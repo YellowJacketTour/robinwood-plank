@@ -7,6 +7,7 @@ export const NAV_LINKS = [
   { href: "#mint", label: "Mint" },
   { href: "#tokenomics", label: "Tokenomics" },
   { href: "#roadmap", label: "Roadmap" },
+  { href: "#liquidity", label: "Liquidity" },
   { href: "#get-ready", label: "Get Ready" },
 ] as const;
 

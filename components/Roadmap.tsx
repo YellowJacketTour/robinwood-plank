@@ -7,24 +7,28 @@ const PHASES = [
     phase: "Phase 1 — Launch",
     title: "Plank the Seed",
     desc: "Anti-sniper and anti-bad-whale settings ON. We plant the roots carefully.",
+    claims: ["ANTI-SNIPER ON", "ANTI-WHALE ON"],
   },
   {
     icon: "🪓",
     phase: "Phase 2 — Early",
     title: "You Can Plank Me Now",
     desc: "All controls relaxed. Pure ERC-20, contract renounced.",
+    claims: ["CONTRACT RENOUNCED", "CONTROLS OFF"],
   },
   {
     icon: "🔥",
     phase: "Phase 3 — Growth",
     title: "Wood You Rather",
     desc: "Liquidity adds and supply burns keep the campfire roaring.",
+    claims: ["LIQUIDITY ADDED", "SUPPLY BURNED"],
   },
   {
     icon: "🛸",
     phase: "Phase 4 — Uncharted",
     title: "Plank, in Space!",
     desc: "The moonshot expansion phase. Uncharted territory, full send.",
+    claims: ["DEX EXPANSION", "CEX PUSH"],
   },
 ];
 
@@ -70,6 +74,16 @@ export default function Roadmap() {
                 <span className="mt-4 text-xs font-bold uppercase tracking-widest text-gold-300">{p.phase}</span>
                 <h3 className="mt-2 font-display text-xl text-foreground">{p.title}</h3>
                 <p className="mt-2 text-sm text-foreground/70">{p.desc}</p>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  {p.claims.map((claim) => (
+                    <span
+                      key={claim}
+                      className="rounded-full border border-forest-600 bg-forest-800/60 px-3 py-1 text-[0.65rem] font-extrabold uppercase tracking-wider text-gold-300"
+                    >
+                      {claim}
+                    </span>
+                  ))}
+                </div>
               </li>
             </Reveal>
           ))}
