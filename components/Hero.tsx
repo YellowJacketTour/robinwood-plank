@@ -13,7 +13,7 @@ export default function Hero() {
           Robinhood Chain is live
         </span>
 
-        <h1 className="font-display text-5xl leading-tight text-foreground drop-shadow-[0_4px_0_rgba(0,0,0,0.4)] sm:text-6xl md:text-7xl">
+        <h1 className="font-display text-5xl leading-tight text-foreground drop-shadow-[0_2px_10px_rgba(0,0,0,0.5)] sm:text-6xl md:text-7xl">
           RobinWood <span className="gold-text">($PLANK)</span>
         </h1>
 
@@ -45,7 +45,7 @@ export default function Hero() {
         <div className="flex flex-col gap-4 sm:flex-row">
           <a
             href="#whitelist"
-            className="rounded-lg bg-gold-500 px-8 py-3 text-base font-bold text-wood-950 shadow-[0_6px_0_0_#a9781f] transition-transform hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_2px_0_0_#a9781f]"
+            className="rounded-lg bg-gold-500 px-8 py-3 text-base font-bold text-wood-950 shadow-[0_6px_18px_-4px_rgba(217,164,65,0.5)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_-6px_rgba(217,164,65,0.6)] active:translate-y-0"
           >
             Join the Whitelist
           </a>

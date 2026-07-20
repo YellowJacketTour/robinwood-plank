@@ -51,8 +51,8 @@ body {
 }
 
 .font-display {
-  font-family: var(--font-stencil), "Impact", sans-serif;
-  letter-spacing: 0.02em;
+  font-family: var(--font-stencil), "Georgia", serif;
+  letter-spacing: 0.01em;
 }
 
 .wood-grain {
@@ -82,8 +82,8 @@ body {
 }
 
 .section-title {
-  font-family: var(--font-stencil), "Impact", sans-serif;
-  letter-spacing: 0.03em;
+  font-family: var(--font-stencil), "Georgia", serif;
+  letter-spacing: 0.02em;
 }
 
 @keyframes float {

@@ -1,15 +1,15 @@
 import type { Metadata, Viewport } from "next";
-import { Rye, Work_Sans } from "next/font/google";
+import { Uncial_Antiqua, Nunito_Sans } from "next/font/google";
 import "./globals.css";
 import { SITE_URL } from "@/lib/constants";
 
-const stencil = Rye({
+const stencil = Uncial_Antiqua({
   variable: "--font-stencil",
   subsets: ["latin"],
   weight: "400",
 });
 
-const body = Work_Sans({
+const body = Nunito_Sans({
   variable: "--font-body",
   subsets: ["latin"],
 });
