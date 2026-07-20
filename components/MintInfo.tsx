@@ -1,4 +1,5 @@
 import Reveal from "@/components/Reveal";
+import { WHITELIST_TWEET_URL } from "@/lib/constants";
 
 const MINT_STATS = [
   {
@@ -48,11 +49,19 @@ export default function MintInfo() {
             id="whitelist"
             className="mx-auto mt-14 max-w-2xl scroll-mt-24 rounded-2xl border-2 border-dashed border-gold-500/50 bg-forest-900/40 p-6 text-center"
           >
-            <h3 className="font-display text-2xl text-gold-300">Whitelist Signup Opens Soon</h3>
+            <h3 className="font-display text-2xl text-gold-300">Join the Whitelist</h3>
             <p className="mt-2 text-sm text-foreground/70">
-              We&apos;re finalizing the whitelist form — check back shortly or watch our socials for the
-              announcement. No wallet connection needed on this page; this is an info-only site.
+              Drop your wallet address in the replies to our official whitelist thread on X. No wallet
+              connection needed on this page; this is an info-only site.
             </p>
+            <a
+              href={WHITELIST_TWEET_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-5 inline-block rounded-lg bg-gold-500 px-8 py-3 text-base font-bold text-wood-950 shadow-[0_6px_18px_-4px_rgba(217,164,65,0.5)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_-6px_rgba(217,164,65,0.6)] active:translate-y-0"
+            >
+              Leave Your Address on X ↗
+            </a>
           </div>
         </Reveal>
       </div>
