@@ -11,11 +11,8 @@ export const NAV_LINKS = [
   { href: "#get-ready", label: "Get Ready" },
 ] as const;
 
-// TODO: replace telegram/discord with real URLs before launch.
 export const SOCIAL_LINKS = {
   twitter: "https://x.com/RobinWoodPlank",
-  telegram: "#",
-  discord: "#",
 } as const;
 
 // Official whitelist thread — drop your wallet address in the replies.
