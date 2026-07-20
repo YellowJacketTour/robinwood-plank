@@ -2,22 +2,22 @@ import Reveal from "@/components/Reveal";
 
 const STEPS = [
   {
-    icon: "🏦",
+    icon: "📲",
     step: "Step 1",
-    title: "In-app bridge (safest)",
-    desc: "If Robinhood ships an in-app “Send to chain” or bridge feature, use it directly in the Robinhood app. Funds stay in Robinhood's custody until the official bridge contract moves them — no third-party contract risk.",
+    title: "Send any EVM asset to your Robinhood Wallet address",
+    desc: "Download the official Robinhood Wallet app and grab your public address. Since it's an EVM wallet, you can send ETH — or any EVM-chain asset — to that address from any exchange or wallet you already hold funds in.",
   },
   {
-    icon: "🦊",
+    icon: "🔁",
     step: "Step 2",
-    title: "Self-custody wallet + official bridge",
-    desc: "Withdraw ETH from Robinhood to a self-custody wallet (MetaMask, Rabby, etc.), then bridge to Robinhood Chain using only the bridge URL linked directly from Robinhood's own site or app — never a link from Twitter, Telegram, or a DM.",
+    title: "Use the in-app swap to convert to ETH on Robinhood Chain",
+    desc: "Once funds land in your Robinhood Wallet, use the built-in in-app swap to cross-chain swap into ETH on Robinhood's L2 — no separate bridge site or contract to trust, it's handled inside the official app.",
   },
   {
-    icon: "🏛️",
+    icon: "🌉",
     step: "Step 3",
-    title: "Direct CEX deposit (if supported)",
-    desc: "Some new L2s get day-one deposit/withdraw support from major exchanges (Coinbase, Kraken, Binance). If Robinhood Chain is listed, this skips bridge risk entirely — just double-check the network name matches exactly before sending.",
+    title: "Coming from a non-EVM chain? Swap first with ChangeNOW",
+    desc: "Holding Bitcoin, Solana, or another non-EVM asset? Use a service like changenow.io to swap it into an EVM asset first, then send that to your Robinhood Wallet address and swap onto Robinhood Chain as in Step 2.",
   },
 ];
 
@@ -30,7 +30,7 @@ export default function FAQGetReady() {
             How to Get $PLANK-Ready
           </h2>
           <p className="mx-auto mt-3 max-w-2xl text-center text-foreground/70">
-            Getting your funds onto Robinhood Chain safely, before $PLANK goes live.
+            Getting ETH into your Robinhood Wallet on Robinhood Chain, before $PLANK goes live.
           </p>
         </Reveal>
 
@@ -55,9 +55,10 @@ export default function FAQGetReady() {
         <Reveal delayMs={360}>
           <div className="mt-8 rounded-xl border-2 border-dashed border-gold-500/40 bg-forest-900/40 p-5 text-sm text-foreground/80">
             <p>
-              <span aria-hidden="true">🔑</span> <strong>Golden Rule:</strong> Only ever use bridge or contract
-              links posted on Robinhood&apos;s official domain or app. Fake bridge sites are the #1 drainer vector on
-              new chain launches. Never trust a link from a tweet, DM, or Telegram.
+              <span aria-hidden="true">🔑</span> <strong>Golden Rule:</strong> Only ever download Robinhood Wallet
+              from Robinhood&apos;s official site or your phone&apos;s app store, and triple-check your wallet address
+              before sending funds. Fake wallet apps and copy-pasted wrong addresses are the #1 way people lose
+              funds on new chain launches — never trust an address or app link from a tweet, DM, or Telegram.
             </p>
           </div>
         </Reveal>
