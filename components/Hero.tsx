@@ -1,5 +1,5 @@
+import Image from "next/image";
 import CopyCA from "@/components/CopyCA";
-import PlankMascot from "@/components/PlankMascot";
 
 export default function Hero() {
   return (
@@ -25,8 +25,19 @@ export default function Hero() {
           <strong className="text-gold-300">$PLANK</strong> from day one.
         </p>
 
-        <div className="animate-float">
-          <PlankMascot className="h-40 w-auto sm:h-52" />
+        <div className="wood-frame relative aspect-[3110/2265] w-full max-w-4xl overflow-hidden rounded-2xl">
+          <Image
+            src="/images/planks-collage.jpg"
+            alt="RobinWood Plank mascot dressed as dozens of meme and pop-culture characters"
+            fill
+            priority
+            sizes="(min-width: 1024px) 896px, 100vw"
+            className="object-cover"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent sm:bg-gradient-to-t sm:from-black/50 sm:via-transparent sm:to-transparent"
+          />
         </div>
 
         <CopyCA />

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Reveal from "@/components/Reveal";
 
 const PHASES = [
@@ -36,6 +37,18 @@ export default function Roadmap() {
           <p className="mx-auto mt-3 max-w-2xl text-center text-foreground/70">
             Four phases from seed to space.
           </p>
+        </Reveal>
+
+        <Reveal delayMs={80}>
+          <div className="wood-frame relative mt-10 aspect-[1774/887] w-full overflow-hidden rounded-2xl">
+            <Image
+              src="/images/plank-plan.jpg"
+              alt="RobinWood Plank roadmap banner showing four phases: Plank the Seed, You Can Plank Me Now, Wood You Rather, and Plank in Space"
+              fill
+              sizes="(min-width: 1280px) 1152px, 100vw"
+              className="object-cover"
+            />
+          </div>
         </Reveal>
 
         <ol className="relative mt-14 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
