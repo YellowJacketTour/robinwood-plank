@@ -44,7 +44,7 @@ body {
   background-position: top center, top center;
   /* background-size is computed at runtime by PlankBackground.tsx so the
      eyes land exactly at the bottom of the real page, on any viewport. */
-  background-size: 100% 100%, 900vw auto;
+  background-size: 100% 100%, 100% 300vh;
   background-attachment: scroll, scroll;
 }
 

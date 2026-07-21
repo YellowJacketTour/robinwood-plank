@@ -6,15 +6,16 @@ import { useEffect } from "react";
 // the eye band sits at rows 543-604, so the vertical center of the
 // eyes is at this fraction of the full image height.
 const EYE_FRACTION = 573.5 / 1766;
-const IMAGE_ASPECT = 1200 / 1766; // width / height
 
 export default function PlankBackground() {
   useEffect(() => {
     const update = () => {
       const pageHeight = document.documentElement.scrollHeight;
+      // Width stays locked to 100% (never crops him left-to-right).
+      // Height is computed independently (not aspect-locked) so the
+      // eye band lands exactly at the real bottom of the page.
       const imgHeight = pageHeight / EYE_FRACTION;
-      const imgWidth = imgHeight * IMAGE_ASPECT;
-      document.body.style.backgroundSize = `100% 100%, ${imgWidth}px ${imgHeight}px`;
+      document.body.style.backgroundSize = `100% 100%, 100% ${imgHeight}px`;
     };
 
     update();
