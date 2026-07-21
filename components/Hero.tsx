@@ -13,6 +13,15 @@ export default function Hero() {
           Robinhood Chain is live
         </span>
 
+        <Image
+          src="/images/plank-logo.webp"
+          alt="RobinWood Plank mascot"
+          width={140}
+          height={200}
+          priority
+          className="h-28 w-auto drop-shadow-[0_8px_20px_rgba(0,0,0,0.5)] sm:h-36"
+        />
+
         <h1 className="font-display text-5xl leading-tight text-foreground drop-shadow-[0_2px_10px_rgba(0,0,0,0.5)] sm:text-6xl md:text-7xl">
           RobinWood <span className="gold-text">($PLANK)</span>
         </h1>

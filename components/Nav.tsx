@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { NAV_LINKS } from "@/lib/constants";
 
 export default function Nav() {
@@ -10,7 +11,7 @@ export default function Nav() {
     <header className="sticky top-0 z-50 border-b border-gold-500/20 bg-wood-950/85 backdrop-blur supports-[backdrop-filter]:bg-wood-950/70">
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6" aria-label="Primary">
         <a href="#home" className="flex items-center gap-2 font-display text-lg text-gold-300 sm:text-xl">
-          <span aria-hidden="true">🪵</span>
+          <Image src="/images/plank-logo.webp" alt="" width={28} height={40} className="h-8 w-auto" priority />
           RobinWood <span className="text-foreground/60">($PLANK)</span>
         </a>
 
