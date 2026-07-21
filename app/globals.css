@@ -42,9 +42,9 @@ body {
     url("/images/plank-logo.webp");
   background-repeat: no-repeat, no-repeat;
   background-position: top center, top center;
-  /* background-size is computed at runtime by PlankBackground.tsx so the
-     eyes land exactly at the bottom of the real page, on any viewport. */
-  background-size: 100% 100%, 100% 300vh;
+  /* True aspect ratio, full width, no stretching — the image is only
+     as tall as its real proportions allow. */
+  background-size: 100% 100%, 100% auto;
   background-attachment: scroll, scroll;
 }
 
