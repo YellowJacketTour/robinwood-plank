@@ -33,59 +33,17 @@
 }
 
 body {
-  background-color: #3d2a17;
+  background-color: #14100b;
   color: var(--foreground);
   font-family: var(--font-body), Arial, Helvetica, sans-serif;
   background-image:
-    /* knots — bold, visible rings */
-    radial-gradient(ellipse 70px 100px at 15% 6%, rgba(20, 12, 5, 0.75), rgba(20, 12, 5, 0.35) 45%, rgba(20, 12, 5, 0.12) 65%, transparent 78%),
-    radial-gradient(ellipse 50px 75px at 85% 18%, rgba(20, 12, 5, 0.7), rgba(20, 12, 5, 0.3) 45%, rgba(20, 12, 5, 0.1) 65%, transparent 78%),
-    radial-gradient(ellipse 65px 90px at 25% 42%, rgba(20, 12, 5, 0.7), rgba(20, 12, 5, 0.32) 45%, rgba(20, 12, 5, 0.1) 65%, transparent 78%),
-    radial-gradient(ellipse 55px 80px at 78% 62%, rgba(20, 12, 5, 0.72), rgba(20, 12, 5, 0.3) 45%, rgba(20, 12, 5, 0.1) 65%, transparent 78%),
-    radial-gradient(ellipse 60px 85px at 12% 82%, rgba(20, 12, 5, 0.7), rgba(20, 12, 5, 0.3) 45%, rgba(20, 12, 5, 0.1) 65%, transparent 78%),
-    radial-gradient(ellipse 45px 65px at 60% 95%, rgba(20, 12, 5, 0.65), rgba(20, 12, 5, 0.28) 45%, rgba(20, 12, 5, 0.1) 65%, transparent 78%),
-    /* bold vertical grain banding — alternating light/dark streaks */
-    repeating-linear-gradient(
-      179deg,
-      rgba(20, 12, 5, 0.4) 0px,
-      rgba(20, 12, 5, 0.4) 4px,
-      transparent 4px,
-      transparent 18px,
-      rgba(20, 12, 5, 0.25) 18px,
-      rgba(20, 12, 5, 0.25) 22px,
-      transparent 22px,
-      transparent 44px
-    ),
-    repeating-linear-gradient(
-      181deg,
-      rgba(255, 214, 150, 0.22) 0px,
-      transparent 3px,
-      transparent 24px,
-      rgba(255, 214, 150, 0.16) 27px,
-      transparent 30px,
-      transparent 58px
-    ),
-    /* lit central column so it reads as one board, dark vignette at the far edges */
-    radial-gradient(ellipse 70% 140% at 50% 40%, rgba(217, 164, 65, 0.14), transparent 65%),
-    linear-gradient(90deg, rgba(0, 0, 0, 0.55) 0%, transparent 12%, transparent 88%, rgba(0, 0, 0, 0.55) 100%),
-    /* base plank color — warm wood, not near-black */
-    linear-gradient(180deg, #4a3018 0%, #3d2a17 30%, #33220f 60%, #2a1c0d 100%);
-  background-size:
-    500px 750px,
-    500px 750px,
-    500px 750px,
-    500px 750px,
-    500px 750px,
-    500px 750px,
-    100% 100%,
-    100% 100%,
-    100% 100%,
-    100% 100%,
-    100% 100%;
-  background-repeat:
-    no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat,
-    repeat, repeat, no-repeat, no-repeat, no-repeat;
-  background-attachment: scroll;
+    /* darken/warm wash so foreground text stays readable over the giant render */
+    linear-gradient(180deg, rgba(20, 16, 11, 0.55) 0%, rgba(20, 16, 11, 0.75) 40%, rgba(20, 16, 11, 0.88) 100%),
+    url("/images/plank-logo.webp");
+  background-repeat: no-repeat, no-repeat;
+  background-position: top center, top center;
+  background-size: 100% 100%, 900vw auto;
+  background-attachment: scroll, scroll;
 }
 
 .font-display {
