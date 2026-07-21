@@ -38,7 +38,7 @@ export default function Roadmap() {
       <div className="mx-auto max-w-6xl">
         <Reveal>
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">Roadmap</h2>
-          <p className="mx-auto mt-3 max-w-2xl text-center text-foreground/70">
+          <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
             Four phases from seed to space.
           </p>
         </Reveal>
@@ -62,7 +62,7 @@ export default function Roadmap() {
           />
           {PHASES.map((p, i) => (
             <Reveal key={p.phase} delayMs={i * 120}>
-              <li className="relative flex flex-col items-center rounded-2xl border border-gold-500/20 bg-wood-900/60 p-6 text-center">
+              <li className="relative flex flex-col items-center rounded-2xl border border-gold-500/20 bg-wood-900/85 p-6 text-center">
                 <div
                   className={`relative z-10 flex h-16 w-16 items-center justify-center rounded-full border-2 border-gold-500 bg-wood-950 text-3xl ${
                     i === 2 ? "animate-flicker" : ""

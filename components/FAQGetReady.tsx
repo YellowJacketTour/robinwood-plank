@@ -29,7 +29,7 @@ export default function FAQGetReady() {
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">
             How to Get $PLANK-Ready
           </h2>
-          <p className="mx-auto mt-3 max-w-2xl text-center text-foreground/70">
+          <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
             Getting ETH into your Robinhood Wallet on Robinhood Chain, before $PLANK goes live.
           </p>
         </Reveal>
@@ -37,7 +37,7 @@ export default function FAQGetReady() {
         <ol className="mt-14 grid gap-8 sm:grid-cols-3">
           {STEPS.map((s, i) => (
             <Reveal key={s.title} delayMs={i * 120}>
-              <li className="relative flex flex-col items-center rounded-2xl border border-gold-500/20 bg-wood-900/60 p-6 text-center">
+              <li className="relative flex flex-col items-center rounded-2xl border border-gold-500/20 bg-wood-900/85 p-6 text-center">
                 <div
                   className="relative z-10 flex h-16 w-16 items-center justify-center rounded-full border-2 border-gold-500 bg-wood-950 text-3xl"
                   aria-hidden="true"
@@ -53,7 +53,7 @@ export default function FAQGetReady() {
         </ol>
 
         <Reveal delayMs={360}>
-          <div className="mt-8 rounded-xl border-2 border-dashed border-gold-500/40 bg-forest-900/40 p-5 text-sm text-foreground/80">
+          <div className="mt-8 rounded-xl border-2 border-dashed border-gold-500/40 bg-forest-900/75 p-5 text-sm text-foreground/80">
             <p>
               <span aria-hidden="true">🔑</span> <strong>Golden Rule:</strong> Only ever download Robinhood Wallet
               from Robinhood&apos;s official site or your phone&apos;s app store, and triple-check your wallet address

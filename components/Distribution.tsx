@@ -30,7 +30,7 @@ export default function Distribution() {
       <div className="mx-auto max-w-4xl">
         <Reveal>
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">Distribution</h2>
-          <p className="mx-auto mt-3 max-w-2xl text-center text-foreground/70">
+          <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
             Where every bit of RobinWood value flows.
           </p>
         </Reveal>
@@ -62,7 +62,7 @@ export default function Distribution() {
         </div>
 
         <Reveal delayMs={300}>
-          <div className="mt-8 rounded-xl border-2 border-dashed border-gold-500/40 bg-forest-900/40 p-5 text-sm text-foreground/80">
+          <div className="mt-8 rounded-xl border-2 border-dashed border-gold-500/40 bg-forest-900/75 p-5 text-sm text-foreground/80">
             <p>
               <span aria-hidden="true">👨🏻‍⚖️</span> The remaining <strong>≈0.8%</strong> of supply is airdropped
               to the single largest secondary purchaser of a RobinWood NFT within 1 week of mint-out. Log your

@@ -85,6 +85,20 @@ body {
 .section-title {
   font-family: var(--font-stencil), "Georgia", serif;
   letter-spacing: 0.02em;
+  text-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.9),
+    0 0 24px rgba(0, 0, 0, 0.65),
+    0 0 2px rgba(0, 0, 0, 0.9);
+}
+
+/* Any text that sits directly on the giant scrolling background (not
+   inside an opaque card) needs a guaranteed-legible shadow, since the
+   backdrop swings from near-black to bright yellow across the page. */
+.lede,
+.on-bg-text {
+  text-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.95),
+    0 0 14px rgba(0, 0, 0, 0.7);
 }
 
 @keyframes float {

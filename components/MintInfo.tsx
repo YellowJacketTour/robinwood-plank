@@ -25,7 +25,7 @@ export default function MintInfo() {
       <div className="mx-auto max-w-6xl">
         <Reveal>
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">Mint Structure</h2>
-          <p className="mx-auto mt-3 max-w-2xl text-center text-foreground/70">
+          <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
             Simple, fair, and built to fund $PLANK liquidity from block one.
           </p>
         </Reveal>
@@ -33,7 +33,7 @@ export default function MintInfo() {
         <div className="mt-12 grid gap-6 sm:grid-cols-3">
           {MINT_STATS.map((stat, i) => (
             <Reveal key={stat.title} delayMs={i * 120}>
-              <div className="wood-frame h-full rounded-2xl bg-wood-900/70 p-6 text-center">
+              <div className="wood-frame h-full rounded-2xl bg-wood-900/85 p-6 text-center">
                 <div className="text-4xl" aria-hidden="true">
                   {stat.icon}
                 </div>
@@ -47,7 +47,7 @@ export default function MintInfo() {
         <Reveal delayMs={200}>
           <div
             id="whitelist"
-            className="mx-auto mt-14 max-w-2xl scroll-mt-24 rounded-2xl border-2 border-dashed border-gold-500/50 bg-forest-900/40 p-6 text-center"
+            className="mx-auto mt-14 max-w-2xl scroll-mt-24 rounded-2xl border-2 border-dashed border-gold-500/50 bg-forest-900/75 p-6 text-center"
           >
             <h3 className="font-display text-2xl text-gold-300">Join the Whitelist</h3>
             <p className="mt-2 text-sm text-foreground/70">
