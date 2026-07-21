@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Uncial_Antiqua, Nunito_Sans } from "next/font/google";
 import "./globals.css";
 import { SITE_URL } from "@/lib/constants";
+import PlankBackground from "@/components/PlankBackground";
 
 const stencil = Uncial_Antiqua({
   variable: "--font-stencil",
@@ -53,7 +54,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${stencil.variable} ${body.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <PlankBackground />
+        {children}
+      </body>
     </html>
   );
 }
