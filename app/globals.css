@@ -33,52 +33,58 @@
 }
 
 body {
-  background-color: var(--background);
+  background-color: #3d2a17;
   color: var(--foreground);
   font-family: var(--font-body), Arial, Helvetica, sans-serif;
   background-image:
-    /* knots */
-    radial-gradient(ellipse 60px 90px at 12% 8%, rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.12) 55%, transparent 70%),
-    radial-gradient(ellipse 40px 60px at 82% 22%, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.1) 55%, transparent 70%),
-    radial-gradient(ellipse 50px 70px at 30% 48%, rgba(0, 0, 0, 0.28), rgba(0, 0, 0, 0.1) 55%, transparent 70%),
-    radial-gradient(ellipse 45px 65px at 70% 68%, rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.1) 55%, transparent 70%),
-    radial-gradient(ellipse 55px 80px at 18% 88%, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.1) 55%, transparent 70%),
-    /* long vertical grain streaks, slightly wavy via multiple offset angles */
+    /* knots — bold, visible rings */
+    radial-gradient(ellipse 70px 100px at 15% 6%, rgba(20, 12, 5, 0.75), rgba(20, 12, 5, 0.35) 45%, rgba(20, 12, 5, 0.12) 65%, transparent 78%),
+    radial-gradient(ellipse 50px 75px at 85% 18%, rgba(20, 12, 5, 0.7), rgba(20, 12, 5, 0.3) 45%, rgba(20, 12, 5, 0.1) 65%, transparent 78%),
+    radial-gradient(ellipse 65px 90px at 25% 42%, rgba(20, 12, 5, 0.7), rgba(20, 12, 5, 0.32) 45%, rgba(20, 12, 5, 0.1) 65%, transparent 78%),
+    radial-gradient(ellipse 55px 80px at 78% 62%, rgba(20, 12, 5, 0.72), rgba(20, 12, 5, 0.3) 45%, rgba(20, 12, 5, 0.1) 65%, transparent 78%),
+    radial-gradient(ellipse 60px 85px at 12% 82%, rgba(20, 12, 5, 0.7), rgba(20, 12, 5, 0.3) 45%, rgba(20, 12, 5, 0.1) 65%, transparent 78%),
+    radial-gradient(ellipse 45px 65px at 60% 95%, rgba(20, 12, 5, 0.65), rgba(20, 12, 5, 0.28) 45%, rgba(20, 12, 5, 0.1) 65%, transparent 78%),
+    /* bold vertical grain banding — alternating light/dark streaks */
     repeating-linear-gradient(
-      178deg,
-      rgba(0, 0, 0, 0.1) 0px,
+      179deg,
+      rgba(20, 12, 5, 0.4) 0px,
+      rgba(20, 12, 5, 0.4) 4px,
+      transparent 4px,
+      transparent 18px,
+      rgba(20, 12, 5, 0.25) 18px,
+      rgba(20, 12, 5, 0.25) 22px,
+      transparent 22px,
+      transparent 44px
+    ),
+    repeating-linear-gradient(
+      181deg,
+      rgba(255, 214, 150, 0.22) 0px,
       transparent 3px,
-      transparent 14px,
-      rgba(0, 0, 0, 0.08) 17px,
-      transparent 20px,
-      transparent 38px
+      transparent 24px,
+      rgba(255, 214, 150, 0.16) 27px,
+      transparent 30px,
+      transparent 58px
     ),
-    repeating-linear-gradient(
-      182deg,
-      rgba(255, 220, 170, 0.05) 0px,
-      transparent 2px,
-      transparent 26px,
-      rgba(255, 220, 170, 0.04) 28px,
-      transparent 31px,
-      transparent 52px
-    ),
-    /* soft directional light across the plank */
-    radial-gradient(ellipse 90% 60% at 50% 0%, rgba(217, 164, 65, 0.08), transparent 55%),
-    radial-gradient(ellipse 80% 50% at 90% 100%, rgba(36, 105, 63, 0.1), transparent 50%),
-    /* base plank color */
-    linear-gradient(180deg, #2a1a0f 0%, #1b120a 35%, #14100b 65%, #0d1f16 100%);
+    /* lit central column so it reads as one board, dark vignette at the far edges */
+    radial-gradient(ellipse 70% 140% at 50% 40%, rgba(217, 164, 65, 0.14), transparent 65%),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.55) 0%, transparent 12%, transparent 88%, rgba(0, 0, 0, 0.55) 100%),
+    /* base plank color — warm wood, not near-black */
+    linear-gradient(180deg, #4a3018 0%, #3d2a17 30%, #33220f 60%, #2a1c0d 100%);
   background-size:
-    600px 900px,
-    600px 900px,
-    600px 900px,
-    600px 900px,
-    600px 900px,
+    500px 750px,
+    500px 750px,
+    500px 750px,
+    500px 750px,
+    500px 750px,
+    500px 750px,
     100% 100%,
     100% 100%,
-    100% 2400px,
-    100% 2400px,
+    100% 100%,
+    100% 100%,
     100% 100%;
-  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, repeat, repeat, repeat-y, repeat-y, no-repeat;
+  background-repeat:
+    no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat,
+    repeat, repeat, no-repeat, no-repeat, no-repeat;
   background-attachment: scroll;
 }
 
