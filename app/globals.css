@@ -39,13 +39,16 @@ body {
   background-image:
     /* darken/warm wash so foreground text stays readable over the giant render */
     linear-gradient(180deg, rgba(20, 16, 11, 0.55) 0%, rgba(20, 16, 11, 0.75) 40%, rgba(20, 16, 11, 0.88) 100%),
-    url("/images/plank-logo.webp");
-  background-repeat: no-repeat, no-repeat;
-  background-position: top center, top center;
-  /* True aspect ratio, full width, no stretching — the image is only
-     as tall as its real proportions allow. */
-  background-size: 100% 100%, 100% auto;
-  background-attachment: scroll, scroll;
+    /* head/eyes/smile — always shown at true, undistorted aspect ratio */
+    url("/images/plank-head.webp"),
+    /* legs/body — plain wood grain, safe to stretch to fill the rest of the page
+       (sized dynamically by PlankBackground.tsx so the whole body spans the
+       full page height without warping the face) */
+    url("/images/plank-legs.webp");
+  background-repeat: no-repeat, no-repeat, no-repeat;
+  background-position: top center, top center, top center;
+  background-size: 100% 100%, 100% auto, 100% auto;
+  background-attachment: scroll, scroll, scroll;
 }
 
 .font-display {
