@@ -1,74 +1,69 @@
 import Reveal from "@/components/Reveal";
 
-const ROWS = [
+const FUNDING_FLOW = [
   {
-    icon: "🪵",
-    label: "RobinWood NFT Holders",
-    value: 4.2069,
-    display: "4.2069%",
-    color: "bg-gold-500",
+    step: "1",
+    title: "First 4.2069 ETH raised",
+    value: "Initial LP",
+    description:
+      "100% of the first 4.2069 ETH in paid mint proceeds is used to establish liquidity.",
   },
   {
-    icon: "💧",
-    label: "$PLANK Initial Pool",
-    value: 45,
-    display: "45%",
-    color: "bg-forest-600",
+    step: "+",
+    title: "Developer contribution",
+    value: "1 ETH",
+    description:
+      "The developer adds 1 ETH of liquidity regardless of how much the mint raises.",
   },
   {
-    icon: "📈",
-    label: "Treasury (DEX & CEX listings)",
-    value: 50,
-    display: "50%",
-    color: "bg-wood-600",
+    step: "2",
+    title: "Proceeds above 4.2069 ETH",
+    value: "Ongoing support",
+    description:
+      "Any paid mint proceeds above 4.2069 ETH are used for buybacks and additional liquidity.",
   },
-];
+] as const;
 
 export default function Distribution() {
   return (
     <section id="tokenomics" className="px-4 py-20 sm:px-6">
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-5xl">
         <Reveal>
-          <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">Distribution</h2>
+          <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">
+            Mint Proceeds
+          </h2>
           <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
-            Where every bit of RobinWood value flows.
+            How paid mint proceeds and the developer contribution support liquidity.
           </p>
         </Reveal>
 
-        <div className="mt-12 space-y-6">
-          {ROWS.map((row, i) => (
-            <Reveal key={row.label} delayMs={i * 100}>
-              <div className="rounded-xl border border-gold-500/20 bg-wood-900/50 p-4 sm:p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-2 font-semibold text-foreground">
-                    <span aria-hidden="true">{row.icon}</span>
-                    {row.label}
+        <div className="mt-12 grid gap-6 md:grid-cols-3">
+          {FUNDING_FLOW.map((item, index) => (
+            <Reveal key={item.title} delayMs={index * 100}>
+              <article className="wood-frame h-full rounded-2xl bg-wood-900/90 p-6">
+                <div className="flex items-center justify-between gap-4">
+                  <span
+                    aria-hidden="true"
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-gold-500 font-display text-xl text-wood-950"
+                  >
+                    {item.step}
                   </span>
-                  <span className="font-display text-gold-300">{row.display}</span>
+                  <span className="text-right text-sm font-extrabold uppercase tracking-wide text-gold-300">
+                    {item.value}
+                  </span>
                 </div>
-                <div
-                  className="mt-3 h-3 w-full overflow-hidden rounded-full bg-black/30"
-                  role="img"
-                  aria-label={`${row.label}: ${row.display} of supply`}
-                >
-                  <div
-                    className={`h-full rounded-full ${row.color}`}
-                    style={{ width: `${Math.min(row.value, 100)}%` }}
-                  />
-                </div>
-              </div>
+                <h3 className="mt-6 font-display text-xl text-foreground">{item.title}</h3>
+                <p className="mt-3 text-sm leading-6 text-foreground/70">{item.description}</p>
+              </article>
             </Reveal>
           ))}
         </div>
 
-        <Reveal delayMs={300}>
-          <div className="mt-8 rounded-xl border-2 border-dashed border-gold-500/40 bg-forest-900/75 p-5 text-sm text-foreground/80">
-            <p>
-              <span aria-hidden="true">👨🏻‍⚖️</span> The remaining <strong>≈0.8%</strong> of supply is airdropped
-              to the single largest secondary purchaser of a RobinWood NFT within 1 week of mint-out. Log your
-              purchase on-chain to be eligible.
-            </p>
-          </div>
+        <Reveal delayMs={320}>
+          <p className="lede mx-auto mt-8 max-w-3xl text-center text-sm text-foreground/65">
+            The 1 ETH developer contribution is separate from mint proceeds. No fixed percentage of
+            the total raise is represented here.
+          </p>
         </Reveal>
       </div>
     </section>

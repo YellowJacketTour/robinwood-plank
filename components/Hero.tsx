@@ -62,7 +62,7 @@ export default function Hero() {
             href="#tokenomics"
             className="rounded-lg border-2 border-forest-600 bg-forest-800/60 px-8 py-3 text-base font-bold text-foreground transition-colors hover:border-gold-400 hover:text-gold-300"
           >
-            Read the Docs
+            Funding Details
           </a>
         </div>
       </div>
