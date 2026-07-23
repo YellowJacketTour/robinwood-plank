@@ -32,7 +32,7 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "/images/plank-check-signed.jpg",
+        url: "/images/plank-check-signed.jpg?v=20260723",
         width: 1280,
         height: 719,
         alt: "RobinWood Plank check",
@@ -43,7 +43,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title,
     description,
-    images: ["/images/plank-check-signed.jpg"],
+    images: ["/images/plank-check-signed.jpg?v=20260723"],
   },
   icons: {
     icon: "/favicon.ico",
