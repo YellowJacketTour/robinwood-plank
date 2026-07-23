@@ -30,11 +30,20 @@ export const metadata: Metadata = {
     url: SITE_URL,
     siteName: "RobinWood ($PLANK)",
     type: "website",
+    images: [
+      {
+        url: "/images/plank-check.jpg",
+        width: 1280,
+        height: 719,
+        alt: "RobinWood Plank check",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title,
     description,
+    images: ["/images/plank-check.jpg"],
   },
   icons: {
     icon: "/favicon.ico",

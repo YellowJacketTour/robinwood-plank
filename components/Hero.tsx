@@ -1,5 +1,6 @@
 import Image from "next/image";
 import CopyCA from "@/components/CopyCA";
+import Countdown from "@/components/Countdown";
 
 export default function Hero() {
   return (
@@ -27,6 +28,8 @@ export default function Hero() {
         </h1>
 
         <p className="lede font-display text-2xl text-gold-300 sm:text-3xl">Plank is Plank.</p>
+
+        <Countdown targetDate={process.env.NEXT_PUBLIC_MINT_START_AT} />
 
         <p className="lede max-w-2xl text-balance text-xl text-foreground sm:text-2xl">
           1,542 RobinWood NFTs. Built for $PLANK.

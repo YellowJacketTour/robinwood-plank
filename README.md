@@ -81,5 +81,8 @@ npm run start
   `0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156`.
 - The site uses Robinhood Chain's public RPC by default. Set
   `NEXT_PUBLIC_ROBINHOOD_RPC_URL` in Vercel to use a production RPC provider.
+- Set `NEXT_PUBLIC_MINT_START_AT` to an ISO 8601 timestamp to show the homepage
+  countdown, for example `2026-08-01T19:00:00-05:00`. Leave it unset to hide
+  the countdown.
 - Allowlist minting reads `public/proofs.json`. Publish proofs keyed by
   lowercase wallet address before opening the allowlist phase.
