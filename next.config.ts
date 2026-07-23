@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  async rewrites() {
+    return [
+      { source: "/opengraph-image", destination: "/plank-social.jpg" },
+      { source: "/opengraph-image.png", destination: "/plank-social.jpg" },
+    ];
+  },
   async headers() {
     return [
       {
