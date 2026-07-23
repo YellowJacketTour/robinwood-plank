@@ -25,8 +25,7 @@ npm run start
 - `app/layout.tsx` — root layout, fonts (`next/font/google`: Rye for display,
   Work Sans for body), and page metadata/OG tags.
 - `app/page.tsx` — assembles the single-page layout.
-- `app/opengraph-image.tsx` — auto-generated OG/Twitter share image via
-  `next/og` (no static image asset needed).
+- `public/plank-social.jpg` — static Open Graph and X link-preview artwork.
 - `components/MintPanel.tsx` — live NFT contract reads, wallet connection, and
   free, allowlist, and paid mint transactions.
 - `components/` — site sections including `Nav`, `Hero`, `MintInfo`,
