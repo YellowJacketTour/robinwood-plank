@@ -3,13 +3,13 @@ import Reveal from "@/components/Reveal";
 const SOURCES = [
   {
     icon: "💎",
-    title: "1 ETH — Dev Seed",
-    desc: "The dev wallet seeds the pool directly with 1 ETH, day one, no strings attached.",
+    title: "1 ETH — Developer Liquidity",
+    desc: "The developer adds 1 ETH of liquidity regardless of the total funds raised.",
   },
   {
     icon: "🪵",
-    title: "RobinWood Mint Proceeds",
-    desc: "45% of every paid RobinWood NFT mint flows straight into the $PLANK initial pool.",
+    title: "First 4.2069 ETH Raised",
+    desc: "100% of the first 4.2069 ETH in paid mint proceeds goes into LP.",
   },
 ];
 
@@ -25,8 +25,7 @@ export default function LiquidityBurn() {
             Liquidity Gets Burned. Forever.
           </h2>
           <p className="lede mx-auto mt-4 max-w-2xl text-center text-base text-foreground/80 sm:text-lg">
-            No rug. No pulling the pool. Once liquidity is live, the LP tokens are sent to a dead
-            address — permanently, irreversibly, un-ruggable by anyone, including us.
+            The initial LP tokens are sent to a dead address after liquidity is added.
           </p>
         </Reveal>
 
@@ -52,9 +51,9 @@ export default function LiquidityBurn() {
               <span aria-hidden="true">🔥</span>
             </div>
             <p className="lede max-w-2xl text-sm text-foreground/70">
-              The dev&apos;s 1 ETH and the 45% of mint proceeds combine to seed the Uniswap
-              $PLANK/ETH pool. The resulting LP tokens are burned on-chain, not held in any wallet —
-              anyone will be able to verify the burn transaction once the pool is live.
+              The developer adds 1 ETH regardless of the raise. The first 4.2069 ETH raised goes into
+              LP. Proceeds above 4.2069 ETH are used for buybacks and additional liquidity. The initial
+              LP burn will be verifiable on-chain once the pool is live.
             </p>
           </div>
         </Reveal>

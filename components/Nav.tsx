@@ -29,10 +29,10 @@ export default function Nav() {
         </ul>
 
         <a
-          href="#whitelist"
+          href="#mint"
           className="hidden rounded-md bg-gold-500 px-4 py-2 text-sm font-bold text-wood-950 transition-transform hover:scale-105 hover:bg-gold-400 md:inline-block"
         >
-          Join the Whitelist
+          Mint RobinWood
         </a>
 
         <button
@@ -69,11 +69,11 @@ export default function Nav() {
             ))}
             <li>
               <a
-                href="#whitelist"
+                href="#mint"
                 onClick={() => setOpen(false)}
                 className="mt-2 block rounded-md bg-gold-500 px-3 py-2 text-center text-sm font-bold text-wood-950"
               >
-                Join the Whitelist
+                Mint RobinWood
               </a>
             </li>
           </ul>

@@ -1,3 +1,5 @@
+// $PLANK token contract. The RobinWood NFT mint contract is defined separately
+// in lib/mint-contract.ts.
 export const CONTRACT_ADDRESS = "0x69420eaf0eBF43E08F621B014f25cEfDfA7e2DDc";
 
 export const SITE_URL = "https://plank.love";

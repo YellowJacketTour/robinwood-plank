@@ -1,9 +1,8 @@
 # RobinWood ($PLANK)
 
-Marketing site for the RobinWood NFT collection and $PLANK meme coin, launching
-on the (fictional) Robinhood Chain. Static, single-page, no backend, no
-wallet-connect — built with Next.js 14+ App Router, TypeScript, and Tailwind
-CSS.
+Official site and mint interface for the RobinWood NFT collection and $PLANK
+on Robinhood Chain. Built with the Next.js App Router, TypeScript, Tailwind CSS,
+and ethers.
 
 ## Run locally
 
@@ -28,11 +27,13 @@ npm run start
 - `app/page.tsx` — assembles the single-page layout.
 - `app/opengraph-image.tsx` — auto-generated OG/Twitter share image via
   `next/og` (no static image asset needed).
-- `components/` — `Nav`, `Hero`, `MintInfo`, `Distribution`, `Roadmap`,
-  `Footer`, `CopyCA` (contract-address copy button), `PlankMascot` (placeholder
-  SVG art), `Reveal` (scroll-in animation wrapper).
-- `lib/constants.ts` — contract address, nav links, and social link
-  placeholders (update `SOCIAL_LINKS` before launch — currently `#`).
+- `components/MintPanel.tsx` — live NFT contract reads, wallet connection, and
+  free, allowlist, and paid mint transactions.
+- `components/` — site sections including `Nav`, `Hero`, `MintInfo`,
+  `Distribution`, `Roadmap`, `LiquidityBurn`, and `Footer`.
+- `lib/mint-contract.ts` — NFT contract ABI, address, and Robinhood Chain
+  configuration.
+- `lib/constants.ts` — $PLANK token address, navigation, and social links.
 
 ## Deploy to Vercel
 
@@ -42,20 +43,20 @@ npm run start
    (`npm run build`, output handled automatically).
 4. Click **Deploy**. You'll get a `*.vercel.app` URL immediately.
 
-## Point a purchased domain (e.g. `plank.lol`) at Vercel
+## Point a purchased domain at Vercel
 
 1. In the Vercel dashboard, open your project → **Settings → Domains** and add
-   your domain (e.g. `plank.lol` and/or `www.plank.lol`).
+   your domain.
 2. Vercel will show you the exact records to add. As of this writing, for a
    domain purchased at Namecheap, Porkbun, or similar, that's typically:
 
-   **Root domain (`plank.lol`)** — add an `A` record:
+   **Root domain** — add an `A` record:
 
    | Type | Host/Name | Value           | TTL       |
    | ---- | --------- | --------------- | --------- |
    | A    | `@`       | `76.76.21.21`   | Automatic |
 
-   **`www` subdomain (`www.plank.lol`)** — add a `CNAME` record:
+   **`www` subdomain** — add a `CNAME` record:
 
    | Type  | Host/Name | Value                | TTL       |
    | ----- | --------- | -------------------- | --------- |
@@ -74,12 +75,11 @@ npm run start
 5. Optional: set your apex domain to redirect to `www` (or vice versa) from
    the same Domains panel.
 
-## Notes
+## Mint configuration
 
-- This is an info-only marketing site: there is no whitelist backend, no
-  wallet connection, and no mint transaction wired up. The "Join the
-  Whitelist" button anchors to a placeholder section on the page.
-- Social links in `components/Footer.tsx` / `lib/constants.ts` are placeholder
-  `#` hrefs — replace with real URLs before launch.
-- `components/PlankMascot.tsx` is a hand-rolled SVG placeholder standing in
-  for commissioned mascot artwork.
+- The NFT contract is deployed on Robinhood Chain at
+  `0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156`.
+- The site uses Robinhood Chain's public RPC by default. Set
+  `NEXT_PUBLIC_ROBINHOOD_RPC_URL` in Vercel to use a production RPC provider.
+- Allowlist minting reads `public/proofs.json`. Publish proofs keyed by
+  lowercase wallet address before opening the allowlist phase.

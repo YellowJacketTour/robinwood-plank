@@ -53,10 +53,10 @@ export default function Hero() {
 
         <div className="flex flex-col gap-4 sm:flex-row">
           <a
-            href="#whitelist"
+            href="#mint"
             className="rounded-lg bg-gold-500 px-8 py-3 text-base font-bold text-wood-950 shadow-[0_6px_18px_-4px_rgba(217,164,65,0.5)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_-6px_rgba(217,164,65,0.6)] active:translate-y-0"
           >
-            Join the Whitelist
+            Mint RobinWood
           </a>
           <a
             href="#tokenomics"
