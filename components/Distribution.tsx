@@ -6,21 +6,21 @@ const FUNDING_FLOW = [
     title: "First 4.2069 ETH raised",
     value: "Initial LP",
     description:
-      "100% of the first 4.2069 ETH in paid mint proceeds is used to establish liquidity.",
+      "100% goes to initial liquidity.",
   },
   {
     step: "+",
     title: "Developer contribution",
     value: "1 ETH",
     description:
-      "The developer adds 1 ETH of liquidity regardless of how much the mint raises.",
+      "Added regardless of the raise.",
   },
   {
     step: "2",
     title: "Proceeds above 4.2069 ETH",
     value: "Ongoing support",
     description:
-      "Any paid mint proceeds above 4.2069 ETH are used for buybacks and additional liquidity.",
+      "Used for buybacks and more liquidity.",
   },
 ] as const;
 
@@ -33,7 +33,7 @@ export default function Distribution() {
             Mint Proceeds
           </h2>
           <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
-            How paid mint proceeds and the developer contribution support liquidity.
+            Simple. Fixed. Public.
           </p>
         </Reveal>
 
@@ -52,8 +52,8 @@ export default function Distribution() {
                     {item.value}
                   </span>
                 </div>
-                <h3 className="mt-6 font-display text-xl text-foreground">{item.title}</h3>
-                <p className="mt-3 text-sm leading-6 text-foreground/70">{item.description}</p>
+                <h3 className="mt-6 font-display text-2xl text-foreground">{item.title}</h3>
+                <p className="mt-3 text-lg leading-7 text-foreground">{item.description}</p>
               </article>
             </Reveal>
           ))}
@@ -61,8 +61,7 @@ export default function Distribution() {
 
         <Reveal delayMs={320}>
           <p className="lede mx-auto mt-8 max-w-3xl text-center text-sm text-foreground/65">
-            The 1 ETH developer contribution is separate from mint proceeds. No fixed percentage of
-            the total raise is represented here.
+            Developer ETH is separate from mint proceeds.
           </p>
         </Reveal>
       </div>

@@ -6,28 +6,28 @@ const PHASES = [
     icon: "🌱",
     phase: "Phase 1 — Launch",
     title: "Plank the Seed",
-    desc: "Anti-sniper and anti-bad-whale settings ON. We plant the roots carefully.",
+    desc: "Protected launch.",
     claims: ["ANTI-SNIPER ON", "ANTI-WHALE ON"],
   },
   {
     icon: "🪓",
     phase: "Phase 2 — Early",
     title: "You Can Plank Me Now",
-    desc: "All controls relaxed. Pure ERC-20, contract renounced.",
+    desc: "Controls removed.",
     claims: ["CONTRACT RENOUNCED", "CONTROLS OFF"],
   },
   {
     icon: "🔥",
     phase: "Phase 3 — Growth",
     title: "Wood You Rather",
-    desc: "Liquidity adds and supply burns keep the campfire roaring.",
+    desc: "Add liquidity. Burn supply.",
     claims: ["LIQUIDITY ADDED", "SUPPLY BURNED"],
   },
   {
     icon: "🛸",
     phase: "Phase 4 — Uncharted",
     title: "Plank, in Space!",
-    desc: "The moonshot expansion phase. Uncharted territory, full send.",
+    desc: "DEX and CEX expansion.",
     claims: ["DEX EXPANSION", "CEX PUSH"],
   },
 ];
@@ -72,8 +72,8 @@ export default function Roadmap() {
                   {p.icon}
                 </div>
                 <span className="mt-4 text-xs font-bold uppercase tracking-widest text-gold-300">{p.phase}</span>
-                <h3 className="mt-2 font-display text-xl text-foreground">{p.title}</h3>
-                <p className="mt-2 text-sm text-foreground/70">{p.desc}</p>
+                <h3 className="mt-2 font-display text-2xl text-foreground">{p.title}</h3>
+                <p className="mt-2 text-lg text-foreground">{p.desc}</p>
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
                   {p.claims.map((claim) => (
                     <span

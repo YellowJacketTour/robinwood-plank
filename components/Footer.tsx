@@ -38,10 +38,8 @@ export default function Footer() {
           ))}
         </ul>
 
-        <p className="max-w-xl text-xs text-foreground/50">
-          $PLANK is a meme coin with no intrinsic value or expectation of financial return. This is not
-          financial advice. Nothing on this site is an offer to sell securities. Do your own research (DYOR)
-          before participating.
+        <p className="max-w-xl text-base text-foreground">
+          Meme coin. No promised return. Not financial advice. DYOR.
         </p>
 
         <p className="text-xs text-foreground/40">© {new Date().getFullYear()} RobinWood. All rights reserved.</p>

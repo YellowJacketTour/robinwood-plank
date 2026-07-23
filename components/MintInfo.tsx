@@ -28,7 +28,7 @@ export default function MintInfo() {
         <Reveal>
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">Mint Structure</h2>
           <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
-            Live supply, phase, pricing, and wallet limits are read directly from the mint contract.
+            Live contract. Live supply. Mint here.
           </p>
         </Reveal>
 
@@ -39,8 +39,8 @@ export default function MintInfo() {
                 <div className="text-4xl" aria-hidden="true">
                   {stat.icon}
                 </div>
-                <h3 className="mt-4 font-display text-xl text-foreground">{stat.title}</h3>
-                <p className="mt-2 text-sm text-foreground/70">{stat.desc}</p>
+                <h3 className="mt-4 font-display text-2xl text-foreground">{stat.title}</h3>
+                <p className="mt-2 text-lg text-foreground">{stat.desc}</p>
               </div>
             </Reveal>
           ))}
@@ -72,8 +72,7 @@ export default function MintInfo() {
           >
             <h3 className="font-display text-2xl text-gold-300">Join the Whitelist</h3>
             <p className="mt-2 text-sm text-foreground/70">
-              Drop your wallet address in the replies to our official whitelist thread on X. If selected,
-              your wallet will be included when the allowlist root and proofs are published.
+              Reply with your wallet. Selected wallets enter the allowlist.
             </p>
             <a
               href={WHITELIST_TWEET_URL}

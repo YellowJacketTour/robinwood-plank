@@ -2,7 +2,7 @@
 
 :root {
   --background: #14100b;
-  --foreground: #f3e8d0;
+  --foreground: #fff2cf;
   --font-display: var(--font-stencil);
   --font-sans: var(--font-body);
 }
@@ -49,6 +49,65 @@ body {
   background-position: top center, top center, top center;
   background-size: 100% 100%, 100% auto, 100% auto;
   background-attachment: scroll, scroll, scroll;
+  font-weight: 700;
+}
+
+/* Strong, warm typography that stays readable over every part of the Plank art. */
+body :where(h1, h2, h3, h4, p, a, button, dt, dd, li, code, strong, span) {
+  text-shadow:
+    -1px -1px 0 #1a0b03,
+    1px -1px 0 #1a0b03,
+    -1px 1px 0 #1a0b03,
+    1px 1px 0 #1a0b03,
+    0 3px 5px rgba(20, 8, 2, 0.98),
+    0 0 14px rgba(20, 8, 2, 0.82);
+}
+
+body p {
+  font-size: clamp(1rem, 1.35vw, 1.2rem) !important;
+  line-height: 1.55 !important;
+}
+
+body dt {
+  color: #e9c987 !important;
+  font-size: 1rem !important;
+  font-weight: 800;
+}
+
+body dd {
+  color: #fff2cf !important;
+  font-size: 1.15rem !important;
+  font-weight: 900;
+}
+
+body [class*="text-foreground/"] {
+  color: #f8e7c2 !important;
+}
+
+body .text-forest-600 {
+  color: #f8d98a !important;
+}
+
+body :where(.bg-wood-900\/85, .bg-wood-900\/90, .bg-wood-900\/95) {
+  background-color: rgba(42, 22, 10, 0.96) !important;
+}
+
+body :where(.bg-forest-900\/70, .bg-forest-900\/75) {
+  background-color: rgba(30, 18, 8, 0.95) !important;
+}
+
+button,
+a.rounded-lg,
+a.rounded-md {
+  font-size: 1rem !important;
+  font-weight: 900 !important;
+}
+
+body :where(.bg-gold-500, .bg-gold-400) {
+  color: #261105 !important;
+  text-shadow:
+    0 1px 0 rgba(255, 242, 207, 0.8),
+    0 2px 2px rgba(89, 43, 12, 0.35) !important;
 }
 
 .font-display {
@@ -85,10 +144,15 @@ body {
 .section-title {
   font-family: var(--font-stencil), "Georgia", serif;
   letter-spacing: 0.02em;
+  font-size: clamp(3rem, 7vw, 5.5rem) !important;
+  line-height: 0.95;
   text-shadow:
-    0 2px 4px rgba(0, 0, 0, 0.9),
-    0 0 24px rgba(0, 0, 0, 0.65),
-    0 0 2px rgba(0, 0, 0, 0.9);
+    -2px -2px 0 #311708,
+    2px -2px 0 #311708,
+    -2px 2px 0 #311708,
+    2px 2px 0 #311708,
+    0 6px 8px #120701,
+    0 0 24px rgba(18, 7, 1, 0.9);
 }
 
 /* Any text that sits directly on the giant scrolling background (not
@@ -96,9 +160,15 @@ body {
    backdrop swings from near-black to bright yellow across the page. */
 .lede,
 .on-bg-text {
+  color: #fff0c9 !important;
+  font-weight: 800;
   text-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.95),
-    0 0 14px rgba(0, 0, 0, 0.7);
+    -1px -1px 0 #1a0b03,
+    1px -1px 0 #1a0b03,
+    -1px 1px 0 #1a0b03,
+    1px 1px 0 #1a0b03,
+    0 4px 6px #120701,
+    0 0 18px rgba(18, 7, 1, 0.92);
 }
 
 @keyframes float {

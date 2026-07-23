@@ -28,10 +28,8 @@ export default function Hero() {
 
         <p className="lede font-display text-2xl text-gold-300 sm:text-3xl">Plank is Plank.</p>
 
-        <p className="lede max-w-2xl text-balance text-base text-foreground/80 sm:text-lg">
-          The Robinhood Chain is officially live. To celebrate, we&apos;re launching the{" "}
-          <strong className="text-foreground">RobinWood NFT Collection</strong>, built to support{" "}
-          <strong className="text-gold-300">$PLANK</strong> from day one.
+        <p className="lede max-w-2xl text-balance text-xl text-foreground sm:text-2xl">
+          1,542 RobinWood NFTs. Built for $PLANK.
         </p>
 
         <div className="wood-frame relative aspect-[3110/2265] w-full max-w-4xl overflow-hidden rounded-2xl">
