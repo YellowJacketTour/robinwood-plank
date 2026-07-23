@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Home from "../page";
 
 const shareImage =
-  "https://plank.love/images/plank-check-signed.jpg?v=20260723";
+  "https://plank.love/plank-social.jpg";
 
 export const metadata: Metadata = {
   title: "PLANK.LOVE — RobinWood Mint",
