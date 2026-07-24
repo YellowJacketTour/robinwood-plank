@@ -74,14 +74,34 @@ export default function WoodListChecker() {
         aria-live="polite"
         className={`mt-4 min-h-7 text-lg font-black ${
           result === "listed"
-            ? "text-gold-300"
+            ? "text-emerald-300"
             : result === "not-listed" || result === "invalid" || result === "error"
               ? "text-red-300"
               : "text-foreground"
         }`}
       >
-        {result === "listed" && "Yes — you’re on the Wood List."}
-        {result === "not-listed" && "No — this address is not on the Wood List."}
+        {result === "listed" && (
+          <span className="inline-flex items-center gap-2">
+            <span
+              aria-hidden="true"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-base text-white"
+            >
+              ✓
+            </span>
+            <span>Wood you mint? You wood.</span>
+          </span>
+        )}
+        {result === "not-listed" && (
+          <span className="inline-flex items-center gap-2">
+            <span
+              aria-hidden="true"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-500 text-base text-white"
+            >
+              ✕
+            </span>
+            <span>Wood you mint? You woodn’t.</span>
+          </span>
+        )}
         {result === "invalid" && "Enter a valid EVM address."}
         {result === "error" && "Could not check the Wood List. Try again."}
       </p>
