@@ -19,7 +19,7 @@ import {
 
 const TOTAL_SUPPLY = 1542;
 const COMMUNITY_SUPPLY = 777;
-const PHASE_NAMES = ["Closed", "Free Mint", "Allowlist Mint", "Paid Mint"];
+const PHASE_NAMES = ["Closed", "Free Mint", "Wood List Mint", "Paid Mint"];
 
 type EthereumProvider = Eip1193Provider & {
   on?: (event: string, listener: (...args: unknown[]) => void) => void;
@@ -266,7 +266,7 @@ export default function MintPanel() {
         transaction = await contract.freeMint(mintQuantity);
       } else if (stats.phase === 2) {
         const response = await fetch("/proofs.json", { cache: "no-store" });
-        if (!response.ok) throw new Error("The allowlist proof file is not available yet.");
+        if (!response.ok) throw new Error("The Wood List proof file is not available yet.");
         const proofData = (await response.json()) as {
           proofs?: Record<string, string[]>;
           [key: string]: unknown;
@@ -275,7 +275,7 @@ export default function MintPanel() {
         const proof =
           proofData.proofs?.[normalizedAddress] ||
           (proofData[normalizedAddress] as string[] | undefined);
-        if (!proof) throw new Error("This wallet is not on the allowlist.");
+        if (!proof) throw new Error("This wallet is not on the Wood List.");
         transaction = await contract.allowlistMint(mintQuantity, proof);
       } else if (stats.phase === 3) {
         const livePrice = (await contract.mintPrice()) as bigint;
@@ -314,7 +314,7 @@ export default function MintPanel() {
               : stats.phase === 1
                 ? `Mint ${mintQuantity} Free`
                 : stats.phase === 2
-                  ? `Mint ${mintQuantity} Allowlist`
+                  ? `Mint ${mintQuantity} Wood List`
                   : `Mint ${mintQuantity} for ${totalPrice} ETH`;
 
   return (
@@ -358,7 +358,7 @@ export default function MintPanel() {
           <dd className="mt-1 font-bold text-foreground">{stats.community} / {COMMUNITY_SUPPLY}</dd>
         </div>
         <div>
-          <dt className="text-foreground/55">Free / allowlist</dt>
+          <dt className="text-foreground/55">Free / Wood List</dt>
           <dd className="mt-1 font-bold text-foreground">{stats.free} / {stats.allowlist}</dd>
         </div>
         <div>

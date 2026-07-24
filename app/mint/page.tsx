@@ -6,13 +6,13 @@ const shareImage =
 
 export const metadata: Metadata = {
   title: "PLANK.LOVE — RobinWood Mint",
-  description: "Join the RobinWood allowlist and mint on Robinhood Chain.",
+  description: "Join the Wood List and mint on Robinhood Chain.",
   alternates: {
     canonical: "https://plank.love/mint",
   },
   openGraph: {
     title: "PLANK.LOVE — RobinWood Mint",
-    description: "Join the RobinWood allowlist and mint on Robinhood Chain.",
+    description: "Join the Wood List and mint on Robinhood Chain.",
     url: "https://plank.love/mint",
     siteName: "PLANK.LOVE",
     type: "website",
@@ -28,7 +28,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "PLANK.LOVE — RobinWood Mint",
-    description: "Join the RobinWood allowlist and mint on Robinhood Chain.",
+    description: "Join the Wood List and mint on Robinhood Chain.",
     images: [shareImage],
   },
 };

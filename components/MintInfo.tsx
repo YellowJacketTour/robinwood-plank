@@ -1,13 +1,14 @@
 import Reveal from "@/components/Reveal";
 import MintPanel from "@/components/MintPanel";
+import WoodListChecker from "@/components/WoodListChecker";
 import Image from "next/image";
-import { WHITELIST_TWEET_URL } from "@/lib/constants";
+import { WOOD_LIST_TWEET_URL } from "@/lib/constants";
 
 const MINT_STATS = [
   {
     icon: "🪵",
     title: "777 Community",
-    desc: "Free and allowlist mints share a protected pool of 777 NFTs.",
+    desc: "Free and Wood List mints share a protected pool of 777 NFTs.",
   },
   {
     icon: "💰",
@@ -67,21 +68,22 @@ export default function MintInfo() {
 
         <Reveal delayMs={200}>
           <div
-            id="whitelist"
+            id="wood-list"
             className="mx-auto mt-14 max-w-2xl scroll-mt-24 rounded-2xl border-2 border-dashed border-gold-500/50 bg-forest-900/75 p-6 text-center"
           >
-            <h3 className="font-display text-2xl text-gold-300">Join the Whitelist</h3>
+            <h3 className="font-display text-2xl text-gold-300">Join the Wood List</h3>
             <p className="mt-2 text-sm text-foreground/70">
-              Reply with your wallet. Selected wallets enter the allowlist.
+              Reply with your wallet. Selected wallets enter the Wood List.
             </p>
             <a
-              href={WHITELIST_TWEET_URL}
+              href={WOOD_LIST_TWEET_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-5 inline-block rounded-lg bg-gold-500 px-8 py-3 text-base font-bold text-wood-950 shadow-[0_6px_18px_-4px_rgba(217,164,65,0.5)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_-6px_rgba(217,164,65,0.6)] active:translate-y-0"
             >
               Leave Your Address on X ↗
             </a>
+            <WoodListChecker />
           </div>
         </Reveal>
       </div>

@@ -17,6 +17,6 @@ export const SOCIAL_LINKS = {
   twitter: "https://x.com/RobinWoodPlank",
 } as const;
 
-// Official whitelist thread — drop your wallet address in the replies.
-export const WHITELIST_TWEET_URL =
+// Official Wood List thread — drop your wallet address in the replies.
+export const WOOD_LIST_TWEET_URL =
   "https://x.com/RobinWoodPlank/status/2079327510458982752";

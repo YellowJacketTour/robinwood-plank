@@ -27,7 +27,7 @@ npm run start
 - `app/page.tsx` — assembles the single-page layout.
 - `public/plank-social.jpg` — static Open Graph and X link-preview artwork.
 - `components/MintPanel.tsx` — live NFT contract reads, wallet connection, and
-  free, allowlist, and paid mint transactions.
+  free, Wood List, and paid mint transactions.
 - `components/` — site sections including `Nav`, `Hero`, `MintInfo`,
   `Distribution`, `Roadmap`, `LiquidityBurn`, and `Footer`.
 - `lib/mint-contract.ts` — NFT contract ABI, address, and Robinhood Chain
@@ -83,5 +83,5 @@ npm run start
 - Set `NEXT_PUBLIC_MINT_START_AT` to an ISO 8601 timestamp to show the homepage
   countdown, for example `2026-08-01T19:00:00-05:00`. Leave it unset to hide
   the countdown.
-- Allowlist minting reads `public/proofs.json`. Publish proofs keyed by
-  lowercase wallet address before opening the allowlist phase.
+- Wood List minting reads `public/proofs.json`. Publish proofs keyed by
+  lowercase wallet address before opening the Wood List phase.
