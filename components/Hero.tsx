@@ -23,8 +23,8 @@ export default function Hero() {
           className="h-28 w-auto drop-shadow-[0_8px_20px_rgba(0,0,0,0.5)] sm:h-36"
         />
 
-        <h1 className="font-display text-5xl leading-tight text-foreground drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)] sm:text-6xl md:text-7xl">
-          RobinWood <span className="plank-title">($PLANK)</span>
+        <h1 className="max-w-full font-display text-4xl leading-tight text-foreground drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)] sm:text-6xl md:text-7xl">
+          RobinWood <span className="plank-title block sm:inline">($PLANK)</span>
         </h1>
 
         <p className="lede font-display text-2xl text-gold-300 sm:text-3xl">Plank is Plank.</p>

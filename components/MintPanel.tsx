@@ -381,7 +381,7 @@ export default function MintPanel() {
             aria-label="Decrease mint quantity"
             disabled={busy || mintQuantity <= 1}
             onClick={() => setQuantity((value) => Math.max(1, value - 1))}
-            className="h-10 w-10 rounded-full text-xl font-bold text-gold-300 disabled:opacity-35"
+            className="h-12 w-12 rounded-full text-xl font-bold text-gold-300 disabled:opacity-35"
           >
             −
           </button>
@@ -391,7 +391,7 @@ export default function MintPanel() {
             aria-label="Increase mint quantity"
             disabled={busy || mintQuantity >= phaseLimit}
             onClick={() => setQuantity((value) => Math.min(phaseLimit, value + 1))}
-            className="h-10 w-10 rounded-full text-xl font-bold text-gold-300 disabled:opacity-35"
+            className="h-12 w-12 rounded-full text-xl font-bold text-gold-300 disabled:opacity-35"
           >
             +
           </button>
@@ -402,7 +402,7 @@ export default function MintPanel() {
         type="button"
         onClick={() => void submitMint()}
         disabled={loading || busy || (Boolean(address) && (stats.paused || soldOut || stats.phase === 0 || phaseLimit === 0))}
-        className="mt-6 w-full rounded-lg bg-gold-500 px-6 py-4 text-base font-extrabold text-wood-950 transition-colors hover:bg-gold-400 disabled:cursor-not-allowed disabled:opacity-45"
+        className="mt-6 min-h-14 w-full rounded-lg bg-gold-500 px-6 py-4 text-base font-extrabold text-wood-950 transition-colors hover:bg-gold-400 disabled:cursor-not-allowed disabled:opacity-45"
       >
         {buttonLabel}
       </button>

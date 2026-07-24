@@ -40,7 +40,7 @@ export default function WoodListChecker() {
   }
 
   return (
-    <form onSubmit={checkAddress} className="mt-7 border-t border-gold-500/30 pt-6">
+    <form onSubmit={checkAddress} className="mt-7 border-t border-gold-500/30 pt-6 text-left">
       <label htmlFor="wood-list-address" className="block font-display text-xl text-gold-300">
         Wood Checker
       </label>
@@ -63,7 +63,7 @@ export default function WoodListChecker() {
         <button
           type="submit"
           disabled={checking}
-          className="rounded-lg bg-gold-500 px-6 py-3 text-base font-black text-wood-950 disabled:cursor-wait disabled:opacity-60"
+          className="min-h-12 rounded-lg bg-gold-500 px-6 py-3 text-base font-black text-wood-950 disabled:cursor-wait disabled:opacity-60"
         >
           {checking ? "Checking..." : "Check Address"}
         </button>

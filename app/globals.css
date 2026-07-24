@@ -224,3 +224,55 @@ body :where(.bg-gold-500, .bg-gold-400) {
   outline-offset: 3px;
   border-radius: 4px;
 }
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+section[id],
+div[id] {
+  scroll-margin-top: 5.5rem;
+}
+
+button,
+a,
+input {
+  touch-action: manipulation;
+}
+
+input {
+  font-size: 16px;
+}
+
+@media (max-width: 639px) {
+  section {
+    padding-top: 4rem !important;
+    padding-bottom: 4rem !important;
+  }
+
+  .wood-frame {
+    border-width: 2px;
+  }
+
+  .section-title {
+    font-size: clamp(2.6rem, 14vw, 3.5rem) !important;
+    line-height: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}

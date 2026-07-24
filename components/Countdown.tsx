@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useState } from "react";
 
@@ -44,7 +44,7 @@ export default function Countdown({ targetDate }: { targetDate?: string }) {
         {remaining?.complete ? "Mint is live" : "Mint opens in"}
       </p>
       {!remaining?.complete && (
-        <div className="mt-5 grid grid-cols-4 gap-2 sm:gap-4" role="timer" aria-live="off">
+        <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-4" role="timer" aria-live="off">
           {[
             ["Days", remaining?.days],
             ["Hours", remaining?.hours],
@@ -62,7 +62,7 @@ export default function Countdown({ targetDate }: { targetDate?: string }) {
           ))}
         </div>
       )}
-      <time className="mt-4 block text-base font-extrabold text-foreground" dateTime={targetDate}>
+      <time className="mt-4 block text-center text-base font-extrabold text-foreground" dateTime={targetDate}>
         {new Intl.DateTimeFormat("en-US", {
           weekday: "long",
           year: "numeric",
