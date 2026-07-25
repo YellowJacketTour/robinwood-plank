@@ -112,11 +112,14 @@ export function tokenMatchesIndex(
     // Interior partial on a single word ("wood" in "ironwood")
     if (q.length >= 3 && word.includes(q)) return true;
 
-    // Near spelling only when lengths are similar (rare ↔ raer), not loose prefixes
+    // Near spelling only when lengths are similar (rare ↔ raer).
+    // Reject long queries fuzzy-matched onto short words (plankmon ↛ plank).
     const budget = fuzzyBudget(q.length);
+    const lenDiff = Math.abs(word.length - q.length);
     if (
       budget > 0 &&
-      Math.abs(word.length - q.length) <= budget &&
+      lenDiff <= budget &&
+      q.length <= word.length + 1 &&
       levenshtein(q, word) <= budget
     ) {
       return true;
