@@ -74,13 +74,36 @@ export function getTrapWindow(nowMs: number = Date.now()): TrapWindow {
   };
 }
 
-/** True while we still collect Bad Boards / enforce listing window. */
+/**
+ * True for the full ops window: death trap + post-open cooldown display.
+ * Used for cooldowns / Bad Boards *blocking* on quote·swap — not for new chain flags.
+ */
 export function isListingWindowActive(nowMs: number = Date.now()): boolean {
   const w = getTrapWindow(nowMs);
   if (w.rulesRelaxed) return false;
   return (
     nowMs >= w.trapStartsAt.getTime() && nowMs < w.cooldownsEndAt.getTime()
   );
+}
+
+/**
+ * True only while the official widget is still locked (LP bait / sniper trap).
+ * Chain scanner may mark Bad Boards *only* in this phase.
+ *
+ * Once community trade opens (`cooldown_window` / widget on), buyers through
+ * plank.love must never be auto-logged as Bad Boards — scan capture stops.
+ */
+export function isSniperCaptureActive(nowMs: number = Date.now()): boolean {
+  const w = getTrapWindow(nowMs);
+  if (w.rulesRelaxed) return false;
+  return w.phase === "death_trap";
+}
+
+/** Community widget unlocked (and not free yet). */
+export function isOfficialWidgetOpen(nowMs: number = Date.now()): boolean {
+  const w = getTrapWindow(nowMs);
+  if (w.rulesRelaxed) return true;
+  return nowMs >= w.tradeOpensAt.getTime();
 }
 
 export function cooldownEndsAt(startedAtMs: number): number {

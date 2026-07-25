@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   cooldownEndsAt,
   isListingWindowActive,
+  isSniperCaptureActive,
   normalizeAddress,
   WALLET_COOLDOWN_MS,
 } from "@/lib/boards";
@@ -29,8 +30,22 @@ function emptyState(): BoardsState {
     badBoards: {},
     cooldowns: {},
     lastScannedBlock: 0,
+    lastScanAt: undefined,
     scanNotes: [],
+    totalEthSpentWei: "0",
   };
+}
+
+function recomputeTotalEth(state: BoardsState): void {
+  let total = BigInt(0);
+  for (const e of Object.values(state.badBoards)) {
+    try {
+      total += BigInt(e.ethSpentWei || "0");
+    } catch {
+      // skip bad wei
+    }
+  }
+  state.totalEthSpentWei = total.toString();
 }
 
 const TMP_PATH =
@@ -45,14 +60,25 @@ async function ensureLoaded(): Promise<BoardsState> {
   try {
     const raw = await fs.readFile(TMP_PATH, "utf8");
     const parsed = JSON.parse(raw) as BoardsState;
+    const badBoards: BoardsState["badBoards"] = {};
+    for (const [k, v] of Object.entries(parsed.badBoards || {})) {
+      badBoards[k] = {
+        ...v,
+        ethSpentWei: v.ethSpentWei || "0",
+        txHashes: v.txHashes || [],
+        sources: v.sources || [],
+      };
+    }
     glob.__plankBoardsState = {
       ...emptyState(),
       ...parsed,
       widgetSessions: parsed.widgetSessions || {},
-      badBoards: parsed.badBoards || {},
+      badBoards,
       cooldowns: parsed.cooldowns || {},
       scanNotes: parsed.scanNotes || [],
+      totalEthSpentWei: parsed.totalEthSpentWei || "0",
     };
+    recomputeTotalEth(glob.__plankBoardsState);
   } catch {
     glob.__plankBoardsState = emptyState();
   }
@@ -174,17 +200,32 @@ export async function wasWidgetVerified(address: string): Promise<boolean> {
 }
 
 /**
- * Mark a wallet Bad Boards — off-widget / funny business during listing window.
+ * Mark a wallet Bad Boards — off-widget snipes while the official widget is locked.
  * Good Wood addresses that offend become "fallen" (still counted in bad list).
+ * Optional ethSpentWeiDelta accumulates native ETH value from the sniper's txs.
+ * Official widget sessions are never marked.
  */
 export async function markBadBoard(opts: {
   address: string;
   reason: string;
   source: string;
   txHash?: string;
+  /** Additional wei this hit (only applied once per new txHash). */
+  ethSpentWeiDelta?: string | bigint;
   at?: Date;
+  /**
+   * `sniper` (default for chain): only while widget is locked (death trap).
+   * `manual` / ops: allowed for full listing window if ever needed.
+   */
+  captureMode?: "sniper" | "manual";
 }): Promise<BadBoardEntry | null> {
-  if (!isListingWindowActive(opts.at?.getTime() ?? Date.now())) {
+  const atMs = opts.at?.getTime() ?? Date.now();
+  const mode = opts.captureMode ?? "sniper";
+  // Chain sniper capture stops the moment community widget unlocks.
+  if (mode === "sniper" && !isSniperCaptureActive(atMs)) {
+    return null;
+  }
+  if (mode === "manual" && !isListingWindowActive(atMs)) {
     return null;
   }
 
@@ -192,18 +233,36 @@ export async function markBadBoard(opts: {
   const a = normalizeAddress(opts.address);
   if (!/^0x[a-f0-9]{40}$/.test(a)) return null;
 
-  // Official widget users are not auto-bad from chain noise if they only used us —
-  // but explicit off-widget reason still applies if they also sniped elsewhere.
+  // Manual mode only: never re-flag wallets already verified via official quote/swap.
+  // Sniper mode intentionally ignores widget sessions (ping is unauthenticated).
+  if (mode === "manual" && (await wasWidgetVerified(a))) {
+    return null;
+  }
+
   const at = opts.at ?? new Date();
   const good = await isGoodWood(a);
   const prev = state.badBoards[a];
   const txHashes = prev?.txHashes ? [...prev.txHashes] : [];
-  if (opts.txHash && !txHashes.includes(opts.txHash)) {
+  const isNewTx = Boolean(opts.txHash && !txHashes.includes(opts.txHash));
+  if (opts.txHash && isNewTx) {
     txHashes.push(opts.txHash);
-    if (txHashes.length > 20) txHashes.shift();
+    if (txHashes.length > 40) txHashes.shift();
   }
   const sources = prev?.sources ? [...prev.sources] : [];
   if (!sources.includes(opts.source)) sources.push(opts.source);
+
+  let ethSpentWei = BigInt(prev?.ethSpentWei || "0");
+  if (isNewTx && opts.ethSpentWeiDelta != null) {
+    try {
+      const delta =
+        typeof opts.ethSpentWeiDelta === "bigint"
+          ? opts.ethSpentWeiDelta
+          : BigInt(opts.ethSpentWeiDelta || "0");
+      if (delta > BigInt(0)) ethSpentWei += delta;
+    } catch {
+      // ignore bad delta
+    }
+  }
 
   const entry: BadBoardEntry = {
     address: a,
@@ -213,8 +272,10 @@ export async function markBadBoard(opts: {
     wasGoodWood: good || Boolean(prev?.wasGoodWood),
     sources,
     txHashes,
+    ethSpentWei: ethSpentWei.toString(),
   };
   state.badBoards[a] = entry;
+  recomputeTotalEth(state);
   touchCooldown(state, a, at);
   await persist(state);
   return entry;
@@ -227,15 +288,18 @@ export async function getBoardsState(): Promise<BoardsState> {
 export async function setScanCursor(block: number, notes: string[]): Promise<void> {
   const state = await ensureLoaded();
   state.lastScannedBlock = block;
+  state.lastScanAt = new Date().toISOString();
   state.scanNotes = notes.slice(0, 20);
   await persist(state);
 }
 
-/** ISO of last successful scan (from updatedAt after scan). */
+/** Age of last successful chain scan (uses lastScanAt — not widget ping noise). */
 export async function getLastScanAgeMs(): Promise<number> {
   const state = await ensureLoaded();
-  if (!state.updatedAt || state.lastScannedBlock <= 0) return Number.POSITIVE_INFINITY;
-  const t = Date.parse(state.updatedAt);
+  if (state.lastScannedBlock <= 0) return Number.POSITIVE_INFINITY;
+  const iso = state.lastScanAt || state.updatedAt;
+  if (!iso) return Number.POSITIVE_INFINITY;
+  const t = Date.parse(iso);
   if (Number.isNaN(t)) return Number.POSITIVE_INFINITY;
   return Date.now() - t;
 }
@@ -290,8 +354,10 @@ export async function publicBoardsSnapshot(): Promise<{
   fallenCount: number;
   /** Sample of Good Wood addresses for the wooden ledger (nice column). */
   niceLedger: string[];
+  totalEthSpentWei: string;
 }> {
   const state = await ensureLoaded();
+  recomputeTotalEth(state);
   const good = await loadGoodWoodSet();
   const badList = Object.values(state.badBoards).sort(
     (a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt)
@@ -324,6 +390,50 @@ export async function publicBoardsSnapshot(): Promise<{
     recentBad: badList.slice(0, 100),
     fallenCount,
     niceLedger: niceSet,
+    totalEthSpentWei: state.totalEthSpentWei || "0",
+  };
+}
+
+/** Enrich bad entries + volume tick with live ETH/USD. */
+export async function withVolumeDecorators(snap: {
+  recentBad: BadBoardEntry[];
+  totalEthSpentWei: string;
+  fallenCount: number;
+  state: BoardsState;
+}): Promise<{
+  recentBad: BadBoardEntry[];
+  volume: import("@/lib/boards-types").BoardsVolumeTick;
+}> {
+  const { formatEth3, formatUsd, getEthUsdPrice, weiToUsd } = await import("@/lib/eth-price");
+  const price = await getEthUsdPrice();
+  const totalWei = snap.totalEthSpentWei || "0";
+  const totalUsd = weiToUsd(totalWei, price.usd);
+
+  const recentBad = snap.recentBad.map((b) => {
+    const wei = b.ethSpentWei || "0";
+    const usd = weiToUsd(wei, price.usd);
+    return {
+      ...b,
+      ethSpentWei: wei,
+      ethSpent: formatEth3(wei),
+      ethSpentUsd: usd,
+      ethSpentUsdLabel: formatUsd(usd),
+    };
+  });
+
+  return {
+    recentBad,
+    volume: {
+      serverNow: new Date().toISOString(),
+      ethUsd: price.usd,
+      ethUsdSource: price.source,
+      totalEthSpent: formatEth3(totalWei),
+      totalEthSpentWei: totalWei,
+      totalUsd,
+      totalUsdLabel: formatUsd(totalUsd),
+      badBoards: Object.keys(snap.state.badBoards).length,
+      fallen: snap.fallenCount,
+    },
   };
 }
 

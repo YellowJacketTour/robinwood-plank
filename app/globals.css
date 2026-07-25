@@ -326,6 +326,186 @@ input {
   color: #ffc9b0;
 }
 
+/* Airdrop allocation panel — beat global p/button clamps; dense & readable */
+.airdrop-panel {
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-weight: 600;
+}
+
+.airdrop-panel :where(p, span, label, strong, code, button, input, th, td, li) {
+  font-size: inherit !important;
+  line-height: inherit !important;
+  text-shadow:
+    0 1px 1px rgba(12, 6, 2, 0.9),
+    0 0 8px rgba(12, 6, 2, 0.55) !important;
+}
+
+.airdrop-panel .airdrop-label {
+  font-size: 0.62rem !important;
+  line-height: 1.15 !important;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e9c987;
+}
+
+.airdrop-panel .airdrop-stat {
+  font-family: var(--font-stencil), Georgia, serif;
+  font-size: 1.15rem !important;
+  line-height: 1.1 !important;
+  font-weight: 700;
+  color: #f8d98a;
+  font-variant-numeric: tabular-nums;
+}
+
+.airdrop-panel .airdrop-stat-sm {
+  font-size: 0.95rem !important;
+}
+
+.airdrop-panel .airdrop-meta {
+  font-size: 0.68rem !important;
+  line-height: 1.25 !important;
+  font-weight: 600;
+  color: #f3e0b0;
+  opacity: 0.88;
+}
+
+.airdrop-panel .airdrop-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
+}
+
+.airdrop-panel .airdrop-row {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr) 4.25rem 4.75rem 5.25rem;
+  column-gap: 0.35rem;
+  align-items: baseline;
+  min-height: 1.35rem;
+  font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+  font-size: 0.7rem !important;
+  line-height: 1.35rem !important;
+  font-weight: 600;
+  color: #cfeec4;
+}
+
+@media (min-width: 640px) {
+  .airdrop-panel .airdrop-row {
+    grid-template-columns: 2rem minmax(0, 1.15fr) 4.5rem 5rem 5.5rem 3.25rem;
+    font-size: 0.72rem !important;
+  }
+}
+
+.airdrop-panel .airdrop-row-head {
+  color: #e9c987;
+  opacity: 0.75;
+  font-size: 0.58rem !important;
+  line-height: 1.2rem !important;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: var(--font-body), system-ui, sans-serif;
+}
+
+.airdrop-panel .airdrop-input {
+  min-height: 2rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(196, 146, 46, 0.5);
+  background: rgba(27, 18, 10, 0.9);
+  padding: 0.3rem 0.55rem;
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: 0.75rem !important;
+  line-height: 1.2 !important;
+  font-weight: 600;
+  color: #f8d98a;
+  outline: none;
+}
+
+.airdrop-panel .airdrop-input::placeholder {
+  color: rgba(243, 224, 176, 0.35);
+  font-weight: 500;
+}
+
+.airdrop-panel .airdrop-input:focus {
+  border-color: #eec164;
+}
+
+.airdrop-panel .airdrop-btn {
+  min-height: 2rem;
+  border-radius: 0.35rem;
+  background: #d9a441;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.72rem !important;
+  line-height: 1.2 !important;
+  font-weight: 800 !important;
+  color: #261105 !important;
+  text-shadow: 0 1px 0 rgba(255, 242, 207, 0.75) !important;
+  white-space: nowrap;
+}
+
+.airdrop-panel .airdrop-btn:hover {
+  background: #eec164;
+}
+
+.airdrop-panel .airdrop-btn:disabled {
+  opacity: 0.55;
+}
+
+.airdrop-panel .airdrop-btn-ghost {
+  background: transparent;
+  border: 1px solid rgba(196, 146, 46, 0.45);
+  color: #f8d98a !important;
+  text-shadow: 0 1px 1px rgba(12, 6, 2, 0.9) !important;
+}
+
+.airdrop-panel .airdrop-btn-ghost:hover {
+  background: rgba(217, 164, 65, 0.12);
+}
+
+.airdrop-panel .airdrop-result {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.45rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(196, 146, 46, 0.28);
+  background: rgba(27, 18, 10, 0.55);
+}
+
+@media (min-width: 640px) {
+  .airdrop-panel .airdrop-result {
+    grid-template-columns: auto 1fr auto auto auto;
+    align-items: baseline;
+  }
+}
+
+.airdrop-panel .airdrop-result-k {
+  font-size: 0.58rem !important;
+  line-height: 1.1 !important;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #e9c987;
+  opacity: 0.8;
+}
+
+.airdrop-panel .airdrop-result-v {
+  font-size: 0.8rem !important;
+  line-height: 1.2 !important;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #f8d98a;
+}
+
+.airdrop-panel .airdrop-result-v.ok {
+  color: #9fe0a0;
+}
+
+.airdrop-panel .airdrop-result-v.bad {
+  color: #ffc9b0;
+}
+
 /* Unified page shell width */
 .site-shell {
   width: 100%;
