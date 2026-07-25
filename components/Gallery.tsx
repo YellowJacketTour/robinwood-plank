@@ -34,26 +34,17 @@ import {
   tierColor,
   type TokenRarity,
 } from "@/lib/rarity";
+import type { GalleryNft } from "@/lib/gallery-types";
 import RarityInsights from "@/components/RarityInsights";
 
-export type GalleryNft = {
-  tokenId: number;
-  tokenUri: string;
-  name: string;
-  description: string;
-  imageUri: string;
-  attributes: NftAttribute[];
-  owner: string;
-  searchText: string;
-  searchWords: string[];
-  loaded: boolean;
-  error?: string;
-};
+export type { GalleryNft };
 
 const POLL_MS = 20_000;
-const URI_BATCH = 24;
-const META_CONCURRENCY = 10;
+const URI_BATCH = 16;
+const META_CONCURRENCY = 8;
 const PAGE_SIZE = 24;
+/** First paint: stage this many cards immediately (newest first). */
+const INITIAL_STAGE = 48;
 
 function shortOwner(owner: string) {
   if (!owner || owner.length < 10) return owner || "—";
@@ -273,7 +264,8 @@ export default function Gallery() {
 
   const knownIdsRef = useRef<Set<number>>(new Set());
   const loadingIdsRef = useRef<Set<number>>(new Set());
-  const cancelledRef = useRef(false);
+  const itemsCountRef = useRef(0);
+  const syncGenRef = useRef(0);
 
   const upsertItems = useCallback((incoming: GalleryNft[]) => {
     setItems((previous) => {
@@ -281,197 +273,233 @@ export default function Gallery() {
       for (const item of incoming) {
         map.set(item.tokenId, item);
       }
-      return Array.from(map.values()).sort(sortNewestFirst);
+      const next = Array.from(map.values()).sort(sortNewestFirst);
+      itemsCountRef.current = next.length;
+      return next;
     });
   }, []);
 
+  const makePlaceholder = useCallback((tokenId: number): GalleryNft => {
+    const name = `RobinWood Plank #${tokenId}`;
+    const idx = indexNft({ tokenId, name, owner: "" });
+    return {
+      tokenId,
+      tokenUri: "",
+      name,
+      description: "",
+      imageUri: "",
+      attributes: [],
+      owner: "",
+      searchText: idx.searchText,
+      searchWords: idx.words,
+      loaded: false,
+    };
+  }, []);
+
+  const hydrateToken = useCallback(
+    async (tokenId: number, contract: Contract): Promise<GalleryNft> => {
+      const fallbackName = `RobinWood Plank #${tokenId}`;
+      let tokenUri = "";
+      let owner = "";
+      try {
+        tokenUri = (await contract.tokenURI(tokenId)) as string;
+      } catch {
+        /* keep empty */
+      }
+      try {
+        owner = (await contract.ownerOf(tokenId)) as string;
+      } catch {
+        /* keep empty */
+      }
+
+      if (!tokenUri) {
+        const idx = indexNft({ tokenId, name: fallbackName, owner });
+        return {
+          tokenId,
+          tokenUri: "",
+          name: fallbackName,
+          description: "",
+          imageUri: "",
+          attributes: [],
+          owner,
+          searchText: idx.searchText,
+          searchWords: idx.words,
+          loaded: true,
+          error: "tokenURI unavailable",
+        };
+      }
+
+      try {
+        const metadata: NftMetadata = await fetchNftMetadata(tokenUri);
+        const name = metadata.name?.trim() || fallbackName;
+        const description = metadata.description?.trim() || "";
+        const attributes = Array.isArray(metadata.attributes)
+          ? metadata.attributes
+          : [];
+        const idx = indexNft({
+          tokenId,
+          name,
+          description,
+          attributes,
+          owner,
+        });
+        return {
+          tokenId,
+          tokenUri,
+          name,
+          description,
+          imageUri: metadata.image || "",
+          attributes,
+          owner,
+          searchText: idx.searchText,
+          searchWords: idx.words,
+          loaded: true,
+        };
+      } catch {
+        const idx = indexNft({ tokenId, name: fallbackName, owner });
+        return {
+          tokenId,
+          tokenUri,
+          name: fallbackName,
+          description: "",
+          imageUri: "",
+          attributes: [],
+          owner,
+          searchText: idx.searchText,
+          searchWords: idx.words,
+          loaded: true,
+          error: "metadata unavailable",
+        };
+      }
+    },
+    [],
+  );
+
   const loadMetadataForIds = useCallback(
-    async (tokenIds: number[], contract: Contract) => {
-      const pending = tokenIds.filter(
-        (id) => !loadingIdsRef.current.has(id),
-      );
+    async (tokenIds: number[], contract: Contract, gen: number) => {
+      const pending = tokenIds.filter((id) => !loadingIdsRef.current.has(id));
       if (!pending.length) return;
 
       for (const id of pending) loadingIdsRef.current.add(id);
 
-      // Newest first within this batch set
       const ordered = [...pending].sort((a, b) => b - a);
 
       for (let offset = 0; offset < ordered.length; offset += URI_BATCH) {
-        if (cancelledRef.current) return;
+        if (syncGenRef.current !== gen) return;
         const slice = ordered.slice(offset, offset + URI_BATCH);
 
-        const withChain = await Promise.all(
-          slice.map(async (tokenId) => {
-            const [uriResult, ownerResult] = await Promise.allSettled([
-              contract.tokenURI(tokenId) as Promise<string>,
-              contract.ownerOf(tokenId) as Promise<string>,
-            ]);
-            return {
-              tokenId,
-              tokenUri: uriResult.status === "fulfilled" ? uriResult.value : "",
-              owner: ownerResult.status === "fulfilled" ? ownerResult.value : "",
-            };
-          }),
-        );
-
-        // Metadata with limited concurrency
-        for (let i = 0; i < withChain.length; i += META_CONCURRENCY) {
-          if (cancelledRef.current) return;
-          const chunk = withChain.slice(i, i + META_CONCURRENCY);
+        for (let i = 0; i < slice.length; i += META_CONCURRENCY) {
+          if (syncGenRef.current !== gen) return;
+          const chunk = slice.slice(i, i + META_CONCURRENCY);
           const resolved = await Promise.all(
-            chunk.map(async (entry) => {
-              const fallbackName = `RobinWood Plank #${entry.tokenId}`;
-              const owner = entry.owner || "";
-              if (!entry.tokenUri) {
-                const idx = indexNft({
-                  tokenId: entry.tokenId,
-                  name: fallbackName,
-                  owner,
-                });
-                return {
-                  tokenId: entry.tokenId,
-                  tokenUri: "",
-                  name: fallbackName,
-                  description: "",
-                  imageUri: "",
-                  attributes: [] as NftAttribute[],
-                  owner,
-                  searchText: idx.searchText,
-                  searchWords: idx.words,
-                  loaded: true,
-                  error: "tokenURI unavailable",
-                } satisfies GalleryNft;
-              }
-              try {
-                const metadata: NftMetadata = await fetchNftMetadata(entry.tokenUri);
-                const name = metadata.name?.trim() || fallbackName;
-                const description = metadata.description?.trim() || "";
-                const attributes = Array.isArray(metadata.attributes)
-                  ? metadata.attributes
-                  : [];
-                const idx = indexNft({
-                  tokenId: entry.tokenId,
-                  name,
-                  description,
-                  attributes,
-                  owner,
-                });
-                return {
-                  tokenId: entry.tokenId,
-                  tokenUri: entry.tokenUri,
-                  name,
-                  description,
-                  imageUri: metadata.image || "",
-                  attributes,
-                  owner,
-                  searchText: idx.searchText,
-                  searchWords: idx.words,
-                  loaded: true,
-                } satisfies GalleryNft;
-              } catch {
-                const idx = indexNft({
-                  tokenId: entry.tokenId,
-                  name: fallbackName,
-                  owner,
-                });
-                return {
-                  tokenId: entry.tokenId,
-                  tokenUri: entry.tokenUri,
-                  name: fallbackName,
-                  description: "",
-                  imageUri: "",
-                  attributes: [],
-                  owner,
-                  searchText: idx.searchText,
-                  searchWords: idx.words,
-                  loaded: true,
-                  error: "metadata unavailable",
-                } satisfies GalleryNft;
-              }
-            }),
+            chunk.map((tokenId) => hydrateToken(tokenId, contract)),
           );
-
-          if (cancelledRef.current) return;
+          if (syncGenRef.current !== gen) return;
           upsertItems(resolved);
           setLoadedCount((count) => count + resolved.length);
         }
       }
     },
-    [upsertItems],
+    [hydrateToken, upsertItems],
   );
 
   const syncMinted = useCallback(async () => {
+    const gen = ++syncGenRef.current;
     try {
+      setStatus("Connecting to Robinhood Chain…");
       const provider = new JsonRpcProvider(ROBINHOOD_RPC_URL, ROBINHOOD_CHAIN_ID, {
         staticNetwork: true,
       });
       const contract = new Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, provider);
       const supply = Number(await contract.totalSupply());
+      if (syncGenRef.current !== gen) return;
+
       setTotalMinted(supply);
 
       if (supply === 0) {
         setStatus("No Planks minted yet.");
         setItems([]);
+        itemsCountRef.current = 0;
         knownIdsRef.current.clear();
+        loadingIdsRef.current.clear();
         setLoadedCount(0);
         return;
       }
 
-      // Sequential mint IDs 1..supply — only revealed/minted tokens
-      const allIds: number[] = [];
-      for (let id = supply; id >= 1; id -= 1) {
-        allIds.push(id);
+      // If we previously aborted before painting, recover by re-staging.
+      if (itemsCountRef.current === 0 && knownIdsRef.current.size > 0) {
+        knownIdsRef.current.clear();
+        loadingIdsRef.current.clear();
+        setLoadedCount(0);
       }
+
+      // Newest first: supply … 1
+      const allIds: number[] = [];
+      for (let id = supply; id >= 1; id -= 1) allIds.push(id);
 
       const newIds = allIds.filter((id) => !knownIdsRef.current.has(id));
-      for (const id of allIds) knownIdsRef.current.add(id);
 
-      // Placeholder cards so newest mints appear immediately (top-left)
       if (newIds.length) {
-        const placeholders = newIds.map((tokenId) => {
-          const name = `RobinWood Plank #${tokenId}`;
-          const idx = indexNft({ tokenId, name, owner: "" });
-          return {
-            tokenId,
-            tokenUri: "",
-            name,
-            description: "",
-            imageUri: "",
-            attributes: [],
-            owner: "",
-            searchText: idx.searchText,
-            searchWords: idx.words,
-            loaded: false,
-          } satisfies GalleryNft;
-        });
-        upsertItems(placeholders);
-        setStatus(
-          newIds.length === allIds.length
-            ? `Loading ${supply} minted Planks…`
-            : `${newIds.length} new mint${newIds.length === 1 ? "" : "s"} — updating gallery…`,
-        );
+        // Stage newest immediately so the grid never looks empty
+        const stageNow = newIds.slice(0, Math.max(INITIAL_STAGE, PAGE_SIZE));
+        const stageLater = newIds.slice(stageNow.length);
+
+        for (const id of stageNow) knownIdsRef.current.add(id);
+        upsertItems(stageNow.map(makePlaceholder));
+        setStatus(`Loading ${supply.toLocaleString()} minted Planks…`);
         setLivePulse(true);
-        window.setTimeout(() => setLivePulse(false), 1200);
-        await loadMetadataForIds(newIds, contract);
+        window.setTimeout(() => setLivePulse(false), 900);
+
+        // Hydrate visible/newest first
+        await loadMetadataForIds(stageNow, contract, gen);
+        if (syncGenRef.current !== gen) return;
+
+        // Stage + hydrate the rest in the background
+        if (stageLater.length) {
+          for (const id of stageLater) knownIdsRef.current.add(id);
+          upsertItems(stageLater.map(makePlaceholder));
+          void loadMetadataForIds(stageLater, contract, gen);
+        }
+      } else if (itemsCountRef.current === 0) {
+        // known set drifted without paint — hard reset
+        knownIdsRef.current.clear();
+        loadingIdsRef.current.clear();
+        setLoadedCount(0);
+        const stageNow = allIds.slice(0, INITIAL_STAGE);
+        for (const id of stageNow) knownIdsRef.current.add(id);
+        upsertItems(stageNow.map(makePlaceholder));
+        await loadMetadataForIds(stageNow, contract, gen);
+        if (syncGenRef.current !== gen) return;
+        const rest = allIds.slice(INITIAL_STAGE);
+        if (rest.length) {
+          for (const id of rest) knownIdsRef.current.add(id);
+          upsertItems(rest.map(makePlaceholder));
+          void loadMetadataForIds(rest, contract, gen);
+        }
       }
 
-      setStatus(
-        `Live gallery · ${supply.toLocaleString()} minted · newest top-left`,
-      );
+      if (syncGenRef.current === gen) {
+        setStatus(
+          `Live gallery · ${supply.toLocaleString()} minted · newest top-left`,
+        );
+      }
     } catch (error) {
+      if (syncGenRef.current !== gen) return;
       const message =
         error instanceof Error ? error.message : "Unable to sync gallery.";
       setStatus(`Gallery sync issue: ${message}`);
+      // Allow retry to re-stage everything
+      knownIdsRef.current.clear();
+      loadingIdsRef.current.clear();
     }
-  }, [loadMetadataForIds, upsertItems]);
+  }, [loadMetadataForIds, makePlaceholder, upsertItems]);
 
   useEffect(() => {
-    cancelledRef.current = false;
     void syncMinted();
     const timer = window.setInterval(() => void syncMinted(), POLL_MS);
     return () => {
-      cancelledRef.current = true;
+      // Invalidate in-flight work without permanently blocking the next mount
+      syncGenRef.current += 1;
       window.clearInterval(timer);
     };
   }, [syncMinted]);

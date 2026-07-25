@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { GalleryNft } from "@/components/Gallery";
+import type { GalleryNft } from "@/lib/gallery-types";
 import NftImage from "@/components/NftImage";
 import {
   TIER_ORDER,
