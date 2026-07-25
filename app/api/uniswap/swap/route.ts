@@ -1,4 +1,4 @@
-import { isListingWindowActive } from "@/lib/boards";
+import { isSniperCaptureActive } from "@/lib/boards";
 import { classifyWallet, recordWidgetActivity } from "@/lib/boards-store";
 import {
   assertNoClientFeeOrRouteOverride,
@@ -49,13 +49,13 @@ export async function POST(req: Request) {
           ? String((quote as { swapper?: string }).swapper)
           : "";
 
-    if (swapper && isListingWindowActive()) {
+    if (swapper && isSniperCaptureActive()) {
       const board = await classifyWallet(swapper);
       if (board.side === "bad_boards" || board.side === "fallen") {
         throw new TradeApiError(
           403,
           "BAD_BOARD",
-          "Wallet is on Bad Boards — official free trade opens after the cooldown window."
+          "Wallet is on Bad Boards during the death trap."
         );
       }
     }
