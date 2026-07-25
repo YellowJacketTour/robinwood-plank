@@ -2,12 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  BUY_GAS_RESERVE_ETH,
+  BUY_GAS_RESERVE_WEI,
   CHAIN,
   CONTRACT_ADDRESS,
   NATIVE_TOKEN_ADDRESS,
   RULES_RELAXED,
   SITE_FEE,
   TOKEN,
+  UNIVERSAL_ROUTER_ADDRESS,
 } from "@/lib/constants";
 import {
   buildUniswapSwapUrl,
@@ -20,6 +23,7 @@ import {
 import {
   connectWallet,
   ensureRobinhoodChain,
+  getChainId,
   getConnectedAccounts,
   getEthereumProvider,
   getNativeBalance,
@@ -346,19 +350,25 @@ export default function SwapWidget({ unlocked }: Props) {
         return parseQuotePayload(qData);
       };
 
+      // Hard chain gate — never swap / never look like a bridge to L1
+      const chainId = await getChainId();
+      if (chainId !== CHAIN.id) {
+        throw new Error(
+          `Wallet is on chain ${chainId}, not ${CHAIN.name} (${CHAIN.id}). Switch network. This widget never bridges ETH to Ethereum.`
+        );
+      }
+
       // Buys: leave ETH for gas so the tx is not underfunded / stuck
       if (direction === "buy") {
         const bal = await getNativeBalance(account);
-        // Reserve ~0.003 ETH for gas on RH (UR + fee routes)
-        const gasReserve = BigInt("3000000000000000");
-        if (bal <= gasReserve) {
+        if (bal <= BUY_GAS_RESERVE_WEI) {
           throw new Error(
-            "Not enough ETH for gas. Keep at least ~0.003 ETH free after the buy amount."
+            `Not enough ETH for gas. Keep at least ~${BUY_GAS_RESERVE_ETH} ETH free after the buy amount.`
           );
         }
-        if (raw + gasReserve > bal) {
+        if (raw + BUY_GAS_RESERVE_WEI > bal) {
           throw new Error(
-            "Buy amount too high — leave ~0.003 ETH free for gas so the swap doesn't get stuck."
+            `Buy amount too high — leave ~${BUY_GAS_RESERVE_ETH} ETH free for gas. Your ETH stays on Robinhood Chain (this is a swap, not a bridge).`
           );
         }
       }
@@ -481,6 +491,12 @@ export default function SwapWidget({ unlocked }: Props) {
       if (!tx?.to || !tx?.data || tx.data === "0x") {
         throw new Error("Invalid swap transaction from Uniswap.");
       }
+      // Never send swap value to anything except official UR on RH
+      if (tx.to.toLowerCase() !== UNIVERSAL_ROUTER_ADDRESS.toLowerCase()) {
+        throw new Error(
+          "Blocked: swap target is not Uniswap Universal Router. No bridge, no unknown contract."
+        );
+      }
       // Buy must send native ETH
       if (direction === "buy" && (!tx.value || tx.value === "0x0" || tx.value === "0")) {
         throw new Error("Swap missing ETH value. Get a fresh quote and retry.");
@@ -503,7 +519,7 @@ export default function SwapWidget({ unlocked }: Props) {
       const ethBefore =
         direction === "sell" ? await getNativeBalance(account) : BigInt(0);
 
-      setStatus("Confirm in wallet…");
+      setStatus("Simulating swap on Robinhood Chain (no bridge)…");
       const hash = await sendTransaction({
         to: tx.to,
         from: account,
@@ -528,7 +544,8 @@ export default function SwapWidget({ unlocked }: Props) {
         kind: "swap",
       });
       setTxHash(hash);
-      setStatus("Submitted — waiting for chain…");
+      setStatus("Submitted on Robinhood Chain — waiting for confirmation…");
+      let delivered = false;
       try {
         await waitForTransaction(hash, {
           label: "Swap",
@@ -536,46 +553,52 @@ export default function SwapWidget({ unlocked }: Props) {
           onPending: (ms) => {
             if (ms > 30_000) {
               setStatus(
-                "Still pending… If stuck, open Rabby/MetaMask → Speed Up. Keep this tab open."
+                "Still pending on Robinhood Chain… Speed Up in wallet if stuck. This is NOT a bridge to Ethereum."
               );
             } else if (ms > 10_000) {
-              setStatus("Waiting for block confirmation…");
+              setStatus("Waiting for Robinhood Chain block…");
             }
           },
         });
 
-        // Prove tokens arrived — receipt success alone is not enough for user trust
+        // Prove tokens arrived — never claim success without balance increase
         if (direction === "buy") {
-          // brief settle for RPC lag
           await new Promise((r) => setTimeout(r, 1500));
           const plankAfter = await getErc20Balance(CONTRACT_ADDRESS, account);
           if (plankAfter <= plankBefore) {
             setError(
-              "Tx mined but $PLANK balance did not increase. Check explorer — if reverted, only gas was spent. Retry with 2–3% slip."
+              "Tx mined but $PLANK did not arrive. Import token CA in wallet. If explorer shows Failed, only gas was spent (buy ETH refunded)."
             );
-            setStatus("No $PLANK received — check explorer link below.");
+            setStatus("No $PLANK increase yet — check explorer / import CA.");
           } else {
-            setStatus("Swap confirmed ✓ $PLANK received");
+            delivered = true;
+            setStatus(
+              `Swap confirmed ✓ $PLANK received on ${CHAIN.name}. Import CA if wallet hides it.`
+            );
           }
         } else {
           await new Promise((r) => setTimeout(r, 1500));
           const ethAfter = await getNativeBalance(account);
           if (ethAfter <= ethBefore) {
             setError(
-              "Tx mined but ETH balance did not increase. Check explorer / retry with higher slip."
+              "Tx mined but ETH did not increase. Check explorer — if Failed, only gas spent."
             );
             setStatus("Sell mined — verify ETH on explorer.");
           } else {
-            setStatus("Swap confirmed ✓ ETH received");
+            delivered = true;
+            setStatus("Swap confirmed ✓ ETH received on Robinhood Chain");
           }
         }
       } catch (waitErr) {
-        // Don't clear hash — user can track on explorer
         setError(waitErr instanceof Error ? waitErr.message : "Confirmation timed out.");
-        setStatus("Tx sent — check explorer / speed up in wallet if pending.");
+        setStatus(
+          "Check explorer on Robinhood Chain. Reverted = buy ETH refunded (gas only lost). Bridge UI is unrelated."
+        );
       }
-      setQuote(null);
-      setAmountIn("");
+      if (delivered) {
+        setQuote(null);
+        setAmountIn("");
+      }
       void fetch("/api/boards/ping", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -636,10 +659,20 @@ export default function SwapWidget({ unlocked }: Props) {
         </div>
 
         {unlocked && (
-          <p className="mt-2.5 rounded-lg border border-emerald-500/30 bg-forest-900/75 px-2.5 py-2 text-[0.7rem] leading-snug text-foreground/80 sm:text-xs">
-            <strong className="text-emerald-300">Live:</strong> connect · buy/sell · fee{" "}
-            {SITE_FEE.enabled ? SITE_FEE.label : "0% (fee off)"}. Full output to you. Fresh quote before each swap.
-          </p>
+          <div className="mt-2.5 space-y-1.5">
+            <p className="rounded-lg border border-emerald-500/30 bg-forest-900/75 px-2.5 py-2 text-[0.7rem] leading-snug text-foreground/80 sm:text-xs">
+              <strong className="text-emerald-300">Live on {CHAIN.name} only:</strong> this
+              is a Uniswap swap (ETH ↔ $PLANK).{" "}
+              <strong className="text-foreground">Not a bridge</strong> — ETH never leaves
+              to Ethereum mainnet from this button. No widget fee · full output to you.
+            </p>
+            <p className="rounded-lg border border-amber-500/35 bg-amber-950/40 px-2.5 py-2 text-[0.65rem] leading-snug text-amber-100/90 sm:text-[0.7rem]">
+              <strong className="text-amber-200">If your wallet says “sent to Ethereum /
+              processed on rollup”:</strong> that is a <em>bridge withdraw</em> (can take ~7
+              days + L1 claim) — <strong>not</strong> this swap. Do not bridge while buying
+              $PLANK. Leave ~{BUY_GAS_RESERVE_ETH} ETH free for gas on buys.
+            </p>
+          </div>
         )}
 
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-gold-500/25 bg-wood-900/80 px-2.5 py-2">
@@ -866,8 +899,8 @@ export default function SwapWidget({ unlocked }: Props) {
         )}
 
         <p className="mt-3 text-center text-[0.65rem] leading-snug text-foreground/40">
-          ETH ↔ {TOKEN.symbol} on chain {CHAIN.id}
-          {SITE_FEE.enabled ? ` · fee ${SITE_FEE.label}` : " · no widget fee"} · not financial advice
+          ETH ↔ {TOKEN.symbol} · chain {CHAIN.id} ({CHAIN.name}) only · no bridge ·{" "}
+          {SITE_FEE.enabled ? `fee ${SITE_FEE.label}` : "no widget fee"} · not financial advice
         </p>
         <span className="sr-only">
           Native {NATIVE_TOKEN_ADDRESS}; PLANK {CONTRACT_ADDRESS}

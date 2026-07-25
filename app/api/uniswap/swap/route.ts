@@ -1,4 +1,4 @@
-import { CHAIN } from "@/lib/constants";
+import { CHAIN, UNIVERSAL_ROUTER_ADDRESS } from "@/lib/constants";
 import { isSniperCaptureActive } from "@/lib/boards";
 import { classifyWallet, recordWidgetActivity } from "@/lib/boards-store";
 import {
@@ -282,6 +282,17 @@ export async function POST(req: Request) {
     }
     if (typeof rawSwap.chainId === "number" && rawSwap.chainId !== 4663) {
       throw new TradeApiError(502, "BAD_CHAIN", "Swap transaction is not for Robinhood Chain.");
+    }
+    // Never hand the client a bridge / unknown router
+    if (
+      typeof rawSwap.to === "string" &&
+      rawSwap.to.toLowerCase() !== UNIVERSAL_ROUTER_ADDRESS.toLowerCase()
+    ) {
+      throw new TradeApiError(
+        502,
+        "BAD_ROUTER",
+        "Swap target is not Uniswap Universal Router on Robinhood Chain. Blocked for safety."
+      );
     }
 
     const from = swapper || (typeof rawSwap.from === "string" ? rawSwap.from : "");

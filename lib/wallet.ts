@@ -1,4 +1,4 @@
-import { CHAIN } from "@/lib/constants";
+import { CHAIN, UNIVERSAL_ROUTER_ADDRESS } from "@/lib/constants";
 
 export type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
@@ -271,20 +271,83 @@ export type SendTxOpts = {
 };
 
 /**
+ * Pre-flight: eth_call + eth_estimateGas on wallet RPC.
+ * For swaps we HARD-FAIL before eth_sendTransaction so users never pay gas on doomed txs.
+ */
+export async function simulateTransaction(tx: {
+  to: string;
+  from: string;
+  data: string;
+  value?: string;
+}): Promise<{ ok: true; gasEstimate: bigint } | { ok: false; message: string }> {
+  const provider = getEthereumProvider();
+  if (!provider) return { ok: false, message: "No wallet found." };
+
+  const call: Record<string, string> = {
+    to: tx.to,
+    from: tx.from,
+    data: tx.data,
+  };
+  if (tx.value) {
+    const v = parseQuantity(tx.value);
+    if (v !== null && v > BigInt(0)) call.value = `0x${v.toString(16)}`;
+  }
+
+  try {
+    await provider.request({ method: "eth_call", params: [call, "latest"] });
+  } catch (err) {
+    const msg =
+      (err as { message?: string; data?: { message?: string } })?.message ||
+      (err as { data?: { message?: string } })?.data?.message ||
+      "Simulation reverted.";
+    return { ok: false, message: humanizeTxError(msg, "swap") };
+  }
+
+  try {
+    const estHex = (await provider.request({
+      method: "eth_estimateGas",
+      params: [call],
+    })) as string;
+    const est = parseQuantity(estHex) || MIN_SWAP_GAS;
+    return { ok: true, gasEstimate: est };
+  } catch (err) {
+    const msg = (err as { message?: string })?.message || "Gas estimate failed.";
+    return { ok: false, message: humanizeTxError(msg, "swap") };
+  }
+}
+
+function assertSafeSwapDestination(to: string, kind: string) {
+  if (kind !== "swap") return;
+  if (to.toLowerCase() !== UNIVERSAL_ROUTER_ADDRESS.toLowerCase()) {
+    throw new Error(
+      "Blocked unsafe swap target. Official widget only sends to Uniswap Universal Router on Robinhood Chain — never a bridge."
+    );
+  }
+}
+
+/**
  * Build + send a tx with RH-chain-aware gas.
  *
- * CRITICAL: never retry without a hard gas floor. Earlier retries stripped `gas`
- * so wallets re-estimated ~170k → out-of-gas reverts. Users paid gas, got no PLANK
- * (swap value refunds on revert, but it feels like the site "took ETH as a fee").
+ * CRITICAL:
+ * - Swaps simulate first — never broadcast a tx that will revert (wastes gas).
+ * - Never retry without a hard gas floor (OOG reverts burned gas; felt like "site took ETH").
+ * - Only RH chain; swaps only to Universal Router.
  */
 export async function sendTransaction(tx: SendTxOpts): Promise<string> {
   const provider = getEthereumProvider();
   if (!provider) throw new Error("No wallet found.");
 
   await ensureRobinhoodChain();
+  const chainId = await getChainId();
+  if (chainId !== CHAIN.id) {
+    throw new Error(
+      `Wrong network (chain ${chainId}). Switch to ${CHAIN.name} (${CHAIN.id}). This site never bridges to Ethereum.`
+    );
+  }
 
   const kind = tx.kind || "swap";
-  const chainIdHex = `0x${CHAIN.id.toString(16)}`;
+  assertSafeSwapDestination(tx.to, kind);
+
   const base: Record<string, string> = {
     to: tx.to,
     from: tx.from,
@@ -304,27 +367,34 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
     }
   }
 
-  // --- Gas limit: estimate on wallet RPC, then ALWAYS floor ---
+  // --- Swaps: must simulate successfully before wallet popup ---
   let gasLimit = parseQuantity(tx.gasLimit ?? tx.gas);
-  try {
-    const estHex = (await provider.request({
-      method: "eth_estimateGas",
-      params: [
-        {
-          to: base.to,
-          from: base.from,
-          data: base.data,
-          ...(base.value ? { value: base.value } : {}),
-        },
-      ],
-    })) as string;
-    const est = parseQuantity(estHex);
-    if (est) {
-      gasLimit = (est * BigInt(180)) / BigInt(100);
+  if (kind === "swap") {
+    const sim = await simulateTransaction({
+      to: base.to,
+      from: base.from,
+      data: base.data,
+      value: base.value,
+    });
+    if (!sim.ok) {
+      throw new Error(
+        `${sim.message} — no tx was sent (your ETH is still in the wallet except prior gas).`
+      );
     }
-  } catch {
-    // keep provided / floor — estimate often fails pre-approve on sells
+    gasLimit = (sim.gasEstimate * BigInt(180)) / BigInt(100);
+  } else {
+    try {
+      const estHex = (await provider.request({
+        method: "eth_estimateGas",
+        params: [base],
+      })) as string;
+      const est = parseQuantity(estHex);
+      if (est) gasLimit = (est * BigInt(180)) / BigInt(100);
+    } catch {
+      /* approve: keep floor */
+    }
   }
+
   const floor = kind === "approve" ? MIN_APPROVE_GAS : MIN_SWAP_GAS;
   if (!gasLimit || gasLimit < floor) gasLimit = floor;
   if (gasLimit > BigInt(3_000_000)) gasLimit = BigInt(3_000_000);
@@ -337,7 +407,7 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
   );
 
   const gasHex = `0x${gasLimit.toString(16)}`;
-  // Only two shapes — both KEEP the gas floor (no bare under-gassed retries)
+  // Only shapes that KEEP the gas floor — never bare under-gassed sends
   const attempts: Record<string, string>[] = [
     { ...base, gas: gasHex, gasLimit: gasHex, ...fees },
     { ...base, gas: gasHex, ...fees },
@@ -359,7 +429,6 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
       if (/user rejected|denied|4001/i.test(msg)) {
         throw new Error("Transaction cancelled in wallet.");
       }
-      // Hard failures — do NOT try weaker gas variants (causes OOG buys)
       if (
         /TRANSFER_FAILED|insufficient funds|exceeds balance|allowance|TRANSFER_FROM|execution reverted|STF|Too little received|Too much requested|INSUFFICIENT/i.test(
           msg
@@ -374,19 +443,19 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
 
 function humanizeTxError(msg: string, kind: string): string {
   if (/insufficient funds|exceeds balance/i.test(msg)) {
-    return "Insufficient funds. For buys leave ~0.003+ ETH for gas after the amount.";
+    return "Insufficient funds. For buys leave ~0.004+ ETH free for gas after the buy amount.";
   }
   if (/TRANSFER_FAILED/i.test(msg)) {
-    return "Swap simulation failed (TRANSFER_FAILED). Fresh quote, higher slip (2–3%), check ETH balance, retry.";
+    return "Swap would fail (TRANSFER_FAILED). Fresh quote, slip 2.5–3%, leave ETH for gas. No tx sent.";
   }
   if (/allowance|transfer amount exceeds|TRANSFER_FROM/i.test(msg)) {
     return "Token approval needed. Confirm the approve step, then swap again.";
   }
   if (/Too little received|INSUFFICIENT_OUTPUT|slippage/i.test(msg)) {
-    return "Price moved — raise slippage to 2–3% and get a fresh quote.";
+    return "Price moved — raise slippage to 2.5–3% and get a fresh quote.";
   }
   if (/simulation|estimateGas|intrinsic gas|gas required|out of gas/i.test(msg)) {
-    return `Wallet simulation failed on ${kind}. Fresh quote, higher slip (2–3%), leave ETH for gas, retry.`;
+    return `Would fail on ${kind} (simulation). Fresh quote, higher slip, leave ETH for gas. No doomed tx sent.`;
   }
   if (/nonce|already known|replacement/i.test(msg)) {
     return "Pending tx in wallet — Speed Up or Cancel the old one, then retry.";
@@ -442,7 +511,7 @@ export async function waitForTransaction(
     if (receipt?.status) {
       if (receipt.status === "0x0") {
         throw new Error(
-          `${label} reverted on-chain. Try smaller size or higher slip (2–3%).`
+          `${label} REVERTED on-chain. Your swap ETH was refunded automatically — only gas was spent (tiny). This is NOT a bridge and NOT a site fee. Raise slip to 2.5–3% and retry.`
         );
       }
       return { status: receipt.status };

@@ -27,6 +27,20 @@ export const CHAIN = {
 export const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 /**
+ * Uniswap Universal Router 2.1.1 on Robinhood Chain (chain 4663).
+ * Widget only ever sends swap txs to this address — never bridges / never L1.
+ * @see https://developers.uniswap.org/docs/trading/swapping-api/supported-chains
+ */
+export const UNIVERSAL_ROUTER_ADDRESS =
+  "0x8876789976dEcBfCbBbe364623C63652db8C0904" as const;
+
+/** ETH (wei) buyers must keep free for gas after the buy amount. */
+export const BUY_GAS_RESERVE_WEI = BigInt("4000000000000000"); // 0.004 ETH
+
+/** Human label for the gas reserve. */
+export const BUY_GAS_RESERVE_ETH = "0.004";
+
+/**
  * Community trade open time (ISO 8601).
  * Override at deploy with NEXT_PUBLIC_TRADE_OPENS_AT.
  * Until this moment the on-site Uniswap widget is hard-locked.

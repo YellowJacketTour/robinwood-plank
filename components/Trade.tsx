@@ -7,6 +7,7 @@ import CountdownTimer from "@/components/trade/CountdownTimer";
 import SwapWidget from "@/components/trade/SwapWidget";
 import UniswapOfficialWindow from "@/components/trade/UniswapOfficialWindow";
 import {
+  BUY_GAS_RESERVE_ETH,
   CHAIN,
   CONTRACT_ADDRESS,
   SITE_FEE,
@@ -35,7 +36,7 @@ export default function Trade() {
             lede={
               TRADE_PAUSED
                 ? "Community: stand by. Trading is not live yet."
-                : `Trade the verified $${"PLANK"} pair on official Uniswap (Robinhood Chain) or use the on-site widget · fee ${SITE_FEE.label} on widget only.`
+                : `Swap ETH ↔ $PLANK on ${CHAIN.name} only (chain ${CHAIN.id}). Not a bridge to Ethereum. Widget fee ${SITE_FEE.enabled ? SITE_FEE.label : "off (0%)"}.`
             }
             artSrc="/images/collection/plank-knightwood.png"
             artAlt="KnightWood collection plank"
@@ -72,9 +73,9 @@ export default function Trade() {
                       1
                     </span>
                     <span>
-                      <strong className="text-foreground">Uniswap (recommended).</strong> Use the
-                      buttons above — opens app.uniswap.org on{" "}
-                      <strong className="text-gold-300">{CHAIN.name}</strong> with the verified CA.
+                      <strong className="text-foreground">Stay on {CHAIN.name}.</strong>{" "}
+                      Wallet network must be chain <strong className="text-gold-300">{CHAIN.id}</strong>.
+                      Never use “bridge / withdraw to Ethereum” while buying $PLANK.
                     </span>
                   </li>
                   <li className="flex gap-2">
@@ -82,8 +83,8 @@ export default function Trade() {
                       2
                     </span>
                     <span>
-                      <strong className="text-foreground">On-site widget.</strong> Buy/sell here with
-                      site fee {SITE_FEE.label}. Same official pair.
+                      <strong className="text-foreground">Uniswap or this widget.</strong> Same
+                      verified CA. Leave ~{BUY_GAS_RESERVE_ETH} ETH free for gas on buys.
                     </span>
                   </li>
                   <li className="flex gap-2">
@@ -93,14 +94,23 @@ export default function Trade() {
                     <span>
                       <strong className="text-foreground">Verify CA.</strong> Only{" "}
                       <code className="text-gold-300">{shortAddress(CONTRACT_ADDRESS, 6)}</code>
+                      {" "}— import in wallet if $PLANK doesn&apos;t show after a successful swap.
                     </span>
                   </li>
                 </ol>
               </div>
 
               <div className="rounded-lg border border-dashed border-emerald-500/35 bg-forest-900/75 px-3 py-2 text-[0.7rem] leading-snug text-foreground/80 sm:text-xs">
-                <strong className="text-emerald-300">Safe pair:</strong> ETH ↔ $PLANK on chain{" "}
-                {CHAIN.id}. Never swap a different contract.
+                <strong className="text-emerald-300">Safe pair:</strong> ETH ↔ $PLANK on{" "}
+                {CHAIN.name} ({CHAIN.id}). Swap stays on this chain.
+              </div>
+
+              <div className="rounded-lg border border-amber-500/40 bg-amber-950/35 px-3 py-2 text-[0.7rem] leading-snug text-amber-50/90 sm:text-xs">
+                <strong className="text-amber-200">Not a bridge:</strong> if a screen says
+                “processed on rollup / sent to Ethereum / not confirmed on Ethereum,” that is
+                a <strong>canonical bridge withdraw</strong> (~7 day wait + claim on L1). It is{" "}
+                <em>not</em> this trade widget and not a site fee. Failed swaps refund buy ETH
+                automatically; only gas is spent.
               </div>
 
               <div className="dense-card p-3 sm:p-3.5">
@@ -122,7 +132,13 @@ export default function Trade() {
                   </div>
                   <div className="flex justify-between gap-2">
                     <dt>Widget fee</dt>
-                    <dd className="text-gold-300">{SITE_FEE.label}</dd>
+                    <dd className="text-gold-300">
+                      {SITE_FEE.enabled ? SITE_FEE.label : "0% (off)"}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt>Buy gas reserve</dt>
+                    <dd className="text-foreground">~{BUY_GAS_RESERVE_ETH} ETH</dd>
                   </div>
                 </dl>
                 <div className="mt-2">
