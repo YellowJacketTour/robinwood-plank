@@ -767,13 +767,14 @@ export default function NftViewer() {
         const batch = await Promise.all(
           slice.map(async (tokenId) => {
             const existing = nftFromCache(tokenId);
-            // Need attributes for rarity — re-fetch if missing
+            // Need image + attributes — re-fetch if art missing (live mints)
             if (existing?.imageUri && existing.attributes.length > 0) return existing;
 
             const fallbackName = `RobinWood Plank #${tokenId}`;
             try {
               let tokenUri = getCachedToken(tokenId)?.tokenUri || existing?.tokenUri || "";
-              if (!tokenUri) {
+              // Always re-read URI when art missing — reveal can update URI
+              if (!tokenUri || !existing?.imageUri) {
                 tokenUri = (await contract.tokenURI(tokenId)) as string;
                 if (tokenUri) putTokenUri(tokenId, tokenUri);
                 touchMintReadClient();
@@ -790,7 +791,9 @@ export default function NftViewer() {
                 } satisfies OwnedNft;
               }
 
-              const metadata: NftMetadata = await fetchNftMetadata(tokenUri);
+              const metadata: NftMetadata = await fetchNftMetadata(tokenUri, {
+                force: !existing?.imageUri,
+              });
               const name = metadata.name?.trim() || fallbackName;
               const description = metadata.description?.trim() || "";
               const attributes = Array.isArray(metadata.attributes)

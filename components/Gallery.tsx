@@ -43,6 +43,8 @@ import {
   getCachedToken,
   hasFreshMetadata,
   hasFreshOwner,
+  invalidateIncompleteToken,
+  needsMetadataRetry,
   putTokenMetadata,
   putTokenOwner,
   putTokenUri,
@@ -326,30 +328,31 @@ export default function Gallery() {
 
   const makePlaceholder = useCallback((tokenId: number): GalleryNft => {
     const cached = getCachedToken(tokenId);
-    if (cached && (cached.imageUri || cached.metaAt)) {
+    // Only treat as fully loaded when art or traits actually exist
+    if (cached && hasFreshMetadata(tokenId)) {
       const nft = recordToGalleryNft(cached, true);
       loadedIdsRef.current.add(tokenId);
       return nft;
     }
-    if (cached?.owner) {
-      return recordToGalleryNft(
-        {
-          ...cached,
-          name: cached.name || `RobinWood Plank #${tokenId}`,
-        },
-        false,
-      );
+    if (cached && (cached.imageUri || cached.attributes?.length)) {
+      // Partial success without full freshness check
+      const nft = recordToGalleryNft(cached, Boolean(cached.imageUri));
+      if (cached.imageUri) loadedIdsRef.current.add(tokenId);
+      return nft;
     }
-    const name = `RobinWood Plank #${tokenId}`;
-    const idx = indexNft({ tokenId, name, owner: "" });
+    if (cached?.error || (cached && !cached.imageUri)) {
+      invalidateIncompleteToken(tokenId);
+    }
+    const name = cached?.name || `RobinWood Plank #${tokenId}`;
+    const idx = indexNft({ tokenId, name, owner: cached?.owner || "" });
     return {
       tokenId,
-      tokenUri: "",
+      tokenUri: cached?.tokenUri || "",
       name,
       description: "",
       imageUri: "",
       attributes: [],
-      owner: "",
+      owner: cached?.owner || "",
       searchText: idx.searchText,
       searchWords: idx.words,
       loaded: false,
@@ -384,17 +387,21 @@ export default function Gallery() {
         return recordToGalleryNft(updated, true);
       }
 
-      // Partial cache: have tokenURI from earlier
+      // Drop sticky bad cache so we re-pull tokenURI + IPFS
+      invalidateIncompleteToken(tokenId);
+
       let tokenUri = getCachedToken(tokenId)?.tokenUri || "";
       let owner = hasFreshOwner(tokenId) ? getCachedToken(tokenId)?.owner || "" : "";
 
-      if (!tokenUri) {
+      // Always re-read tokenURI for incomplete newest mints (URI may update on reveal)
+      const forceUri = !tokenUri || needsMetadataRetry(tokenId);
+      if (forceUri) {
         try {
           tokenUri = (await contract.tokenURI(tokenId)) as string;
           if (tokenUri) putTokenUri(tokenId, tokenUri);
           touchMintReadClient();
         } catch {
-          /* keep empty */
+          /* keep previous */
         }
       }
 
@@ -409,6 +416,7 @@ export default function Gallery() {
       }
 
       if (!tokenUri) {
+        // NOT permanent — short-lived failure so poll retries
         const rec = putTokenMetadata(tokenId, {
           tokenUri: "",
           name: fallbackName,
@@ -418,25 +426,34 @@ export default function Gallery() {
           owner,
           error: "tokenURI unavailable",
         });
-        return recordToGalleryNft(rec, true);
+        // Mark incomplete so hasFreshMetadata is false
+        invalidateIncompleteToken(tokenId);
+        return recordToGalleryNft(rec, false);
       }
 
       try {
-        const metadata: NftMetadata = await fetchNftMetadata(tokenUri);
+        // force:true when we already failed once — bypass stale empty metadata cache
+        const metadata: NftMetadata = await fetchNftMetadata(tokenUri, {
+          force: needsMetadataRetry(tokenId),
+        });
         const name = metadata.name?.trim() || fallbackName;
         const description = metadata.description?.trim() || "";
         const attributes = Array.isArray(metadata.attributes)
           ? metadata.attributes
           : [];
+        const imageUri = (metadata.image || "").trim();
         const rec = putTokenMetadata(tokenId, {
           tokenUri,
           name,
           description,
-          imageUri: metadata.image || "",
+          imageUri,
           attributes,
           owner,
         });
-        return recordToGalleryNft(rec, true);
+        // Only "loaded" when we have art or traits
+        const ok = Boolean(imageUri || attributes.length);
+        if (!ok) invalidateIncompleteToken(tokenId);
+        return recordToGalleryNft(rec, ok);
       } catch {
         const rec = putTokenMetadata(tokenId, {
           tokenUri,
@@ -447,7 +464,11 @@ export default function Gallery() {
           owner,
           error: "metadata unavailable",
         });
-        return recordToGalleryNft(rec, true);
+        invalidateIncompleteToken(tokenId);
+        return recordToGalleryNft(
+          { ...rec, error: "metadata unavailable" },
+          false,
+        );
       }
     },
     [],
@@ -489,7 +510,12 @@ export default function Gallery() {
           if (!aliveRef.current) return;
 
           for (const nft of resolved) {
-            if (nft.loaded) loadedIdsRef.current.add(nft.tokenId);
+            if (nft.loaded && (nft.imageUri || nft.attributes.length)) {
+              loadedIdsRef.current.add(nft.tokenId);
+            } else {
+              // Keep incomplete out of "done" so polls re-queue art
+              loadedIdsRef.current.delete(nft.tokenId);
+            }
           }
           upsertItems(resolved);
           recountLoaded();
@@ -516,18 +542,20 @@ export default function Gallery() {
   );
 
   const enqueueHydrate = useCallback(
-    (ids: number[], contract: Contract) => {
-      const pending = ids.filter(
-        (id) =>
-          !loadedIdsRef.current.has(id) ||
-          !hasFreshMetadata(id) ||
-          !hasFreshOwner(id),
-      );
+    (ids: number[], contract: Contract, opts?: { force?: boolean }) => {
+      const pending = ids.filter((id) => {
+        if (opts?.force) return needsMetadataRetry(id) || !hasFreshMetadata(id);
+        if (loadingIdsRef.current.has(id)) return false;
+        if (hasFreshMetadata(id) && hasFreshOwner(id)) return false;
+        return needsMetadataRetry(id) || !loadedIdsRef.current.has(id);
+      });
       if (!pending.length) return;
       const queued = new Set(queueRef.current);
-      for (const id of pending) {
+      // Newest first in queue head so live mints paint ASAP
+      const ordered = [...pending].sort((a, b) => b - a);
+      for (const id of ordered) {
         if (!queued.has(id) && !loadingIdsRef.current.has(id)) {
-          queueRef.current.push(id);
+          queueRef.current.unshift(id);
           queued.add(id);
         }
       }
@@ -607,7 +635,15 @@ export default function Gallery() {
           knownMaxRef.current = supply;
         }
 
-        // Re-queue anything still unloaded (recover from past stalls)
+        // Always keep the newest window hot — never leave recent mints without art
+        const newestWindow: number[] = [];
+        for (let id = supply; id >= Math.max(1, supply - 47); id -= 1) {
+          newestWindow.push(id);
+        }
+        stageIds(newestWindow);
+        enqueueHydrate(newestWindow, contract, { force: true });
+
+        // Re-queue anything still unloaded (recover from past stalls / bad cache)
         if (mode === "full" || loadedIdsRef.current.size < supply) {
           const missing: number[] = [];
           for (let id = supply; id >= 1; id -= 1) {
@@ -616,22 +652,21 @@ export default function Gallery() {
             }
           }
           if (missing.length) {
-            // Ensure placeholders exist
-            const needStage = missing.filter((id) => {
-              // cheap: stage only if not already in items — stageIds upserts fine
-              return true;
-            });
-            // Stage in chunks of INITIAL_STAGE to avoid huge single setState
-            for (let i = 0; i < needStage.length; i += INITIAL_STAGE) {
-              stageIds(needStage.slice(i, i + INITIAL_STAGE));
+            for (let i = 0; i < missing.length; i += INITIAL_STAGE) {
+              stageIds(missing.slice(i, i + INITIAL_STAGE));
             }
             enqueueHydrate(missing, contract);
           }
         }
 
-        if (loadedIdsRef.current.size >= supply) {
+        const artReady = loadedIdsRef.current.size;
+        if (artReady >= supply) {
           setStatus(
             `Live gallery · ${supply.toLocaleString()} minted · newest top-left`,
+          );
+        } else if (mode === "poll") {
+          setStatus(
+            `Live gallery · ${supply.toLocaleString()} minted · art ${artReady.toLocaleString()}/${supply.toLocaleString()}`,
           );
         }
       } catch (error) {

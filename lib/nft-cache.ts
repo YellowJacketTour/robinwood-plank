@@ -267,10 +267,54 @@ export function listCachedScoredTokens(): Array<{
   return out;
 }
 
+/**
+ * True only when we have real revealed art/traits — NOT placeholder names
+ * from a failed IPFS fetch (those used to stick for 7 days and blank newest Planks).
+ */
 export function hasFreshMetadata(tokenId: number): boolean {
   const rec = getCachedToken(tokenId);
   if (!rec?.tokenUri || !rec.metaAt) return false;
-  return Boolean(rec.imageUri || rec.name) && isFresh(rec.metaAt, TTL_IMMUTABLE_MS);
+  if (rec.error) return false;
+  const hasArt = Boolean(rec.imageUri && rec.imageUri.trim());
+  const hasTraits = Array.isArray(rec.attributes) && rec.attributes.length > 0;
+  if (!hasArt && !hasTraits) return false;
+  return isFresh(rec.metaAt, TTL_IMMUTABLE_MS);
+}
+
+/** Incomplete / failed hydrate — safe to retry soon. */
+export function needsMetadataRetry(tokenId: number): boolean {
+  const rec = getCachedToken(tokenId);
+  if (!rec) return true;
+  if (hasFreshMetadata(tokenId)) return false;
+  // Back off a bit after a recent failure so we don't hot-loop IPFS
+  if (rec.metaAt && rec.error && now() - rec.metaAt < 15_000) return false;
+  return true;
+}
+
+/** Drop bad permanent cache entries (empty art marked loaded). */
+export function invalidateIncompleteToken(tokenId: number) {
+  hydrateFromStorage();
+  const rec = memory.tokens.get(tokenId);
+  if (!rec) return;
+  // Keep successful art
+  if (rec.imageUri?.trim() && !rec.error) return;
+  const uri = rec.tokenUri;
+  // Clear meta clock so hasFreshMetadata is false; keep tokenUri for faster retry
+  memory.tokens.set(tokenId, {
+    ...rec,
+    metaAt: 0,
+    imageUri: rec.imageUri || "",
+    attributes: rec.attributes?.length ? rec.attributes : [],
+    error: rec.error || "retry",
+  });
+  // Only wipe metadata blob if it had no usable image
+  if (uri) {
+    const blob = memory.metadata.get(uri);
+    if (!blob?.data?.image) {
+      memory.metadata.delete(uri);
+    }
+  }
+  schedulePersist();
 }
 
 export function hasFreshOwner(tokenId: number): boolean {
@@ -350,7 +394,12 @@ export function putTokenMetadata(
     error: fields.error,
   };
   memory.tokens.set(tokenId, next);
-  if (next.tokenUri) {
+  // Never persist empty/error payloads into the IPFS metadata map
+  if (
+    next.tokenUri &&
+    !fields.error &&
+    (next.imageUri?.trim() || next.attributes.length > 0)
+  ) {
     setCachedMetadata(next.tokenUri, {
       name: next.name,
       description: next.description,
