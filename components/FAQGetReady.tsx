@@ -1,43 +1,45 @@
 import Reveal from "@/components/Reveal";
+import SectionHead from "@/components/SectionHead";
 
 const STEPS = [
   {
     icon: "📲",
-    step: "Step 1",
-    title: "Open Robinhood Wallet",
-    desc: "Copy your public wallet address.",
+    step: "1",
+    title: "Robinhood Wallet",
+    desc: "Copy your public address.",
   },
   {
     icon: "🔁",
-    step: "Step 2",
-    title: "Get ETH on Robinhood Chain",
-    desc: "Use the wallet's built-in swap.",
+    step: "2",
+    title: "ETH on RH Chain",
+    desc: "In-app swap to chain 4663.",
   },
   {
     icon: "🌉",
-    step: "Step 3",
-    title: "Verify the Network",
-    desc: "Chain ID 4663. Gas is paid in ETH.",
+    step: "3",
+    title: "Verify network",
+    desc: "Chain ID 4663 · gas in ETH.",
   },
 ];
 
 export default function FAQGetReady() {
   return (
     <section id="get-ready" className="section-tight px-3 sm:px-5">
-      <div className="mx-auto max-w-6xl">
+      <div className="mx-auto max-w-5xl">
         <Reveal>
-          <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">
-            Get Mint-Ready
-          </h2>
-          <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
-            Wallet. Robinhood Chain. ETH.
-          </p>
+          <SectionHead
+            eyebrow="Guide"
+            title="Get Mint-Ready"
+            lede="Wallet · Robinhood Chain · ETH."
+            artSrc="/images/collection/plank-bobawood.png"
+            artAlt="BobaWood collection plank"
+          />
         </Reveal>
 
-        <ol className="mt-14 grid gap-8 sm:grid-cols-3">
+        <ol className="mt-3 grid gap-2 sm:grid-cols-3 sm:gap-3">
           {STEPS.map((s, i) => (
-            <Reveal key={s.title} delayMs={i * 120}>
-              <li className="relative flex flex-col items-center rounded-2xl border border-gold-500/20 bg-wood-900/85 p-6 text-center">
+            <Reveal key={s.title} delayMs={i * 80}>
+              <li className="dense-card relative flex flex-col items-center p-3 text-center sm:p-4">
                 <div
                   className="relative z-10 flex h-16 w-16 items-center justify-center rounded-full border-2 border-gold-500 bg-wood-950 text-3xl"
                   aria-hidden="true"

@@ -4,66 +4,75 @@ import Countdown from "@/components/Countdown";
 
 export default function Hero() {
   return (
-    <section id="home" className="relative overflow-hidden px-4 pb-20 pt-16 sm:px-6 sm:pt-24">
+    <section id="home" className="relative overflow-hidden px-3 pb-8 pt-14 sm:px-5 sm:pb-10 sm:pt-16">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(217,164,65,0.15),transparent_55%)]"
       />
-      <div className="relative mx-auto flex max-w-6xl flex-col items-center gap-10 text-center">
-        <span className="rounded-full border border-gold-500/40 bg-wood-950/70 px-4 py-1 text-xs font-bold uppercase tracking-widest text-gold-300 backdrop-blur-sm">
-          Robinhood Chain is live
+      <div className="relative mx-auto flex max-w-5xl flex-col items-center gap-3 text-center sm:gap-4">
+        <span className="rounded-full border border-gold-500/40 bg-wood-950/70 px-3 py-0.5 text-[0.65rem] font-bold uppercase tracking-widest text-gold-300 backdrop-blur-sm">
+          Robinhood Chain · live
         </span>
 
-        <Image
-          src="/images/plank-logo.webp"
-          alt="RobinWood Plank mascot"
-          width={140}
-          height={200}
-          priority
-          className="h-28 w-auto drop-shadow-[0_8px_20px_rgba(0,0,0,0.5)] sm:h-36"
-        />
-
-        <h1 className="max-w-full font-display text-4xl leading-tight text-foreground drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)] sm:text-6xl md:text-7xl">
-          RobinWood <span className="plank-title block sm:inline">($PLANK)</span>
-        </h1>
-
-        <p className="lede font-display text-2xl text-gold-300 sm:text-3xl">Plank is Plank.</p>
+        <div className="flex items-center gap-3 sm:gap-4">
+          <Image
+            src="/images/plank-logo.webp"
+            alt="RobinWood Plank mascot"
+            width={96}
+            height={140}
+            priority
+            className="h-16 w-auto drop-shadow-[0_8px_20px_rgba(0,0,0,0.5)] sm:h-20"
+          />
+          <div className="text-left">
+            <h1 className="font-display text-3xl leading-none text-foreground sm:text-5xl md:text-6xl">
+              RobinWood{" "}
+              <span className="plank-title">($PLANK)</span>
+            </h1>
+            <p className="lede mt-1 font-display text-lg text-gold-300 sm:text-xl">Plank is Plank.</p>
+          </div>
+        </div>
 
         <Countdown targetDate={process.env.NEXT_PUBLIC_MINT_START_AT} />
 
-        <p className="lede max-w-2xl text-balance text-xl text-foreground sm:text-2xl">
-          1,542 RobinWood NFTs. Built for $PLANK.
+        <p className="lede max-w-xl text-balance text-sm text-foreground sm:text-base">
+          1,542 RobinWood NFTs · official trade widget · Good Wood vs Bad Boards
         </p>
 
-        <div className="wood-frame relative aspect-[3110/2265] w-full max-w-4xl overflow-hidden rounded-2xl">
+        <div className="wood-frame relative aspect-[2/1] w-full max-w-3xl overflow-hidden rounded-xl sm:aspect-[3110/2265]">
           <Image
             src="/images/planks-collage.jpg"
-            alt="RobinWood Plank mascot dressed as dozens of meme and pop-culture characters"
+            alt="RobinWood Plank collection collage"
             fill
             priority
-            sizes="(min-width: 1024px) 896px, 100vw"
-            className="object-cover"
+            sizes="(min-width: 1024px) 768px, 100vw"
+            className="object-cover object-top"
           />
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent sm:bg-gradient-to-t sm:from-black/50 sm:via-transparent sm:to-transparent"
+            className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent"
           />
         </div>
 
         <CopyCA />
 
-        <div className="flex flex-col gap-4 sm:flex-row">
+        <div className="flex w-full max-w-md flex-col gap-2 sm:max-w-none sm:flex-row sm:justify-center">
           <a
             href="#trade"
-            className="rounded-lg bg-gold-500 px-8 py-3 text-base font-bold text-wood-950 shadow-[0_6px_18px_-4px_rgba(217,164,65,0.5)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_-6px_rgba(217,164,65,0.6)] active:translate-y-0"
+            className="rounded-lg bg-gold-500 px-6 py-2.5 text-sm font-bold text-wood-950 shadow-[0_6px_18px_-4px_rgba(217,164,65,0.5)] transition-all hover:-translate-y-0.5 sm:text-base"
           >
             Trade $PLANK
           </a>
           <a
-            href="#mint"
-            className="rounded-lg border-2 border-forest-600 bg-forest-800/60 px-8 py-3 text-base font-bold text-foreground transition-colors hover:border-gold-400 hover:text-gold-300"
+            href="#boards"
+            className="rounded-lg border-2 border-gold-500/50 bg-wood-900/80 px-6 py-2.5 text-sm font-bold text-gold-300 transition-colors hover:border-gold-400 sm:text-base"
           >
-            Mint RobinWood
+            Boards
+          </a>
+          <a
+            href="#mint"
+            className="rounded-lg border-2 border-forest-600 bg-forest-800/60 px-6 py-2.5 text-sm font-bold text-foreground transition-colors hover:border-gold-400 hover:text-gold-300 sm:text-base"
+          >
+            Mint
           </a>
         </div>
       </div>

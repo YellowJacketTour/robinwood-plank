@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Reveal from "@/components/Reveal";
+import SectionHead from "@/components/SectionHead";
 import { shortAddress } from "@/lib/trade";
 
 type BadEntry = {
@@ -136,143 +137,104 @@ export default function WoodYouJustLookAtIt() {
   const counts = data?.counts;
 
   return (
-    <section id="boards" className="section-tight scroll-mt-24 px-3 sm:px-5">
+    <section id="boards" className="section-tight scroll-mt-20 px-3 sm:px-5">
       <div className="mx-auto max-w-5xl">
         <Reveal>
-          <p className="lede text-center text-[0.65rem] font-extrabold uppercase tracking-[0.28em] text-forest-600 sm:text-xs">
-            Live list · death trap · cooldowns
-          </p>
-          <h2 className="section-title mt-1.5 text-center text-3xl text-gold-300 sm:text-4xl md:text-5xl">
-            Wood You Just Look At It
-          </h2>
-          <p className="lede mx-auto mt-2 max-w-2xl text-center text-sm text-foreground/75 sm:text-base">
-            Good Wood held the line. Bad Boards jumped the gun or left the official widget. Cooldowns
-            run <strong className="text-gold-300">30 minutes per wallet</strong> so we can list
-            snipers before free trade.
-          </p>
+          <SectionHead
+            eyebrow="Live list · death trap · cooldowns"
+            title="Wood You Just Look At It"
+            lede="Good Wood held the line. Bad Boards sniped or left the widget. 30m per-wallet cooldowns while we list them."
+            artSrc="/images/collection/plank-redacted.png"
+            artAlt="Redacted collection plank"
+          />
         </Reveal>
 
-        <Reveal delayMs={60}>
-          <div className="mt-5 grid gap-3 sm:mt-6 sm:grid-cols-2 lg:grid-cols-4">
+        <Reveal delayMs={40}>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
             {[
-              {
-                label: "Good Wood",
-                value: counts?.goodWood ?? "—",
-                hint: "Wood List + airdrop",
-                border: "border-forest-600/50",
-              },
-              {
-                label: "Bad Boards",
-                value: counts?.badBoards ?? "—",
-                hint: "Off-widget / snipers",
-                border: "border-red-500/40",
-              },
-              {
-                label: "Fallen",
-                value: counts?.fallen ?? "—",
-                hint: "Were good, went off-site",
-                border: "border-gold-500/40",
-              },
-              {
-                label: "Widget verified",
-                value: counts?.widgetVerified ?? "—",
-                hint: "Used plank.love",
-                border: "border-gold-500/25",
-              },
+              { label: "Good Wood", value: counts?.goodWood ?? "—", hint: "Mint + airdrop", border: "border-forest-600/50" },
+              { label: "Bad Boards", value: counts?.badBoards ?? "—", hint: "Off-widget", border: "border-red-500/40" },
+              { label: "Fallen", value: counts?.fallen ?? "—", hint: "Good → bad", border: "border-gold-500/40" },
+              { label: "Widget OK", value: counts?.widgetVerified ?? "—", hint: "plank.love", border: "border-gold-500/25" },
             ].map((c) => (
-              <div
-                key={c.label}
-                className={`rounded-xl border ${c.border} bg-wood-900/85 px-3 py-3 text-center`}
-              >
-                <p className="text-[0.65rem] font-bold uppercase tracking-wider text-foreground/50">
+              <div key={c.label} className={`dense-card border ${c.border} px-2 py-2 text-center sm:px-3`}>
+                <p className="text-[0.55rem] font-bold uppercase tracking-wider text-foreground/50 sm:text-[0.6rem]">
                   {c.label}
                 </p>
-                <p className="mt-1 font-display text-2xl text-gold-300 sm:text-3xl">{c.value}</p>
-                <p className="mt-0.5 text-[0.7rem] text-foreground/55">{c.hint}</p>
+                <p className="font-display text-xl leading-tight text-gold-300 sm:text-2xl">{c.value}</p>
+                <p className="text-[0.6rem] text-foreground/50">{c.hint}</p>
               </div>
             ))}
           </div>
         </Reveal>
 
-        <Reveal delayMs={100}>
-          <div className="mt-4 rounded-xl border border-gold-500/25 bg-wood-950/80 p-4 sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-[0.65rem] font-bold uppercase tracking-wider text-gold-300">
-                  Phase
-                </p>
-                <p className="mt-0.5 font-display text-lg text-foreground sm:text-xl">
-                  {trap ? phaseLabel(trap.phase) : "…"}
-                </p>
+        <Reveal delayMs={70}>
+          <div className="dense-card mt-3 flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between sm:p-3.5">
+            <div className="min-w-0">
+              <p className="text-[0.6rem] font-bold uppercase tracking-wider text-gold-300">Phase</p>
+              <p className="font-display text-base text-foreground sm:text-lg">
+                {trap ? phaseLabel(trap.phase) : "…"}
                 {trap && (
-                  <p className="mt-1 text-xs text-foreground/60">
-                    Trap {new Date(trap.trapStartsAt).toLocaleString()} → cooldowns end{" "}
-                    {new Date(trap.cooldownsEndAt).toLocaleString()} · listing{" "}
-                    {trap.active ? "ACTIVE" : "idle"}
-                  </p>
+                  <span className="ml-2 text-xs font-sans font-bold text-foreground/55">
+                    {trap.active ? "LISTING" : "idle"}
+                  </span>
                 )}
-              </div>
-              <button
-                type="button"
-                onClick={runScan}
-                disabled={scanning}
-                className="min-h-11 shrink-0 rounded-lg bg-gold-500 px-4 py-2 text-sm font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50"
-              >
-                {scanning ? "Scanning chain…" : "Scan chain for Bad Boards"}
-              </button>
+              </p>
+              {trap && (
+                <p className="mt-0.5 text-[0.65rem] text-foreground/55">
+                  Ends {new Date(trap.cooldownsEndAt).toLocaleString()} · {data?.legend.cooldown}
+                </p>
+              )}
+              {data?.scan?.notes?.[0] && (
+                <p className="mt-1 truncate font-mono text-[0.6rem] text-foreground/40">{data.scan.notes[0]}</p>
+              )}
+              {error && <p className="mt-1 text-xs text-red-300">{error}</p>}
             </div>
-            <p className="mt-3 text-xs leading-relaxed text-foreground/65">
-              {data?.legend.cooldown}
-            </p>
-            {data?.scan?.notes?.[0] && (
-              <p className="mt-2 font-mono text-[0.65rem] text-foreground/45">{data.scan.notes[0]}</p>
-            )}
-            {error && <p className="mt-2 text-sm text-red-300">{error}</p>}
+            <button
+              type="button"
+              onClick={runScan}
+              disabled={scanning}
+              className="min-h-10 shrink-0 rounded-lg bg-gold-500 px-3 py-2 text-xs font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50 sm:text-sm"
+            >
+              {scanning ? "Scanning…" : "Scan chain"}
+            </button>
           </div>
         </Reveal>
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-2">
-          <Reveal delayMs={120}>
-            <div className="rounded-xl border border-forest-600/40 bg-forest-900/50 p-4 sm:p-5">
-              <h3 className="font-display text-xl text-gold-300">Good Wood</h3>
-              <p className="mt-1 text-xs text-foreground/65 sm:text-sm">{data?.legend.goodWood}</p>
-              <p className="mt-3 text-sm text-foreground/80">
-                Loaded from the official Wood List (mint proofs) plus{" "}
-                <code className="text-gold-300">airdrop.json</code>. Stay on the official widget
-                during the trap or you fall.
-              </p>
-              <ul className="mt-3 space-y-1.5 text-xs text-foreground/70">
-                <li>· Mint / Wood List addresses</li>
-                <li>· Airdrop wallets (seed file)</li>
-                <li>· Widget-verified stays clean if you only trade here</li>
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <Reveal delayMs={90}>
+            <div className="dense-card border-forest-600/40 p-3 sm:p-3.5">
+              <h3 className="font-display text-base text-gold-300">Good Wood</h3>
+              <p className="mt-0.5 text-[0.7rem] text-foreground/65">{data?.legend.goodWood}</p>
+              <ul className="mt-2 space-y-0.5 text-[0.7rem] text-foreground/70">
+                <li>· Wood List (mint proofs)</li>
+                <li>· Airdrop wallets</li>
+                <li>· Official widget only in the trap</li>
               </ul>
             </div>
           </Reveal>
 
-          <Reveal delayMs={140}>
-            <div className="rounded-xl border border-red-500/35 bg-wood-950/90 p-4 sm:p-5">
-              <h3 className="font-display text-xl text-gold-300">Bad Boards</h3>
-              <p className="mt-1 text-xs text-foreground/65 sm:text-sm">{data?.legend.badBoards}</p>
-              <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+          <Reveal delayMs={100}>
+            <div className="dense-card border-red-500/35 p-3 sm:p-3.5">
+              <h3 className="font-display text-base text-gold-300">Bad Boards</h3>
+              <p className="mt-0.5 text-[0.7rem] text-foreground/65">{data?.legend.badBoards}</p>
+              <div className="mt-2 max-h-52 space-y-1.5 overflow-y-auto pr-0.5">
                 {(data?.recentBadBoards?.length ?? 0) === 0 && (
-                  <p className="text-sm text-foreground/50">No Bad Boards yet — keep waiting.</p>
+                  <p className="text-xs text-foreground/50">Empty — keep waiting.</p>
                 )}
                 {data?.recentBadBoards?.map((b) => (
                   <div
                     key={b.address + b.lastSeenAt}
-                    className="rounded-lg border border-gold-500/15 bg-wood-900/80 px-2.5 py-2 text-xs"
+                    className="rounded-md border border-gold-500/15 bg-wood-950/80 px-2 py-1.5 text-[0.7rem]"
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-1">
+                    <div className="flex items-center justify-between gap-1">
                       <code className="font-mono text-gold-300" title={b.address}>
-                        {shortAddress(b.address, 6)}
+                        {shortAddress(b.address, 5)}
                       </code>
                       {b.wasGoodWood && (
-                        <span className="rounded-full border border-gold-500/40 px-2 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300">
-                          Fallen
-                        </span>
+                        <span className="text-[0.55rem] font-bold uppercase text-gold-300">Fallen</span>
                       )}
                     </div>
-                    <p className="mt-1 text-foreground/55">{b.reason}</p>
                   </div>
                 ))}
               </div>
@@ -280,47 +242,30 @@ export default function WoodYouJustLookAtIt() {
           </Reveal>
         </div>
 
-        <Reveal delayMs={160}>
-          <form
-            onSubmit={checkWallet}
-            className="mt-5 rounded-xl border border-gold-500/25 bg-wood-900/85 p-4 sm:p-5"
-          >
-            <h3 className="font-display text-lg text-gold-300">Check a wallet</h3>
-            <p className="mt-1 text-xs text-foreground/60">
-              See Good Wood / Bad Boards / Fallen status and remaining cooldown.
-            </p>
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <Reveal delayMs={120}>
+          <form onSubmit={checkWallet} className="dense-card mt-3 p-3 sm:p-3.5">
+            <h3 className="font-display text-base text-gold-300">Check a wallet</h3>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
               <input
                 value={lookupAddr}
                 onChange={(e) => setLookupAddr(e.target.value)}
                 placeholder="0x…"
-                className="min-h-11 min-w-0 flex-1 rounded-lg border border-gold-500/30 bg-wood-950 px-3 font-mono text-sm text-foreground outline-none focus:border-gold-400"
+                className="min-h-10 min-w-0 flex-1 rounded-lg border border-gold-500/30 bg-wood-950 px-2.5 font-mono text-xs text-foreground outline-none focus:border-gold-400 sm:text-sm"
               />
               <button
                 type="submit"
-                className="min-h-11 rounded-lg bg-gold-500 px-5 text-sm font-bold text-wood-950 hover:bg-gold-400"
+                className="min-h-10 rounded-lg bg-gold-500 px-4 text-xs font-bold text-wood-950 hover:bg-gold-400 sm:text-sm"
               >
                 Look
               </button>
             </div>
-            {lookupErr && <p className="mt-2 text-sm text-red-300">{lookupErr}</p>}
+            {lookupErr && <p className="mt-1.5 text-xs text-red-300">{lookupErr}</p>}
             {lookup && (
-              <div className="mt-3 rounded-lg border border-gold-500/20 bg-wood-950/80 px-3 py-3 text-sm">
-                <p>
-                  <span className="text-foreground/55">Side:</span>{" "}
-                  <strong className="text-gold-300">{lookup.side}</strong>
-                  {lookup.widgetVerified ? " · widget verified" : ""}
-                </p>
+              <div className="mt-2 rounded-md border border-gold-500/20 bg-wood-950/80 px-2.5 py-2 text-xs">
+                <strong className="text-gold-300">{lookup.side}</strong>
+                {lookup.widgetVerified ? " · widget OK" : ""}
                 {lookup.cooldown?.active && (
-                  <p className="mt-1">
-                    Cooldown remaining:{" "}
-                    <strong className="text-gold-300">
-                      {fmtRemain(lookup.cooldown.remainingMs)}
-                    </strong>
-                  </p>
-                )}
-                {lookup.badEntry && (
-                  <p className="mt-1 text-xs text-foreground/60">{lookup.badEntry.reason}</p>
+                  <span className="ml-2">cooldown {fmtRemain(lookup.cooldown.remainingMs)}</span>
                 )}
               </div>
             )}
