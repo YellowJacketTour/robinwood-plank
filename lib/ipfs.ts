@@ -2,16 +2,17 @@ import { getCachedMetadata, setCachedMetadata } from "@/lib/nft-cache";
 
 /**
  * Public IPFS gateways tried for metadata and images.
- * Order: fastest/reliable first; race the top few on metadata fetch.
+ * Pinata first — this collection's art CID resolves reliably there;
+ * ipfs.io / cloudflare / dweb often timeout or 504 on the image folder.
  */
 export const IPFS_GATEWAYS = [
+  "https://gateway.pinata.cloud/ipfs/",
+  "https://ipfs.io/ipfs/",
   "https://nftstorage.link/ipfs/",
   "https://w3s.link/ipfs/",
-  "https://ipfs.io/ipfs/",
   "https://dweb.link/ipfs/",
-  "https://cloudflare-ipfs.com/ipfs/",
-  "https://gateway.pinata.cloud/ipfs/",
   "https://4everland.io/ipfs/",
+  "https://cloudflare-ipfs.com/ipfs/",
 ] as const;
 
 /**
