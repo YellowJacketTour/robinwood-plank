@@ -35,10 +35,19 @@ import {
   ensureNftCacheHydrated,
   getCachedInventory,
   getCachedToken,
+  listCachedScoredTokens,
   putTokenMetadata,
   putTokenUri,
   setCachedInventory,
 } from "@/lib/nft-cache";
+import {
+  TIER_ORDER,
+  computeRaritySnapshot,
+  formatRank,
+  tierColor,
+  type RarityTier,
+  type TokenRarity,
+} from "@/lib/rarity";
 
 type EthereumProvider = Eip1193Provider & {
   on?: (event: string, listener: (...args: unknown[]) => void) => void;
@@ -114,6 +123,28 @@ function nftFromCache(tokenId: number): OwnedNft | null {
     attributes: rec.attributes || [],
     metadataError: rec.error,
   };
+}
+
+/**
+ * Collection-wide rarity: merge full cache sample + currently loaded wallet NFTs
+ * so ranks match Gallery (not bag-relative ranks).
+ */
+function buildCollectionRaritySample(owned: OwnedNft[]) {
+  ensureNftCacheHydrated();
+  const byId = new Map<number, { tokenId: number; attributes: NftAttribute[]; loaded: boolean }>();
+  for (const item of listCachedScoredTokens()) {
+    byId.set(item.tokenId, item);
+  }
+  for (const nft of owned) {
+    if (Array.isArray(nft.attributes) && nft.attributes.length > 0) {
+      byId.set(nft.tokenId, {
+        tokenId: nft.tokenId,
+        attributes: nft.attributes,
+        loaded: true,
+      });
+    }
+  }
+  return Array.from(byId.values());
 }
 
 function NftImage({
@@ -193,13 +224,47 @@ function AttributeList({ attributes }: { attributes: NftAttribute[] }) {
   );
 }
 
+function TraitRarityList({ rarity }: { rarity: TokenRarity }) {
+  return (
+    <ul className="space-y-1.5">
+      {rarity.traits.map((row) => (
+        <li
+          key={`${row.trait}-${row.value}`}
+          className="min-w-0 rounded-lg border border-gold-500/20 bg-black/25 px-2.5 py-2"
+        >
+          <div className="flex items-center justify-between gap-2 text-[0.7rem]">
+            <span className="min-w-0 truncate font-bold text-gold-300/90">
+              {row.trait}: {row.value}
+            </span>
+            <span className="shrink-0 font-mono text-foreground/55">
+              {row.count} · {row.pct < 1 ? row.pct.toFixed(2) : row.pct.toFixed(1)}%
+            </span>
+          </div>
+          <div className="mt-1 h-1 overflow-hidden rounded-full bg-black/40">
+            <div
+              className="h-full rounded-full bg-gold-500/80"
+              style={{
+                width: `${Math.min(100, Math.max(4, 100 - row.pct))}%`,
+              }}
+            />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function NftDetailModal({
   nft,
   owner,
+  rarity,
+  sampleSize,
   onClose,
 }: {
   nft: OwnedNft;
   owner: string;
+  rarity?: TokenRarity;
+  sampleSize: number;
   onClose: () => void;
 }) {
   const titleId = useId();
@@ -242,7 +307,12 @@ function NftDetailModal({
         <div className="flex shrink-0 items-start gap-3 border-b border-gold-500/25 bg-wood-900 px-4 py-3 sm:px-5 sm:py-4">
           <div className="min-w-0 flex-1 pr-1">
             <p className="text-[0.7rem] font-extrabold uppercase tracking-[0.16em] text-gold-300">
-              RobinWood Plank
+              Your Planks
+              {rarity && (
+                <span className="ml-2" style={{ color: tierColor(rarity.tier) }}>
+                  · {rarity.tier} {formatRank(rarity.rank)}
+                </span>
+              )}
             </p>
             <h3
               id={titleId}
@@ -287,6 +357,46 @@ function NftDetailModal({
                     {shortAddress(owner)}
                   </dd>
                 </div>
+                {rarity && (
+                  <>
+                    <div className="min-w-0 rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5">
+                      <dt className="uppercase tracking-wide text-foreground/55">
+                        Collection rank
+                      </dt>
+                      <dd
+                        className="mt-1 font-mono"
+                        style={{ color: tierColor(rarity.tier) }}
+                      >
+                        {formatRank(rarity.rank)}
+                        <span className="text-foreground/45">
+                          {" "}
+                          / {sampleSize.toLocaleString()}
+                        </span>
+                      </dd>
+                    </div>
+                    <div className="min-w-0 rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5">
+                      <dt className="uppercase tracking-wide text-foreground/55">Tier · score</dt>
+                      <dd className="mt-1 font-mono">
+                        <span style={{ color: tierColor(rarity.tier) }}>{rarity.tier}</span>
+                        <span className="text-foreground/70">
+                          {" "}
+                          · {rarity.normalizedScore.toFixed(1)}
+                        </span>
+                        <span className="text-foreground/45"> / 100</span>
+                      </dd>
+                    </div>
+                    <div className="min-w-0 rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5 min-[420px]:col-span-2">
+                      <dt className="uppercase tracking-wide text-foreground/55">
+                        Percentile
+                      </dt>
+                      <dd className="mt-1 font-mono text-foreground">
+                        {rarity.percentile.toFixed(1)}th · rarer than{" "}
+                        {Math.max(0, rarity.percentile - 100 / Math.max(1, sampleSize)).toFixed(1)}
+                        % of scored Planks
+                      </dd>
+                    </div>
+                  </>
+                )}
               </dl>
 
               {nft.description && (
@@ -302,10 +412,29 @@ function NftDetailModal({
               )}
 
               <div className="min-w-0">
-                <h4 className="mb-2 text-xs font-extrabold uppercase tracking-[0.14em] text-gold-300">
-                  Traits
-                </h4>
-                <AttributeList attributes={nft.attributes} />
+                {rarity && rarity.traits.length > 0 ? (
+                  <>
+                    <h4 className="mb-2 text-xs font-extrabold uppercase tracking-[0.14em] text-gold-300">
+                      Trait rarity
+                      <span className="ml-2 font-bold normal-case tracking-normal text-foreground/45">
+                        vs collection sample
+                      </span>
+                    </h4>
+                    <TraitRarityList rarity={rarity} />
+                  </>
+                ) : (
+                  <>
+                    <h4 className="mb-2 text-xs font-extrabold uppercase tracking-[0.14em] text-gold-300">
+                      Traits
+                    </h4>
+                    <AttributeList attributes={nft.attributes} />
+                    {nft.attributes.length > 0 && !rarity && (
+                      <p className="mt-2 text-xs text-foreground/50">
+                        Open the Gallery to index the collection for live ranks.
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -320,6 +449,12 @@ function NftDetailModal({
           >
             View on explorer ↗
           </a>
+          <a
+            href={`/gallery`}
+            className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg border border-gold-500/40 px-4 py-3 text-center font-extrabold text-gold-300"
+          >
+            Open gallery
+          </a>
           <button
             type="button"
             onClick={onClose}
@@ -333,6 +468,109 @@ function NftDetailModal({
   );
 }
 
+function BagRaritySummary({
+  nfts,
+  rarityById,
+  sampleSize,
+  tierCounts,
+}: {
+  nfts: OwnedNft[];
+  rarityById: Map<number, TokenRarity>;
+  sampleSize: number;
+  tierCounts: Record<RarityTier, number>;
+}) {
+  const scored = nfts.filter((n) => rarityById.has(n.tokenId));
+  if (!scored.length) return null;
+
+  const rarest = [...scored]
+    .map((n) => rarityById.get(n.tokenId)!)
+    .sort((a, b) => a.rank - b.rank || b.normalizedScore - a.normalizedScore)[0];
+
+  const avgScore =
+    scored.reduce((sum, n) => sum + (rarityById.get(n.tokenId)?.normalizedScore || 0), 0) /
+    scored.length;
+
+  const bagTiers = TIER_ORDER.filter((tier) => tierCounts[tier] > 0);
+
+  return (
+    <div className="border-b border-gold-500/15 bg-black/15 px-4 py-3 sm:px-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.14em] text-gold-300/85">
+          Bag rarity · collection ranks
+        </p>
+        <p className="text-xs text-foreground/50">
+          Sample {sampleSize.toLocaleString()} revealed
+        </p>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="rounded-lg border border-gold-500/20 bg-black/25 px-2.5 py-2">
+          <p className="text-[0.6rem] font-bold uppercase tracking-wide text-foreground/50">
+            Scored
+          </p>
+          <p className="font-mono text-sm font-black text-foreground">
+            {scored.length}
+            <span className="text-foreground/45"> / {nfts.length}</span>
+          </p>
+        </div>
+        <div className="rounded-lg border border-gold-500/20 bg-black/25 px-2.5 py-2">
+          <p className="text-[0.6rem] font-bold uppercase tracking-wide text-foreground/50">
+            Rarest held
+          </p>
+          <p
+            className="truncate font-mono text-sm font-black"
+            style={{ color: tierColor(rarest.tier) }}
+            title={`#${rarest.tokenId}`}
+          >
+            {formatRank(rarest.rank)} · {rarest.tier}
+          </p>
+        </div>
+        <div className="rounded-lg border border-gold-500/20 bg-black/25 px-2.5 py-2">
+          <p className="text-[0.6rem] font-bold uppercase tracking-wide text-foreground/50">
+            Avg score
+          </p>
+          <p className="font-mono text-sm font-black text-foreground">
+            {avgScore.toFixed(1)}
+            <span className="text-foreground/45"> / 100</span>
+          </p>
+        </div>
+        <div className="rounded-lg border border-gold-500/20 bg-black/25 px-2.5 py-2">
+          <p className="text-[0.6rem] font-bold uppercase tracking-wide text-foreground/50">
+            Tiers in bag
+          </p>
+          <p className="truncate text-sm font-black text-foreground">
+            {bagTiers.length
+              ? bagTiers
+                  .map((t) => `${t.slice(0, 1)}${tierCounts[t]}`)
+                  .join(" · ")
+              : "—"}
+          </p>
+        </div>
+      </div>
+      {bagTiers.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {TIER_ORDER.map((tier) => {
+            const count = tierCounts[tier];
+            if (!count) return null;
+            return (
+              <span
+                key={tier}
+                className="rounded-full px-2 py-0.5 text-[0.65rem] font-extrabold"
+                style={{
+                  color: tierColor(tier),
+                  border: `1px solid ${tierColor(tier)}55`,
+                  background: `${tierColor(tier)}18`,
+                }}
+              >
+                {tier} {count}
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function NftViewer() {
   const [inputAddress, setInputAddress] = useState("");
   const [viewedAddress, setViewedAddress] = useState("");
@@ -342,8 +580,76 @@ export default function NftViewer() {
   const [message, setMessage] = useState("");
   const [selected, setSelected] = useState<OwnedNft | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [sortMode, setSortMode] = useState<"id" | "rarest" | "score">("id");
   const requestIdRef = useRef(0);
   const gridScrollRef = useRef<HTMLDivElement>(null);
+
+  const collectionRarity = useMemo(() => {
+    const sample = buildCollectionRaritySample(nfts);
+    return computeRaritySnapshot(sample);
+  }, [nfts]);
+
+  const bagTierCounts = useMemo(() => {
+    const counts: Record<RarityTier, number> = {
+      Mythic: 0,
+      Legendary: 0,
+      Epic: 0,
+      Rare: 0,
+      Uncommon: 0,
+      Common: 0,
+    };
+    for (const nft of nfts) {
+      const r = collectionRarity.byTokenId.get(nft.tokenId);
+      if (r) counts[r.tier] += 1;
+    }
+    return counts;
+  }, [nfts, collectionRarity]);
+
+  const sortedNfts = useMemo(() => {
+    if (sortMode === "id") {
+      return [...nfts].sort((a, b) => a.tokenId - b.tokenId);
+    }
+    return [...nfts].sort((a, b) => {
+      const ra = collectionRarity.byTokenId.get(a.tokenId);
+      const rb = collectionRarity.byTokenId.get(b.tokenId);
+      if (sortMode === "rarest") {
+        if (ra && rb) return ra.rank - rb.rank || a.tokenId - b.tokenId;
+        if (ra) return -1;
+        if (rb) return 1;
+        return a.tokenId - b.tokenId;
+      }
+      // score
+      if (ra && rb) {
+        return rb.normalizedScore - ra.normalizedScore || a.tokenId - b.tokenId;
+      }
+      if (ra) return -1;
+      if (rb) return 1;
+      return a.tokenId - b.tokenId;
+    });
+  }, [nfts, sortMode, collectionRarity]);
+
+  const visibleNfts = useMemo(
+    () => sortedNfts.slice(0, visibleCount),
+    [sortedNfts, visibleCount],
+  );
+
+  const selectedRarity = selected
+    ? collectionRarity.byTokenId.get(selected.tokenId)
+    : undefined;
+
+  // Keep modal in sync as metadata/rarity loads
+  useEffect(() => {
+    if (!selected) return;
+    const next = nfts.find((n) => n.tokenId === selected.tokenId);
+    if (
+      next &&
+      (next.imageUri !== selected.imageUri ||
+        next.attributes !== selected.attributes ||
+        next.name !== selected.name)
+    ) {
+      setSelected(next);
+    }
+  }, [nfts, selected]);
 
   const paintFromInventoryCache = useCallback((wallet: string) => {
     ensureNftCacheHydrated();
@@ -371,7 +677,6 @@ export default function NftViewer() {
     setViewedAddress(wallet);
     if (gridScrollRef.current) gridScrollRef.current.scrollTop = 0;
 
-    // Non-destructive: keep showing cache while we refresh
     const hadCache = paintFromInventoryCache(wallet);
     if (!hadCache) {
       setNfts([]);
@@ -386,7 +691,6 @@ export default function NftViewer() {
       let sortedIds: number[];
 
       if (inv?.fresh && inv.ids.length >= 0) {
-        // Fresh inventory — still verify balance cheaply
         const balance = Number(await contract.balanceOf(wallet));
         touchMintReadClient();
         if (requestId !== requestIdRef.current) return;
@@ -394,7 +698,6 @@ export default function NftViewer() {
         if (balance === inv.ids.length) {
           sortedIds = [...inv.ids].sort((a, b) => a - b);
         } else {
-          // Bag changed — re-enumerate
           const tokenIds = await Promise.all(
             Array.from({ length: balance }, (_, index) =>
               contract
@@ -419,7 +722,6 @@ export default function NftViewer() {
           return;
         }
 
-        // Sequential index reads (batchMaxCount:1) — still parallel promises, serial RPC
         const tokenIds = await Promise.all(
           Array.from({ length: balance }, (_, index) =>
             contract
@@ -441,7 +743,6 @@ export default function NftViewer() {
         return;
       }
 
-      // Paint cache hits immediately in final order
       const owned: OwnedNft[] = sortedIds.map((tokenId) => {
         const hit = nftFromCache(tokenId);
         if (hit) return hit;
@@ -459,7 +760,6 @@ export default function NftViewer() {
         `Loading ${sortedIds.length} Plank${sortedIds.length === 1 ? "" : "s"}…`,
       );
 
-      // Fill gaps with network + IPFS; skip tokens that already have image
       for (let offset = 0; offset < sortedIds.length; offset += META_BATCH) {
         if (requestId !== requestIdRef.current) return;
         const slice = sortedIds.slice(offset, offset + META_BATCH);
@@ -467,11 +767,12 @@ export default function NftViewer() {
         const batch = await Promise.all(
           slice.map(async (tokenId) => {
             const existing = nftFromCache(tokenId);
-            if (existing?.imageUri) return existing;
+            // Need attributes for rarity — re-fetch if missing
+            if (existing?.imageUri && existing.attributes.length > 0) return existing;
 
             const fallbackName = `RobinWood Plank #${tokenId}`;
             try {
-              let tokenUri = getCachedToken(tokenId)?.tokenUri || "";
+              let tokenUri = getCachedToken(tokenId)?.tokenUri || existing?.tokenUri || "";
               if (!tokenUri) {
                 tokenUri = (await contract.tokenURI(tokenId)) as string;
                 if (tokenUri) putTokenUri(tokenId, tokenUri);
@@ -517,15 +818,14 @@ export default function NftViewer() {
                 tokenUri: getCachedToken(tokenId)?.tokenUri || "",
                 name: fallbackName,
                 description: "",
-                imageUri: "",
-                attributes: [],
+                imageUri: existing?.imageUri || "",
+                attributes: existing?.attributes || [],
                 metadataError: errorMessage(error),
               } satisfies OwnedNft;
             }
           }),
         );
 
-        // Merge into owned array by tokenId
         const byId = new Map(batch.map((n) => [n.tokenId, n]));
         for (let i = 0; i < owned.length; i += 1) {
           const updated = byId.get(owned[i].tokenId);
@@ -537,10 +837,11 @@ export default function NftViewer() {
       }
 
       if (requestId === requestIdRef.current) {
+        const scored = owned.filter((n) => n.attributes.length > 0).length;
         setMessage(
           owned.length === 1
-            ? "1 RobinWood Plank in this wallet."
-            : `${owned.length} RobinWood Planks in this wallet.`,
+            ? `1 RobinWood Plank · ${scored ? "rarity live" : "awaiting traits"}`
+            : `${owned.length} RobinWood Planks · ${scored} scored`,
         );
       }
     } catch (error) {
@@ -629,26 +930,22 @@ export default function NftViewer() {
     }
   }
 
-  const heading =
-    viewedAddress && !loading
-      ? `Collection · ${shortAddress(viewedAddress)}`
-      : viewedAddress
-        ? `Collection · ${shortAddress(viewedAddress)}`
-        : "Collection Viewer";
+  const heading = viewedAddress
+    ? `Collection · ${shortAddress(viewedAddress)}`
+    : "Collection Viewer";
 
-  const visibleNfts = useMemo(
-    () => nfts.slice(0, visibleCount),
-    [nfts, visibleCount],
-  );
-  const hasMore = visibleCount < nfts.length;
-  const remaining = Math.max(0, nfts.length - visibleCount);
+  const hasMore = visibleCount < sortedNfts.length;
+  const remaining = Math.max(0, sortedNfts.length - visibleCount);
+  const scoredInBag = nfts.filter((n) =>
+    collectionRarity.byTokenId.has(n.tokenId),
+  ).length;
 
   function showMore() {
-    setVisibleCount((count) => Math.min(nfts.length, count + PAGE_SIZE));
+    setVisibleCount((count) => Math.min(sortedNfts.length, count + PAGE_SIZE));
   }
 
   function showAll() {
-    setVisibleCount(nfts.length);
+    setVisibleCount(sortedNfts.length);
   }
 
   return (
@@ -659,7 +956,8 @@ export default function NftViewer() {
             Your Planks
           </h2>
           <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
-            Connect a wallet or paste an address to view every RobinWood NFT it holds.
+            Connect a wallet or paste an address — same live rarity ranks and trait scores as the
+            Gallery.
           </p>
         </Reveal>
 
@@ -718,19 +1016,76 @@ export default function NftViewer() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-3 border-b border-gold-500/15 bg-black/20 px-4 py-3 sm:px-5">
+            {/* Sort + rarity chrome */}
+            <div className="flex flex-col gap-2 border-b border-gold-500/15 bg-black/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <h3 className="min-w-0 truncate font-display text-lg text-gold-300 sm:text-xl">
                 {heading}
               </h3>
-              <div className="flex shrink-0 items-center gap-3 text-xs font-bold uppercase tracking-wide text-foreground/55 sm:text-sm">
-                {loading && <span>Fetching…</span>}
-                {nfts.length > 0 && (
-                  <span className="rounded-full border border-gold-500/30 px-2.5 py-1 text-gold-300">
-                    {Math.min(visibleCount, nfts.length)} / {nfts.length}
+              <div className="flex flex-wrap items-center gap-2">
+                {loading && (
+                  <span className="text-xs font-bold uppercase tracking-wide text-foreground/55">
+                    Fetching…
                   </span>
+                )}
+                {nfts.length > 0 && (
+                  <>
+                    <span className="rounded-full border border-gold-500/30 px-2.5 py-1 text-xs font-bold text-gold-300">
+                      {Math.min(visibleCount, sortedNfts.length)} / {sortedNfts.length}
+                    </span>
+                    <span className="rounded-full border border-gold-500/30 px-2.5 py-1 text-xs font-bold text-gold-300">
+                      {scoredInBag} scored
+                    </span>
+                    <span className="rounded-full border border-gold-500/20 px-2.5 py-1 text-xs font-bold text-foreground/55">
+                      sample {collectionRarity.scoredCount.toLocaleString()}
+                    </span>
+                  </>
                 )}
               </div>
             </div>
+
+            {nfts.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 border-b border-gold-500/10 px-4 py-2.5 sm:px-5">
+                {(
+                  [
+                    ["id", "Token #"],
+                    ["rarest", "Rarest"],
+                    ["score", "Score"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      setSortMode(id);
+                      setVisibleCount(PAGE_SIZE);
+                      gridScrollRef.current?.scrollTo({ top: 0 });
+                    }}
+                    className={`min-h-9 rounded-lg px-3 py-1.5 text-xs font-extrabold sm:text-sm ${
+                      sortMode === id
+                        ? "bg-gold-500 text-wood-950"
+                        : "border border-gold-500/40 text-gold-300"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <a
+                  href="/gallery"
+                  className="ml-auto inline-flex min-h-9 items-center rounded-lg border border-gold-500/30 px-3 py-1.5 text-xs font-extrabold text-gold-300/90 sm:text-sm"
+                >
+                  Full gallery rarity ↗
+                </a>
+              </div>
+            )}
+
+            {nfts.length > 0 && (
+              <BagRaritySummary
+                nfts={nfts}
+                rarityById={collectionRarity.byTokenId}
+                sampleSize={collectionRarity.scoredCount}
+                tierCounts={bagTierCounts}
+              />
+            )}
 
             <div
               ref={gridScrollRef}
@@ -777,50 +1132,89 @@ export default function NftViewer() {
 
               {!viewedAddress && !loading && nfts.length === 0 && (
                 <p className="px-5 py-10 text-center text-sm text-foreground/55">
-                  Tip: works with any public address — no transaction required.
+                  Tip: works with any public address — ranks use the same live sample as Gallery.
                 </p>
               )}
 
-              {nfts.length > 0 && (
+              {visibleNfts.length > 0 && (
                 <ul className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:gap-4 sm:p-4 lg:grid-cols-4">
-                  {visibleNfts.map((nft) => (
-                    <li
-                      key={nft.tokenId}
-                      className="[content-visibility:auto] [contain-intrinsic-size:auto_220px]"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setSelected(nft)}
-                        onKeyDown={(event) => onCardKeyDown(event, nft)}
-                        className="group flex h-full w-full flex-col overflow-hidden rounded-xl border border-gold-500/30 bg-wood-950/70 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-400"
-                        aria-label={`Open details for ${nft.name}`}
+                  {visibleNfts.map((nft) => {
+                    const tokenRarity = collectionRarity.byTokenId.get(nft.tokenId);
+                    return (
+                      <li
+                        key={nft.tokenId}
+                        className="[content-visibility:auto] [contain-intrinsic-size:auto_240px]"
                       >
-                        <div className="relative aspect-square w-full overflow-hidden bg-wood-950">
-                          <NftImage
-                            imageUri={nft.imageUri}
-                            alt=""
-                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                          />
-                        </div>
-                        <div className="flex flex-1 flex-col gap-1 p-2.5 sm:p-3">
-                          <p className="line-clamp-2 text-sm font-black leading-snug text-foreground sm:text-base">
-                            {nft.name}
-                          </p>
-                          <p className="font-mono text-xs font-bold text-gold-300 sm:text-sm">
-                            #{nft.tokenId}
-                          </p>
-                        </div>
-                      </button>
-                    </li>
-                  ))}
+                        <button
+                          type="button"
+                          onClick={() => setSelected(nft)}
+                          onKeyDown={(event) => onCardKeyDown(event, nft)}
+                          className="group flex h-full w-full flex-col overflow-hidden rounded-xl border border-gold-500/30 bg-wood-950/70 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-400"
+                          aria-label={
+                            tokenRarity
+                              ? `Open ${nft.name}, ${tokenRarity.tier} rank ${tokenRarity.rank}`
+                              : `Open details for ${nft.name}`
+                          }
+                        >
+                          <div className="relative aspect-square w-full overflow-hidden bg-wood-950">
+                            <NftImage
+                              imageUri={nft.imageUri}
+                              alt=""
+                              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                            />
+                            <span className="absolute left-1.5 top-1.5 rounded bg-black/75 px-1.5 py-0.5 font-mono text-[0.65rem] font-bold text-gold-300">
+                              #{nft.tokenId}
+                            </span>
+                            {tokenRarity && (
+                              <span
+                                className="absolute bottom-1.5 right-1.5 rounded px-1.5 py-0.5 text-[0.6rem] font-black"
+                                style={{
+                                  color: tierColor(tokenRarity.tier),
+                                  background: "rgba(0,0,0,0.75)",
+                                  border: `1px solid ${tierColor(tokenRarity.tier)}55`,
+                                }}
+                              >
+                                {formatRank(tokenRarity.rank)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-1 flex-col gap-1 p-2.5 sm:p-3">
+                            <p className="line-clamp-2 text-sm font-black leading-snug text-foreground sm:text-base">
+                              {nft.name}
+                            </p>
+                            <div className="flex items-center justify-between gap-1">
+                              {tokenRarity ? (
+                                <span
+                                  className="truncate text-[0.7rem] font-bold sm:text-xs"
+                                  style={{ color: tierColor(tokenRarity.tier) }}
+                                >
+                                  {tokenRarity.tier}
+                                </span>
+                              ) : (
+                                <span className="text-[0.7rem] text-foreground/40">
+                                  {nft.attributes.length ? "…" : "unrevealed"}
+                                </span>
+                              )}
+                              {tokenRarity && (
+                                <span className="font-mono text-[0.7rem] text-foreground/55 sm:text-xs">
+                                  {tokenRarity.normalizedScore.toFixed(0)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
 
-            {nfts.length > PAGE_SIZE && (
+            {sortedNfts.length > PAGE_SIZE && (
               <div className="flex flex-col gap-2 border-t border-gold-500/20 bg-black/25 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
                 <p className="text-sm text-foreground/65">
-                  Showing {Math.min(visibleCount, nfts.length)} of {nfts.length} Planks
+                  Showing {Math.min(visibleCount, sortedNfts.length)} of {sortedNfts.length}{" "}
+                  Planks
                 </p>
                 <div className="grid grid-cols-2 gap-2 sm:flex">
                   {hasMore ? (
@@ -863,6 +1257,8 @@ export default function NftViewer() {
         <NftDetailModal
           nft={selected}
           owner={viewedAddress}
+          rarity={selectedRarity}
+          sampleSize={collectionRarity.scoredCount}
           onClose={() => setSelected(null)}
         />
       )}
