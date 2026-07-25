@@ -60,9 +60,13 @@ const PAGE_SIZE = 24;
 /** First paint: stage this many cards immediately (newest first). */
 const INITIAL_STAGE = 48;
 
+/** Compact 0xABCD…WXYZ — unobtrusive on cards; full address via title. */
 function shortOwner(owner: string) {
-  if (!owner || owner.length < 10) return owner || "—";
-  return `${owner.slice(0, 6)}…${owner.slice(-4)}`;
+  const raw = (owner || "").trim();
+  if (!raw) return "";
+  if (raw.length < 10) return raw;
+  // 0x + 4 hex + … + last 4
+  return `0x${raw.slice(2, 6)}…${raw.slice(-4)}`;
 }
 
 function indexNft(fields: {
@@ -1058,6 +1062,18 @@ export default function Gallery() {
                                   </span>
                                 )}
                               </div>
+                              {nft.owner ? (
+                                <p
+                                  className="truncate font-mono text-[0.6rem] font-medium leading-none text-foreground/40"
+                                  title={nft.owner}
+                                >
+                                  {shortOwner(nft.owner)}
+                                </p>
+                              ) : (
+                                <p className="font-mono text-[0.6rem] leading-none text-foreground/25">
+                                  0x····
+                                </p>
+                              )}
                             </div>
                           </button>
                         </li>
