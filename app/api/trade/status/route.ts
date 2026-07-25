@@ -56,9 +56,10 @@ export async function GET(req: Request) {
       };
     })(),
     rulesRelaxed: RULES_RELAXED,
-    // Do not hand bots a deep-link while the sniper trap / limits are active
-    uniswapUrl: RULES_RELAXED && !TRADE_PAUSED ? buildUniswapSwapUrl({ direction: "buy" }) : null,
-    externalSwapsAllowed: RULES_RELAXED && !TRADE_PAUSED,
+    // Official Uniswap FE deep-link — verified $PLANK CA on Robinhood Chain
+    uniswapUrl: !TRADE_PAUSED ? buildUniswapSwapUrl({ direction: "buy" }) : null,
+    uniswapUrlSell: !TRADE_PAUSED ? buildUniswapSwapUrl({ direction: "sell" }) : null,
+    externalSwapsAllowed: !TRADE_PAUSED,
     // Boolean only — never the key itself
     tradingApiConfigured: isTradingApiConfigured(),
     siteFee: {
@@ -69,9 +70,8 @@ export async function GET(req: Request) {
     },
     venuePolicy: TRADE_PAUSED
       ? "STAND BY — trading not live. Do not swap on Uniswap.app or anywhere else."
-      : RULES_RELAXED
-        ? "Rules relaxed — open markets OK; still verify CA."
-        : "Official plank.love widget only until launch rules are relaxed. Do not swap elsewhere.",
+      : "Trade via official Uniswap FE (verified $PLANK pair) or the on-site widget. Always verify CA.",
+    tokenAddress: CONTRACT_ADDRESS,
   });
 }
 

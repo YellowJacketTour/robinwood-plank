@@ -78,7 +78,6 @@ export default function SwapWidget({ unlocked }: Props) {
   const inputDecimals = direction === "buy" ? 18 : TOKEN.decimals;
 
   const uniswapUrl = useMemo(() => {
-    if (!RULES_RELAXED) return null;
     return buildUniswapSwapUrl({
       direction,
       amountEth: direction === "buy" ? amountIn : undefined,
@@ -637,14 +636,14 @@ export default function SwapWidget({ unlocked }: Props) {
             </p>
           )}
 
-          {RULES_RELAXED && uniswapUrl && unlocked && (
+          {uniswapUrl && unlocked && (
             <a
               href={uniswapUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-center text-[0.65rem] text-foreground/40 underline-offset-2 hover:underline"
+              className="rounded-lg border border-gold-500/35 bg-wood-900/60 px-2.5 py-2 text-center text-[0.7rem] font-bold text-gold-300 underline-offset-2 hover:bg-gold-500/10 hover:underline"
             >
-              Optional Uniswap.app (rules relaxed) ↗
+              Open this pair on official Uniswap ↗
             </a>
           )}
         </div>
