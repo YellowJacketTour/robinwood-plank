@@ -375,14 +375,16 @@ function NftDetailModal({
                       </dd>
                     </div>
                     <div className="min-w-0 rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5">
-                      <dt className="uppercase tracking-wide text-foreground/55">Tier · score</dt>
+                      <dt className="uppercase tracking-wide text-foreground/55">
+                        Tier · exclusivity
+                      </dt>
                       <dd className="mt-1 font-mono">
                         <span style={{ color: tierColor(rarity.tier) }}>{rarity.tier}</span>
                         <span className="text-foreground/70">
                           {" "}
                           · {rarity.normalizedScore.toFixed(1)}
                         </span>
-                        <span className="text-foreground/45"> / 100</span>
+                        <span className="text-foreground/45"> outranks %</span>
                       </dd>
                     </div>
                     <div className="min-w-0 rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5 min-[420px]:col-span-2">

@@ -13,6 +13,7 @@ import {
   TIER_ORDER,
   computeRaritySnapshot,
   formatRank,
+  rarityMethodBlurb,
   tierColor,
   type RarityTier,
 } from "@/lib/rarity";
@@ -962,8 +963,8 @@ export default function RarityInsights({
       )}
 
       <p className="text-center text-[0.7rem] text-foreground/40">
-        Insights reads the same local cache as Grid · filters also apply to the
-        Grid cut · no extra chain spam
+        {rarityMethodBlurb(scoredCount)} · Insights uses the same local cache as
+        Grid · filters also apply to the Grid cut
       </p>
     </div>
   );
