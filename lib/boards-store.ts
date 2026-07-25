@@ -279,6 +279,8 @@ export async function publicBoardsSnapshot(): Promise<{
   goodWoodCount: number;
   recentBad: BadBoardEntry[];
   fallenCount: number;
+  /** Sample of Good Wood addresses for the wooden ledger (nice column). */
+  niceLedger: string[];
 }> {
   const state = await ensureLoaded();
   const good = await loadGoodWoodSet();
@@ -286,11 +288,33 @@ export async function publicBoardsSnapshot(): Promise<{
     (a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt)
   );
   const fallenCount = badList.filter((b) => b.wasGoodWood).length;
+
+  // Nice column: widget-verified first (live), then Good Wood samples for ledger density
+  const niceSet: string[] = [];
+  const widgetAddrs = Object.keys(state.widgetSessions).sort(
+    (a, b) =>
+      Date.parse(state.widgetSessions[b].lastSeenAt) -
+      Date.parse(state.widgetSessions[a].lastSeenAt)
+  );
+  for (const a of widgetAddrs) {
+    if (!state.badBoards[a]) niceSet.push(a);
+    if (niceSet.length >= 48) break;
+  }
+  if (niceSet.length < 48) {
+    for (const a of good) {
+      if (state.badBoards[a]) continue;
+      if (niceSet.includes(a)) continue;
+      niceSet.push(a);
+      if (niceSet.length >= 48) break;
+    }
+  }
+
   return {
     state,
     goodWoodCount: good.size,
     recentBad: badList.slice(0, 100),
     fallenCount,
+    niceLedger: niceSet,
   };
 }
 
