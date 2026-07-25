@@ -57,6 +57,9 @@ export type OwnedNft = {
   metadataError?: string;
 };
 
+/** Cards rendered per "page" so large bags don't explode the DOM or page height. */
+const PAGE_SIZE = 12;
+
 function shortAddress(address: string) {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
@@ -298,7 +301,9 @@ export default function NftViewer() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [selected, setSelected] = useState<OwnedNft | null>(null);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const requestIdRef = useRef(0);
+  const gridScrollRef = useRef<HTMLDivElement>(null);
 
   const loadCollection = useCallback(async (wallet: string) => {
     const requestId = ++requestIdRef.current;
@@ -306,7 +311,9 @@ export default function NftViewer() {
     setMessage("");
     setNfts([]);
     setSelected(null);
+    setVisibleCount(PAGE_SIZE);
     setViewedAddress(wallet);
+    if (gridScrollRef.current) gridScrollRef.current.scrollTop = 0;
 
     try {
       const provider = new JsonRpcProvider(ROBINHOOD_RPC_URL, ROBINHOOD_CHAIN_ID, {
@@ -470,8 +477,23 @@ export default function NftViewer() {
       ? `Collection · ${shortAddress(viewedAddress)}`
       : "Collection Viewer";
 
+  const visibleNfts = useMemo(
+    () => nfts.slice(0, visibleCount),
+    [nfts, visibleCount],
+  );
+  const hasMore = visibleCount < nfts.length;
+  const remaining = Math.max(0, nfts.length - visibleCount);
+
+  function showMore() {
+    setVisibleCount((count) => Math.min(nfts.length, count + PAGE_SIZE));
+  }
+
+  function showAll() {
+    setVisibleCount(nfts.length);
+  }
+
   return (
-    <section id="collection" className="scroll-mt-24 px-4 py-20 sm:px-6">
+    <section id="collection" className="scroll-mt-24 px-4 py-16 sm:px-6 sm:py-20">
       <div className="mx-auto max-w-6xl">
         <Reveal>
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">
@@ -483,146 +505,203 @@ export default function NftViewer() {
         </Reveal>
 
         <Reveal delayMs={120}>
-          <div className="wood-frame mx-auto mt-10 max-w-3xl rounded-2xl bg-wood-900/95 p-4 sm:p-6">
-            <form
-              onSubmit={onSubmit}
-              className="flex flex-col gap-3 sm:flex-row sm:items-stretch"
-            >
-              <label htmlFor="nft-viewer-address" className="sr-only">
-                Wallet address
-              </label>
-              <input
-                id="nft-viewer-address"
-                type="text"
-                inputMode="text"
-                autoComplete="off"
-                spellCheck={false}
-                value={inputAddress}
-                onChange={(event) => setInputAddress(event.target.value)}
-                placeholder="0x… wallet address"
-                className="min-h-12 min-w-0 flex-1 rounded-lg border-2 border-gold-500/50 bg-wood-950 px-4 py-3 font-mono text-base font-bold text-foreground outline-none placeholder:text-foreground/40 focus:border-gold-300"
-              />
-              <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="min-h-12 rounded-lg bg-gold-500 px-5 py-3 text-base font-extrabold text-wood-950 disabled:cursor-wait disabled:opacity-60"
-                >
-                  {loading ? "Loading…" : "View NFTs"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void connectWallet()}
-                  disabled={loading}
-                  className="min-h-12 rounded-lg border border-gold-500/40 px-5 py-3 text-base font-extrabold text-gold-300 disabled:opacity-60"
-                >
-                  {connectedAddress ? "My Wallet" : "Connect"}
-                </button>
-              </div>
-            </form>
-
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm text-foreground/65">
-              <p role="status" aria-live="polite">
-                {message || "Robinhood Chain · ERC-721 RobinWood collection"}
-              </p>
-              <a
-                href={`${ROBINHOOD_EXPLORER_URL}/token/${NFT_CONTRACT_ADDRESS}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-bold text-gold-300 hover:text-gold-400"
+          <div className="wood-frame mx-auto mt-10 flex max-w-5xl flex-col overflow-hidden rounded-2xl bg-wood-900/95">
+            {/* Lookup bar */}
+            <div className="border-b border-gold-500/20 p-4 sm:p-5">
+              <form
+                onSubmit={onSubmit}
+                className="flex flex-col gap-3 sm:flex-row sm:items-stretch"
               >
-                Contract ↗
-              </a>
-            </div>
-          </div>
-        </Reveal>
-
-        <div className="mt-8">
-          <div className="mb-4 flex items-end justify-between gap-3">
-            <h3 className="font-display text-xl text-gold-300 sm:text-2xl">{heading}</h3>
-            {loading && (
-              <span className="text-sm font-bold uppercase tracking-wide text-foreground/55">
-                Fetching…
-              </span>
-            )}
-          </div>
-
-          {loading && nfts.length === 0 && (
-            <div
-              className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4"
-              aria-hidden="true"
-            >
-              {Array.from({ length: 8 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="wood-frame animate-pulse overflow-hidden rounded-xl bg-wood-900/80"
-                >
-                  <div className="aspect-square bg-wood-950/70" />
-                  <div className="space-y-2 p-3">
-                    <div className="h-4 w-3/4 rounded bg-gold-500/15" />
-                    <div className="h-3 w-1/3 rounded bg-gold-500/10" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!loading && nfts.length === 0 && viewedAddress && (
-            <div className="wood-frame rounded-2xl bg-wood-900/90 px-5 py-12 text-center">
-              <div className="text-4xl" aria-hidden="true">
-                🪵
-              </div>
-              <p className="mt-3 text-lg font-black text-foreground">Empty woodpile</p>
-              <p className="mt-2 text-foreground/65">
-                This wallet does not hold any RobinWood Planks yet.
-              </p>
-              <a
-                href="#mint"
-                className="mt-5 inline-flex min-h-12 items-center justify-center rounded-lg bg-gold-500 px-6 py-3 font-extrabold text-wood-950"
-              >
-                Mint RobinWood
-              </a>
-            </div>
-          )}
-
-          {nfts.length > 0 && (
-            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
-              {nfts.map((nft) => (
-                <li key={nft.tokenId}>
+                <label htmlFor="nft-viewer-address" className="sr-only">
+                  Wallet address
+                </label>
+                <input
+                  id="nft-viewer-address"
+                  type="text"
+                  inputMode="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={inputAddress}
+                  onChange={(event) => setInputAddress(event.target.value)}
+                  placeholder="0x… wallet address"
+                  className="min-h-12 min-w-0 flex-1 rounded-lg border-2 border-gold-500/50 bg-wood-950 px-4 py-3 font-mono text-base font-bold text-foreground outline-none placeholder:text-foreground/40 focus:border-gold-300"
+                />
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="min-h-12 rounded-lg bg-gold-500 px-5 py-3 text-base font-extrabold text-wood-950 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {loading ? "Loading…" : "View NFTs"}
+                  </button>
                   <button
                     type="button"
-                    onClick={() => setSelected(nft)}
-                    onKeyDown={(event) => onCardKeyDown(event, nft)}
-                    className="wood-frame group flex h-full w-full flex-col overflow-hidden rounded-xl bg-wood-900/95 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-400"
-                    aria-label={`Open details for ${nft.name}`}
+                    onClick={() => void connectWallet()}
+                    disabled={loading}
+                    className="min-h-12 rounded-lg border border-gold-500/40 px-5 py-3 text-base font-extrabold text-gold-300 disabled:opacity-60"
                   >
-                    <div className="relative aspect-square w-full overflow-hidden bg-wood-950">
-                      <NftImage
-                        imageUri={nft.imageUri}
-                        alt=""
-                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                      />
-                    </div>
-                    <div className="flex flex-1 flex-col gap-1 p-3 sm:p-3.5">
-                      <p className="line-clamp-2 text-sm font-black leading-snug text-foreground sm:text-base">
-                        {nft.name}
-                      </p>
-                      <p className="font-mono text-xs font-bold text-gold-300 sm:text-sm">
-                        #{nft.tokenId}
-                      </p>
-                    </div>
+                    {connectedAddress ? "My Wallet" : "Connect"}
                   </button>
-                </li>
-              ))}
-            </ul>
-          )}
+                </div>
+              </form>
 
-          {!viewedAddress && !loading && (
-            <p className="mt-6 text-center text-sm text-foreground/55">
-              Tip: works with any public address — no transaction required.
-            </p>
-          )}
-        </div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-foreground/65">
+                <p role="status" aria-live="polite">
+                  {message || "Robinhood Chain · ERC-721 RobinWood collection"}
+                </p>
+                <a
+                  href={`${ROBINHOOD_EXPLORER_URL}/token/${NFT_CONTRACT_ADDRESS}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-bold text-gold-300 hover:text-gold-400"
+                >
+                  Contract ↗
+                </a>
+              </div>
+            </div>
+
+            {/* Window chrome */}
+            <div className="flex items-center justify-between gap-3 border-b border-gold-500/15 bg-black/20 px-4 py-3 sm:px-5">
+              <h3 className="min-w-0 truncate font-display text-lg text-gold-300 sm:text-xl">
+                {heading}
+              </h3>
+              <div className="flex shrink-0 items-center gap-3 text-xs font-bold uppercase tracking-wide text-foreground/55 sm:text-sm">
+                {loading && <span>Fetching…</span>}
+                {nfts.length > 0 && (
+                  <span className="rounded-full border border-gold-500/30 px-2.5 py-1 text-gold-300">
+                    {Math.min(visibleCount, nfts.length)} / {nfts.length}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Bounded scroll window — keeps page flow stable with large bags */}
+            <div
+              ref={gridScrollRef}
+              className="max-h-[min(62dvh,560px)] overflow-y-auto overscroll-contain sm:max-h-[min(64dvh,640px)]"
+              style={{ WebkitOverflowScrolling: "touch" }}
+            >
+              {loading && nfts.length === 0 && (
+                <div
+                  className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:gap-4 sm:p-4 lg:grid-cols-4"
+                  aria-hidden="true"
+                >
+                  {Array.from({ length: 8 }).map((_, index) => (
+                    <div
+                      key={index}
+                      className="animate-pulse overflow-hidden rounded-xl border border-gold-500/20 bg-wood-950/60"
+                    >
+                      <div className="aspect-square bg-wood-950/70" />
+                      <div className="space-y-2 p-3">
+                        <div className="h-4 w-3/4 rounded bg-gold-500/15" />
+                        <div className="h-3 w-1/3 rounded bg-gold-500/10" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!loading && nfts.length === 0 && viewedAddress && (
+                <div className="px-5 py-12 text-center">
+                  <div className="text-4xl" aria-hidden="true">
+                    🪵
+                  </div>
+                  <p className="mt-3 text-lg font-black text-foreground">Empty woodpile</p>
+                  <p className="mt-2 text-foreground/65">
+                    This wallet does not hold any RobinWood Planks yet.
+                  </p>
+                  <a
+                    href="#mint"
+                    className="mt-5 inline-flex min-h-12 items-center justify-center rounded-lg bg-gold-500 px-6 py-3 font-extrabold text-wood-950"
+                  >
+                    Mint RobinWood
+                  </a>
+                </div>
+              )}
+
+              {!viewedAddress && !loading && nfts.length === 0 && (
+                <p className="px-5 py-10 text-center text-sm text-foreground/55">
+                  Tip: works with any public address — no transaction required.
+                </p>
+              )}
+
+              {nfts.length > 0 && (
+                <ul className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:gap-4 sm:p-4 lg:grid-cols-4">
+                  {visibleNfts.map((nft) => (
+                    <li
+                      key={nft.tokenId}
+                      className="[content-visibility:auto] [contain-intrinsic-size:auto_220px]"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setSelected(nft)}
+                        onKeyDown={(event) => onCardKeyDown(event, nft)}
+                        className="group flex h-full w-full flex-col overflow-hidden rounded-xl border border-gold-500/30 bg-wood-950/70 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-400"
+                        aria-label={`Open details for ${nft.name}`}
+                      >
+                        <div className="relative aspect-square w-full overflow-hidden bg-wood-950">
+                          <NftImage
+                            imageUri={nft.imageUri}
+                            alt=""
+                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                          />
+                        </div>
+                        <div className="flex flex-1 flex-col gap-1 p-2.5 sm:p-3">
+                          <p className="line-clamp-2 text-sm font-black leading-snug text-foreground sm:text-base">
+                            {nft.name}
+                          </p>
+                          <p className="font-mono text-xs font-bold text-gold-300 sm:text-sm">
+                            #{nft.tokenId}
+                          </p>
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {/* Pager footer — fixed chrome under the window */}
+            {nfts.length > PAGE_SIZE && (
+              <div className="flex flex-col gap-2 border-t border-gold-500/20 bg-black/25 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                <p className="text-sm text-foreground/65">
+                  Showing {Math.min(visibleCount, nfts.length)} of {nfts.length} Planks
+                </p>
+                <div className="grid grid-cols-2 gap-2 sm:flex">
+                  {hasMore ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={showMore}
+                        className="min-h-11 rounded-lg bg-gold-500 px-4 py-2 text-sm font-extrabold text-wood-950"
+                      >
+                        Show {Math.min(PAGE_SIZE, remaining)} more
+                      </button>
+                      <button
+                        type="button"
+                        onClick={showAll}
+                        className="min-h-11 rounded-lg border border-gold-500/40 px-4 py-2 text-sm font-extrabold text-gold-300"
+                      >
+                        Show all
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVisibleCount(PAGE_SIZE);
+                        gridScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      className="min-h-11 rounded-lg border border-gold-500/40 px-4 py-2 text-sm font-extrabold text-gold-300 sm:col-span-2"
+                    >
+                      Collapse to first {PAGE_SIZE}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </Reveal>
       </div>
 
       {selected && viewedAddress && (
