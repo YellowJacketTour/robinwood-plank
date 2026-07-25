@@ -40,7 +40,14 @@ type Summary = {
   equalPctOfSupply: number | null;
   equalExpectedTokens?: string | null;
   woodListCount: number;
-  nft?: { ready: boolean; scannedAt: string | null; addresses: number };
+  allocationMode?: "equal" | "nft";
+  nft?: {
+    ready: boolean;
+    scannedAt: string | null;
+    addresses: number;
+    uniqueHolders?: number;
+    totalNfts?: number;
+  };
 };
 
 type LookupResult = {
@@ -96,23 +103,36 @@ function fmtTokens(s: string | number | null | undefined): string {
         ? BigInt(Math.floor(s))
         : BigInt(String(s).split(".")[0] || "0");
     if (n < BigInt(0)) return "0";
-    const units: Array<{ div: bigint; suf: string }> = [
-      { div: BigInt("1000000000000000"), suf: "Q" },
-      { div: BigInt("1000000000000"), suf: "T" },
-      { div: BigInt("1000000000"), suf: "B" },
-      { div: BigInt("1000000"), suf: "M" },
-      { div: BigInt("1000"), suf: "K" },
-    ];
-    for (const u of units) {
-      if (n >= u.div) {
-        const whole = n / u.div;
-        const tenth = Number(((n % u.div) * BigInt(10)) / u.div);
-        if (whole >= BigInt(100) || tenth === 0) {
-          return `${whole.toLocaleString("en-US")}${u.suf}`;
-        }
-        return `${whole.toLocaleString("en-US")}.${tenth}${u.suf}`;
-      }
+    // Always show full grouped number for clarity (16,552,233,791)
+    // plus compact suffix for huge values in tight columns
+    if (n >= BigInt("1000000000000")) {
+      // trillions
+      const whole = n / BigInt("1000000000000");
+      const tenth = Number(((n % BigInt("1000000000000")) * BigInt(10)) / BigInt("1000000000000"));
+      return tenth > 0
+        ? `${whole.toLocaleString("en-US")}.${tenth}T`
+        : `${whole.toLocaleString("en-US")}T`;
     }
+    if (n >= BigInt("1000000000")) {
+      const whole = n / BigInt("1000000000");
+      const tenth = Number(((n % BigInt("1000000000")) * BigInt(10)) / BigInt("1000000000"));
+      return tenth > 0
+        ? `${whole.toLocaleString("en-US")}.${tenth}B`
+        : `${whole.toLocaleString("en-US")}B`;
+    }
+    return n.toLocaleString("en-US");
+  } catch {
+    return String(s);
+  }
+}
+
+function fullTokens(s: string | number | null | undefined): string {
+  if (s == null || s === "") return "";
+  try {
+    const n =
+      typeof s === "number"
+        ? BigInt(Math.floor(s))
+        : BigInt(String(s).split(".")[0] || "0");
     return n.toLocaleString("en-US");
   } catch {
     return String(s);
@@ -423,7 +443,7 @@ export default function AirdropChecker() {
           <SectionHead
             eyebrow="Allocation · live"
             title="Airdrop"
-            lede="Holder pool 4.2069% of ~888.42T supply. Sort by NFTs, free/wood/paid mints, or share. Click any column."
+            lede="4.2069% pool split by NFTs held (live owner scan). Click columns to sort · Free / Wood / Paid mint caps 2 / 2 / 33."
             artSrc="/images/collection/plank-bobawood.png"
             artAlt="Boba wood plank"
           />
@@ -477,19 +497,46 @@ export default function AirdropChecker() {
               </div>
               <div className="bg-[#2a1a0f]/85 px-2 py-1.5 sm:px-2.5">
                 <div className="airdrop-label">
-                  {summary?.equalWeight ? "Each (equal)" : "Weighted"}
+                  {summary?.allocationMode === "nft" || nftReady
+                    ? "Per NFT"
+                    : "Mode"}
                 </div>
-                {summary?.equalWeight && summary.equalExpectedTokens != null ? (
+                {summary?.allocationMode === "nft" &&
+                summary.nft?.totalNfts &&
+                cfg ? (
+                  <>
+                    <div
+                      className="airdrop-stat airdrop-stat-sm airdrop-num text-emerald-300/95"
+                      title={fullTokens(
+                        (
+                          BigInt(cfg.airdropPoolTokens) /
+                          BigInt(summary.nft.totalNfts)
+                        ).toString()
+                      )}
+                    >
+                      {fmtTokens(
+                        (
+                          BigInt(cfg.airdropPoolTokens) /
+                          BigInt(summary.nft.totalNfts)
+                        ).toString()
+                      )}
+                    </div>
+                    <div className="airdrop-meta airdrop-num">
+                      ×{summary.nft.totalNfts} NFTs ·{" "}
+                      {summary.nft.uniqueHolders ?? "—"} holders
+                    </div>
+                  </>
+                ) : summary?.equalExpectedTokens != null ? (
                   <>
                     <div className="airdrop-stat airdrop-stat-sm airdrop-num text-emerald-300/95">
                       {fmtTokens(summary.equalExpectedTokens)}
                     </div>
-                    <div className="airdrop-meta airdrop-num">
-                      {fmtPct(summary.equalPctOfSupply)} supply
-                    </div>
+                    <div className="airdrop-meta">equal (pre-scan)</div>
                   </>
                 ) : (
-                  <div className="airdrop-stat airdrop-stat-sm airdrop-num">—</div>
+                  <div className="airdrop-meta">
+                    {nftLoading ? "Scanning holdings…" : "Awaiting NFT scan"}
+                  </div>
                 )}
               </div>
             </div>
@@ -560,9 +607,15 @@ export default function AirdropChecker() {
                       </div>
                       <div>
                         <div className="airdrop-result-k">Expected</div>
-                        <div className="airdrop-result-v airdrop-num">
+                        <div
+                          className="airdrop-result-v airdrop-num"
+                          title={fullTokens(lookup.allocation.expectedTokens)}
+                        >
                           {fmtTokens(lookup.allocation.expectedTokens)}
                           <span className="airdrop-meta ml-0.5">PLANK</span>
+                        </div>
+                        <div className="airdrop-meta col-span-full airdrop-num opacity-80">
+                          {fullTokens(lookup.allocation.expectedTokens)} PLANK exact
                         </div>
                       </div>
                     </>
@@ -673,7 +726,10 @@ export default function AirdropChecker() {
                     <span className="airdrop-num hidden text-right text-gold-300/80 sm:inline">
                       {fmtPct(r.pa)}
                     </span>
-                    <span className="airdrop-num text-right text-[#f3e0b0]">
+                    <span
+                      className="airdrop-num text-right font-semibold text-[#f3e0b0]"
+                      title={`${fullTokens(r.t)} PLANK`}
+                    >
                       {fmtTokens(r.t)}
                     </span>
                   </div>

@@ -486,7 +486,7 @@ export function compactRows(rows: AllocationRow[]): Array<{
   }));
 }
 
-/** Attach NFT mint stats onto allocation rows (mutates copies). */
+/** Attach NFT mint stats onto allocation rows. */
 export function attachNftStats(
   rows: AllocationRow[],
   byAddress: Record<
@@ -509,4 +509,94 @@ export function attachNftStats(
       paidMinted: st.paid,
     };
   });
+}
+
+/**
+ * Recompute PLANK shares by NFT holdings (official holder airdrop).
+ * weight = nfts held; 0 NFTs → 0 PLANK from the holder pool.
+ * Merges any holders present in byAddress that are missing from rows.
+ */
+export function recomputeByNftHoldings(opts: {
+  rows: AllocationRow[];
+  byAddress: Record<
+    string,
+    { nfts: number; free: number; wood: number; paid: number }
+  >;
+  poolHuman: string;
+  airdropPercentOfSupply: number;
+  /** When true, also add pure secondary holders not on wood list */
+  includeAllHolders?: boolean;
+}): {
+  rows: AllocationRow[];
+  totalNftsWeighted: number;
+  holdersWithNfts: number;
+} {
+  const poolHuman = BigInt(opts.poolHuman || "0");
+  const pct = opts.airdropPercentOfSupply;
+
+  const map = new Map<string, AllocationRow>();
+  for (const r of opts.rows) {
+    const st = opts.byAddress[r.address];
+    map.set(r.address, {
+      ...r,
+      nfts: st?.nfts ?? r.nfts ?? 0,
+      freeMinted: st?.free ?? r.freeMinted ?? 0,
+      woodMinted: st?.wood ?? r.woodMinted ?? 0,
+      paidMinted: st?.paid ?? r.paidMinted ?? 0,
+    });
+  }
+
+  if (opts.includeAllHolders !== false) {
+    for (const [addr, st] of Object.entries(opts.byAddress)) {
+      if (st.nfts <= 0) continue;
+      if (map.has(addr)) continue;
+      map.set(addr, {
+        address: addr,
+        source: "airdrop",
+        weight: st.nfts,
+        shareOfAirdrop: 0,
+        pctOfAirdrop: 0,
+        pctOfSupply: 0,
+        expectedTokens: "0",
+        expectedTokensRaw: "0",
+        nfts: st.nfts,
+        freeMinted: st.free,
+        woodMinted: st.wood,
+        paidMinted: st.paid,
+      });
+    }
+  }
+
+  let totalNfts = 0;
+  for (const r of map.values()) totalNfts += r.nfts ?? 0;
+
+  const out: AllocationRow[] = [];
+  for (const r of map.values()) {
+    const n = r.nfts ?? 0;
+    const share = totalNfts > 0 ? n / totalNfts : 0;
+    const expectedHuman =
+      totalNfts > 0 ? (poolHuman * BigInt(n)) / BigInt(totalNfts) : BigInt(0);
+    out.push({
+      ...r,
+      weight: n > 0 ? n : r.weight,
+      shareOfAirdrop: share,
+      pctOfAirdrop: Number((share * 100).toFixed(8)),
+      pctOfSupply: Number((pct * share).toFixed(10)),
+      expectedTokens: expectedHuman.toString(),
+      expectedTokensRaw: (expectedHuman * BigInt(10) ** BigInt(18)).toString(),
+    });
+  }
+
+  out.sort((a, b) => {
+    const an = a.nfts ?? 0;
+    const bn = b.nfts ?? 0;
+    if (bn !== an) return bn - an;
+    return a.address.localeCompare(b.address);
+  });
+
+  return {
+    rows: out,
+    totalNftsWeighted: totalNfts,
+    holdersWithNfts: out.filter((r) => (r.nfts ?? 0) > 0).length,
+  };
 }

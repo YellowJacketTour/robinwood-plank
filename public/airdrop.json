@@ -2,9 +2,10 @@
   "description": "Holder airdrop: 4.2069% of $PLANK total supply (official). Total supply is read on-chain; this file sets the pool % and extra wallets/weights.",
   "notes": [
     "On-chain totalSupply ≈ 888,420,069,420,888 PLANK (18 decimals).",
-    "Official: NFT holders get 4.2069% of token supply.",
-    "10% was never real tokenomics — removed. Override with airdropPercentOfSupply or airdropPoolTokens."
+    "Official: NFT holders get 4.2069% of token supply, pro-rata by NFTs held (not equal wood-list share).",
+    "Holdings from full ownerOf scan. Free/Wood/Paid from remaining* mint caps (2/2/33)."
   ],
+  "allocationMode": "nft",
   "totalSupply": "888420069420888",
   "airdropPercentOfSupply": 4.2069,
   "airdropPoolTokens": null,
