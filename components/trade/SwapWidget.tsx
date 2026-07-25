@@ -184,6 +184,11 @@ export default function SwapWidget({ unlocked }: Props) {
       });
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 429 || data.error === "RATE_LIMIT") {
+          throw new Error(
+            data.message || "Too many quotes — wait a few seconds and try again."
+          );
+        }
         throw new Error(data.message || data.error || "Quote failed.");
       }
 
@@ -294,6 +299,17 @@ export default function SwapWidget({ unlocked }: Props) {
       });
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 429 || data.error === "RATE_LIMIT") {
+          throw new Error(
+            data.message || "Routing busy — wait a few seconds, get a new quote, then swap."
+          );
+        }
+        if (data.error === "INSUFFICIENT_FUNDS" || data.error === "GAS_ESTIMATE") {
+          throw new Error(
+            data.message ||
+              "Could not build swap (balance/gas). Check ETH for gas + amount, then retry."
+          );
+        }
         throw new Error(data.message || data.error || "Swap build failed.");
       }
 
@@ -303,15 +319,19 @@ export default function SwapWidget({ unlocked }: Props) {
       }
 
       setStatus("Confirm swap in wallet…");
+      // Omit gas fields if empty so wallet estimates (avoids bad Uniswap gas)
+      const gasLimit = tx.gasLimit || tx.gas;
       const hash = await sendTransaction({
         to: tx.to,
         from: account,
         data: tx.data,
         value: tx.value,
-        gasLimit: tx.gasLimit || tx.gas,
-        maxFeePerGas: tx.maxFeePerGas,
-        maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
-        gasPrice: tx.gasPrice,
+        ...(gasLimit ? { gasLimit: String(gasLimit) } : {}),
+        ...(tx.maxFeePerGas ? { maxFeePerGas: String(tx.maxFeePerGas) } : {}),
+        ...(tx.maxPriorityFeePerGas
+          ? { maxPriorityFeePerGas: String(tx.maxPriorityFeePerGas) }
+          : {}),
+        ...(tx.gasPrice ? { gasPrice: String(tx.gasPrice) } : {}),
         chainId: tx.chainId,
       });
       setTxHash(hash);

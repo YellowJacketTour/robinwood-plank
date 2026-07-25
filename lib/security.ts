@@ -104,10 +104,24 @@ export function sanitizeUpstreamError(data: unknown, fallback: string): {
   }
   const obj = data as Record<string, unknown>;
   // Uniswap often returns `detail` / `errorCode` rather than `message` / `error`
-  const rawMsg =
+  let rawMsg =
     (typeof obj.message === "string" && obj.message) ||
     (typeof obj.detail === "string" && obj.detail) ||
     fallback;
+
+  // Map Uniswap gas / sim noise to actionable copy
+  if (/Failed to fetch gas fee|FAILED_TO_ESTIMATE_GAS|simulate transaction/i.test(rawMsg)) {
+    if (/TRANSFER_FAILED|insufficient/i.test(rawMsg)) {
+      rawMsg =
+        "Not enough balance or allowance for this swap. Add ETH for gas (and PLANK if selling), or lower the amount.";
+    } else {
+      rawMsg =
+        "Could not fetch gas fee (busy or rate limited). Wait a few seconds, get a fresh quote, and try again.";
+    }
+  } else if (/rate.?limit|too many requests|throttl/i.test(rawMsg)) {
+    rawMsg = "Routing rate limited — wait a few seconds and retry.";
+  }
+
   const message = !looksSecret(rawMsg) ? String(rawMsg).slice(0, 400) : fallback;
   const rawErr =
     (typeof obj.error === "string" && obj.error) ||

@@ -25,7 +25,7 @@ type Body = {
 
 export async function POST(req: Request) {
   try {
-    const limited = rateLimit(req, { key: "approval", limit: 30, windowMs: 60_000 });
+    const limited = rateLimit(req, { key: "approval", limit: 90, windowMs: 60_000 });
     if (limited) return limited;
 
     assertTradeOpen();
