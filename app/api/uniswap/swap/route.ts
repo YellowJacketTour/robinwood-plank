@@ -1,7 +1,6 @@
 import { CHAIN } from "@/lib/constants";
 import { isSniperCaptureActive } from "@/lib/boards";
 import { classifyWallet, recordWidgetActivity } from "@/lib/boards-store";
-import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 import {
   assertNoClientFeeOrRouteOverride,
   assertQuoteIntegrity,
@@ -30,7 +29,7 @@ type Body = {
 type SwapTx = Record<string, unknown> & {
   to?: string;
   data?: string;
-  value?: string;
+  value?: string | number;
   from?: string;
   gas?: string | number;
   gasLimit?: string | number;
@@ -60,7 +59,7 @@ function mapSwapError(message: string): { error: string; message: string; status
     return {
       error: "GAS_ESTIMATE",
       message:
-        "Could not estimate gas (pool busy or balance/allowance issue). Retry in a few seconds with a smaller amount.",
+        "Wallet simulation could not estimate gas. Get a fresh quote and retry — ensure you have ETH for gas.",
       status: 502,
     };
   }
@@ -78,81 +77,53 @@ function mapSwapError(message: string): { error: string; message: string; status
   };
 }
 
-async function rpc(method: string, params: unknown[]): Promise<unknown> {
-  let last: unknown;
-  for (const url of ROBINHOOD_RPC_URLS) {
+/**
+ * Normalize Uniswap TransactionRequest for wallet simulators (Rabby/MetaMask).
+ * Critical: do NOT mix gasPrice with maxFeePerGas — that breaks Rabby simulation.
+ * Prefer letting the wallet estimate fees; keep gas limit only if Uniswap provided it.
+ */
+function walletSafeTx(swap: SwapTx, from: string): SwapTx {
+  const to = typeof swap.to === "string" ? swap.to : "";
+  const data = typeof swap.data === "string" ? swap.data : "";
+  let value = swap.value;
+  if (typeof value === "number") value = `0x${BigInt(value).toString(16)}`;
+  if (typeof value === "string" && value && !value.startsWith("0x")) {
     try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-        cache: "no-store",
-      });
-      const data = (await res.json()) as { result?: unknown; error?: { message?: string } };
-      if (data.error) throw new Error(data.error.message || "RPC error");
-      return data.result;
-    } catch (e) {
-      last = e;
-    }
-  }
-  throw last instanceof Error ? last : new Error("RPC failed");
-}
-
-/** Fill missing gas fields from Robinhood Chain so the wallet can still send. */
-async function ensureGasFields(swap: SwapTx, from: string): Promise<SwapTx> {
-  const next = { ...swap };
-  const hasGas = Boolean(next.gasLimit || next.gas);
-  const hasPrice = Boolean(
-    next.gasPrice || (next.maxFeePerGas && next.maxPriorityFeePerGas)
-  );
-
-  if (!hasGas && next.to && next.data) {
-    try {
-      const est = (await rpc("eth_estimateGas", [
-        {
-          from,
-          to: next.to,
-          data: next.data,
-          value:
-            typeof next.value === "string" && next.value
-              ? next.value.startsWith("0x")
-                ? next.value
-                : `0x${BigInt(next.value).toString(16)}`
-              : "0x0",
-        },
-      ])) as string;
-      if (est) {
-        // +20% headroom
-        const n = BigInt(est);
-        const bumped = (n * BigInt(12)) / BigInt(10);
-        next.gasLimit = `0x${bumped.toString(16)}`;
-        next.gas = next.gasLimit;
-      }
+      value = `0x${BigInt(value).toString(16)}`;
     } catch {
-      // wallet will estimate
+      value = "0x0";
     }
   }
 
-  if (!hasPrice) {
+  const out: SwapTx = {
+    to,
+    data,
+    from,
+    chainId: CHAIN.id,
+  };
+  if (value) out.value = value;
+
+  // Keep only a gas *limit* if present (not fee fields)
+  const rawGas = swap.gasLimit ?? swap.gas;
+  if (rawGas != null && rawGas !== "") {
     try {
-      const gp = (await rpc("eth_gasPrice", [])) as string;
-      if (gp) {
-        next.gasPrice = gp;
-        // mild EIP-1559-ish fields for wallets that prefer them
-        const price = BigInt(gp);
-        next.maxFeePerGas = `0x${((price * BigInt(12)) / BigInt(10)).toString(16)}`;
-        const tip = price / BigInt(10);
-        next.maxPriorityFeePerGas = `0x${(tip > BigInt(0) ? tip : BigInt(1)).toString(16)}`;
-      }
+      const n =
+        typeof rawGas === "string" && rawGas.startsWith("0x")
+          ? BigInt(rawGas)
+          : BigInt(rawGas);
+      // mild headroom without over-insisting
+      const bumped = (n * BigInt(115)) / BigInt(100);
+      out.gas = `0x${bumped.toString(16)}`;
+      out.gasLimit = out.gas;
     } catch {
-      /* wallet fills */
+      /* omit — wallet estimates */
     }
   }
 
-  if (typeof next.chainId !== "number") {
-    next.chainId = CHAIN.id;
-  }
-  return next;
+  // Intentionally omit gasPrice / maxFeePerGas / maxPriorityFeePerGas.
+  // Rabby + modern wallets simulate and set fees themselves; forced fees
+  // cause "simulation failed" and worse inclusion than Uniswap.app.
+  return out;
 }
 
 async function buildSwapOnce(
@@ -177,7 +148,6 @@ async function buildSwapOnce(
 
 export async function POST(req: Request) {
   try {
-    // Launch traffic: generous limits (was 20 — too tight with quote+swap+retries)
     const limited = rateLimit(req, { key: "swap", limit: 90, windowMs: 60_000 });
     if (limited) return limited;
 
@@ -222,11 +192,16 @@ export async function POST(req: Request) {
       basePayload.signature = body.signature;
     }
 
-    // Attempt order: simulate+refresh → refresh only → neither (wallet estimates gas)
+    /**
+     * Prefer NO server-side simulation — Rabby re-simulates in-wallet.
+     * Uniswap sim often fails (gas fee / TRANSFER) while the real tx is fine.
+     * refreshGasPrice true once for better inclusion without embedding fees in tx.
+     */
     const attempts: Array<Record<string, unknown>> = [
-      { ...basePayload, refreshGasPrice: true, simulateTransaction: true },
       { ...basePayload, refreshGasPrice: true, simulateTransaction: false },
       { ...basePayload, refreshGasPrice: false, simulateTransaction: false },
+      // last resort: with sim (some keys require it)
+      { ...basePayload, refreshGasPrice: true, simulateTransaction: true },
     ];
 
     let data: Record<string, unknown> | null = null;
@@ -241,7 +216,6 @@ export async function POST(req: Request) {
       }
       lastFail = result.message;
       lastStatus = result.status;
-      // Only retry gas/sim/rate-limit style failures
       if (!isGasFailure(result.message) && result.status !== 429) {
         const mapped = mapSwapError(result.message);
         return publicJson(
@@ -249,9 +223,8 @@ export async function POST(req: Request) {
           mapped.status
         );
       }
-      // brief backoff on rate limit
       if (result.status === 429 || /rate.?limit/i.test(result.message)) {
-        await new Promise((r) => setTimeout(r, 400));
+        await new Promise((r) => setTimeout(r, 500));
       }
     }
 
@@ -263,26 +236,24 @@ export async function POST(req: Request) {
       );
     }
 
-    let swap = data.swap as SwapTx | undefined;
-    if (!swap || typeof swap !== "object") {
+    const rawSwap = data.swap as SwapTx | undefined;
+    if (!rawSwap || typeof rawSwap !== "object") {
       throw new TradeApiError(502, "BAD_TX", "Uniswap returned no swap transaction.");
     }
     if (
-      typeof swap.to !== "string" ||
-      typeof swap.data !== "string" ||
-      !swap.data ||
-      swap.data === "0x"
+      typeof rawSwap.to !== "string" ||
+      typeof rawSwap.data !== "string" ||
+      !rawSwap.data ||
+      rawSwap.data === "0x"
     ) {
       throw new TradeApiError(502, "BAD_TX", "Uniswap returned an invalid swap transaction.");
     }
-    if (typeof swap.chainId === "number" && swap.chainId !== 4663) {
+    if (typeof rawSwap.chainId === "number" && rawSwap.chainId !== 4663) {
       throw new TradeApiError(502, "BAD_CHAIN", "Swap transaction is not for Robinhood Chain.");
     }
 
-    // Ensure gas so wallets don't fail on "missing gas" after Uniswap skips it
-    if (swapper) {
-      swap = await ensureGasFields(swap, swapper);
-    }
+    const from = swapper || (typeof rawSwap.from === "string" ? rawSwap.from : "");
+    const swap = walletSafeTx(rawSwap, from);
 
     if (swapper) {
       await recordWidgetActivity(swapper, "swap");
@@ -291,7 +262,9 @@ export async function POST(req: Request) {
     return publicJson({
       requestId: data.requestId,
       swap,
-      gasFee: data.gasFee,
+      // gasFee is informational only — not forced onto the tx
+      gasFee: data.gasFee ?? null,
+      walletSim: true,
     });
   } catch (err) {
     return publicError(err, "Unexpected error building swap.");

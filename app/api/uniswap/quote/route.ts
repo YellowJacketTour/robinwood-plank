@@ -78,6 +78,7 @@ export async function POST(req: Request) {
     // Spec-accurate fee payload (OpenAPI IntegratorFee + integratorFees array).
     const integratorFees = getIntegratorFees();
 
+    // Checksum-safe lower swapper; BEST_PRICE for execution quality vs Uniswap UI
     const upstream = await uniswapFetch("/quote", {
       tokenIn,
       tokenOut,
@@ -87,6 +88,7 @@ export async function POST(req: Request) {
       amount,
       swapper: swapper.toLowerCase(),
       slippageTolerance,
+      // Auto permit amount helps sell path match Uniswap.app
       permitAmount: "EXACT",
       // AMM only → CLASSIC quotes → /swap (not UniswapX /order)
       protocols: [...AMM_PROTOCOLS],

@@ -69,7 +69,8 @@ export default function SwapWidget({ unlocked }: Props) {
   const [quote, setQuote] = useState<QuoteState | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [apiReady, setApiReady] = useState<boolean | null>(null);
-  const [slippage, setSlippage] = useState(1);
+  // Slightly higher default than Uniswap UI auto — meme pool moves fast
+  const [slippage, setSlippage] = useState(1.5);
 
   const inputSymbol = direction === "buy" ? "ETH" : TOKEN.symbol;
   const outputSymbol = direction === "buy" ? TOKEN.symbol : "ETH";
@@ -239,50 +240,81 @@ export default function SwapWidget({ unlocked }: Props) {
     setError(null);
     setTxHash(null);
 
-    // Stale quote — force refresh (prices move; Uniswap quotes expire)
-    if (Date.now() - quote.fetchedAt > QUOTE_MAX_AGE_MS) {
-      setQuote(null);
-      setError("Quote expired. Get a fresh quote and try again.");
-      return;
-    }
-
     try {
       setBusy(true);
       await ensureRobinhoodChain();
 
+      // Always re-quote right before build so we don't lose to stale Uniswap.app prices
+      let active = quote;
+      if (Date.now() - quote.fetchedAt > 8_000) {
+        setStatus("Refreshing quote for best price…");
+        const raw = parseTokenAmount(amountIn, inputDecimals);
+        if (raw === null || raw <= BigInt(0)) {
+          throw new Error("Enter a valid amount.");
+        }
+        const qRes = await fetch("/api/uniswap/quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            direction,
+            amount: raw.toString(),
+            swapper: account,
+            slippageTolerance: slippage,
+          }),
+        });
+        const qData = await qRes.json();
+        if (!qRes.ok) {
+          throw new Error(qData.message || "Could not refresh quote. Try again.");
+        }
+        const quoteObj = (qData.quote ?? qData) as Record<string, unknown>;
+        const amountOut =
+          (typeof qData.amountOut === "string" && qData.amountOut) ||
+          (quoteObj.output as { amount?: string } | undefined)?.amount ||
+          "";
+        if (!amountOut) throw new Error("Quote missing output. Retry.");
+        active = {
+          quote: quoteObj,
+          permitData:
+            qData.permitData && typeof qData.permitData === "object"
+              ? (qData.permitData as QuoteState["permitData"])
+              : null,
+          permitTransaction:
+            qData.permitTransaction && typeof qData.permitTransaction === "object"
+              ? (qData.permitTransaction as Record<string, string>)
+              : null,
+          routing: (qData.routing as string) || "CLASSIC",
+          amountOut,
+          fetchedAt: Date.now(),
+        };
+        setQuote(active);
+      }
+
       // On-chain approval tx if Uniswap returned one (ERC-20 sell path)
-      if (quote.permitTransaction?.to && quote.permitTransaction?.data) {
+      if (active.permitTransaction?.to && active.permitTransaction?.data) {
         setStatus("Approve token in wallet…");
         const approveHash = await sendTransaction({
-          to: quote.permitTransaction.to,
+          to: active.permitTransaction.to,
           from: account,
-          data: quote.permitTransaction.data,
-          value: quote.permitTransaction.value,
-          gasLimit: quote.permitTransaction.gasLimit || quote.permitTransaction.gas,
-          maxFeePerGas: quote.permitTransaction.maxFeePerGas,
-          maxPriorityFeePerGas: quote.permitTransaction.maxPriorityFeePerGas,
-          gasPrice: quote.permitTransaction.gasPrice,
-          chainId: quote.permitTransaction.chainId,
+          data: active.permitTransaction.data,
+          value: active.permitTransaction.value,
+          // No fee fields — Rabby sim
+          gasLimit:
+            active.permitTransaction.gasLimit || active.permitTransaction.gas,
+          letWalletEstimateFees: true,
         });
         setStatus("Waiting for approval…");
-        await waitForTransaction(approveHash);
+        await waitForTransaction(approveHash, { label: "Approval" });
       }
 
       let signature: string | undefined;
-      if (quote.permitData?.domain && quote.permitData.types && quote.permitData.values) {
+      if (active.permitData?.domain && active.permitData.types && active.permitData.values) {
         setStatus("Sign Permit2…");
         signature = await signTypedData(
           account,
-          quote.permitData.domain,
-          quote.permitData.types,
-          quote.permitData.values
+          active.permitData.domain,
+          active.permitData.types,
+          active.permitData.values
         );
-      }
-
-      // Re-check age after user signed (can take a while)
-      if (Date.now() - quote.fetchedAt > QUOTE_MAX_AGE_MS) {
-        setQuote(null);
-        throw new Error("Quote expired while waiting. Get a new quote.");
       }
 
       setStatus("Building swap…");
@@ -290,10 +322,10 @@ export default function SwapWidget({ unlocked }: Props) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          quote: quote.quote,
+          quote: active.quote,
           swapper: account,
-          ...(quote.permitData && signature
-            ? { permitData: quote.permitData, signature }
+          ...(active.permitData && signature
+            ? { permitData: active.permitData, signature }
             : {}),
         }),
       });
@@ -318,8 +350,8 @@ export default function SwapWidget({ unlocked }: Props) {
         throw new Error("Invalid swap transaction from Uniswap.");
       }
 
-      setStatus("Confirm swap in wallet…");
-      // Omit gas fields if empty so wallet estimates (avoids bad Uniswap gas)
+      setStatus("Confirm in wallet (simulation)…");
+      // Clean payload: to/data/value + optional gas limit only — wallet sets fees
       const gasLimit = tx.gasLimit || tx.gas;
       const hash = await sendTransaction({
         to: tx.to,
@@ -327,12 +359,7 @@ export default function SwapWidget({ unlocked }: Props) {
         data: tx.data,
         value: tx.value,
         ...(gasLimit ? { gasLimit: String(gasLimit) } : {}),
-        ...(tx.maxFeePerGas ? { maxFeePerGas: String(tx.maxFeePerGas) } : {}),
-        ...(tx.maxPriorityFeePerGas
-          ? { maxPriorityFeePerGas: String(tx.maxPriorityFeePerGas) }
-          : {}),
-        ...(tx.gasPrice ? { gasPrice: String(tx.gasPrice) } : {}),
-        chainId: tx.chainId,
+        letWalletEstimateFees: true,
       });
       setTxHash(hash);
       setStatus("Swap submitted — waiting for confirmation…");
@@ -340,12 +367,10 @@ export default function SwapWidget({ unlocked }: Props) {
         await waitForTransaction(hash, { label: "Swap", timeoutMs: 180_000 });
         setStatus("Swap confirmed.");
       } catch {
-        // Submitted is enough if confirmation is slow; hash still shown
         setStatus("Swap submitted (confirming on chain…).");
       }
       setQuote(null);
       setAmountIn("");
-      // Widget session for Good Wood
       void fetch("/api/boards/ping", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -356,7 +381,7 @@ export default function SwapWidget({ unlocked }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [unlocked, quote, account]);
+  }, [unlocked, quote, account, amountIn, inputDecimals, direction, slippage]);
 
   const estimatedOut = useMemo(() => {
     if (!quote?.amountOut) return "—";
@@ -407,8 +432,8 @@ export default function SwapWidget({ unlocked }: Props) {
 
         {unlocked && (
           <p className="mt-2.5 rounded-lg border border-emerald-500/30 bg-forest-900/75 px-2.5 py-2 text-[0.7rem] leading-snug text-foreground/80 sm:text-xs">
-            <strong className="text-emerald-300">Live:</strong> connect wallet · buy or sell ·
-            fee {SITE_FEE.label} to treasury. Official CA only.
+            <strong className="text-emerald-300">Live:</strong> connect · buy/sell · fee{" "}
+            {SITE_FEE.label}. Quotes refresh before swap. Rabby/MetaMask set their own gas.
           </p>
         )}
 
@@ -520,7 +545,9 @@ export default function SwapWidget({ unlocked }: Props) {
             >
               <option value={0.5}>0.5%</option>
               <option value={1}>1%</option>
+              <option value={1.5}>1.5%</option>
               <option value={2}>2%</option>
+              <option value={3}>3%</option>
               <option value={5}>5%</option>
             </select>
           </label>
