@@ -46,6 +46,14 @@ export type AllocationRow = {
   pctOfSupply: number;
   expectedTokens: string;
   expectedTokensRaw: string;
+  /** Current NFT balance */
+  nfts?: number;
+  /** Free mints claimed (max 2) */
+  freeMinted?: number;
+  /** Wood List / allowlist mints claimed (max 2) */
+  woodMinted?: number;
+  /** Paid / public mints claimed (max 33) */
+  paidMinted?: number;
 };
 
 export type AirdropSnapshot = {
@@ -459,6 +467,10 @@ export function compactRows(rows: AllocationRow[]): Array<{
   pa: number;
   ps: number;
   t: string;
+  n: number;
+  f: number;
+  wl: number;
+  p: number;
 }> {
   return rows.map((r) => ({
     a: r.address,
@@ -467,5 +479,34 @@ export function compactRows(rows: AllocationRow[]): Array<{
     pa: r.pctOfAirdrop,
     ps: r.pctOfSupply,
     t: r.expectedTokens,
+    n: r.nfts ?? 0,
+    f: r.freeMinted ?? 0,
+    wl: r.woodMinted ?? 0,
+    p: r.paidMinted ?? 0,
   }));
+}
+
+/** Attach NFT mint stats onto allocation rows (mutates copies). */
+export function attachNftStats(
+  rows: AllocationRow[],
+  byAddress: Record<
+    string,
+    { nfts: number; free: number; wood: number; paid: number }
+  >
+): AllocationRow[] {
+  return rows.map((r) => {
+    const st = byAddress[r.address] || {
+      nfts: 0,
+      free: 0,
+      wood: 0,
+      paid: 0,
+    };
+    return {
+      ...r,
+      nfts: st.nfts,
+      freeMinted: st.free,
+      woodMinted: st.wood,
+      paidMinted: st.paid,
+    };
+  });
 }
