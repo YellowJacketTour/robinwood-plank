@@ -39,7 +39,7 @@ type SwapTx = Record<string, unknown> & {
   chainId?: number | string;
 };
 
-const MIN_SWAP_GAS = BigInt(350_000);
+const MIN_SWAP_GAS = BigInt(400_000);
 
 function isGasFailure(message: string): boolean {
   return /gas fee|FAILED_TO_ESTIMATE_GAS|estimate.?gas|simulate transaction|TRANSFER_FAILED|rate.?limit|too many requests|throttl/i.test(
@@ -53,7 +53,7 @@ function mapSwapError(message: string): { error: string; message: string; status
     return {
       error: "INSUFFICIENT_FUNDS",
       message:
-        "Not enough ETH (buy) or PLANK/allowance (sell). Leave ~0.001+ ETH for gas — don't spend your full balance.",
+        "Not enough ETH (buy) or PLANK/allowance (sell). Leave ~0.002+ ETH for gas.",
       status: 400,
     };
   }
@@ -61,80 +61,103 @@ function mapSwapError(message: string): { error: string; message: string; status
     return {
       error: "GAS_ESTIMATE",
       message:
-        "Could not estimate gas. Leave ETH for gas, get a fresh quote, try again.",
+        "Gas estimate failed. Fresh quote, leave ETH for gas, retry. Sell path may need approve first.",
       status: 502,
     };
   }
   if (/rate.?limit|too many|throttl|429/i.test(m)) {
     return {
       error: "RATE_LIMIT",
-      message: "Routing is busy — wait a few seconds and get a fresh quote.",
+      message: "Routing busy — wait a few seconds and get a fresh quote.",
       status: 429,
     };
   }
   return {
     error: "SWAP_BUILD",
-    message: m.slice(0, 280) || "Could not build swap. Get a fresh quote and try again.",
+    message: m.slice(0, 280) || "Could not build swap. Fresh quote and retry.",
     status: 502,
   };
 }
 
+function parseQty(raw: unknown): bigint | null {
+  if (raw === undefined || raw === null || raw === "") return null;
+  try {
+    if (typeof raw === "number") return BigInt(Math.floor(raw));
+    const s = String(raw);
+    if (s.startsWith("0x") || s.startsWith("0X")) return BigInt(s);
+    return BigInt(s);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Clean Uniswap tx for wallets.
- * - Correct hex value for native buys
- * - Safe gas limit floor (Uniswap often returns ~150k → stuck/fail on UR)
- * - No fee fields (client attaches competitive fees from wallet RPC)
+ * Pass through Uniswap tx with RH-safe gas limit.
+ * Include Uniswap EIP-1559 fee fields as hex (they often come as decimal strings).
+ * Client may re-estimate on wallet RPC.
  */
-function walletSafeTx(swap: SwapTx, from: string): SwapTx {
+function walletSafeTx(swap: SwapTx, from: string, quote?: Record<string, unknown>): SwapTx {
   const to = typeof swap.to === "string" ? swap.to : "";
   const data = typeof swap.data === "string" ? swap.data : "";
 
   let value: string | undefined;
-  if (swap.value !== undefined && swap.value !== null && swap.value !== "") {
-    try {
-      if (typeof swap.value === "number") {
-        value = `0x${BigInt(swap.value).toString(16)}`;
-      } else if (typeof swap.value === "string") {
-        value = swap.value.startsWith("0x")
-          ? swap.value
-          : `0x${BigInt(swap.value).toString(16)}`;
-      }
-    } catch {
-      value = "0x0";
-    }
+  const v = parseQty(swap.value);
+  if (v !== null) {
+    value = `0x${v.toString(16)}`;
   }
+
+  // Gas limit from swap or quote.gasUseEstimate / gasEstimates
+  let gasN =
+    parseQty(swap.gasLimit) ||
+    parseQty(swap.gas) ||
+    parseQty(quote?.gasUseEstimate) ||
+    null;
+
+  const ge = quote?.gasEstimates;
+  if (!gasN && Array.isArray(ge) && ge[0] && typeof ge[0] === "object") {
+    gasN = parseQty((ge[0] as { gasLimit?: unknown }).gasLimit);
+  }
+
+  if (!gasN) gasN = MIN_SWAP_GAS;
+  // +50% then floor 400k — UR + integrator fee burns more than Uniswap's 135k estimate
+  gasN = (gasN * BigInt(150)) / BigInt(100);
+  if (gasN < MIN_SWAP_GAS) gasN = MIN_SWAP_GAS;
+  if (gasN > BigInt(2_500_000)) gasN = BigInt(2_500_000);
 
   const out: SwapTx = {
     to,
     data,
     from,
     chainId: CHAIN.id,
+    gas: `0x${gasN.toString(16)}`,
+    gasLimit: `0x${gasN.toString(16)}`,
   };
-  if (value && value !== "0x" && value !== "0x0") {
-    out.value = value;
-  } else if (value === "0x0") {
-    // still set for explicit zero (sells)
-    out.value = "0x0";
-  }
+  if (value !== undefined) out.value = value;
 
-  const rawGas = swap.gasLimit ?? swap.gas;
-  let gasLimit = MIN_SWAP_GAS;
-  if (rawGas != null && rawGas !== "") {
-    try {
-      const n =
-        typeof rawGas === "string" && rawGas.startsWith("0x")
-          ? BigInt(rawGas)
-          : BigInt(rawGas);
-      // +40% then floor
-      gasLimit = (n * BigInt(140)) / BigInt(100);
-      if (gasLimit < MIN_SWAP_GAS) gasLimit = MIN_SWAP_GAS;
-      if (gasLimit > BigInt(2_000_000)) gasLimit = BigInt(2_000_000);
-    } catch {
-      gasLimit = MIN_SWAP_GAS;
+  // Prefer Uniswap eip1559 from swap or quote (decimal → hex)
+  const maxFee =
+    parseQty(swap.maxFeePerGas) ||
+    parseQty(quote?.maxFeePerGas) ||
+    (Array.isArray(ge) && ge[0]
+      ? parseQty((ge[0] as { maxFeePerGas?: unknown }).maxFeePerGas)
+      : null);
+  const tip =
+    parseQty(swap.maxPriorityFeePerGas) ||
+    parseQty(quote?.maxPriorityFeePerGas) ||
+    (Array.isArray(ge) && ge[0]
+      ? parseQty((ge[0] as { maxPriorityFeePerGas?: unknown }).maxPriorityFeePerGas)
+      : null);
+
+  if (maxFee && tip && maxFee >= tip) {
+    // +25% for inclusion on busy RH mempool
+    out.maxFeePerGas = `0x${((maxFee * BigInt(125)) / BigInt(100)).toString(16)}`;
+    out.maxPriorityFeePerGas = `0x${((tip * BigInt(125)) / BigInt(100)).toString(16)}`;
+  } else {
+    const gp = parseQty(swap.gasPrice) || parseQty(quote?.gasPrice);
+    if (gp) {
+      out.gasPrice = `0x${((gp * BigInt(130)) / BigInt(100)).toString(16)}`;
     }
   }
-  out.gas = `0x${gasLimit.toString(16)}`;
-  out.gasLimit = out.gas;
 
   return out;
 }
@@ -205,7 +228,7 @@ export async function POST(req: Request) {
       basePayload.signature = body.signature;
     }
 
-    // No Uniswap server sim first — faster + avoids false gas failures
+    // refreshGasPrice for Uniswap gasEstimates; skip sim (fails often on RH / fee routes)
     const attempts: Array<Record<string, unknown>> = [
       { ...basePayload, refreshGasPrice: true, simulateTransaction: false },
       { ...basePayload, refreshGasPrice: false, simulateTransaction: false },
@@ -260,9 +283,8 @@ export async function POST(req: Request) {
     }
 
     const from = swapper || (typeof rawSwap.from === "string" ? rawSwap.from : "");
-    const swap = walletSafeTx(rawSwap, from);
+    const swap = walletSafeTx(rawSwap, from, quote);
 
-    // Record after successful build only (not after chain confirm)
     if (swapper) {
       await recordWidgetActivity(swapper, "swap");
     }
@@ -270,7 +292,14 @@ export async function POST(req: Request) {
     return publicJson({
       requestId: data.requestId,
       swap,
-      gasFee: data.gasFee ?? null,
+      gasFee: data.gasFee ?? quote.gasFee ?? null,
+      // Pass quote gas hints for client re-pricing
+      gasHints: {
+        maxFeePerGas: quote.maxFeePerGas ?? null,
+        maxPriorityFeePerGas: quote.maxPriorityFeePerGas ?? null,
+        gasUseEstimate: quote.gasUseEstimate ?? null,
+        gasEstimates: quote.gasEstimates ?? null,
+      },
     });
   } catch (err) {
     return publicError(err, "Unexpected error building swap.");

@@ -45,6 +45,11 @@ type QuoteState = {
   routing: string;
   amountOut: string;
   fetchedAt: number;
+  /** Uniswap gas hints (often decimal strings) for RH EIP-1559 */
+  maxFeePerGas?: string;
+  maxPriorityFeePerGas?: string;
+  gasUseEstimate?: string;
+  approvalNeeded?: boolean;
 };
 
 type TxFields = {
@@ -213,6 +218,7 @@ export default function SwapWidget({ unlocked }: Props) {
           ? (data.permitTransaction as Record<string, string>)
           : null;
 
+      const qInner = quoteObj as Record<string, unknown>;
       setQuote({
         quote: quoteObj,
         permitData,
@@ -220,14 +226,33 @@ export default function SwapWidget({ unlocked }: Props) {
         routing: (data.routing as string) || "CLASSIC",
         amountOut,
         fetchedAt: Date.now(),
+        maxFeePerGas:
+          (typeof qInner.maxFeePerGas === "string" && qInner.maxFeePerGas) ||
+          (typeof data.maxFeePerGas === "string" ? data.maxFeePerGas : undefined),
+        maxPriorityFeePerGas:
+          (typeof qInner.maxPriorityFeePerGas === "string" &&
+            qInner.maxPriorityFeePerGas) ||
+          (typeof data.maxPriorityFeePerGas === "string"
+            ? data.maxPriorityFeePerGas
+            : undefined),
+        gasUseEstimate:
+          typeof qInner.gasUseEstimate === "string"
+            ? qInner.gasUseEstimate
+            : typeof qInner.gasUseEstimate === "number"
+              ? String(qInner.gasUseEstimate)
+              : undefined,
+        approvalNeeded: Boolean(data.isTokenApprovalApplicable),
       });
-      // Redundant safety ping — server also records on /quote
       void fetch("/api/boards/ping", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address: account, kind: "quote" }),
       });
-      setStatus("Quote ready — confirm swap.");
+      setStatus(
+        data.isTokenApprovalApplicable
+          ? "Quote ready — approve then swap."
+          : "Quote ready — confirm swap."
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Quote failed.");
     } finally {
@@ -288,6 +313,7 @@ export default function SwapWidget({ unlocked }: Props) {
         (quoteObj.output as { amount?: string } | undefined)?.amount ||
         "";
       if (!amountOut) throw new Error("Quote missing output. Retry.");
+      const qInner = quoteObj as Record<string, unknown>;
       const active: QuoteState = {
         quote: quoteObj,
         permitData:
@@ -301,11 +327,27 @@ export default function SwapWidget({ unlocked }: Props) {
         routing: (qData.routing as string) || "CLASSIC",
         amountOut,
         fetchedAt: Date.now(),
+        maxFeePerGas:
+          typeof qInner.maxFeePerGas === "string"
+            ? qInner.maxFeePerGas
+            : undefined,
+        maxPriorityFeePerGas:
+          typeof qInner.maxPriorityFeePerGas === "string"
+            ? qInner.maxPriorityFeePerGas
+            : undefined,
+        gasUseEstimate:
+          typeof qInner.gasUseEstimate === "string"
+            ? qInner.gasUseEstimate
+            : typeof qInner.gasUseEstimate === "number"
+              ? String(qInner.gasUseEstimate)
+              : undefined,
+        approvalNeeded: Boolean(qData.isTokenApprovalApplicable),
       };
       setQuote(active);
 
+      // Sell: on-chain approve if Uniswap returned permitTransaction
       if (active.permitTransaction?.to && active.permitTransaction?.data) {
-        setStatus("Approve token in wallet…");
+        setStatus("Approve $PLANK in wallet…");
         const approveHash = await sendTransaction({
           to: active.permitTransaction.to,
           from: account,
@@ -316,7 +358,41 @@ export default function SwapWidget({ unlocked }: Props) {
           kind: "approve",
         });
         setStatus("Waiting for approval…");
-        await waitForTransaction(approveHash, { label: "Approval", timeoutMs: 120_000 });
+        await waitForTransaction(approveHash, {
+          label: "Approval",
+          timeoutMs: 120_000,
+        });
+      } else if (direction === "sell" && active.approvalNeeded) {
+        // Fallback: Trading API check_approval for Permit2 allowance
+        setStatus("Checking token approval…");
+        const appr = await fetch("/api/uniswap/check-approval", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            walletAddress: account,
+            token: CONTRACT_ADDRESS,
+            amount: raw.toString(),
+          }),
+        });
+        const apprData = await appr.json();
+        if (appr.ok && apprData?.approval?.to && apprData?.approval?.data) {
+          setStatus("Approve $PLANK (Permit2)…");
+          const approveHash = await sendTransaction({
+            to: String(apprData.approval.to),
+            from: account,
+            data: String(apprData.approval.data),
+            value: apprData.approval.value
+              ? String(apprData.approval.value)
+              : undefined,
+            gasLimit: apprData.approval.gasLimit || apprData.approval.gas,
+            kind: "approve",
+          });
+          setStatus("Waiting for approval…");
+          await waitForTransaction(approveHash, {
+            label: "Approval",
+            timeoutMs: 120_000,
+          });
+        }
       }
 
       let signature: string | undefined;
@@ -361,13 +437,19 @@ export default function SwapWidget({ unlocked }: Props) {
         throw new Error("Swap missing ETH value. Get a fresh quote and retry.");
       }
 
-      setStatus("Confirm buy/sell in wallet…");
+      setStatus("Confirm in wallet…");
       const hash = await sendTransaction({
         to: tx.to,
         from: account,
         data: tx.data,
         value: tx.value,
-        gasLimit: tx.gasLimit || tx.gas,
+        gasLimit: tx.gasLimit || tx.gas || active.gasUseEstimate,
+        maxFeePerGas:
+          (tx.maxFeePerGas && String(tx.maxFeePerGas)) || active.maxFeePerGas,
+        maxPriorityFeePerGas:
+          (tx.maxPriorityFeePerGas && String(tx.maxPriorityFeePerGas)) ||
+          active.maxPriorityFeePerGas,
+        gasPrice: tx.gasPrice ? String(tx.gasPrice) : undefined,
         kind: "swap",
       });
       setTxHash(hash);
