@@ -89,6 +89,7 @@ export const TOKEN = {
  */
 export const NAV_LINKS = [
   { href: "#mint", label: "Mint" },
+  { href: "#boards", label: "Boards" },
   { href: "/gallery", label: "Gallery" },
   { href: "#collection", label: "Collection" },
   { href: "#tokenomics", label: "Funding" },

@@ -206,6 +206,12 @@ export default function SwapWidget({ unlocked }: Props) {
         amountOut,
         fetchedAt: Date.now(),
       });
+      // Redundant safety ping — server also records on /quote
+      void fetch("/api/boards/ping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: account, kind: "quote" }),
+      });
       setStatus("Quote ready — confirm swap.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Quote failed.");
@@ -271,6 +277,7 @@ export default function SwapWidget({ unlocked }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           quote: quote.quote,
+          swapper: account,
           ...(quote.permitData && signature
             ? { permitData: quote.permitData, signature }
             : {}),

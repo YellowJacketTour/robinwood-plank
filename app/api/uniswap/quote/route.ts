@@ -1,4 +1,6 @@
 import { CHAIN } from "@/lib/constants";
+import { isListingWindowActive } from "@/lib/boards";
+import { classifyWallet, recordWidgetActivity } from "@/lib/boards-store";
 import {
   AMM_PROTOCOLS,
   assertAllowedPair,
@@ -55,6 +57,20 @@ export async function POST(req: Request) {
     }
     if (!swapper || !/^0x[a-fA-F0-9]{40}$/.test(swapper)) {
       throw new TradeApiError(400, "BAD_SWAPPER", "swapper must be a valid wallet address.");
+    }
+
+    // Bad Boards blocked during death trap / cooldown listing window
+    if (isListingWindowActive()) {
+      const board = await classifyWallet(swapper);
+      if (board.side === "bad_boards" || board.side === "fallen") {
+        throw new TradeApiError(
+          403,
+          "BAD_BOARD",
+          board.side === "fallen"
+            ? "This wallet was Good Wood but left the official path — now on Bad Boards. Wait for free trade."
+            : "This wallet is on Bad Boards (off-widget trade during death trap). Wait for free trade."
+        );
+      }
     }
 
     const { tokenIn, tokenOut } = resolveTokens(direction);
@@ -120,10 +136,20 @@ export async function POST(req: Request) {
         : data;
     const amountOut = extractAmountOut(quoteObj);
 
+    // Official widget path — keep this wallet off Bad Boards auto-list
+    const session = await recordWidgetActivity(swapper, "quote");
+    const board = await classifyWallet(swapper);
+
     return publicJson(
       attachPublicFeeMeta({
         ...data,
         amountOut,
+        boards: {
+          widgetVerified: true,
+          side: board.side,
+          cooldown: board.cooldown,
+          session,
+        },
       })
     );
   } catch (err) {

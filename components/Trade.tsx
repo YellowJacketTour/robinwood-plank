@@ -27,13 +27,13 @@ const STEPS = [
   },
   {
     n: "3",
-    title: "Plank List",
-    body: "Early / off-widget buyers get listed.",
+    title: "Bad Boards",
+    body: "Off-widget $PLANK movers listed live — see Boards.",
   },
   {
     n: "4",
-    title: "Free forever",
-    body: "Rules off, LP renounced, open markets.",
+    title: "30m cooldowns",
+    body: "Per wallet while we update blacklist / exclusions.",
   },
 ] as const;
 
