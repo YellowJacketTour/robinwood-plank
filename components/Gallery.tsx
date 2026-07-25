@@ -794,10 +794,35 @@ export default function Gallery() {
   }
 
   function openToken(tokenId: number) {
-    const nft = items.find((item) => item.tokenId === tokenId);
+    let nft = items.find((item) => item.tokenId === tokenId);
+    // Insights may surface tokens from local cache before React state has them
+    if (!nft) {
+      const cached = getCachedToken(tokenId);
+      if (cached && (cached.imageUri || cached.attributes?.length)) {
+        const idx = indexNft({
+          tokenId,
+          name: cached.name,
+          description: cached.description,
+          attributes: cached.attributes,
+          owner: cached.owner,
+        });
+        nft = {
+          tokenId,
+          tokenUri: cached.tokenUri,
+          name: cached.name,
+          description: cached.description,
+          imageUri: cached.imageUri,
+          attributes: cached.attributes,
+          owner: cached.owner,
+          searchText: idx.searchText,
+          searchWords: idx.words,
+          loaded: true,
+        };
+      }
+    }
     if (nft) {
-      setPanel("gallery");
       setSelected(nft);
+      // Stay on Insights if already there so art board isn't kicked out
     }
   }
 
