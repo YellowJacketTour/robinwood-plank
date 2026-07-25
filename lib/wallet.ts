@@ -4,24 +4,21 @@ export type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
   on?: (event: string, handler: (...args: unknown[]) => void) => void;
   removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
+  isMetaMask?: boolean;
+  providers?: Eip1193Provider[];
 };
 
-declare global {
-  interface Window {
-    ethereum?: Eip1193Provider & {
-      isMetaMask?: boolean;
-      providers?: Eip1193Provider[];
-    };
-  }
-}
+type InjectedWindow = Window & {
+  ethereum?: Eip1193Provider;
+};
 
 export function getEthereumProvider(): Eip1193Provider | null {
   if (typeof window === "undefined") return null;
-  const eth = window.ethereum;
+  const eth = (window as InjectedWindow).ethereum;
   if (!eth) return null;
   // Prefer MetaMask when multiple injected providers exist.
   if (Array.isArray(eth.providers) && eth.providers.length > 0) {
-    const mm = eth.providers.find((p) => (p as { isMetaMask?: boolean }).isMetaMask);
+    const mm = eth.providers.find((p) => p.isMetaMask);
     return mm || eth.providers[0];
   }
   return eth;
