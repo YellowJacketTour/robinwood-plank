@@ -243,6 +243,30 @@ export function getCachedTokensInRange(
   return out;
 }
 
+/** All tokens with revealed attributes — sample for collection-wide rarity. */
+export function listCachedScoredTokens(): Array<{
+  tokenId: number;
+  attributes: NftAttribute[];
+  loaded: boolean;
+}> {
+  hydrateFromStorage();
+  const out: Array<{
+    tokenId: number;
+    attributes: NftAttribute[];
+    loaded: boolean;
+  }> = [];
+  for (const rec of memory.tokens.values()) {
+    if (Array.isArray(rec.attributes) && rec.attributes.length > 0) {
+      out.push({
+        tokenId: rec.tokenId,
+        attributes: rec.attributes,
+        loaded: true,
+      });
+    }
+  }
+  return out;
+}
+
 export function hasFreshMetadata(tokenId: number): boolean {
   const rec = getCachedToken(tokenId);
   if (!rec?.tokenUri || !rec.metaAt) return false;
