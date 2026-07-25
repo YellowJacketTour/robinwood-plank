@@ -231,6 +231,15 @@ export async function setScanCursor(block: number, notes: string[]): Promise<voi
   await persist(state);
 }
 
+/** ISO of last successful scan (from updatedAt after scan). */
+export async function getLastScanAgeMs(): Promise<number> {
+  const state = await ensureLoaded();
+  if (!state.updatedAt || state.lastScannedBlock <= 0) return Number.POSITIVE_INFINITY;
+  const t = Date.parse(state.updatedAt);
+  if (Number.isNaN(t)) return Number.POSITIVE_INFINITY;
+  return Date.now() - t;
+}
+
 export async function getCooldown(address: string): Promise<{
   active: boolean;
   startedAt: string | null;
