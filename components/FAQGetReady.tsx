@@ -39,33 +39,28 @@ export default function FAQGetReady() {
         <ol className="mt-3 grid gap-2 sm:grid-cols-3 sm:gap-3">
           {STEPS.map((s, i) => (
             <Reveal key={s.title} delayMs={i * 80}>
-              <li className="dense-card relative flex flex-col items-center p-3 text-center sm:p-4">
+              <li className="dense-card relative flex flex-col items-center p-2.5 text-center sm:p-3">
                 <div
-                  className="relative z-10 flex h-16 w-16 items-center justify-center rounded-full border-2 border-gold-500 bg-wood-950 text-3xl"
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-gold-500 bg-wood-950 text-xl"
                   aria-hidden="true"
                 >
                   {s.icon}
                 </div>
-                <span className="mt-4 text-xs font-bold uppercase tracking-widest text-gold-300">{s.step}</span>
-                <h3 className="mt-2 font-display text-2xl text-foreground">{s.title}</h3>
-                <p className="mt-2 text-lg text-foreground">{s.desc}</p>
+                <span className="mt-1.5 text-[0.6rem] font-bold uppercase tracking-widest text-gold-300">
+                  {s.step}
+                </span>
+                <h3 className="mt-0.5 font-display text-base text-foreground sm:text-lg">{s.title}</h3>
+                <p className="mt-0.5 text-xs text-foreground/70">{s.desc}</p>
               </li>
             </Reveal>
           ))}
         </ol>
 
-        <Reveal delayMs={360}>
-          <div className="mt-8 rounded-xl border-2 border-dashed border-gold-500/40 bg-forest-900/75 p-5 text-sm text-foreground/80">
-            <p>
-              <span aria-hidden="true">🔑</span> <strong>Stay safe:</strong> Use the official wallet. Verify every
-              address. Ignore links in DMs.
-            </p>
+        <Reveal delayMs={200}>
+          <div className="mt-3 rounded-lg border border-dashed border-gold-500/40 bg-forest-900/75 px-3 py-2 text-xs text-foreground/80">
+            <strong>Stay safe:</strong> Official wallet only. Verify addresses. Ignore DMs.
           </div>
         </Reveal>
-
-        <p className="mt-6 text-center text-xs italic text-foreground/50">
-          Verify everything with Robinhood&apos;s official documentation.
-        </p>
       </div>
     </section>
   );
