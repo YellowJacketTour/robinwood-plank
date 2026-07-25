@@ -22,11 +22,13 @@ import {
   matchesGalleryQuery,
 } from "@/lib/gallery-search";
 import {
-  NFT_ABI,
   NFT_CONTRACT_ADDRESS,
   ROBINHOOD_EXPLORER_URL,
 } from "@/lib/mint-contract";
-import { getMintReadClient } from "@/lib/robinhood-provider";
+import {
+  getMintReadClient,
+  touchMintReadClient,
+} from "@/lib/robinhood-provider";
 import {
   computeRaritySnapshot,
   formatRank,
@@ -35,12 +37,23 @@ import {
 } from "@/lib/rarity";
 import type { GalleryNft } from "@/lib/gallery-types";
 import RarityInsights from "@/components/RarityInsights";
+import {
+  ensureNftCacheHydrated,
+  getCachedSupply,
+  getCachedToken,
+  hasFreshMetadata,
+  hasFreshOwner,
+  putTokenMetadata,
+  putTokenOwner,
+  putTokenUri,
+  setCachedSupply,
+  type CachedTokenRecord,
+} from "@/lib/nft-cache";
 
 export type { GalleryNft };
 
-const POLL_MS = 20_000;
-const URI_BATCH = 16;
-const META_CONCURRENCY = 8;
+const POLL_MS = 25_000;
+const META_CONCURRENCY = 6;
 const PAGE_SIZE = 24;
 /** First paint: stage this many cards immediately (newest first). */
 const INITIAL_STAGE = 48;
@@ -68,6 +81,29 @@ function indexNft(fields: {
 
 function sortNewestFirst(a: GalleryNft, b: GalleryNft) {
   return b.tokenId - a.tokenId;
+}
+
+function recordToGalleryNft(rec: CachedTokenRecord, loaded: boolean): GalleryNft {
+  const idx = indexNft({
+    tokenId: rec.tokenId,
+    name: rec.name,
+    description: rec.description,
+    attributes: rec.attributes,
+    owner: rec.owner,
+  });
+  return {
+    tokenId: rec.tokenId,
+    tokenUri: rec.tokenUri,
+    name: rec.name,
+    description: rec.description,
+    imageUri: rec.imageUri,
+    attributes: rec.attributes,
+    owner: rec.owner,
+    searchText: idx.searchText,
+    searchWords: idx.words,
+    loaded,
+    error: rec.error,
+  };
 }
 
 function GalleryDetailModal({
@@ -261,10 +297,16 @@ export default function Gallery() {
   const [sortMode, setSortMode] = useState<"newest" | "rarest">("newest");
   const [panel, setPanel] = useState<"gallery" | "insights">("gallery");
 
-  const knownIdsRef = useRef<Set<number>>(new Set());
+  /** Max supply id we've staged placeholders for */
+  const knownMaxRef = useRef(0);
+  /** tokenIds currently in-flight for network hydrate */
   const loadingIdsRef = useRef<Set<number>>(new Set());
-  const itemsCountRef = useRef(0);
-  const syncGenRef = useRef(0);
+  /** tokenIds with metadata painted (loaded true) */
+  const loadedIdsRef = useRef<Set<number>>(new Set());
+  /** Bumped only on unmount — polls must NOT cancel hydration */
+  const aliveRef = useRef(true);
+  const hydratingRef = useRef(false);
+  const queueRef = useRef<number[]>([]);
 
   const upsertItems = useCallback((incoming: GalleryNft[]) => {
     setItems((previous) => {
@@ -272,13 +314,30 @@ export default function Gallery() {
       for (const item of incoming) {
         map.set(item.tokenId, item);
       }
-      const next = Array.from(map.values()).sort(sortNewestFirst);
-      itemsCountRef.current = next.length;
-      return next;
+      return Array.from(map.values()).sort(sortNewestFirst);
     });
   }, []);
 
+  const recountLoaded = useCallback(() => {
+    setLoadedCount(loadedIdsRef.current.size);
+  }, []);
+
   const makePlaceholder = useCallback((tokenId: number): GalleryNft => {
+    const cached = getCachedToken(tokenId);
+    if (cached && (cached.imageUri || cached.metaAt)) {
+      const nft = recordToGalleryNft(cached, true);
+      loadedIdsRef.current.add(tokenId);
+      return nft;
+    }
+    if (cached?.owner) {
+      return recordToGalleryNft(
+        {
+          ...cached,
+          name: cached.name || `RobinWood Plank #${tokenId}`,
+        },
+        false,
+      );
+    }
     const name = `RobinWood Plank #${tokenId}`;
     const idx = indexNft({ tokenId, name, owner: "" });
     return {
@@ -298,34 +357,66 @@ export default function Gallery() {
   const hydrateToken = useCallback(
     async (tokenId: number, contract: Contract): Promise<GalleryNft> => {
       const fallbackName = `RobinWood Plank #${tokenId}`;
-      let tokenUri = "";
-      let owner = "";
-      try {
-        tokenUri = (await contract.tokenURI(tokenId)) as string;
-      } catch {
-        /* keep empty */
+
+      // Immutable metadata cache hit — only refresh owner if stale
+      if (hasFreshMetadata(tokenId)) {
+        const rec = getCachedToken(tokenId)!;
+        let owner = rec.owner;
+        if (!hasFreshOwner(tokenId)) {
+          try {
+            owner = (await contract.ownerOf(tokenId)) as string;
+            putTokenOwner(tokenId, owner);
+            touchMintReadClient();
+          } catch {
+            /* keep cached owner */
+          }
+        }
+        const updated = putTokenMetadata(tokenId, {
+          tokenUri: rec.tokenUri,
+          name: rec.name,
+          description: rec.description,
+          imageUri: rec.imageUri,
+          attributes: rec.attributes,
+          owner,
+        });
+        return recordToGalleryNft(updated, true);
       }
-      try {
-        owner = (await contract.ownerOf(tokenId)) as string;
-      } catch {
-        /* keep empty */
+
+      // Partial cache: have tokenURI from earlier
+      let tokenUri = getCachedToken(tokenId)?.tokenUri || "";
+      let owner = hasFreshOwner(tokenId) ? getCachedToken(tokenId)?.owner || "" : "";
+
+      if (!tokenUri) {
+        try {
+          tokenUri = (await contract.tokenURI(tokenId)) as string;
+          if (tokenUri) putTokenUri(tokenId, tokenUri);
+          touchMintReadClient();
+        } catch {
+          /* keep empty */
+        }
+      }
+
+      if (!owner) {
+        try {
+          owner = (await contract.ownerOf(tokenId)) as string;
+          putTokenOwner(tokenId, owner);
+          touchMintReadClient();
+        } catch {
+          /* keep empty */
+        }
       }
 
       if (!tokenUri) {
-        const idx = indexNft({ tokenId, name: fallbackName, owner });
-        return {
-          tokenId,
+        const rec = putTokenMetadata(tokenId, {
           tokenUri: "",
           name: fallbackName,
           description: "",
           imageUri: "",
           attributes: [],
           owner,
-          searchText: idx.searchText,
-          searchWords: idx.words,
-          loaded: true,
           error: "tokenURI unavailable",
-        };
+        });
+        return recordToGalleryNft(rec, true);
       }
 
       try {
@@ -335,170 +426,269 @@ export default function Gallery() {
         const attributes = Array.isArray(metadata.attributes)
           ? metadata.attributes
           : [];
-        const idx = indexNft({
-          tokenId,
-          name,
-          description,
-          attributes,
-          owner,
-        });
-        return {
-          tokenId,
+        const rec = putTokenMetadata(tokenId, {
           tokenUri,
           name,
           description,
           imageUri: metadata.image || "",
           attributes,
           owner,
-          searchText: idx.searchText,
-          searchWords: idx.words,
-          loaded: true,
-        };
+        });
+        return recordToGalleryNft(rec, true);
       } catch {
-        const idx = indexNft({ tokenId, name: fallbackName, owner });
-        return {
-          tokenId,
+        const rec = putTokenMetadata(tokenId, {
           tokenUri,
           name: fallbackName,
           description: "",
           imageUri: "",
           attributes: [],
           owner,
-          searchText: idx.searchText,
-          searchWords: idx.words,
-          loaded: true,
           error: "metadata unavailable",
-        };
+        });
+        return recordToGalleryNft(rec, true);
       }
     },
     [],
   );
 
-  const loadMetadataForIds = useCallback(
-    async (tokenIds: number[], contract: Contract, gen: number) => {
-      const pending = tokenIds.filter((id) => !loadingIdsRef.current.has(id));
-      if (!pending.length) return;
+  /**
+   * Drain hydrate queue. Safe to call while already running — enqueues work.
+   * Polls never cancel this; only unmount (aliveRef) stops it.
+   */
+  const drainHydrateQueue = useCallback(
+    async (contract: Contract) => {
+      if (hydratingRef.current) return;
+      hydratingRef.current = true;
 
-      for (const id of pending) loadingIdsRef.current.add(id);
+      try {
+        while (aliveRef.current) {
+          // Prefer newest first
+          queueRef.current.sort((a, b) => b - a);
+          const next: number[] = [];
+          while (next.length < META_CONCURRENCY && queueRef.current.length) {
+            const id = queueRef.current.shift()!;
+            if (loadingIdsRef.current.has(id)) continue;
+            if (loadedIdsRef.current.has(id) && hasFreshMetadata(id)) continue;
+            loadingIdsRef.current.add(id);
+            next.push(id);
+          }
+          if (!next.length) break;
 
-      const ordered = [...pending].sort((a, b) => b - a);
-
-      for (let offset = 0; offset < ordered.length; offset += URI_BATCH) {
-        if (syncGenRef.current !== gen) return;
-        const slice = ordered.slice(offset, offset + URI_BATCH);
-
-        for (let i = 0; i < slice.length; i += META_CONCURRENCY) {
-          if (syncGenRef.current !== gen) return;
-          const chunk = slice.slice(i, i + META_CONCURRENCY);
           const resolved = await Promise.all(
-            chunk.map((tokenId) => hydrateToken(tokenId, contract)),
+            next.map(async (tokenId) => {
+              try {
+                return await hydrateToken(tokenId, contract);
+              } finally {
+                loadingIdsRef.current.delete(tokenId);
+              }
+            }),
           );
-          if (syncGenRef.current !== gen) return;
+
+          if (!aliveRef.current) return;
+
+          for (const nft of resolved) {
+            if (nft.loaded) loadedIdsRef.current.add(nft.tokenId);
+          }
           upsertItems(resolved);
-          setLoadedCount((count) => count + resolved.length);
+          recountLoaded();
+
+          const supply = knownMaxRef.current;
+          if (supply > 0) {
+            const done = loadedIdsRef.current.size;
+            setStatus(
+              done >= supply
+                ? `Live gallery · ${supply.toLocaleString()} minted · newest top-left`
+                : `Indexing ${done.toLocaleString()} / ${supply.toLocaleString()} Planks…`,
+            );
+          }
+        }
+      } finally {
+        hydratingRef.current = false;
+        // If more work arrived while finishing, continue
+        if (aliveRef.current && queueRef.current.length) {
+          void drainHydrateQueue(contract);
         }
       }
     },
-    [hydrateToken, upsertItems],
+    [hydrateToken, recountLoaded, upsertItems],
   );
 
-  const syncMinted = useCallback(async () => {
-    const gen = ++syncGenRef.current;
-    try {
-      setStatus("Connecting to Robinhood Chain…");
-      const { contract } = await getMintReadClient();
-      const supply = Number(await contract.totalSupply());
-      if (syncGenRef.current !== gen) return;
-
-      setTotalMinted(supply);
-
-      if (supply === 0) {
-        setStatus("No Planks minted yet.");
-        setItems([]);
-        itemsCountRef.current = 0;
-        knownIdsRef.current.clear();
-        loadingIdsRef.current.clear();
-        setLoadedCount(0);
-        return;
-      }
-
-      // If we previously aborted before painting, recover by re-staging.
-      if (itemsCountRef.current === 0 && knownIdsRef.current.size > 0) {
-        knownIdsRef.current.clear();
-        loadingIdsRef.current.clear();
-        setLoadedCount(0);
-      }
-
-      // Newest first: supply … 1
-      const allIds: number[] = [];
-      for (let id = supply; id >= 1; id -= 1) allIds.push(id);
-
-      const newIds = allIds.filter((id) => !knownIdsRef.current.has(id));
-
-      if (newIds.length) {
-        // Stage newest immediately so the grid never looks empty
-        const stageNow = newIds.slice(0, Math.max(INITIAL_STAGE, PAGE_SIZE));
-        const stageLater = newIds.slice(stageNow.length);
-
-        for (const id of stageNow) knownIdsRef.current.add(id);
-        upsertItems(stageNow.map(makePlaceholder));
-        setStatus(`Loading ${supply.toLocaleString()} minted Planks…`);
-        setLivePulse(true);
-        window.setTimeout(() => setLivePulse(false), 900);
-
-        // Hydrate visible/newest first
-        await loadMetadataForIds(stageNow, contract, gen);
-        if (syncGenRef.current !== gen) return;
-
-        // Stage + hydrate the rest in the background
-        if (stageLater.length) {
-          for (const id of stageLater) knownIdsRef.current.add(id);
-          upsertItems(stageLater.map(makePlaceholder));
-          void loadMetadataForIds(stageLater, contract, gen);
-        }
-      } else if (itemsCountRef.current === 0) {
-        // known set drifted without paint — hard reset
-        knownIdsRef.current.clear();
-        loadingIdsRef.current.clear();
-        setLoadedCount(0);
-        const stageNow = allIds.slice(0, INITIAL_STAGE);
-        for (const id of stageNow) knownIdsRef.current.add(id);
-        upsertItems(stageNow.map(makePlaceholder));
-        await loadMetadataForIds(stageNow, contract, gen);
-        if (syncGenRef.current !== gen) return;
-        const rest = allIds.slice(INITIAL_STAGE);
-        if (rest.length) {
-          for (const id of rest) knownIdsRef.current.add(id);
-          upsertItems(rest.map(makePlaceholder));
-          void loadMetadataForIds(rest, contract, gen);
+  const enqueueHydrate = useCallback(
+    (ids: number[], contract: Contract) => {
+      const pending = ids.filter(
+        (id) =>
+          !loadedIdsRef.current.has(id) ||
+          !hasFreshMetadata(id) ||
+          !hasFreshOwner(id),
+      );
+      if (!pending.length) return;
+      const queued = new Set(queueRef.current);
+      for (const id of pending) {
+        if (!queued.has(id) && !loadingIdsRef.current.has(id)) {
+          queueRef.current.push(id);
+          queued.add(id);
         }
       }
+      void drainHydrateQueue(contract);
+    },
+    [drainHydrateQueue],
+  );
 
-      if (syncGenRef.current === gen) {
-        setStatus(
-          `Live gallery · ${supply.toLocaleString()} minted · newest top-left`,
+  const stageIds = useCallback(
+    (ids: number[]) => {
+      if (!ids.length) return;
+      const staged = ids.map(makePlaceholder);
+      upsertItems(staged);
+      recountLoaded();
+    },
+    [makePlaceholder, recountLoaded, upsertItems],
+  );
+
+  const syncMinted = useCallback(
+    async (mode: "full" | "poll" = "full") => {
+      try {
+        if (mode === "full") {
+          setStatus((s) =>
+            items.length || getCachedSupply()
+              ? s.startsWith("Live") || s.startsWith("Indexing")
+                ? s
+                : "Refreshing gallery…"
+              : "Connecting to Robinhood Chain…",
+          );
+        }
+
+        const { contract } = await getMintReadClient();
+        const supply = Number(await contract.totalSupply());
+        if (!aliveRef.current) return;
+
+        touchMintReadClient();
+        setCachedSupply(supply);
+        setTotalMinted(supply);
+
+        if (supply === 0) {
+          setStatus("No Planks minted yet.");
+          setItems([]);
+          knownMaxRef.current = 0;
+          loadedIdsRef.current.clear();
+          loadingIdsRef.current.clear();
+          queueRef.current = [];
+          setLoadedCount(0);
+          return;
+        }
+
+        const prevMax = knownMaxRef.current;
+
+        // Newly minted ids only
+        if (supply > prevMax) {
+          const newIds: number[] = [];
+          for (let id = prevMax + 1; id <= supply; id += 1) newIds.push(id);
+          knownMaxRef.current = supply;
+
+          // Newest first for stage order
+          newIds.sort((a, b) => b - a);
+          const stageNow = newIds.slice(0, Math.max(INITIAL_STAGE, PAGE_SIZE));
+          const stageLater = newIds.slice(stageNow.length);
+
+          stageIds(stageNow);
+          setLivePulse(true);
+          window.setTimeout(() => setLivePulse(false), 900);
+          setStatus(`Loading ${supply.toLocaleString()} minted Planks…`);
+
+          enqueueHydrate(stageNow, contract);
+          if (stageLater.length) {
+            // Stage placeholders for the rest without blocking
+            stageIds(stageLater);
+            enqueueHydrate(stageLater, contract);
+          }
+        } else if (prevMax === 0 && supply > 0) {
+          // First run with cache paint already done, or empty known
+          knownMaxRef.current = supply;
+        }
+
+        // Re-queue anything still unloaded (recover from past stalls)
+        if (mode === "full" || loadedIdsRef.current.size < supply) {
+          const missing: number[] = [];
+          for (let id = supply; id >= 1; id -= 1) {
+            if (!loadedIdsRef.current.has(id) || !hasFreshMetadata(id)) {
+              missing.push(id);
+            }
+          }
+          if (missing.length) {
+            // Ensure placeholders exist
+            const needStage = missing.filter((id) => {
+              // cheap: stage only if not already in items — stageIds upserts fine
+              return true;
+            });
+            // Stage in chunks of INITIAL_STAGE to avoid huge single setState
+            for (let i = 0; i < needStage.length; i += INITIAL_STAGE) {
+              stageIds(needStage.slice(i, i + INITIAL_STAGE));
+            }
+            enqueueHydrate(missing, contract);
+          }
+        }
+
+        if (loadedIdsRef.current.size >= supply) {
+          setStatus(
+            `Live gallery · ${supply.toLocaleString()} minted · newest top-left`,
+          );
+        }
+      } catch (error) {
+        if (!aliveRef.current) return;
+        const message =
+          error instanceof Error ? error.message : "Unable to sync gallery.";
+        // Keep cached grid visible
+        setStatus((prev) =>
+          items.length || loadedIdsRef.current.size
+            ? `Sync pause: ${message}`
+            : `Gallery sync issue: ${message}`,
         );
       }
-    } catch (error) {
-      if (syncGenRef.current !== gen) return;
-      const message =
-        error instanceof Error ? error.message : "Unable to sync gallery.";
-      setStatus(`Gallery sync issue: ${message}`);
-      // Allow retry to re-stage everything
-      knownIdsRef.current.clear();
-      loadingIdsRef.current.clear();
-    }
-  }, [loadMetadataForIds, makePlaceholder, upsertItems]);
+    },
+    // items.length only used for status strings — omit to avoid resubscribe storms
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [enqueueHydrate, stageIds],
+  );
 
+  // Bootstrap from local cache before any RPC
   useEffect(() => {
-    void syncMinted();
-    const timer = window.setInterval(() => void syncMinted(), POLL_MS);
+    aliveRef.current = true;
+    ensureNftCacheHydrated();
+    const cachedSupply = getCachedSupply();
+    if (cachedSupply && cachedSupply.value > 0) {
+      const supply = cachedSupply.value;
+      setTotalMinted(supply);
+      knownMaxRef.current = supply;
+      const ids: number[] = [];
+      for (let id = supply; id >= 1; id -= 1) ids.push(id);
+      // Paint cached metadata immediately (newest first)
+      const painted: GalleryNft[] = [];
+      for (const id of ids) {
+        const rec = getCachedToken(id);
+        if (rec && (rec.imageUri || rec.metaAt)) {
+          painted.push(recordToGalleryNft(rec, true));
+          loadedIdsRef.current.add(id);
+        } else {
+          painted.push(makePlaceholder(id));
+        }
+      }
+      setItems(painted);
+      setLoadedCount(loadedIdsRef.current.size);
+      setStatus(
+        loadedIdsRef.current.size >= supply
+          ? `Live gallery · ${supply.toLocaleString()} minted · cached`
+          : `Restored ${loadedIdsRef.current.size.toLocaleString()} cached · syncing…`,
+      );
+    }
+
+    void syncMinted("full");
+    const timer = window.setInterval(() => void syncMinted("poll"), POLL_MS);
+
     return () => {
-      // Invalidate in-flight work without permanently blocking the next mount
-      syncGenRef.current += 1;
+      aliveRef.current = false;
       window.clearInterval(timer);
     };
-  }, [syncMinted]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Reset pagination when query changes
   useEffect(() => {
@@ -542,7 +732,9 @@ export default function Gallery() {
 
   const remaining = Math.max(0, filtered.length - visibleCount);
   const progress =
-    totalMinted === 0 ? 0 : Math.min(100, Math.round((loadedCount / totalMinted) * 100));
+    totalMinted === 0
+      ? 0
+      : Math.min(100, Math.round((loadedCount / totalMinted) * 100));
   const searchActive = query.trim().length > 0;
   const metadataStillLoading = totalMinted > 0 && loadedCount < totalMinted;
   const selectedRarity = selected
@@ -609,7 +801,6 @@ export default function Gallery() {
         </div>
 
         <div className="wood-frame overflow-hidden rounded-xl bg-wood-900/95">
-          {/* Compact toolbar */}
           <div className="border-b border-gold-500/20 p-3 sm:p-3.5">
             <form
               onSubmit={onSearchSubmit}

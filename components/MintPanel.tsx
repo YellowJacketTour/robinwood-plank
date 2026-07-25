@@ -15,7 +15,19 @@ import {
   ROBINHOOD_RPC_URL,
   SALE_PHASE_NAMES,
 } from "@/lib/mint-contract";
-import { clearMintReadClientCache, getMintReadClient } from "@/lib/robinhood-provider";
+import {
+  clearMintReadClientCache,
+  getMintReadClient,
+  touchMintReadClient,
+} from "@/lib/robinhood-provider";
+import {
+  ensureNftCacheHydrated,
+  getCachedMintStats,
+  getCachedMintStatsIfFresh,
+  getCachedProofs,
+  setCachedMintStats,
+  setCachedProofs,
+} from "@/lib/nft-cache";
 
 const TOTAL_SUPPLY = 1542;
 const COMMUNITY_SUPPLY = 777;
@@ -105,8 +117,58 @@ export default function MintPanel() {
   const [transactionHash, setTransactionHash] = useState("");
   const [rpcLabel, setRpcLabel] = useState("");
 
+  const applyCachedStats = useCallback(() => {
+    ensureNftCacheHydrated();
+    const cached = getCachedMintStats();
+    if (!cached) return false;
+    setStats({
+      phase: cached.phase,
+      paused: cached.paused,
+      total: cached.total,
+      community: cached.community,
+      free: cached.free,
+      allowlist: cached.allowlist,
+      paid: cached.paid,
+      remainingCommunity: cached.remainingCommunity,
+      remainingTotal: cached.remainingTotal,
+      remainingPaidSupply: cached.remainingPaidSupply,
+      priceWei: BigInt(cached.priceWei || "0"),
+      communityReleased: cached.communityReleased,
+      live: true,
+    });
+    setLoading(false);
+    return true;
+  }, []);
+
   const loadStats = useCallback(async (walletAddress = address, forceRpc = false) => {
     try {
+      // Serve fresh cache immediately; still refresh in background when forced or stale
+      if (!forceRpc) {
+        const fresh = getCachedMintStatsIfFresh();
+        if (fresh) {
+          setStats({
+            phase: fresh.phase,
+            paused: fresh.paused,
+            total: fresh.total,
+            community: fresh.community,
+            free: fresh.free,
+            allowlist: fresh.allowlist,
+            paid: fresh.paid,
+            remainingCommunity: fresh.remainingCommunity,
+            remainingTotal: fresh.remainingTotal,
+            remainingPaidSupply: fresh.remainingPaidSupply,
+            priceWei: BigInt(fresh.priceWei || "0"),
+            communityReleased: fresh.communityReleased,
+            live: true,
+          });
+          setLoading(false);
+          // Still refresh wallet limits if needed
+          if (!walletAddress) return;
+        } else {
+          applyCachedStats();
+        }
+      }
+
       if (forceRpc) clearMintReadClientCache();
       const { contract, rpcUrl } = await getMintReadClient(forceRpc);
       setRpcLabel(rpcUrl.includes("blockscout") ? "Blockscout RPC" : "Robinhood RPC");
@@ -138,8 +200,9 @@ export default function MintPanel() {
         contract.mintPrice(),
         contract.communitySupplyReleased(),
       ]);
+      touchMintReadClient();
 
-      setStats({
+      const nextStats = {
         phase: Number(phase),
         paused: Boolean(paused),
         total: Number(total),
@@ -152,8 +215,25 @@ export default function MintPanel() {
         remainingPaidSupply: Number(remainingPaidSupply),
         priceWei,
         communityReleased: Boolean(communityReleased),
-        live: true,
+        live: true as const,
+      };
+
+      setCachedMintStats({
+        phase: nextStats.phase,
+        paused: nextStats.paused,
+        total: nextStats.total,
+        community: nextStats.community,
+        free: nextStats.free,
+        allowlist: nextStats.allowlist,
+        paid: nextStats.paid,
+        remainingCommunity: nextStats.remainingCommunity,
+        remainingTotal: nextStats.remainingTotal,
+        remainingPaidSupply: nextStats.remainingPaidSupply,
+        priceWei: priceWei.toString(),
+        communityReleased: nextStats.communityReleased,
       });
+
+      setStats(nextStats);
 
       if (walletAddress) {
         const [freeRemaining, allowlistRemaining, paidRemaining] = await Promise.all([
@@ -185,16 +265,17 @@ export default function MintPanel() {
             },
       );
     }
-  }, [address]);
+  }, [address, applyCachedStats]);
 
   useEffect(() => {
+    applyCachedStats();
     const initialLoad = window.setTimeout(() => void loadStats(), 0);
     const timer = window.setInterval(() => void loadStats(), 12_000);
     return () => {
       window.clearTimeout(initialLoad);
       window.clearInterval(timer);
     };
-  }, [loadStats]);
+  }, [loadStats, applyCachedStats]);
 
   useEffect(() => {
     if (!window.ethereum) return;
@@ -301,12 +382,17 @@ export default function MintPanel() {
       if (phase === 1) {
         transaction = await contract.freeMint(mintQuantity);
       } else if (phase === 2) {
-        const response = await fetch("/proofs.json", { cache: "no-store" });
-        if (!response.ok) throw new Error("The Wood List proof file is not available yet.");
-        const proofData = (await response.json()) as {
+        type ProofsFile = {
           proofs?: Record<string, string[]>;
           [key: string]: unknown;
         };
+        let proofData = getCachedProofs() as ProofsFile | null;
+        if (!proofData) {
+          const response = await fetch("/proofs.json", { cache: "force-cache" });
+          if (!response.ok) throw new Error("The Wood List proof file is not available yet.");
+          proofData = (await response.json()) as ProofsFile;
+          setCachedProofs(proofData);
+        }
         const normalizedAddress = address.toLowerCase();
         const proof =
           proofData.proofs?.[normalizedAddress] ||

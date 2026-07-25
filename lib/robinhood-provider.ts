@@ -18,7 +18,11 @@ type CacheEntry = {
 };
 
 let cached: CacheEntry | null = null;
-const CACHE_MS = 30_000;
+/** Keep a healthy RPC warm; re-probe only after this window. */
+const CACHE_MS = 90_000;
+/** Skip health-check RPC when last success was this recent. */
+const HEALTH_SKIP_MS = 20_000;
+let lastHealthOkAt = 0;
 
 function timeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -58,13 +62,17 @@ async function probe(rpcUrl: string): Promise<MintContractRead> {
 
 /**
  * Working read client for the mint contract.
- * Caches a healthy RPC for 30s so mint + gallery don't thrash endpoints.
+ * Caches a healthy RPC and avoids re-probing on every gallery/mint tick.
  */
 export async function getMintReadClient(force = false): Promise<MintContractRead> {
   if (!force && cached && cached.expiresAt > Date.now()) {
+    // Trust recent successes — gallery hydrates hundreds of calls on this client
+    if (Date.now() - lastHealthOkAt < HEALTH_SKIP_MS) {
+      return cached.client;
+    }
     try {
-      // cheap health check
       await timeout(cached.client.contract.salePhase(), 5_000, "cached RPC dead");
+      lastHealthOkAt = Date.now();
       return cached.client;
     } catch {
       cached = null;
@@ -76,6 +84,7 @@ export async function getMintReadClient(force = false): Promise<MintContractRead
     try {
       const client = await probe(rpcUrl);
       cached = { client, expiresAt: Date.now() + CACHE_MS };
+      lastHealthOkAt = Date.now();
       return client;
     } catch (error) {
       lastError = error;
@@ -90,4 +99,13 @@ export async function getMintReadClient(force = false): Promise<MintContractRead
 
 export function clearMintReadClientCache() {
   cached = null;
+  lastHealthOkAt = 0;
+}
+
+/** Mark current RPC as healthy after a successful contract call. */
+export function touchMintReadClient() {
+  if (cached) {
+    lastHealthOkAt = Date.now();
+    cached.expiresAt = Date.now() + CACHE_MS;
+  }
 }

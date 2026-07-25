@@ -2,8 +2,24 @@
 
 import { useState, type FormEvent } from "react";
 import { isAddress } from "ethers";
+import { getCachedProofs, setCachedProofs } from "@/lib/nft-cache";
 
 type Result = "listed" | "not-listed" | "invalid" | "error" | null;
+
+type ProofsFile = {
+  proofs?: Record<string, string[]>;
+  [key: string]: unknown;
+};
+
+async function loadProofs(): Promise<ProofsFile> {
+  const cached = getCachedProofs() as ProofsFile | null;
+  if (cached) return cached;
+  const response = await fetch("/proofs.json", { cache: "force-cache" });
+  if (!response.ok) throw new Error("Proof file unavailable");
+  const data = (await response.json()) as ProofsFile;
+  setCachedProofs(data);
+  return data;
+}
 
 export default function WoodListChecker() {
   const [address, setAddress] = useState("");
@@ -22,12 +38,7 @@ export default function WoodListChecker() {
     setChecking(true);
     setResult(null);
     try {
-      const response = await fetch("/proofs.json");
-      if (!response.ok) throw new Error("Proof file unavailable");
-      const data = (await response.json()) as {
-        proofs?: Record<string, string[]>;
-        [key: string]: unknown;
-      };
+      const data = await loadProofs();
       const proof =
         data.proofs?.[normalizedAddress] ||
         (data[normalizedAddress] as string[] | undefined);

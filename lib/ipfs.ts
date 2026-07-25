@@ -1,9 +1,11 @@
+import { getCachedMetadata, setCachedMetadata } from "@/lib/nft-cache";
+
 /** Public IPFS gateways tried in order for metadata and images. */
 export const IPFS_GATEWAYS = [
   "https://ipfs.io/ipfs/",
+  "https://cloudflare-ipfs.com/ipfs/",
   "https://dweb.link/ipfs/",
   "https://gateway.pinata.cloud/ipfs/",
-  "https://cloudflare-ipfs.com/ipfs/",
 ] as const;
 
 /**
@@ -53,20 +55,38 @@ export type NftMetadata = {
   attributes?: NftAttribute[];
 };
 
-export async function fetchNftMetadata(tokenUri: string): Promise<NftMetadata> {
+/**
+ * Fetch NFT metadata with permanent cache (IPFS is content-addressed).
+ * Pass `force: true` to bypass cache.
+ */
+export async function fetchNftMetadata(
+  tokenUri: string,
+  options?: { force?: boolean },
+): Promise<NftMetadata> {
+  if (!tokenUri) throw new Error("Empty tokenURI");
+
+  if (!options?.force) {
+    const cached = getCachedMetadata(tokenUri);
+    if (cached) return cached;
+  }
+
   const candidates = ipfsGatewayCandidates(tokenUri);
   let lastError: unknown;
 
   for (const url of candidates) {
     try {
       const response = await fetch(url, {
-        signal: AbortSignal.timeout(12_000),
+        signal: AbortSignal.timeout(10_000),
+        // Metadata is immutable once published
+        cache: "force-cache",
       });
       if (!response.ok) {
         lastError = new Error(`HTTP ${response.status}`);
         continue;
       }
-      return (await response.json()) as NftMetadata;
+      const data = (await response.json()) as NftMetadata;
+      setCachedMetadata(tokenUri, data);
+      return data;
     } catch (error) {
       lastError = error;
     }
