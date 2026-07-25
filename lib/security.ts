@@ -103,14 +103,17 @@ export function sanitizeUpstreamError(data: unknown, fallback: string): {
     return { error: "UPSTREAM", message: fallback };
   }
   const obj = data as Record<string, unknown>;
-  const message =
-    typeof obj.message === "string" && !looksSecret(obj.message)
-      ? obj.message.slice(0, 400)
-      : fallback;
-  const error =
-    typeof obj.error === "string" && !looksSecret(obj.error)
-      ? obj.error.slice(0, 80)
-      : "UPSTREAM";
+  // Uniswap often returns `detail` / `errorCode` rather than `message` / `error`
+  const rawMsg =
+    (typeof obj.message === "string" && obj.message) ||
+    (typeof obj.detail === "string" && obj.detail) ||
+    fallback;
+  const message = !looksSecret(rawMsg) ? String(rawMsg).slice(0, 400) : fallback;
+  const rawErr =
+    (typeof obj.error === "string" && obj.error) ||
+    (typeof obj.errorCode === "string" && obj.errorCode) ||
+    "UPSTREAM";
+  const error = !looksSecret(rawErr) ? String(rawErr).slice(0, 80) : "UPSTREAM";
   return { error, message };
 }
 
