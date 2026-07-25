@@ -88,15 +88,26 @@ export function isListingWindowActive(nowMs: number = Date.now()): boolean {
 
 /**
  * True only while the official widget is still locked (LP bait / sniper trap).
- * Chain scanner may mark Bad Boards *only* in this phase.
- *
- * Once community trade opens (`cooldown_window` / widget on), buyers through
- * plank.love must never be auto-logged as Bad Boards — scan capture stops.
+ * All PLANK movers in this phase are off-site (widget cannot buy yet).
  */
 export function isSniperCaptureActive(nowMs: number = Date.now()): boolean {
   const w = getTrapWindow(nowMs);
   if (w.rulesRelaxed) return false;
   return w.phase === "death_trap";
+}
+
+/**
+ * True while we still flag off-site / Uniswap-UI buyers:
+ *  - death_trap: widget locked → every chain buy is off-site
+ *  - cooldown_window: widget open → only wallets WITHOUT a plank.love
+ *    quote/swap session are Bad Boards (Uni app / other UIs)
+ *
+ * Official plank.love widget buyers are never listed (server records sessions).
+ */
+export function isOffWidgetCaptureActive(nowMs: number = Date.now()): boolean {
+  const w = getTrapWindow(nowMs);
+  if (w.rulesRelaxed) return false;
+  return w.phase === "death_trap" || w.phase === "cooldown_window";
 }
 
 /** Community widget unlocked (and not free yet). */

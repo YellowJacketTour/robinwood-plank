@@ -17,6 +17,13 @@ type BadEntry = {
   ethSpent?: string;
   ethSpentUsd?: number;
   ethSpentUsdLabel?: string;
+  venue?: "death_trap" | "off_site";
+  venueLabel?: string;
+};
+
+type NiceEntry = {
+  address: string;
+  label: "plank.love" | "wood_list";
 };
 
 type VolumeTick = {
@@ -45,8 +52,9 @@ type BoardsPayload = {
     fallen: number;
   };
   recentBadBoards: BadEntry[];
-  niceLedger?: string[];
+  niceLedger?: Array<string | NiceEntry>;
   naughtyLedger?: BadEntry[];
+  export?: { blacklistCsv?: string; addressesOnly?: string };
   volume?: VolumeTick;
   live?: {
     autoScanEveryMs: number;
@@ -338,13 +346,26 @@ export default function WoodYouJustLookAtIt() {
 
   const trap = data?.trap;
   const counts = data?.counts;
-  const goodList = data?.niceLedger ?? [];
+  const goodList: NiceEntry[] = (data?.niceLedger ?? []).map((row) =>
+    typeof row === "string"
+      ? { address: row, label: "wood_list" as const }
+      : row
+  );
   const badList = data?.naughtyLedger ?? data?.recentBadBoards ?? [];
   const listingLive = Boolean(trap?.active || data?.live?.listingActive);
   const ethUsd = volume?.ethUsd ?? data?.volume?.ethUsd ?? 0;
   const totalEth = volume?.totalEthSpent ?? data?.volume?.totalEthSpent ?? "0.000";
   const totalUsd =
     volume?.totalUsdLabel ?? data?.volume?.totalUsdLabel ?? "$0.00";
+
+  function downloadBlacklist(format: "csv" | "addresses") {
+    const path =
+      format === "csv"
+        ? data?.export?.blacklistCsv || "/api/boards/export?format=csv"
+        : data?.export?.addressesOnly || "/api/boards/export?format=addresses";
+    // One-click download for 20lab / ops
+    window.location.href = path;
+  }
 
   return (
     <section id="boards" className="section-tight scroll-mt-20 px-3 sm:px-5">
@@ -353,7 +374,7 @@ export default function WoodYouJustLookAtIt() {
           <SectionHead
             eyebrow="Wooden ledger · live scan"
             title="Wood You Just Look At It"
-            lede="Good Wood held the line. Bad Boards sniped while the widget was locked. Once trade is on, official plank.love buyers stay clean — ETH + USD tick live."
+            lede="plank.love widget vs off-site/Uniswap labeled. Death trap + post-open off-widget snipes → Bad Boards. One-click CSV for 20lab."
             artSrc="/images/collection/plank-redacted.png"
             artAlt="Redacted collection plank"
           />
@@ -467,6 +488,31 @@ export default function WoodYouJustLookAtIt() {
               </button>
             </div>
           </div>
+
+          {/* 20lab blacklist export */}
+          <div className="wood-ledger mt-2 flex flex-wrap items-center justify-between gap-2 px-2.5 py-2">
+            <p className="text-[0.65rem] text-foreground/60">
+              <strong className="text-gold-300">Blacklist CSV</strong> for 20lab — one click.
+              plank.love widget buyers stay off this list.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => downloadBlacklist("csv")}
+                className="min-h-8 rounded bg-orange-500/90 px-3 text-[0.65rem] font-bold text-wood-950 hover:bg-orange-400"
+              >
+                Download CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => downloadBlacklist("addresses")}
+                className="min-h-8 rounded border border-[#c4922e]/50 px-3 text-[0.65rem] font-bold text-gold-300 hover:bg-gold-500/10"
+              >
+                Addresses only
+              </button>
+            </div>
+          </div>
+
           {error && <p className="mt-1 text-xs text-red-300">{error}</p>}
         </Reveal>
 
@@ -479,19 +525,36 @@ export default function WoodYouJustLookAtIt() {
                     Good Wood
                   </h3>
                   <span className="text-[0.55rem] font-bold uppercase tracking-wider text-emerald-400/70">
-                    mint · airdrop
+                    plank.love · wood list
                   </span>
                 </header>
                 <div className="wood-ledger-ruled max-h-56 overflow-y-auto px-2 py-0.5 sm:max-h-72">
                   {goodList.length === 0 ? (
                     <p className="wood-ledger-entry text-foreground/40">Loading…</p>
                   ) : (
-                    goodList.map((addr, i) => (
-                      <div key={addr} className="wood-ledger-entry wood-ledger-good flex gap-1.5">
+                    goodList.map((row, i) => (
+                      <div
+                        key={row.address}
+                        className="wood-ledger-entry wood-ledger-good flex items-baseline gap-1.5"
+                      >
                         <span className="w-5 shrink-0 text-foreground/35">{i + 1}</span>
-                        <code className="min-w-0 flex-1 truncate" title={addr}>
-                          {shortAddress(addr, 5)}
+                        <code className="min-w-0 flex-1 truncate" title={row.address}>
+                          {shortAddress(row.address, 5)}
                         </code>
+                        <span
+                          className={`shrink-0 text-[0.55rem] font-bold uppercase ${
+                            row.label === "plank.love"
+                              ? "text-emerald-300"
+                              : "text-foreground/45"
+                          }`}
+                          title={
+                            row.label === "plank.love"
+                              ? "Official plank.love Trade widget"
+                              : "Wood List / mint allowlist"
+                          }
+                        >
+                          {row.label === "plank.love" ? "plank.love" : "wood list"}
+                        </span>
                       </div>
                     ))
                   )}
@@ -509,7 +572,7 @@ export default function WoodYouJustLookAtIt() {
                     Bad Boards
                   </h3>
                   <span className="text-[0.55rem] font-bold uppercase tracking-wider text-orange-400/70">
-                    {streamLive ? "live eth · usd" : listingLive ? "scanning" : "off-widget"}
+                    {streamLive ? "off-site · uni" : listingLive ? "scanning" : "off-widget"}
                   </span>
                 </header>
                 <div className="wood-ledger-ruled max-h-56 overflow-y-auto px-2 py-0.5 sm:max-h-72">
@@ -521,12 +584,22 @@ export default function WoodYouJustLookAtIt() {
                     badList.map((b, i) => (
                       <div
                         key={b.address + b.lastSeenAt}
-                        className="wood-ledger-entry wood-ledger-bad flex items-baseline gap-1.5"
+                        className="wood-ledger-entry wood-ledger-bad flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5"
                       >
                         <span className="w-5 shrink-0 text-foreground/35">{i + 1}</span>
                         <code className="min-w-0 flex-1 truncate" title={b.address}>
                           {shortAddress(b.address, 5)}
                         </code>
+                        <span
+                          className="shrink-0 text-[0.5rem] font-bold uppercase tracking-wide text-orange-300/85"
+                          title={b.reason || b.venueLabel}
+                        >
+                          {b.venue === "off_site"
+                            ? "off-site"
+                            : b.venue === "death_trap"
+                              ? "death trap"
+                              : "uni/ext"}
+                        </span>
                         <span
                           className="shrink-0 tabular-nums text-[0.65rem] font-semibold text-gold-300"
                           title="ETH spent (3 dp) · USD"

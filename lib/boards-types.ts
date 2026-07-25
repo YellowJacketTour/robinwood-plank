@@ -1,5 +1,8 @@
 export type BoardSide = "good_wood" | "bad_boards" | "neutral" | "fallen";
 
+/** Where the bad activity came from — never plank.love widget. */
+export type BadVenue = "death_trap" | "off_site";
+
 export type BadBoardEntry = {
   address: string;
   /** ISO timestamp first seen */
@@ -12,14 +15,28 @@ export type BadBoardEntry = {
   txHashes: string[];
   /**
    * Cumulative native ETH (wei, decimal string) spent by this wallet on
-   * off-widget snipes during the death trap — sum of tx.value for txs they signed.
+   * off-widget snipes — sum of tx.value for txs they signed.
    */
   ethSpentWei: string;
+  /**
+   * death_trap = bought while widget locked (Uniswap / bots / external).
+   * off_site   = bought after open without a plank.love widget session.
+   */
+  venue?: BadVenue;
+  /** Human label for ledger / CSV (e.g. "Uniswap / external") */
+  venueLabel?: string;
   /** ETH spent fixed to 3 decimals (derived; always recomputed for clients). */
   ethSpent?: string;
   /** USD equivalent at last known ETH price (derived on read). */
   ethSpentUsd?: number;
   ethSpentUsdLabel?: string;
+};
+
+/** Good Wood / nice column with provenance. */
+export type NiceLedgerEntry = {
+  address: string;
+  /** plank.love = official widget; wood_list = mint allowlist */
+  label: "plank.love" | "wood_list";
 };
 
 export type WidgetSession = {
@@ -89,5 +106,7 @@ export type BoardsPublicView = {
     badBoards: string;
     fallen: string;
     cooldown: string;
+    plankLove: string;
+    offSite: string;
   };
 };
