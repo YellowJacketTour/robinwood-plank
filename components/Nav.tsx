@@ -2,25 +2,55 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import { usePathname } from "next/navigation";
 import { NAV_LINKS } from "@/lib/constants";
+
+function navHref(href: string, pathname: string) {
+  if (href.startsWith("#") && pathname !== "/") {
+    return `/${href}`;
+  }
+  return href;
+}
+
+function isActive(href: string, pathname: string) {
+  if (href === "/gallery") return pathname === "/gallery";
+  return false;
+}
 
 export default function Nav() {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname() || "/";
 
   return (
     <header className="sticky top-0 z-50 border-b border-gold-500/20 bg-wood-950/85 backdrop-blur supports-[backdrop-filter]:bg-wood-950/70">
-      <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6" aria-label="Primary">
-        <a href="#home" className="min-w-0 flex items-center gap-2 font-display text-base text-gold-300 sm:text-xl">
-          <Image src="/images/plank-logo.webp" alt="" width={28} height={40} className="h-8 w-auto" priority />
-          <span className="truncate">RobinWood</span> <span className="hidden text-foreground/60 min-[420px]:inline">($PLANK)</span>
+      <nav
+        className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6"
+        aria-label="Primary"
+      >
+        <a
+          href={pathname === "/" ? "#home" : "/"}
+          className="flex min-w-0 items-center gap-2 font-display text-base text-gold-300 sm:text-xl"
+        >
+          <Image
+            src="/images/plank-logo.webp"
+            alt=""
+            width={28}
+            height={40}
+            className="h-8 w-auto"
+            priority
+          />
+          <span className="truncate">RobinWood</span>{" "}
+          <span className="hidden text-foreground/60 min-[420px]:inline">($PLANK)</span>
         </a>
 
-        <ul className="hidden items-center gap-8 md:flex">
+        <ul className="hidden items-center gap-5 md:flex lg:gap-7">
           {NAV_LINKS.map((link) => (
             <li key={link.href}>
               <a
-                href={link.href}
-                className="text-sm font-semibold uppercase tracking-wide text-foreground/80 transition-colors hover:text-gold-300"
+                href={navHref(link.href, pathname)}
+                className={`text-sm font-semibold uppercase tracking-wide transition-colors hover:text-gold-300 ${
+                  isActive(link.href, pathname) ? "text-gold-300" : "text-foreground/80"
+                }`}
               >
                 {link.label}
               </a>
@@ -29,7 +59,7 @@ export default function Nav() {
         </ul>
 
         <a
-          href="#mint"
+          href={navHref("#mint", pathname)}
           className="hidden rounded-md bg-gold-500 px-4 py-2 text-sm font-bold text-wood-950 transition-transform hover:scale-105 hover:bg-gold-400 md:inline-block"
         >
           Mint RobinWood
@@ -41,9 +71,17 @@ export default function Nav() {
           aria-expanded={open}
           aria-controls="mobile-menu"
           aria-label="Toggle navigation menu"
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setOpen((value) => !value)}
         >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
             {open ? (
               <path d="M6 6l12 12M18 6l-12 12" strokeLinecap="round" />
             ) : (
@@ -54,12 +92,15 @@ export default function Nav() {
       </nav>
 
       {open && (
-        <div id="mobile-menu" className="border-t border-gold-500/20 bg-wood-950 px-4 pb-4 md:hidden">
+        <div
+          id="mobile-menu"
+          className="border-t border-gold-500/20 bg-wood-950 px-4 pb-4 md:hidden"
+        >
           <ul className="flex flex-col gap-1 pt-2">
             {NAV_LINKS.map((link) => (
               <li key={link.href}>
                 <a
-                  href={link.href}
+                  href={navHref(link.href, pathname)}
                   onClick={() => setOpen(false)}
                   className="flex min-h-11 items-center rounded-md px-3 py-2 text-base font-semibold uppercase tracking-wide text-foreground/80 hover:bg-wood-900 hover:text-gold-300"
                 >
@@ -69,7 +110,7 @@ export default function Nav() {
             ))}
             <li>
               <a
-                href="#mint"
+                href={navHref("#mint", pathname)}
                 onClick={() => setOpen(false)}
                 className="mt-2 flex min-h-12 items-center justify-center rounded-md bg-gold-500 px-3 py-2 text-center text-sm font-bold text-wood-950"
               >
