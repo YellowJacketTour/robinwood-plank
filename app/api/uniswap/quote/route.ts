@@ -81,7 +81,24 @@ export async function POST(req: Request) {
 
     const data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
     if (!upstream.ok) {
-      const clean = sanitizeUpstreamError(data, "Uniswap quote request failed.");
+      // Map common Uniswap errors to clear community-facing messages
+      const detail = typeof data.detail === "string" ? data.detail : "";
+      const code = typeof data.errorCode === "string" ? data.errorCode : "";
+      if (
+        code === "ResourceNotFound" ||
+        /no quotes available/i.test(detail) ||
+        /no route/i.test(detail)
+      ) {
+        return publicJson(
+          {
+            error: "NO_LIQUIDITY",
+            message:
+              "No Uniswap route for $PLANK yet. LP may not be live — wait for the official pool on Robinhood Chain.",
+          },
+          404
+        );
+      }
+      const clean = sanitizeUpstreamError(data, detail || "Uniswap quote request failed.");
       return publicJson(
         clean,
         upstream.status >= 400 && upstream.status < 600 ? upstream.status : 502

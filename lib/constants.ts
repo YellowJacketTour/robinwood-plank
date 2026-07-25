@@ -52,21 +52,26 @@ export const RULES_RELAXED =
 
 /**
  * plank.love integrator fee on in-widget Uniswap swaps (Trading API path only).
- * 0.42069% = 42.069 basis points (Uniswap supports fractional bps to 2 decimals).
+ *
+ * Target meme rate was 0.42069%. Uniswap Trading API IntegratorFee.bips allows
+ * at most 2 decimal places, so we send 42.07 bips (= 0.4207%) — closest legal value.
  *
  * IMMUTABLE by design:
  * - Hard-coded (not from env / not from client body)
- * - Server always re-injects this on /api/uniswap/quote
- * - Client cannot override bps or recipient (rejected by assertNoClientFeeOrRouteOverride)
+ * - Server always re-injects this on /api/uniswap/quote as integratorFees: [{ bips, recipient }]
+ * - Client cannot override (rejected by assertNoClientFeeOrRouteOverride)
  * Requires UNISWAP_API_KEY + Universal Router 2.1.1 (set on server quotes).
  */
 export const SITE_FEE = Object.freeze({
-  /** Human-readable percent, e.g. 0.42069 */
-  percent: 0.42069,
-  /** Basis points sent to Uniswap `integratorFee.bps` */
-  bps: 42.069,
+  /** Human-readable percent charged (matches bips) */
+  percent: 0.4207,
+  /**
+   * IntegratorFee.bips (1 bip = 0.01%). Max 2 decimal places per Uniswap API.
+   * 42.07 bips = 0.4207%
+   */
+  bps: 42.07,
   /** Display string for UI */
-  label: "0.42069%",
+  label: "0.4207%",
   /** Treasury wallet that receives the fee on Robinhood Chain */
   recipient: "0xfa987d386c4f61b27cb67a1e4e1239866fe8d9ba",
 });
