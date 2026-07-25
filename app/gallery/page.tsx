@@ -5,12 +5,12 @@ import Gallery from "@/components/Gallery";
 import { SITE_URL } from "@/lib/constants";
 
 export const metadata: Metadata = {
-  title: "Gallery — RobinWood ($PLANK)",
+  title: "Gallery & Rarity — RobinWood ($PLANK)",
   description:
-    "Live gallery of every minted RobinWood Plank NFT on Robinhood Chain. Newest first, searchable by name and traits.",
+    "Live gallery of minted RobinWood Planks with real-time rarity scores, trait analytics, and wallet search on Robinhood Chain.",
   openGraph: {
-    title: "RobinWood Gallery",
-    description: "Revealed Plank art — latest mint first.",
+    title: "RobinWood Gallery & Rarity",
+    description: "Revealed art, live rarity ranks, and trait insights.",
     url: `${SITE_URL}/gallery`,
   },
 };
@@ -20,9 +20,7 @@ export default function GalleryPage() {
     <>
       <Nav />
       <main className="flex-1">
-        <div className="pt-4 sm:pt-6">
-          <Gallery />
-        </div>
+        <Gallery />
       </main>
       <Footer />
     </>

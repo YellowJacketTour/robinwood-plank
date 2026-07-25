@@ -6,7 +6,7 @@ import { WOOD_LIST_TWEET_URL } from "@/lib/constants";
 
 export default function MintInfo() {
   return (
-    <section id="mint" className="px-4 py-20 sm:px-6">
+    <section id="mint" className="section-tight px-3 sm:px-5">
       <div className="mx-auto max-w-6xl">
         <Reveal>
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">Mint Structure</h2>

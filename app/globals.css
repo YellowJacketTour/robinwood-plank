@@ -247,8 +247,8 @@ input {
 
 @media (max-width: 639px) {
   section {
-    padding-top: 4rem !important;
-    padding-bottom: 4rem !important;
+    padding-top: 2.5rem !important;
+    padding-bottom: 2.5rem !important;
   }
 
   .wood-frame {
@@ -256,8 +256,21 @@ input {
   }
 
   .section-title {
-    font-size: clamp(2.6rem, 14vw, 3.5rem) !important;
-    line-height: 1;
+    font-size: clamp(2.1rem, 11vw, 3rem) !important;
+    line-height: 1.05;
+  }
+}
+
+/* Density helpers — keep desktop/mobile tight without empty chrome */
+.section-tight {
+  padding-top: 2.5rem;
+  padding-bottom: 2.5rem;
+}
+
+@media (min-width: 640px) {
+  .section-tight {
+    padding-top: 3rem;
+    padding-bottom: 3rem;
   }
 }
 

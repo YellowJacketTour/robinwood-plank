@@ -15,7 +15,7 @@ const SOURCES = [
 
 export default function LiquidityBurn() {
   return (
-    <section id="liquidity" className="px-4 py-20 sm:px-6">
+    <section id="liquidity" className="section-tight px-3 sm:px-5">
       <div className="mx-auto max-w-5xl">
         <Reveal>
           <p className="lede text-center text-xs font-extrabold uppercase tracking-[0.3em] text-forest-600">
