@@ -181,7 +181,10 @@ export function assertQuoteIntegrity(quote: Record<string, unknown>): void {
     (typeof output?.token === "string" && output.token) ||
     (typeof quote.tokenOut === "string" ? quote.tokenOut : null);
 
-  if (tokenIn && tokenOut) {
+  if (!tokenIn || !tokenOut) {
+    throw new TradeApiError(400, "QUOTE_PAIR", "Quote missing token pair metadata.");
+  }
+  {
     const ok =
       (isNative(tokenIn) && isPlank(tokenOut)) || (isPlank(tokenIn) && isNative(tokenOut));
     if (!ok) {
@@ -253,7 +256,7 @@ export async function uniswapFetch(path: string, body: unknown): Promise<Respons
       "x-api-key": apiKey,
       "Content-Type": "application/json",
       Accept: "application/json",
-      // Required for fractional integrator fee bips (0.42069% → 42.069)
+      // Required for fractional integrator fee bips (0.4207% → 42.07)
       "x-universal-router-version": "2.1.1",
     },
     body: JSON.stringify(safeBody),
