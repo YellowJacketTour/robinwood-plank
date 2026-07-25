@@ -5,6 +5,7 @@ import {
   SNIPER_TRAP_MINUTES,
   TOKEN,
 } from "@/lib/constants";
+import { getTrapWindow, isListingWindowActive, WALLET_COOLDOWN_MINUTES } from "@/lib/boards";
 import { buildUniswapSwapUrl, getCountdownParts, getTradeOpensAt } from "@/lib/trade";
 import { getPublicSiteFee, isTradingApiConfigured } from "@/lib/uniswap-server";
 import { publicJson, rateLimit } from "@/lib/security";
@@ -37,6 +38,16 @@ export async function GET(req: Request) {
       chainName: CHAIN.name,
     },
     sniperTrapMinutes: SNIPER_TRAP_MINUTES,
+    walletCooldownMinutes: WALLET_COOLDOWN_MINUTES,
+    listingWindow: (() => {
+      const t = getTrapWindow();
+      return {
+        active: isListingWindowActive(),
+        phase: t.phase,
+        trapStartsAt: t.trapStartsAt.toISOString(),
+        cooldownsEndAt: t.cooldownsEndAt.toISOString(),
+      };
+    })(),
     rulesRelaxed: RULES_RELAXED,
     // Do not hand bots a deep-link while the sniper trap / limits are active
     uniswapUrl: RULES_RELAXED ? buildUniswapSwapUrl({ direction: "buy" }) : null,

@@ -1,3 +1,5 @@
+import { isListingWindowActive } from "@/lib/boards";
+import { classifyWallet, recordWidgetActivity } from "@/lib/boards-store";
 import {
   assertNoClientFeeOrRouteOverride,
   assertQuoteIntegrity,
@@ -20,6 +22,7 @@ type Body = {
   quote?: unknown;
   signature?: unknown;
   permitData?: unknown;
+  swapper?: unknown;
 };
 
 export async function POST(req: Request) {
@@ -38,6 +41,24 @@ export async function POST(req: Request) {
 
     const quote = body.quote as Record<string, unknown>;
     assertQuoteIntegrity(quote);
+
+    const swapper =
+      typeof body.swapper === "string"
+        ? body.swapper.trim()
+        : typeof (quote as { swapper?: string }).swapper === "string"
+          ? String((quote as { swapper?: string }).swapper)
+          : "";
+
+    if (swapper && isListingWindowActive()) {
+      const board = await classifyWallet(swapper);
+      if (board.side === "bad_boards" || board.side === "fallen") {
+        throw new TradeApiError(
+          403,
+          "BAD_BOARD",
+          "Wallet is on Bad Boards — official free trade opens after the cooldown window."
+        );
+      }
+    }
 
     // CreateSwapRequest: quote + optional permit signature pair
     const payload: Record<string, unknown> = {
@@ -80,6 +101,10 @@ export async function POST(req: Request) {
     }
     if (typeof swap.chainId === "number" && swap.chainId !== 4663) {
       throw new TradeApiError(502, "BAD_CHAIN", "Swap transaction is not for Robinhood Chain.");
+    }
+
+    if (swapper) {
+      await recordWidgetActivity(swapper, "swap");
     }
 
     return publicJson({

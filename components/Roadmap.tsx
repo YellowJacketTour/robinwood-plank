@@ -6,26 +6,33 @@ const PHASES = [
     icon: "🌱",
     phase: "Phase 1 — Launch",
     title: "Plank the Seed",
-    desc: "LP live early as a sniper trap. Anti-sniper and anti-whale ON. Community waits for the plank.love timer — early buyers land on the Plank List.",
-    claims: ["ANTI-SNIPER ON", "PLANK LIST", "SITE TIMER"],
+    desc: "Death trap: LP early, site timer later. Off-widget traders → Bad Boards. Good Wood is mint + airdrop. 30m per-wallet cooldowns while we list snipers.",
+    claims: ["DEATH TRAP", "BAD BOARDS", "30M COOLDOWN"],
+  },
+  {
+    icon: "👀",
+    phase: "Phase 2 — Look",
+    title: "Wood You Just Look At It",
+    desc: "Live Good Wood vs Bad Boards. Fallen Good Wood who left the official path. Export lists before free trade.",
+    claims: ["GOOD WOOD", "BAD BOARDS", "FALLEN"],
   },
   {
     icon: "🪓",
-    phase: "Phase 2 — Early",
+    phase: "Phase 3 — Early",
     title: "You Can Plank Me Now",
-    desc: "Timer hits zero: cooldowns and limits off. Pure ERC-20, LP renounced, free trading forever.",
+    desc: "Cooldowns done, controls off, LP renounced — free trading forever.",
     claims: ["LP RENOUNCED", "CONTROLS OFF", "FREE TRADE"],
   },
   {
     icon: "🔥",
-    phase: "Phase 3 — Growth",
+    phase: "Phase 4 — Growth",
     title: "Wood You Rather",
     desc: "Add liquidity. Burn supply.",
     claims: ["LIQUIDITY ADDED", "SUPPLY BURNED"],
   },
   {
     icon: "🛸",
-    phase: "Phase 4 — Uncharted",
+    phase: "Phase 5 — Uncharted",
     title: "Plank, in Space!",
     desc: "DEX and CEX expansion.",
     claims: ["DEX EXPANSION", "CEX PUSH"],
@@ -39,7 +46,7 @@ export default function Roadmap() {
         <Reveal>
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">Roadmap</h2>
           <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
-            Four phases from seed to space.
+            Five phases from seed to space.
           </p>
         </Reveal>
 
@@ -55,17 +62,13 @@ export default function Roadmap() {
           </div>
         </Reveal>
 
-        <ol className="relative mt-14 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-          <div
-            aria-hidden="true"
-            className="absolute left-0 right-0 top-8 hidden h-0.5 bg-gradient-to-r from-forest-600 via-gold-500 to-wood-600 lg:block"
-          />
+        <ol className="relative mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {PHASES.map((p, i) => (
             <Reveal key={p.phase} delayMs={i * 120}>
-              <li className="relative flex flex-col items-center rounded-2xl border border-gold-500/20 bg-wood-900/85 p-6 text-center">
+              <li className="relative flex flex-col items-center rounded-2xl border border-gold-500/20 bg-wood-900/85 p-5 text-center sm:p-6">
                 <div
-                  className={`relative z-10 flex h-16 w-16 items-center justify-center rounded-full border-2 border-gold-500 bg-wood-950 text-3xl ${
-                    i === 2 ? "animate-flicker" : ""
+                  className={`relative z-10 flex h-14 w-14 items-center justify-center rounded-full border-2 border-gold-500 bg-wood-950 text-2xl sm:h-16 sm:w-16 sm:text-3xl ${
+                    i === 1 ? "animate-flicker" : ""
                   }`}
                   aria-hidden="true"
                 >
