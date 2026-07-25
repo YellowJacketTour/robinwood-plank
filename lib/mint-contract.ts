@@ -32,7 +32,9 @@ export const NFT_ABI = [
   "function symbol() view returns (string)",
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
+  "function tokenByIndex(uint256 index) view returns (uint256)",
   "function tokenURI(uint256 tokenId) view returns (string)",
   "function ownerOf(uint256 tokenId) view returns (address)",
+  "function nextTokenId() view returns (uint256)",
 ] as const;
 
