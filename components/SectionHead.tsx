@@ -45,13 +45,13 @@ export default function SectionHead({
         {children}
       </div>
       {artSrc && (
-        <div className="relative mt-1 h-20 w-20 shrink-0 sm:mt-0 sm:h-24 sm:w-24 md:h-28 md:w-28">
+        <div className="relative mt-0.5 hidden h-16 w-16 shrink-0 sm:mt-0 sm:block sm:h-20 sm:w-20 md:h-24 md:w-24">
           <Image
             src={artSrc}
             alt={artAlt}
             fill
-            sizes="112px"
-            className="object-contain drop-shadow-[0_8px_16px_rgba(0,0,0,0.55)]"
+            sizes="96px"
+            className="object-contain drop-shadow-[0_6px_12px_rgba(0,0,0,0.5)]"
           />
         </div>
       )}

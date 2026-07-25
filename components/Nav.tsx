@@ -43,13 +43,13 @@ export default function Nav() {
           <span className="hidden text-foreground/60 min-[420px]:inline">($PLANK)</span>
         </a>
 
-        <div className="hidden items-center gap-5 md:flex lg:gap-7">
-          <ul className="flex items-center gap-5 lg:gap-7">
+        <div className="hidden items-center gap-3 md:flex lg:gap-5">
+          <ul className="flex items-center gap-3 lg:gap-4">
             {NAV_LINKS.map((link) => (
               <li key={link.href}>
                 <a
                   href={navHref(link.href, pathname)}
-                  className={`text-sm font-semibold uppercase tracking-wide transition-colors hover:text-gold-300 ${
+                  className={`text-xs font-semibold uppercase tracking-wide transition-colors hover:text-gold-300 lg:text-sm ${
                     isActive(link.href, pathname) ? "text-gold-300" : "text-foreground/80"
                   }`}
                 >
@@ -60,7 +60,7 @@ export default function Nav() {
           </ul>
           <a
             href={navHref("#trade", pathname)}
-            className="rounded-md bg-gold-500 px-4 py-2 text-sm font-bold text-wood-950 transition-transform hover:scale-105 hover:bg-gold-400"
+            className="rounded-md bg-gold-500 px-3 py-1.5 text-xs font-bold text-wood-950 transition-colors hover:bg-gold-400 lg:px-4 lg:text-sm"
           >
             Trade
           </a>

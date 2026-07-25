@@ -87,12 +87,11 @@ export const TOKEN = {
 /**
  * Primary nav text links. Logo → home. Trade is the gold CTA button (not listed here).
  */
+/** Keep nav short — Trade is the gold CTA; rest are anchors. */
 export const NAV_LINKS = [
-  { href: "#mint", label: "Mint" },
   { href: "#boards", label: "Boards" },
+  { href: "#mint", label: "Mint" },
   { href: "/gallery", label: "Gallery" },
-  { href: "#collection", label: "Collection" },
-  { href: "#tokenomics", label: "Funding" },
   { href: "#roadmap", label: "Roadmap" },
   { href: "#get-ready", label: "Guide" },
 ] as const;
