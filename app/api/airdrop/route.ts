@@ -41,6 +41,7 @@ export async function GET(req: Request) {
       equalWeight: snap.equalWeight,
       equalPctOfAirdrop: snap.equalPctOfAirdrop,
       equalPctOfSupply: snap.equalPctOfSupply,
+      equalExpectedTokens: snap.equalExpectedTokens,
       woodListRoot: snap.woodListRoot,
       woodListCount: snap.woodListCount,
       live: {
