@@ -71,18 +71,28 @@ export const RULES_RELAXED =
  * - Client cannot override (rejected by assertNoClientFeeOrRouteOverride)
  * Requires UNISWAP_API_KEY + Universal Router 2.1.1 (set on server quotes).
  */
+/**
+ * Widget integrator fee (Uniswap Trading API).
+ *
+ * EMERGENCY: bps=0 — fee path was taking complexity (extra UR commands) and
+ * buys were reverting / under-gassing while users lost gas and saw no $PLANK.
+ * On-chain: fee treasury had 0 PLANK fee transfers while UR buys failed.
+ * Set bps back to 42.07 only after fee-route swaps are proven on RH.
+ */
 export const SITE_FEE = Object.freeze({
   /** Human-readable percent charged (matches bips) */
-  percent: 0.4207,
+  percent: 0,
   /**
    * IntegratorFee.bips (1 bip = 0.01%). Max 2 decimal places per Uniswap API.
-   * 42.07 bips = 0.4207%
+   * 0 = no fee (full output to buyer). Was 42.07 (= 0.4207%).
    */
-  bps: 42.07,
+  bps: 0,
   /** Display string for UI */
-  label: "0.4207%",
-  /** Treasury wallet that receives the fee on Robinhood Chain */
+  label: "0%",
+  /** Treasury wallet (unused while bps=0) */
   recipient: "0xfa987d386c4f61b27cb67a1e4e1239866fe8d9ba",
+  /** When false, server omits integratorFees entirely from Uniswap quote */
+  enabled: false,
 });
 
 export const TOKEN = {

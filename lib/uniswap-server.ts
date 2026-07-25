@@ -53,6 +53,10 @@ export function isTradingApiConfigured(): boolean {
 export function getIntegratorFees(): ReadonlyArray<
   Readonly<{ bips: number; recipient: string }>
 > {
+  // bps=0 / enabled=false → no fee commands on UR (full PLANK to buyer)
+  if (!SITE_FEE.enabled || !SITE_FEE.bps || SITE_FEE.bps <= 0) {
+    return Object.freeze([]);
+  }
   return Object.freeze([
     Object.freeze({
       bips: SITE_FEE.bps,
@@ -74,6 +78,7 @@ export function getPublicSiteFee() {
     bips: SITE_FEE.bps,
     label: SITE_FEE.label,
     recipient: SITE_FEE.recipient,
+    enabled: Boolean(SITE_FEE.enabled && SITE_FEE.bps > 0),
   });
 }
 

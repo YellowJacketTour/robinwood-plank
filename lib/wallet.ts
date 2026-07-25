@@ -138,8 +138,8 @@ export function toHexQuantity(value: string | number | bigint): string {
   return `0x${n.toString(16)}`;
 }
 
-// UR + integrator-fee routes on RH routinely need well above Uniswap's ~135k estimate
-const MIN_SWAP_GAS = BigInt(550_000);
+// UR routes on RH — never allow Uniswap's ~135–171k estimates (OOG reverts burn gas, no PLANK)
+const MIN_SWAP_GAS = BigInt(650_000);
 const MIN_APPROVE_GAS = BigInt(120_000);
 
 function parseQuantity(raw: string | number | undefined | null): bigint | null {
@@ -272,11 +272,10 @@ export type SendTxOpts = {
 
 /**
  * Build + send a tx with RH-chain-aware gas.
- * 1) eth_estimateGas on wallet RPC when possible
- * 2) Floor gas limits (UR + fee routes need >> 135k Uniswap estimate)
- * 3) EIP-1559: max(Uniswap quote fees, live RH baseFee schedule)
- * 4) Never mix gasPrice + maxFee*; single fee style only (Rabby-safe)
- * 5) Retry tiers if wallet rejects sim / underpriced
+ *
+ * CRITICAL: never retry without a hard gas floor. Earlier retries stripped `gas`
+ * so wallets re-estimated ~170k → out-of-gas reverts. Users paid gas, got no PLANK
+ * (swap value refunds on revert, but it feels like the site "took ETH as a fee").
  */
 export async function sendTransaction(tx: SendTxOpts): Promise<string> {
   const provider = getEthereumProvider();
@@ -290,28 +289,38 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
     to: tx.to,
     from: tx.from,
     data: tx.data,
-    chainId: chainIdHex,
   };
   if (tx.value !== undefined && tx.value !== null && tx.value !== "") {
     const v = parseQuantity(tx.value);
     if (v !== null && v > BigInt(0)) {
       base.value = `0x${v.toString(16)}`;
-    } else if (typeof tx.value === "string" && tx.value.startsWith("0x") && tx.value !== "0x" && tx.value !== "0x0") {
+    } else if (
+      typeof tx.value === "string" &&
+      tx.value.startsWith("0x") &&
+      tx.value !== "0x" &&
+      tx.value !== "0x0"
+    ) {
       base.value = tx.value;
     }
   }
 
-  // --- Gas limit: estimate on wallet RPC, then floor ---
+  // --- Gas limit: estimate on wallet RPC, then ALWAYS floor ---
   let gasLimit = parseQuantity(tx.gasLimit ?? tx.gas);
   try {
     const estHex = (await provider.request({
       method: "eth_estimateGas",
-      params: [{ to: base.to, from: base.from, data: base.data, ...(base.value ? { value: base.value } : {}) }],
+      params: [
+        {
+          to: base.to,
+          from: base.from,
+          data: base.data,
+          ...(base.value ? { value: base.value } : {}),
+        },
+      ],
     })) as string;
     const est = parseQuantity(estHex);
     if (est) {
-      // +60% headroom for integrator-fee UR routes on RH
-      gasLimit = (est * BigInt(160)) / BigInt(100);
+      gasLimit = (est * BigInt(180)) / BigInt(100);
     }
   } catch {
     // keep provided / floor — estimate often fails pre-approve on sells
@@ -320,7 +329,6 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
   if (!gasLimit || gasLimit < floor) gasLimit = floor;
   if (gasLimit > BigInt(3_000_000)) gasLimit = BigInt(3_000_000);
 
-  // --- Fees: merge Uniswap quote + live RH chain (never underprice) ---
   const fees = await mergeFeeFields(
     provider,
     parseQuantity(tx.maxFeePerGas),
@@ -328,33 +336,11 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
     parseQuantity(tx.gasPrice)
   );
 
-  const withGasLimit: Record<string, string> = {
-    ...base,
-    gas: `0x${gasLimit.toString(16)}`,
-    ...fees,
-  };
-  // Some wallets want gasLimit alias
-  withGasLimit.gasLimit = withGasLimit.gas;
-
+  const gasHex = `0x${gasLimit.toString(16)}`;
+  // Only two shapes — both KEEP the gas floor (no bare under-gassed retries)
   const attempts: Record<string, string>[] = [
-    withGasLimit,
-    // drop hard limit — wallet re-estimates
-    { ...base, ...fees },
-    // fee-only without chainId (some injectors choke on chainId in tx)
-    (() => {
-      const { chainId: _c, ...rest } = base;
-      return { ...rest, gas: withGasLimit.gas, ...fees };
-    })(),
-    // bare essentials
-    (() => {
-      const bare: Record<string, string> = {
-        to: base.to,
-        from: base.from,
-        data: base.data,
-      };
-      if (base.value) bare.value = base.value;
-      return bare;
-    })(),
+    { ...base, gas: gasHex, gasLimit: gasHex, ...fees },
+    { ...base, gas: gasHex, ...fees },
   ];
 
   let lastMsg = "Transaction rejected.";
@@ -373,7 +359,14 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
       if (/user rejected|denied|4001/i.test(msg)) {
         throw new Error("Transaction cancelled in wallet.");
       }
-      // try next tier
+      // Hard failures — do NOT try weaker gas variants (causes OOG buys)
+      if (
+        /TRANSFER_FAILED|insufficient funds|exceeds balance|allowance|TRANSFER_FROM|execution reverted|STF|Too little received|Too much requested|INSUFFICIENT/i.test(
+          msg
+        )
+      ) {
+        throw new Error(humanizeTxError(msg, kind));
+      }
     }
   }
   throw new Error(humanizeTxError(lastMsg, kind));
@@ -381,18 +374,45 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
 
 function humanizeTxError(msg: string, kind: string): string {
   if (/insufficient funds|exceeds balance/i.test(msg)) {
-    return "Insufficient funds. For buys leave ~0.002+ ETH for gas after the amount.";
+    return "Insufficient funds. For buys leave ~0.003+ ETH for gas after the amount.";
+  }
+  if (/TRANSFER_FAILED/i.test(msg)) {
+    return "Swap simulation failed (TRANSFER_FAILED). Fresh quote, higher slip (2–3%), check ETH balance, retry.";
   }
   if (/allowance|transfer amount exceeds|TRANSFER_FROM/i.test(msg)) {
     return "Token approval needed. Confirm the approve step, then swap again.";
   }
-  if (/simulation|estimateGas|intrinsic gas|gas required/i.test(msg)) {
+  if (/Too little received|INSUFFICIENT_OUTPUT|slippage/i.test(msg)) {
+    return "Price moved — raise slippage to 2–3% and get a fresh quote.";
+  }
+  if (/simulation|estimateGas|intrinsic gas|gas required|out of gas/i.test(msg)) {
     return `Wallet simulation failed on ${kind}. Fresh quote, higher slip (2–3%), leave ETH for gas, retry.`;
   }
   if (/nonce|already known|replacement/i.test(msg)) {
     return "Pending tx in wallet — Speed Up or Cancel the old one, then retry.";
   }
   return msg.slice(0, 280);
+}
+
+/** ERC-20 balanceOf via eth_call (for post-swap delivery checks). */
+export async function getErc20Balance(
+  token: string,
+  owner: string
+): Promise<bigint> {
+  const provider = getEthereumProvider();
+  if (!provider) return BigInt(0);
+  try {
+    const ownerClean = owner.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+    const data = `0x70a08231${ownerClean}`;
+    const hex = (await provider.request({
+      method: "eth_call",
+      params: [{ to: token, data }, "latest"],
+    })) as string;
+    if (!hex || hex === "0x") return BigInt(0);
+    return BigInt(hex);
+  } catch {
+    return BigInt(0);
+  }
 }
 
 export async function waitForTransaction(

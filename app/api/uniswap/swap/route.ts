@@ -39,7 +39,7 @@ type SwapTx = Record<string, unknown> & {
   chainId?: number | string;
 };
 
-const MIN_SWAP_GAS = BigInt(550_000);
+const MIN_SWAP_GAS = BigInt(650_000);
 
 function isGasFailure(message: string): boolean {
   return /gas fee|FAILED_TO_ESTIMATE_GAS|estimate.?gas|simulate transaction|TRANSFER_FAILED|rate.?limit|too many requests|throttl/i.test(
@@ -228,8 +228,10 @@ export async function POST(req: Request) {
       basePayload.signature = body.signature;
     }
 
-    // refreshGasPrice for Uniswap gasEstimates; skip sim (fails often on RH / fee routes)
+    // Prefer simulated builds when API can; fall back to no-sim so wallet still gets calldata.
+    // Gas floor on walletSafeTx still protects against OOG (seen ~171k limits on failed buys).
     const attempts: Array<Record<string, unknown>> = [
+      { ...basePayload, refreshGasPrice: true, simulateTransaction: true },
       { ...basePayload, refreshGasPrice: true, simulateTransaction: false },
       { ...basePayload, refreshGasPrice: false, simulateTransaction: false },
     ];

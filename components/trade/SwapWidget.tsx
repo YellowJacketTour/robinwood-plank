@@ -23,6 +23,7 @@ import {
   getConnectedAccounts,
   getEthereumProvider,
   getNativeBalance,
+  getErc20Balance,
   sendTransaction,
   signTypedData,
   waitForTransaction,
@@ -75,8 +76,8 @@ export default function SwapWidget({ unlocked }: Props) {
   const [quote, setQuote] = useState<QuoteState | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [apiReady, setApiReady] = useState<boolean | null>(null);
-  // Slightly higher default than Uniswap UI auto — meme pool moves fast
-  const [slippage, setSlippage] = useState(1.5);
+  // Higher default — meme pool moves fast; low slip → reverts (ETH gas lost, no PLANK)
+  const [slippage, setSlippage] = useState(2.5);
 
   const inputSymbol = direction === "buy" ? "ETH" : TOKEN.symbol;
   const outputSymbol = direction === "buy" ? TOKEN.symbol : "ETH";
@@ -494,6 +495,14 @@ export default function SwapWidget({ unlocked }: Props) {
           }
         | undefined;
 
+      // Snapshot balances so we can prove delivery (never claim success without tokens)
+      const plankBefore =
+        direction === "buy"
+          ? await getErc20Balance(CONTRACT_ADDRESS, account)
+          : BigInt(0);
+      const ethBefore =
+        direction === "sell" ? await getNativeBalance(account) : BigInt(0);
+
       setStatus("Confirm in wallet…");
       const hash = await sendTransaction({
         to: tx.to,
@@ -534,7 +543,32 @@ export default function SwapWidget({ unlocked }: Props) {
             }
           },
         });
-        setStatus("Swap confirmed ✓");
+
+        // Prove tokens arrived — receipt success alone is not enough for user trust
+        if (direction === "buy") {
+          // brief settle for RPC lag
+          await new Promise((r) => setTimeout(r, 1500));
+          const plankAfter = await getErc20Balance(CONTRACT_ADDRESS, account);
+          if (plankAfter <= plankBefore) {
+            setError(
+              "Tx mined but $PLANK balance did not increase. Check explorer — if reverted, only gas was spent. Retry with 2–3% slip."
+            );
+            setStatus("No $PLANK received — check explorer link below.");
+          } else {
+            setStatus("Swap confirmed ✓ $PLANK received");
+          }
+        } else {
+          await new Promise((r) => setTimeout(r, 1500));
+          const ethAfter = await getNativeBalance(account);
+          if (ethAfter <= ethBefore) {
+            setError(
+              "Tx mined but ETH balance did not increase. Check explorer / retry with higher slip."
+            );
+            setStatus("Sell mined — verify ETH on explorer.");
+          } else {
+            setStatus("Swap confirmed ✓ ETH received");
+          }
+        }
       } catch (waitErr) {
         // Don't clear hash — user can track on explorer
         setError(waitErr instanceof Error ? waitErr.message : "Confirmation timed out.");
@@ -604,7 +638,7 @@ export default function SwapWidget({ unlocked }: Props) {
         {unlocked && (
           <p className="mt-2.5 rounded-lg border border-emerald-500/30 bg-forest-900/75 px-2.5 py-2 text-[0.7rem] leading-snug text-foreground/80 sm:text-xs">
             <strong className="text-emerald-300">Live:</strong> connect · buy/sell · fee{" "}
-            {SITE_FEE.label}. Quotes refresh before swap. Rabby/MetaMask set their own gas.
+            {SITE_FEE.enabled ? SITE_FEE.label : "0% (fee off)"}. Full output to you. Fresh quote before each swap.
           </p>
         )}
 
@@ -723,7 +757,7 @@ export default function SwapWidget({ unlocked }: Props) {
             </select>
           </label>
           <span>
-            Fee {SITE_FEE.label} · ETH/{TOKEN.symbol}
+            {SITE_FEE.enabled ? `Fee ${SITE_FEE.label}` : "No widget fee"} · ETH/{TOKEN.symbol}
           </span>
         </div>
 
@@ -771,7 +805,11 @@ export default function SwapWidget({ unlocked }: Props) {
                   onClick={executeSwap}
                   className={`${btnBase} bg-gold-500 text-wood-950 shadow-[0_6px_16px_-4px_rgba(217,164,65,0.45)] hover:bg-gold-400`}
                 >
-                  {busy ? "Confirm in wallet…" : `Swap · ${SITE_FEE.label} fee`}
+                  {busy
+                    ? "Confirm in wallet…"
+                    : SITE_FEE.enabled
+                      ? `Swap · ${SITE_FEE.label} fee`
+                      : "Swap — full $PLANK to you"}
                 </button>
               )}
             </>
@@ -828,7 +866,8 @@ export default function SwapWidget({ unlocked }: Props) {
         )}
 
         <p className="mt-3 text-center text-[0.65rem] leading-snug text-foreground/40">
-          ETH ↔ {TOKEN.symbol} on chain {CHAIN.id} · fee {SITE_FEE.label} · not financial advice
+          ETH ↔ {TOKEN.symbol} on chain {CHAIN.id}
+          {SITE_FEE.enabled ? ` · fee ${SITE_FEE.label}` : " · no widget fee"} · not financial advice
         </p>
         <span className="sr-only">
           Native {NATIVE_TOKEN_ADDRESS}; PLANK {CONTRACT_ADDRESS}

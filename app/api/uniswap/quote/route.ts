@@ -75,11 +75,11 @@ export async function POST(req: Request) {
     const { tokenIn, tokenOut } = resolveTokens(direction);
     assertAllowedPair(tokenIn, tokenOut, CHAIN.id);
 
-    // Spec-accurate fee payload (OpenAPI IntegratorFee + integratorFees array).
+    // Spec-accurate fee payload (empty array when site fee disabled — full output to buyer)
     const integratorFees = getIntegratorFees();
 
     // Checksum-safe lower swapper; BEST_PRICE for execution quality vs Uniswap UI
-    const upstream = await uniswapFetch("/quote", {
+    const quoteBody: Record<string, unknown> = {
       tokenIn,
       tokenOut,
       tokenInChainId: CHAIN.id,
@@ -93,8 +93,13 @@ export async function POST(req: Request) {
       // AMM only → CLASSIC quotes → /swap (not UniswapX /order)
       protocols: [...AMM_PROTOCOLS],
       routingPreference: "BEST_PRICE",
-      integratorFees,
-    });
+    };
+    // Only attach fee field when non-empty — some API builds mishandle empty/zero fees
+    if (integratorFees.length > 0) {
+      quoteBody.integratorFees = integratorFees;
+    }
+
+    const upstream = await uniswapFetch("/quote", quoteBody);
 
     const data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
     if (!upstream.ok) {
