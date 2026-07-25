@@ -21,6 +21,8 @@ type Summary = {
     airdropPercentOfSupply: number;
     airdropPoolTokens: string;
     decimals: number;
+    supplySource?: string;
+    poolSource?: string;
   };
   counts: {
     approved: number;
@@ -32,6 +34,7 @@ type Summary = {
   equalWeight: boolean;
   equalPctOfAirdrop: number | null;
   equalPctOfSupply: number | null;
+  equalExpectedTokens?: string | null;
   woodListCount: number;
 };
 
@@ -64,21 +67,46 @@ function fmtPct(n: number | null | undefined): string {
 function fmtInt(s: string | number | null | undefined): string {
   if (s == null || s === "") return "—";
   try {
-    const n = typeof s === "number" ? BigInt(Math.floor(s)) : BigInt(String(s).split(".")[0] || "0");
+    const n =
+      typeof s === "number"
+        ? BigInt(Math.floor(s))
+        : BigInt(String(s).split(".")[0] || "0");
     return n.toLocaleString("en-US");
   } catch {
     return String(s);
   }
 }
 
+/** Compact for huge meme supply (888T scale): 16.5B, 37.4T */
 function fmtTokens(s: string | number | null | undefined): string {
   if (s == null || s === "") return "—";
-  const n = typeof s === "number" ? s : Number(s);
-  if (!Number.isFinite(n)) return String(s);
-  if (n >= 1_000_000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
-  if (n >= 1_000) return n.toLocaleString("en-US", { maximumFractionDigits: 1 });
-  if (n >= 1) return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+  try {
+    const n =
+      typeof s === "number"
+        ? BigInt(Math.floor(s))
+        : BigInt(String(s).split(".")[0] || "0");
+    if (n < BigInt(0)) return "0";
+    const units: Array<{ div: bigint; suf: string }> = [
+      { div: BigInt("1000000000000000"), suf: "Q" },
+      { div: BigInt("1000000000000"), suf: "T" },
+      { div: BigInt("1000000000"), suf: "B" },
+      { div: BigInt("1000000"), suf: "M" },
+      { div: BigInt("1000"), suf: "K" },
+    ];
+    for (const u of units) {
+      if (n >= u.div) {
+        const whole = n / u.div;
+        const tenth = Number(((n % u.div) * BigInt(10)) / u.div);
+        if (whole >= BigInt(100) || tenth === 0) {
+          return `${whole.toLocaleString("en-US")}${u.suf}`;
+        }
+        return `${whole.toLocaleString("en-US")}.${tenth}${u.suf}`;
+      }
+    }
+    return n.toLocaleString("en-US");
+  } catch {
+    return String(s);
+  }
 }
 
 function sourceShort(s: string): string {
@@ -271,7 +299,7 @@ export default function AirdropChecker() {
           <SectionHead
             eyebrow="Allocation · live"
             title="Airdrop"
-            lede="Check your wallet. See every approved address, drop %, supply %, and expected PLANK — updates live."
+            lede="Holder airdrop = 4.2069% of total supply. On-chain supply ~888.42T. Check your share — live."
             artSrc="/images/collection/plank-bobawood.png"
             artAlt="Boba wood plank"
           />
@@ -300,26 +328,48 @@ export default function AirdropChecker() {
                 </div>
               </div>
               <div className="bg-[#2a1a0f]/85 px-2 py-1.5 sm:px-2.5">
-                <div className="airdrop-label">Pool · % supply</div>
+                <div className="airdrop-label">Holder pool</div>
                 <div className="airdrop-stat airdrop-num">
-                  {cfg ? `${cfg.airdropPercentOfSupply}%` : "—"}
+                  {cfg
+                    ? `${Number(cfg.airdropPercentOfSupply).toLocaleString("en-US", {
+                        maximumFractionDigits: 4,
+                      })}%`
+                    : "—"}
                 </div>
-                <div className="airdrop-meta airdrop-num">
-                  {cfg ? fmtInt(cfg.airdropPoolTokens) : "—"} PLANK
+                <div className="airdrop-meta airdrop-num" title={cfg?.airdropPoolTokens}>
+                  {cfg ? fmtTokens(cfg.airdropPoolTokens) : "—"} PLANK
                 </div>
-              </div>
-              <div className="bg-[#2a1a0f]/85 px-2 py-1.5 sm:px-2.5">
-                <div className="airdrop-label">Total supply</div>
-                <div className="airdrop-stat airdrop-stat-sm airdrop-num">
-                  {cfg ? fmtInt(cfg.totalSupply) : "—"}
-                </div>
-                <div className="airdrop-meta">PLANK</div>
               </div>
               <div className="bg-[#2a1a0f]/85 px-2 py-1.5 sm:px-2.5">
                 <div className="airdrop-label">
-                  {summary?.equalWeight ? "Each wallet" : "Weighted"}
+                  Total supply
+                  {cfg?.supplySource === "chain" ? " · chain" : ""}
                 </div>
-                {summary?.equalWeight && summary.equalPctOfAirdrop != null ? (
+                <div
+                  className="airdrop-stat airdrop-stat-sm airdrop-num"
+                  title={cfg?.totalSupply}
+                >
+                  {cfg ? fmtTokens(cfg.totalSupply) : "—"}
+                </div>
+                <div className="airdrop-meta airdrop-num opacity-70">
+                  {cfg ? fmtInt(cfg.totalSupply) : ""}
+                </div>
+              </div>
+              <div className="bg-[#2a1a0f]/85 px-2 py-1.5 sm:px-2.5">
+                <div className="airdrop-label">
+                  {summary?.equalWeight ? "Each (equal)" : "Weighted"}
+                </div>
+                {summary?.equalWeight && summary.equalExpectedTokens != null ? (
+                  <>
+                    <div className="airdrop-stat airdrop-stat-sm airdrop-num text-emerald-300/95">
+                      {fmtTokens(summary.equalExpectedTokens)}
+                    </div>
+                    <div className="airdrop-meta airdrop-num">
+                      {fmtPct(summary.equalPctOfSupply)} supply ·{" "}
+                      {fmtPct(summary.equalPctOfAirdrop)} drop
+                    </div>
+                  </>
+                ) : summary?.equalWeight && summary.equalPctOfAirdrop != null ? (
                   <>
                     <div className="airdrop-stat airdrop-stat-sm airdrop-num text-emerald-300/95">
                       {fmtPct(summary.equalPctOfAirdrop)}

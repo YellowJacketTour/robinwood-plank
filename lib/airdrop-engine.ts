@@ -1,33 +1,39 @@
 /**
  * Airdrop allocation engine.
- * Builds expected shares for every approved wallet from:
- *  - Wood List (public/proofs.json keys)
- *  - Extra airdrop.json addresses / optional weights
  *
- * Equal weight by default; optional per-wallet weights in airdrop.json.
- * All numbers are deterministic from the on-disk snapshot (live when files update).
+ * Source of truth:
+ *  - Total supply: on-chain $PLANK totalSupply (fallback: airdrop.json / env)
+ *  - Pool: official holder share 4.2069% of supply (or explicit airdropPoolTokens)
+ *  - Wallets: Wood List (proofs.json) + airdrop.json extras / weights
+ *
+ * Official: NFT holders get 4.2069% of token supply (@RobinWoodPlank).
  */
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { CONTRACT_ADDRESS, CHAIN } from "@/lib/constants";
+import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 
 export type AirdropSource = "wood_list" | "airdrop" | "both";
 
 export type AirdropConfigFile = {
   description?: string;
-  /** Human token units of total $PLANK supply (e.g. "1000000000") */
+  notes?: string[];
+  /** Human token units of total $PLANK supply (fallback if RPC fails) */
   totalSupply?: string | number;
-  /** % of total supply reserved for this airdrop pool (e.g. 10 = 10%) */
+  /**
+   * % of total supply in the airdrop pool.
+   * Official holder allocation: 4.2069
+   */
   airdropPercentOfSupply?: number;
-  /** Token decimals for display (default 18) */
+  /**
+   * Absolute pool size in human PLANK (overrides percent when set & > 0).
+   */
+  airdropPoolTokens?: string | number | null;
   decimals?: number;
-  /** Include Wood List (proofs.json) wallets — default true */
   includeWoodList?: boolean;
-  /** Extra approved addresses (lowercase preferred) */
   addresses?: string[];
-  /** Optional weight multipliers (default 1). Higher weight → larger share. */
   weights?: Record<string, number>;
-  /** Addresses to exclude even if on Wood List */
   exclude?: string[];
 };
 
@@ -35,15 +41,10 @@ export type AllocationRow = {
   address: string;
   source: AirdropSource;
   weight: number;
-  /** Share of airdrop pool 0–1 */
   shareOfAirdrop: number;
-  /** % of airdrop pool */
   pctOfAirdrop: number;
-  /** % of total token supply */
   pctOfSupply: number;
-  /** Expected tokens in human units (string, up to 6 frac digits trimmed) */
   expectedTokens: string;
-  /** Expected tokens raw integer string (base units) */
   expectedTokensRaw: string;
 };
 
@@ -55,6 +56,8 @@ export type AirdropSnapshot = {
     airdropPoolTokens: string;
     decimals: number;
     includeWoodList: boolean;
+    supplySource: "chain" | "config" | "env";
+    poolSource: "percent" | "absolute";
   };
   counts: {
     approved: number;
@@ -63,19 +66,21 @@ export type AirdropSnapshot = {
     both: number;
     totalWeight: number;
   };
-  /** Equal-weight shortcut for UI when all weights are 1 */
   equalWeight: boolean;
-  /** Per-wallet equal % when equalWeight (else null) */
   equalPctOfAirdrop: number | null;
   equalPctOfSupply: number | null;
+  equalExpectedTokens: string | null;
   allocations: AllocationRow[];
-  /** Merkle root from proofs if present (transparency) */
   woodListRoot: string | null;
   woodListCount: number;
 };
 
-const DEFAULT_TOTAL_SUPPLY = "1000000000"; // 1B PLANK human units
-const DEFAULT_AIRDROP_PCT = 10;
+/** On-chain totalSupply human units (888420069420888) — last known good fallback */
+export const PLANK_TOTAL_SUPPLY_FALLBACK = "888420069420888";
+
+/** Official holder airdrop: 4.2069% of total supply */
+export const OFFICIAL_AIRDROP_PERCENT = 4.2069;
+
 const DEFAULT_DECIMALS = 18;
 
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -95,22 +100,22 @@ function parsePositiveNumber(v: unknown, fallback: number): number {
   return n;
 }
 
-function parseSupply(v: unknown): string {
+function parseSupplyString(v: unknown): string | null {
   if (typeof v === "number" && Number.isFinite(v) && v > 0) {
     return Math.floor(v).toString();
   }
   if (typeof v === "string" && /^\d+(\.\d+)?$/.test(v.trim())) {
     const [w] = v.trim().split(".");
-    return w || DEFAULT_TOTAL_SUPPLY;
+    if (w && w !== "0") return w;
   }
-  return DEFAULT_TOTAL_SUPPLY;
+  return null;
 }
 
-/** Format integer base units → human with up to `maxFrac` digits. */
+/** Format integer human units with full separators (no scientific). */
 export function formatTokenUnits(
   raw: bigint,
   decimals: number,
-  maxFrac = 6
+  maxFrac = 4
 ): string {
   if (raw === BigInt(0)) return "0";
   const base = BigInt(10) ** BigInt(decimals);
@@ -122,15 +127,45 @@ export function formatTokenUnits(
   return fracStr ? `${whole.toString()}.${fracStr}` : whole.toString();
 }
 
+/** Human-readable compact amount for UI (e.g. 16.55B, 37.36T). */
+export function formatCompactTokens(human: string | bigint): string {
+  try {
+    const n = typeof human === "bigint" ? human : BigInt(String(human).split(".")[0] || "0");
+    if (n < BigInt(0)) return "0";
+    const abs = n;
+    const units: Array<{ div: bigint; suf: string }> = [
+      { div: BigInt("1000000000000000"), suf: "Q" }, // 1e15
+      { div: BigInt("1000000000000"), suf: "T" }, // 1e12
+      { div: BigInt("1000000000"), suf: "B" },
+      { div: BigInt("1000000"), suf: "M" },
+      { div: BigInt("1000"), suf: "K" },
+    ];
+    for (const u of units) {
+      if (abs >= u.div) {
+        const whole = abs / u.div;
+        const rem = abs % u.div;
+        // one decimal when useful
+        const tenth = Number((rem * BigInt(10)) / u.div);
+        if (whole >= BigInt(100) || tenth === 0) {
+          return `${whole.toLocaleString("en-US")}${u.suf}`;
+        }
+        return `${whole.toLocaleString("en-US")}.${tenth}${u.suf}`;
+      }
+    }
+    return abs.toLocaleString("en-US");
+  } catch {
+    return String(human);
+  }
+}
+
 function pctLabel(n: number, digits = 6): number {
   if (!Number.isFinite(n)) return 0;
-  // Avoid scientific noise for tiny shares
-  const f = Number(n.toFixed(digits));
-  return f;
+  return Number(n.toFixed(digits));
 }
 
 type GlobalAirdrop = {
   __plankAirdropSnap?: { at: number; data: AirdropSnapshot };
+  __plankChainSupply?: { at: number; human: string };
 };
 
 function g(): GlobalAirdrop {
@@ -139,7 +174,7 @@ function g(): GlobalAirdrop {
 
 async function readJsonFile<T>(rel: string): Promise<T | null> {
   try {
-    const full = path.join(process.cwd(), rel);
+    const full = path.join(process.cwd(), /* turbopackIgnore: true */ rel);
     const raw = await fs.readFile(full, "utf8");
     return JSON.parse(raw) as T;
   } catch {
@@ -147,9 +182,49 @@ async function readJsonFile<T>(rel: string): Promise<T | null> {
   }
 }
 
+async function rpcCall(method: string, params: unknown[]): Promise<unknown> {
+  let last: unknown;
+  for (const url of ROBINHOOD_RPC_URLS) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        cache: "no-store",
+      });
+      const data = (await res.json()) as { result?: unknown; error?: { message?: string } };
+      if (data.error) throw new Error(data.error.message || "RPC error");
+      return data.result;
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last instanceof Error ? last : new Error("RPC failed");
+}
+
+/** Live totalSupply from $PLANK contract (human units). Cached ~60s. */
+export async function fetchOnChainTotalSupply(): Promise<string | null> {
+  const cache = g().__plankChainSupply;
+  if (cache && Date.now() - cache.at < 60_000) return cache.human;
+  try {
+    // totalSupply() selector 0x18160ddd
+    const hex = (await rpcCall("eth_call", [
+      { to: CONTRACT_ADDRESS, data: "0x18160ddd" },
+      "latest",
+    ])) as string;
+    if (!hex || hex === "0x") return null;
+    const wei = BigInt(hex);
+    const human = (wei / BigInt(10) ** BigInt(18)).toString();
+    if (human === "0") return null;
+    g().__plankChainSupply = { at: Date.now(), human };
+    return human;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Build full allocation snapshot from disk.
- * Cached briefly so live poll/SSE stay cheap.
+ * Build full allocation snapshot.
  */
 export async function buildAirdropSnapshot(opts?: {
   force?: boolean;
@@ -170,21 +245,40 @@ export async function buildAirdropSnapshot(opts?: {
     proofs?: Record<string, unknown>;
   }>("public/proofs.json");
 
-  const totalSupplyHuman = parseSupply(
-    process.env.AIRDROP_TOTAL_SUPPLY ?? configFile.totalSupply
+  // ── Total supply: chain → env → config → known fallback
+  let supplySource: AirdropSnapshot["config"]["supplySource"] = "config";
+  let totalSupplyHuman =
+    parseSupplyString(process.env.AIRDROP_TOTAL_SUPPLY) ||
+    parseSupplyString(configFile.totalSupply) ||
+    PLANK_TOTAL_SUPPLY_FALLBACK;
+
+  if (process.env.AIRDROP_TOTAL_SUPPLY?.trim()) {
+    supplySource = "env";
+  }
+
+  const chainSupply = await fetchOnChainTotalSupply();
+  if (chainSupply) {
+    totalSupplyHuman = chainSupply;
+    supplySource = "chain";
+  } else if (!process.env.AIRDROP_TOTAL_SUPPLY?.trim() && !configFile.totalSupply) {
+    supplySource = "config";
+    totalSupplyHuman = PLANK_TOTAL_SUPPLY_FALLBACK;
+  }
+
+  // ── Pool: absolute tokens override percent; default official 4.2069%
+  const absolutePool = parseSupplyString(
+    process.env.AIRDROP_POOL_TOKENS ?? configFile.airdropPoolTokens ?? null
   );
-  const airdropPct = parsePositiveNumber(
+  let airdropPct = parsePositiveNumber(
     process.env.AIRDROP_PERCENT_OF_SUPPLY ?? configFile.airdropPercentOfSupply,
-    DEFAULT_AIRDROP_PCT
+    OFFICIAL_AIRDROP_PERCENT
   );
+  // Cap nonsense
+  if (airdropPct > 100) airdropPct = 100;
+
   const decimals = Math.min(
     18,
-    Math.max(
-      0,
-      Math.floor(
-        parsePositiveNumber(configFile.decimals, DEFAULT_DECIMALS)
-      )
-    )
+    Math.max(0, Math.floor(parsePositiveNumber(configFile.decimals, DEFAULT_DECIMALS)))
   );
   const includeWoodList = configFile.includeWoodList !== false;
 
@@ -193,11 +287,7 @@ export async function buildAirdropSnapshot(opts?: {
     if (isAddressLike(e)) exclude.add(normalizeAddress(e));
   }
 
-  // address → { wood, air, weight }
-  const map = new Map<
-    string,
-    { wood: boolean; air: boolean; weight: number }
-  >();
+  const map = new Map<string, { wood: boolean; air: boolean; weight: number }>();
 
   if (includeWoodList && proofs?.proofs) {
     for (const addr of Object.keys(proofs.proofs)) {
@@ -213,14 +303,10 @@ export async function buildAirdropSnapshot(opts?: {
     const a = normalizeAddress(addr);
     if (exclude.has(a)) continue;
     const prev = map.get(a);
-    if (prev) {
-      prev.air = true;
-    } else {
-      map.set(a, { wood: false, air: true, weight: 1 });
-    }
+    if (prev) prev.air = true;
+    else map.set(a, { wood: false, air: true, weight: 1 });
   }
 
-  // Apply weights (multiply base weight)
   if (configFile.weights && typeof configFile.weights === "object") {
     for (const [addr, w] of Object.entries(configFile.weights)) {
       if (!isAddressLike(addr)) continue;
@@ -229,16 +315,11 @@ export async function buildAirdropSnapshot(opts?: {
       const weight = parsePositiveNumber(w, 1);
       if (weight <= 0) continue;
       const prev = map.get(a);
-      if (prev) {
-        prev.weight = weight;
-      } else {
-        // Weight-only entry counts as airdrop-only approved
-        map.set(a, { wood: false, air: true, weight });
-      }
+      if (prev) prev.weight = weight;
+      else map.set(a, { wood: false, air: true, weight });
     }
   }
 
-  // Env extras: AIRDROP_EXTRA=0x...,0x...
   const extraEnv = process.env.AIRDROP_EXTRA?.split(",") || [];
   for (const addr of extraEnv) {
     if (!isAddressLike(addr)) continue;
@@ -260,13 +341,27 @@ export async function buildAirdropSnapshot(opts?: {
     else airdropOnly += 1;
   }
 
-  // Pool in human units, then scale to raw with decimals via rational math
   const supplyHuman = BigInt(totalSupplyHuman);
-  // airdrop pool human = supply * pct / 100 (integer math on milli-percent)
-  // use basis points of percent * 1e6 for precision: pool = supply * pct / 100
-  const pctScaled = BigInt(Math.round(airdropPct * 1_000_000)); // pct * 1e6
-  const poolHuman =
-    (supplyHuman * pctScaled) / (BigInt(100) * BigInt(1_000_000));
+  let poolHuman: bigint;
+  let poolSource: "percent" | "absolute" = "percent";
+
+  if (absolutePool) {
+    poolHuman = BigInt(absolutePool);
+    poolSource = "absolute";
+    // Derive effective % for display
+    if (supplyHuman > BigInt(0)) {
+      // percent * 1e6 = pool * 100 * 1e6 / supply
+      const scaled =
+        (poolHuman * BigInt(100) * BigInt(1_000_000)) / supplyHuman;
+      airdropPct = Number(scaled) / 1_000_000;
+    }
+  } else {
+    // pool = supply * pct / 100 with high precision (pct * 1e6)
+    const pctScaled = BigInt(Math.round(airdropPct * 1_000_000));
+    poolHuman =
+      (supplyHuman * pctScaled) / (BigInt(100) * BigInt(1_000_000));
+    poolSource = "percent";
+  }
 
   const scale = BigInt(10) ** BigInt(decimals);
   const poolRaw = poolHuman * scale;
@@ -280,36 +375,39 @@ export async function buildAirdropSnapshot(opts?: {
   for (const [address, meta] of sorted) {
     const source: AirdropSource =
       meta.wood && meta.air ? "both" : meta.wood ? "wood_list" : "airdrop";
-    const share =
-      totalWeight > 0 ? meta.weight / totalWeight : 0;
-    // expected raw = poolRaw * weight / totalWeight
+    const share = totalWeight > 0 ? meta.weight / totalWeight : 0;
     const expectedRaw =
       totalWeight > 0
         ? (poolRaw * BigInt(meta.weight)) / BigInt(totalWeight)
         : BigInt(0);
-    // % of airdrop = share; % of supply = airdropPct * share (avoid float on huge wei)
-    const pctOfAirdrop = share * 100;
-    const pctOfSupply = airdropPct * share;
+    const expectedHuman =
+      totalWeight > 0
+        ? (poolHuman * BigInt(meta.weight)) / BigInt(totalWeight)
+        : BigInt(0);
 
     allocations.push({
       address,
       source,
       weight: meta.weight,
       shareOfAirdrop: share,
-      pctOfAirdrop: pctLabel(pctOfAirdrop, 8),
-      pctOfSupply: pctLabel(pctOfSupply, 10),
-      expectedTokens: formatTokenUnits(expectedRaw, decimals, 6),
+      pctOfAirdrop: pctLabel(share * 100, 8),
+      pctOfSupply: pctLabel(airdropPct * share, 10),
+      expectedTokens: expectedHuman.toString(),
       expectedTokensRaw: expectedRaw.toString(),
     });
   }
 
-  // Sort display: highest weight first, then address
   allocations.sort((a, b) => {
     if (b.weight !== a.weight) return b.weight - a.weight;
     return a.address.localeCompare(b.address);
   });
 
   const n = allocations.length;
+  const equalExpected =
+    equalWeight && n > 0
+      ? (poolHuman / BigInt(n)).toString()
+      : null;
+
   const snapshot: AirdropSnapshot = {
     updatedAt: new Date().toISOString(),
     config: {
@@ -318,6 +416,8 @@ export async function buildAirdropSnapshot(opts?: {
       airdropPoolTokens: poolHuman.toString(),
       decimals,
       includeWoodList,
+      supplySource,
+      poolSource,
     },
     counts: {
       approved: n,
@@ -330,10 +430,14 @@ export async function buildAirdropSnapshot(opts?: {
     equalPctOfAirdrop: equalWeight && n > 0 ? pctLabel(100 / n, 8) : null,
     equalPctOfSupply:
       equalWeight && n > 0 ? pctLabel(airdropPct / n, 10) : null,
+    equalExpectedTokens: equalExpected,
     allocations,
     woodListRoot: proofs?.root ?? null,
     woodListCount: proofs?.count ?? Object.keys(proofs?.proofs || {}).length,
   };
+
+  // Silence unused CHAIN import warning if any - keep for docs
+  void CHAIN;
 
   g().__plankAirdropSnap = { at: now, data: snapshot };
   return snapshot;
@@ -348,7 +452,6 @@ export function lookupAllocation(
   return snap.allocations.find((r) => r.address === a) || null;
 }
 
-/** Compact public rows for list UI (smaller payload). */
 export function compactRows(rows: AllocationRow[]): Array<{
   a: string;
   s: AirdropSource;
