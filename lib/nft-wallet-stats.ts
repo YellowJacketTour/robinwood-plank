@@ -1,10 +1,8 @@
 /**
  * Per-wallet NFT holdings + free / wood-list / paid mint counts.
  *
- * free  claimed = 2 − remainingFreeMintsForWallet
- * wood  claimed = 2 − remainingAllowlistMintsForWallet
- * paid  claimed = 33 − remainingPaidMintsForWallet
- * nfts          = balanceOf
+ * Holdings: full collection ownerOf scan (authoritative).
+ * Mint types: remaining* caps (free≤2, wood≤2, paid≤33).
  */
 
 import { id } from "ethers";
@@ -26,6 +24,8 @@ export const NFT_MINT_CAPS = {
 const ZERO = "0x0000000000000000000000000000000000000000";
 
 const SEL = {
+  totalSupply: id("totalSupply()").slice(0, 10),
+  ownerOf: id("ownerOf(uint256)").slice(0, 10),
   balanceOf: id("balanceOf(address)").slice(0, 10),
   remainingFree: id("remainingFreeMintsForWallet(address)").slice(0, 10),
   remainingAllowlist: id("remainingAllowlistMintsForWallet(address)").slice(
@@ -38,6 +38,10 @@ const SEL = {
 type CacheBag = {
   at: number;
   byAddress: Record<string, WalletNftStats>;
+  /** All current holders from ownerOf scan */
+  holders: string[];
+  totalNfts: number;
+  uniqueHolders: number;
   addresses: number;
   ready: boolean;
 };
@@ -63,6 +67,10 @@ function encodeAddrCall(selector: string, address: string): string {
   return selector + padAddress(address);
 }
 
+function encodeOwnerOf(tokenId: number): string {
+  return SEL.ownerOf + tokenId.toString(16).padStart(64, "0");
+}
+
 function decodeUint(hex: string | null | undefined): number {
   if (!hex || hex === "0x") return 0;
   try {
@@ -74,6 +82,13 @@ function decodeUint(hex: string | null | undefined): number {
   }
 }
 
+function decodeAddress(hex: string | null | undefined): string | null {
+  if (!hex || hex.length < 66) return null;
+  const a = normalize(`0x${hex.slice(-40)}`);
+  if (a === ZERO) return null;
+  return a;
+}
+
 function claimed(cap: number, remaining: number): number {
   const r = Math.max(0, Math.min(cap, remaining));
   return Math.max(0, cap - r);
@@ -83,7 +98,6 @@ function emptyStats(): WalletNftStats {
   return { nfts: 0, free: 0, wood: 0, paid: 0 };
 }
 
-/** Parallel single-call batch (JSON-RPC array). Falls back per-URL. */
 async function rpcBatch(
   calls: Array<{ method: string; params: unknown[] }>
 ): Promise<(string | null)[]> {
@@ -121,14 +135,21 @@ async function rpcBatch(
   throw lastErr instanceof Error ? lastErr : new Error("RPC batch failed");
 }
 
-const ADDR_CHUNK = 8; // 8 wallets × 4 calls = 32 eth_calls per HTTP batch
-const CACHE_MS = 120_000;
+async function rpcCall(method: string, params: unknown[]): Promise<string | null> {
+  const [r] = await rpcBatch([{ method, params }]);
+  return r;
+}
+
+const OWNER_BATCH = 40;
+const MINT_CHUNK = 10; // 10 wallets × 3 remaining calls
+const CACHE_MS = 90_000;
 
 /**
- * Build stats for the given wallets. Cached ~2 min process-wide.
+ * Build authoritative NFT holdings via ownerOf(1..totalSupply), then mint-type
+ * remaining for every holder (+ any extra addresses requested).
  */
 export async function buildNftWalletStats(
-  addresses: string[],
+  extraAddresses: string[] = [],
   opts?: { force?: boolean }
 ): Promise<CacheBag> {
   const glob = g();
@@ -144,23 +165,110 @@ export async function buildNftWalletStats(
   }
 
   const job = (async (): Promise<CacheBag> => {
-    const uniq = [
-      ...new Set(
-        addresses
+    const byAddress: Record<string, WalletNftStats> = {};
+
+    // ── 1) totalSupply
+    let supply = 0;
+    try {
+      const hex = await rpcCall("eth_call", [
+        { to: NFT_CONTRACT_ADDRESS, data: SEL.totalSupply },
+        "latest",
+      ]);
+      supply = Math.min(decodeUint(hex), 5000);
+    } catch {
+      supply = 0;
+    }
+
+    // ── 2) ownerOf scan — true holdings for every token
+    for (let start = 1; start <= supply; start += OWNER_BATCH) {
+      const end = Math.min(supply, start + OWNER_BATCH - 1);
+      const calls = [];
+      for (let id = start; id <= end; id++) {
+        calls.push({
+          method: "eth_call",
+          params: [
+            { to: NFT_CONTRACT_ADDRESS, data: encodeOwnerOf(id) },
+            "latest",
+          ],
+        });
+      }
+      try {
+        const results = await rpcBatch(calls);
+        for (const raw of results) {
+          const owner = decodeAddress(raw);
+          if (!owner) continue;
+          if (!byAddress[owner]) byAddress[owner] = emptyStats();
+          byAddress[owner].nfts += 1;
+        }
+      } catch {
+        // retry token-by-token for this window
+        for (let id = start; id <= end; id++) {
+          try {
+            const raw = await rpcCall("eth_call", [
+              { to: NFT_CONTRACT_ADDRESS, data: encodeOwnerOf(id) },
+              "latest",
+            ]);
+            const owner = decodeAddress(raw);
+            if (!owner) continue;
+            if (!byAddress[owner]) byAddress[owner] = emptyStats();
+            byAddress[owner].nfts += 1;
+          } catch {
+            /* skip token */
+          }
+        }
+      }
+    }
+
+    // Seed extras (wood list with 0 NFTs still listed)
+    for (const raw of extraAddresses) {
+      const a = normalize(raw);
+      if (!/^0x[a-f0-9]{40}$/.test(a) || a === ZERO) continue;
+      if (!byAddress[a]) byAddress[a] = emptyStats();
+    }
+
+    // ── 3) Verify top holders with balanceOf (catch scan drift)
+    const holders = Object.keys(byAddress).filter((a) => byAddress[a].nfts > 0);
+    holders.sort((a, b) => byAddress[b].nfts - byAddress[a].nfts);
+    const verifyList = holders.slice(0, 40);
+    for (let i = 0; i < verifyList.length; i += MINT_CHUNK) {
+      const chunk = verifyList.slice(i, i + MINT_CHUNK);
+      const calls = chunk.map((a) => ({
+        method: "eth_call",
+        params: [
+          {
+            to: NFT_CONTRACT_ADDRESS,
+            data: encodeAddrCall(SEL.balanceOf, a),
+          },
+          "latest",
+        ],
+      }));
+      try {
+        const results = await rpcBatch(calls);
+        chunk.forEach((a, idx) => {
+          const bal = decodeUint(results[idx]);
+          if (bal > 0) byAddress[a].nfts = bal;
+        });
+      } catch {
+        /* keep scan counts */
+      }
+    }
+
+    // ── 4) free / wood / paid remaining for every current holder
+    //    (not all 2k wood list — only people who hold or held via remaining)
+    const mintTargets = [
+      ...new Set([
+        ...holders,
+        ...extraAddresses
           .map(normalize)
-          .filter((a) => /^0x[a-f0-9]{40}$/.test(a) && a !== ZERO)
-      ),
+          .filter((a) => byAddress[a] && byAddress[a].nfts > 0),
+      ]),
     ];
 
-    const byAddress: Record<string, WalletNftStats> = {};
-    for (const a of uniq) byAddress[a] = emptyStats();
-
-    for (let i = 0; i < uniq.length; i += ADDR_CHUNK) {
-      const chunk = uniq.slice(i, i + ADDR_CHUNK);
+    for (let i = 0; i < mintTargets.length; i += MINT_CHUNK) {
+      const chunk = mintTargets.slice(i, i + MINT_CHUNK);
       const calls: Array<{ method: string; params: unknown[] }> = [];
       for (const a of chunk) {
         for (const selector of [
-          SEL.balanceOf,
           SEL.remainingFree,
           SEL.remainingAllowlist,
           SEL.remainingPaid,
@@ -180,27 +288,35 @@ export async function buildNftWalletStats(
       try {
         const results = await rpcBatch(calls);
         chunk.forEach((a, idx) => {
-          const base = idx * 4;
-          const bal = decodeUint(results[base]);
-          const freeRem = decodeUint(results[base + 1]);
-          const woodRem = decodeUint(results[base + 2]);
-          const paidRem = decodeUint(results[base + 3]);
+          const base = idx * 3;
+          const freeRem = decodeUint(results[base]);
+          const woodRem = decodeUint(results[base + 1]);
+          const paidRem = decodeUint(results[base + 2]);
+          const prev = byAddress[a] || emptyStats();
           byAddress[a] = {
-            nfts: bal,
+            nfts: prev.nfts,
             free: claimed(NFT_MINT_CAPS.free, freeRem),
             wood: claimed(NFT_MINT_CAPS.wood, woodRem),
             paid: claimed(NFT_MINT_CAPS.paid, paidRem),
           };
         });
       } catch {
-        // leave zeros for this chunk
+        /* leave mint types 0 */
       }
     }
+
+    let totalNfts = 0;
+    for (const st of Object.values(byAddress)) totalNfts += st.nfts;
 
     const bag: CacheBag = {
       at: Date.now(),
       byAddress,
-      addresses: uniq.length,
+      holders: Object.keys(byAddress)
+        .filter((a) => byAddress[a].nfts > 0)
+        .sort((a, b) => byAddress[b].nfts - byAddress[a].nfts),
+      totalNfts,
+      uniqueHolders: holders.length,
+      addresses: Object.keys(byAddress).length,
       ready: true,
     };
     g().__plankNftWalletStats = bag;
@@ -218,12 +334,9 @@ export async function buildNftWalletStats(
 }
 
 export function getCachedNftWalletStats(): CacheBag | null {
-  const c = g().__plankNftWalletStats;
-  if (!c) return null;
-  return c;
+  return g().__plankNftWalletStats ?? null;
 }
 
-/** Merge stats into a compact row shape. */
 export function statsFor(
   bag: CacheBag | null | undefined,
   address: string
