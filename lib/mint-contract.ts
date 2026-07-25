@@ -4,21 +4,21 @@ export const NFT_CONTRACT_ADDRESS =
 export const ROBINHOOD_CHAIN_ID = 4663;
 export const ROBINHOOD_CHAIN_HEX_ID = "0x1237";
 
-/** Preferred public RPC; overridable in Vercel. */
+/** Preferred public RPC (override with NEXT_PUBLIC_ROBINHOOD_RPC_URL). */
 export const ROBINHOOD_RPC_URL =
   process.env.NEXT_PUBLIC_ROBINHOOD_RPC_URL ||
-  "https://robinhoodchain.blockscout.com/api/eth-rpc";
+  "https://rpc.mainnet.chain.robinhood.com";
 
 /**
- * Fallback list for browser reads. Prefer Blockscout eth-rpc (reliable + CORS),
- * then the official Robinhood public RPC.
+ * Ordered RPC fallbacks. Official Robinhood RPC first (supports batch eth_call).
+ * Blockscout is last-resort — it returns 413 on large JSON-RPC batches.
  */
 export const ROBINHOOD_RPC_URLS: string[] = Array.from(
   new Set(
     [
       process.env.NEXT_PUBLIC_ROBINHOOD_RPC_URL,
-      "https://robinhoodchain.blockscout.com/api/eth-rpc",
       "https://rpc.mainnet.chain.robinhood.com",
+      "https://robinhoodchain.blockscout.com/api/eth-rpc",
     ].filter((url): url is string => Boolean(url && url.trim())),
   ),
 );
@@ -44,7 +44,6 @@ export const NFT_ABI = [
   "function freeMint(uint256 quantity)",
   "function allowlistMint(uint256 quantity, bytes32[] merkleProof)",
   "function publicMint(uint256 quantity) payable",
-  // Collection viewer (ERC-721 Enumerable + metadata)
   "function name() view returns (string)",
   "function symbol() view returns (string)",
   "function balanceOf(address owner) view returns (uint256)",
