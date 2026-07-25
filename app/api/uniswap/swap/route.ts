@@ -39,10 +39,12 @@ export async function POST(req: Request) {
     const quote = body.quote as Record<string, unknown>;
     assertQuoteIntegrity(quote);
 
-    // Never accept client-supplied integratorFee nested under quote overrides for rebuild.
-    // We pass the quote through as returned by Uniswap; integrity check enforces fee recipient.
-
-    const payload: Record<string, unknown> = { quote };
+    // CreateSwapRequest: quote + optional permit signature pair
+    const payload: Record<string, unknown> = {
+      quote,
+      refreshGasPrice: true,
+      simulateTransaction: true,
+    };
     if (
       body.permitData &&
       typeof body.permitData === "object" &&
@@ -57,22 +59,34 @@ export async function POST(req: Request) {
     const data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
     if (!upstream.ok) {
       const clean = sanitizeUpstreamError(data, "Uniswap swap build failed.");
-      return publicJson(clean, upstream.status >= 400 && upstream.status < 600 ? upstream.status : 502);
+      return publicJson(
+        clean,
+        upstream.status >= 400 && upstream.status < 600 ? upstream.status : 502
+      );
     }
 
-    // Only return fields needed to sign/send — never env or headers.
-    const swap =
-      (data.swap as Record<string, unknown> | undefined) ||
-      (data.transaction as Record<string, unknown> | undefined);
-
-    if (swap && typeof swap === "object") {
-      // Validate tx shape before handing to wallet
-      if (typeof swap.to !== "string" || typeof swap.data !== "string" || !swap.data || swap.data === "0x") {
-        throw new TradeApiError(502, "BAD_TX", "Uniswap returned an invalid swap transaction.");
-      }
+    // CreateSwapResponse: { requestId, swap: TransactionRequest, gasFee }
+    const swap = data.swap as Record<string, unknown> | undefined;
+    if (!swap || typeof swap !== "object") {
+      throw new TradeApiError(502, "BAD_TX", "Uniswap returned no swap transaction.");
+    }
+    if (
+      typeof swap.to !== "string" ||
+      typeof swap.data !== "string" ||
+      !swap.data ||
+      swap.data === "0x"
+    ) {
+      throw new TradeApiError(502, "BAD_TX", "Uniswap returned an invalid swap transaction.");
+    }
+    if (typeof swap.chainId === "number" && swap.chainId !== 4663) {
+      throw new TradeApiError(502, "BAD_CHAIN", "Swap transaction is not for Robinhood Chain.");
     }
 
-    return publicJson(data);
+    return publicJson({
+      requestId: data.requestId,
+      swap,
+      gasFee: data.gasFee,
+    });
   } catch (err) {
     return publicError(err, "Unexpected error building swap.");
   }

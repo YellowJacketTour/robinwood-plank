@@ -16,7 +16,6 @@ export function getEthereumProvider(): Eip1193Provider | null {
   if (typeof window === "undefined") return null;
   const eth = (window as InjectedWindow).ethereum;
   if (!eth) return null;
-  // Prefer MetaMask when multiple injected providers exist.
   if (Array.isArray(eth.providers) && eth.providers.length > 0) {
     const mm = eth.providers.find((p) => p.isMetaMask);
     return mm || eth.providers[0];
@@ -54,7 +53,6 @@ export async function switchToRobinhoodChain(): Promise<void> {
     });
   } catch (err) {
     const code = (err as { code?: number })?.code;
-    // 4902 = chain not added
     if (code === 4902 || code === -32603) {
       await provider.request({
         method: "wallet_addEthereumChain",
@@ -78,6 +76,11 @@ export async function ensureRobinhoodChain(): Promise<void> {
   const id = await getChainId();
   if (id !== CHAIN.id) {
     await switchToRobinhoodChain();
+    // Re-check after switch
+    const after = await getChainId();
+    if (after !== CHAIN.id) {
+      throw new Error(`Switch wallet network to ${CHAIN.name} (chain ${CHAIN.id}).`);
+    }
   }
 }
 
@@ -91,6 +94,7 @@ export async function sendTransaction(tx: {
   maxFeePerGas?: string;
   maxPriorityFeePerGas?: string;
   gasPrice?: string;
+  chainId?: number | string;
 }): Promise<string> {
   const provider = getEthereumProvider();
   if (!provider) throw new Error("No wallet found.");
@@ -100,12 +104,20 @@ export async function sendTransaction(tx: {
     from: tx.from,
     data: tx.data,
   };
-  if (tx.value) params.value = toHexQuantity(tx.value);
+  if (tx.value !== undefined && tx.value !== null && tx.value !== "") {
+    params.value = toHexQuantity(tx.value);
+  }
   const gas = tx.gasLimit || tx.gas;
   if (gas) params.gas = toHexQuantity(gas);
   if (tx.maxFeePerGas) params.maxFeePerGas = toHexQuantity(tx.maxFeePerGas);
   if (tx.maxPriorityFeePerGas) params.maxPriorityFeePerGas = toHexQuantity(tx.maxPriorityFeePerGas);
   if (tx.gasPrice) params.gasPrice = toHexQuantity(tx.gasPrice);
+  if (tx.chainId !== undefined) {
+    params.chainId =
+      typeof tx.chainId === "string" && tx.chainId.startsWith("0x")
+        ? tx.chainId
+        : toHexQuantity(tx.chainId);
+  }
 
   const hash = (await provider.request({
     method: "eth_sendTransaction",
@@ -123,19 +135,31 @@ export async function signTypedData(
   const provider = getEthereumProvider();
   if (!provider) throw new Error("No wallet found.");
 
-  // Strip EIP712Domain from types if present — wallets re-add it from domain.
   const typesCopy = { ...types } as Record<string, unknown>;
   delete typesCopy.EIP712Domain;
 
-  const primaryType =
-    (typeof value === "object" &&
-      value !== null &&
-      "details" in (value as object) &&
-      "spender" in (value as object) &&
-      "PermitSingle") ||
-    Object.keys(typesCopy).find((k) => k === "PermitSingle" || k === "PermitBatch") ||
-    Object.keys(typesCopy)[0] ||
-    "PermitSingle";
+  let primaryType = "PermitSingle";
+  if (typesCopy.PermitBatch) primaryType = "PermitBatch";
+  else if (typesCopy.PermitSingle) primaryType = "PermitSingle";
+  else {
+    const keys = Object.keys(typesCopy);
+    if (keys.length === 1) primaryType = keys[0];
+    else if (keys.length > 0) {
+      // Prefer type whose shape matches message keys
+      if (value && typeof value === "object") {
+        const msgKeys = Object.keys(value as object);
+        const match = keys.find((k) => {
+          const fields = typesCopy[k] as { name: string }[] | undefined;
+          if (!Array.isArray(fields)) return false;
+          return fields.every((f) => msgKeys.includes(f.name));
+        });
+        if (match) primaryType = match;
+        else primaryType = keys[0];
+      } else {
+        primaryType = keys[0];
+      }
+    }
+  }
 
   const payload = JSON.stringify({
     domain,
