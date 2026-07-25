@@ -4,24 +4,6 @@ import WoodListChecker from "@/components/WoodListChecker";
 import Image from "next/image";
 import { WOOD_LIST_TWEET_URL } from "@/lib/constants";
 
-const MINT_STATS = [
-  {
-    icon: "🪵",
-    title: "777 Community",
-    desc: "Free and Wood List mints share a protected pool of 777 NFTs.",
-  },
-  {
-    icon: "💰",
-    title: "765 Paid & Reserve",
-    desc: "Paid and owner mints begin with a separate allocation of 765 NFTs.",
-  },
-  {
-    icon: "🎯",
-    title: "0.01 ETH",
-    desc: "The paid mint price is read from the contract and shown live below.",
-  },
-];
-
 export default function MintInfo() {
   return (
     <section id="mint" className="px-4 py-20 sm:px-6">
@@ -33,7 +15,7 @@ export default function MintInfo() {
           </p>
         </Reveal>
 
-        {/* 1. Wood Checker first — above mint + Your Planks */}
+        {/* 1. Wood Checker */}
         <Reveal delayMs={80}>
           <div
             id="wood-list"
@@ -88,21 +70,6 @@ export default function MintInfo() {
             </div>
           </div>
         </Reveal>
-
-        {/* 3. Allocation explanations — below connect/mint */}
-        <div className="mt-10 grid gap-6 sm:grid-cols-3">
-          {MINT_STATS.map((stat, i) => (
-            <Reveal key={stat.title} delayMs={i * 120}>
-              <div className="wood-frame h-full rounded-2xl bg-wood-900/85 p-6 text-center">
-                <div className="text-4xl" aria-hidden="true">
-                  {stat.icon}
-                </div>
-                <h3 className="mt-4 font-display text-2xl text-foreground">{stat.title}</h3>
-                <p className="mt-2 text-lg text-foreground">{stat.desc}</p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
       </div>
     </section>
   );
