@@ -389,11 +389,45 @@ input {
   color: #cfeec4;
 }
 
+/* Wallet · NFTs · Free · Wood · Paid · Drop% · PLANK */
+.airdrop-panel .airdrop-row-wide {
+  grid-template-columns: 1.4rem minmax(0, 1fr) 2.1rem 2.1rem 2.1rem 2.1rem 3.6rem;
+  column-gap: 0.28rem;
+  font-size: 0.66rem !important;
+}
+
 @media (min-width: 640px) {
   .airdrop-panel .airdrop-row {
     grid-template-columns: 2rem minmax(0, 1.15fr) 4.5rem 5rem 5.5rem 3.25rem;
     font-size: 0.72rem !important;
   }
+  .airdrop-panel .airdrop-row-wide {
+    grid-template-columns: 1.75rem minmax(0, 1fr) 2.6rem 2.6rem 2.6rem 2.6rem 4rem 4.5rem;
+    font-size: 0.7rem !important;
+  }
+}
+
+.airdrop-panel .airdrop-sort {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: inherit !important;
+  line-height: inherit !important;
+  font-weight: 800 !important;
+  color: #e9c987 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.airdrop-panel .airdrop-sort:hover {
+  color: #f8d98a !important;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .airdrop-panel .airdrop-row-head {
