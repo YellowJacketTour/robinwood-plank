@@ -22,6 +22,7 @@ import {
   ensureRobinhoodChain,
   getConnectedAccounts,
   getEthereumProvider,
+  getNativeBalance,
   sendTransaction,
   signTypedData,
   waitForTransaction,
@@ -244,52 +245,66 @@ export default function SwapWidget({ unlocked }: Props) {
       setBusy(true);
       await ensureRobinhoodChain();
 
-      // Always re-quote right before build so we don't lose to stale Uniswap.app prices
-      let active = quote;
-      if (Date.now() - quote.fetchedAt > 8_000) {
-        setStatus("Refreshing quote for best price…");
-        const raw = parseTokenAmount(amountIn, inputDecimals);
-        if (raw === null || raw <= BigInt(0)) {
-          throw new Error("Enter a valid amount.");
-        }
-        const qRes = await fetch("/api/uniswap/quote", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            direction,
-            amount: raw.toString(),
-            swapper: account,
-            slippageTolerance: slippage,
-          }),
-        });
-        const qData = await qRes.json();
-        if (!qRes.ok) {
-          throw new Error(qData.message || "Could not refresh quote. Try again.");
-        }
-        const quoteObj = (qData.quote ?? qData) as Record<string, unknown>;
-        const amountOut =
-          (typeof qData.amountOut === "string" && qData.amountOut) ||
-          (quoteObj.output as { amount?: string } | undefined)?.amount ||
-          "";
-        if (!amountOut) throw new Error("Quote missing output. Retry.");
-        active = {
-          quote: quoteObj,
-          permitData:
-            qData.permitData && typeof qData.permitData === "object"
-              ? (qData.permitData as QuoteState["permitData"])
-              : null,
-          permitTransaction:
-            qData.permitTransaction && typeof qData.permitTransaction === "object"
-              ? (qData.permitTransaction as Record<string, string>)
-              : null,
-          routing: (qData.routing as string) || "CLASSIC",
-          amountOut,
-          fetchedAt: Date.now(),
-        };
-        setQuote(active);
+      const raw = parseTokenAmount(amountIn, inputDecimals);
+      if (raw === null || raw <= BigInt(0)) {
+        throw new Error("Enter a valid amount.");
       }
 
-      // On-chain approval tx if Uniswap returned one (ERC-20 sell path)
+      // Buys: leave ETH for gas so the tx is not underfunded / stuck
+      if (direction === "buy") {
+        const bal = await getNativeBalance(account);
+        // Reserve ~0.002 ETH for gas on RH (conservative)
+        const gasReserve = BigInt("2000000000000000");
+        if (bal <= gasReserve) {
+          throw new Error(
+            "Not enough ETH for gas. Keep at least ~0.002 ETH free after the buy amount."
+          );
+        }
+        if (raw + gasReserve > bal) {
+          throw new Error(
+            "Buy amount too high — leave ~0.002 ETH free for gas so the swap doesn't get stuck."
+          );
+        }
+      }
+
+      // Always re-quote immediately before build (stale quotes → stuck/reverted)
+      setStatus("Refreshing quote…");
+      const qRes = await fetch("/api/uniswap/quote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          direction,
+          amount: raw.toString(),
+          swapper: account,
+          slippageTolerance: slippage,
+        }),
+      });
+      const qData = await qRes.json();
+      if (!qRes.ok) {
+        throw new Error(qData.message || "Could not refresh quote. Try again.");
+      }
+      const quoteObj = (qData.quote ?? qData) as Record<string, unknown>;
+      const amountOut =
+        (typeof qData.amountOut === "string" && qData.amountOut) ||
+        (quoteObj.output as { amount?: string } | undefined)?.amount ||
+        "";
+      if (!amountOut) throw new Error("Quote missing output. Retry.");
+      const active: QuoteState = {
+        quote: quoteObj,
+        permitData:
+          qData.permitData && typeof qData.permitData === "object"
+            ? (qData.permitData as QuoteState["permitData"])
+            : null,
+        permitTransaction:
+          qData.permitTransaction && typeof qData.permitTransaction === "object"
+            ? (qData.permitTransaction as Record<string, string>)
+            : null,
+        routing: (qData.routing as string) || "CLASSIC",
+        amountOut,
+        fetchedAt: Date.now(),
+      };
+      setQuote(active);
+
       if (active.permitTransaction?.to && active.permitTransaction?.data) {
         setStatus("Approve token in wallet…");
         const approveHash = await sendTransaction({
@@ -297,13 +312,12 @@ export default function SwapWidget({ unlocked }: Props) {
           from: account,
           data: active.permitTransaction.data,
           value: active.permitTransaction.value,
-          // No fee fields — Rabby sim
           gasLimit:
             active.permitTransaction.gasLimit || active.permitTransaction.gas,
-          letWalletEstimateFees: true,
+          kind: "approve",
         });
         setStatus("Waiting for approval…");
-        await waitForTransaction(approveHash, { label: "Approval" });
+        await waitForTransaction(approveHash, { label: "Approval", timeoutMs: 120_000 });
       }
 
       let signature: string | undefined;
@@ -333,13 +347,7 @@ export default function SwapWidget({ unlocked }: Props) {
       if (!res.ok) {
         if (res.status === 429 || data.error === "RATE_LIMIT") {
           throw new Error(
-            data.message || "Routing busy — wait a few seconds, get a new quote, then swap."
-          );
-        }
-        if (data.error === "INSUFFICIENT_FUNDS" || data.error === "GAS_ESTIMATE") {
-          throw new Error(
-            data.message ||
-              "Could not build swap (balance/gas). Check ETH for gas + amount, then retry."
+            data.message || "Routing busy — wait a few seconds, then try again."
           );
         }
         throw new Error(data.message || data.error || "Swap build failed.");
@@ -349,25 +357,41 @@ export default function SwapWidget({ unlocked }: Props) {
       if (!tx?.to || !tx?.data || tx.data === "0x") {
         throw new Error("Invalid swap transaction from Uniswap.");
       }
+      // Buy must send native ETH
+      if (direction === "buy" && (!tx.value || tx.value === "0x0" || tx.value === "0")) {
+        throw new Error("Swap missing ETH value. Get a fresh quote and retry.");
+      }
 
-      setStatus("Confirm in wallet (simulation)…");
-      // Clean payload: to/data/value + optional gas limit only — wallet sets fees
-      const gasLimit = tx.gasLimit || tx.gas;
+      setStatus("Confirm buy/sell in wallet…");
       const hash = await sendTransaction({
         to: tx.to,
         from: account,
         data: tx.data,
         value: tx.value,
-        ...(gasLimit ? { gasLimit: String(gasLimit) } : {}),
-        letWalletEstimateFees: true,
+        gasLimit: tx.gasLimit || tx.gas,
+        kind: "swap",
       });
       setTxHash(hash);
-      setStatus("Swap submitted — waiting for confirmation…");
+      setStatus("Submitted — waiting for chain…");
       try {
-        await waitForTransaction(hash, { label: "Swap", timeoutMs: 180_000 });
-        setStatus("Swap confirmed.");
-      } catch {
-        setStatus("Swap submitted (confirming on chain…).");
+        await waitForTransaction(hash, {
+          label: "Swap",
+          timeoutMs: 120_000,
+          onPending: (ms) => {
+            if (ms > 30_000) {
+              setStatus(
+                "Still pending… If stuck, open Rabby/MetaMask → Speed Up. Keep this tab open."
+              );
+            } else if (ms > 10_000) {
+              setStatus("Waiting for block confirmation…");
+            }
+          },
+        });
+        setStatus("Swap confirmed ✓");
+      } catch (waitErr) {
+        // Don't clear hash — user can track on explorer
+        setError(waitErr instanceof Error ? waitErr.message : "Confirmation timed out.");
+        setStatus("Tx sent — check explorer / speed up in wallet if pending.");
       }
       setQuote(null);
       setAmountIn("");
@@ -648,6 +672,9 @@ export default function SwapWidget({ unlocked }: Props) {
                 >
                   {shortAddress(txHash, 6)}
                 </a>
+                <span className="mt-1 block text-[0.65rem] text-foreground/50">
+                  Pending long? Use Speed Up in your wallet, or open the explorer link.
+                </span>
               </p>
             )}
           </div>
