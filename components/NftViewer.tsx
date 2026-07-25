@@ -12,7 +12,6 @@ import {
 } from "react";
 import {
   BrowserProvider,
-  Contract,
   getAddress,
   isAddress,
   type Eip1193Provider,
@@ -25,13 +24,21 @@ import {
   type NftMetadata,
 } from "@/lib/ipfs";
 import {
-  NFT_ABI,
   NFT_CONTRACT_ADDRESS,
-  ROBINHOOD_CHAIN_HEX_ID,
   ROBINHOOD_EXPLORER_URL,
-  ROBINHOOD_RPC_URL,
 } from "@/lib/mint-contract";
-import { getMintReadClient } from "@/lib/robinhood-provider";
+import {
+  getMintReadClient,
+  touchMintReadClient,
+} from "@/lib/robinhood-provider";
+import {
+  ensureNftCacheHydrated,
+  getCachedInventory,
+  getCachedToken,
+  putTokenMetadata,
+  putTokenUri,
+  setCachedInventory,
+} from "@/lib/nft-cache";
 
 type EthereumProvider = Eip1193Provider & {
   on?: (event: string, listener: (...args: unknown[]) => void) => void;
@@ -59,6 +66,7 @@ export type OwnedNft = {
 
 /** Cards rendered per "page" so large bags don't explode the DOM or page height. */
 const PAGE_SIZE = 12;
+const META_BATCH = 6;
 
 function shortAddress(address: string) {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -91,6 +99,21 @@ function normalizeAddressInput(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+function nftFromCache(tokenId: number): OwnedNft | null {
+  const rec = getCachedToken(tokenId);
+  if (!rec?.tokenUri && !rec?.metaAt) return null;
+  if (!rec.imageUri && !rec.metaAt) return null;
+  return {
+    tokenId,
+    tokenUri: rec.tokenUri,
+    name: rec.name || `RobinWood Plank #${tokenId}`,
+    description: rec.description || "",
+    imageUri: rec.imageUri || "",
+    attributes: rec.attributes || [],
+    metadataError: rec.error,
+  };
 }
 
 function NftImage({
@@ -216,7 +239,6 @@ function NftDetailModal({
         className="nft-modal wood-frame relative flex h-[min(92dvh,880px)] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-wood-900 sm:h-auto sm:max-h-[min(90dvh,860px)] sm:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        {/* Fixed header — title wraps, never collides with close */}
         <div className="flex shrink-0 items-start gap-3 border-b border-gold-500/25 bg-wood-900 px-4 py-3 sm:px-5 sm:py-4">
           <div className="min-w-0 flex-1 pr-1">
             <p className="text-[0.7rem] font-extrabold uppercase tracking-[0.16em] text-gold-300">
@@ -240,7 +262,6 @@ function NftDetailModal({
           </button>
         </div>
 
-        {/* Scrollable body */}
         <div className="nft-modal-body min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <div className="grid sm:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
             <div className="relative mx-auto flex w-full max-h-[min(42dvh,320px)] items-center justify-center bg-wood-950 sm:max-h-none sm:min-h-[280px] sm:self-stretch">
@@ -290,7 +311,6 @@ function NftDetailModal({
           </div>
         </div>
 
-        {/* Sticky action bar — always fully visible */}
         <div className="flex shrink-0 flex-col gap-2 border-t border-gold-500/25 bg-wood-900 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:px-5">
           <a
             href={`${ROBINHOOD_EXPLORER_URL}/token/${NFT_CONTRACT_ADDRESS}/instance/${nft.tokenId}`}
@@ -325,66 +345,176 @@ export default function NftViewer() {
   const requestIdRef = useRef(0);
   const gridScrollRef = useRef<HTMLDivElement>(null);
 
+  const paintFromInventoryCache = useCallback((wallet: string) => {
+    ensureNftCacheHydrated();
+    const inv = getCachedInventory(wallet);
+    if (!inv?.ids.length) return false;
+    const cachedNfts = inv.ids
+      .map((id) => nftFromCache(id))
+      .filter((n): n is OwnedNft => Boolean(n))
+      .sort((a, b) => a.tokenId - b.tokenId);
+    if (!cachedNfts.length) return false;
+    setNfts(cachedNfts);
+    setMessage(
+      inv.fresh
+        ? `Showing ${cachedNfts.length} cached Plank${cachedNfts.length === 1 ? "" : "s"}…`
+        : `Showing ${cachedNfts.length} cached Plank${cachedNfts.length === 1 ? "" : "s"} · refreshing…`,
+    );
+    return true;
+  }, []);
+
   const loadCollection = useCallback(async (wallet: string) => {
     const requestId = ++requestIdRef.current;
     setLoading(true);
-    setMessage("");
-    setNfts([]);
     setSelected(null);
     setVisibleCount(PAGE_SIZE);
     setViewedAddress(wallet);
     if (gridScrollRef.current) gridScrollRef.current.scrollTop = 0;
 
+    // Non-destructive: keep showing cache while we refresh
+    const hadCache = paintFromInventoryCache(wallet);
+    if (!hadCache) {
+      setNfts([]);
+      setMessage("Fetching wallet collection…");
+    }
+
     try {
       const { contract } = await getMintReadClient();
-      const balance = Number(await contract.balanceOf(wallet));
+      if (requestId !== requestIdRef.current) return;
 
-      if (balance === 0) {
-        if (requestId === requestIdRef.current) {
+      const inv = getCachedInventory(wallet);
+      let sortedIds: number[];
+
+      if (inv?.fresh && inv.ids.length >= 0) {
+        // Fresh inventory — still verify balance cheaply
+        const balance = Number(await contract.balanceOf(wallet));
+        touchMintReadClient();
+        if (requestId !== requestIdRef.current) return;
+
+        if (balance === inv.ids.length) {
+          sortedIds = [...inv.ids].sort((a, b) => a - b);
+        } else {
+          // Bag changed — re-enumerate
+          const tokenIds = await Promise.all(
+            Array.from({ length: balance }, (_, index) =>
+              contract
+                .tokenOfOwnerByIndex(wallet, index)
+                .then((id: bigint) => Number(id)),
+            ),
+          );
+          touchMintReadClient();
+          sortedIds = [...tokenIds].sort((a, b) => a - b);
+          setCachedInventory(wallet, sortedIds);
+        }
+      } else {
+        const balance = Number(await contract.balanceOf(wallet));
+        touchMintReadClient();
+        if (requestId !== requestIdRef.current) return;
+
+        if (balance === 0) {
+          setCachedInventory(wallet, []);
           setNfts([]);
           setMessage("No RobinWood Planks found for this wallet.");
           setLoading(false);
+          return;
         }
+
+        // Sequential index reads (batchMaxCount:1) — still parallel promises, serial RPC
+        const tokenIds = await Promise.all(
+          Array.from({ length: balance }, (_, index) =>
+            contract
+              .tokenOfOwnerByIndex(wallet, index)
+              .then((id: bigint) => Number(id)),
+          ),
+        );
+        touchMintReadClient();
+        sortedIds = [...tokenIds].sort((a, b) => a - b);
+        setCachedInventory(wallet, sortedIds);
+      }
+
+      if (requestId !== requestIdRef.current) return;
+
+      if (sortedIds.length === 0) {
+        setNfts([]);
+        setMessage("No RobinWood Planks found for this wallet.");
+        setLoading(false);
         return;
       }
 
-      const tokenIds = await Promise.all(
-        Array.from({ length: balance }, (_, index) =>
-          contract.tokenOfOwnerByIndex(wallet, index).then((id: bigint) => Number(id)),
-        ),
+      // Paint cache hits immediately in final order
+      const owned: OwnedNft[] = sortedIds.map((tokenId) => {
+        const hit = nftFromCache(tokenId);
+        if (hit) return hit;
+        return {
+          tokenId,
+          tokenUri: "",
+          name: `RobinWood Plank #${tokenId}`,
+          description: "",
+          imageUri: "",
+          attributes: [],
+        };
+      });
+      setNfts([...owned]);
+      setMessage(
+        `Loading ${sortedIds.length} Plank${sortedIds.length === 1 ? "" : "s"}…`,
       );
 
-      const sortedIds = [...tokenIds].sort((a, b) => a - b);
-
-      const tokenUris = await Promise.all(
-        sortedIds.map((tokenId) =>
-          contract.tokenURI(tokenId).then((uri: string) => ({ tokenId, uri })),
-        ),
-      );
-
-      const BATCH = 8;
-      const owned: OwnedNft[] = [];
-
-      for (let offset = 0; offset < tokenUris.length; offset += BATCH) {
+      // Fill gaps with network + IPFS; skip tokens that already have image
+      for (let offset = 0; offset < sortedIds.length; offset += META_BATCH) {
         if (requestId !== requestIdRef.current) return;
-        const slice = tokenUris.slice(offset, offset + BATCH);
+        const slice = sortedIds.slice(offset, offset + META_BATCH);
+
         const batch = await Promise.all(
-          slice.map(async ({ tokenId, uri }) => {
+          slice.map(async (tokenId) => {
+            const existing = nftFromCache(tokenId);
+            if (existing?.imageUri) return existing;
+
             const fallbackName = `RobinWood Plank #${tokenId}`;
             try {
-              const metadata: NftMetadata = await fetchNftMetadata(uri);
+              let tokenUri = getCachedToken(tokenId)?.tokenUri || "";
+              if (!tokenUri) {
+                tokenUri = (await contract.tokenURI(tokenId)) as string;
+                if (tokenUri) putTokenUri(tokenId, tokenUri);
+                touchMintReadClient();
+              }
+              if (!tokenUri) {
+                return {
+                  tokenId,
+                  tokenUri: "",
+                  name: fallbackName,
+                  description: "",
+                  imageUri: "",
+                  attributes: [],
+                  metadataError: "tokenURI unavailable",
+                } satisfies OwnedNft;
+              }
+
+              const metadata: NftMetadata = await fetchNftMetadata(tokenUri);
+              const name = metadata.name?.trim() || fallbackName;
+              const description = metadata.description?.trim() || "";
+              const attributes = Array.isArray(metadata.attributes)
+                ? metadata.attributes
+                : [];
+              putTokenMetadata(tokenId, {
+                tokenUri,
+                name,
+                description,
+                imageUri: metadata.image || "",
+                attributes,
+                owner: wallet,
+              });
               return {
                 tokenId,
-                tokenUri: uri,
-                name: metadata.name?.trim() || fallbackName,
-                description: metadata.description?.trim() || "",
+                tokenUri,
+                name,
+                description,
                 imageUri: metadata.image || "",
-                attributes: Array.isArray(metadata.attributes) ? metadata.attributes : [],
+                attributes,
               } satisfies OwnedNft;
             } catch (error) {
               return {
                 tokenId,
-                tokenUri: uri,
+                tokenUri: getCachedToken(tokenId)?.tokenUri || "",
                 name: fallbackName,
                 description: "",
                 imageUri: "",
@@ -394,7 +524,13 @@ export default function NftViewer() {
             }
           }),
         );
-        owned.push(...batch);
+
+        // Merge into owned array by tokenId
+        const byId = new Map(batch.map((n) => [n.tokenId, n]));
+        for (let i = 0; i < owned.length; i += 1) {
+          const updated = byId.get(owned[i].tokenId);
+          if (updated) owned[i] = updated;
+        }
         if (requestId === requestIdRef.current) {
           setNfts([...owned]);
         }
@@ -409,17 +545,21 @@ export default function NftViewer() {
       }
     } catch (error) {
       if (requestId === requestIdRef.current) {
-        setMessage(`Unable to load collection. ${errorMessage(error)}`);
-        setNfts([]);
+        setMessage(
+          hadCache
+            ? `Refresh failed — showing cache. ${errorMessage(error)}`
+            : `Unable to load collection. ${errorMessage(error)}`,
+        );
       }
     } finally {
       if (requestId === requestIdRef.current) {
         setLoading(false);
       }
     }
-  }, []);
+  }, [paintFromInventoryCache]);
 
   useEffect(() => {
+    ensureNftCacheHydrated();
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const fromQuery = params.get("address") || params.get("wallet");
@@ -428,7 +568,8 @@ export default function NftViewer() {
       setInputAddress(checksummed);
       void loadCollection(checksummed);
     }
-  }, [loadCollection]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!window.ethereum) return;
@@ -457,7 +598,6 @@ export default function NftViewer() {
         setMessage("No wallet account returned.");
         return;
       }
-      // Ensure we read checksum form without forcing a chain switch for a view-only flow.
       const provider = new BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const next = getAddress(await signer.getAddress());
@@ -492,7 +632,9 @@ export default function NftViewer() {
   const heading =
     viewedAddress && !loading
       ? `Collection · ${shortAddress(viewedAddress)}`
-      : "Collection Viewer";
+      : viewedAddress
+        ? `Collection · ${shortAddress(viewedAddress)}`
+        : "Collection Viewer";
 
   const visibleNfts = useMemo(
     () => nfts.slice(0, visibleCount),
@@ -523,7 +665,6 @@ export default function NftViewer() {
 
         <Reveal delayMs={120}>
           <div className="wood-frame mx-auto mt-10 flex max-w-5xl flex-col overflow-hidden rounded-2xl bg-wood-900/95">
-            {/* Lookup bar */}
             <div className="border-b border-gold-500/20 p-4 sm:p-5">
               <form
                 onSubmit={onSubmit}
@@ -577,7 +718,6 @@ export default function NftViewer() {
               </div>
             </div>
 
-            {/* Window chrome */}
             <div className="flex items-center justify-between gap-3 border-b border-gold-500/15 bg-black/20 px-4 py-3 sm:px-5">
               <h3 className="min-w-0 truncate font-display text-lg text-gold-300 sm:text-xl">
                 {heading}
@@ -592,7 +732,6 @@ export default function NftViewer() {
               </div>
             </div>
 
-            {/* Bounded scroll window — keeps page flow stable with large bags */}
             <div
               ref={gridScrollRef}
               className="max-h-[min(62dvh,560px)] overflow-y-auto overscroll-contain sm:max-h-[min(64dvh,640px)]"
@@ -678,7 +817,6 @@ export default function NftViewer() {
               )}
             </div>
 
-            {/* Pager footer — fixed chrome under the window */}
             {nfts.length > PAGE_SIZE && (
               <div className="flex flex-col gap-2 border-t border-gold-500/20 bg-black/25 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
                 <p className="text-sm text-foreground/65">
