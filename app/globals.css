@@ -156,8 +156,9 @@ body :where(.bg-gold-500, .bg-gold-400) {
 .section-title {
   font-family: var(--font-stencil), "Georgia", serif;
   letter-spacing: 0.02em;
-  font-size: clamp(3rem, 7vw, 5.5rem) !important;
-  line-height: 0.95;
+  /* Dense: big enough to brand, small enough to avoid empty chrome */
+  font-size: clamp(1.75rem, 5.5vw, 2.75rem) !important;
+  line-height: 1.05;
   text-shadow:
     -2px -2px 0 #311708,
     2px -2px 0 #311708,
@@ -256,22 +257,29 @@ input {
   }
 
   .section-title {
-    font-size: clamp(2.1rem, 11vw, 3rem) !important;
-    line-height: 1.05;
+    font-size: clamp(1.55rem, 8vw, 2.1rem) !important;
+    line-height: 1.08;
   }
 }
 
 /* Density helpers — keep desktop/mobile tight without empty chrome */
 .section-tight {
-  padding-top: 2.5rem;
-  padding-bottom: 2.5rem;
+  padding-top: 1.25rem;
+  padding-bottom: 1.25rem;
 }
 
 @media (min-width: 640px) {
   .section-tight {
-    padding-top: 3rem;
-    padding-bottom: 3rem;
+    padding-top: 1.75rem;
+    padding-bottom: 1.75rem;
   }
+}
+
+/* Compact card used across trade / boards / mint strips */
+.dense-card {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(217, 164, 65, 0.28);
+  background: rgba(42, 26, 15, 0.92);
 }
 
 /* NFT detail modal — override global p/dt/dd/button size/shadow so traits

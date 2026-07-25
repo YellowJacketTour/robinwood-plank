@@ -1,57 +1,56 @@
 import Reveal from "@/components/Reveal";
+import SectionHead from "@/components/SectionHead";
 
 const SOURCES = [
   {
     icon: "💎",
-    title: "1 ETH — Developer Liquidity",
-    desc: "Added regardless of the raise.",
+    title: "1 ETH — Dev LP",
+    desc: "Seeded regardless of raise.",
   },
   {
     icon: "🪵",
-    title: "First 4.2069 ETH Raised",
-    desc: "100% goes into LP.",
+    title: "First 4.2069 ETH",
+    desc: "100% into the pool.",
   },
 ];
 
 export default function LiquidityBurn() {
   return (
-    <section id="liquidity" className="section-tight scroll-mt-24 px-3 sm:px-5">
+    <section id="liquidity" className="section-tight scroll-mt-20 px-3 sm:px-5">
       <div className="mx-auto max-w-5xl">
         <Reveal>
-          <p className="lede text-center text-xs font-extrabold uppercase tracking-[0.3em] text-forest-600">
-            $PLANK LIQUIDITY
-          </p>
-          <h2 className="section-title mt-2 text-center text-4xl text-gold-300 sm:text-5xl md:text-6xl">
-            Liquidity Gets Burned. Forever.
-          </h2>
-          <p className="lede mx-auto mt-4 max-w-2xl text-center text-base text-foreground/80 sm:text-lg">
-            Initial LP tokens go to the dead address.
-          </p>
+          <SectionHead
+            eyebrow="$PLANK liquidity"
+            title="LP Gets Burned. Forever."
+            lede="Initial LP tokens to the dead address — no rug path."
+            artSrc="/images/plank-check-signed.jpg"
+            artAlt="Bank of Plank novelty check"
+          />
         </Reveal>
 
-        <div className="mt-12 grid gap-6 sm:grid-cols-2">
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 sm:gap-3">
           {SOURCES.map((s, i) => (
-            <Reveal key={s.title} delayMs={i * 120}>
-              <div className="wood-frame h-full rounded-2xl bg-wood-900/85 p-6 text-center">
-                <div className="text-4xl" aria-hidden="true">
+            <Reveal key={s.title} delayMs={i * 80}>
+              <div className="dense-card flex items-center gap-3 p-3 sm:p-3.5">
+                <span className="text-2xl" aria-hidden="true">
                   {s.icon}
+                </span>
+                <div className="min-w-0">
+                <h3 className="font-display text-base text-foreground sm:text-lg">{s.title}</h3>
+                <p className="text-xs text-foreground/70 sm:text-sm">{s.desc}</p>
                 </div>
-                <h3 className="mt-4 font-display text-2xl text-foreground">{s.title}</h3>
-                <p className="mt-2 text-lg text-foreground">{s.desc}</p>
               </div>
             </Reveal>
           ))}
         </div>
 
-        <Reveal delayMs={280}>
-          <div className="mt-8 flex flex-col items-center gap-4 rounded-2xl border-2 border-dashed border-gold-500/50 bg-forest-900/70 p-8 text-center backdrop-blur-sm">
-            <div className="lede flex items-center gap-3 text-2xl font-extrabold uppercase tracking-wide text-gold-300 sm:text-3xl">
-              <span aria-hidden="true">🔥</span>
-              <span>Fund LP. Burn initial LP tokens.</span>
-              <span aria-hidden="true">🔥</span>
-            </div>
-            <p className="lede max-w-2xl text-sm text-foreground/70">
-              Above 4.2069 ETH: buybacks and added liquidity. Verify the initial LP burn on-chain.
+        <Reveal delayMs={160}>
+          <div className="mt-3 rounded-lg border border-dashed border-gold-500/45 bg-forest-900/70 px-3 py-2.5 text-center">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-gold-300 sm:text-sm">
+              🔥 Fund LP · burn initial LP tokens · verify on-chain 🔥
+            </p>
+            <p className="mt-0.5 text-[0.7rem] text-foreground/65">
+              Above 4.2069 ETH: buybacks + more LP.
             </p>
           </div>
         </Reveal>
