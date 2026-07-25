@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SNIPER_TRAP_MINUTES } from "@/lib/constants";
 import { getCountdownParts, getTradeOpensAt, type CountdownParts } from "@/lib/trade";
 
 function pad(n: number) {
   return n.toString().padStart(2, "0");
 }
+
+type Phase = "pre_lp" | "death_trap" | "cooldown_window" | "free" | "unknown";
 
 type Props = {
   onOpenChange?: (isOpen: boolean) => void;
@@ -15,11 +18,15 @@ type Props = {
 /**
  * Countdown synced to server clock via /api/trade/status to avoid client clock skew
  * unlocking the UI while the API is still TRADE_LOCKED (or vice versa).
+ * Shows launch phase: pre-LP → death trap → OPEN.
  */
 export default function CountdownTimer({ onOpenChange, className = "" }: Props) {
   const [parts, setParts] = useState<CountdownParts>(() => getCountdownParts());
   /** clientNow - serverNow; positive means client is ahead */
   const [skewMs, setSkewMs] = useState(0);
+  const [phase, setPhase] = useState<Phase>("unknown");
+  const [apiOpen, setApiOpen] = useState<boolean | null>(null);
+  const [apiReady, setApiReady] = useState<boolean | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,18 +37,35 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
           serverNow?: string;
           opensAt?: string;
           isOpen?: boolean;
+          tradingApiConfigured?: boolean;
+          listingWindow?: { phase?: string };
         };
-        if (cancelled || !data.serverNow) return;
-        const serverNow = Date.parse(data.serverNow);
-        if (!Number.isNaN(serverNow)) {
-          setSkewMs(Date.now() - serverNow);
+        if (cancelled) return;
+        if (data.serverNow) {
+          const serverNow = Date.parse(data.serverNow);
+          if (!Number.isNaN(serverNow)) {
+            setSkewMs(Date.now() - serverNow);
+          }
+        }
+        if (typeof data.isOpen === "boolean") setApiOpen(data.isOpen);
+        if (typeof data.tradingApiConfigured === "boolean") {
+          setApiReady(data.tradingApiConfigured);
+        }
+        const p = data.listingWindow?.phase;
+        if (
+          p === "pre_lp" ||
+          p === "death_trap" ||
+          p === "cooldown_window" ||
+          p === "free"
+        ) {
+          setPhase(p);
         }
       } catch {
         // Keep local clock if status fails; API still enforces lock.
       }
     }
     sync();
-    const syncId = window.setInterval(sync, 30_000);
+    const syncId = window.setInterval(sync, 15_000);
     return () => {
       cancelled = true;
       window.clearInterval(syncId);
@@ -59,13 +83,19 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
         next.isOpen = false;
         next.totalMs = Number.MAX_SAFE_INTEGER;
       }
+      // Prefer server isOpen when available (API is source of truth for unlock)
+      if (apiOpen === false) {
+        next.isOpen = false;
+      } else if (apiOpen === true && next.isOpen) {
+        next.isOpen = true;
+      }
       setParts(next);
       onOpenChange?.(next.isOpen);
     };
     tick();
     const id = window.setInterval(tick, 250);
     return () => window.clearInterval(id);
-  }, [onOpenChange, skewMs]);
+  }, [onOpenChange, skewMs, apiOpen]);
 
   if (parts.isOpen) {
     return (
@@ -78,7 +108,10 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
           Trade window
         </p>
         <p className="mt-0.5 font-display text-2xl text-gold-300 sm:text-3xl">OPEN</p>
-        <p className="mt-0.5 text-xs text-foreground/70">Official widget live — swap here only.</p>
+        <p className="mt-0.5 text-xs text-foreground/70">
+          Official widget live — swap here only.
+          {apiReady === false ? " · API key missing on server." : ""}
+        </p>
       </div>
     );
   }
@@ -89,6 +122,21 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
     { label: "M", full: "Mins", value: pad(parts.minutes) },
     { label: "S", full: "Secs", value: pad(parts.seconds) },
   ];
+
+  const phaseBanner =
+    phase === "death_trap"
+      ? {
+          title: "Death trap live",
+          body: `LP may be live · widget locked · ~${SNIPER_TRAP_MINUTES}m sniper window · off-site = Bad Boards`,
+          tone: "border-orange-500/45 bg-[#3a1510]/85 text-orange-200",
+        }
+      : phase === "pre_lp"
+        ? {
+            title: "Pre-LP",
+            body: "Community waits for the timer. Do not use Uniswap.app.",
+            tone: "border-gold-500/30 bg-wood-900/80 text-foreground/75",
+          }
+        : null;
 
   return (
     <div
@@ -116,6 +164,21 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
           </div>
         ))}
       </div>
+      {phaseBanner && (
+        <div
+          className={`mt-2.5 rounded-lg border px-2.5 py-1.5 text-left text-[0.65rem] leading-snug sm:text-xs ${phaseBanner.tone}`}
+        >
+          <strong className="font-extrabold uppercase tracking-wide">
+            {phaseBanner.title}
+          </strong>
+          <span className="opacity-90"> — {phaseBanner.body}</span>
+        </div>
+      )}
+      {apiReady === false && (
+        <p className="mt-1.5 text-[0.65rem] text-red-300">
+          Trading API not configured on server — set UNISWAP_API_KEY before open.
+        </p>
+      )}
     </div>
   );
 }

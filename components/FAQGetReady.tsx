@@ -6,19 +6,25 @@ const STEPS = [
     icon: "📲",
     step: "1",
     title: "Robinhood Wallet",
-    desc: "Copy your public address.",
+    desc: "Connect on chain 4663.",
   },
   {
     icon: "🔁",
     step: "2",
-    title: "ETH on RH Chain",
-    desc: "In-app swap to chain 4663.",
+    title: "ETH for gas",
+    desc: "Native ETH on Robinhood Chain.",
   },
   {
-    icon: "🌉",
+    icon: "🪵",
     step: "3",
-    title: "Verify network",
-    desc: "Chain ID 4663 · gas in ETH.",
+    title: "Trade here only",
+    desc: "Wait for timer · plank.love widget · real CA.",
+  },
+  {
+    icon: "📋",
+    step: "4",
+    title: "Skip Uniswap.app",
+    desc: "Off-site in the trap → Bad Boards.",
   },
 ];
 
@@ -29,14 +35,14 @@ export default function FAQGetReady() {
         <Reveal>
           <SectionHead
             eyebrow="Guide"
-            title="Get Mint-Ready"
-            lede="Wallet · Robinhood Chain · ETH."
+            title="Get Trade-Ready"
+            lede="Wallet · Robinhood Chain · official widget only."
             artSrc="/images/collection/plank-bobawood.png"
             artAlt="BobaWood collection plank"
           />
         </Reveal>
 
-        <ol className="mt-3 grid gap-2 sm:grid-cols-3 sm:gap-3">
+        <ol className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 sm:gap-3">
           {STEPS.map((s, i) => (
             <Reveal key={s.title} delayMs={i * 80}>
               <li className="dense-card relative flex flex-col items-center p-2.5 text-center sm:p-3">
@@ -58,7 +64,8 @@ export default function FAQGetReady() {
 
         <Reveal delayMs={200}>
           <div className="mt-3 rounded-lg border border-dashed border-gold-500/40 bg-forest-900/75 px-3 py-2 text-xs text-foreground/80">
-            <strong>Stay safe:</strong> Official wallet only. Verify addresses. Ignore DMs.
+            <strong>Stay safe:</strong> Official CA only. Ignore DMs. Mint at #mint · trade at #trade ·
+            boards CSV at #boards.
           </div>
         </Reveal>
       </div>
