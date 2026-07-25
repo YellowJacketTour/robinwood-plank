@@ -18,6 +18,10 @@ import {
   type NftMetadata,
 } from "@/lib/ipfs";
 import {
+  buildGallerySearchIndex,
+  matchesGalleryQuery,
+} from "@/lib/gallery-search";
+import {
   NFT_ABI,
   NFT_CONTRACT_ADDRESS,
   ROBINHOOD_CHAIN_ID,
@@ -33,6 +37,7 @@ export type GalleryNft = {
   imageUri: string;
   attributes: NftAttribute[];
   searchText: string;
+  searchWords: string[];
   loaded: boolean;
   error?: string;
 };
@@ -42,28 +47,18 @@ const URI_BATCH = 24;
 const META_CONCURRENCY = 10;
 const PAGE_SIZE = 24;
 
-function buildSearchText(name: string, attributes: NftAttribute[], tokenId: number) {
-  const parts = [
-    name,
-    `#${tokenId}`,
-    String(tokenId),
-    ...attributes.flatMap((attribute) => [
-      String(attribute.trait_type ?? ""),
-      String(attribute.value ?? ""),
-    ]),
-  ];
-  return parts.join(" ").toLowerCase();
-}
-
-function matchesQuery(nft: GalleryNft, query: string) {
-  if (!query) return true;
-  const tokens = query
-    .toLowerCase()
-    .split(/\s+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  if (!tokens.length) return true;
-  return tokens.every((token) => nft.searchText.includes(token));
+function indexNft(fields: {
+  tokenId: number;
+  name: string;
+  description?: string;
+  attributes?: NftAttribute[];
+}) {
+  return buildGallerySearchIndex({
+    tokenId: fields.tokenId,
+    name: fields.name,
+    description: fields.description ?? "",
+    attributes: fields.attributes ?? [],
+  });
 }
 
 function sortNewestFirst(a: GalleryNft, b: GalleryNft) {
@@ -253,6 +248,10 @@ export default function Gallery() {
             chunk.map(async (entry) => {
               const fallbackName = `RobinWood Plank #${entry.tokenId}`;
               if (!entry.tokenUri) {
+                const idx = indexNft({
+                  tokenId: entry.tokenId,
+                  name: fallbackName,
+                });
                 return {
                   tokenId: entry.tokenId,
                   tokenUri: "",
@@ -260,7 +259,8 @@ export default function Gallery() {
                   description: "",
                   imageUri: "",
                   attributes: [] as NftAttribute[],
-                  searchText: buildSearchText(fallbackName, [], entry.tokenId),
+                  searchText: idx.searchText,
+                  searchWords: idx.words,
                   loaded: true,
                   error: "tokenURI unavailable",
                 } satisfies GalleryNft;
@@ -268,20 +268,32 @@ export default function Gallery() {
               try {
                 const metadata: NftMetadata = await fetchNftMetadata(entry.tokenUri);
                 const name = metadata.name?.trim() || fallbackName;
+                const description = metadata.description?.trim() || "";
                 const attributes = Array.isArray(metadata.attributes)
                   ? metadata.attributes
                   : [];
+                const idx = indexNft({
+                  tokenId: entry.tokenId,
+                  name,
+                  description,
+                  attributes,
+                });
                 return {
                   tokenId: entry.tokenId,
                   tokenUri: entry.tokenUri,
                   name,
-                  description: metadata.description?.trim() || "",
+                  description,
                   imageUri: metadata.image || "",
                   attributes,
-                  searchText: buildSearchText(name, attributes, entry.tokenId),
+                  searchText: idx.searchText,
+                  searchWords: idx.words,
                   loaded: true,
                 } satisfies GalleryNft;
               } catch {
+                const idx = indexNft({
+                  tokenId: entry.tokenId,
+                  name: fallbackName,
+                });
                 return {
                   tokenId: entry.tokenId,
                   tokenUri: entry.tokenUri,
@@ -289,7 +301,8 @@ export default function Gallery() {
                   description: "",
                   imageUri: "",
                   attributes: [],
-                  searchText: buildSearchText(fallbackName, [], entry.tokenId),
+                  searchText: idx.searchText,
+                  searchWords: idx.words,
                   loaded: true,
                   error: "metadata unavailable",
                 } satisfies GalleryNft;
@@ -334,19 +347,21 @@ export default function Gallery() {
 
       // Placeholder cards so newest mints appear immediately (top-left)
       if (newIds.length) {
-        const placeholders = newIds.map(
-          (tokenId) =>
-            ({
-              tokenId,
-              tokenUri: "",
-              name: `RobinWood Plank #${tokenId}`,
-              description: "",
-              imageUri: "",
-              attributes: [],
-              searchText: buildSearchText(`RobinWood Plank #${tokenId}`, [], tokenId),
-              loaded: false,
-            }) satisfies GalleryNft,
-        );
+        const placeholders = newIds.map((tokenId) => {
+          const name = `RobinWood Plank #${tokenId}`;
+          const idx = indexNft({ tokenId, name });
+          return {
+            tokenId,
+            tokenUri: "",
+            name,
+            description: "",
+            imageUri: "",
+            attributes: [],
+            searchText: idx.searchText,
+            searchWords: idx.words,
+            loaded: false,
+          } satisfies GalleryNft;
+        });
         upsertItems(placeholders);
         setStatus(
           newIds.length === allIds.length
@@ -385,7 +400,10 @@ export default function Gallery() {
 
   const filtered = useMemo(() => {
     const q = query.trim();
-    return items.filter((item) => matchesQuery(item, q));
+    if (!q) return items;
+    return items.filter((item) =>
+      matchesGalleryQuery(q, item.searchText || "", item.searchWords || []),
+    );
   }, [items, query]);
 
   const visible = useMemo(
@@ -396,9 +414,16 @@ export default function Gallery() {
   const remaining = Math.max(0, filtered.length - visibleCount);
   const progress =
     totalMinted === 0 ? 0 : Math.min(100, Math.round((loadedCount / totalMinted) * 100));
+  const searchActive = query.trim().length > 0;
+  const metadataStillLoading = totalMinted > 0 && loadedCount < totalMinted;
 
   function onSearchSubmit(event: FormEvent) {
     event.preventDefault();
+  }
+
+  function onSearchChange(value: string) {
+    setQuery(value);
+    setVisibleCount(PAGE_SIZE);
   }
 
   return (
@@ -438,16 +463,17 @@ export default function Gallery() {
                   id="gallery-search"
                   type="search"
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search names & traits… e.g. holographic, rare, plank"
+                  onChange={(event) => onSearchChange(event.target.value)}
+                  placeholder="Live filter: holo, rare, iron wood, #42…"
                   autoComplete="off"
                   spellCheck={false}
+                  enterKeyHint="search"
                   className="min-h-12 min-w-0 flex-1 rounded-lg border-2 border-gold-500/50 bg-wood-950 px-4 py-3 text-base font-bold text-foreground outline-none placeholder:text-foreground/40 focus:border-gold-300"
                 />
                 {query && (
                   <button
                     type="button"
-                    onClick={() => setQuery("")}
+                    onClick={() => onSearchChange("")}
                     className="min-h-12 rounded-lg border border-gold-500/40 px-5 py-3 font-extrabold text-gold-300 sm:shrink-0"
                   >
                     Clear
@@ -457,19 +483,26 @@ export default function Gallery() {
 
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm text-foreground/65">
                 <p role="status" aria-live="polite">
-                  {status}
+                  {searchActive
+                    ? metadataStillLoading
+                      ? `${filtered.length.toLocaleString()} match${
+                          filtered.length === 1 ? "" : "es"
+                        } for “${query.trim()}” · indexing traits ${progress}%…`
+                      : `${filtered.length.toLocaleString()} match${
+                          filtered.length === 1 ? "" : "es"
+                        } for “${query.trim()}”`
+                    : status}
                 </p>
                 <div className="flex flex-wrap items-center gap-3 font-bold">
                   <span className="rounded-full border border-gold-500/30 px-2.5 py-1 text-gold-300">
                     {totalMinted.toLocaleString()} minted
                   </span>
-                  {query && (
-                    <span className="rounded-full border border-gold-500/30 px-2.5 py-1 text-gold-300">
-                      {filtered.length.toLocaleString()} match
-                      {filtered.length === 1 ? "" : "es"}
+                  {searchActive && (
+                    <span className="rounded-full border border-emerald-400/40 px-2.5 py-1 text-emerald-300">
+                      {filtered.length.toLocaleString()} shown
                     </span>
                   )}
-                  {totalMinted > 0 && loadedCount < totalMinted && (
+                  {metadataStillLoading && (
                     <span className="text-foreground/50">Art {progress}%</span>
                   )}
                 </div>
@@ -495,7 +528,9 @@ export default function Gallery() {
 
               {totalMinted > 0 && filtered.length === 0 && (
                 <p className="py-16 text-center text-foreground/60">
-                  No Planks match “{query}”. Try another name or trait.
+                  {searchActive && metadataStillLoading
+                    ? `No matches for “${query.trim()}” yet — still loading names & traits (${progress}%). Results appear as art indexes.`
+                    : `No Planks match “${query.trim()}”. Try a partial trait (holo), base name, rarity, or #id.`}
                 </p>
               )}
 
