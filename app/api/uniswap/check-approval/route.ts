@@ -44,7 +44,7 @@ export async function POST(req: Request) {
     if (!token || !/^0x[a-fA-F0-9]{40}$/.test(token)) {
       throw new TradeApiError(400, "BAD_TOKEN", "token must be a valid address.");
     }
-    if (!amount || !/^\d+$/.test(amount)) {
+    if (!amount || !/^\d+$/.test(amount) || amount === "0") {
       throw new TradeApiError(400, "BAD_AMOUNT", "amount must be a positive integer string.");
     }
 

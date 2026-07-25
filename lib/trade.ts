@@ -82,12 +82,12 @@ export function parseTokenAmount(amount: string, decimals: number): bigint | nul
   const trimmed = amount.trim();
   if (!trimmed) return null;
   // Allow "1", "1.", ".5", "0.1" — reject multiple dots / non-numeric.
-  if (!/^\d*\.?\d*$/.test(trimmed) || trimmed === "." || trimmed === "") return null;
+  if ((trimmed.match(/\./g) || []).length > 1) return null;
+  if (!/^\d*\.?\d*$/.test(trimmed) || trimmed === ".") return null;
   const [wholePart, fracPart = ""] = trimmed.split(".");
   if (fracPart.length > decimals) return null;
   const whole = wholePart === "" ? "0" : wholePart;
   const frac = fracPart.padEnd(decimals, "0");
-  // Reject pure empty whole+frac edge after pad (should not happen)
   if (!/^\d+$/.test(whole + frac)) return null;
   try {
     return BigInt(whole + frac);
@@ -99,7 +99,7 @@ export function parseTokenAmount(amount: string, decimals: number): bigint | nul
 export function formatTokenAmount(
   raw: string | bigint,
   decimals: number,
-  maxFractionDigits = 6
+  maxFractionDigits = 8
 ): string {
   const value = typeof raw === "bigint" ? raw : BigInt(raw || "0");
   const neg = value < BigInt(0);
@@ -107,11 +107,23 @@ export function formatTokenAmount(
   const base = BigInt(10) ** BigInt(decimals);
   const whole = abs / base;
   const frac = abs % base;
-  let fracStr = frac.toString().padStart(decimals, "0").slice(0, maxFractionDigits);
+  // Show full precision for dust below default display threshold so "0" is not misleading.
+  let digits = maxFractionDigits;
+  if (abs > BigInt(0) && whole === BigInt(0)) {
+    const minVisible = base / BigInt(10) ** BigInt(Math.min(maxFractionDigits, decimals));
+    if (frac > BigInt(0) && frac < minVisible) {
+      digits = decimals;
+    }
+  }
+  digits = Math.min(digits, decimals);
+  let fracStr = frac.toString().padStart(decimals, "0").slice(0, digits);
   fracStr = fracStr.replace(/0+$/, "");
   const body = fracStr ? `${whole.toString()}.${fracStr}` : whole.toString();
   return neg ? `-${body}` : body;
 }
+
+/** Quotes older than this should be refreshed before swap. */
+export const QUOTE_MAX_AGE_MS = 45_000;
 
 export function shortAddress(address: string, chars = 4): string {
   if (!address || address.length < 10) return address;

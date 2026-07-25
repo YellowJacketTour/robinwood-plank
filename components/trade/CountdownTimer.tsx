@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getCountdownParts, type CountdownParts } from "@/lib/trade";
+import { getCountdownParts, getTradeOpensAt, type CountdownParts } from "@/lib/trade";
 
 function pad(n: number) {
   return n.toString().padStart(2, "0");
@@ -12,19 +12,60 @@ type Props = {
   className?: string;
 };
 
+/**
+ * Countdown synced to server clock via /api/trade/status to avoid client clock skew
+ * unlocking the UI while the API is still TRADE_LOCKED (or vice versa).
+ */
 export default function CountdownTimer({ onOpenChange, className = "" }: Props) {
   const [parts, setParts] = useState<CountdownParts>(() => getCountdownParts());
+  /** clientNow - serverNow; positive means client is ahead */
+  const [skewMs, setSkewMs] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function sync() {
+      try {
+        const res = await fetch("/api/trade/status", { cache: "no-store" });
+        const data = (await res.json()) as {
+          serverNow?: string;
+          opensAt?: string;
+          isOpen?: boolean;
+        };
+        if (cancelled || !data.serverNow) return;
+        const serverNow = Date.parse(data.serverNow);
+        if (!Number.isNaN(serverNow)) {
+          setSkewMs(Date.now() - serverNow);
+        }
+      } catch {
+        // Keep local clock if status fails; API still enforces lock.
+      }
+    }
+    sync();
+    const syncId = window.setInterval(sync, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(syncId);
+    };
+  }, []);
 
   useEffect(() => {
     const tick = () => {
-      const next = getCountdownParts();
+      // Correct client clock toward server time
+      const correctedNow = Date.now() - skewMs;
+      const next = getCountdownParts(correctedNow);
+      // Fail closed: if opensAt is invalid, stay locked
+      const opens = getTradeOpensAt().getTime();
+      if (Number.isNaN(opens)) {
+        next.isOpen = false;
+        next.totalMs = Number.MAX_SAFE_INTEGER;
+      }
       setParts(next);
       onOpenChange?.(next.isOpen);
     };
     tick();
     const id = window.setInterval(tick, 250);
     return () => window.clearInterval(id);
-  }, [onOpenChange]);
+  }, [onOpenChange, skewMs]);
 
   if (parts.isOpen) {
     return (
