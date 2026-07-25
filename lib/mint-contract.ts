@@ -27,5 +27,12 @@ export const NFT_ABI = [
   "function freeMint(uint256 quantity)",
   "function allowlistMint(uint256 quantity, bytes32[] merkleProof)",
   "function publicMint(uint256 quantity) payable",
+  // Collection viewer (ERC-721 Enumerable + metadata)
+  "function name() view returns (string)",
+  "function symbol() view returns (string)",
+  "function balanceOf(address owner) view returns (uint256)",
+  "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
+  "function tokenURI(uint256 tokenId) view returns (string)",
+  "function ownerOf(uint256 tokenId) view returns (address)",
 ] as const;
 

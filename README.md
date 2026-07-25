@@ -28,10 +28,13 @@ npm run start
 - `public/plank-social.jpg` — static Open Graph and X link-preview artwork.
 - `components/MintPanel.tsx` — live NFT contract reads, wallet connection, and
   free, Wood List, and paid mint transactions.
+- `components/NftViewer.tsx` — wallet/address collection viewer for RobinWood
+  NFTs (responsive grid + detail modal).
 - `components/` — site sections including `Nav`, `Hero`, `MintInfo`,
   `Distribution`, `Roadmap`, `LiquidityBurn`, and `Footer`.
 - `lib/mint-contract.ts` — NFT contract ABI, address, and Robinhood Chain
   configuration.
+- `lib/ipfs.ts` — IPFS gateway helpers and NFT metadata fetching.
 - `lib/constants.ts` — $PLANK token address, navigation, and social links.
 
 ## Deploy to Vercel

@@ -7,6 +7,7 @@ export const SITE_URL = "https://plank.love";
 export const NAV_LINKS = [
   { href: "#home", label: "Home" },
   { href: "#mint", label: "Mint" },
+  { href: "#collection", label: "Collection" },
   { href: "#tokenomics", label: "Funding" },
   { href: "#roadmap", label: "Roadmap" },
   { href: "#liquidity", label: "Liquidity" },
