@@ -2,6 +2,7 @@ import {
   getTrapWindow,
   isListingWindowActive,
   isOfficialWidgetOpen,
+  isOffWidgetCaptureActive,
   isSniperCaptureActive,
   SNIPER_TRAP_MINUTES,
   WALLET_COOLDOWN_MINUTES,
@@ -26,9 +27,9 @@ export async function GET(req: Request) {
     const limited = rateLimit(req, { key: "boards", limit: 90, windowMs: 60_000 });
     if (limited) return limited;
 
-    // Live path: auto-scan only while widget is locked (death trap sniper capture)
+    // Live path: auto-scan during death trap + cooldown (off-widget capture)
     let autoScan: { ran: boolean; newBad?: number; notes?: string[] } = { ran: false };
-    if (isSniperCaptureActive()) {
+    if (isOffWidgetCaptureActive()) {
       const age = await getLastScanAgeMs();
       if (age >= AUTO_SCAN_EVERY_MS) {
         try {
@@ -68,23 +69,33 @@ export async function GET(req: Request) {
       volume: decorated.volume,
       legend: {
         goodWood:
-          "Mint Wood List + airdrop wallets. Community that waited and held the real list.",
+          "Wood List (mint) + live plank.love widget buyers. Labeled so you can tell them apart.",
         badBoards:
-          "Wallets that moved $PLANK while the official widget was still locked (death trap). Once the widget is on, official plank.love buyers are never auto-logged here.",
+          "Off-site / Uniswap UI (or bots) — never the official plank.love widget. Death trap = widget locked; Off-site = post-open without a widget session.",
         fallen:
-          "Were Good Wood (mint/airdrop) then got cute off-site during the trap — now Bad Boards.",
+          "Were Good Wood (mint/airdrop) then bought off-site during the trap — now Bad Boards.",
         cooldown: `Each wallet that touches $PLANK starts a ${WALLET_COOLDOWN_MINUTES}-minute cooldown so ops can list snipers before free trade.`,
+        plankLove:
+          "Bought or quoted through the official plank.love Trade widget (server session).",
+        offSite:
+          "Chain activity without a plank.love widget session — Uniswap app or other frontend.",
       },
     };
 
     return publicJson({
       ...view,
       niceLedger: snap.niceLedger,
+      niceLedgerAddresses: snap.niceLedgerAddresses,
       naughtyLedger: decorated.recentBad,
+      export: {
+        blacklistCsv: "/api/boards/export?format=csv",
+        addressesOnly: "/api/boards/export?format=addresses",
+      },
       live: {
         autoScanEveryMs: AUTO_SCAN_EVERY_MS,
         listingActive: isListingWindowActive(),
         sniperCapture: isSniperCaptureActive(),
+        offWidgetCapture: isOffWidgetCaptureActive(),
         widgetOpen: isOfficialWidgetOpen(),
         lastAutoScan: autoScan,
         stream: "/api/boards/stream",

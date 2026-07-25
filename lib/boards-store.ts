@@ -3,13 +3,16 @@ import path from "node:path";
 import {
   cooldownEndsAt,
   isListingWindowActive,
+  isOffWidgetCaptureActive,
   isSniperCaptureActive,
   normalizeAddress,
   WALLET_COOLDOWN_MS,
 } from "@/lib/boards";
 import type {
   BadBoardEntry,
+  BadVenue,
   BoardsState,
+  NiceLedgerEntry,
   WidgetSession,
 } from "@/lib/boards-types";
 
@@ -199,30 +202,38 @@ export async function wasWidgetVerified(address: string): Promise<boolean> {
   return Boolean(state.widgetSessions[normalizeAddress(address)]);
 }
 
+export function venueLabelFor(venue: BadVenue): string {
+  if (venue === "death_trap") return "Death trap · Uniswap / external";
+  return "Off-site · not plank.love";
+}
+
 /**
- * Mark a wallet Bad Boards — off-widget snipes while the official widget is locked.
- * Good Wood addresses that offend become "fallen" (still counted in bad list).
- * Optional ethSpentWeiDelta accumulates native ETH value from the sniper's txs.
- * Official widget sessions are never marked.
+ * Mark a wallet Bad Boards — off-widget / Uniswap-UI path (never plank.love).
+ * Good Wood offenders become "fallen".
+ * Official widget sessions (server quote/swap) are never marked in off_widget mode.
  */
 export async function markBadBoard(opts: {
   address: string;
   reason: string;
   source: string;
   txHash?: string;
-  /** Additional wei this hit (only applied once per new txHash). */
   ethSpentWeiDelta?: string | bigint;
   at?: Date;
+  venue?: BadVenue;
   /**
-   * `sniper` (default for chain): only while widget is locked (death trap).
-   * `manual` / ops: allowed for full listing window if ever needed.
+   * sniper     — death trap only (widget locked; all chain = off-site)
+   * off_widget — death trap or cooldown; skips plank.love widget sessions
+   * manual     — ops / full listing window
    */
-  captureMode?: "sniper" | "manual";
+  captureMode?: "sniper" | "off_widget" | "manual";
 }): Promise<BadBoardEntry | null> {
   const atMs = opts.at?.getTime() ?? Date.now();
   const mode = opts.captureMode ?? "sniper";
-  // Chain sniper capture stops the moment community widget unlocks.
+
   if (mode === "sniper" && !isSniperCaptureActive(atMs)) {
+    return null;
+  }
+  if (mode === "off_widget" && !isOffWidgetCaptureActive(atMs)) {
     return null;
   }
   if (mode === "manual" && !isListingWindowActive(atMs)) {
@@ -233,10 +244,12 @@ export async function markBadBoard(opts: {
   const a = normalizeAddress(opts.address);
   if (!/^0x[a-f0-9]{40}$/.test(a)) return null;
 
-  // Manual mode only: never re-flag wallets already verified via official quote/swap.
-  // Sniper mode intentionally ignores widget sessions (ping is unauthenticated).
-  if (mode === "manual" && (await wasWidgetVerified(a))) {
-    return null;
+  // plank.love widget buyers (server quote/swap session) never go on Bad Boards
+  // once the widget is open. During pure death trap, widget cannot buy anyway.
+  if (mode === "off_widget" || mode === "manual") {
+    if (await wasWidgetVerified(a)) {
+      return null;
+    }
   }
 
   const at = opts.at ?? new Date();
@@ -264,6 +277,11 @@ export async function markBadBoard(opts: {
     }
   }
 
+  const venue: BadVenue =
+    opts.venue ||
+    prev?.venue ||
+    (isSniperCaptureActive(atMs) ? "death_trap" : "off_site");
+
   const entry: BadBoardEntry = {
     address: a,
     firstSeenAt: prev?.firstSeenAt ?? at.toISOString(),
@@ -273,6 +291,8 @@ export async function markBadBoard(opts: {
     sources,
     txHashes,
     ethSpentWei: ethSpentWei.toString(),
+    venue,
+    venueLabel: venueLabelFor(venue),
   };
   state.badBoards[a] = entry;
   recomputeTotalEth(state);
@@ -352,46 +372,68 @@ export async function publicBoardsSnapshot(): Promise<{
   goodWoodCount: number;
   recentBad: BadBoardEntry[];
   fallenCount: number;
-  /** Sample of Good Wood addresses for the wooden ledger (nice column). */
-  niceLedger: string[];
+  /** Sample of Good Wood with plank.love vs wood_list labels */
+  niceLedger: NiceLedgerEntry[];
+  /** Flat addresses for legacy consumers */
+  niceLedgerAddresses: string[];
   totalEthSpentWei: string;
 }> {
   const state = await ensureLoaded();
   recomputeTotalEth(state);
   const good = await loadGoodWoodSet();
-  const badList = Object.values(state.badBoards).sort(
-    (a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt)
-  );
+  const badList = Object.values(state.badBoards)
+    .map((b) => ({
+      ...b,
+      venue: b.venue || ("death_trap" as BadVenue),
+      venueLabel: b.venueLabel || venueLabelFor(b.venue || "death_trap"),
+    }))
+    .sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt));
   const fallenCount = badList.filter((b) => b.wasGoodWood).length;
 
-  // Nice column: widget-verified first (live), then Good Wood samples for ledger density
-  const niceSet: string[] = [];
+  // Nice column: plank.love widget first, then Wood List
+  const niceLedger: NiceLedgerEntry[] = [];
+  const seen = new Set<string>();
   const widgetAddrs = Object.keys(state.widgetSessions).sort(
     (a, b) =>
       Date.parse(state.widgetSessions[b].lastSeenAt) -
       Date.parse(state.widgetSessions[a].lastSeenAt)
   );
   for (const a of widgetAddrs) {
-    if (!state.badBoards[a]) niceSet.push(a);
-    if (niceSet.length >= 48) break;
+    if (state.badBoards[a]) continue;
+    niceLedger.push({ address: a, label: "plank.love" });
+    seen.add(a);
+    if (niceLedger.length >= 48) break;
   }
-  if (niceSet.length < 48) {
+  if (niceLedger.length < 48) {
     for (const a of good) {
-      if (state.badBoards[a]) continue;
-      if (niceSet.includes(a)) continue;
-      niceSet.push(a);
-      if (niceSet.length >= 48) break;
+      if (state.badBoards[a] || seen.has(a)) continue;
+      niceLedger.push({ address: a, label: "wood_list" });
+      seen.add(a);
+      if (niceLedger.length >= 48) break;
     }
   }
 
   return {
     state,
     goodWoodCount: good.size,
-    recentBad: badList.slice(0, 100),
+    recentBad: badList.slice(0, 200),
     fallenCount,
-    niceLedger: niceSet,
+    niceLedger,
+    niceLedgerAddresses: niceLedger.map((n) => n.address),
     totalEthSpentWei: state.totalEthSpentWei || "0",
   };
+}
+
+/** All bad board rows for CSV export (full set). */
+export async function listAllBadBoards(): Promise<BadBoardEntry[]> {
+  const state = await ensureLoaded();
+  return Object.values(state.badBoards)
+    .map((b) => ({
+      ...b,
+      venue: b.venue || ("death_trap" as BadVenue),
+      venueLabel: b.venueLabel || venueLabelFor(b.venue || "death_trap"),
+    }))
+    .sort((a, b) => Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt));
 }
 
 /** Enrich bad entries + volume tick with live ETH/USD. */

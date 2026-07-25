@@ -2,6 +2,7 @@ import {
   getTrapWindow,
   isListingWindowActive,
   isOfficialWidgetOpen,
+  isOffWidgetCaptureActive,
   isSniperCaptureActive,
   SNIPER_TRAP_MINUTES,
   WALLET_COOLDOWN_MINUTES,
@@ -64,8 +65,13 @@ async function buildPayload() {
       autoScanEveryMs: AUTO_SCAN_EVERY_MS,
       listingActive: isListingWindowActive(),
       sniperCapture: isSniperCaptureActive(),
+      offWidgetCapture: isOffWidgetCaptureActive(),
       widgetOpen: isOfficialWidgetOpen(),
       stream: "/api/boards/stream",
+      export: {
+        blacklistCsv: "/api/boards/export?format=csv",
+        addressesOnly: "/api/boards/export?format=addresses",
+      },
     },
   };
 }
@@ -110,7 +116,7 @@ export async function GET(req: Request) {
       // Immediate snapshot
       try {
         // Only chain-scan while widget is locked (sniper capture)
-        if (isSniperCaptureActive()) {
+        if (isOffWidgetCaptureActive()) {
           const age = await getLastScanAgeMs();
           if (age >= AUTO_SCAN_EVERY_MS) {
             try {
@@ -137,7 +143,7 @@ export async function GET(req: Request) {
 
         try {
           // Periodic chain scan only while death trap / widget locked
-          if (isSniperCaptureActive()) {
+          if (isOffWidgetCaptureActive()) {
             const age = await getLastScanAgeMs();
             if (age >= AUTO_SCAN_EVERY_MS) {
               try {

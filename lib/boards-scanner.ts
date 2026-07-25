@@ -1,12 +1,14 @@
 import { CONTRACT_ADDRESS, CHAIN } from "@/lib/constants";
 import {
   getTrapWindow,
+  isOffWidgetCaptureActive,
   isSniperCaptureActive,
   normalizeAddress,
 } from "@/lib/boards";
 import {
   getBoardsState,
   markBadBoard,
+  wasWidgetVerified,
 } from "@/lib/boards-store";
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 
@@ -135,15 +137,14 @@ export async function scanPlankTransfers(opts?: {
   notes: string[];
 }> {
   const notes: string[] = [];
-  // Only flag snipers while the official widget is still locked.
-  // After community open, buyers through the widget (and all post-open flow)
-  // must never be auto-logged as Bad Boards.
-  if (!isSniperCaptureActive()) {
+  // death_trap: flag all EOAs (widget locked → every buy is off-site / Uni)
+  // cooldown_window: flag only non–plank.love widget buyers (server sessions)
+  if (!isOffWidgetCaptureActive()) {
     const trap = getTrapWindow();
     notes.push(
-      trap.phase === "cooldown_window" || trap.phase === "free"
-        ? `Widget open (phase=${trap.phase}) — chain Bad Boards capture off; official buyers safe.`
-        : "Sniper capture inactive — scan skipped."
+      trap.phase === "free"
+        ? "Free trade — Bad Boards chain capture off."
+        : "Off-widget capture inactive — scan skipped."
     );
     return {
       scannedFrom: 0,
@@ -153,6 +154,8 @@ export async function scanPlankTransfers(opts?: {
       notes,
     };
   }
+
+  const deathTrap = isSniperCaptureActive();
 
   const latestHex = (await rpc("eth_blockNumber", [])) as string;
   const latest = parseInt(latestHex, 16);
@@ -228,9 +231,16 @@ export async function scanPlankTransfers(opts?: {
       if (seen.has(wallet + txHash)) continue;
       seen.add(wallet + txHash);
 
-      // Death trap: official widget is locked — any non-ignored wallet in a
-      // PLANK transfer is a sniper candidate. Do NOT trust client "widget pings"
-      // here (that was a self-whitelist bypass). Capture ends when widget opens.
+      // Skip contracts (routers / pools) — only EOAs
+      if (await isContractAddress(wallet)) {
+        continue;
+      }
+
+      // After widget open: only flag the buyer (tx signer) if they never used plank.love
+      if (!deathTrap) {
+        if (!meta || meta.from !== wallet) continue;
+        if (await wasWidgetVerified(wallet)) continue;
+      }
 
       // Native ETH on this tx only counts for the signer
       let ethDelta = BigInt(0);
@@ -238,24 +248,19 @@ export async function scanPlankTransfers(opts?: {
         ethDelta = meta.valueWei;
       }
 
-      // Skip contracts (routers / pools) — only EOAs for the Bad Boards ledger
-      if (await isContractAddress(wallet)) {
-        continue;
-      }
-
-      // Off-widget PLANK movement during death trap only → Bad Boards
       const before = (await getBoardsState()).badBoards[wallet];
       const prevWei = BigInt(before?.ethSpentWei || "0");
       const entry = await markBadBoard({
         address: wallet,
-        reason:
-          "Transacted $PLANK outside official plank.love widget during death trap (widget still locked)",
-        source: "chain_transfer",
+        reason: deathTrap
+          ? "Death trap snipe — $PLANK moved while plank.love widget was locked (Uniswap app / bots / external)"
+          : "Off-site buy — $PLANK moved without a plank.love widget session (Uniswap UI or other frontend)",
+        source: deathTrap ? "death_trap_chain" : "off_site_uniswap",
+        venue: deathTrap ? "death_trap" : "off_site",
         txHash,
         ethSpentWeiDelta: ethDelta > BigInt(0) ? ethDelta : undefined,
         at: new Date(),
-        // Chain capture only valid in death trap (double-check inside markBadBoard)
-        captureMode: "sniper",
+        captureMode: deathTrap ? "sniper" : "off_widget",
       });
       if (entry && !before) newBad += 1;
       if (entry) {
