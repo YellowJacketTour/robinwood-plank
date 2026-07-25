@@ -632,7 +632,7 @@ export default function AirdropChecker() {
 
             <div className="flex flex-wrap items-center gap-1.5 border-b border-[#c4922e]/35 bg-[#24160d]/70 px-2 py-1 sm:px-2.5">
               <span className="airdrop-label shrink-0 !tracking-[0.06em]">
-                Approved · {fmtInt(totalShown)}
+                Holders · {fmtInt(totalShown)}
               </span>
               <span className="airdrop-meta">
                 {nftLoading
@@ -641,6 +641,20 @@ export default function AirdropChecker() {
                     ? "NFTs live"
                     : "NFTs pending"}
               </span>
+              <a
+                href="/api/airdrop/export-holders?format=20lab"
+                className="airdrop-btn ml-auto !no-underline"
+                download
+              >
+                20lab CSV
+              </a>
+              <a
+                href="/api/airdrop/export-holders?format=full"
+                className="airdrop-btn airdrop-btn-ghost !no-underline"
+                download
+              >
+                Full audit
+              </a>
               <input
                 value={filter}
                 onChange={(e) => {
@@ -648,7 +662,7 @@ export default function AirdropChecker() {
                   setVisible(LIST_PAGE);
                 }}
                 placeholder="Filter…"
-                className="airdrop-input ml-auto w-[7rem] sm:w-36"
+                className="airdrop-input w-[6.5rem] sm:w-32"
                 spellCheck={false}
                 aria-label="Filter wallets"
               />

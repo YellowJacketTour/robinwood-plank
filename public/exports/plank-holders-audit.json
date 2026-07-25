@@ -1,0 +1,3322 @@
+{
+  "generatedAt": "2026-07-25T20:43:58.130Z",
+  "chainId": 4663,
+  "nftContract": "0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156",
+  "plankContract": "0x69420eaf0eBF43E08F621B014f25cEfDfA7e2DDc",
+  "nftTotalSupply": 1542,
+  "uniqueHolders": 357,
+  "sumNftBalances": 1542,
+  "plankTotalSupply": "888420069420888",
+  "airdropPercentOfSupply": 4.2069,
+  "airdropPoolTokens": "37374943900467",
+  "allocatedTokens": "37374943900446",
+  "unallocatedRemainder": "21",
+  "note": "Amounts are human PLANK units (18 decimals on-chain). 20lab CSV uses address,amount. Pro-rata by current NFT balanceOf.",
+  "top10": [
+    {
+      "rank": 1,
+      "address": "0x4d39083a277c4908844dfde44a368ba4d26bedaf",
+      "nfts": 65,
+      "amount": "1575467803845",
+      "amountWei": "1575467803845000000000000000000",
+      "pctOfPool": 4.2153048,
+      "pctOfSupply": 0.1773336576
+    },
+    {
+      "rank": 2,
+      "address": "0x8e170d8b87ff190e89b75f0bce4999e9da2431c8",
+      "nfts": 37,
+      "amount": "896804749881",
+      "amountWei": "896804749881000000000000000000",
+      "pctOfPool": 2.39948119,
+      "pctOfSupply": 0.1009437743
+    },
+    {
+      "rank": 3,
+      "address": "0xa1f59c3b73715af89aad711fafc47e0776857944",
+      "nfts": 35,
+      "amount": "848328817455",
+      "amountWei": "848328817455000000000000000000",
+      "pctOfPool": 2.26977951,
+      "pctOfSupply": 0.0954873541
+    },
+    {
+      "rank": 4,
+      "address": "0x061315a4598854f3e228fccd6b0cfb1a6435ba5f",
+      "nfts": 33,
+      "amount": "799852885029",
+      "amountWei": "799852885029000000000000000000",
+      "pctOfPool": 2.14007782,
+      "pctOfSupply": 0.0900309339
+    },
+    {
+      "rank": 5,
+      "address": "0x9819bbb9c355ab6f91304a1a54d301d72ca31247",
+      "nfts": 33,
+      "amount": "799852885029",
+      "amountWei": "799852885029000000000000000000",
+      "pctOfPool": 2.14007782,
+      "pctOfSupply": 0.0900309339
+    },
+    {
+      "rank": 6,
+      "address": "0xed600ba1297c9abd9cab2e2eb88a44b666910ea9",
+      "nfts": 33,
+      "amount": "799852885029",
+      "amountWei": "799852885029000000000000000000",
+      "pctOfPool": 2.14007782,
+      "pctOfSupply": 0.0900309339
+    },
+    {
+      "rank": 7,
+      "address": "0xf33b4d58353ec6bf220e6b5b4d75880877e1f978",
+      "nfts": 33,
+      "amount": "799852885029",
+      "amountWei": "799852885029000000000000000000",
+      "pctOfPool": 2.14007782,
+      "pctOfSupply": 0.0900309339
+    },
+    {
+      "rank": 8,
+      "address": "0x699c7dc26322c70bc1f52c9420e0b93594ee3163",
+      "nfts": 28,
+      "amount": "678663053964",
+      "amountWei": "678663053964000000000000000000",
+      "pctOfPool": 1.81582361,
+      "pctOfSupply": 0.0763898833
+    },
+    {
+      "rank": 9,
+      "address": "0x72d0fd2f9cdd52905f8db816efba9cce8abf684d",
+      "nfts": 27,
+      "amount": "654425087751",
+      "amountWei": "654425087751000000000000000000",
+      "pctOfPool": 1.75097276,
+      "pctOfSupply": 0.0736616732
+    },
+    {
+      "rank": 10,
+      "address": "0x287dcdd23a5ca68f1f5194ed5458676a5ac5849e",
+      "nfts": 25,
+      "amount": "605949155325",
+      "amountWei": "605949155325000000000000000000",
+      "pctOfPool": 1.62127108,
+      "pctOfSupply": 0.0682052529
+    }
+  ],
+  "holders": [
+    {
+      "rank": 1,
+      "address": "0x4d39083a277c4908844dfde44a368ba4d26bedaf",
+      "nfts": 65,
+      "amount": "1575467803845",
+      "amountWei": "1575467803845000000000000000000",
+      "pctOfPool": 4.2153048,
+      "pctOfSupply": 0.1773336576
+    },
+    {
+      "rank": 2,
+      "address": "0x8e170d8b87ff190e89b75f0bce4999e9da2431c8",
+      "nfts": 37,
+      "amount": "896804749881",
+      "amountWei": "896804749881000000000000000000",
+      "pctOfPool": 2.39948119,
+      "pctOfSupply": 0.1009437743
+    },
+    {
+      "rank": 3,
+      "address": "0xa1f59c3b73715af89aad711fafc47e0776857944",
+      "nfts": 35,
+      "amount": "848328817455",
+      "amountWei": "848328817455000000000000000000",
+      "pctOfPool": 2.26977951,
+      "pctOfSupply": 0.0954873541
+    },
+    {
+      "rank": 4,
+      "address": "0x061315a4598854f3e228fccd6b0cfb1a6435ba5f",
+      "nfts": 33,
+      "amount": "799852885029",
+      "amountWei": "799852885029000000000000000000",
+      "pctOfPool": 2.14007782,
+      "pctOfSupply": 0.0900309339
+    },
+    {
+      "rank": 5,
+      "address": "0x9819bbb9c355ab6f91304a1a54d301d72ca31247",
+      "nfts": 33,
+      "amount": "799852885029",
+      "amountWei": "799852885029000000000000000000",
+      "pctOfPool": 2.14007782,
+      "pctOfSupply": 0.0900309339
+    },
+    {
+      "rank": 6,
+      "address": "0xed600ba1297c9abd9cab2e2eb88a44b666910ea9",
+      "nfts": 33,
+      "amount": "799852885029",
+      "amountWei": "799852885029000000000000000000",
+      "pctOfPool": 2.14007782,
+      "pctOfSupply": 0.0900309339
+    },
+    {
+      "rank": 7,
+      "address": "0xf33b4d58353ec6bf220e6b5b4d75880877e1f978",
+      "nfts": 33,
+      "amount": "799852885029",
+      "amountWei": "799852885029000000000000000000",
+      "pctOfPool": 2.14007782,
+      "pctOfSupply": 0.0900309339
+    },
+    {
+      "rank": 8,
+      "address": "0x699c7dc26322c70bc1f52c9420e0b93594ee3163",
+      "nfts": 28,
+      "amount": "678663053964",
+      "amountWei": "678663053964000000000000000000",
+      "pctOfPool": 1.81582361,
+      "pctOfSupply": 0.0763898833
+    },
+    {
+      "rank": 9,
+      "address": "0x72d0fd2f9cdd52905f8db816efba9cce8abf684d",
+      "nfts": 27,
+      "amount": "654425087751",
+      "amountWei": "654425087751000000000000000000",
+      "pctOfPool": 1.75097276,
+      "pctOfSupply": 0.0736616732
+    },
+    {
+      "rank": 10,
+      "address": "0x287dcdd23a5ca68f1f5194ed5458676a5ac5849e",
+      "nfts": 25,
+      "amount": "605949155325",
+      "amountWei": "605949155325000000000000000000",
+      "pctOfPool": 1.62127108,
+      "pctOfSupply": 0.0682052529
+    },
+    {
+      "rank": 11,
+      "address": "0x0ce61dc009669c4691491263dca7c30209924ed3",
+      "nfts": 24,
+      "amount": "581711189112",
+      "amountWei": "581711189112000000000000000000",
+      "pctOfPool": 1.55642023,
+      "pctOfSupply": 0.0654770428
+    },
+    {
+      "rank": 12,
+      "address": "0x5880ad155eddab6ea413f8c8b243c11f737573f9",
+      "nfts": 24,
+      "amount": "581711189112",
+      "amountWei": "581711189112000000000000000000",
+      "pctOfPool": 1.55642023,
+      "pctOfSupply": 0.0654770428
+    },
+    {
+      "rank": 13,
+      "address": "0x70d50867373331acda3513fd353ec4d394f2331c",
+      "nfts": 22,
+      "amount": "533235256686",
+      "amountWei": "533235256686000000000000000000",
+      "pctOfPool": 1.42671855,
+      "pctOfSupply": 0.0600206226
+    },
+    {
+      "rank": 14,
+      "address": "0x32f00258ed197badc0971da04799aa7042b81253",
+      "nfts": 20,
+      "amount": "484759324260",
+      "amountWei": "484759324260000000000000000000",
+      "pctOfPool": 1.29701686,
+      "pctOfSupply": 0.0545642023
+    },
+    {
+      "rank": 15,
+      "address": "0x7304b78e28370f45fdf77ca67bdbbf550c3aac34",
+      "nfts": 19,
+      "amount": "460521358047",
+      "amountWei": "460521358047000000000000000000",
+      "pctOfPool": 1.23216602,
+      "pctOfSupply": 0.0518359922
+    },
+    {
+      "rank": 16,
+      "address": "0x63f67a2e42352c693e8d7c88dff0ad6c58e29bb1",
+      "nfts": 18,
+      "amount": "436283391834",
+      "amountWei": "436283391834000000000000000000",
+      "pctOfPool": 1.16731518,
+      "pctOfSupply": 0.0491077821
+    },
+    {
+      "rank": 17,
+      "address": "0x06b4e5bd69cf2feda7ba52c8554e9110581464d5",
+      "nfts": 17,
+      "amount": "412045425621",
+      "amountWei": "412045425621000000000000000000",
+      "pctOfPool": 1.10246433,
+      "pctOfSupply": 0.046379572
+    },
+    {
+      "rank": 18,
+      "address": "0x66199aa0764a540dcca5a6593368b3434c908669",
+      "nfts": 17,
+      "amount": "412045425621",
+      "amountWei": "412045425621000000000000000000",
+      "pctOfPool": 1.10246433,
+      "pctOfSupply": 0.046379572
+    },
+    {
+      "rank": 19,
+      "address": "0xfd25d661e28f684e72c484dfe7cceb0af43a12f9",
+      "nfts": 17,
+      "amount": "412045425621",
+      "amountWei": "412045425621000000000000000000",
+      "pctOfPool": 1.10246433,
+      "pctOfSupply": 0.046379572
+    },
+    {
+      "rank": 20,
+      "address": "0x89f6b520a1715373fa21e311d6833d19b3cec5dc",
+      "nfts": 16,
+      "amount": "387807459408",
+      "amountWei": "387807459408000000000000000000",
+      "pctOfPool": 1.03761349,
+      "pctOfSupply": 0.0436513619
+    },
+    {
+      "rank": 21,
+      "address": "0xe4b67c77317d32da364ae36c3a4bec4d166d53b4",
+      "nfts": 16,
+      "amount": "387807459408",
+      "amountWei": "387807459408000000000000000000",
+      "pctOfPool": 1.03761349,
+      "pctOfSupply": 0.0436513619
+    },
+    {
+      "rank": 22,
+      "address": "0x6dbb6e3a7218df1f1c3f83f83383970547ab7dce",
+      "nfts": 15,
+      "amount": "363569493195",
+      "amountWei": "363569493195000000000000000000",
+      "pctOfPool": 0.97276265,
+      "pctOfSupply": 0.0409231518
+    },
+    {
+      "rank": 23,
+      "address": "0xac2d528ed9add1ed761ac06bab3dd8fb40792189",
+      "nfts": 15,
+      "amount": "363569493195",
+      "amountWei": "363569493195000000000000000000",
+      "pctOfPool": 0.97276265,
+      "pctOfSupply": 0.0409231518
+    },
+    {
+      "rank": 24,
+      "address": "0xb8ebbe55b5c18ad0075b3b247b50ea82385bda0d",
+      "nfts": 15,
+      "amount": "363569493195",
+      "amountWei": "363569493195000000000000000000",
+      "pctOfPool": 0.97276265,
+      "pctOfSupply": 0.0409231518
+    },
+    {
+      "rank": 25,
+      "address": "0x1b29ee80ba7316f65d496ccbdf66245a8fef363e",
+      "nfts": 14,
+      "amount": "339331526982",
+      "amountWei": "339331526982000000000000000000",
+      "pctOfPool": 0.9079118,
+      "pctOfSupply": 0.0381949416
+    },
+    {
+      "rank": 26,
+      "address": "0x4113715efb2282cc63ec04129628ed5ef8799938",
+      "nfts": 14,
+      "amount": "339331526982",
+      "amountWei": "339331526982000000000000000000",
+      "pctOfPool": 0.9079118,
+      "pctOfSupply": 0.0381949416
+    },
+    {
+      "rank": 27,
+      "address": "0x9f010a1583f7ed30d6cd46937c023e9fb4a5f847",
+      "nfts": 14,
+      "amount": "339331526982",
+      "amountWei": "339331526982000000000000000000",
+      "pctOfPool": 0.9079118,
+      "pctOfSupply": 0.0381949416
+    },
+    {
+      "rank": 28,
+      "address": "0xc1db89b97b45953c0ef51295ab6826076d347dce",
+      "nfts": 14,
+      "amount": "339331526982",
+      "amountWei": "339331526982000000000000000000",
+      "pctOfPool": 0.9079118,
+      "pctOfSupply": 0.0381949416
+    },
+    {
+      "rank": 29,
+      "address": "0x2bb7e2184b2dfc2595d6a8a557507bb763c4eb44",
+      "nfts": 13,
+      "amount": "315093560769",
+      "amountWei": "315093560769000000000000000000",
+      "pctOfPool": 0.84306096,
+      "pctOfSupply": 0.0354667315
+    },
+    {
+      "rank": 30,
+      "address": "0x5ed93a19e87a2b53a5bb3c225c09177dbe98ff40",
+      "nfts": 13,
+      "amount": "315093560769",
+      "amountWei": "315093560769000000000000000000",
+      "pctOfPool": 0.84306096,
+      "pctOfSupply": 0.0354667315
+    },
+    {
+      "rank": 31,
+      "address": "0x878ed19b41394261d5215de18ced642a3f0ed451",
+      "nfts": 12,
+      "amount": "290855594556",
+      "amountWei": "290855594556000000000000000000",
+      "pctOfPool": 0.77821012,
+      "pctOfSupply": 0.0327385214
+    },
+    {
+      "rank": 32,
+      "address": "0x701e2034cf2128a2f526a0044cd69ef9faafadcc",
+      "nfts": 11,
+      "amount": "266617628343",
+      "amountWei": "266617628343000000000000000000",
+      "pctOfPool": 0.71335927,
+      "pctOfSupply": 0.0300103113
+    },
+    {
+      "rank": 33,
+      "address": "0x8439bf8e1fdd160da268a89c397d0921a17043b4",
+      "nfts": 11,
+      "amount": "266617628343",
+      "amountWei": "266617628343000000000000000000",
+      "pctOfPool": 0.71335927,
+      "pctOfSupply": 0.0300103113
+    },
+    {
+      "rank": 34,
+      "address": "0x55fe120cce30167c1c4e579fcd7423f7d8f95821",
+      "nfts": 10,
+      "amount": "242379662130",
+      "amountWei": "242379662130000000000000000000",
+      "pctOfPool": 0.64850843,
+      "pctOfSupply": 0.0272821012
+    },
+    {
+      "rank": 35,
+      "address": "0xd6dab4691ee54fd06b3e834c90b78ff5cb633ee8",
+      "nfts": 10,
+      "amount": "242379662130",
+      "amountWei": "242379662130000000000000000000",
+      "pctOfPool": 0.64850843,
+      "pctOfSupply": 0.0272821012
+    },
+    {
+      "rank": 36,
+      "address": "0x105cea72284784b13a26c633ce18de4711f81c29",
+      "nfts": 9,
+      "amount": "218141695917",
+      "amountWei": "218141695917000000000000000000",
+      "pctOfPool": 0.58365759,
+      "pctOfSupply": 0.0245538911
+    },
+    {
+      "rank": 37,
+      "address": "0x486058f0d5c838454a7b5905c3b1ece98b76972c",
+      "nfts": 9,
+      "amount": "218141695917",
+      "amountWei": "218141695917000000000000000000",
+      "pctOfPool": 0.58365759,
+      "pctOfSupply": 0.0245538911
+    },
+    {
+      "rank": 38,
+      "address": "0x820dbcaa5834c11824b51ec0e5b713165ed6f61e",
+      "nfts": 9,
+      "amount": "218141695917",
+      "amountWei": "218141695917000000000000000000",
+      "pctOfPool": 0.58365759,
+      "pctOfSupply": 0.0245538911
+    },
+    {
+      "rank": 39,
+      "address": "0xf899f549aaf979d8e451d42c31c48a4e39ac59c9",
+      "nfts": 9,
+      "amount": "218141695917",
+      "amountWei": "218141695917000000000000000000",
+      "pctOfPool": 0.58365759,
+      "pctOfSupply": 0.0245538911
+    },
+    {
+      "rank": 40,
+      "address": "0x5c22257be909cc48e803007e9a9656f94c3faba0",
+      "nfts": 8,
+      "amount": "193903729704",
+      "amountWei": "193903729704000000000000000000",
+      "pctOfPool": 0.51880674,
+      "pctOfSupply": 0.0218256809
+    },
+    {
+      "rank": 41,
+      "address": "0xc62965d0c1bacabbeae5cd758c2888bcd1c7f4d8",
+      "nfts": 8,
+      "amount": "193903729704",
+      "amountWei": "193903729704000000000000000000",
+      "pctOfPool": 0.51880674,
+      "pctOfSupply": 0.0218256809
+    },
+    {
+      "rank": 42,
+      "address": "0xd1913ca2126fe5f230a0f32946aa839455f43a1a",
+      "nfts": 8,
+      "amount": "193903729704",
+      "amountWei": "193903729704000000000000000000",
+      "pctOfPool": 0.51880674,
+      "pctOfSupply": 0.0218256809
+    },
+    {
+      "rank": 43,
+      "address": "0xf8da81acae505dcc1078409e00416af42cf2ab40",
+      "nfts": 8,
+      "amount": "193903729704",
+      "amountWei": "193903729704000000000000000000",
+      "pctOfPool": 0.51880674,
+      "pctOfSupply": 0.0218256809
+    },
+    {
+      "rank": 44,
+      "address": "0x2b25e8d77642e6b8be906c66254538d52611d0ba",
+      "nfts": 7,
+      "amount": "169665763491",
+      "amountWei": "169665763491000000000000000000",
+      "pctOfPool": 0.4539559,
+      "pctOfSupply": 0.0190974708
+    },
+    {
+      "rank": 45,
+      "address": "0xe975b410c3864f1819af1e662098790a4cf9b04d",
+      "nfts": 7,
+      "amount": "169665763491",
+      "amountWei": "169665763491000000000000000000",
+      "pctOfPool": 0.4539559,
+      "pctOfSupply": 0.0190974708
+    },
+    {
+      "rank": 46,
+      "address": "0x1afb13de99de869fe3efa7115f598eccba3cb555",
+      "nfts": 6,
+      "amount": "145427797278",
+      "amountWei": "145427797278000000000000000000",
+      "pctOfPool": 0.38910506,
+      "pctOfSupply": 0.0163692607
+    },
+    {
+      "rank": 47,
+      "address": "0x349661a1aa403f7e1b2e10c30f4689568200b7cc",
+      "nfts": 6,
+      "amount": "145427797278",
+      "amountWei": "145427797278000000000000000000",
+      "pctOfPool": 0.38910506,
+      "pctOfSupply": 0.0163692607
+    },
+    {
+      "rank": 48,
+      "address": "0x36e87529a3d23eb60300cf2095902387b5251622",
+      "nfts": 6,
+      "amount": "145427797278",
+      "amountWei": "145427797278000000000000000000",
+      "pctOfPool": 0.38910506,
+      "pctOfSupply": 0.0163692607
+    },
+    {
+      "rank": 49,
+      "address": "0x3e0914fc2b3b67a476142020b7d6990d01ad234e",
+      "nfts": 6,
+      "amount": "145427797278",
+      "amountWei": "145427797278000000000000000000",
+      "pctOfPool": 0.38910506,
+      "pctOfSupply": 0.0163692607
+    },
+    {
+      "rank": 50,
+      "address": "0x46455f2fec29f31f058a50cc70621ffaccfd030a",
+      "nfts": 6,
+      "amount": "145427797278",
+      "amountWei": "145427797278000000000000000000",
+      "pctOfPool": 0.38910506,
+      "pctOfSupply": 0.0163692607
+    },
+    {
+      "rank": 51,
+      "address": "0x7558cd06f3f53391e50d093ee000266b685fc875",
+      "nfts": 6,
+      "amount": "145427797278",
+      "amountWei": "145427797278000000000000000000",
+      "pctOfPool": 0.38910506,
+      "pctOfSupply": 0.0163692607
+    },
+    {
+      "rank": 52,
+      "address": "0x86e65b6c6117321f451c59ac9501eafd73565382",
+      "nfts": 6,
+      "amount": "145427797278",
+      "amountWei": "145427797278000000000000000000",
+      "pctOfPool": 0.38910506,
+      "pctOfSupply": 0.0163692607
+    },
+    {
+      "rank": 53,
+      "address": "0xb5e6387ee173fb6546fef0d39180591c28cf3fb6",
+      "nfts": 6,
+      "amount": "145427797278",
+      "amountWei": "145427797278000000000000000000",
+      "pctOfPool": 0.38910506,
+      "pctOfSupply": 0.0163692607
+    },
+    {
+      "rank": 54,
+      "address": "0xcc0e129c95c91f92dddf8d856358c2b3b06d1d50",
+      "nfts": 6,
+      "amount": "145427797278",
+      "amountWei": "145427797278000000000000000000",
+      "pctOfPool": 0.38910506,
+      "pctOfSupply": 0.0163692607
+    },
+    {
+      "rank": 55,
+      "address": "0x278cfff7337f3636ed0bc1ab044d9ef0b9de1e26",
+      "nfts": 5,
+      "amount": "121189831065",
+      "amountWei": "121189831065000000000000000000",
+      "pctOfPool": 0.32425422,
+      "pctOfSupply": 0.0136410506
+    },
+    {
+      "rank": 56,
+      "address": "0x32dcf68acef69addf9a090f70bf8b1897ff4d782",
+      "nfts": 5,
+      "amount": "121189831065",
+      "amountWei": "121189831065000000000000000000",
+      "pctOfPool": 0.32425422,
+      "pctOfSupply": 0.0136410506
+    },
+    {
+      "rank": 57,
+      "address": "0x400f69528cddcd95f55815fcf8ca6bf41c565167",
+      "nfts": 5,
+      "amount": "121189831065",
+      "amountWei": "121189831065000000000000000000",
+      "pctOfPool": 0.32425422,
+      "pctOfSupply": 0.0136410506
+    },
+    {
+      "rank": 58,
+      "address": "0x5aec8aca0361877e5b7d4ce6de26b39d455439cc",
+      "nfts": 5,
+      "amount": "121189831065",
+      "amountWei": "121189831065000000000000000000",
+      "pctOfPool": 0.32425422,
+      "pctOfSupply": 0.0136410506
+    },
+    {
+      "rank": 59,
+      "address": "0x8d0c00e47a525f3d4eaa16bd735b3524ab0afa08",
+      "nfts": 5,
+      "amount": "121189831065",
+      "amountWei": "121189831065000000000000000000",
+      "pctOfPool": 0.32425422,
+      "pctOfSupply": 0.0136410506
+    },
+    {
+      "rank": 60,
+      "address": "0xbce030c09d73ac91677e5df4bec4cf9ea52ed7f1",
+      "nfts": 5,
+      "amount": "121189831065",
+      "amountWei": "121189831065000000000000000000",
+      "pctOfPool": 0.32425422,
+      "pctOfSupply": 0.0136410506
+    },
+    {
+      "rank": 61,
+      "address": "0xc0658ebddcfff897b1f95c20a40fd5328438b65c",
+      "nfts": 5,
+      "amount": "121189831065",
+      "amountWei": "121189831065000000000000000000",
+      "pctOfPool": 0.32425422,
+      "pctOfSupply": 0.0136410506
+    },
+    {
+      "rank": 62,
+      "address": "0xc1ae49d59f3557c6ec4f2398831c72b623885338",
+      "nfts": 5,
+      "amount": "121189831065",
+      "amountWei": "121189831065000000000000000000",
+      "pctOfPool": 0.32425422,
+      "pctOfSupply": 0.0136410506
+    },
+    {
+      "rank": 63,
+      "address": "0xcb3473b401d90159e0d5e6f204c52a6b3ad49380",
+      "nfts": 5,
+      "amount": "121189831065",
+      "amountWei": "121189831065000000000000000000",
+      "pctOfPool": 0.32425422,
+      "pctOfSupply": 0.0136410506
+    },
+    {
+      "rank": 64,
+      "address": "0xf5b4d097042cf2ae5bdb8eeb9e3a836875421854",
+      "nfts": 5,
+      "amount": "121189831065",
+      "amountWei": "121189831065000000000000000000",
+      "pctOfPool": 0.32425422,
+      "pctOfSupply": 0.0136410506
+    },
+    {
+      "rank": 65,
+      "address": "0xfbec0614c7c710de11d0b3ffe5b338fa718c345d",
+      "nfts": 5,
+      "amount": "121189831065",
+      "amountWei": "121189831065000000000000000000",
+      "pctOfPool": 0.32425422,
+      "pctOfSupply": 0.0136410506
+    },
+    {
+      "rank": 66,
+      "address": "0x0096ae7f8013072f1ea04a99f78ace6fcfb6ec96",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 67,
+      "address": "0x0317fab80dde7bc06e6fc418f41d88e101c028f5",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 68,
+      "address": "0x269a93ec8486fbc3a82e352430e84fd8af8ebb0d",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 69,
+      "address": "0x3124a0e29bb77b2bac9eff8189c4e3f6882d2efb",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 70,
+      "address": "0x3168866520430d547ec7796e64dc2869d7e522c9",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 71,
+      "address": "0x36136b7167b4b8d4adbb7f89d0ead87dd73f558a",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 72,
+      "address": "0x385fa52944e8041438a75949e07a780351f4a56d",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 73,
+      "address": "0x3aa9f65d70beb73f249ace4582bf89dac1ffdad4",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 74,
+      "address": "0x45402b7e815e58787f0b729cea940d2b2ff268dc",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 75,
+      "address": "0x5979753061ff0856120d324b7d7fe9cf0e0604bb",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 76,
+      "address": "0x6d4621ae052f8aa11f6fbe24284852dae3f4107e",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 77,
+      "address": "0x6e5d5e217886dcdeb463ac8cac61f049b86d09f1",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 78,
+      "address": "0x7719b679f34a2eec8610af5100d854057b41ec5c",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 79,
+      "address": "0x7c41ee39989a3870e72e1b5902d907cd8eaa1798",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 80,
+      "address": "0x8bfff4d264cc4fcc33a52f918d980c8a1244e0da",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 81,
+      "address": "0x8d8cb6d19e32115823cf0008701a84fb07f43467",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 82,
+      "address": "0x96b9a37b63a1c00527867f6a30726a9620333496",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 83,
+      "address": "0xa202e76263f0d181ed8b7d5401a5c0e96218c94c",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 84,
+      "address": "0xa6dd5f927d07c85170f33ecd25e7b03cf02289fe",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 85,
+      "address": "0xb407d12572f08af66cb3b0bb10f2a403621a7be2",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 86,
+      "address": "0xcdad8027b8657926fbedb85762c5312cbd6e831e",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 87,
+      "address": "0xd6c6a77719b9da321463c76c0e61024ec1e8caaf",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 88,
+      "address": "0xea1420c79a940b2ecfe694ea76ac6a21eefac410",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 89,
+      "address": "0xf793950ef6405f8e3c293c0ca81608ab7a527d32",
+      "nfts": 4,
+      "amount": "96951864852",
+      "amountWei": "96951864852000000000000000000",
+      "pctOfPool": 0.25940337,
+      "pctOfSupply": 0.0109128405
+    },
+    {
+      "rank": 90,
+      "address": "0x04b11fe93578147f4893a4b449401a57a31a9356",
+      "nfts": 3,
+      "amount": "72713898639",
+      "amountWei": "72713898639000000000000000000",
+      "pctOfPool": 0.19455253,
+      "pctOfSupply": 0.0081846304
+    },
+    {
+      "rank": 91,
+      "address": "0x212aa4eb089ac23f572265e5ab9faf3de6bfd603",
+      "nfts": 3,
+      "amount": "72713898639",
+      "amountWei": "72713898639000000000000000000",
+      "pctOfPool": 0.19455253,
+      "pctOfSupply": 0.0081846304
+    },
+    {
+      "rank": 92,
+      "address": "0x38f55f77ce4087e1c3fbf4873fec69f2a2c2037e",
+      "nfts": 3,
+      "amount": "72713898639",
+      "amountWei": "72713898639000000000000000000",
+      "pctOfPool": 0.19455253,
+      "pctOfSupply": 0.0081846304
+    },
+    {
+      "rank": 93,
+      "address": "0x6398b4743d3cf953d5d68bed5daeeefb77cb448a",
+      "nfts": 3,
+      "amount": "72713898639",
+      "amountWei": "72713898639000000000000000000",
+      "pctOfPool": 0.19455253,
+      "pctOfSupply": 0.0081846304
+    },
+    {
+      "rank": 94,
+      "address": "0x65ea5fc7f489d183be044a46c519a3cb47828a58",
+      "nfts": 3,
+      "amount": "72713898639",
+      "amountWei": "72713898639000000000000000000",
+      "pctOfPool": 0.19455253,
+      "pctOfSupply": 0.0081846304
+    },
+    {
+      "rank": 95,
+      "address": "0x897e1ac1806814b49de9372a4dfece830f2adb81",
+      "nfts": 3,
+      "amount": "72713898639",
+      "amountWei": "72713898639000000000000000000",
+      "pctOfPool": 0.19455253,
+      "pctOfSupply": 0.0081846304
+    },
+    {
+      "rank": 96,
+      "address": "0xa1952db7d21e45c49a768c7ca143167abda54660",
+      "nfts": 3,
+      "amount": "72713898639",
+      "amountWei": "72713898639000000000000000000",
+      "pctOfPool": 0.19455253,
+      "pctOfSupply": 0.0081846304
+    },
+    {
+      "rank": 97,
+      "address": "0xdab8d72e76f6aa46919139e08f7ecd5379504a7c",
+      "nfts": 3,
+      "amount": "72713898639",
+      "amountWei": "72713898639000000000000000000",
+      "pctOfPool": 0.19455253,
+      "pctOfSupply": 0.0081846304
+    },
+    {
+      "rank": 98,
+      "address": "0xf044541c2fa655d36dbbc1697732fb23d2275dd9",
+      "nfts": 3,
+      "amount": "72713898639",
+      "amountWei": "72713898639000000000000000000",
+      "pctOfPool": 0.19455253,
+      "pctOfSupply": 0.0081846304
+    },
+    {
+      "rank": 99,
+      "address": "0x01aa2e76f958c294d2f5e26fe4ab50d009884b07",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 100,
+      "address": "0x01c1f77f4b3f56035047c665cc871c156bddfe12",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 101,
+      "address": "0x01d59b2410a50fb2aca1693a616608072144b500",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 102,
+      "address": "0x02b6a09379c1bfc268431895408819d78abd1ddf",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 103,
+      "address": "0x04b5e240f18d2b033a18eeeaebe95ec61de6dc0d",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 104,
+      "address": "0x054279f394c45a09764da50d3de276280e77b191",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 105,
+      "address": "0x06b66e72ee766b6788acda47fd0690169a7624b9",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 106,
+      "address": "0x07916b71c73c3f11bd95ffd8b85017c2f99363cc",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 107,
+      "address": "0x07e810fa3bfbd94cc6316de8047bcf8bb61a6307",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 108,
+      "address": "0x082870b6dbedbd31a889d42fca7ff2a620368a5c",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 109,
+      "address": "0x09313424624c061aa8656359e9e9b1d7d65b69c2",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 110,
+      "address": "0x0aab6edac7cf869065506a485c721aca0100dead",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 111,
+      "address": "0x0ae80ad3f2501963cbbc06b1071e0e7795745176",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 112,
+      "address": "0x0b1e82922c771d940a5a57c0d6b06e994b59780b",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 113,
+      "address": "0x0ca11b74e603cc4601b6764c5f9c9d19766bfddf",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 114,
+      "address": "0x0d6b9bccf97677fa1fa3f5c38aea3f8ca0f200c6",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 115,
+      "address": "0x0fe4164f81d4d71be2107c233c54079983ee9f0b",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 116,
+      "address": "0x0fffa433e6db4034ea06e67d83e73f69f0e98f48",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 117,
+      "address": "0x1112b8c161119d4f866e4c21bacf0eeb3a1c91d9",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 118,
+      "address": "0x121636b6897ec4a9a37727abaac2e3e360e21e42",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 119,
+      "address": "0x12e56991fa999466404e4e1d034a1a93470420e0",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 120,
+      "address": "0x14ce05c813838e9f45e5f690047fed071de8456a",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 121,
+      "address": "0x1505c19b3bd35e336aac4553f0fd27ff5b550b04",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 122,
+      "address": "0x150d208025b6785b77c557e31dd8051ea3d91364",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 123,
+      "address": "0x1588c68d8dd53fec3a39d9a1fa944f138456e906",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 124,
+      "address": "0x15a5ec7559736336d0a62e35b05325c105a8429c",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 125,
+      "address": "0x160598df7642ee9c71e43ede4d2b4876622d4d28",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 126,
+      "address": "0x1741666b45e13a3c2c76df93f77f22c1541ef140",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 127,
+      "address": "0x174894fc6d749411e4d3079cfa6978832e294f77",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 128,
+      "address": "0x17a04ca0fee9092a801f1fa18e8df4990ace239a",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 129,
+      "address": "0x1894e68c4a401a18c778d1ffb29f5a825bc46c88",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 130,
+      "address": "0x19beca61e54c5d7751c838f60457a5bd01745f63",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 131,
+      "address": "0x1bb4f80235154ed5e2befc06438dacf96b42359a",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 132,
+      "address": "0x1c90d1a9725bc6d3ff617ec7ab95d2740b3d9402",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 133,
+      "address": "0x1ce99a978a406b60a29e9380f8d3d5d21fc50b30",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 134,
+      "address": "0x1d431829d6a3409fa15ec95f74258fe252276df4",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 135,
+      "address": "0x20aff59ca97e80a12b520b61ed3e278d465a9fff",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 136,
+      "address": "0x20cab4382f03cd64d0b175e23b28616614da3c42",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 137,
+      "address": "0x21e4d961ec8e37c1e8fd7b94c10613a594b69930",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 138,
+      "address": "0x226d7aa5e07b89276def41b7293491cb877d90b1",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 139,
+      "address": "0x23676650719c544f6abc12dcaf9c003543322222",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 140,
+      "address": "0x23680d0fa7253067845250b39ffb67ecfcaa99a2",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 141,
+      "address": "0x239a0ce786f89583a42d1ad3978f01ffd3f22b0b",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 142,
+      "address": "0x23a1475c7867f4a0e7a4f238bb45611cd0a37b0b",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 143,
+      "address": "0x24472f9a26dce3137acb50f5397e5fa51bc404df",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 144,
+      "address": "0x29e2b7204ef5facae2ab750d42a97e1f50598857",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 145,
+      "address": "0x2a6d170fa74d10b96e63f098f1500dde9bce30b6",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 146,
+      "address": "0x2db644273d525aea9eeaa864e922aad4523c2e6b",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 147,
+      "address": "0x2e10ea839034f0718908a67fd4b868356bc105da",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 148,
+      "address": "0x2ff456acbee655480ac5181df2323bdf81e03303",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 149,
+      "address": "0x30c04c1b49e4bae22a7194ac0e53d6f2e9696ee9",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 150,
+      "address": "0x31e9c5805cd563007edbab0a0ac49976281df413",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 151,
+      "address": "0x331058b975af04a931745ccf0692977612e890ce",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 152,
+      "address": "0x334fb05d00d7899bbf87a3e861a524e3ef349201",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 153,
+      "address": "0x3360e5be9ed7149c4c13307d02be04ff4813fc1c",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 154,
+      "address": "0x336426329049c119e21be487ff822434cd83d0f2",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 155,
+      "address": "0x3650018e00aea062ddb48adf521398271fc9917d",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 156,
+      "address": "0x381a8c6d6a8aa299baf1d975fba2fdac2fc62047",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 157,
+      "address": "0x381ced1e4fddea190e0bf7f7a8618046971a76ad",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 158,
+      "address": "0x386cc90d45e8471286c8f0580f982e389d0b0d6e",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 159,
+      "address": "0x38b08781bd109caec9e2758d2099006cd6a013b1",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 160,
+      "address": "0x3aafdb9d25540dfc74d5e61aed2bfee2d0830013",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 161,
+      "address": "0x3ac359247127172afedbd6b5da8a4c388f5046ca",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 162,
+      "address": "0x3b6faeab434aa6e9c77c6848db98709d123156d1",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 163,
+      "address": "0x3f47212ea1b02c63d9f386efea1dbb521bd1ef28",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 164,
+      "address": "0x3f90ede2729882289a2fef3e9a6840eefe0735ff",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 165,
+      "address": "0x43a106172325df5a3ee017d5c0cd15a0e919d6ba",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 166,
+      "address": "0x4438bce6f25a0f04abe4b11bccb00a219fde4705",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 167,
+      "address": "0x4451f0ad65968668a82c848733048abfc27b7448",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 168,
+      "address": "0x44a7a28a43e900b88e7571e16985bbdd81f6b2eb",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 169,
+      "address": "0x480fa56806362ee93c36400932dfc99e4be88c54",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 170,
+      "address": "0x4827e3ef5f176c95adc045c86f92a9ad1d23f40a",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 171,
+      "address": "0x498d1cb0ec4ccc90f7d1241fec12d175a682e47e",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 172,
+      "address": "0x4a440c9558cb132875c3ef01232e418649c948f7",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 173,
+      "address": "0x4d1938bf17f10b0adcce695952da20c30166ccc6",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 174,
+      "address": "0x4d1f23dbbc9694d4ec978f3634e570c10d7dead3",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 175,
+      "address": "0x4f6a6a168c6e5a135c773791c639c77de79ebefa",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 176,
+      "address": "0x4f80765154aa2a88b018f1495fe4fc7550559b61",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 177,
+      "address": "0x52d5f4646ce964f824a1bb251339eac802e748df",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 178,
+      "address": "0x52e146361b96280058d7d64f8447afc4c81f7412",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 179,
+      "address": "0x543ca818620fedea6b780054d7108aa1ffa23a76",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 180,
+      "address": "0x553379dec6863daef71456ef7c3c00465df3e0bb",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 181,
+      "address": "0x55a65a46dcbb46761c13039a4a8db63256248d8f",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 182,
+      "address": "0x56aab3c7b6b14fea658f86bfffdcba9883c74122",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 183,
+      "address": "0x57c287ecbf3bba9d4ae065ed978143afe303f4fa",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 184,
+      "address": "0x582002100608a9d1a909d408a165b05506800000",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 185,
+      "address": "0x5a1dbd3520bba272b23ebf682b33cdbf34f047db",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 186,
+      "address": "0x5a4610da9c33015960934b6830fb83a7101f0584",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 187,
+      "address": "0x5bd29901a6dbe1778c026218caef4225e2f13168",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 188,
+      "address": "0x5c0cd3807f704162f220e4b2962b16b7992042e3",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 189,
+      "address": "0x5c15ac512066fa792836208b4592ff173c22becb",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 190,
+      "address": "0x5d244e23c6b071b410b8b993f58f15fb2683b84b",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 191,
+      "address": "0x5f8b65ddc91c74ee169c7ebeb0603824ad09f39b",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 192,
+      "address": "0x6122cbd894c7bab8e4b5370895277c21c600f24d",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 193,
+      "address": "0x61c2ad2da6fe111e23b30a1a7e25070aa5d0754c",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 194,
+      "address": "0x6255114919f5e781b480e948faf0639788488888",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 195,
+      "address": "0x62ee9dba95437f8fb2ea8e03b637bb8f8e1abb5b",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 196,
+      "address": "0x63fe8673658da5f96032a55efc36dd15d16cc737",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 197,
+      "address": "0x6405780c4e25f02731b45972d75f7bd6c9f7109e",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 198,
+      "address": "0x6422ed6a42bbcd75da93381efc44749b39582108",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 199,
+      "address": "0x6435d20f502a470743d71693a36cd124304605e4",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 200,
+      "address": "0x65acbe92024c7669cbf8eea8ee67694e72a77378",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 201,
+      "address": "0x674065d509d11211b6c7ff28ee870fe06f2b0cc9",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 202,
+      "address": "0x67cdd5755294d521fa1976695a16752194db931a",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 203,
+      "address": "0x6a7ba85afd1a91e2f2a29460dbfab902d7780b86",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 204,
+      "address": "0x6b08c5235c3e9a77b1f8f4e70dd24f797528110c",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 205,
+      "address": "0x6d55f95affbeda0a841dfc8a778580e7907da9d0",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 206,
+      "address": "0x6e4d8cb9fe0ec7ec6be36b70bdfc42b746efd630",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 207,
+      "address": "0x6ee77fbf238c7ec32e90de50967ee71df9987613",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 208,
+      "address": "0x70103b1bc823d6a2e6b07ee9fb1d2eeff1767b53",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 209,
+      "address": "0x71197528817dbae469a11e4017e12d3918600000",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 210,
+      "address": "0x711e4f777b580b52716eb50ecd33354d4fbb0a38",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 211,
+      "address": "0x725b9c03d07450a5d66fe5266a9a50dcccfa590f",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 212,
+      "address": "0x73a874b236d6157e818aaa94e2fcc53a39537912",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 213,
+      "address": "0x75b0773536156d96e0b9ccc02afa15f3144b51f6",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 214,
+      "address": "0x7631bb95069c20f41223bfe6a27893190b36cfb7",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 215,
+      "address": "0x77914a0328ce9f5bc0f5c70f830f92a2b1e93147",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 216,
+      "address": "0x78aef6080c2dfef65cf4609bd195e782813e9ef2",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 217,
+      "address": "0x78bb0816aa6855077f46a4a8c3e4c7d7b82d9444",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 218,
+      "address": "0x78d643d9c3bd9ea1659372a37acc069d09a3c51e",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 219,
+      "address": "0x792cee45c8504cf997ca09962e1eee650fbd2858",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 220,
+      "address": "0x7a4f3fd607275cbb534c54955544b5ec6219dc44",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 221,
+      "address": "0x7bade1f6e13412c56ae45e28dcb33a35af879aac",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 222,
+      "address": "0x7c34e155c9ace55a161fdae93a7587f068e9509d",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 223,
+      "address": "0x7cf3c9abcde56e9b75facf71a9634c33a1c84950",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 224,
+      "address": "0x7ea2c226291736d57728809daead59cc52f0b1d9",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 225,
+      "address": "0x7eb7391971e1d61f89c91fcf724d044fc72f4df4",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 226,
+      "address": "0x7f5ca0837c895722d654728562d25695b349a090",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 227,
+      "address": "0x8019b18c7bb4d71d280d71b5905954db1fc9701b",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 228,
+      "address": "0x8034e19e10bdd6279a2f06732732561a7f2ec7c2",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 229,
+      "address": "0x81b504c05e5e233b220216d636a6ae8e4d0f043d",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 230,
+      "address": "0x81c173db8e2a42ff4f49e8cbec2b2cdd8ba08474",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 231,
+      "address": "0x8263e5f6bacbdcd3930c22ce3b4e941ec5e35598",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 232,
+      "address": "0x84a4a5bce1ed6a648de2eb2a356dee585fb09195",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 233,
+      "address": "0x84fbe237fec03e9be8d84a43c4edd517ca871a3e",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 234,
+      "address": "0x85fbf6dd00280d1a183b541a93d95cb0a5faec20",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 235,
+      "address": "0x863372f95d3984e533855e4976f2e5e20bf8c805",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 236,
+      "address": "0x87b95dda446543ee55c7a20c1eccebe354d66d10",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 237,
+      "address": "0x892b9ea0e4df4b3e436938bc5324005e58c56013",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 238,
+      "address": "0x8b19438bc97e7d3a6a50adb13ad39a16539e186d",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 239,
+      "address": "0x8ce7797c95aa29f7ad9d11e2fc4b55cb04635ac5",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 240,
+      "address": "0x9011ffa834b46f40a5ae14c2d6b9da447fef8e88",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 241,
+      "address": "0x905cf5e3a3e0a4b2a536d9d9ecec54afd14d268a",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 242,
+      "address": "0x915da37f772f9d87f84a9e521f2354124b17e621",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 243,
+      "address": "0x92121f17050b6d254e3bc8860eca6cba04d97373",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 244,
+      "address": "0x9532f4d438dec03f53724bcfb3e0d92fc6ef9c53",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 245,
+      "address": "0x99a3dec6bc8167e82e835083f705f08a8d36a055",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 246,
+      "address": "0x9d0aa44accb5573ca15f964fc8a7a24624b31202",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 247,
+      "address": "0x9e33c04f049ee53dbadd61f3eb19761141be5140",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 248,
+      "address": "0x9e660e0f77418030e5ffc3d73b03f7c879e0c477",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 249,
+      "address": "0x9ee7f3f2f0dfd73b05c04dfa0f0684c0ed034fe0",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 250,
+      "address": "0x9f1d5fe7dc37aad532ba818112baa007dceccaa8",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 251,
+      "address": "0xa0bc9f544453061b18202a377854ae28f837cd24",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 252,
+      "address": "0xa0c9ea7dcd2a50fc7ad758b96356e99f04b9861d",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 253,
+      "address": "0xa102fb6cb2780edc6385d01acd8fa3d155461193",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 254,
+      "address": "0xa39f39a804acb5f28788432e6665bce9cba32949",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 255,
+      "address": "0xa3f50179e2e9582bf1be153f952c322b809ed76c",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 256,
+      "address": "0xa4e4d939c36f01e55361dc2777072497be46edfb",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 257,
+      "address": "0xa50e347907afa24755e869e5fbf781ae94a9f97b",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 258,
+      "address": "0xa510f25fcd0dcc7ec212c5d0248690c7bbe65f5c",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 259,
+      "address": "0xa61ff12573a7973b45b68826e996e3bc8d6b09ba",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 260,
+      "address": "0xa7963c8bf4c84192765a305383f3b3d6415b53a4",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 261,
+      "address": "0xa85216455c21b406a30a8de298f53de8ecc86b10",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 262,
+      "address": "0xaae82e74398954bce819c766f4aa9c5def4a6788",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 263,
+      "address": "0xac1a20ea8d89a7a0980e6f20c511e8937145a077",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 264,
+      "address": "0xb0e76894de228ed023291bb37ea07f4681f9781c",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 265,
+      "address": "0xb2e8d353b8fe5fbef0578a4aa5cb058a065a32a7",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 266,
+      "address": "0xb859189bb29d9c752b6512df248e6e8a4f7e394a",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 267,
+      "address": "0xb86430323a80ecbe0c0c212745b85c589a02edd5",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 268,
+      "address": "0xb89f0647b12bb95a7e7477158c483da2e125b1e1",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 269,
+      "address": "0xb94e23b30baa23886c399d42a72306a9309b1bd1",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 270,
+      "address": "0xb9b27bdaeb012e1310dd0aee3820eb76f9da821f",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 271,
+      "address": "0xba57b1449159107d66200687c32027f55ac7f67b",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 272,
+      "address": "0xbcc94c648a36026b4335db5d762b1cfff605378f",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 273,
+      "address": "0xbe4a4fbc6b3c0f072869ed61b4a3158340247917",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 274,
+      "address": "0xbf17b626b59ab38cbdaaa4339b5a9b56c36f1a8d",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 275,
+      "address": "0xbf766b5e46c210d78a25ba9edb0283d5b982e470",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 276,
+      "address": "0xc00b9818571ab72912c0f89ba31c21d023fa99dd",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 277,
+      "address": "0xc2ae9bff884994fc3866d4fc59e3a607ca54450a",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 278,
+      "address": "0xc346eb5559a9c5e1fab3652fca0fc80d9df2f99d",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 279,
+      "address": "0xc3e2c11826b7dd23ca8c0172f5835f99384b24a0",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 280,
+      "address": "0xc4824469940e066fc8080cdbba7d8e2dff2f6557",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 281,
+      "address": "0xc48c7c21b9ced3342ce3b9aa707227172adde19c",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 282,
+      "address": "0xc5ba122ab0009c9c2c8e945c562c80107762cc82",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 283,
+      "address": "0xc73dd8239bb0e788b2e627447d779d52e63128f8",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 284,
+      "address": "0xc90765bc6a07952dfc0f1be48c10ec719ce63b83",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 285,
+      "address": "0xcab7a4958a00826089d66f25a7135dd0fcc645e9",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 286,
+      "address": "0xcb390fe2ef93729229addacc57f9581f35068f17",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 287,
+      "address": "0xcebf18a5f3ee3a30b0645046f80304f8d201466d",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 288,
+      "address": "0xcf9a5c793dfd957378e1ea4fe7f28b4770b2793e",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 289,
+      "address": "0xcfbf8330a19c3c58f02d548daecd7b5b798b36ec",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 290,
+      "address": "0xcffdd0ca14e61af77c51a49dead1745e116d3037",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 291,
+      "address": "0xd6796e714385eedb68d5d027382d4b4d0be68b73",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 292,
+      "address": "0xd70b61e343342b417bd98ab3dca890854a16f372",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 293,
+      "address": "0xd793332bf9a15d2c34f3cb97f5416659a725958f",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 294,
+      "address": "0xd9998ce41599ffe232fced928e82a0c6f70adcdb",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 295,
+      "address": "0xda5966e74f98f31bcf95d931eb8d70fc236d7edf",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 296,
+      "address": "0xda8ca7e0a52e1cf737935a4db9dfb85e13baec53",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 297,
+      "address": "0xda9c0f11f16c865fee054881bd213df6200b925f",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 298,
+      "address": "0xdac618b71f7337c8b663c370fee7b622edcb2335",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 299,
+      "address": "0xdd6208ea224cb28bc150f60edc4aec20fb27ddd4",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 300,
+      "address": "0xdf552963389ac903e13d5e58dd58bcbf24096cb3",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 301,
+      "address": "0xe009f3a7463fc8a02370714bb06513263cc75d2d",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 302,
+      "address": "0xe12916f486c2466afa13da59a75e573e88e063a8",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 303,
+      "address": "0xe2d53bad3145399402233a644f4cbaf13e9736d6",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 304,
+      "address": "0xe2e8040d7d3cb289f83625cae1999fceb90227f7",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 305,
+      "address": "0xe6f71457557c093e518a77998d38afe63f0ae2c7",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 306,
+      "address": "0xe7361ac8fa5d678029aeea262f07548fe1a0e8dd",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 307,
+      "address": "0xe9f963a68c34b4528fc8d2e51c0aca438993b5b9",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 308,
+      "address": "0xea0374fb1a7450a46aec0c1d39506517a7b93315",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 309,
+      "address": "0xeaab8389ca8fa6aee66c587ae5cc7b7da44b0023",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 310,
+      "address": "0xeaaf9f6218e43d6c516c17e4a7f291ac095f57d0",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 311,
+      "address": "0xeb09f37c2a19d19af4622f5cb51e398d9362f991",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 312,
+      "address": "0xeba5a2f101bbe39953758c702e7c0846d87e14ae",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 313,
+      "address": "0xed63763458cb4d22dd0e48bf6a570480ef565aa4",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 314,
+      "address": "0xeee75022f71504a6eb2e1bc59560f0386e149440",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 315,
+      "address": "0xf04dd24497a1bfc92adccd9ea0ba25994e02f080",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 316,
+      "address": "0xf0c8d2c7a5cad3330c584ea74537be4e64427262",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 317,
+      "address": "0xf0fb030634c89445c46febe2522be609cb9a39c2",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 318,
+      "address": "0xf43f2dbf8fb3a3dbe2d2bf0f5a75ff88bbecee65",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 319,
+      "address": "0xf5a553b6960a8c72bbf5ad1b7ed1427084001964",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 320,
+      "address": "0xf6adb83e4674c84977977877c10dfc6996bfb4d8",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 321,
+      "address": "0xf6e2adabc0f69a7f1161a60a48e52214f533b839",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 322,
+      "address": "0xf74141c0c89146131993c7b19aa4314f6be50bb3",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 323,
+      "address": "0xf76a218ca417361918c6675e39d8f93a01ef81a3",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 324,
+      "address": "0xf7eb288282a819585af33a1bb552c4b1f9dae3c3",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 325,
+      "address": "0xf85cbef6f8f45fb8bbc5be91fe9eeb4e36687826",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 326,
+      "address": "0xf90f47b41d4814c18562e9b5b891b6dabf44b0e8",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 327,
+      "address": "0xff4de8adcb1e3b3a8c7f8401c18a204a3ee51fe2",
+      "nfts": 2,
+      "amount": "48475932426",
+      "amountWei": "48475932426000000000000000000",
+      "pctOfPool": 0.12970169,
+      "pctOfSupply": 0.0054564202
+    },
+    {
+      "rank": 328,
+      "address": "0x0a451489f8c4b59aa4c84d2f53ebf11e984d5c39",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 329,
+      "address": "0x1578bcda7837fa7a6a86689248712fb031e47a6a",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 330,
+      "address": "0x1db31451c00550d6289729ff420e816c0f68f067",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 331,
+      "address": "0x3b4b59b71b8a69bbf12a5290c2c2f25456eeeee2",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 332,
+      "address": "0x41e2fa384159f92bd990abdac4636c8d102d8354",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 333,
+      "address": "0x46942a9111798df2d7e05b58462455af4e1d00a8",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 334,
+      "address": "0x4e0673b6bda872a711719ea6d8af3ca8f797c0aa",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 335,
+      "address": "0x5b6954acf79d65d51ec5372bc309e77688e6a196",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 336,
+      "address": "0x64c5503b01e6ccc451687c5392068a0bdedaf959",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 337,
+      "address": "0x67176fd91ad6bcc9c4b3a2cec29e43356d0854fe",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 338,
+      "address": "0x67520701ce9419758e5ef325d67c76709780659a",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 339,
+      "address": "0x676f330cc974ba96cce7b1f68be87bed1e499a5b",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 340,
+      "address": "0x698ebcdb4c98554e92cc5d8b3bb3892820cca090",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 341,
+      "address": "0x69bfe63d37599d4e785ef19e53635b8cd70b0156",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 342,
+      "address": "0x6a6611ab2f6be27a69d95e8e34a47bf93060f22b",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 343,
+      "address": "0x71fcf4ce1a170d26695beefd9a382ed240107f0f",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 344,
+      "address": "0x765a26bb61a59b3f4022a23704c30db42baec036",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 345,
+      "address": "0x929dc9910f2274ccd1ba44414058cd2280217eaf",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 346,
+      "address": "0xa1b31f8f4db546ec9d48d5eb2a58af486a780ca5",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 347,
+      "address": "0xa7a78045251d8be6ed56e5bd3f09cccedb2dbd1b",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 348,
+      "address": "0xb860fe575fb5b73ffe4b80977cc0cf7c66b37f49",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 349,
+      "address": "0xc2510dd40da6ffc0c6b44177db1c67ee092f4490",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 350,
+      "address": "0xc90630dcd4d273395035626e0c8f91fab1797116",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 351,
+      "address": "0xd491f57c25f8b7996955be24652d74dc160931df",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 352,
+      "address": "0xe88ec9ec9499c12c23db6e2104c987c0d0ae8133",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 353,
+      "address": "0xefea2ea0506daa2a12ad3ad63ea287f13f1866e9",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 354,
+      "address": "0xf358ce3134e5a318039914d04e1fd27faef5806c",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 355,
+      "address": "0xf7739ac4c946056a6e302b6db83bc0345d1df37f",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 356,
+      "address": "0xf97c2337ea3e5fddeab7de2f557fb0cd67ac32b5",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    },
+    {
+      "rank": 357,
+      "address": "0xff79d9b29fb14c1b755e0b4ea9937744f2b36fd3",
+      "nfts": 1,
+      "amount": "24237966213",
+      "amountWei": "24237966213000000000000000000",
+      "pctOfPool": 0.06485084,
+      "pctOfSupply": 0.0027282101
+    }
+  ]
+}
