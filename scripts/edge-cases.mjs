@@ -103,7 +103,7 @@ ok("reject 19 frac digits", parseTokenAmount("0." + "1".repeat(19), 18) === null
 ok("accept 18 frac digits", parseTokenAmount("0." + "1".repeat(18), 18) === 111111111111111111n);
 // round-trip format
 ok("format dust shows non-zero", formatTokenAmount(1n, 18) === "0.000000000000000001");
-ok("format large", formatTokenAmount(123456789n * 10n ** 12n, 18).startsWith("123456.789"));
+ok("format large", formatTokenAmount(123456789n * 10n ** 12n, 18).startsWith("123.456"));
 ok("format mid", formatTokenAmount(15n * 10n ** 17n, 18) === "1.5");
 
 // ─── countdown clock edges ───
