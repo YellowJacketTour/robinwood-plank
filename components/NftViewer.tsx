@@ -13,7 +13,6 @@ import {
 import {
   BrowserProvider,
   Contract,
-  JsonRpcProvider,
   getAddress,
   isAddress,
   type Eip1193Provider,
@@ -28,10 +27,11 @@ import {
 import {
   NFT_ABI,
   NFT_CONTRACT_ADDRESS,
-  ROBINHOOD_CHAIN_ID,
+  ROBINHOOD_CHAIN_HEX_ID,
   ROBINHOOD_EXPLORER_URL,
   ROBINHOOD_RPC_URL,
 } from "@/lib/mint-contract";
+import { getMintReadClient } from "@/lib/robinhood-provider";
 
 type EthereumProvider = Eip1193Provider & {
   on?: (event: string, listener: (...args: unknown[]) => void) => void;
@@ -336,10 +336,7 @@ export default function NftViewer() {
     if (gridScrollRef.current) gridScrollRef.current.scrollTop = 0;
 
     try {
-      const provider = new JsonRpcProvider(ROBINHOOD_RPC_URL, ROBINHOOD_CHAIN_ID, {
-        staticNetwork: true,
-      });
-      const contract = new Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, provider);
+      const { contract } = await getMintReadClient();
       const balance = Number(await contract.balanceOf(wallet));
 
       if (balance === 0) {

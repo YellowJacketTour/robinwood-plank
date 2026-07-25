@@ -15,7 +15,7 @@ import {
   ROBINHOOD_RPC_URL,
   SALE_PHASE_NAMES,
 } from "@/lib/mint-contract";
-import { getMintReadClient } from "@/lib/robinhood-provider";
+import { clearMintReadClientCache, getMintReadClient } from "@/lib/robinhood-provider";
 
 const TOTAL_SUPPLY = 1542;
 const COMMUNITY_SUPPLY = 777;
@@ -105,9 +105,10 @@ export default function MintPanel() {
   const [transactionHash, setTransactionHash] = useState("");
   const [rpcLabel, setRpcLabel] = useState("");
 
-  const loadStats = useCallback(async (walletAddress = address) => {
+  const loadStats = useCallback(async (walletAddress = address, forceRpc = false) => {
     try {
-      const { contract, rpcUrl } = await getMintReadClient();
+      if (forceRpc) clearMintReadClientCache();
+      const { contract, rpcUrl } = await getMintReadClient(forceRpc);
       setRpcLabel(rpcUrl.includes("blockscout") ? "Blockscout RPC" : "Robinhood RPC");
 
       const [
@@ -469,7 +470,8 @@ export default function MintPanel() {
         onClick={() => {
           if (offline) {
             setLoading(true);
-            void loadStats(address);
+            setMessage("");
+            void loadStats(address, true);
             return;
           }
           void submitMint();
