@@ -124,7 +124,7 @@ async function ensureGasFields(swap: SwapTx, from: string): Promise<SwapTx> {
       if (est) {
         // +20% headroom
         const n = BigInt(est);
-        const bumped = (n * 12n) / 10n;
+        const bumped = (n * BigInt(12)) / BigInt(10);
         next.gasLimit = `0x${bumped.toString(16)}`;
         next.gas = next.gasLimit;
       }
@@ -140,8 +140,9 @@ async function ensureGasFields(swap: SwapTx, from: string): Promise<SwapTx> {
         next.gasPrice = gp;
         // mild EIP-1559-ish fields for wallets that prefer them
         const price = BigInt(gp);
-        next.maxFeePerGas = `0x${((price * 12n) / 10n).toString(16)}`;
-        next.maxPriorityFeePerGas = `0x${(price / 10n || 1n).toString(16)}`;
+        next.maxFeePerGas = `0x${((price * BigInt(12)) / BigInt(10)).toString(16)}`;
+        const tip = price / BigInt(10);
+        next.maxPriorityFeePerGas = `0x${(tip > BigInt(0) ? tip : BigInt(1)).toString(16)}`;
       }
     } catch {
       /* wallet fills */
