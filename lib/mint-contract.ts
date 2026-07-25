@@ -3,9 +3,26 @@ export const NFT_CONTRACT_ADDRESS =
 
 export const ROBINHOOD_CHAIN_ID = 4663;
 export const ROBINHOOD_CHAIN_HEX_ID = "0x1237";
+
+/** Preferred public RPC; overridable in Vercel. */
 export const ROBINHOOD_RPC_URL =
   process.env.NEXT_PUBLIC_ROBINHOOD_RPC_URL ||
-  "https://rpc.mainnet.chain.robinhood.com";
+  "https://robinhoodchain.blockscout.com/api/eth-rpc";
+
+/**
+ * Fallback list for browser reads. Prefer Blockscout eth-rpc (reliable + CORS),
+ * then the official Robinhood public RPC.
+ */
+export const ROBINHOOD_RPC_URLS: string[] = Array.from(
+  new Set(
+    [
+      process.env.NEXT_PUBLIC_ROBINHOOD_RPC_URL,
+      "https://robinhoodchain.blockscout.com/api/eth-rpc",
+      "https://rpc.mainnet.chain.robinhood.com",
+    ].filter((url): url is string => Boolean(url && url.trim())),
+  ),
+);
+
 export const ROBINHOOD_EXPLORER_URL = "https://robinhoodchain.blockscout.com";
 
 export const NFT_ABI = [
@@ -38,3 +55,9 @@ export const NFT_ABI = [
   "function nextTokenId() view returns (uint256)",
 ] as const;
 
+export const SALE_PHASE_NAMES = [
+  "Closed",
+  "Free Mint",
+  "Wood List Mint",
+  "Paid Mint",
+] as const;
