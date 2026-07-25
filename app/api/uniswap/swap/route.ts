@@ -39,6 +39,8 @@ type SwapTx = Record<string, unknown> & {
   chainId?: number | string;
 };
 
+const MIN_SWAP_GAS = BigInt(350_000);
+
 function isGasFailure(message: string): boolean {
   return /gas fee|FAILED_TO_ESTIMATE_GAS|estimate.?gas|simulate transaction|TRANSFER_FAILED|rate.?limit|too many requests|throttl/i.test(
     message
@@ -51,7 +53,7 @@ function mapSwapError(message: string): { error: string; message: string; status
     return {
       error: "INSUFFICIENT_FUNDS",
       message:
-        "Not enough ETH (buy) or PLANK/allowance (sell) for this swap. Add funds or lower the amount.",
+        "Not enough ETH (buy) or PLANK/allowance (sell). Leave ~0.001+ ETH for gas — don't spend your full balance.",
       status: 400,
     };
   }
@@ -59,7 +61,7 @@ function mapSwapError(message: string): { error: string; message: string; status
     return {
       error: "GAS_ESTIMATE",
       message:
-        "Wallet simulation could not estimate gas. Get a fresh quote and retry — ensure you have ETH for gas.",
+        "Could not estimate gas. Leave ETH for gas, get a fresh quote, try again.",
       status: 502,
     };
   }
@@ -78,18 +80,25 @@ function mapSwapError(message: string): { error: string; message: string; status
 }
 
 /**
- * Normalize Uniswap TransactionRequest for wallet simulators (Rabby/MetaMask).
- * Critical: do NOT mix gasPrice with maxFeePerGas — that breaks Rabby simulation.
- * Prefer letting the wallet estimate fees; keep gas limit only if Uniswap provided it.
+ * Clean Uniswap tx for wallets.
+ * - Correct hex value for native buys
+ * - Safe gas limit floor (Uniswap often returns ~150k → stuck/fail on UR)
+ * - No fee fields (client attaches competitive fees from wallet RPC)
  */
 function walletSafeTx(swap: SwapTx, from: string): SwapTx {
   const to = typeof swap.to === "string" ? swap.to : "";
   const data = typeof swap.data === "string" ? swap.data : "";
-  let value = swap.value;
-  if (typeof value === "number") value = `0x${BigInt(value).toString(16)}`;
-  if (typeof value === "string" && value && !value.startsWith("0x")) {
+
+  let value: string | undefined;
+  if (swap.value !== undefined && swap.value !== null && swap.value !== "") {
     try {
-      value = `0x${BigInt(value).toString(16)}`;
+      if (typeof swap.value === "number") {
+        value = `0x${BigInt(swap.value).toString(16)}`;
+      } else if (typeof swap.value === "string") {
+        value = swap.value.startsWith("0x")
+          ? swap.value
+          : `0x${BigInt(swap.value).toString(16)}`;
+      }
     } catch {
       value = "0x0";
     }
@@ -101,28 +110,32 @@ function walletSafeTx(swap: SwapTx, from: string): SwapTx {
     from,
     chainId: CHAIN.id,
   };
-  if (value) out.value = value;
+  if (value && value !== "0x" && value !== "0x0") {
+    out.value = value;
+  } else if (value === "0x0") {
+    // still set for explicit zero (sells)
+    out.value = "0x0";
+  }
 
-  // Keep only a gas *limit* if present (not fee fields)
   const rawGas = swap.gasLimit ?? swap.gas;
+  let gasLimit = MIN_SWAP_GAS;
   if (rawGas != null && rawGas !== "") {
     try {
       const n =
         typeof rawGas === "string" && rawGas.startsWith("0x")
           ? BigInt(rawGas)
           : BigInt(rawGas);
-      // mild headroom without over-insisting
-      const bumped = (n * BigInt(115)) / BigInt(100);
-      out.gas = `0x${bumped.toString(16)}`;
-      out.gasLimit = out.gas;
+      // +40% then floor
+      gasLimit = (n * BigInt(140)) / BigInt(100);
+      if (gasLimit < MIN_SWAP_GAS) gasLimit = MIN_SWAP_GAS;
+      if (gasLimit > BigInt(2_000_000)) gasLimit = BigInt(2_000_000);
     } catch {
-      /* omit — wallet estimates */
+      gasLimit = MIN_SWAP_GAS;
     }
   }
+  out.gas = `0x${gasLimit.toString(16)}`;
+  out.gasLimit = out.gas;
 
-  // Intentionally omit gasPrice / maxFeePerGas / maxPriorityFeePerGas.
-  // Rabby + modern wallets simulate and set fees themselves; forced fees
-  // cause "simulation failed" and worse inclusion than Uniswap.app.
   return out;
 }
 
@@ -192,16 +205,10 @@ export async function POST(req: Request) {
       basePayload.signature = body.signature;
     }
 
-    /**
-     * Prefer NO server-side simulation — Rabby re-simulates in-wallet.
-     * Uniswap sim often fails (gas fee / TRANSFER) while the real tx is fine.
-     * refreshGasPrice true once for better inclusion without embedding fees in tx.
-     */
+    // No Uniswap server sim first — faster + avoids false gas failures
     const attempts: Array<Record<string, unknown>> = [
       { ...basePayload, refreshGasPrice: true, simulateTransaction: false },
       { ...basePayload, refreshGasPrice: false, simulateTransaction: false },
-      // last resort: with sim (some keys require it)
-      { ...basePayload, refreshGasPrice: true, simulateTransaction: true },
     ];
 
     let data: Record<string, unknown> | null = null;
@@ -255,6 +262,7 @@ export async function POST(req: Request) {
     const from = swapper || (typeof rawSwap.from === "string" ? rawSwap.from : "");
     const swap = walletSafeTx(rawSwap, from);
 
+    // Record after successful build only (not after chain confirm)
     if (swapper) {
       await recordWidgetActivity(swapper, "swap");
     }
@@ -262,9 +270,7 @@ export async function POST(req: Request) {
     return publicJson({
       requestId: data.requestId,
       swap,
-      // gasFee is informational only — not forced onto the tx
       gasFee: data.gasFee ?? null,
-      walletSim: true,
     });
   } catch (err) {
     return publicError(err, "Unexpected error building swap.");
