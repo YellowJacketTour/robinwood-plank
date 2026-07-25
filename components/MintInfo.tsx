@@ -1,60 +1,25 @@
 import Reveal from "@/components/Reveal";
 import MintPanel from "@/components/MintPanel";
-import WoodListChecker from "@/components/WoodListChecker";
 import Image from "next/image";
-import { WOOD_LIST_TWEET_URL } from "@/lib/constants";
 
 export default function MintInfo() {
   return (
     <section id="mint" className="section-tight px-3 sm:px-5">
       <div className="mx-auto max-w-6xl">
         <Reveal>
-          <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">Mint Structure</h2>
+          <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">
+            Mint Structure
+          </h2>
           <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
             Live contract. Live supply. Mint here. For $PLANK, use only the official Trade widget
             after the countdown — not Uniswap.app until launch rules are relaxed.
           </p>
         </Reveal>
 
-        {/* 1. Wood Checker */}
-        <Reveal delayMs={80}>
-          <div
-            id="wood-list"
-            className="wood-frame mx-auto mt-10 grid max-w-5xl scroll-mt-24 overflow-hidden rounded-2xl bg-forest-900/75 lg:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.28fr)]"
-          >
-            <div
-              className="relative min-h-64 overflow-hidden bg-[#e7c56d] sm:min-h-80 lg:min-h-full"
-              aria-label="Woody Woodplanker"
-            >
-              <Image
-                src="/images/woody-woodplanker.jpg"
-                alt="Woody Woodplanker smiling beside the Wood Checker"
-                fill
-                sizes="(min-width: 1024px) 360px, 100vw"
-                className="object-contain p-3 mix-blend-multiply sm:p-5"
-              />
-            </div>
-            <div className="p-5 text-center sm:p-8 lg:text-left">
-              <h3 className="font-display text-3xl text-gold-300">Join the Wood List</h3>
-              <p className="mt-2 text-foreground/70">
-                Reply with your wallet. Selected wallets enter the Wood List.
-              </p>
-              <a
-                href={WOOD_LIST_TWEET_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-5 inline-flex min-h-12 items-center justify-center rounded-lg bg-gold-500 px-8 py-3 text-base font-bold text-wood-950 shadow-[0_6px_18px_-4px_rgba(217,164,65,0.5)] transition-all hover:-translate-y-0.5 hover:shadow-[0_10px_24px_-6px_rgba(217,164,65,0.6)] active:translate-y-0"
-              >
-                Leave Your Address on X ↗
-              </a>
-              <WoodListChecker />
-            </div>
-          </div>
-        </Reveal>
+        {/* Wood List / Wood Checker hidden — allow list closed */}
 
-        {/* 2. Live mint panel */}
-        <Reveal delayMs={180}>
-          <div className="mx-auto mt-14 grid max-w-5xl items-stretch gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.55fr)]">
+        <Reveal delayMs={80}>
+          <div className="mx-auto mt-8 grid max-w-5xl items-stretch gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.55fr)]">
             <MintPanel />
             <div className="wood-frame relative hidden min-h-[520px] overflow-hidden rounded-2xl bg-wood-900/85 lg:block">
               <div
