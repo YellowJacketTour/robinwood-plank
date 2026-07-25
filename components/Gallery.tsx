@@ -69,6 +69,26 @@ function shortOwner(owner: string) {
   return `0x${raw.slice(2, 6)}…${raw.slice(-4)}`;
 }
 
+/**
+ * Deployer put real plank names on the Base trait; metadata `name` is just
+ * "RobinWood Plank #N". Prefer Base for display — token id is already on the card.
+ */
+function displayName(nft: {
+  name: string;
+  tokenId: number;
+  attributes?: NftAttribute[];
+}): string {
+  const base = nft.attributes?.find(
+    (a) => String(a.trait_type ?? "").trim().toLowerCase() === "base",
+  );
+  const baseName = base != null ? String(base.value ?? "").trim() : "";
+  if (baseName) return baseName;
+  const stripped = nft.name.replace(/^RobinWood Plank\s*/i, "").trim();
+  // Skip pure #id / numeric names — id is already top-left
+  if (stripped && !/^#?\d+$/.test(stripped)) return stripped;
+  return nft.name?.trim() || `Plank #${nft.tokenId}`;
+}
+
 function indexNft(fields: {
   tokenId: number;
   name: string;
@@ -162,7 +182,7 @@ function GalleryDetailModal({
               )}
             </p>
             <h3 id={titleId} className="nft-modal-title mt-1 font-display text-foreground">
-              {nft.name}
+              {displayName(nft)}
             </h3>
           </div>
           <button
@@ -181,7 +201,7 @@ function GalleryDetailModal({
             <div className="relative mx-auto aspect-square w-full max-w-[360px] bg-wood-950 sm:max-w-none">
               <NftImage
                 imageUri={nft.imageUri}
-                alt={nft.name}
+                alt={displayName(nft)}
                 priority
                 className="h-full w-full object-contain p-3"
               />
@@ -1010,7 +1030,7 @@ export default function Gallery() {
                             type="button"
                             onClick={() => setSelected(nft)}
                             className="group flex h-full w-full flex-col overflow-hidden rounded-lg border border-gold-500/25 bg-wood-950/70 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-400"
-                            aria-label={`Open ${nft.name}`}
+                            aria-label={`Open ${displayName(nft)}`}
                           >
                             <div className="relative aspect-square w-full overflow-hidden bg-wood-950">
                               {!nft.loaded && !nft.imageUri ? (
@@ -1042,8 +1062,11 @@ export default function Gallery() {
                               )}
                             </div>
                             <div className="space-y-0.5 p-2">
-                              <p className="line-clamp-1 text-xs font-black text-foreground sm:text-sm">
-                                {nft.name.replace(/^RobinWood Plank\s*/i, "") || nft.name}
+                              <p
+                                className="line-clamp-1 text-xs font-black text-foreground sm:text-sm"
+                                title={displayName(nft)}
+                              >
+                                {displayName(nft)}
                               </p>
                               <div className="flex items-center justify-between gap-1">
                                 {tokenRarity ? (
