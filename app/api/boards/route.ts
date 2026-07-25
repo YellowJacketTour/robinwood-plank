@@ -4,17 +4,38 @@ import {
   SNIPER_TRAP_MINUTES,
   WALLET_COOLDOWN_MINUTES,
 } from "@/lib/boards";
-import { publicBoardsSnapshot } from "@/lib/boards-store";
+import { getLastScanAgeMs, publicBoardsSnapshot } from "@/lib/boards-store";
+import { scanPlankTransfers } from "@/lib/boards-scanner";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 import type { BoardsPublicView } from "@/lib/boards-types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+/** Re-scan chain if listing is active and last scan is older than this. */
+const AUTO_SCAN_EVERY_MS = 12_000;
+
 export async function GET(req: Request) {
   try {
-    const limited = rateLimit(req, { key: "boards", limit: 60, windowMs: 60_000 });
+    const limited = rateLimit(req, { key: "boards", limit: 90, windowMs: 60_000 });
     if (limited) return limited;
+
+    // Live path: auto-scan while death trap / cooldown window is open
+    let autoScan: { ran: boolean; newBad?: number; notes?: string[] } = { ran: false };
+    if (isListingWindowActive()) {
+      const age = await getLastScanAgeMs();
+      if (age >= AUTO_SCAN_EVERY_MS) {
+        try {
+          const result = await scanPlankTransfers({ maxBlocks: 2_000 });
+          autoScan = { ran: true, newBad: result.newBad, notes: result.notes };
+        } catch (e) {
+          autoScan = {
+            ran: false,
+            notes: [e instanceof Error ? e.message : "auto-scan failed"],
+          };
+        }
+      }
+    }
 
     const trap = getTrapWindow();
     const snap = await publicBoardsSnapshot();
@@ -52,6 +73,11 @@ export async function GET(req: Request) {
       ...view,
       niceLedger: snap.niceLedger,
       naughtyLedger: snap.recentBad,
+      live: {
+        autoScanEveryMs: AUTO_SCAN_EVERY_MS,
+        listingActive: isListingWindowActive(),
+        lastAutoScan: autoScan,
+      },
       scan: {
         lastScannedBlock: snap.state.lastScannedBlock,
         notes: snap.state.scanNotes,

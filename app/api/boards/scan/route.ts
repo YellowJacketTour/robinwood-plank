@@ -11,19 +11,20 @@ export const runtime = "nodejs";
  */
 export async function POST(req: Request) {
   try {
-    const limited = rateLimit(req, { key: "boards-scan", limit: 10, windowMs: 60_000 });
+    const limited = rateLimit(req, { key: "boards-scan", limit: 30, windowMs: 60_000 });
     if (limited) return limited;
 
     if (!isListingWindowActive()) {
       return publicJson({
         ok: true,
         skipped: true,
+        live: false,
         message: "Listing window inactive — cooldowns complete or rules relaxed.",
       });
     }
 
-    const result = await scanPlankTransfers();
-    return publicJson({ ok: true, ...result });
+    const result = await scanPlankTransfers({ maxBlocks: 3_000 });
+    return publicJson({ ok: true, live: true, ...result });
   } catch (err) {
     return publicError(err, "Chain scan failed.");
   }
