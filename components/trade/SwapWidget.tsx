@@ -343,7 +343,7 @@ export default function SwapWidget({ unlocked }: Props) {
           </span>
           <p className="font-display text-xl text-gold-300 sm:text-2xl">Widget locked</p>
           <p className="max-w-xs text-xs text-foreground/75 sm:text-sm">
-            Wait for the countdown. Do not swap on Uniswap.app or bots first.
+            Trading is not live. Stand by — do not swap on Uniswap.app or anywhere else.
           </p>
         </div>
       )}

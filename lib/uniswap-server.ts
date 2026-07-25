@@ -19,7 +19,11 @@ export type SwapDirection = "buy" | "sell";
 
 export function assertTradeOpen(): void {
   if (!isTradeOpen()) {
-    throw new TradeApiError(403, "TRADE_LOCKED", "Community trade window is not open yet.");
+    throw new TradeApiError(
+      403,
+      "TRADE_LOCKED",
+      "Trading is paused — stand by. Official widget is locked; do not trade $PLANK anywhere yet."
+    );
   }
 }
 

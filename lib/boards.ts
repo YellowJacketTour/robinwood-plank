@@ -2,6 +2,7 @@ import {
   RULES_RELAXED,
   SNIPER_TRAP_MINUTES,
   TRADE_OPENS_AT_ISO,
+  TRADE_PAUSED,
 } from "@/lib/constants";
 import { getTradeOpensAt } from "@/lib/trade";
 import type { BoardsPublicView } from "@/lib/boards-types";
@@ -91,6 +92,8 @@ export function isListingWindowActive(nowMs: number = Date.now()): boolean {
  * All PLANK movers in this phase are off-site (widget cannot buy yet).
  */
 export function isSniperCaptureActive(nowMs: number = Date.now()): boolean {
+  // Stand-by / trade paused: do not auto-blacklist community while trading is offline
+  if (TRADE_PAUSED) return false;
   const w = getTrapWindow(nowMs);
   if (w.rulesRelaxed) return false;
   return w.phase === "death_trap";
@@ -103,8 +106,10 @@ export function isSniperCaptureActive(nowMs: number = Date.now()): boolean {
  *    quote/swap session are Bad Boards (Uni app / other UIs)
  *
  * Official plank.love widget buyers are never listed (server records sessions).
+ * While TRADE_PAUSED, capture is off so stand-by community is not blacklisted.
  */
 export function isOffWidgetCaptureActive(nowMs: number = Date.now()): boolean {
+  if (TRADE_PAUSED) return false;
   const w = getTrapWindow(nowMs);
   if (w.rulesRelaxed) return false;
   return w.phase === "death_trap" || w.phase === "cooldown_window";

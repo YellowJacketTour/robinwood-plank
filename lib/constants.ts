@@ -37,6 +37,16 @@ export const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000"
 export const TRADE_OPENS_AT_ISO =
   process.env.NEXT_PUBLIC_TRADE_OPENS_AT?.trim() || "2026-07-25T21:20:00.000Z";
 
+/**
+ * Hard pause: widget stays locked + countdown shows STAND BY.
+ * Trading is NOT live while this is true — community must not trade anywhere.
+ *
+ * Default: paused (true). To go live set NEXT_PUBLIC_TRADE_PAUSED=false on Vercel
+ * and redeploy (or remove the env and set TRADE_PAUSED false in code).
+ */
+export const TRADE_PAUSED =
+  process.env.NEXT_PUBLIC_TRADE_PAUSED?.trim().toLowerCase() !== "false";
+
 /** How long before the community timer LP is expected live (sniper trap window). */
 export const SNIPER_TRAP_MINUTES = 30;
 
