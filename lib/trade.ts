@@ -4,6 +4,7 @@ import {
   NATIVE_TOKEN_ADDRESS,
   TOKEN,
   TRADE_OPENS_AT_ISO,
+  TRADE_PAUSED,
 } from "@/lib/constants";
 
 export type CountdownParts = {
@@ -13,6 +14,8 @@ export type CountdownParts = {
   minutes: number;
   seconds: number;
   isOpen: boolean;
+  /** Hard pause — trading not live; community stand by */
+  paused: boolean;
 };
 
 export function getTradeOpensAt(): Date {
@@ -27,7 +30,8 @@ export function getTradeOpensAt(): Date {
 export function getCountdownParts(nowMs: number = Date.now()): CountdownParts {
   const opensAt = getTradeOpensAt().getTime();
   const totalMs = Math.max(0, opensAt - nowMs);
-  const isOpen = totalMs <= 0;
+  // Never open while paused — widget + API stay locked
+  const isOpen = !TRADE_PAUSED && totalMs <= 0;
 
   const totalSeconds = Math.floor(totalMs / 1000);
   const days = Math.floor(totalSeconds / 86400);
@@ -35,12 +39,23 @@ export function getCountdownParts(nowMs: number = Date.now()): CountdownParts {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
 
-  return { totalMs, days, hours, minutes, seconds, isOpen };
+  return {
+    totalMs: TRADE_PAUSED ? Number.MAX_SAFE_INTEGER : totalMs,
+    days: TRADE_PAUSED ? 0 : days,
+    hours: TRADE_PAUSED ? 0 : hours,
+    minutes: TRADE_PAUSED ? 0 : minutes,
+    seconds: TRADE_PAUSED ? 0 : seconds,
+    isOpen,
+    paused: TRADE_PAUSED,
+  };
 }
 
 export function isTradeOpen(nowMs: number = Date.now()): boolean {
+  if (TRADE_PAUSED) return false;
   return getCountdownParts(nowMs).isOpen;
 }
+
+export { TRADE_PAUSED };
 
 /** Official Uniswap interface deep-link — exact $PLANK CA on Robinhood Chain. */
 export function buildUniswapSwapUrl(opts?: {
