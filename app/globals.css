@@ -261,6 +261,63 @@ input {
   }
 }
 
+/* NFT detail modal — override global p/dt/dd/button size/shadow so traits
+   and labels don't collide or get clipped in the popup. */
+body .nft-modal,
+body .nft-modal :where(h1, h2, h3, h4, p, a, button, dt, dd, li, code, strong, span) {
+  text-shadow: 0 1px 2px rgba(12, 6, 2, 0.85) !important;
+}
+
+body .nft-modal p {
+  font-size: inherit !important;
+  line-height: 1.4 !important;
+}
+
+body .nft-modal dt {
+  font-size: 0.75rem !important;
+  line-height: 1.25 !important;
+  font-weight: 800 !important;
+}
+
+body .nft-modal dd {
+  font-size: 0.95rem !important;
+  line-height: 1.35 !important;
+  font-weight: 800 !important;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+body .nft-modal button,
+body .nft-modal a.rounded-lg {
+  font-size: 0.95rem !important;
+  line-height: 1.25 !important;
+}
+
+body .nft-modal .nft-modal-title {
+  font-size: clamp(1.15rem, 4.2vw, 1.65rem) !important;
+  line-height: 1.2 !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+body .nft-modal .nft-modal-trait-label {
+  font-size: 0.65rem !important;
+  line-height: 1.2 !important;
+  letter-spacing: 0.08em;
+}
+
+body .nft-modal .nft-modal-trait-value {
+  font-size: 0.85rem !important;
+  line-height: 1.3 !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+body .nft-modal .nft-modal-body {
+  scrollbar-gutter: stable;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
