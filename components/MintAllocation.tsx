@@ -24,7 +24,7 @@ export default function MintAllocation() {
     <section
       id="mint-allocation"
       aria-label="Mint allocation"
-      className="scroll-mt-24 px-4 pb-8 pt-4 sm:px-6 sm:pb-10"
+      className="scroll-mt-20 px-3 pb-6 pt-2 sm:px-5 sm:pb-8"
     >
       <div className="mx-auto max-w-6xl">
         <Reveal>

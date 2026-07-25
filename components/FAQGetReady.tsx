@@ -23,7 +23,7 @@ const STEPS = [
 
 export default function FAQGetReady() {
   return (
-    <section id="get-ready" className="px-4 py-20 sm:px-6">
+    <section id="get-ready" className="section-tight px-3 sm:px-5">
       <div className="mx-auto max-w-6xl">
         <Reveal>
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">

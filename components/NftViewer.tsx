@@ -513,7 +513,7 @@ export default function NftViewer() {
   }
 
   return (
-    <section id="collection" className="scroll-mt-24 px-4 py-16 sm:px-6 sm:py-20">
+    <section id="collection" className="scroll-mt-20 section-tight px-3 sm:px-5">
       <div className="mx-auto max-w-6xl">
         <Reveal>
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">

@@ -26,7 +26,7 @@ const FUNDING_FLOW = [
 
 export default function Distribution() {
   return (
-    <section id="tokenomics" className="px-4 py-20 sm:px-6">
+    <section id="tokenomics" className="section-tight px-3 sm:px-5">
       <div className="mx-auto max-w-5xl">
         <Reveal>
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">
