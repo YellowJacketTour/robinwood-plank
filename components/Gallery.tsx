@@ -203,10 +203,12 @@ function GalleryDetailModal({
                       </dd>
                     </div>
                     <div className="rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2">
-                      <dt className="uppercase tracking-wide text-foreground/55">Score</dt>
+                      <dt className="uppercase tracking-wide text-foreground/55">
+                        Exclusivity
+                      </dt>
                       <dd className="mt-0.5 font-mono">
                         {rarity.normalizedScore.toFixed(1)}
-                        <span className="text-foreground/45"> / 100</span>
+                        <span className="text-foreground/45"> · outranks %</span>
                       </dd>
                     </div>
                   </>
