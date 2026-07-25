@@ -22,7 +22,7 @@ export function assertTradeOpen(): void {
     throw new TradeApiError(
       403,
       "TRADE_LOCKED",
-      "Trading is paused — stand by. Official widget is locked; do not trade $PLANK anywhere yet."
+      "Official trade is not open yet (or temporarily paused). Use the Uniswap buttons when trading is live, or wait for unlock."
     );
   }
 }

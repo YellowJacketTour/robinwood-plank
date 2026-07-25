@@ -22,18 +22,17 @@ export function getEthereumProvider(): Eip1193Provider | null {
   if (typeof window === "undefined") return null;
   const w = window as InjectedWindow;
   const eth = w.ethereum;
-  if (!eth) {
-    return w.coinbaseWalletExtension || null;
-  }
+  if (!eth) return w.coinbaseWalletExtension || null;
   if (Array.isArray(eth.providers) && eth.providers.length > 0) {
-    const ranked =
+    return (
       eth.providers.find((p) => p.isMetaMask && !p.isBraveWallet) ||
       eth.providers.find((p) => p.isRabby) ||
       eth.providers.find((p) => p.isCoinbaseWallet) ||
       eth.providers.find((p) => p.isBraveWallet) ||
       eth.providers.find((p) => p.isTrust) ||
-      eth.providers[0];
-    return ranked || eth;
+      eth.providers[0] ||
+      eth
+    );
   }
   return eth;
 }
@@ -53,10 +52,9 @@ export async function connectWallet(): Promise<string> {
   const provider = getEthereumProvider();
   if (!provider) {
     throw new Error(
-      "No wallet found. Open in Robinhood Wallet browser, or install MetaMask / another EVM wallet."
+      "No wallet found. Open in Robinhood Wallet browser, or install MetaMask / Rabby."
     );
   }
-
   try {
     await provider.request({
       method: "wallet_requestPermissions",
@@ -65,7 +63,6 @@ export async function connectWallet(): Promise<string> {
   } catch {
     /* optional */
   }
-
   const accounts = (await provider.request({
     method: "eth_requestAccounts",
   })) as string[];
@@ -83,7 +80,6 @@ export async function getChainId(): Promise<number> {
 export async function switchToRobinhoodChain(): Promise<void> {
   const provider = getEthereumProvider();
   if (!provider) throw new Error("No wallet found.");
-
   const chainIdHex = `0x${CHAIN.id.toString(16)}`;
 
   try {
@@ -116,7 +112,7 @@ export async function switchToRobinhoodChain(): Promise<void> {
           params: [{ chainId: chainIdHex }],
         });
       } catch {
-        /* already on chain */
+        /* ok */
       }
       return;
     }
@@ -135,39 +131,31 @@ export async function ensureRobinhoodChain(): Promise<void> {
   }
 }
 
-function toHexQuantity(value: string | number | bigint): string {
+export function toHexQuantity(value: string | number | bigint): string {
   if (typeof value === "string" && value.startsWith("0x")) return value;
-  const n = typeof value === "bigint" ? value : BigInt(value);
+  // Uniswap often returns decimal strings like "86172000"
+  const n = typeof value === "bigint" ? value : BigInt(String(value));
   return `0x${n.toString(16)}`;
 }
 
-/** Minimum gas limit for Universal Router swaps — Uniswap often underestimates. */
-const MIN_SWAP_GAS = BigInt(350_000);
-const MIN_APPROVE_GAS = BigInt(80_000);
+const MIN_SWAP_GAS = BigInt(400_000);
+const MIN_APPROVE_GAS = BigInt(100_000);
 
-function normalizeGasLimit(
-  raw: string | number | undefined,
-  kind: "swap" | "approve"
-): string | undefined {
-  if (raw === undefined || raw === null || raw === "") return undefined;
+function parseQuantity(raw: string | number | undefined | null): bigint | null {
+  if (raw === undefined || raw === null || raw === "") return null;
   try {
-    const n =
-      typeof raw === "string" && raw.startsWith("0x") ? BigInt(raw) : BigInt(raw);
-    // +40% headroom for integrator fee routes
-    let bumped = (n * BigInt(140)) / BigInt(100);
-    const floor = kind === "approve" ? MIN_APPROVE_GAS : MIN_SWAP_GAS;
-    if (bumped < floor) bumped = floor;
-    // Cap absurd values
-    if (bumped > BigInt(2_000_000)) bumped = BigInt(2_000_000);
-    return `0x${bumped.toString(16)}`;
+    if (typeof raw === "number") return BigInt(Math.floor(raw));
+    if (raw.startsWith("0x") || raw.startsWith("0X")) return BigInt(raw);
+    return BigInt(raw);
   } catch {
-    return undefined;
+    return null;
   }
 }
 
 /**
- * Competitive gas fees from the wallet's own RPC (same chain user is on).
- * Uses ONE fee style only (EIP-1559 OR legacy) so Rabby sim does not break.
+ * Gas fees for Robinhood Chain (EIP-1559 with very small baseFee ~0.07 gwei).
+ * Single fee style only — never mix gasPrice with maxFee*.
+ * Tips scaled to chain (do NOT force 1 gwei on a micro-gwei chain).
  */
 async function resolveFeeFields(
   provider: Eip1193Provider
@@ -178,38 +166,34 @@ async function resolveFeeFields(
       params: ["latest", false],
     })) as { baseFeePerGas?: string } | null;
 
-    const baseFee = block?.baseFeePerGas ? BigInt(block.baseFeePerGas) : null;
+    const baseFee = parseQuantity(block?.baseFeePerGas ?? null);
+    const gasPrice = parseQuantity(
+      (await provider.request({ method: "eth_gasPrice", params: [] })) as string
+    );
 
     if (baseFee && baseFee > BigInt(0)) {
-      // EIP-1559: tip ~ network gasPrice fraction, maxFee = 2*base + tip
-      let tip = BigInt(0);
-      try {
-        const gp = BigInt(
-          (await provider.request({ method: "eth_gasPrice", params: [] })) as string
-        );
-        tip = gp > baseFee ? gp - baseFee : baseFee / BigInt(10);
-      } catch {
-        tip = baseFee / BigInt(10) || BigInt(1);
-      }
-      // Boost tip for inclusion (stuck txs often underpriced)
-      if (tip < BigInt(1_000_000_000)) tip = BigInt(1_000_000_000); // 1 gwei floor when possible
-      const maxPriority = tip;
-      const maxFee = baseFee * BigInt(2) + maxPriority;
+      // tip = max(gasPrice - base, 10% of base, 1 wei)
+      let tip = BigInt(1);
+      if (gasPrice && gasPrice > baseFee) tip = gasPrice - baseFee;
+      const minTip = baseFee / BigInt(10) || BigInt(1);
+      if (tip < minTip) tip = minTip;
+      // +50% tip for inclusion without overpaying like a 1 gwei floor
+      tip = (tip * BigInt(150)) / BigInt(100);
+      const maxFee = baseFee * BigInt(3) + tip;
       return {
         maxFeePerGas: `0x${maxFee.toString(16)}`,
-        maxPriorityFeePerGas: `0x${maxPriority.toString(16)}`,
+        maxPriorityFeePerGas: `0x${tip.toString(16)}`,
       };
     }
 
-    // Legacy gasPrice — bump 25% for inclusion
-    const gp = BigInt(
-      (await provider.request({ method: "eth_gasPrice", params: [] })) as string
-    );
-    const bumped = (gp * BigInt(125)) / BigInt(100);
-    return { gasPrice: `0x${bumped.toString(16)}` };
+    if (gasPrice && gasPrice > BigInt(0)) {
+      const bumped = (gasPrice * BigInt(150)) / BigInt(100);
+      return { gasPrice: `0x${bumped.toString(16)}` };
+    }
   } catch {
-    return {};
+    /* fall through */
   }
+  return {};
 }
 
 export type SendTxOpts = {
@@ -219,11 +203,19 @@ export type SendTxOpts = {
   value?: string;
   gas?: string;
   gasLimit?: string;
+  /** Prefer Uniswap quote gas estimates (decimal or hex) */
+  maxFeePerGas?: string;
+  maxPriorityFeePerGas?: string;
+  gasPrice?: string;
   kind?: "swap" | "approve";
 };
 
 /**
- * Send swap/approve with safe gas so txs don't sit pending forever.
+ * Build + send a tx with RH-chain-aware gas.
+ * 1) eth_estimateGas on wallet RPC when possible
+ * 2) Floor gas limits (UR swaps need >> 135k Uniswap estimate)
+ * 3) EIP-1559 fees from block baseFee (or legacy gasPrice)
+ * 4) Retry without hard gas limit if sim fails
  */
 export async function sendTransaction(tx: SendTxOpts): Promise<string> {
   const provider = getEthereumProvider();
@@ -232,29 +224,65 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
   await ensureRobinhoodChain();
 
   const kind = tx.kind || "swap";
-  const params: Record<string, string> = {
+  const base: Record<string, string> = {
     to: tx.to,
     from: tx.from,
     data: tx.data,
   };
-
   if (tx.value !== undefined && tx.value !== null && tx.value !== "") {
-    params.value = toHexQuantity(tx.value);
+    base.value = toHexQuantity(tx.value);
   }
 
-  const gas = normalizeGasLimit(tx.gasLimit || tx.gas, kind);
-  if (gas) params.gas = gas;
+  // --- Gas limit: estimate on wallet RPC, then floor ---
+  let gasLimit = parseQuantity(tx.gasLimit ?? tx.gas);
+  try {
+    const estHex = (await provider.request({
+      method: "eth_estimateGas",
+      params: [base],
+    })) as string;
+    const est = parseQuantity(estHex);
+    if (est) {
+      // +50% headroom for integrator-fee UR routes
+      gasLimit = (est * BigInt(150)) / BigInt(100);
+    }
+  } catch {
+    // keep provided / floor
+  }
+  const floor = kind === "approve" ? MIN_APPROVE_GAS : MIN_SWAP_GAS;
+  if (!gasLimit || gasLimit < floor) gasLimit = floor;
+  if (gasLimit > BigInt(2_500_000)) gasLimit = BigInt(2_500_000);
 
-  // Competitive fees — single style only
-  const fees = await resolveFeeFields(provider);
-  Object.assign(params, fees);
+  // --- Fees: prefer Uniswap quote eip1559 if valid, else chain ---
+  let fees: Record<string, string> = {};
+  const uniMax = parseQuantity(tx.maxFeePerGas);
+  const uniTip = parseQuantity(tx.maxPriorityFeePerGas);
+  const uniLegacy = parseQuantity(tx.gasPrice);
+  if (uniMax && uniTip && uniMax >= uniTip) {
+    // Uniswap returns decimal wei strings — convert + boost 20% for inclusion
+    const maxFee = (uniMax * BigInt(120)) / BigInt(100);
+    const tip = (uniTip * BigInt(120)) / BigInt(100);
+    fees = {
+      maxFeePerGas: `0x${maxFee.toString(16)}`,
+      maxPriorityFeePerGas: `0x${tip.toString(16)}`,
+    };
+  } else if (uniLegacy && uniLegacy > BigInt(0)) {
+    const bumped = (uniLegacy * BigInt(130)) / BigInt(100);
+    fees = { gasPrice: `0x${bumped.toString(16)}` };
+  } else {
+    fees = await resolveFeeFields(provider);
+  }
+
+  const params: Record<string, string> = {
+    ...base,
+    gas: `0x${gasLimit.toString(16)}`,
+    ...fees,
+  };
 
   try {
-    const hash = (await provider.request({
+    return (await provider.request({
       method: "eth_sendTransaction",
       params: [params],
     })) as string;
-    return hash;
   } catch (err) {
     const msg =
       (err as { message?: string; shortMessage?: string })?.shortMessage ||
@@ -263,58 +291,51 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
     if (/user rejected|denied|4001/i.test(msg)) {
       throw new Error("Transaction cancelled in wallet.");
     }
-    // Retry once without gas limit if estimate/sim failed (wallet re-estimates)
-    if (/simulation|estimateGas|intrinsic gas|gas required|underpriced/i.test(msg)) {
+
+    // Retry: drop gas limit, keep fees (wallet re-estimates limit)
+    try {
+      const retry: Record<string, string> = { ...base, ...fees };
+      return (await provider.request({
+        method: "eth_sendTransaction",
+        params: [retry],
+      })) as string;
+    } catch (err2) {
+      // Last resort: only to/data/value — pure wallet estimate
       try {
-        const retry: Record<string, string> = {
-          to: tx.to,
-          from: tx.from,
-          data: tx.data,
-        };
-        if (params.value) retry.value = params.value;
-        Object.assign(retry, fees);
-        const hash = (await provider.request({
+        return (await provider.request({
           method: "eth_sendTransaction",
-          params: [retry],
+          params: [base],
         })) as string;
-        return hash;
-      } catch (err2) {
-        const msg2 =
+      } catch (err3) {
+        const msg3 =
+          (err3 as { message?: string })?.message ||
           (err2 as { message?: string })?.message ||
-          "Wallet rejected the transaction.";
-        if (/user rejected|denied|4001/i.test(msg2)) {
+          msg;
+        if (/user rejected|denied|4001/i.test(msg3)) {
           throw new Error("Transaction cancelled in wallet.");
         }
         throw new Error(
-          "Wallet simulation failed. Keep extra ETH for gas (don't spend 100% of balance), get a fresh quote, and try again."
+          humanizeTxError(msg3, kind)
         );
       }
     }
-    throw new Error(msg);
   }
 }
 
-export type TxReceiptStatus = {
-  status: "pending" | "success" | "reverted";
-  blockNumber?: string;
-};
-
-/** One-shot receipt check (for UI polling). */
-export async function getTransactionStatus(hash: string): Promise<TxReceiptStatus> {
-  const provider = getEthereumProvider();
-  if (!provider) return { status: "pending" };
-  try {
-    const receipt = (await provider.request({
-      method: "eth_getTransactionReceipt",
-      params: [hash],
-    })) as { status?: string; blockNumber?: string } | null;
-    if (!receipt) return { status: "pending" };
-    if (receipt.status === "0x0") return { status: "reverted", blockNumber: receipt.blockNumber };
-    if (receipt.status === "0x1") return { status: "success", blockNumber: receipt.blockNumber };
-    return { status: "pending" };
-  } catch {
-    return { status: "pending" };
+function humanizeTxError(msg: string, kind: string): string {
+  if (/insufficient funds|exceeds balance/i.test(msg)) {
+    return "Insufficient funds. For buys leave ~0.002+ ETH for gas after the amount.";
   }
+  if (/allowance|transfer amount exceeds|TRANSFER_FROM/i.test(msg)) {
+    return "Token approval needed. Confirm the approve step, then swap again.";
+  }
+  if (/simulation|estimateGas|intrinsic gas|gas required/i.test(msg)) {
+    return `Wallet simulation failed on ${kind}. Fresh quote, higher slip (2–3%), leave ETH for gas, retry.`;
+  }
+  if (/nonce|already known|replacement/i.test(msg)) {
+    return "Pending tx in wallet — Speed Up or Cancel the old one, then retry.";
+  }
+  return msg.slice(0, 280);
 }
 
 export async function waitForTransaction(
@@ -341,15 +362,16 @@ export async function waitForTransaction(
       method: "eth_getTransactionReceipt",
       params: [hash],
     })) as { status?: string } | null;
-    if (receipt && receipt.status) {
+    if (receipt?.status) {
       if (receipt.status === "0x0") {
-        throw new Error(`${label} reverted on-chain. Try a smaller amount or higher slip.`);
+        throw new Error(
+          `${label} reverted on-chain. Try smaller size or higher slip (2–3%).`
+        );
       }
       return { status: receipt.status };
     }
 
-    // Detect dropped/replaced: if node no longer knows the tx after 45s
-    if (elapsed > 45_000) {
+    if (elapsed > 40_000) {
       try {
         const tx = (await provider.request({
           method: "eth_getTransactionByHash",
@@ -357,18 +379,18 @@ export async function waitForTransaction(
         })) as { hash?: string } | null;
         if (!tx) {
           throw new Error(
-            `${label} was dropped from the mempool (often underpriced gas). Speed up or re-send in your wallet, or try again with a fresh quote.`
+            `${label} dropped from mempool (underpriced gas). Speed Up in wallet or retry with a fresh quote.`
           );
         }
       } catch (e) {
-        if (e instanceof Error && e.message.includes("dropped")) throw e;
+        if (e instanceof Error && /dropped|mempool/i.test(e.message)) throw e;
       }
     }
 
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   throw new Error(
-    `${label} still pending after ${Math.round(timeoutMs / 1000)}s — open your wallet to Speed Up, or wait. Check the explorer link.`
+    `${label} still pending — open wallet → Speed Up, or wait. Use the explorer link.`
   );
 }
 
@@ -390,19 +412,16 @@ export async function signTypedData(
   else {
     const keys = Object.keys(typesCopy);
     if (keys.length === 1) primaryType = keys[0];
-    else if (keys.length > 0) {
-      if (value && typeof value === "object") {
-        const msgKeys = Object.keys(value as object);
-        const match = keys.find((k) => {
-          const fields = typesCopy[k] as { name: string }[] | undefined;
-          if (!Array.isArray(fields)) return false;
-          return fields.every((f) => msgKeys.includes(f.name));
-        });
-        if (match) primaryType = match;
-        else primaryType = keys[0];
-      } else {
-        primaryType = keys[0];
-      }
+    else if (keys.length > 0 && value && typeof value === "object") {
+      const msgKeys = Object.keys(value as object);
+      const match = keys.find((k) => {
+        const fields = typesCopy[k] as { name: string }[] | undefined;
+        if (!Array.isArray(fields)) return false;
+        return fields.every((f) => msgKeys.includes(f.name));
+      });
+      primaryType = match || keys[0];
+    } else if (keys.length > 0) {
+      primaryType = keys[0];
     }
   }
 
@@ -427,7 +446,6 @@ export async function signTypedData(
   }
 }
 
-/** Native ETH balance in wei (bigint). */
 export async function getNativeBalance(address: string): Promise<bigint> {
   const provider = getEthereumProvider();
   if (!provider) return BigInt(0);
