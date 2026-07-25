@@ -138,28 +138,33 @@ export function toHexQuantity(value: string | number | bigint): string {
   return `0x${n.toString(16)}`;
 }
 
-const MIN_SWAP_GAS = BigInt(400_000);
-const MIN_APPROVE_GAS = BigInt(100_000);
+// UR + integrator-fee routes on RH routinely need well above Uniswap's ~135k estimate
+const MIN_SWAP_GAS = BigInt(550_000);
+const MIN_APPROVE_GAS = BigInt(120_000);
 
 function parseQuantity(raw: string | number | undefined | null): bigint | null {
   if (raw === undefined || raw === null || raw === "") return null;
   try {
     if (typeof raw === "number") return BigInt(Math.floor(raw));
-    if (raw.startsWith("0x") || raw.startsWith("0X")) return BigInt(raw);
-    return BigInt(raw);
+    const s = String(raw).trim();
+    if (!s) return null;
+    if (s.startsWith("0x") || s.startsWith("0X")) return BigInt(s);
+    return BigInt(s);
   } catch {
     return null;
   }
 }
 
+type FeePair = { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
+
 /**
- * Gas fees for Robinhood Chain (EIP-1559 with very small baseFee ~0.07 gwei).
+ * Gas fees for Robinhood Chain (EIP-1559, baseFee often ~0.05–0.1 gwei).
  * Single fee style only — never mix gasPrice with maxFee*.
- * Tips scaled to chain (do NOT force 1 gwei on a micro-gwei chain).
+ * Tips scale with chain (do NOT force 1 gwei on a micro-gwei chain).
  */
-async function resolveFeeFields(
+async function resolveChainEip1559(
   provider: Eip1193Provider
-): Promise<Record<string, string>> {
+): Promise<FeePair | null> {
   try {
     const block = (await provider.request({
       method: "eth_getBlockByNumber",
@@ -167,25 +172,40 @@ async function resolveFeeFields(
     })) as { baseFeePerGas?: string } | null;
 
     const baseFee = parseQuantity(block?.baseFeePerGas ?? null);
+    if (!baseFee || baseFee <= BigInt(0)) return null;
+
     const gasPrice = parseQuantity(
       (await provider.request({ method: "eth_gasPrice", params: [] })) as string
     );
 
-    if (baseFee && baseFee > BigInt(0)) {
-      // tip = max(gasPrice - base, 10% of base, 1 wei)
-      let tip = BigInt(1);
-      if (gasPrice && gasPrice > baseFee) tip = gasPrice - baseFee;
-      const minTip = baseFee / BigInt(10) || BigInt(1);
-      if (tip < minTip) tip = minTip;
-      // +50% tip for inclusion without overpaying like a 1 gwei floor
-      tip = (tip * BigInt(150)) / BigInt(100);
-      const maxFee = baseFee * BigInt(3) + tip;
-      return {
-        maxFeePerGas: `0x${maxFee.toString(16)}`,
-        maxPriorityFeePerGas: `0x${tip.toString(16)}`,
-      };
-    }
+    // tip = max(gasPrice - base, 15% of base, 1 wei), then +100% for inclusion
+    let tip = BigInt(1);
+    if (gasPrice && gasPrice > baseFee) tip = gasPrice - baseFee;
+    const minTip = (baseFee * BigInt(15)) / BigInt(100) || BigInt(1);
+    if (tip < minTip) tip = minTip;
+    tip = tip * BigInt(2);
+    // maxFee must clear next-block base spikes: 4x base + tip
+    const maxFee = baseFee * BigInt(4) + tip;
+    return { maxFeePerGas: maxFee, maxPriorityFeePerGas: tip };
+  } catch {
+    return null;
+  }
+}
 
+async function resolveFeeFields(
+  provider: Eip1193Provider
+): Promise<Record<string, string>> {
+  const eip = await resolveChainEip1559(provider);
+  if (eip) {
+    return {
+      maxFeePerGas: `0x${eip.maxFeePerGas.toString(16)}`,
+      maxPriorityFeePerGas: `0x${eip.maxPriorityFeePerGas.toString(16)}`,
+    };
+  }
+  try {
+    const gasPrice = parseQuantity(
+      (await provider.request({ method: "eth_gasPrice", params: [] })) as string
+    );
     if (gasPrice && gasPrice > BigInt(0)) {
       const bumped = (gasPrice * BigInt(150)) / BigInt(100);
       return { gasPrice: `0x${bumped.toString(16)}` };
@@ -194,6 +214,46 @@ async function resolveFeeFields(
     /* fall through */
   }
   return {};
+}
+
+/** Prefer the higher of Uniswap quote fees vs live RH chain fees (never underprice). */
+async function mergeFeeFields(
+  provider: Eip1193Provider,
+  uniMax: bigint | null,
+  uniTip: bigint | null,
+  uniLegacy: bigint | null
+): Promise<Record<string, string>> {
+  const chain = await resolveChainEip1559(provider);
+
+  if (uniMax && uniTip && uniMax >= uniTip) {
+    // Uniswap decimal wei → boost 30%
+    let maxFee = (uniMax * BigInt(130)) / BigInt(100);
+    let tip = (uniTip * BigInt(130)) / BigInt(100);
+    if (chain) {
+      if (maxFee < chain.maxFeePerGas) maxFee = chain.maxFeePerGas;
+      if (tip < chain.maxPriorityFeePerGas) tip = chain.maxPriorityFeePerGas;
+      // tip cannot exceed maxFee
+      if (tip > maxFee) maxFee = tip;
+    }
+    return {
+      maxFeePerGas: `0x${maxFee.toString(16)}`,
+      maxPriorityFeePerGas: `0x${tip.toString(16)}`,
+    };
+  }
+
+  if (chain) {
+    return {
+      maxFeePerGas: `0x${chain.maxFeePerGas.toString(16)}`,
+      maxPriorityFeePerGas: `0x${chain.maxPriorityFeePerGas.toString(16)}`,
+    };
+  }
+
+  if (uniLegacy && uniLegacy > BigInt(0)) {
+    const bumped = (uniLegacy * BigInt(130)) / BigInt(100);
+    return { gasPrice: `0x${bumped.toString(16)}` };
+  }
+
+  return resolveFeeFields(provider);
 }
 
 export type SendTxOpts = {
@@ -213,9 +273,10 @@ export type SendTxOpts = {
 /**
  * Build + send a tx with RH-chain-aware gas.
  * 1) eth_estimateGas on wallet RPC when possible
- * 2) Floor gas limits (UR swaps need >> 135k Uniswap estimate)
- * 3) EIP-1559 fees from block baseFee (or legacy gasPrice)
- * 4) Retry without hard gas limit if sim fails
+ * 2) Floor gas limits (UR + fee routes need >> 135k Uniswap estimate)
+ * 3) EIP-1559: max(Uniswap quote fees, live RH baseFee schedule)
+ * 4) Never mix gasPrice + maxFee*; single fee style only (Rabby-safe)
+ * 5) Retry tiers if wallet rejects sim / underpriced
  */
 export async function sendTransaction(tx: SendTxOpts): Promise<string> {
   const provider = getEthereumProvider();
@@ -224,13 +285,20 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
   await ensureRobinhoodChain();
 
   const kind = tx.kind || "swap";
+  const chainIdHex = `0x${CHAIN.id.toString(16)}`;
   const base: Record<string, string> = {
     to: tx.to,
     from: tx.from,
     data: tx.data,
+    chainId: chainIdHex,
   };
   if (tx.value !== undefined && tx.value !== null && tx.value !== "") {
-    base.value = toHexQuantity(tx.value);
+    const v = parseQuantity(tx.value);
+    if (v !== null && v > BigInt(0)) {
+      base.value = `0x${v.toString(16)}`;
+    } else if (typeof tx.value === "string" && tx.value.startsWith("0x") && tx.value !== "0x" && tx.value !== "0x0") {
+      base.value = tx.value;
+    }
   }
 
   // --- Gas limit: estimate on wallet RPC, then floor ---
@@ -238,88 +306,77 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
   try {
     const estHex = (await provider.request({
       method: "eth_estimateGas",
-      params: [base],
+      params: [{ to: base.to, from: base.from, data: base.data, ...(base.value ? { value: base.value } : {}) }],
     })) as string;
     const est = parseQuantity(estHex);
     if (est) {
-      // +50% headroom for integrator-fee UR routes
-      gasLimit = (est * BigInt(150)) / BigInt(100);
+      // +60% headroom for integrator-fee UR routes on RH
+      gasLimit = (est * BigInt(160)) / BigInt(100);
     }
   } catch {
-    // keep provided / floor
+    // keep provided / floor — estimate often fails pre-approve on sells
   }
   const floor = kind === "approve" ? MIN_APPROVE_GAS : MIN_SWAP_GAS;
   if (!gasLimit || gasLimit < floor) gasLimit = floor;
-  if (gasLimit > BigInt(2_500_000)) gasLimit = BigInt(2_500_000);
+  if (gasLimit > BigInt(3_000_000)) gasLimit = BigInt(3_000_000);
 
-  // --- Fees: prefer Uniswap quote eip1559 if valid, else chain ---
-  let fees: Record<string, string> = {};
-  const uniMax = parseQuantity(tx.maxFeePerGas);
-  const uniTip = parseQuantity(tx.maxPriorityFeePerGas);
-  const uniLegacy = parseQuantity(tx.gasPrice);
-  if (uniMax && uniTip && uniMax >= uniTip) {
-    // Uniswap returns decimal wei strings — convert + boost 20% for inclusion
-    const maxFee = (uniMax * BigInt(120)) / BigInt(100);
-    const tip = (uniTip * BigInt(120)) / BigInt(100);
-    fees = {
-      maxFeePerGas: `0x${maxFee.toString(16)}`,
-      maxPriorityFeePerGas: `0x${tip.toString(16)}`,
-    };
-  } else if (uniLegacy && uniLegacy > BigInt(0)) {
-    const bumped = (uniLegacy * BigInt(130)) / BigInt(100);
-    fees = { gasPrice: `0x${bumped.toString(16)}` };
-  } else {
-    fees = await resolveFeeFields(provider);
-  }
+  // --- Fees: merge Uniswap quote + live RH chain (never underprice) ---
+  const fees = await mergeFeeFields(
+    provider,
+    parseQuantity(tx.maxFeePerGas),
+    parseQuantity(tx.maxPriorityFeePerGas),
+    parseQuantity(tx.gasPrice)
+  );
 
-  const params: Record<string, string> = {
+  const withGasLimit: Record<string, string> = {
     ...base,
     gas: `0x${gasLimit.toString(16)}`,
     ...fees,
   };
+  // Some wallets want gasLimit alias
+  withGasLimit.gasLimit = withGasLimit.gas;
 
-  try {
-    return (await provider.request({
-      method: "eth_sendTransaction",
-      params: [params],
-    })) as string;
-  } catch (err) {
-    const msg =
-      (err as { message?: string; shortMessage?: string })?.shortMessage ||
-      (err as { message?: string })?.message ||
-      "Transaction rejected.";
-    if (/user rejected|denied|4001/i.test(msg)) {
-      throw new Error("Transaction cancelled in wallet.");
-    }
+  const attempts: Record<string, string>[] = [
+    withGasLimit,
+    // drop hard limit — wallet re-estimates
+    { ...base, ...fees },
+    // fee-only without chainId (some injectors choke on chainId in tx)
+    (() => {
+      const { chainId: _c, ...rest } = base;
+      return { ...rest, gas: withGasLimit.gas, ...fees };
+    })(),
+    // bare essentials
+    (() => {
+      const bare: Record<string, string> = {
+        to: base.to,
+        from: base.from,
+        data: base.data,
+      };
+      if (base.value) bare.value = base.value;
+      return bare;
+    })(),
+  ];
 
-    // Retry: drop gas limit, keep fees (wallet re-estimates limit)
+  let lastMsg = "Transaction rejected.";
+  for (let i = 0; i < attempts.length; i++) {
     try {
-      const retry: Record<string, string> = { ...base, ...fees };
       return (await provider.request({
         method: "eth_sendTransaction",
-        params: [retry],
+        params: [attempts[i]],
       })) as string;
-    } catch (err2) {
-      // Last resort: only to/data/value — pure wallet estimate
-      try {
-        return (await provider.request({
-          method: "eth_sendTransaction",
-          params: [base],
-        })) as string;
-      } catch (err3) {
-        const msg3 =
-          (err3 as { message?: string })?.message ||
-          (err2 as { message?: string })?.message ||
-          msg;
-        if (/user rejected|denied|4001/i.test(msg3)) {
-          throw new Error("Transaction cancelled in wallet.");
-        }
-        throw new Error(
-          humanizeTxError(msg3, kind)
-        );
+    } catch (err) {
+      const msg =
+        (err as { message?: string; shortMessage?: string })?.shortMessage ||
+        (err as { message?: string })?.message ||
+        "Transaction rejected.";
+      lastMsg = msg;
+      if (/user rejected|denied|4001/i.test(msg)) {
+        throw new Error("Transaction cancelled in wallet.");
       }
+      // try next tier
     }
   }
+  throw new Error(humanizeTxError(lastMsg, kind));
 }
 
 function humanizeTxError(msg: string, kind: string): string {

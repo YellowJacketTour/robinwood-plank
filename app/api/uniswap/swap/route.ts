@@ -39,7 +39,7 @@ type SwapTx = Record<string, unknown> & {
   chainId?: number | string;
 };
 
-const MIN_SWAP_GAS = BigInt(400_000);
+const MIN_SWAP_GAS = BigInt(550_000);
 
 function isGasFailure(message: string): boolean {
   return /gas fee|FAILED_TO_ESTIMATE_GAS|estimate.?gas|simulate transaction|TRANSFER_FAILED|rate.?limit|too many requests|throttl/i.test(
@@ -119,10 +119,10 @@ function walletSafeTx(swap: SwapTx, from: string, quote?: Record<string, unknown
   }
 
   if (!gasN) gasN = MIN_SWAP_GAS;
-  // +50% then floor 400k — UR + integrator fee burns more than Uniswap's 135k estimate
-  gasN = (gasN * BigInt(150)) / BigInt(100);
+  // +60% then floor 550k — UR + integrator fee burns more than Uniswap's ~135k sell estimate
+  gasN = (gasN * BigInt(160)) / BigInt(100);
   if (gasN < MIN_SWAP_GAS) gasN = MIN_SWAP_GAS;
-  if (gasN > BigInt(2_500_000)) gasN = BigInt(2_500_000);
+  if (gasN > BigInt(3_000_000)) gasN = BigInt(3_000_000);
 
   const out: SwapTx = {
     to,
@@ -149,9 +149,9 @@ function walletSafeTx(swap: SwapTx, from: string, quote?: Record<string, unknown
       : null);
 
   if (maxFee && tip && maxFee >= tip) {
-    // +25% for inclusion on busy RH mempool
-    out.maxFeePerGas = `0x${((maxFee * BigInt(125)) / BigInt(100)).toString(16)}`;
-    out.maxPriorityFeePerGas = `0x${((tip * BigInt(125)) / BigInt(100)).toString(16)}`;
+    // +30% for inclusion on RH; client will also max() with live baseFee
+    out.maxFeePerGas = `0x${((maxFee * BigInt(130)) / BigInt(100)).toString(16)}`;
+    out.maxPriorityFeePerGas = `0x${((tip * BigInt(130)) / BigInt(100)).toString(16)}`;
   } else {
     const gp = parseQty(swap.gasPrice) || parseQty(quote?.gasPrice);
     if (gp) {
