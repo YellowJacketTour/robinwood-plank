@@ -50,6 +50,8 @@ export async function GET(req: Request) {
 
     return publicJson({
       ...view,
+      niceLedger: snap.niceLedger,
+      naughtyLedger: snap.recentBad,
       scan: {
         lastScannedBlock: snap.state.lastScannedBlock,
         notes: snap.state.scanNotes,

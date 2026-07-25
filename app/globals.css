@@ -282,6 +282,78 @@ input {
   background: rgba(42, 26, 15, 0.92);
 }
 
+/* Wooden naughty / nice ledger (Good Wood · Bad Boards) */
+.wood-ledger {
+  position: relative;
+  border-radius: 0.65rem;
+  border: 3px solid #c4922e;
+  box-shadow:
+    inset 0 0 0 2px rgba(40, 18, 6, 0.55),
+    inset 0 0 40px rgba(0, 0, 0, 0.25),
+    0 10px 28px -12px rgba(0, 0, 0, 0.85);
+  background-color: #3d2513;
+  background-image:
+    repeating-linear-gradient(
+      92deg,
+      rgba(0, 0, 0, 0.14) 0px,
+      rgba(0, 0, 0, 0.14) 1px,
+      transparent 1px,
+      transparent 9px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0px,
+      transparent 22px,
+      rgba(0, 0, 0, 0.08) 22px,
+      rgba(0, 0, 0, 0.08) 23px
+    ),
+    linear-gradient(165deg, #6b4424 0%, #4a2e16 40%, #2a1a0f 100%);
+}
+
+.wood-ledger-ruled {
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0px,
+      transparent 1.55rem,
+      rgba(217, 164, 65, 0.12) 1.55rem,
+      rgba(217, 164, 65, 0.12) calc(1.55rem + 1px)
+    );
+}
+
+.wood-ledger-spine {
+  background: linear-gradient(90deg, #1b120a 0%, #5c3a1e 35%, #1b120a 100%);
+  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.6);
+}
+
+.wood-ledger-entry {
+  font-family: ui-monospace, "Cascadia Code", "Courier New", monospace;
+  font-size: 0.7rem;
+  line-height: 1.55rem;
+  letter-spacing: 0.02em;
+  color: #f3e0b0;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.75);
+}
+
+.wood-ledger-entry-nice {
+  color: #d4f0c8;
+}
+
+.wood-ledger-entry-naughty {
+  color: #ffc9b0;
+}
+
+.wood-ledger-stamp {
+  font-family: var(--font-stencil), Georgia, serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 2px solid currentColor;
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  opacity: 0.92;
+  transform: rotate(-2deg);
+}
+
 /* NFT detail modal — override global p/dt/dd/button size/shadow so traits
    and labels don't collide or get clipped in the popup. */
 body .nft-modal,
