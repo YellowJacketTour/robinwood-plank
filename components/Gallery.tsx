@@ -9,7 +9,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Contract, JsonRpcProvider } from "ethers";
+import { Contract } from "ethers";
 import Reveal from "@/components/Reveal";
 import NftImage from "@/components/NftImage";
 import {
@@ -24,10 +24,9 @@ import {
 import {
   NFT_ABI,
   NFT_CONTRACT_ADDRESS,
-  ROBINHOOD_CHAIN_ID,
   ROBINHOOD_EXPLORER_URL,
-  ROBINHOOD_RPC_URL,
 } from "@/lib/mint-contract";
+import { getMintReadClient } from "@/lib/robinhood-provider";
 import {
   computeRaritySnapshot,
   formatRank,
@@ -407,10 +406,7 @@ export default function Gallery() {
     const gen = ++syncGenRef.current;
     try {
       setStatus("Connecting to Robinhood Chain…");
-      const provider = new JsonRpcProvider(ROBINHOOD_RPC_URL, ROBINHOOD_CHAIN_ID, {
-        staticNetwork: true,
-      });
-      const contract = new Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, provider);
+      const { contract } = await getMintReadClient();
       const supply = Number(await contract.totalSupply());
       if (syncGenRef.current !== gen) return;
 
