@@ -296,6 +296,8 @@ export default function Gallery() {
   const [livePulse, setLivePulse] = useState(false);
   const [sortMode, setSortMode] = useState<"newest" | "rarest">("newest");
   const [panel, setPanel] = useState<"gallery" | "insights">("gallery");
+  /** Token ids from Insights checkbox filters — null means no insight filter */
+  const [insightFilterIds, setInsightFilterIds] = useState<number[] | null>(null);
 
   /** Max supply id we've staged placeholders for */
   const knownMaxRef = useRef(0);
@@ -700,8 +702,14 @@ export default function Gallery() {
   const filtered = useMemo(() => {
     const q = query.trim();
     let list = items;
+
+    if (insightFilterIds) {
+      const allow = new Set(insightFilterIds);
+      list = list.filter((item) => allow.has(item.tokenId));
+    }
+
     if (q) {
-      list = items.filter((item) =>
+      list = list.filter((item) =>
         matchesGalleryQuery(
           q,
           item.searchText || "",
@@ -723,7 +731,7 @@ export default function Gallery() {
     }
 
     return [...list].sort(sortNewestFirst);
-  }, [items, query, sortMode, rarity]);
+  }, [items, query, sortMode, rarity, insightFilterIds]);
 
   const visible = useMemo(
     () => filtered.slice(0, visibleCount),
@@ -872,6 +880,16 @@ export default function Gallery() {
                 <span className="rounded-full border border-gold-500/30 px-2 py-0.5 text-gold-300">
                   {rarity.scoredCount.toLocaleString()} scored
                 </span>
+                {insightFilterIds && (
+                  <button
+                    type="button"
+                    onClick={() => setInsightFilterIds(null)}
+                    className="rounded-full border border-cyan-400/40 px-2 py-0.5 text-cyan-300"
+                    title="Clear Insights dissect filters"
+                  >
+                    cut {insightFilterIds.length.toLocaleString()} ✕
+                  </button>
+                )}
                 {metadataStillLoading && (
                   <span className="text-foreground/45">{progress}%</span>
                 )}
@@ -890,7 +908,11 @@ export default function Gallery() {
 
           {panel === "insights" ? (
             <div className="max-h-[min(78dvh,900px)] overflow-y-auto overscroll-contain p-3 sm:p-4">
-              <RarityInsights items={items} onSelectToken={openToken} />
+              <RarityInsights
+                items={items}
+                onSelectToken={openToken}
+                onFilteredIdsChange={setInsightFilterIds}
+              />
             </div>
           ) : (
             <>
