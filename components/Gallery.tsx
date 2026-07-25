@@ -36,6 +36,7 @@ export type GalleryNft = {
   description: string;
   imageUri: string;
   attributes: NftAttribute[];
+  owner: string;
   searchText: string;
   searchWords: string[];
   loaded: boolean;
@@ -47,17 +48,24 @@ const URI_BATCH = 24;
 const META_CONCURRENCY = 10;
 const PAGE_SIZE = 24;
 
+function shortOwner(owner: string) {
+  if (!owner || owner.length < 10) return owner || "—";
+  return `${owner.slice(0, 6)}…${owner.slice(-4)}`;
+}
+
 function indexNft(fields: {
   tokenId: number;
   name: string;
   description?: string;
   attributes?: NftAttribute[];
+  owner?: string;
 }) {
   return buildGallerySearchIndex({
     tokenId: fields.tokenId,
     name: fields.name,
     description: fields.description ?? "",
     attributes: fields.attributes ?? [],
+    owner: fields.owner ?? "",
   });
 }
 
@@ -133,12 +141,21 @@ function GalleryDetailModal({
               />
             </div>
             <div className="min-w-0 space-y-4 p-4 sm:p-5">
-              <dl className="grid grid-cols-1 gap-2">
+              <dl className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
                 <div className="rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5">
                   <dt className="uppercase tracking-wide text-foreground/55">Token ID</dt>
                   <dd className="mt-1 font-mono">#{nft.tokenId}</dd>
                 </div>
+                <div className="min-w-0 rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5">
+                  <dt className="uppercase tracking-wide text-foreground/55">Owner</dt>
+                  <dd className="mt-1 break-all font-mono text-sm" title={nft.owner || undefined}>
+                    {nft.owner ? shortOwner(nft.owner) : "—"}
+                  </dd>
+                </div>
               </dl>
+              {nft.owner && (
+                <p className="break-all font-mono text-xs text-foreground/50">{nft.owner}</p>
+              )}
               {nft.description && (
                 <p className="text-sm leading-relaxed text-foreground/80">{nft.description}</p>
               )}
@@ -225,32 +242,33 @@ export default function Gallery() {
         if (cancelledRef.current) return;
         const slice = ordered.slice(offset, offset + URI_BATCH);
 
-        const withUris = await Promise.all(
+        const withChain = await Promise.all(
           slice.map(async (tokenId) => {
-            try {
-              const tokenUri = (await contract.tokenURI(tokenId)) as string;
-              return { tokenId, tokenUri };
-            } catch {
-              return {
-                tokenId,
-                tokenUri: "",
-                error: "tokenURI unavailable",
-              };
-            }
+            const [uriResult, ownerResult] = await Promise.allSettled([
+              contract.tokenURI(tokenId) as Promise<string>,
+              contract.ownerOf(tokenId) as Promise<string>,
+            ]);
+            return {
+              tokenId,
+              tokenUri: uriResult.status === "fulfilled" ? uriResult.value : "",
+              owner: ownerResult.status === "fulfilled" ? ownerResult.value : "",
+            };
           }),
         );
 
         // Metadata with limited concurrency
-        for (let i = 0; i < withUris.length; i += META_CONCURRENCY) {
+        for (let i = 0; i < withChain.length; i += META_CONCURRENCY) {
           if (cancelledRef.current) return;
-          const chunk = withUris.slice(i, i + META_CONCURRENCY);
+          const chunk = withChain.slice(i, i + META_CONCURRENCY);
           const resolved = await Promise.all(
             chunk.map(async (entry) => {
               const fallbackName = `RobinWood Plank #${entry.tokenId}`;
+              const owner = entry.owner || "";
               if (!entry.tokenUri) {
                 const idx = indexNft({
                   tokenId: entry.tokenId,
                   name: fallbackName,
+                  owner,
                 });
                 return {
                   tokenId: entry.tokenId,
@@ -259,6 +277,7 @@ export default function Gallery() {
                   description: "",
                   imageUri: "",
                   attributes: [] as NftAttribute[],
+                  owner,
                   searchText: idx.searchText,
                   searchWords: idx.words,
                   loaded: true,
@@ -277,6 +296,7 @@ export default function Gallery() {
                   name,
                   description,
                   attributes,
+                  owner,
                 });
                 return {
                   tokenId: entry.tokenId,
@@ -285,6 +305,7 @@ export default function Gallery() {
                   description,
                   imageUri: metadata.image || "",
                   attributes,
+                  owner,
                   searchText: idx.searchText,
                   searchWords: idx.words,
                   loaded: true,
@@ -293,6 +314,7 @@ export default function Gallery() {
                 const idx = indexNft({
                   tokenId: entry.tokenId,
                   name: fallbackName,
+                  owner,
                 });
                 return {
                   tokenId: entry.tokenId,
@@ -301,6 +323,7 @@ export default function Gallery() {
                   description: "",
                   imageUri: "",
                   attributes: [],
+                  owner,
                   searchText: idx.searchText,
                   searchWords: idx.words,
                   loaded: true,
@@ -349,7 +372,7 @@ export default function Gallery() {
       if (newIds.length) {
         const placeholders = newIds.map((tokenId) => {
           const name = `RobinWood Plank #${tokenId}`;
-          const idx = indexNft({ tokenId, name });
+          const idx = indexNft({ tokenId, name, owner: "" });
           return {
             tokenId,
             tokenUri: "",
@@ -357,6 +380,7 @@ export default function Gallery() {
             description: "",
             imageUri: "",
             attributes: [],
+            owner: "",
             searchText: idx.searchText,
             searchWords: idx.words,
             loaded: false,
@@ -402,7 +426,12 @@ export default function Gallery() {
     const q = query.trim();
     if (!q) return items;
     return items.filter((item) =>
-      matchesGalleryQuery(q, item.searchText || "", item.searchWords || []),
+      matchesGalleryQuery(
+        q,
+        item.searchText || "",
+        item.searchWords || [],
+        item.owner || "",
+      ),
     );
   }, [items, query]);
 
@@ -464,7 +493,7 @@ export default function Gallery() {
                   type="search"
                   value={query}
                   onChange={(event) => onSearchChange(event.target.value)}
-                  placeholder="Live filter: holo, rare, iron wood, #42…"
+                  placeholder="Search: holo, rare, 0xabc…, vanity hex, #42…"
                   autoComplete="off"
                   spellCheck={false}
                   enterKeyHint="search"
@@ -568,11 +597,15 @@ export default function Gallery() {
                           <p className="line-clamp-2 text-sm font-black leading-snug text-foreground sm:text-base">
                             {nft.name}
                           </p>
-                          {nft.attributes[0] && (
+                          {nft.owner ? (
+                            <p className="line-clamp-1 font-mono text-[0.7rem] text-foreground/50">
+                              {shortOwner(nft.owner)}
+                            </p>
+                          ) : nft.attributes[0] ? (
                             <p className="line-clamp-1 text-xs text-foreground/55">
                               {nft.attributes[0].trait_type}: {String(nft.attributes[0].value)}
                             </p>
-                          )}
+                          ) : null}
                         </div>
                       </button>
                     </li>
