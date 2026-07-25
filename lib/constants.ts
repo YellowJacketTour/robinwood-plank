@@ -89,11 +89,11 @@ export const TOKEN = {
  */
 /** Keep nav short — Trade is the gold CTA; rest are anchors. */
 export const NAV_LINKS = [
-  { href: "#boards", label: "Boards" },
   { href: "#mint", label: "Mint" },
   { href: "/gallery", label: "Gallery" },
+  { href: "#boards", label: "Boards" },
+  { href: "#airdrop", label: "Airdrop" },
   { href: "#roadmap", label: "Roadmap" },
-  { href: "#get-ready", label: "Guide" },
 ] as const;
 
 export const SOCIAL_LINKS = {

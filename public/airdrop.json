@@ -1,4 +1,13 @@
 {
-  "description": "Airdrop wallets on the Good Wood side. Add lowercase 0x addresses here.",
-  "addresses": []
+  "description": "Airdrop allocation config. Wood List (proofs.json) is included by default. Add extra wallets under addresses; optional weights for multi-share.",
+  "totalSupply": "1000000000",
+  "airdropPercentOfSupply": 10,
+  "decimals": 18,
+  "includeWoodList": true,
+  "addresses": [],
+  "weights": {},
+  "exclude": [
+    "0x000000000000000000000000000000000000dead",
+    "0x0000000000000000000000000000000000000000"
+  ]
 }

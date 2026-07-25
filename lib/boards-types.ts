@@ -10,6 +10,16 @@ export type BadBoardEntry = {
   wasGoodWood: boolean;
   sources: string[];
   txHashes: string[];
+  /**
+   * Cumulative native ETH (wei, decimal string) spent by this wallet on
+   * off-widget snipes during the death trap — sum of tx.value for txs they signed.
+   */
+  ethSpentWei: string;
+  /** ETH spent fixed to 3 decimals (derived; always recomputed for clients). */
+  ethSpent?: string;
+  /** USD equivalent at last known ETH price (derived on read). */
+  ethSpentUsd?: number;
+  ethSpentUsdLabel?: string;
 };
 
 export type WidgetSession = {
@@ -34,7 +44,24 @@ export type BoardsState = {
   cooldowns: Record<string, WalletCooldown>;
   /** Last block scanned for PLANK transfers */
   lastScannedBlock: number;
+  /** ISO time of last successful chain scan (not polluted by widget pings) */
+  lastScanAt?: string;
   scanNotes: string[];
+  /** Aggregate ETH sniped (wei string) across all Bad Boards */
+  totalEthSpentWei?: string;
+};
+
+export type BoardsVolumeTick = {
+  /** Server wall clock */
+  serverNow: string;
+  ethUsd: number;
+  ethUsdSource: string;
+  totalEthSpent: string;
+  totalEthSpentWei: string;
+  totalUsd: number;
+  totalUsdLabel: string;
+  badBoards: number;
+  fallen: number;
 };
 
 export type BoardsPublicView = {
@@ -56,6 +83,7 @@ export type BoardsPublicView = {
   };
   /** Newest first */
   recentBadBoards: BadBoardEntry[];
+  volume: BoardsVolumeTick;
   legend: {
     goodWood: string;
     badBoards: string;

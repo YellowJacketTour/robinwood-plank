@@ -1,13 +1,12 @@
 import { CONTRACT_ADDRESS, CHAIN } from "@/lib/constants";
 import {
   getTrapWindow,
-  isListingWindowActive,
+  isSniperCaptureActive,
   normalizeAddress,
 } from "@/lib/boards";
 import {
   getBoardsState,
   markBadBoard,
-  wasWidgetVerified,
 } from "@/lib/boards-store";
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 
@@ -53,10 +52,77 @@ async function rpc(method: string, params: unknown[]): Promise<unknown> {
   throw lastErr instanceof Error ? lastErr : new Error("All RPCs failed");
 }
 
+type TxMeta = {
+  from: string;
+  /** Native ETH msg.value in wei */
+  valueWei: bigint;
+};
+
+const txMetaCache = new Map<string, TxMeta | null>();
+const codeCache = new Map<string, boolean>();
+
+/** true if address has contract code (router / pool / etc.) */
+async function isContractAddress(address: string): Promise<boolean> {
+  const a = normalizeAddress(address);
+  if (codeCache.has(a)) return codeCache.get(a)!;
+  try {
+    const code = (await rpc("eth_getCode", [a, "latest"])) as string;
+    const isContract = Boolean(code && code !== "0x" && code !== "0x0");
+    codeCache.set(a, isContract);
+    if (codeCache.size > 500) {
+      const first = codeCache.keys().next().value;
+      if (first) codeCache.delete(first);
+    }
+    return isContract;
+  } catch {
+    return false;
+  }
+}
+
+/** Fetch tx.from + value (native ETH spent on the snipe call). */
+async function getTxMeta(txHash: string): Promise<TxMeta | null> {
+  const key = txHash.toLowerCase();
+  if (txMetaCache.has(key)) return txMetaCache.get(key) ?? null;
+  try {
+    const tx = (await rpc("eth_getTransactionByHash", [txHash])) as {
+      from?: string;
+      value?: string;
+    } | null;
+    if (!tx?.from) {
+      txMetaCache.set(key, null);
+      return null;
+    }
+    let valueWei = BigInt(0);
+    try {
+      valueWei = BigInt(tx.value || "0x0");
+    } catch {
+      valueWei = BigInt(0);
+    }
+    const meta: TxMeta = {
+      from: normalizeAddress(tx.from),
+      valueWei,
+    };
+    txMetaCache.set(key, meta);
+    // Bound cache during long scans
+    if (txMetaCache.size > 500) {
+      const first = txMetaCache.keys().next().value;
+      if (first) txMetaCache.delete(first);
+    }
+    return meta;
+  } catch {
+    txMetaCache.set(key, null);
+    return null;
+  }
+}
+
 /**
  * Scan recent PLANK Transfer logs. Any wallet that moves $PLANK during the
  * death-trap / cooldown listing window without an official widget session
  * lands on Bad Boards. Good Wood offenders become "fallen".
+ *
+ * ETH spent: for each unique tx, attribute msg.value (native ETH) to the
+ * signing wallet (tx.from) when they are marked Bad Boards — i.e. how much
+ * ETH they put into the off-widget snipe call.
  */
 export async function scanPlankTransfers(opts?: {
   fromBlock?: number;
@@ -65,12 +131,27 @@ export async function scanPlankTransfers(opts?: {
   scannedFrom: number;
   scannedTo: number;
   newBad: number;
+  ethAddedWei: string;
   notes: string[];
 }> {
   const notes: string[] = [];
-  if (!isListingWindowActive()) {
-    notes.push("Listing window inactive — scan skipped.");
-    return { scannedFrom: 0, scannedTo: 0, newBad: 0, notes };
+  // Only flag snipers while the official widget is still locked.
+  // After community open, buyers through the widget (and all post-open flow)
+  // must never be auto-logged as Bad Boards.
+  if (!isSniperCaptureActive()) {
+    const trap = getTrapWindow();
+    notes.push(
+      trap.phase === "cooldown_window" || trap.phase === "free"
+        ? `Widget open (phase=${trap.phase}) — chain Bad Boards capture off; official buyers safe.`
+        : "Sniper capture inactive — scan skipped."
+    );
+    return {
+      scannedFrom: 0,
+      scannedTo: 0,
+      newBad: 0,
+      ethAddedWei: "0",
+      notes,
+    };
   }
 
   const latestHex = (await rpc("eth_blockNumber", [])) as string;
@@ -91,7 +172,13 @@ export async function scanPlankTransfers(opts?: {
 
   if (fromBlock > latest) {
     notes.push("Already up to date.");
-    return { scannedFrom: fromBlock, scannedTo: latest, newBad: 0, notes };
+    return {
+      scannedFrom: fromBlock,
+      scannedTo: latest,
+      newBad: 0,
+      ethAddedWei: "0",
+      notes,
+    };
   }
 
   const logs = (await rpc("eth_getLogs", [
@@ -108,7 +195,19 @@ export async function scanPlankTransfers(opts?: {
   }>;
 
   let newBad = 0;
+  let ethAdded = BigInt(0);
   const seen = new Set<string>();
+  /** txHash → meta (fetch once per unique hash) */
+  const uniqueHashes = new Set<string>();
+  for (const log of logs || []) {
+    if (log.transactionHash) uniqueHashes.add(log.transactionHash);
+  }
+  // Prefetch tx metas in small parallel batches
+  const hashList = [...uniqueHashes];
+  for (let i = 0; i < hashList.length; i += 8) {
+    const batch = hashList.slice(i, i + 8);
+    await Promise.all(batch.map((h) => getTxMeta(h)));
+  }
 
   for (const log of logs || []) {
     if (!log.topics || log.topics.length < 3) continue;
@@ -116,44 +215,77 @@ export async function scanPlankTransfers(opts?: {
     const to = topicToAddress(log.topics[2]);
     const txHash = log.transactionHash;
     const block = parseInt(log.blockNumber, 16);
+    const meta = await getTxMeta(txHash);
 
     // Skip pure mints from zero if any
     const candidates = [from, to].filter((a) => !IGNORE.has(a) && a !== ZERO);
+    // Always include tx.from if it's a real wallet (the ETH spender)
+    if (meta?.from && !IGNORE.has(meta.from) && meta.from !== ZERO) {
+      if (!candidates.includes(meta.from)) candidates.push(meta.from);
+    }
+
     for (const wallet of candidates) {
       if (seen.has(wallet + txHash)) continue;
       seen.add(wallet + txHash);
 
-      const widget = await wasWidgetVerified(wallet);
-      if (widget) {
-        // Official plank.love path — keep Good / neutral; still starts cooldown via widget ping
+      // Death trap: official widget is locked — any non-ignored wallet in a
+      // PLANK transfer is a sniper candidate. Do NOT trust client "widget pings"
+      // here (that was a self-whitelist bypass). Capture ends when widget opens.
+
+      // Native ETH on this tx only counts for the signer
+      let ethDelta = BigInt(0);
+      if (meta && meta.from === wallet && meta.valueWei > BigInt(0)) {
+        ethDelta = meta.valueWei;
+      }
+
+      // Skip contracts (routers / pools) — only EOAs for the Bad Boards ledger
+      if (await isContractAddress(wallet)) {
         continue;
       }
 
-      // Off-widget PLANK movement during trap → Bad Boards
+      // Off-widget PLANK movement during death trap only → Bad Boards
       const before = (await getBoardsState()).badBoards[wallet];
+      const prevWei = BigInt(before?.ethSpentWei || "0");
       const entry = await markBadBoard({
         address: wallet,
-        reason: widget
-          ? "Off-widget activity after official use"
-          : "Transacted $PLANK outside official plank.love widget during death trap / cooldown",
+        reason:
+          "Transacted $PLANK outside official plank.love widget during death trap (widget still locked)",
         source: "chain_transfer",
         txHash,
-        at: new Date(), // block timestamp optional; now is fine for listing ops
+        ethSpentWeiDelta: ethDelta > BigInt(0) ? ethDelta : undefined,
+        at: new Date(),
+        // Chain capture only valid in death trap (double-check inside markBadBoard)
+        captureMode: "sniper",
       });
       if (entry && !before) newBad += 1;
+      if (entry) {
+        const afterWei = BigInt(entry.ethSpentWei || "0");
+        if (afterWei > prevWei) ethAdded += afterWei - prevWei;
+      }
     }
 
     void block;
   }
 
   const finalNotes = [
-    `Scanned ${fromBlock}→${latest} on ${CHAIN.name}; logs=${(logs || []).length}; newBad=${newBad}`,
+    `Scanned ${fromBlock}→${latest} on ${CHAIN.name}; logs=${(logs || []).length}; newBad=${newBad}; eth+=${ethAdded.toString()} wei`,
     `Trap phase=${trap.phase}`,
     ...notes,
   ];
   const { setScanCursor } = await import("@/lib/boards-store");
   await setScanCursor(latest, finalNotes);
 
-  notes.push(`newBad=${newBad}`, `blocks=${fromBlock}-${latest}`, `transfers=${(logs || []).length}`);
-  return { scannedFrom: fromBlock, scannedTo: latest, newBad, notes };
+  notes.push(
+    `newBad=${newBad}`,
+    `blocks=${fromBlock}-${latest}`,
+    `transfers=${(logs || []).length}`,
+    `ethAddedWei=${ethAdded.toString()}`
+  );
+  return {
+    scannedFrom: fromBlock,
+    scannedTo: latest,
+    newBad,
+    ethAddedWei: ethAdded.toString(),
+    notes,
+  };
 }

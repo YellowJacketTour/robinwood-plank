@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Reveal from "@/components/Reveal";
 import SectionHead from "@/components/SectionHead";
 import { shortAddress } from "@/lib/trade";
@@ -13,6 +13,22 @@ type BadEntry = {
   wasGoodWood: boolean;
   sources: string[];
   txHashes: string[];
+  ethSpentWei?: string;
+  ethSpent?: string;
+  ethSpentUsd?: number;
+  ethSpentUsdLabel?: string;
+};
+
+type VolumeTick = {
+  serverNow: string;
+  ethUsd: number;
+  ethUsdSource: string;
+  totalEthSpent: string;
+  totalEthSpentWei: string;
+  totalUsd: number;
+  totalUsdLabel: string;
+  badBoards: number;
+  fallen: number;
 };
 
 type BoardsPayload = {
@@ -31,10 +47,12 @@ type BoardsPayload = {
   recentBadBoards: BadEntry[];
   niceLedger?: string[];
   naughtyLedger?: BadEntry[];
+  volume?: VolumeTick;
   live?: {
     autoScanEveryMs: number;
     listingActive: boolean;
     lastAutoScan?: { ran: boolean; newBad?: number };
+    stream?: string;
   };
   scan?: {
     lastScannedBlock: number;
@@ -48,6 +66,7 @@ type WalletLookup = {
   side: string;
   widgetVerified: boolean;
   cooldown: { active: boolean; remainingMs: number } | null;
+  badEntry?: BadEntry | null;
 };
 
 function phaseLabel(phase: string) {
@@ -78,50 +97,211 @@ function sideLabel(side: string) {
   return "Unknown";
 }
 
+function ethLabel(b: BadEntry): string {
+  if (b.ethSpent) return b.ethSpent;
+  return "0.000";
+}
+
+function usdLabel(b: BadEntry, ethUsd: number): string {
+  if (b.ethSpentUsdLabel) return b.ethSpentUsdLabel;
+  if (b.ethSpentUsd != null && Number.isFinite(b.ethSpentUsd)) {
+    return `$${b.ethSpentUsd.toFixed(2)}`;
+  }
+  // Client recompute if only wei + live price
+  if (b.ethSpentWei && ethUsd > 0) {
+    try {
+      const milli = Number(BigInt(b.ethSpentWei) / BigInt("1000000000000000"));
+      return `$${((milli / 1000) * ethUsd).toFixed(2)}`;
+    } catch {
+      /* fallthrough */
+    }
+  }
+  return "$0.00";
+}
+
 const POLL_MS_ACTIVE = 8_000;
 const POLL_MS_IDLE = 30_000;
 
 export default function WoodYouJustLookAtIt() {
   const [data, setData] = useState<BoardsPayload | null>(null);
+  const [volume, setVolume] = useState<VolumeTick | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [livePulse, setLivePulse] = useState(false);
+  const [streamLive, setStreamLive] = useState(false);
   const [lookupAddr, setLookupAddr] = useState("");
   const [lookup, setLookup] = useState<WalletLookup | null>(null);
   const [lookupErr, setLookupErr] = useState<string | null>(null);
   const lastBadCount = useRef(0);
+  const lastTotalWei = useRef("0");
+  const streamRef = useRef<EventSource | null>(null);
 
+  const applySnapshot = useCallback((json: BoardsPayload) => {
+    const bad = json.counts?.badBoards ?? 0;
+    const totalWei = json.volume?.totalEthSpentWei ?? "0";
+    if (bad > lastBadCount.current || totalWei !== lastTotalWei.current) {
+      setLivePulse(true);
+    }
+    lastBadCount.current = bad;
+    lastTotalWei.current = totalWei;
+    setData(json);
+    if (json.volume) setVolume(json.volume);
+    setError(null);
+  }, []);
+
+  // SSE live stream (tick-by-tick ETH/USD + ledger)
+  useEffect(() => {
+    let cancelled = false;
+    let reconnectTimer: number | undefined;
+    let es: EventSource | null = null;
+
+    function connect() {
+      if (cancelled) return;
+      try {
+        es = new EventSource("/api/boards/stream");
+        streamRef.current = es;
+
+        es.addEventListener("snapshot", (ev) => {
+          try {
+            const json = JSON.parse((ev as MessageEvent).data) as BoardsPayload;
+            if (!cancelled) applySnapshot(json);
+          } catch {
+            // ignore bad frames
+          }
+        });
+
+        es.addEventListener("tick", (ev) => {
+          try {
+            const tick = JSON.parse((ev as MessageEvent).data) as VolumeTick;
+            if (!cancelled) {
+              setVolume(tick);
+              setStreamLive(true);
+              // Refresh USD labels on ledger rows without full refetch
+              setData((prev) => {
+                if (!prev?.naughtyLedger && !prev?.recentBadBoards) return prev;
+                const list = prev.naughtyLedger ?? prev.recentBadBoards ?? [];
+                const ethUsd = tick.ethUsd;
+                const nextList = list.map((b) => {
+                  if (!b.ethSpentWei || !(ethUsd > 0)) return b;
+                  try {
+                    const wei = BigInt(b.ethSpentWei);
+                    const milli = Number(wei / BigInt("1000000000000000"));
+                    const eth = milli / 1000;
+                    const usd = eth * ethUsd;
+                    const whole = wei / BigInt("1000000000000000000");
+                    const frac3 = (wei % BigInt("1000000000000000000")) / BigInt("1000000000000000");
+                    return {
+                      ...b,
+                      ethSpent: `${whole.toString()}.${frac3.toString().padStart(3, "0")}`,
+                      ethSpentUsd: usd,
+                      ethSpentUsdLabel: `$${usd.toFixed(2)}`,
+                    };
+                  } catch {
+                    return b;
+                  }
+                });
+                return {
+                  ...prev,
+                  volume: tick,
+                  naughtyLedger: nextList,
+                  recentBadBoards: nextList,
+                  counts: {
+                    ...prev.counts,
+                    badBoards: tick.badBoards ?? prev.counts.badBoards,
+                    fallen: tick.fallen ?? prev.counts.fallen,
+                  },
+                };
+              });
+            }
+          } catch {
+            // ignore
+          }
+        });
+
+        es.addEventListener("reconnect", () => {
+          es?.close();
+          if (!cancelled) {
+            reconnectTimer = window.setTimeout(connect, 800);
+          }
+        });
+
+        es.onerror = () => {
+          setStreamLive(false);
+          es?.close();
+          if (!cancelled) {
+            reconnectTimer = window.setTimeout(connect, 2_500);
+          }
+        };
+
+        es.onopen = () => {
+          if (!cancelled) setStreamLive(true);
+        };
+      } catch {
+        setStreamLive(false);
+        if (!cancelled) {
+          reconnectTimer = window.setTimeout(connect, 3_000);
+        }
+      }
+    }
+
+    connect();
+
+    return () => {
+      cancelled = true;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      es?.close();
+      streamRef.current?.close();
+      streamRef.current = null;
+    };
+  }, [applySnapshot]);
+
+  // Poll fallback when SSE is down
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
-    let listingActive = false;
 
     async function tick() {
       if (cancelled) return;
+      // If stream is healthy, poll slowly as backup; if not, poll faster
+      const listingActive = Boolean(
+        data?.trap?.active || data?.live?.listingActive
+      );
+      if (streamLive) {
+        timer = window.setTimeout(tick, POLL_MS_IDLE);
+        return;
+      }
       try {
         const res = await fetch("/api/boards", { cache: "no-store" });
         const json = (await res.json()) as BoardsPayload & { message?: string };
-        if (!cancelled && res.ok) {
-          const bad = json.counts?.badBoards ?? 0;
-          if (bad > lastBadCount.current) setLivePulse(true);
-          lastBadCount.current = bad;
-          listingActive = Boolean(json.trap?.active || json.live?.listingActive);
-          setData(json);
-          setError(null);
-        }
+        if (!cancelled && res.ok) applySnapshot(json);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load boards");
       }
       if (cancelled) return;
-      timer = window.setTimeout(tick, listingActive ? POLL_MS_ACTIVE : POLL_MS_IDLE);
+      timer = window.setTimeout(
+        tick,
+        listingActive ? POLL_MS_ACTIVE : POLL_MS_IDLE
+      );
     }
 
-    tick();
+    // Initial fetch always (SSE may lag on cold start)
+    void (async () => {
+      try {
+        const res = await fetch("/api/boards", { cache: "no-store" });
+        const json = (await res.json()) as BoardsPayload;
+        if (!cancelled && res.ok) applySnapshot(json);
+      } catch {
+        // stream may still work
+      }
+      if (!cancelled) timer = window.setTimeout(tick, POLL_MS_ACTIVE);
+    })();
+
     return () => {
       cancelled = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- poll driven by streamLive
+  }, [streamLive, applySnapshot]);
 
   useEffect(() => {
     if (!livePulse) return;
@@ -134,7 +314,7 @@ export default function WoodYouJustLookAtIt() {
     try {
       await fetch("/api/boards/scan", { method: "POST" });
       const res = await fetch("/api/boards", { cache: "no-store" });
-      if (res.ok) setData((await res.json()) as BoardsPayload);
+      if (res.ok) applySnapshot((await res.json()) as BoardsPayload);
     } finally {
       setScanning(false);
     }
@@ -145,7 +325,9 @@ export default function WoodYouJustLookAtIt() {
     setLookupErr(null);
     setLookup(null);
     try {
-      const res = await fetch(`/api/boards/wallet?address=${encodeURIComponent(lookupAddr.trim())}`);
+      const res = await fetch(
+        `/api/boards/wallet?address=${encodeURIComponent(lookupAddr.trim())}`
+      );
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Lookup failed");
       setLookup(json as WalletLookup);
@@ -159,6 +341,10 @@ export default function WoodYouJustLookAtIt() {
   const goodList = data?.niceLedger ?? [];
   const badList = data?.naughtyLedger ?? data?.recentBadBoards ?? [];
   const listingLive = Boolean(trap?.active || data?.live?.listingActive);
+  const ethUsd = volume?.ethUsd ?? data?.volume?.ethUsd ?? 0;
+  const totalEth = volume?.totalEthSpent ?? data?.volume?.totalEthSpent ?? "0.000";
+  const totalUsd =
+    volume?.totalUsdLabel ?? data?.volume?.totalUsdLabel ?? "$0.00";
 
   return (
     <section id="boards" className="section-tight scroll-mt-20 px-3 sm:px-5">
@@ -167,14 +353,72 @@ export default function WoodYouJustLookAtIt() {
           <SectionHead
             eyebrow="Wooden ledger · live scan"
             title="Wood You Just Look At It"
-            lede="Good Wood held the line. Bad Boards sniped or left the widget. Scanner runs while the trap is live."
+            lede="Good Wood held the line. Bad Boards sniped while the widget was locked. Once trade is on, official plank.love buyers stay clean — ETH + USD tick live."
             artSrc="/images/collection/plank-redacted.png"
             artAlt="Redacted collection plank"
           />
         </Reveal>
 
         <Reveal delayMs={40}>
-          <div className="wood-ledger mt-3 grid grid-cols-2 gap-px overflow-hidden sm:grid-cols-5">
+          <div
+            className={`wood-ledger mt-3 overflow-hidden px-3 py-2 ${
+              livePulse ? "ring-1 ring-orange-400/50" : ""
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="flex items-center gap-1.5 text-[0.55rem] font-bold uppercase tracking-wider text-orange-300/90">
+                  <span
+                    className={`inline-block h-1.5 w-1.5 rounded-full ${
+                      streamLive
+                        ? "animate-pulse bg-emerald-400"
+                        : listingLive
+                          ? "animate-pulse bg-amber-400"
+                          : "bg-foreground/30"
+                    }`}
+                    aria-hidden
+                  />
+                  {streamLive ? "WS live" : listingLive ? "Polling" : "Idle"} · Bad Boards volume
+                </p>
+                <p className="font-display text-lg leading-tight text-gold-300 sm:text-2xl">
+                  <span className={livePulse ? "text-orange-300" : ""}>
+                    {totalEth}
+                  </span>
+                  <span className="ml-1 text-sm font-sans font-bold text-foreground/70 sm:text-base">
+                    ETH
+                  </span>
+                  <span className="mx-1.5 text-foreground/35">·</span>
+                  <span className="text-emerald-300/95">{totalUsd}</span>
+                </p>
+                <p className="text-[0.65rem] text-foreground/50">
+                  ETH/USD{" "}
+                  {ethUsd > 0
+                    ? `$${ethUsd.toLocaleString("en-US", { maximumFractionDigits: 2 })}`
+                    : "—"}
+                  {volume?.ethUsdSource ? ` · ${volume.ethUsdSource}` : ""}
+                  {volume?.serverNow
+                    ? ` · ${new Date(volume.serverNow).toLocaleTimeString()}`
+                    : ""}
+                </p>
+              </div>
+              <div className="text-right text-[0.65rem] text-foreground/55">
+                <p>
+                  snipers{" "}
+                  <strong className="text-orange-300">
+                    {volume?.badBoards ?? counts?.badBoards ?? "—"}
+                  </strong>
+                </p>
+                <p>
+                  fallen{" "}
+                  <strong className="text-amber-300">
+                    {volume?.fallen ?? counts?.fallen ?? "—"}
+                  </strong>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="wood-ledger mt-2 grid grid-cols-2 gap-px overflow-hidden sm:grid-cols-5">
             {[
               { k: "Good Wood", v: counts?.goodWood },
               { k: "Bad Boards", v: counts?.badBoards },
@@ -182,10 +426,14 @@ export default function WoodYouJustLookAtIt() {
               { k: "Widget", v: counts?.widgetVerified },
             ].map((c) => (
               <div key={c.k} className="bg-[#2a1a0f]/80 px-2 py-2 text-center">
-                <p className="text-[0.55rem] font-bold uppercase tracking-wide text-gold-300/80">{c.k}</p>
+                <p className="text-[0.55rem] font-bold uppercase tracking-wide text-gold-300/80">
+                  {c.k}
+                </p>
                 <p
                   className={`font-display text-xl leading-none sm:text-2xl ${
-                    c.k === "Bad Boards" && livePulse ? "text-orange-300" : "text-gold-300"
+                    c.k === "Bad Boards" && livePulse
+                      ? "text-orange-300"
+                      : "text-gold-300"
                   }`}
                 >
                   {c.v ?? "—"}
@@ -227,7 +475,9 @@ export default function WoodYouJustLookAtIt() {
             <div className="grid sm:grid-cols-2">
               <div className="min-w-0 border-b border-[#c4922e]/35 sm:border-b-0 sm:border-r sm:border-[#c4922e]/35">
                 <header className="flex items-center justify-between border-b border-[#c4922e]/35 bg-forest-900/45 px-2.5 py-1.5">
-                  <h3 className="font-display text-sm text-emerald-300 sm:text-base">Good Wood</h3>
+                  <h3 className="font-display text-sm text-emerald-300 sm:text-base">
+                    Good Wood
+                  </h3>
                   <span className="text-[0.55rem] font-bold uppercase tracking-wider text-emerald-400/70">
                     mint · airdrop
                   </span>
@@ -255,9 +505,11 @@ export default function WoodYouJustLookAtIt() {
 
               <div className="min-w-0">
                 <header className="flex items-center justify-between border-b border-[#c4922e]/35 bg-[#3a1510]/50 px-2.5 py-1.5">
-                  <h3 className="font-display text-sm text-orange-300 sm:text-base">Bad Boards</h3>
+                  <h3 className="font-display text-sm text-orange-300 sm:text-base">
+                    Bad Boards
+                  </h3>
                   <span className="text-[0.55rem] font-bold uppercase tracking-wider text-orange-400/70">
-                    {listingLive ? "live feed" : "off-widget"}
+                    {streamLive ? "live eth · usd" : listingLive ? "scanning" : "off-widget"}
                   </span>
                 </header>
                 <div className="wood-ledger-ruled max-h-56 overflow-y-auto px-2 py-0.5 sm:max-h-72">
@@ -269,12 +521,21 @@ export default function WoodYouJustLookAtIt() {
                     badList.map((b, i) => (
                       <div
                         key={b.address + b.lastSeenAt}
-                        className="wood-ledger-entry wood-ledger-bad flex gap-1.5"
+                        className="wood-ledger-entry wood-ledger-bad flex items-baseline gap-1.5"
                       >
                         <span className="w-5 shrink-0 text-foreground/35">{i + 1}</span>
                         <code className="min-w-0 flex-1 truncate" title={b.address}>
                           {shortAddress(b.address, 5)}
                         </code>
+                        <span
+                          className="shrink-0 tabular-nums text-[0.65rem] font-semibold text-gold-300"
+                          title="ETH spent (3 dp) · USD"
+                        >
+                          {ethLabel(b)}
+                          <span className="font-normal text-foreground/45"> Ξ</span>
+                          <span className="mx-0.5 text-foreground/30">/</span>
+                          <span className="text-emerald-300/90">{usdLabel(b, ethUsd)}</span>
+                        </span>
                         {b.wasGoodWood && (
                           <span className="shrink-0 text-[0.55rem] uppercase text-amber-300/90">
                             fallen
@@ -316,6 +577,12 @@ export default function WoodYouJustLookAtIt() {
                 {lookup.widgetVerified ? " · widget" : ""}
                 {lookup.cooldown?.active
                   ? ` · cooldown ${fmtRemain(lookup.cooldown.remainingMs)}`
+                  : ""}
+                {lookup.badEntry?.ethSpent
+                  ? ` · ${lookup.badEntry.ethSpent} ETH`
+                  : ""}
+                {lookup.badEntry?.ethSpentUsdLabel
+                  ? ` (${lookup.badEntry.ethSpentUsdLabel})`
                   : ""}
               </p>
             )}

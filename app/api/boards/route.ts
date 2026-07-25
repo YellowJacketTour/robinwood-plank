@@ -1,10 +1,16 @@
 import {
   getTrapWindow,
   isListingWindowActive,
+  isOfficialWidgetOpen,
+  isSniperCaptureActive,
   SNIPER_TRAP_MINUTES,
   WALLET_COOLDOWN_MINUTES,
 } from "@/lib/boards";
-import { getLastScanAgeMs, publicBoardsSnapshot } from "@/lib/boards-store";
+import {
+  getLastScanAgeMs,
+  publicBoardsSnapshot,
+  withVolumeDecorators,
+} from "@/lib/boards-store";
 import { scanPlankTransfers } from "@/lib/boards-scanner";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 import type { BoardsPublicView } from "@/lib/boards-types";
@@ -20,9 +26,9 @@ export async function GET(req: Request) {
     const limited = rateLimit(req, { key: "boards", limit: 90, windowMs: 60_000 });
     if (limited) return limited;
 
-    // Live path: auto-scan while death trap / cooldown window is open
+    // Live path: auto-scan only while widget is locked (death trap sniper capture)
     let autoScan: { ran: boolean; newBad?: number; notes?: string[] } = { ran: false };
-    if (isListingWindowActive()) {
+    if (isSniperCaptureActive()) {
       const age = await getLastScanAgeMs();
       if (age >= AUTO_SCAN_EVERY_MS) {
         try {
@@ -39,6 +45,7 @@ export async function GET(req: Request) {
 
     const trap = getTrapWindow();
     const snap = await publicBoardsSnapshot();
+    const decorated = await withVolumeDecorators(snap);
 
     const view: BoardsPublicView = {
       trap: {
@@ -57,12 +64,13 @@ export async function GET(req: Request) {
         widgetVerified: Object.keys(snap.state.widgetSessions).length,
         fallen: snap.fallenCount,
       },
-      recentBadBoards: snap.recentBad,
+      recentBadBoards: decorated.recentBad,
+      volume: decorated.volume,
       legend: {
         goodWood:
           "Mint Wood List + airdrop wallets. Community that waited and held the real list.",
         badBoards:
-          "Wallets that moved $PLANK outside the official plank.love widget during the death trap / 30m cooldown window.",
+          "Wallets that moved $PLANK while the official widget was still locked (death trap). Once the widget is on, official plank.love buyers are never auto-logged here.",
         fallen:
           "Were Good Wood (mint/airdrop) then got cute off-site during the trap — now Bad Boards.",
         cooldown: `Each wallet that touches $PLANK starts a ${WALLET_COOLDOWN_MINUTES}-minute cooldown so ops can list snipers before free trade.`,
@@ -72,14 +80,18 @@ export async function GET(req: Request) {
     return publicJson({
       ...view,
       niceLedger: snap.niceLedger,
-      naughtyLedger: snap.recentBad,
+      naughtyLedger: decorated.recentBad,
       live: {
         autoScanEveryMs: AUTO_SCAN_EVERY_MS,
         listingActive: isListingWindowActive(),
+        sniperCapture: isSniperCaptureActive(),
+        widgetOpen: isOfficialWidgetOpen(),
         lastAutoScan: autoScan,
+        stream: "/api/boards/stream",
       },
       scan: {
         lastScannedBlock: snap.state.lastScannedBlock,
+        lastScanAt: snap.state.lastScanAt ?? null,
         notes: snap.state.scanNotes,
         updatedAt: snap.state.updatedAt,
       },

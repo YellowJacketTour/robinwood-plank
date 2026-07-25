@@ -1,5 +1,6 @@
 import { isAddressLike, normalizeAddress } from "@/lib/boards";
 import { classifyWallet } from "@/lib/boards-store";
+import { formatEth3, formatUsd, getEthUsdPrice, weiToUsd } from "@/lib/eth-price";
 import { TradeApiError } from "@/lib/uniswap-server";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 
@@ -18,9 +19,23 @@ export async function GET(req: Request) {
     }
 
     const result = await classifyWallet(normalizeAddress(address));
+    let badEntry = result.badEntry;
+    if (badEntry) {
+      const price = await getEthUsdPrice();
+      const wei = badEntry.ethSpentWei || "0";
+      const usd = weiToUsd(wei, price.usd);
+      badEntry = {
+        ...badEntry,
+        ethSpentWei: wei,
+        ethSpent: formatEth3(wei),
+        ethSpentUsd: usd,
+        ethSpentUsdLabel: formatUsd(usd),
+      };
+    }
     return publicJson({
       address: normalizeAddress(address),
       ...result,
+      badEntry,
     });
   } catch (err) {
     return publicError(err, "Wallet lookup failed.");

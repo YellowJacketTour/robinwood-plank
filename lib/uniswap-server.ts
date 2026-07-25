@@ -211,14 +211,30 @@ export function assertQuoteIntegrity(quote: Record<string, unknown>): void {
     throw new TradeApiError(400, "QUOTE_FEE", "Quote fee recipient does not match plank.love treasury.");
   }
 
+  // When the quote exposes fee routing fields, they must match our treasury.
+  // If Uniswap omits them (shape variance), pair + server-side integratorFees on /quote still bind fees.
   const aggregated = quote.aggregatedOutputs;
-  if (Array.isArray(aggregated)) {
+  if (Array.isArray(aggregated) && aggregated.length > 0) {
+    let sawFeeWallet = false;
     for (const row of aggregated) {
       if (!row || typeof row !== "object") continue;
       const r = row as { recipient?: string };
       if (typeof r.recipient === "string" && r.recipient.toLowerCase() === feeRecipient) {
-        return;
+        sawFeeWallet = true;
+        break;
       }
+    }
+    // Only hard-fail when portionBips / fee fields imply a cut but wrong wallet
+    const hasPortion =
+      quote.portionBips != null ||
+      quote.portionAmount != null ||
+      portionRecipient != null;
+    if (hasPortion && !sawFeeWallet && portionRecipient && portionRecipient !== feeRecipient) {
+      throw new TradeApiError(
+        400,
+        "QUOTE_FEE",
+        "Quote fee routing does not match plank.love treasury."
+      );
     }
   }
 }
