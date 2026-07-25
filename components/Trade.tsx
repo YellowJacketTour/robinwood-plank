@@ -14,130 +14,121 @@ import {
 import { getCountdownParts, shortAddress } from "@/lib/trade";
 import CopyCA from "@/components/CopyCA";
 
+const STEPS = [
+  {
+    n: "1",
+    title: "LP early",
+    body: `~${SNIPER_TRAP_MINUTES}m before timer — bots only.`,
+  },
+  {
+    n: "2",
+    title: "Wait here",
+    body: "Widget locked. Do not use Uniswap.app.",
+  },
+  {
+    n: "3",
+    title: "Plank List",
+    body: "Early / off-widget buyers get listed.",
+  },
+  {
+    n: "4",
+    title: "Free forever",
+    body: "Rules off, LP renounced, open markets.",
+  },
+] as const;
+
 export default function Trade() {
   const [isOpen, setIsOpen] = useState(() => getCountdownParts().isOpen);
   const onOpenChange = useCallback((open: boolean) => setIsOpen(open), []);
 
   return (
-    <section id="trade" className="scroll-mt-24 px-4 py-20 sm:px-6">
-      <div className="mx-auto max-w-6xl">
+    <section id="trade" className="section-tight scroll-mt-24 px-3 sm:px-5">
+      <div className="mx-auto max-w-5xl">
         <Reveal>
-          <p className="lede text-center text-xs font-extrabold uppercase tracking-[0.3em] text-forest-600">
+          <p className="lede text-center text-[0.65rem] font-extrabold uppercase tracking-[0.28em] text-forest-600 sm:text-xs">
             Official plank.love widget only
           </p>
-          <h2 className="section-title mt-2 text-center text-4xl text-gold-300 sm:text-5xl">
+          <h2 className="section-title mt-1.5 text-center text-3xl text-gold-300 sm:text-4xl md:text-5xl">
             Buy Real $PLANK
           </h2>
-          <p className="lede mx-auto mt-4 max-w-2xl text-center text-base text-foreground/80 sm:text-lg">
-            The only safe place to trade the real $PLANK contract until launch rules are relaxed.
-            Powered by Uniswap routing under the hood — stay on this widget, not Uniswap.app or
-            random links.
+          <p className="lede mx-auto mt-2 max-w-xl text-center text-sm text-foreground/75 sm:text-base">
+            Real CA · Uniswap AMM routing · stay on this widget until rules relax.
           </p>
         </Reveal>
 
-        <Reveal delayMs={80}>
-          <div className="mx-auto mt-10 max-w-xl">
+        <Reveal delayMs={60}>
+          <div className="mx-auto mt-5 max-w-md sm:mt-6">
             <CountdownTimer onOpenChange={onOpenChange} />
           </div>
         </Reveal>
 
-        <div className="mt-12 grid items-start gap-8 lg:grid-cols-2">
-          <Reveal delayMs={120}>
+        {/* Widget first on all breakpoints; side info stacks below on mobile */}
+        <div className="mt-6 grid items-start gap-4 sm:mt-8 sm:gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:gap-6">
+          <Reveal delayMs={80}>
             <SwapWidget unlocked={isOpen} />
           </Reveal>
 
-          <Reveal delayMs={200}>
-            <div className="flex flex-col gap-5">
-              <div className="rounded-2xl border border-gold-500/25 bg-wood-900/85 p-6">
-                <h3 className="font-display text-xl text-gold-300">How the launch works</h3>
-                <ol className="mt-4 space-y-4 text-sm text-foreground/75">
-                  <li className="flex gap-3">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-500/50 bg-wood-950 text-xs font-bold text-gold-300">
-                      1
-                    </span>
-                    <span>
-                      <strong className="text-foreground">LP goes live early</strong> — about{" "}
-                      {SNIPER_TRAP_MINUTES} minutes before this site timer. Only bots and snipers
-                      will notice.
-                    </span>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-500/50 bg-wood-950 text-xs font-bold text-gold-300">
-                      2
-                    </span>
-                    <span>
-                      <strong className="text-foreground">Community waits for this timer</strong> —
-                      the official widget stays locked. Do not open Uniswap.app or any other swap UI
-                      first.
-                    </span>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-500/50 bg-wood-950 text-xs font-bold text-gold-300">
-                      3
-                    </span>
-                    <span>
-                      <strong className="text-foreground">Snipers land on the Plank List</strong> —
-                      wallets that buy early (or off this widget while rules are hot) get blacklisted.
-                      Anti-sniper / anti-whale stay on for that window.
-                    </span>
-                  </li>
-                  <li className="flex gap-3">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-500/50 bg-wood-950 text-xs font-bold text-gold-300">
-                      4
-                    </span>
-                    <span>
-                      <strong className="text-foreground">Rules relaxed → free forever</strong> —
-                      cooldowns and limits off, LP renounced / burned. Only then is trading elsewhere
-                      as safe as pure open ERC-20 markets.
-                    </span>
-                  </li>
+          <Reveal delayMs={120}>
+            <div className="flex flex-col gap-3 sm:gap-4">
+              <div className="rounded-xl border border-gold-500/25 bg-wood-900/85 p-4 sm:p-5">
+                <h3 className="font-display text-lg text-gold-300 sm:text-xl">Launch rules</h3>
+                <ol className="mt-3 space-y-2.5">
+                  {STEPS.map((s) => (
+                    <li key={s.n} className="flex gap-2.5 text-sm text-foreground/75">
+                      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-gold-500/45 bg-wood-950 text-[0.65rem] font-bold text-gold-300">
+                        {s.n}
+                      </span>
+                      <span>
+                        <strong className="text-foreground">{s.title}.</strong> {s.body}
+                      </span>
+                    </li>
+                  ))}
                 </ol>
               </div>
 
-              <div className="rounded-2xl border-2 border-dashed border-gold-500/40 bg-forest-900/75 p-5 text-sm text-foreground/80">
-                <p>
-                  <span aria-hidden="true">🪓</span>{" "}
-                  <strong className="text-gold-300">
-                    {RULES_RELAXED ? "Rules relaxed:" : "Official widget only:"}
-                  </strong>{" "}
-                  {RULES_RELAXED
-                    ? "Launch controls are off. Still verify the CA — prefer this trusted widget."
-                    : "Until launch rules are fully relaxed, swap only through this plank.love widget after the countdown. Anywhere else is the trap."}
-                </p>
+              <div className="rounded-xl border border-dashed border-gold-500/40 bg-forest-900/75 px-3.5 py-3 text-xs leading-relaxed text-foreground/80 sm:text-sm">
+                <strong className="text-gold-300">
+                  {RULES_RELAXED ? "Rules relaxed." : "Widget only."}
+                </strong>{" "}
+                {RULES_RELAXED
+                  ? "Still verify the CA — prefer this trusted widget."
+                  : "Until limits are off, swap only here after countdown. Anywhere else is the trap."}
               </div>
 
-              <div className="rounded-2xl border border-gold-500/20 bg-wood-900/85 p-5">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-gold-300">
-                  Always verify
+              <div className="rounded-xl border border-gold-500/20 bg-wood-900/85 p-4 sm:p-5">
+                <h3 className="text-[0.65rem] font-bold uppercase tracking-widest text-gold-300">
+                  Verify
                 </h3>
-                <ul className="mt-3 space-y-2 text-sm text-foreground/70">
-                  <li>
-                    Network: <strong className="text-foreground">{CHAIN.name}</strong> (ID{" "}
-                    {CHAIN.id})
-                  </li>
-                  <li>
-                    Token:{" "}
-                    <code className="text-gold-300" title={CONTRACT_ADDRESS}>
+                <dl className="mt-2.5 space-y-1.5 text-xs text-foreground/70 sm:text-sm">
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
+                    <dt>Network</dt>
+                    <dd className="font-semibold text-foreground">
+                      {CHAIN.name} · {CHAIN.id}
+                    </dd>
+                  </div>
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
+                    <dt>Token</dt>
+                    <dd className="font-mono text-gold-300" title={CONTRACT_ADDRESS}>
                       {shortAddress(CONTRACT_ADDRESS, 6)}
-                    </code>
-                  </li>
-                  <li>
-                    Venue:{" "}
-                    <strong className="text-foreground">
-                      {RULES_RELAXED
-                        ? "plank.love widget (or open Uniswap after verify)"
-                        : "plank.love official widget only"}
-                    </strong>
-                  </li>
-                  <li>
-                    Site fee:{" "}
-                    <strong className="text-gold-300">{SITE_FEE.label}</strong> on widget swaps →{" "}
-                    <code className="text-foreground/80" title={SITE_FEE.recipient}>
-                      {shortAddress(SITE_FEE.recipient, 4)}
-                    </code>
-                  </li>
-                </ul>
-                <div className="mt-4">
+                    </dd>
+                  </div>
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
+                    <dt>Venue</dt>
+                    <dd className="font-semibold text-foreground">
+                      {RULES_RELAXED ? "Widget (+ open markets)" : "plank.love only"}
+                    </dd>
+                  </div>
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-0.5">
+                    <dt>Site fee</dt>
+                    <dd className="text-gold-300">
+                      {SITE_FEE.label} →{" "}
+                      <span className="font-mono" title={SITE_FEE.recipient}>
+                        {shortAddress(SITE_FEE.recipient, 4)}
+                      </span>
+                    </dd>
+                  </div>
+                </dl>
+                <div className="mt-3">
                   <CopyCA />
                 </div>
               </div>

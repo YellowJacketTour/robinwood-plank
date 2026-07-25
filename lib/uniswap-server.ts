@@ -12,6 +12,9 @@ const TRADE_API = "https://trade-api.gateway.uniswap.org/v1";
 /** Paths we are allowed to call on Uniswap — no open proxy. */
 const ALLOWED_PATHS = new Set(["/quote", "/swap", "/check_approval"]);
 
+/** Force AMM routes only so /swap works (no UniswapX /order path). */
+export const AMM_PROTOCOLS = ["V2", "V3", "V4"] as const;
+
 export type SwapDirection = "buy" | "sell";
 
 export function assertTradeOpen(): void {
@@ -27,7 +30,6 @@ export function assertTradeOpen(): void {
  * - Not prefixed with NEXT_PUBLIC_ (so Next will not bundle it)
  */
 export function getApiKey(): string | null {
-  // Explicitly only process.env — no request context.
   const key = process.env.UNISWAP_API_KEY;
   if (typeof key !== "string") return null;
   const trimmed = key.trim();
@@ -40,14 +42,24 @@ export function isTradingApiConfigured(): boolean {
 }
 
 /**
- * Immutable site fee for Uniswap integratorFee.
- * Always rebuilt from SITE_FEE constants — never from client input or env.
+ * Immutable site fee for Uniswap Trading API.
+ * Spec: QuoteRequest.integratorFees: IntegratorFee[] with fields { bips, recipient }.
+ * (Not "bps" / not singular "integratorFee" — those are invalid per OpenAPI.)
  */
-export function getIntegratorFee(): Readonly<{ bps: number; recipient: string }> {
-  return Object.freeze({
-    bps: SITE_FEE.bps,
-    recipient: SITE_FEE.recipient,
-  });
+export function getIntegratorFees(): ReadonlyArray<
+  Readonly<{ bips: number; recipient: string }>
+> {
+  return Object.freeze([
+    Object.freeze({
+      bips: SITE_FEE.bps,
+      recipient: SITE_FEE.recipient.toLowerCase(),
+    }),
+  ]);
+}
+
+/** @deprecated use getIntegratorFees — kept name clarity for call sites */
+export function getIntegratorFee() {
+  return getIntegratorFees()[0];
 }
 
 /** Public fee metadata only (safe to send to the browser). */
@@ -55,6 +67,7 @@ export function getPublicSiteFee() {
   return Object.freeze({
     percent: SITE_FEE.percent,
     bps: SITE_FEE.bps,
+    bips: SITE_FEE.bps,
     label: SITE_FEE.label,
     recipient: SITE_FEE.recipient,
   });
@@ -106,11 +119,12 @@ export function assertAllowedPair(tokenIn: string, tokenOut: string, chainId: nu
 
 /**
  * Reject any attempt by the client to supply fee / routing overrides.
- * Our server is the only authority for integratorFee + pair.
+ * Our server is the only authority for integratorFees + pair.
  */
 export function assertNoClientFeeOrRouteOverride(body: Record<string, unknown>): void {
   const forbidden = [
     "integratorFee",
+    "integratorFees",
     "fee",
     "fees",
     "portionBips",
@@ -120,6 +134,8 @@ export function assertNoClientFeeOrRouteOverride(body: Record<string, unknown>):
     "tokenOut",
     "tokenInChainId",
     "tokenOutChainId",
+    "protocols",
+    "routingPreference",
     "apiKey",
     "api_key",
     "x-api-key",
@@ -135,6 +151,19 @@ export function assertNoClientFeeOrRouteOverride(body: Record<string, unknown>):
       );
     }
   }
+}
+
+const NATIVE_ALIASES = new Set([
+  NATIVE_TOKEN_ADDRESS.toLowerCase(),
+  "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+]);
+
+function isNative(addr: string) {
+  return NATIVE_ALIASES.has(addr.toLowerCase());
+}
+
+function isPlank(addr: string) {
+  return addr.toLowerCase() === CONTRACT_ADDRESS.toLowerCase();
 }
 
 /**
@@ -153,28 +182,26 @@ export function assertQuoteIntegrity(quote: Record<string, unknown>): void {
     (typeof quote.tokenOut === "string" ? quote.tokenOut : null);
 
   if (tokenIn && tokenOut) {
-    // Native may be zero address or chain-native encoding — normalize common forms.
-    const norm = (t: string) => t.toLowerCase();
-    const a = norm(tokenIn);
-    const b = norm(tokenOut);
-    const plank = CONTRACT_ADDRESS.toLowerCase();
-    const natives = new Set([
-      NATIVE_TOKEN_ADDRESS.toLowerCase(),
-      "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-    ]);
-    const aIsNative = natives.has(a);
-    const bIsNative = natives.has(b);
-    const aIsPlank = a === plank;
-    const bIsPlank = b === plank;
-    const ok = (aIsNative && bIsPlank) || (aIsPlank && bIsNative);
+    const ok =
+      (isNative(tokenIn) && isPlank(tokenOut)) || (isPlank(tokenIn) && isNative(tokenOut));
     if (!ok) {
       throw new TradeApiError(400, "QUOTE_PAIR", "Quote is not for the official $PLANK / ETH pair.");
     }
   }
 
+  // Classic swaps only — UniswapX needs /order, not /swap
+  const routing = typeof quote.routing === "string" ? quote.routing : null;
+  // routing may live on the outer response; also reject Dutch-style encodedOrder-only quotes without classic fields
+  if (routing && !["CLASSIC", "WRAP", "UNWRAP"].includes(routing)) {
+    throw new TradeApiError(
+      400,
+      "BAD_ROUTING",
+      `Unsupported routing "${routing}". Official widget uses Uniswap AMM only.`
+    );
+  }
+
   const feeRecipient = SITE_FEE.recipient.toLowerCase();
 
-  // Common Uniswap quote fee fields
   const portionRecipient =
     typeof quote.portionRecipient === "string" ? quote.portionRecipient.toLowerCase() : null;
   if (portionRecipient && portionRecipient !== feeRecipient) {
@@ -185,17 +212,23 @@ export function assertQuoteIntegrity(quote: Record<string, unknown>): void {
   if (Array.isArray(aggregated)) {
     for (const row of aggregated) {
       if (!row || typeof row !== "object") continue;
-      const r = row as { recipient?: string; fee?: string; bps?: number };
-      // Fee leg often has fee flag or small bps portion to integrator
+      const r = row as { recipient?: string };
       if (typeof r.recipient === "string" && r.recipient.toLowerCase() === feeRecipient) {
-        return; // found our fee leg — good
+        return;
       }
     }
   }
+}
 
-  // If portion fields exist with a recipient, already validated above.
-  // If quote has no fee fields at all, still allow (some routes encode fee only in calldata);
-  // the quote request always sets integratorFee server-side.
+/** Pull amountOut from ClassicQuote / Dutch-style quote shapes. */
+export function extractAmountOut(quote: Record<string, unknown>): string {
+  const output = quote.output as { amount?: string } | undefined;
+  if (output && typeof output.amount === "string" && output.amount) return output.amount;
+  if (typeof quote.amountOut === "string" && quote.amountOut) return quote.amountOut;
+  if (typeof quote.expectedAmountOut === "string" && quote.expectedAmountOut) {
+    return quote.expectedAmountOut;
+  }
+  return "";
 }
 
 export async function uniswapFetch(path: string, body: unknown): Promise<Response> {
@@ -212,7 +245,6 @@ export async function uniswapFetch(path: string, body: unknown): Promise<Respons
     );
   }
 
-  // Deep-clone body and force-remove any fee/credential keys if present.
   const safeBody = scrubOutboundBody(body);
 
   const res = await fetch(`${TRADE_API}${path}`, {
@@ -221,14 +253,13 @@ export async function uniswapFetch(path: string, body: unknown): Promise<Respons
       "x-api-key": apiKey,
       "Content-Type": "application/json",
       Accept: "application/json",
-      // Required for fractional integrator fee bps (0.42069% → 42.069)
+      // Required for fractional integrator fee bips (0.42069% → 42.069)
       "x-universal-router-version": "2.1.1",
     },
     body: JSON.stringify(safeBody),
     cache: "no-store",
   });
 
-  // Never log the API key. Log path + status only.
   if (!res.ok) {
     console.error(`[uniswap] ${path} → ${res.status}`);
   }
@@ -238,20 +269,9 @@ export async function uniswapFetch(path: string, body: unknown): Promise<Respons
 
 function scrubOutboundBody(body: unknown): unknown {
   if (!body || typeof body !== "object") return body;
-  const clone = JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
-  // Strip anything that must never be client-controlled if it sneaks in via nested quote
-  delete clone.apiKey;
-  delete clone.api_key;
-  delete clone["x-api-key"];
-  // For /quote we always re-set integratorFee after this scrub in the route.
-  return clone;
+  return JSON.parse(JSON.stringify(body));
 }
 
-/**
- * After a successful /quote, re-attach our fee metadata and ensure the
- * request we sent used server fee (already true). Strip nothing critical
- * from quote for swap execution, but never attach env secrets.
- */
 export function attachPublicFeeMeta<T extends Record<string, unknown>>(data: T): T & {
   siteFee: ReturnType<typeof getPublicSiteFee>;
 } {

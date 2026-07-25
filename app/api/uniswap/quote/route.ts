@@ -1,10 +1,12 @@
 import { CHAIN } from "@/lib/constants";
 import {
+  AMM_PROTOCOLS,
   assertAllowedPair,
   assertNoClientFeeOrRouteOverride,
   assertTradeOpen,
   attachPublicFeeMeta,
-  getIntegratorFee,
+  extractAmountOut,
+  getIntegratorFees,
   resolveTokens,
   TradeApiError,
   uniswapFetch,
@@ -58,8 +60,8 @@ export async function POST(req: Request) {
     const { tokenIn, tokenOut } = resolveTokens(direction);
     assertAllowedPair(tokenIn, tokenOut, CHAIN.id);
 
-    // Fee is ALWAYS server-owned. Client cannot change bps or recipient.
-    const integratorFee = getIntegratorFee();
+    // Spec-accurate fee payload (OpenAPI IntegratorFee + integratorFees array).
+    const integratorFees = getIntegratorFees();
 
     const upstream = await uniswapFetch("/quote", {
       tokenIn,
@@ -68,10 +70,13 @@ export async function POST(req: Request) {
       tokenOutChainId: CHAIN.id,
       type: "EXACT_INPUT",
       amount,
-      swapper,
+      swapper: swapper.toLowerCase(),
       slippageTolerance,
       permitAmount: "EXACT",
-      integratorFee,
+      // AMM only → CLASSIC quotes → /swap (not UniswapX /order)
+      protocols: [...AMM_PROTOCOLS],
+      routingPreference: "BEST_PRICE",
+      integratorFees,
     });
 
     const data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
@@ -83,7 +88,27 @@ export async function POST(req: Request) {
       );
     }
 
-    return publicJson(attachPublicFeeMeta(data));
+    const routing = typeof data.routing === "string" ? data.routing : "";
+    if (routing && !["CLASSIC", "WRAP", "UNWRAP"].includes(routing)) {
+      throw new TradeApiError(
+        502,
+        "BAD_ROUTING",
+        `Unexpected routing "${routing}". Retry — official widget requires AMM (CLASSIC).`
+      );
+    }
+
+    const quoteObj =
+      data.quote && typeof data.quote === "object"
+        ? (data.quote as Record<string, unknown>)
+        : data;
+    const amountOut = extractAmountOut(quoteObj);
+
+    return publicJson(
+      attachPublicFeeMeta({
+        ...data,
+        amountOut,
+      })
+    );
   } catch (err) {
     return publicError(err, "Unexpected error building quote.");
   }
