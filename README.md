@@ -1,90 +1,65 @@
-# RobinWood ($PLANK)
+# RobinWood ($PLANK) — plank.love
 
-Official site and mint interface for the RobinWood NFT collection and $PLANK
-on Robinhood Chain. Built with the Next.js App Router, TypeScript, Tailwind CSS,
-and ethers.
+Official site for the RobinWood NFT collection and $PLANK on **Robinhood Chain**
+(chain ID `4663`). Next.js App Router, TypeScript, Tailwind CSS, ethers, and an
+official Uniswap-routed trade widget.
 
 ## Run locally
 
 ```bash
 npm install
+# Create .env.local (see env table below)
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
-
-To verify a production build (this is what Vercel runs):
 
 ```bash
 npm run build
 npm run start
 ```
 
-## Project structure
+## Environment
 
-- `app/layout.tsx` — root layout, fonts (`next/font/google`: Rye for display,
-  Work Sans for body), and page metadata/OG tags.
-- `app/page.tsx` — assembles the single-page layout.
-- `public/plank-social.jpg` — static Open Graph and X link-preview artwork.
-- `components/MintPanel.tsx` — live NFT contract reads, wallet connection, and
-  free, Wood List, and paid mint transactions.
-- `components/NftViewer.tsx` — wallet/address collection viewer for RobinWood
-  NFTs (responsive grid + detail modal).
-- `components/` — site sections including `Nav`, `Hero`, `MintInfo`,
-  `Distribution`, `Roadmap`, `LiquidityBurn`, and `Footer`.
-- `lib/mint-contract.ts` — NFT contract ABI, address, and Robinhood Chain
-  configuration.
-- `lib/ipfs.ts` — IPFS gateway helpers and NFT metadata fetching.
-- `lib/constants.ts` — $PLANK token address, navigation, and social links.
+| Variable | Public? | Purpose |
+| --- | --- | --- |
+| `NEXT_PUBLIC_TRADE_OPENS_AT` | Yes | ISO 8601 UTC when the official trade widget unlocks. **4:20 PM Central 2026-07-25** = `2026-07-25T21:20:00.000Z` |
+| `NEXT_PUBLIC_RULES_RELAXED` | Yes | `true` only after anti-sniper/limits off. While `false`: official widget only |
+| `UNISWAP_API_KEY` | **Server only** | In-widget quote + swap + **0.42069%** site fee |
+| `NEXT_PUBLIC_MINT_START_AT` | Yes | Optional mint countdown target |
 
-## Deploy to Vercel
+### Site fee (hard-coded)
 
-1. Push this project to a GitHub repository.
-2. Go to [vercel.com/new](https://vercel.com/new) and import the repository.
-3. Vercel auto-detects Next.js — no build settings need to change
-   (`npm run build`, output handled automatically).
-4. Click **Deploy**. You'll get a `*.vercel.app` URL immediately.
+| | |
+| --- | --- |
+| **Fee** | `0.42069%` (`42.069` bps) |
+| **Recipient** | `0xfa987d386c4f61b27cb67a1e4e1239866fe8d9ba` |
+| **When** | Official plank.love widget swaps only |
 
-## Point a purchased domain at Vercel
+## Trade launch model
 
-1. In the Vercel dashboard, open your project → **Settings → Domains** and add
-   your domain.
-2. Vercel will show you the exact records to add. As of this writing, for a
-   domain purchased at Namecheap, Porkbun, or similar, that's typically:
+1. Site timer hard-locks the widget until open.
+2. LP may go live ~30 minutes earlier as a sniper trap — community waits for plank.love.
+3. Early buyers hit on-chain Plank List / anti-sniper controls.
+4. After open + rules relaxed: free trading; LP renounced / burned.
 
-   **Root domain** — add an `A` record:
+## Security (keys & fee)
 
-   | Type | Host/Name | Value           | TTL       |
-   | ---- | --------- | --------------- | --------- |
-   | A    | `@`       | `76.76.21.21`   | Automatic |
+| Secret / control | How protected |
+| --- | --- |
+| `UNISWAP_API_KEY` | Server-only env. Never in request body or client JSON. |
+| Site fee | Hard-coded `SITE_FEE`. Server injects `integratorFee` on every quote. |
+| Venue | No Uniswap.app deep-links until `NEXT_PUBLIC_RULES_RELAXED=true`. |
 
-   **`www` subdomain** — add a `CNAME` record:
+`.env*` is gitignored.
 
-   | Type  | Host/Name | Value                | TTL       |
-   | ----- | --------- | -------------------- | --------- |
-   | CNAME | `www`     | `cname.vercel-dns.com` | Automatic |
+## Deploy (Vercel)
 
-   Always confirm the exact values in your Vercel project's Domains panel —
-   Vercel will flag the specific record it expects for your domain and warn
-   you if anything doesn't match yet.
+1. Import the repo.
+2. Set env vars in the dashboard (not in git).
+3. Deploy.
 
-3. In your registrar's DNS settings (Namecheap: Domain List → Manage → Advanced
-   DNS; Porkbun: Domain Management → DNS Records), add the records above.
-   Remove any conflicting `A`/`CNAME`/parking records for the same host first.
-4. DNS propagation can take anywhere from a few minutes to a few hours.
-   Vercel's Domains panel will show a green checkmark once it verifies the
-   domain and provisions an SSL certificate automatically.
-5. Optional: set your apex domain to redirect to `www` (or vice versa) from
-   the same Domains panel.
+## Notes
 
-## Mint configuration
-
-- The NFT contract is deployed on Robinhood Chain at
-  `0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156`.
-- The site uses Robinhood Chain's public RPC by default. Set
-  `NEXT_PUBLIC_ROBINHOOD_RPC_URL` in Vercel to use a production RPC provider.
-- Set `NEXT_PUBLIC_MINT_START_AT` to an ISO 8601 timestamp to show the homepage
-  countdown, for example `2026-08-01T19:00:00-05:00`. Leave it unset to hide
-  the countdown.
-- Wood List minting reads `public/proofs.json`. Publish proofs keyed by
-  lowercase wallet address before opening the Wood List phase.
+- Not financial advice. Always verify the contract address.
+- Official CA: `0x69420eaf0eBF43E08F621B014f25cEfDfA7e2DDc`

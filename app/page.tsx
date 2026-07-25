@@ -1,5 +1,6 @@
 import Nav from "@/components/Nav";
 import Hero from "@/components/Hero";
+import Trade from "@/components/Trade";
 import MintInfo from "@/components/MintInfo";
 import Gallery from "@/components/Gallery";
 import NftViewer from "@/components/NftViewer";
@@ -16,6 +17,7 @@ export default function Home() {
       <Nav />
       <main className="flex-1">
         <Hero />
+        <Trade />
         <MintInfo />
         <Gallery />
         <NftViewer />
