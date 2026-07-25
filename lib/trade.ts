@@ -80,11 +80,15 @@ export function explorerAddressUrl(address: string): string {
 /** Parse a decimal string amount into integer base units (wei-style). */
 export function parseTokenAmount(amount: string, decimals: number): bigint | null {
   const trimmed = amount.trim();
-  if (!trimmed || !/^\d*\.?\d+$/.test(trimmed)) return null;
+  if (!trimmed) return null;
+  // Allow "1", "1.", ".5", "0.1" — reject multiple dots / non-numeric.
+  if (!/^\d*\.?\d*$/.test(trimmed) || trimmed === "." || trimmed === "") return null;
   const [wholePart, fracPart = ""] = trimmed.split(".");
   if (fracPart.length > decimals) return null;
   const whole = wholePart === "" ? "0" : wholePart;
   const frac = fracPart.padEnd(decimals, "0");
+  // Reject pure empty whole+frac edge after pad (should not happen)
+  if (!/^\d+$/.test(whole + frac)) return null;
   try {
     return BigInt(whole + frac);
   } catch {
