@@ -69,23 +69,9 @@ export default function MintInfo() {
           </div>
         </Reveal>
 
-        {/* 2. Mint structure + live mint panel */}
-        <div className="mt-14 grid gap-6 sm:grid-cols-3">
-          {MINT_STATS.map((stat, i) => (
-            <Reveal key={stat.title} delayMs={i * 120}>
-              <div className="wood-frame h-full rounded-2xl bg-wood-900/85 p-6 text-center">
-                <div className="text-4xl" aria-hidden="true">
-                  {stat.icon}
-                </div>
-                <h3 className="mt-4 font-display text-2xl text-foreground">{stat.title}</h3>
-                <p className="mt-2 text-lg text-foreground">{stat.desc}</p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-
+        {/* 2. Live mint panel */}
         <Reveal delayMs={180}>
-          <div className="mx-auto mt-10 grid max-w-5xl items-stretch gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.55fr)]">
+          <div className="mx-auto mt-14 grid max-w-5xl items-stretch gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.55fr)]">
             <MintPanel />
             <div className="wood-frame relative hidden min-h-[520px] overflow-hidden rounded-2xl bg-wood-900/85 lg:block">
               <div
@@ -102,6 +88,21 @@ export default function MintInfo() {
             </div>
           </div>
         </Reveal>
+
+        {/* 3. Allocation explanations — below connect/mint */}
+        <div className="mt-10 grid gap-6 sm:grid-cols-3">
+          {MINT_STATS.map((stat, i) => (
+            <Reveal key={stat.title} delayMs={i * 120}>
+              <div className="wood-frame h-full rounded-2xl bg-wood-900/85 p-6 text-center">
+                <div className="text-4xl" aria-hidden="true">
+                  {stat.icon}
+                </div>
+                <h3 className="mt-4 font-display text-2xl text-foreground">{stat.title}</h3>
+                <p className="mt-2 text-lg text-foreground">{stat.desc}</p>
+              </div>
+            </Reveal>
+          ))}
+        </div>
       </div>
     </section>
   );
