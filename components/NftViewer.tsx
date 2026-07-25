@@ -152,16 +152,16 @@ function AttributeList({ attributes }: { attributes: NftAttribute[] }) {
   }
 
   return (
-    <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+    <ul className="grid grid-cols-1 gap-2 min-[380px]:grid-cols-2">
       {attributes.map((attribute, index) => (
         <li
           key={`${attribute.trait_type ?? "trait"}-${index}`}
-          className="rounded-lg border border-gold-500/25 bg-black/25 px-3 py-2"
+          className="min-w-0 rounded-lg border border-gold-500/25 bg-black/30 px-3 py-2.5"
         >
-          <p className="text-[0.7rem] font-extrabold uppercase tracking-[0.14em] text-gold-300/80">
+          <p className="nft-modal-trait-label font-extrabold uppercase text-gold-300/85">
             {attribute.trait_type || "Trait"}
           </p>
-          <p className="mt-1 break-words text-sm font-black text-foreground">
+          <p className="nft-modal-trait-value mt-1 font-black text-foreground">
             {String(attribute.value ?? "—")}
           </p>
         </li>
@@ -184,7 +184,12 @@ function NftDetailModal({
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
+    const previousPadding = document.body.style.paddingRight;
+    const scrollbar = window.innerWidth - document.documentElement.clientWidth;
     document.body.style.overflow = "hidden";
+    if (scrollbar > 0) {
+      document.body.style.paddingRight = `${scrollbar}px`;
+    }
     closeRef.current?.focus();
 
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -193,13 +198,14 @@ function NftDetailModal({
     window.addEventListener("keydown", onKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPadding;
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [onClose]);
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/80 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/85 p-0 sm:items-center sm:p-4"
       role="presentation"
       onClick={onClose}
     >
@@ -207,15 +213,19 @@ function NftDetailModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="wood-frame relative flex max-h-[min(92dvh,920px)] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-wood-900 sm:rounded-2xl"
+        className="nft-modal wood-frame relative flex h-[min(92dvh,880px)] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-wood-900 sm:h-auto sm:max-h-[min(90dvh,860px)] sm:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-gold-500/20 px-4 py-3 sm:px-5">
-          <div className="min-w-0">
-            <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-gold-300">
+        {/* Fixed header — title wraps, never collides with close */}
+        <div className="flex shrink-0 items-start gap-3 border-b border-gold-500/25 bg-wood-900 px-4 py-3 sm:px-5 sm:py-4">
+          <div className="min-w-0 flex-1 pr-1">
+            <p className="text-[0.7rem] font-extrabold uppercase tracking-[0.16em] text-gold-300">
               RobinWood Plank
             </p>
-            <h3 id={titleId} className="mt-1 truncate font-display text-2xl text-foreground sm:text-3xl">
+            <h3
+              id={titleId}
+              className="nft-modal-title mt-1 font-display font-normal text-foreground"
+            >
               {nft.name}
             </h3>
           </div>
@@ -223,70 +233,80 @@ function NftDetailModal({
             ref={closeRef}
             type="button"
             onClick={onClose}
-            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg border border-gold-500/40 text-xl text-gold-300"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-gold-500/40 text-2xl leading-none text-gold-300"
             aria-label="Close NFT details"
           >
             ×
           </button>
         </div>
 
-        <div className="grid min-h-0 flex-1 overflow-y-auto overscroll-contain lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-          <div className="relative aspect-square w-full bg-wood-950 sm:aspect-auto sm:min-h-[320px]">
-            <NftImage
-              imageUri={nft.imageUri}
-              alt={nft.name}
-              priority
-              className="h-full w-full object-contain p-3 sm:p-5"
-            />
-          </div>
-
-          <div className="flex flex-col gap-4 p-4 sm:p-5">
-            <dl className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <dt className="text-foreground/55">Token ID</dt>
-                <dd className="mt-1 font-mono font-black">#{nft.tokenId}</dd>
+        {/* Scrollable body */}
+        <div className="nft-modal-body min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className="grid sm:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+            <div className="relative mx-auto flex w-full max-h-[min(42dvh,320px)] items-center justify-center bg-wood-950 sm:max-h-none sm:min-h-[280px] sm:self-stretch">
+              <div className="relative aspect-square w-full max-w-[320px] sm:max-w-none sm:h-full sm:max-h-[420px]">
+                <NftImage
+                  imageUri={nft.imageUri}
+                  alt={nft.name}
+                  priority
+                  className="absolute inset-0 h-full w-full object-contain p-3 sm:p-4"
+                />
               </div>
-              <div>
-                <dt className="text-foreground/55">Owner</dt>
-                <dd className="mt-1 font-mono font-black">{shortAddress(owner)}</dd>
-              </div>
-            </dl>
-
-            {nft.description && (
-              <p className="text-sm leading-relaxed text-foreground/75">{nft.description}</p>
-            )}
-
-            {nft.metadataError && (
-              <p className="rounded-lg border border-red-400/30 bg-red-950/30 px-3 py-2 text-sm text-red-200">
-                Metadata partially failed to load: {nft.metadataError}
-              </p>
-            )}
-
-            <div>
-              <h4 className="mb-2 text-sm font-extrabold uppercase tracking-[0.16em] text-gold-300">
-                Traits
-              </h4>
-              <AttributeList attributes={nft.attributes} />
             </div>
 
-            <div className="mt-auto flex flex-col gap-2 pt-2 sm:flex-row">
-              <a
-                href={`${ROBINHOOD_EXPLORER_URL}/token/${NFT_CONTRACT_ADDRESS}/instance/${nft.tokenId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-gold-500 px-4 py-3 text-center text-base font-extrabold text-wood-950"
-              >
-                View on explorer ↗
-              </a>
-              <button
-                type="button"
-                onClick={onClose}
-                className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg border border-gold-500/40 px-4 py-3 text-base font-extrabold text-gold-300"
-              >
-                Close
-              </button>
+            <div className="flex min-w-0 flex-col gap-4 p-4 pb-5 sm:p-5">
+              <dl className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
+                <div className="min-w-0 rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5">
+                  <dt className="uppercase tracking-wide text-foreground/55">Token ID</dt>
+                  <dd className="mt-1 font-mono">#{nft.tokenId}</dd>
+                </div>
+                <div className="min-w-0 rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5">
+                  <dt className="uppercase tracking-wide text-foreground/55">Owner</dt>
+                  <dd className="mt-1 font-mono" title={owner}>
+                    {shortAddress(owner)}
+                  </dd>
+                </div>
+              </dl>
+
+              {nft.description && (
+                <p className="text-sm leading-relaxed text-foreground/80">
+                  {nft.description}
+                </p>
+              )}
+
+              {nft.metadataError && (
+                <p className="rounded-lg border border-red-400/30 bg-red-950/30 px-3 py-2 text-sm text-red-200">
+                  Metadata partially failed to load: {nft.metadataError}
+                </p>
+              )}
+
+              <div className="min-w-0">
+                <h4 className="mb-2 text-xs font-extrabold uppercase tracking-[0.14em] text-gold-300">
+                  Traits
+                </h4>
+                <AttributeList attributes={nft.attributes} />
+              </div>
             </div>
           </div>
+        </div>
+
+        {/* Sticky action bar — always fully visible */}
+        <div className="flex shrink-0 flex-col gap-2 border-t border-gold-500/25 bg-wood-900 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:px-5">
+          <a
+            href={`${ROBINHOOD_EXPLORER_URL}/token/${NFT_CONTRACT_ADDRESS}/instance/${nft.tokenId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-gold-500 px-4 py-3 text-center font-extrabold text-wood-950"
+          >
+            View on explorer ↗
+          </a>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg border border-gold-500/40 px-4 py-3 font-extrabold text-gold-300"
+          >
+            Close
+          </button>
         </div>
       </div>
     </div>
