@@ -148,21 +148,12 @@ export async function ensureRobinhoodChain(): Promise<void> {
   }
 }
 
-function bumpGas(hexOrNum: string | undefined, bps = 1200): string | undefined {
-  // +12% gas headroom for execution reliability
-  if (!hexOrNum) return undefined;
-  try {
-    const n =
-      typeof hexOrNum === "string" && hexOrNum.startsWith("0x")
-        ? BigInt(hexOrNum)
-        : BigInt(hexOrNum);
-    const bumped = (n * BigInt(10_000 + bps)) / BigInt(10_000);
-    return `0x${bumped.toString(16)}`;
-  } catch {
-    return typeof hexOrNum === "string" ? hexOrNum : undefined;
-  }
-}
-
+/**
+ * Send a swap/approve tx in a Rabby/MetaMask-friendly shape.
+ * - No mixed gasPrice + EIP-1559 fees (breaks Rabby simulation)
+ * - Prefer wallet fee estimation (matches Uniswap.app behavior)
+ * - Optional gas limit only
+ */
 export async function sendTransaction(tx: {
   to: string;
   from: string;
@@ -174,6 +165,8 @@ export async function sendTransaction(tx: {
   maxPriorityFeePerGas?: string;
   gasPrice?: string;
   chainId?: number | string;
+  /** If true (default), omit fee fields so the wallet simulates + prices gas */
+  letWalletEstimateFees?: boolean;
 }): Promise<string> {
   const provider = getEthereumProvider();
   if (!provider) throw new Error("No wallet found.");
@@ -188,15 +181,30 @@ export async function sendTransaction(tx: {
   if (tx.value !== undefined && tx.value !== null && tx.value !== "") {
     params.value = toHexQuantity(tx.value);
   }
-  const gas = bumpGas(tx.gasLimit || tx.gas);
-  if (gas) params.gas = gas;
-  if (tx.maxFeePerGas) params.maxFeePerGas = toHexQuantity(tx.maxFeePerGas);
-  if (tx.maxPriorityFeePerGas) {
-    params.maxPriorityFeePerGas = toHexQuantity(tx.maxPriorityFeePerGas);
+
+  // Gas limit optional — if Uniswap provided one we pass it; never invent fees
+  const gas = tx.gasLimit || tx.gas;
+  if (gas) {
+    try {
+      params.gas = toHexQuantity(gas);
+    } catch {
+      /* skip */
+    }
   }
-  if (tx.gasPrice) params.gasPrice = toHexQuantity(tx.gasPrice);
-  // Prefer chain id from wallet / RH chain — avoid wallet rejecting mismatched chainId
-  params.chainId = `0x${CHAIN.id.toString(16)}`;
+
+  const letWallet = tx.letWalletEstimateFees !== false;
+  if (!letWallet) {
+    // Only use ONE fee style — prefer EIP-1559 pair, else legacy gasPrice
+    if (tx.maxFeePerGas && tx.maxPriorityFeePerGas) {
+      params.maxFeePerGas = toHexQuantity(tx.maxFeePerGas);
+      params.maxPriorityFeePerGas = toHexQuantity(tx.maxPriorityFeePerGas);
+    } else if (tx.gasPrice) {
+      params.gasPrice = toHexQuantity(tx.gasPrice);
+    }
+  }
+
+  // Omit chainId from eth_sendTransaction — wallets already on RH chain after ensure*.
+  // Forcing chainId has caused Rabby sim failures on some builds.
 
   try {
     const hash = (await provider.request({
@@ -211,6 +219,11 @@ export async function sendTransaction(tx: {
       "Transaction rejected.";
     if (/user rejected|denied|4001/i.test(msg)) {
       throw new Error("Transaction cancelled in wallet.");
+    }
+    if (/simulation| eth_estimateGas|intrinsic gas|gas required/i.test(msg)) {
+      throw new Error(
+        "Wallet simulation failed. Get a fresh quote, keep some ETH for gas, and try again. If selling, approve PLANK first."
+      );
     }
     throw new Error(msg);
   }

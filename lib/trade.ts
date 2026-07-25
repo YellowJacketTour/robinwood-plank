@@ -137,8 +137,8 @@ export function formatTokenAmount(
   return neg ? `-${body}` : body;
 }
 
-/** Quotes older than this should be refreshed before swap. */
-export const QUOTE_MAX_AGE_MS = 45_000;
+/** Quotes older than this should be refreshed before swap (tight for meme volatility). */
+export const QUOTE_MAX_AGE_MS = 20_000;
 
 export function shortAddress(address: string, chars = 4): string {
   if (!address || address.length < 10) return address;
