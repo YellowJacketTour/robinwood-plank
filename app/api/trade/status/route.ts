@@ -20,7 +20,7 @@ export const runtime = "nodejs";
  * External Uniswap URLs are withheld until RULES_RELAXED (launch safety).
  */
 export async function GET(req: Request) {
-  const limited = rateLimit(req, { key: "status", limit: 60, windowMs: 60_000 });
+  const limited = rateLimit(req, { key: "status", limit: 180, windowMs: 60_000 });
   if (limited) return limited;
 
   const parts = getCountdownParts();

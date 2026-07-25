@@ -34,7 +34,8 @@ type Body = {
 
 export async function POST(req: Request) {
   try {
-    const limited = rateLimit(req, { key: "quote", limit: 30, windowMs: 60_000 });
+    // Launch traffic — was 30/min and users hit 429 while retrying quotes
+    const limited = rateLimit(req, { key: "quote", limit: 120, windowMs: 60_000 });
     if (limited) return limited;
 
     assertTradeOpen();
@@ -98,6 +99,17 @@ export async function POST(req: Request) {
       // Map common Uniswap errors to clear community-facing messages
       const detail = typeof data.detail === "string" ? data.detail : "";
       const code = typeof data.errorCode === "string" ? data.errorCode : "";
+      const msg =
+        (typeof data.message === "string" && data.message) || detail || "";
+      if (upstream.status === 429 || /rate.?limit|throttl|too many/i.test(msg + detail)) {
+        return publicJson(
+          {
+            error: "RATE_LIMIT",
+            message: "Routing is busy — wait a few seconds and try Get quote again.",
+          },
+          429
+        );
+      }
       if (
         code === "ResourceNotFound" ||
         /no quotes available/i.test(detail) ||
@@ -110,6 +122,16 @@ export async function POST(req: Request) {
               "No Uniswap route for $PLANK yet. LP may not be live — wait for the official pool on Robinhood Chain.",
           },
           404
+        );
+      }
+      if (/gas fee|FAILED_TO_ESTIMATE_GAS|estimate.?gas/i.test(msg + detail)) {
+        return publicJson(
+          {
+            error: "GAS_ESTIMATE",
+            message:
+              "Could not fetch gas for this quote. Retry in a few seconds or lower the amount.",
+          },
+          502
         );
       }
       const clean = sanitizeUpstreamError(data, detail || "Uniswap quote request failed.");
