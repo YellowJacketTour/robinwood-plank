@@ -19,12 +19,8 @@ type BoardsPayload = {
   trap: {
     active: boolean;
     phase: string;
-    trapStartsAt: string;
-    tradeOpensAt: string;
     cooldownsEndAt: string;
-    sniperTrapMinutes: number;
     walletCooldownMinutes: number;
-    serverNow: string;
   };
   counts: {
     goodWood: number;
@@ -35,29 +31,14 @@ type BoardsPayload = {
   recentBadBoards: BadEntry[];
   niceLedger?: string[];
   naughtyLedger?: BadEntry[];
-  legend: {
-    goodWood: string;
-    badBoards: string;
-    fallen: string;
-    cooldown: string;
-  };
-  scan?: {
-    lastScannedBlock: number;
-    notes: string[];
-    updatedAt: string;
-  };
+  scan?: { notes: string[] };
 };
 
 type WalletLookup = {
   address: string;
   side: string;
   widgetVerified: boolean;
-  cooldown: {
-    active: boolean;
-    remainingMs: number;
-    endsAt: string | null;
-  } | null;
-  badEntry: BadEntry | null;
+  cooldown: { active: boolean; remainingMs: number } | null;
 };
 
 function phaseLabel(phase: string) {
@@ -78,16 +59,14 @@ function phaseLabel(phase: string) {
 function fmtRemain(ms: number) {
   if (ms <= 0) return "0:00";
   const s = Math.ceil(ms / 1000);
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}:${r.toString().padStart(2, "0")}`;
+  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 }
 
-function sideStamp(side: string) {
-  if (side === "good_wood") return { label: "NICE", cls: "text-emerald-300 border-emerald-400/70" };
-  if (side === "fallen") return { label: "FALLEN", cls: "text-amber-300 border-amber-400/70" };
-  if (side === "bad_boards") return { label: "NAUGHTY", cls: "text-orange-300 border-orange-400/70" };
-  return { label: "UNKNOWN", cls: "text-foreground/60 border-foreground/40" };
+function sideLabel(side: string) {
+  if (side === "good_wood") return "Good Wood";
+  if (side === "fallen") return "Fallen";
+  if (side === "bad_boards") return "Bad Boards";
+  return "Unknown";
 }
 
 export default function WoodYouJustLookAtIt() {
@@ -101,8 +80,8 @@ export default function WoodYouJustLookAtIt() {
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/boards", { cache: "no-store" });
-      const json = (await res.json()) as BoardsPayload;
-      if (!res.ok) throw new Error((json as { message?: string }).message || "Load failed");
+      const json = (await res.json()) as BoardsPayload & { message?: string };
+      if (!res.ok) throw new Error(json.message || "Load failed");
       setData(json);
       setError(null);
     } catch (e) {
@@ -121,8 +100,6 @@ export default function WoodYouJustLookAtIt() {
     try {
       await fetch("/api/boards/scan", { method: "POST" });
       await load();
-    } catch {
-      // ignore
     } finally {
       setScanning(false);
     }
@@ -144,207 +121,153 @@ export default function WoodYouJustLookAtIt() {
 
   const trap = data?.trap;
   const counts = data?.counts;
-  const nice = data?.niceLedger ?? [];
-  const naughty = data?.naughtyLedger ?? data?.recentBadBoards ?? [];
+  const goodList = data?.niceLedger ?? [];
+  const badList = data?.naughtyLedger ?? data?.recentBadBoards ?? [];
 
   return (
     <section id="boards" className="section-tight scroll-mt-20 px-3 sm:px-5">
-      <div className="mx-auto max-w-5xl">
+      <div className="site-shell">
         <Reveal>
           <SectionHead
-            eyebrow="The wooden ledger · naughty · nice"
+            eyebrow="Wooden ledger"
             title="Wood You Just Look At It"
-            lede="Santa's list, but grainier. Nice = Good Wood. Naughty = Bad Boards. 30m cooldowns while we ink the pages."
+            lede="Good Wood held the line. Bad Boards sniped or left the widget. 30m cooldowns while we list them."
             artSrc="/images/collection/plank-redacted.png"
             artAlt="Redacted collection plank"
           />
         </Reveal>
 
-        {/* Compact tally strip */}
+        {/* Counts + phase in one dense row */}
         <Reveal delayMs={40}>
-          <div className="mt-3 grid grid-cols-4 gap-1.5 sm:gap-2">
+          <div className="wood-ledger mt-3 grid grid-cols-2 gap-px overflow-hidden sm:grid-cols-5">
             {[
-              { label: "Nice", value: counts?.goodWood ?? "—", sub: "Good Wood" },
-              { label: "Naughty", value: counts?.badBoards ?? "—", sub: "Bad Boards" },
-              { label: "Fallen", value: counts?.fallen ?? "—", sub: "Were nice" },
-              { label: "Verified", value: counts?.widgetVerified ?? "—", sub: "Widget" },
+              { k: "Good Wood", v: counts?.goodWood },
+              { k: "Bad Boards", v: counts?.badBoards },
+              { k: "Fallen", v: counts?.fallen },
+              { k: "Widget", v: counts?.widgetVerified },
             ].map((c) => (
-              <div key={c.label} className="wood-ledger px-1.5 py-1.5 text-center sm:px-2 sm:py-2">
-                <p className="text-[0.55rem] font-bold uppercase tracking-wider text-gold-300/90">
-                  {c.label}
-                </p>
-                <p className="font-display text-lg leading-none text-gold-300 sm:text-2xl">{c.value}</p>
-                <p className="text-[0.55rem] text-foreground/55">{c.sub}</p>
+              <div key={c.k} className="bg-[#2a1a0f]/80 px-2 py-2 text-center">
+                <p className="text-[0.55rem] font-bold uppercase tracking-wide text-gold-300/80">{c.k}</p>
+                <p className="font-display text-xl leading-none text-gold-300 sm:text-2xl">{c.v ?? "—"}</p>
               </div>
             ))}
-          </div>
-        </Reveal>
-
-        {/* Phase + scan — dense toolbar on the ledger */}
-        <Reveal delayMs={60}>
-          <div className="wood-ledger mt-2.5 flex flex-col gap-2 p-2.5 sm:flex-row sm:items-center sm:justify-between sm:p-3">
-            <div className="min-w-0">
-              <p className="text-[0.6rem] font-bold uppercase tracking-wider text-gold-300">
-                Ledger phase · {trap ? phaseLabel(trap.phase) : "…"}
-                {trap?.active ? " · INKING" : ""}
-              </p>
-              {trap && (
-                <p className="mt-0.5 text-[0.65rem] text-foreground/60">
-                  Cooldowns end {new Date(trap.cooldownsEndAt).toLocaleString()} · 30m / wallet
+            <div className="col-span-2 flex items-center justify-between gap-2 bg-[#2a1a0f]/80 px-2.5 py-2 sm:col-span-1 sm:flex-col sm:justify-center">
+              <div className="min-w-0 text-left sm:text-center">
+                <p className="text-[0.55rem] font-bold uppercase tracking-wide text-gold-300/80">Phase</p>
+                <p className="truncate text-xs font-bold text-foreground">
+                  {trap ? phaseLabel(trap.phase) : "…"}
+                  {trap?.active ? " · live" : ""}
                 </p>
-              )}
-              {error && <p className="mt-1 text-xs text-red-300">{error}</p>}
+              </div>
+              <button
+                type="button"
+                onClick={runScan}
+                disabled={scanning}
+                className="min-h-8 shrink-0 rounded bg-gold-500 px-2.5 py-1 text-[0.65rem] font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50"
+              >
+                {scanning ? "…" : "Scan"}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={runScan}
-              disabled={scanning}
-              className="min-h-9 shrink-0 rounded-md bg-gold-500 px-3 py-1.5 text-xs font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50"
-            >
-              {scanning ? "Reading chain…" : "Update ledger from chain"}
-            </button>
           </div>
+          {error && <p className="mt-1 text-xs text-red-300">{error}</p>}
         </Reveal>
 
-        {/* THE LEDGER — Naughty | Nice */}
-        <Reveal delayMs={80}>
-          <div className="wood-ledger mt-3 overflow-hidden">
-            {/* Title plate */}
-            <div className="border-b-2 border-[#c4922e]/60 px-3 py-2 text-center sm:px-4 sm:py-2.5">
-              <p className="font-display text-lg tracking-wide text-gold-300 sm:text-xl">
-                Official Wooden Ledger
-              </p>
-              <p className="text-[0.65rem] font-bold uppercase tracking-[0.2em] text-foreground/60">
-                of the Naughty &amp; the Nice
-              </p>
-            </div>
-
-            <div className="grid sm:grid-cols-[1fr_auto_1fr]">
-              {/* NICE — Good Wood */}
-              <div className="min-w-0 border-b border-[#c4922e]/40 sm:border-b-0">
-                <div className="flex items-center justify-between gap-2 border-b border-[#c4922e]/35 bg-forest-900/50 px-2.5 py-1.5">
-                  <div>
-                    <p className="font-display text-sm text-emerald-300 sm:text-base">Nice</p>
-                    <p className="text-[0.6rem] text-foreground/55">Good Wood · mint · airdrop</p>
-                  </div>
-                  <span className="wood-ledger-stamp text-[0.55rem] text-emerald-300">
-                    Good Wood
+        {/* Ledger book: Good Wood | Bad Boards */}
+        <Reveal delayMs={70}>
+          <div className="wood-ledger mt-2.5 overflow-hidden">
+            <div className="grid sm:grid-cols-2">
+              {/* Good Wood */}
+              <div className="min-w-0 border-b border-[#c4922e]/35 sm:border-b-0 sm:border-r sm:border-[#c4922e]/35">
+                <header className="flex items-center justify-between border-b border-[#c4922e]/35 bg-forest-900/45 px-2.5 py-1.5">
+                  <h3 className="font-display text-sm text-emerald-300 sm:text-base">Good Wood</h3>
+                  <span className="text-[0.55rem] font-bold uppercase tracking-wider text-emerald-400/70">
+                    mint · airdrop
                   </span>
-                </div>
-                <div className="wood-ledger-ruled max-h-64 overflow-y-auto px-2 py-1 sm:max-h-80 sm:px-2.5">
-                  {nice.length === 0 && (
-                    <p className="wood-ledger-entry py-2 text-foreground/45">
-                      (ledger warming — wood list loads from proofs)
-                    </p>
+                </header>
+                <div className="wood-ledger-ruled max-h-56 overflow-y-auto px-2 py-0.5 sm:max-h-72">
+                  {goodList.length === 0 ? (
+                    <p className="wood-ledger-entry text-foreground/40">Loading…</p>
+                  ) : (
+                    goodList.map((addr, i) => (
+                      <div key={addr} className="wood-ledger-entry wood-ledger-good flex gap-1.5">
+                        <span className="w-5 shrink-0 text-foreground/35">{i + 1}</span>
+                        <code className="min-w-0 flex-1 truncate" title={addr}>
+                          {shortAddress(addr, 5)}
+                        </code>
+                      </div>
+                    ))
                   )}
-                  {nice.map((addr, i) => (
-                    <div
-                      key={addr}
-                      className="wood-ledger-entry wood-ledger-entry-nice flex items-baseline justify-between gap-2 border-b border-transparent"
-                    >
-                      <span className="shrink-0 text-foreground/40">{String(i + 1).padStart(2, "0")}.</span>
-                      <code className="min-w-0 flex-1 truncate" title={addr}>
-                        {shortAddress(addr, 6)}
-                      </code>
-                      <span className="shrink-0 text-[0.55rem] uppercase text-emerald-400/80">nice</span>
-                    </div>
-                  ))}
-                  {(counts?.goodWood ?? 0) > nice.length && (
-                    <p className="wood-ledger-entry pt-1 text-[0.65rem] text-foreground/45">
-                      … +{(counts?.goodWood ?? 0) - nice.length} more Good Wood on file
+                  {(counts?.goodWood ?? 0) > goodList.length && (
+                    <p className="wood-ledger-entry text-[0.65rem] text-foreground/40">
+                      +{(counts?.goodWood ?? 0) - goodList.length} more
                     </p>
                   )}
                 </div>
               </div>
 
-              {/* Spine */}
-              <div
-                className="wood-ledger-spine hidden w-2 sm:block"
-                aria-hidden="true"
-              />
-
-              {/* NAUGHTY — Bad Boards */}
+              {/* Bad Boards */}
               <div className="min-w-0">
-                <div className="flex items-center justify-between gap-2 border-b border-[#c4922e]/35 bg-[#3a1510]/55 px-2.5 py-1.5">
-                  <div>
-                    <p className="font-display text-sm text-orange-300 sm:text-base">Naughty</p>
-                    <p className="text-[0.6rem] text-foreground/55">Bad Boards · off-widget</p>
-                  </div>
-                  <span className="wood-ledger-stamp text-[0.55rem] text-orange-300">
-                    Bad Boards
+                <header className="flex items-center justify-between border-b border-[#c4922e]/35 bg-[#3a1510]/50 px-2.5 py-1.5">
+                  <h3 className="font-display text-sm text-orange-300 sm:text-base">Bad Boards</h3>
+                  <span className="text-[0.55rem] font-bold uppercase tracking-wider text-orange-400/70">
+                    off-widget
                   </span>
-                </div>
-                <div className="wood-ledger-ruled max-h-64 overflow-y-auto px-2 py-1 sm:max-h-80 sm:px-2.5">
-                  {naughty.length === 0 && (
-                    <p className="wood-ledger-entry py-2 text-foreground/45">
-                      (no ink yet — snipers will appear after LP / scan)
-                    </p>
+                </header>
+                <div className="wood-ledger-ruled max-h-56 overflow-y-auto px-2 py-0.5 sm:max-h-72">
+                  {badList.length === 0 ? (
+                    <p className="wood-ledger-entry text-foreground/40">Empty — scan after LP.</p>
+                  ) : (
+                    badList.map((b, i) => (
+                      <div
+                        key={b.address + b.lastSeenAt}
+                        className="wood-ledger-entry wood-ledger-bad flex gap-1.5"
+                      >
+                        <span className="w-5 shrink-0 text-foreground/35">{i + 1}</span>
+                        <code className="min-w-0 flex-1 truncate" title={b.address}>
+                          {shortAddress(b.address, 5)}
+                        </code>
+                        {b.wasGoodWood && (
+                          <span className="shrink-0 text-[0.55rem] uppercase text-amber-300/90">fallen</span>
+                        )}
+                      </div>
+                    ))
                   )}
-                  {naughty.map((b, i) => (
-                    <div
-                      key={b.address + b.lastSeenAt}
-                      className="wood-ledger-entry wood-ledger-entry-naughty flex items-baseline justify-between gap-2"
-                    >
-                      <span className="shrink-0 text-foreground/40">{String(i + 1).padStart(2, "0")}.</span>
-                      <code className="min-w-0 flex-1 truncate" title={b.address}>
-                        {shortAddress(b.address, 6)}
-                      </code>
-                      <span className="shrink-0 text-[0.55rem] uppercase text-orange-400/90">
-                        {b.wasGoodWood ? "fallen" : "naughty"}
-                      </span>
-                    </div>
-                  ))}
                 </div>
               </div>
-            </div>
-
-            <div className="border-t border-[#c4922e]/40 px-2.5 py-1.5 text-center text-[0.6rem] text-foreground/50">
-              He sees you when you&apos;re sniping · He knows when you use Uniswap.app
             </div>
           </div>
         </Reveal>
 
-        {/* Lookup stamped onto the ledger */}
-        <Reveal delayMs={110}>
-          <form onSubmit={checkWallet} className="wood-ledger mt-3 p-2.5 sm:p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="font-display text-sm text-gold-300 sm:text-base">
-                Look up a name in the ledger
-              </h3>
-              <span className="wood-ledger-stamp text-[0.55rem] text-gold-300">Check twice</span>
-            </div>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+        {/* Lookup */}
+        <Reveal delayMs={90}>
+          <form onSubmit={checkWallet} className="wood-ledger mt-2.5 p-2.5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <label className="sr-only" htmlFor="ledger-lookup">
+                Wallet
+              </label>
               <input
+                id="ledger-lookup"
                 value={lookupAddr}
                 onChange={(e) => setLookupAddr(e.target.value)}
-                placeholder="0x… wallet"
-                className="min-h-10 min-w-0 flex-1 rounded-md border border-[#c4922e]/50 bg-[#1b120a]/80 px-2.5 font-mono text-xs text-gold-300 outline-none placeholder:text-foreground/35 focus:border-gold-400 sm:text-sm"
+                placeholder="0x… check wallet"
+                className="min-h-9 min-w-0 flex-1 rounded border border-[#c4922e]/45 bg-[#1b120a]/85 px-2.5 font-mono text-xs text-gold-300 outline-none placeholder:text-foreground/35 focus:border-gold-400"
               />
               <button
                 type="submit"
-                className="min-h-10 rounded-md bg-gold-500 px-4 text-xs font-bold text-wood-950 hover:bg-gold-400 sm:text-sm"
+                className="min-h-9 rounded bg-gold-500 px-4 text-xs font-bold text-wood-950 hover:bg-gold-400"
               >
-                Consult ledger
+                Check
               </button>
             </div>
             {lookupErr && <p className="mt-1.5 text-xs text-red-300">{lookupErr}</p>}
             {lookup && (
-              <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-[#c4922e]/35 bg-[#1b120a]/60 px-2.5 py-2">
-                <span className={`wood-ledger-stamp text-[0.6rem] ${sideStamp(lookup.side).cls}`}>
-                  {sideStamp(lookup.side).label}
-                </span>
-                <code className="font-mono text-xs text-gold-300" title={lookup.address}>
-                  {shortAddress(lookup.address, 6)}
-                </code>
-                {lookup.widgetVerified && (
-                  <span className="text-[0.65rem] text-emerald-300/90">widget path</span>
-                )}
-                {lookup.cooldown?.active && (
-                  <span className="text-[0.65rem] text-gold-300">
-                    cooldown {fmtRemain(lookup.cooldown.remainingMs)}
-                  </span>
-                )}
-              </div>
+              <p className="mt-1.5 text-xs text-foreground/80">
+                <strong className="text-gold-300">{sideLabel(lookup.side)}</strong>
+                {lookup.widgetVerified ? " · widget" : ""}
+                {lookup.cooldown?.active
+                  ? ` · cooldown ${fmtRemain(lookup.cooldown.remainingMs)}`
+                  : ""}
+              </p>
             )}
           </form>
         </Reveal>

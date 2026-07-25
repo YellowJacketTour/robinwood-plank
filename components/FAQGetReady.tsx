@@ -25,7 +25,7 @@ const STEPS = [
 export default function FAQGetReady() {
   return (
     <section id="get-ready" className="section-tight px-3 sm:px-5">
-      <div className="mx-auto max-w-5xl">
+      <div className="site-shell">
         <Reveal>
           <SectionHead
             eyebrow="Guide"

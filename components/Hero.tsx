@@ -9,7 +9,7 @@ export default function Hero() {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(217,164,65,0.15),transparent_55%)]"
       />
-      <div className="relative mx-auto flex max-w-5xl flex-col items-center gap-3 text-center sm:gap-4">
+      <div className="site-shell relative flex flex-col items-center gap-2.5 text-center sm:gap-3">
         <span className="rounded-full border border-gold-500/40 bg-wood-950/70 px-3 py-0.5 text-[0.65rem] font-bold uppercase tracking-widest text-gold-300 backdrop-blur-sm">
           Robinhood Chain · live
         </span>
@@ -55,22 +55,22 @@ export default function Hero() {
 
         <CopyCA />
 
-        <div className="flex w-full max-w-md flex-col gap-2 sm:max-w-none sm:flex-row sm:justify-center">
+        <div className="grid w-full max-w-lg grid-cols-2 gap-2 sm:flex sm:max-w-none sm:justify-center">
           <a
             href="#trade"
-            className="rounded-lg bg-gold-500 px-6 py-2.5 text-sm font-bold text-wood-950 shadow-[0_6px_18px_-4px_rgba(217,164,65,0.5)] transition-all hover:-translate-y-0.5 sm:text-base"
+            className="col-span-2 rounded-lg bg-gold-500 px-5 py-2.5 text-center text-sm font-bold text-wood-950 sm:col-span-1 sm:min-w-[9rem]"
           >
-            Trade $PLANK
+            Trade
           </a>
           <a
             href="#boards"
-            className="rounded-lg border-2 border-gold-500/50 bg-wood-900/80 px-6 py-2.5 text-sm font-bold text-gold-300 transition-colors hover:border-gold-400 sm:text-base"
+            className="rounded-lg border border-gold-500/50 bg-wood-900/80 px-4 py-2.5 text-center text-sm font-bold text-gold-300 sm:min-w-[9rem]"
           >
             Boards
           </a>
           <a
             href="#mint"
-            className="rounded-lg border-2 border-forest-600 bg-forest-800/60 px-6 py-2.5 text-sm font-bold text-foreground transition-colors hover:border-gold-400 hover:text-gold-300 sm:text-base"
+            className="rounded-lg border border-forest-600 bg-forest-800/60 px-4 py-2.5 text-center text-sm font-bold text-foreground sm:min-w-[9rem]"
           >
             Mint
           </a>

@@ -44,7 +44,7 @@ export default function Trade() {
 
   return (
     <section id="trade" className="section-tight scroll-mt-20 px-3 sm:px-5">
-      <div className="mx-auto max-w-5xl">
+      <div className="site-shell">
         <Reveal>
           <SectionHead
             eyebrow="Official widget only"
