@@ -15,9 +15,9 @@ const body = Nunito_Sans({
   subsets: ["latin"],
 });
 
-const title = "RobinWood ($PLANK) — Robinhood Chain NFT Mint & Meme Coin";
+const title = "RobinWood ($PLANK) — Official Trade & Robinhood Chain Mint";
 const description =
-  "The Robinhood Chain is officially live. RobinWood is a woodsy meme-native NFT collection built to bootstrap and support $PLANK from day one. Plank is Plank.";
+  "Official plank.love home for $PLANK. Trade only through the official widget until launch rules relax. Robinhood Chain · real CA · community timer. Plank is Plank.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

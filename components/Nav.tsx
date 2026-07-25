@@ -43,27 +43,28 @@ export default function Nav() {
           <span className="hidden text-foreground/60 min-[420px]:inline">($PLANK)</span>
         </a>
 
-        <ul className="hidden items-center gap-5 md:flex lg:gap-7">
-          {NAV_LINKS.map((link) => (
-            <li key={link.href}>
-              <a
-                href={navHref(link.href, pathname)}
-                className={`text-sm font-semibold uppercase tracking-wide transition-colors hover:text-gold-300 ${
-                  isActive(link.href, pathname) ? "text-gold-300" : "text-foreground/80"
-                }`}
-              >
-                {link.label}
-              </a>
-            </li>
-          ))}
-        </ul>
-
-        <a
-          href={navHref("#mint", pathname)}
-          className="hidden rounded-md bg-gold-500 px-4 py-2 text-sm font-bold text-wood-950 transition-transform hover:scale-105 hover:bg-gold-400 md:inline-block"
-        >
-          Mint RobinWood
-        </a>
+        <div className="hidden items-center gap-5 md:flex lg:gap-7">
+          <ul className="flex items-center gap-5 lg:gap-7">
+            {NAV_LINKS.map((link) => (
+              <li key={link.href}>
+                <a
+                  href={navHref(link.href, pathname)}
+                  className={`text-sm font-semibold uppercase tracking-wide transition-colors hover:text-gold-300 ${
+                    isActive(link.href, pathname) ? "text-gold-300" : "text-foreground/80"
+                  }`}
+                >
+                  {link.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+          <a
+            href={navHref("#trade", pathname)}
+            className="rounded-md bg-gold-500 px-4 py-2 text-sm font-bold text-wood-950 transition-transform hover:scale-105 hover:bg-gold-400"
+          >
+            Trade
+          </a>
+        </div>
 
         <button
           type="button"
@@ -110,11 +111,11 @@ export default function Nav() {
             ))}
             <li>
               <a
-                href={navHref("#mint", pathname)}
+                href={navHref("#trade", pathname)}
                 onClick={() => setOpen(false)}
                 className="mt-2 flex min-h-12 items-center justify-center rounded-md bg-gold-500 px-3 py-2 text-center text-sm font-bold text-wood-950"
               >
-                Mint RobinWood
+                Trade
               </a>
             </li>
           </ul>
