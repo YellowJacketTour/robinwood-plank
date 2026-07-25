@@ -14,6 +14,7 @@ import {
   explorerTokenUrl,
   formatTokenAmount,
   parseTokenAmount,
+  QUOTE_MAX_AGE_MS,
   shortAddress,
 } from "@/lib/trade";
 import {
@@ -22,6 +23,7 @@ import {
   getEthereumProvider,
   sendTransaction,
   signTypedData,
+  waitForTransaction,
 } from "@/lib/wallet";
 
 type Direction = "buy" | "sell";
@@ -40,6 +42,7 @@ type QuoteState = {
   permitTransaction: Record<string, string> | null;
   routing: string;
   amountOut: string;
+  fetchedAt: number;
 };
 
 type TxFields = {
@@ -201,6 +204,7 @@ export default function SwapWidget({ unlocked }: Props) {
         permitTransaction,
         routing: (data.routing as string) || "CLASSIC",
         amountOut,
+        fetchedAt: Date.now(),
       });
       setStatus("Quote ready — confirm swap.");
     } catch (e) {
@@ -215,6 +219,13 @@ export default function SwapWidget({ unlocked }: Props) {
     setError(null);
     setTxHash(null);
 
+    // Stale quote — force refresh (prices move; Uniswap quotes expire)
+    if (Date.now() - quote.fetchedAt > QUOTE_MAX_AGE_MS) {
+      setQuote(null);
+      setError("Quote expired. Get a fresh quote and try again.");
+      return;
+    }
+
     try {
       setBusy(true);
       await ensureRobinhoodChain();
@@ -222,7 +233,7 @@ export default function SwapWidget({ unlocked }: Props) {
       // On-chain approval tx if Uniswap returned one (ERC-20 sell path)
       if (quote.permitTransaction?.to && quote.permitTransaction?.data) {
         setStatus("Approve token in wallet…");
-        await sendTransaction({
+        const approveHash = await sendTransaction({
           to: quote.permitTransaction.to,
           from: account,
           data: quote.permitTransaction.data,
@@ -233,6 +244,8 @@ export default function SwapWidget({ unlocked }: Props) {
           gasPrice: quote.permitTransaction.gasPrice,
           chainId: quote.permitTransaction.chainId,
         });
+        setStatus("Waiting for approval…");
+        await waitForTransaction(approveHash);
       }
 
       let signature: string | undefined;
@@ -244,6 +257,12 @@ export default function SwapWidget({ unlocked }: Props) {
           quote.permitData.types,
           quote.permitData.values
         );
+      }
+
+      // Re-check age after user signed (can take a while)
+      if (Date.now() - quote.fetchedAt > QUOTE_MAX_AGE_MS) {
+        setQuote(null);
+        throw new Error("Quote expired while waiting. Get a new quote.");
       }
 
       setStatus("Building swap…");

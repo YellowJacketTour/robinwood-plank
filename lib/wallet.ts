@@ -126,6 +126,35 @@ export async function sendTransaction(tx: {
   return hash;
 }
 
+/**
+ * Poll until a tx is mined (or timeout). Used after ERC-20 approve before swap.
+ */
+export async function waitForTransaction(
+  hash: string,
+  opts?: { timeoutMs?: number; intervalMs?: number }
+): Promise<{ status: "0x0" | "0x1" | string }> {
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+  const timeoutMs = opts?.timeoutMs ?? 180_000;
+  const intervalMs = opts?.intervalMs ?? 2_000;
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const receipt = (await provider.request({
+      method: "eth_getTransactionReceipt",
+      params: [hash],
+    })) as { status?: string } | null;
+    if (receipt && receipt.status) {
+      if (receipt.status === "0x0") {
+        throw new Error("Approval transaction reverted.");
+      }
+      return { status: receipt.status };
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error("Timed out waiting for approval confirmation.");
+}
+
 export async function signTypedData(
   address: string,
   domain: unknown,
