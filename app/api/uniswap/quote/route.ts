@@ -1,5 +1,5 @@
 import { CHAIN } from "@/lib/constants";
-import { isListingWindowActive } from "@/lib/boards";
+import { isSniperCaptureActive } from "@/lib/boards";
 import { classifyWallet, recordWidgetActivity } from "@/lib/boards-store";
 import {
   AMM_PROTOCOLS,
@@ -59,16 +59,14 @@ export async function POST(req: Request) {
       throw new TradeApiError(400, "BAD_SWAPPER", "swapper must be a valid wallet address.");
     }
 
-    // Bad Boards blocked during death trap / cooldown listing window
-    if (isListingWindowActive()) {
+    // Only block Bad Boards during active death trap (not free community trade)
+    if (isSniperCaptureActive()) {
       const board = await classifyWallet(swapper);
       if (board.side === "bad_boards" || board.side === "fallen") {
         throw new TradeApiError(
           403,
           "BAD_BOARD",
-          board.side === "fallen"
-            ? "This wallet was Good Wood but left the official path — now on Bad Boards. Wait for free trade."
-            : "This wallet is on Bad Boards (off-widget trade during death trap). Wait for free trade."
+          "This wallet is on Bad Boards from the death trap. Wait for free trade."
         );
       }
     }

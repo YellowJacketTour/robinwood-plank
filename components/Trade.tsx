@@ -70,17 +70,20 @@ export default function Trade() {
     setIsOpen(TRADE_PAUSED ? false : open);
   }, []);
 
+  // Live: keep unlocked when not paused (timer already open)
+  const unlocked = !TRADE_PAUSED && isOpen;
+
   return (
     <section id="trade" className="section-tight scroll-mt-20 px-3 sm:px-5">
       <div className="site-shell">
         <Reveal>
           <SectionHead
-            eyebrow={TRADE_PAUSED ? "Stand by" : "Official widget only"}
-            title={TRADE_PAUSED ? "Trading Paused" : "Buy Real $PLANK"}
+            eyebrow={TRADE_PAUSED ? "Stand by" : "Official widget · live"}
+            title={TRADE_PAUSED ? "Trading Paused" : "Buy & Sell $PLANK"}
             lede={
               TRADE_PAUSED
                 ? "Community: stand by. Widget is off. Do not trade $PLANK anywhere until we unlock on plank.love."
-                : "Real CA · Uniswap AMM · stay on plank.love until cooldowns end."
+                : `Connect wallet · buy or sell on ${CHAIN.name} · site fee ${SITE_FEE.label} · official CA only.`
             }
             artSrc="/images/collection/plank-knightwood.png"
             artAlt="KnightWood collection plank"
@@ -95,7 +98,7 @@ export default function Trade() {
 
         <div className="mt-4 grid items-start gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
           <Reveal delayMs={80}>
-            <SwapWidget unlocked={!TRADE_PAUSED && isOpen} />
+            <SwapWidget unlocked={unlocked} />
           </Reveal>
 
           <Reveal delayMs={80}>

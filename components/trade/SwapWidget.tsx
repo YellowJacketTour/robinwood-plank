@@ -20,6 +20,7 @@ import {
 import {
   connectWallet,
   ensureRobinhoodChain,
+  getConnectedAccounts,
   getEthereumProvider,
   sendTransaction,
   signTypedData,
@@ -86,12 +87,16 @@ export default function SwapWidget({ unlocked }: Props) {
     let cancelled = false;
     fetch("/api/trade/status")
       .then((r) => r.json())
-      .then((d: { tradingApiConfigured?: boolean }) => {
+      .then((d: { tradingApiConfigured?: boolean; isOpen?: boolean; paused?: boolean }) => {
         if (!cancelled) setApiReady(Boolean(d.tradingApiConfigured));
       })
       .catch(() => {
         if (!cancelled) setApiReady(false);
       });
+    // Reconnect silent session (already authorized wallet)
+    void getConnectedAccounts().then((accounts) => {
+      if (!cancelled && accounts[0]) setAccount(accounts[0]);
+    });
     return () => {
       cancelled = true;
     };
@@ -107,6 +112,7 @@ export default function SwapWidget({ unlocked }: Props) {
     };
     const onChain = () => {
       setQuote(null);
+      setStatus(null);
     };
     provider.on("accountsChanged", onAccounts);
     provider.on("chainChanged", onChain);
@@ -121,12 +127,15 @@ export default function SwapWidget({ unlocked }: Props) {
     setStatus(null);
     try {
       setBusy(true);
+      setStatus("Connecting wallet…");
       const addr = await connectWallet();
+      setStatus(`Switching to ${CHAIN.name}…`);
       await ensureRobinhoodChain();
       setAccount(addr);
       setStatus(`Connected · ${CHAIN.name}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect wallet.");
+      setStatus(null);
     } finally {
       setBusy(false);
     }
@@ -306,9 +315,22 @@ export default function SwapWidget({ unlocked }: Props) {
         chainId: tx.chainId,
       });
       setTxHash(hash);
-      setStatus("Swap submitted.");
+      setStatus("Swap submitted — waiting for confirmation…");
+      try {
+        await waitForTransaction(hash, { label: "Swap", timeoutMs: 180_000 });
+        setStatus("Swap confirmed.");
+      } catch {
+        // Submitted is enough if confirmation is slow; hash still shown
+        setStatus("Swap submitted (confirming on chain…).");
+      }
       setQuote(null);
       setAmountIn("");
+      // Widget session for Good Wood
+      void fetch("/api/boards/ping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: account, kind: "swap" }),
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Swap failed.");
     } finally {
@@ -358,15 +380,15 @@ export default function SwapWidget({ unlocked }: Props) {
               Uniswap AMM · {CHAIN.name} · official CA
             </p>
           </div>
-          <span className="shrink-0 rounded-full border border-forest-600 bg-forest-800/60 px-2 py-0.5 text-[0.6rem] font-extrabold uppercase tracking-wide text-gold-300">
-            {RULES_RELAXED ? "Open" : "Official"}
+          <span className="shrink-0 rounded-full border border-forest-600 bg-forest-800/60 px-2 py-0.5 text-[0.6rem] font-extrabold uppercase tracking-wide text-emerald-300">
+            {unlocked ? "Live" : RULES_RELAXED ? "Open" : "Official"}
           </span>
         </div>
 
-        {!RULES_RELAXED && (
-          <p className="mt-2.5 rounded-lg border border-gold-500/35 bg-forest-900/75 px-2.5 py-2 text-[0.7rem] leading-snug text-foreground/80 sm:text-xs">
-            <strong className="text-gold-300">Safety:</strong> only swap here until rules relax.
-            Off-site = Plank List risk.
+        {unlocked && (
+          <p className="mt-2.5 rounded-lg border border-emerald-500/30 bg-forest-900/75 px-2.5 py-2 text-[0.7rem] leading-snug text-foreground/80 sm:text-xs">
+            <strong className="text-emerald-300">Live:</strong> connect wallet · buy or sell ·
+            fee {SITE_FEE.label} to treasury. Official CA only.
           </p>
         )}
 
@@ -495,14 +517,22 @@ export default function SwapWidget({ unlocked }: Props) {
               onClick={handleConnect}
               className={`${btnBase} bg-gold-500 text-wood-950 hover:bg-gold-400`}
             >
-              Connect wallet
+              {busy ? "Connecting…" : "Connect wallet"}
             </button>
           ) : (
-            <div className="flex min-h-10 items-center justify-between rounded-lg border border-forest-600/45 bg-forest-900/45 px-2.5 text-xs sm:text-sm">
+            <div className="flex min-h-10 items-center justify-between gap-2 rounded-lg border border-forest-600/45 bg-forest-900/45 px-2.5 text-xs sm:text-sm">
               <span className="text-foreground/65">Wallet</span>
               <span className="font-mono text-gold-300" title={account}>
                 {shortAddress(account)}
               </span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={handleConnect}
+                className="shrink-0 text-[0.65rem] font-bold text-gold-300/80 underline-offset-2 hover:underline"
+              >
+                Switch
+              </button>
             </div>
           )}
 
