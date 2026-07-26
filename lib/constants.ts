@@ -27,6 +27,27 @@ export const CHAIN = {
 export const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 /**
+ * Uniswap Universal Router 2.1.1 on Robinhood Chain (chain 4663).
+ * Widget only ever sends swap txs to this address — never bridges / never L1.
+ * @see https://developers.uniswap.org/docs/trading/swapping-api/supported-chains
+ */
+export const UNIVERSAL_ROUTER_ADDRESS =
+  "0x8876789976dEcBfCbBbe364623C63652db8C0904" as const;
+
+/**
+ * Canonical Permit2 contract address — identical across every chain Uniswap
+ * deploys it to (deterministic CREATE2 deployment). Sell approvals may only
+ * target this address or the $PLANK contract itself — nothing else.
+ */
+export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA" as const;
+
+/** ETH (wei) buyers must keep free for gas after the buy amount. */
+export const BUY_GAS_RESERVE_WEI = BigInt("4000000000000000"); // 0.004 ETH
+
+/** Human label for the gas reserve. */
+export const BUY_GAS_RESERVE_ETH = "0.004";
+
+/**
  * Community trade open time (ISO 8601).
  * Override at deploy with NEXT_PUBLIC_TRADE_OPENS_AT.
  * Until this moment the on-site Uniswap widget is hard-locked.
@@ -83,6 +104,12 @@ export const SITE_FEE = Object.freeze({
   label: "0.4207%",
   /** Treasury wallet that receives the fee on Robinhood Chain */
   recipient: "0xfa987d386c4f61b27cb67a1e4e1239866fe8d9ba",
+  /**
+   * When false, server omits integratorFees entirely from the Uniswap quote
+   * (full output to buyer, no fee transfer). Flip off fast if a fee-route
+   * swap ever fails simulation in a way that isn't already caught pre-flight.
+   */
+  enabled: true,
 });
 
 export const TOKEN = {
