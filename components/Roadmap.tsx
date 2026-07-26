@@ -8,6 +8,7 @@ const PHASES = [
     title: "Plank the Seed",
     desc: "LP early, 30m cooldowns, snipers get listed.",
     claims: ["DEATH TRAP", "BAD BOARDS", "30M COOLDOWN"],
+    status: "done" as const,
   },
   {
     icon: "👀",
@@ -15,6 +16,7 @@ const PHASES = [
     title: "Wood You Just Look At It",
     desc: "Live Good Wood vs Bad Boards, lists exported before free trade.",
     claims: ["GOOD WOOD", "BAD BOARDS", "FALLEN"],
+    status: "done" as const,
   },
   {
     icon: "🪓",
@@ -22,6 +24,7 @@ const PHASES = [
     title: "You Can Plank Me Now",
     desc: "Cooldowns done, LP renounced — free trading forever.",
     claims: ["LP RENOUNCED", "CONTROLS OFF", "FREE TRADE"],
+    status: "current" as const,
   },
   {
     icon: "🔥",
@@ -66,13 +69,26 @@ export default function Roadmap() {
           {PHASES.map((p, i) => (
             <Reveal key={p.phase} delayMs={i * 120}>
               <li className="relative flex flex-col items-center rounded-2xl border border-gold-500/20 bg-wood-900/85 p-5 text-center sm:p-6">
-                <div
-                  className={`relative z-10 flex h-14 w-14 items-center justify-center rounded-full border-2 border-gold-500 bg-wood-950 text-2xl sm:h-16 sm:w-16 sm:text-3xl ${
-                    i === 1 ? "animate-flicker" : ""
-                  }`}
-                  aria-hidden="true"
-                >
-                  {p.icon}
+                <div className="relative">
+                  <div
+                    className={`relative z-10 flex h-14 w-14 items-center justify-center rounded-full border-2 bg-wood-950 text-2xl sm:h-16 sm:w-16 sm:text-3xl ${
+                      p.status === "current"
+                        ? "animate-flicker border-orange-500 ring-4 ring-orange-500/60 ring-offset-2 ring-offset-wood-900"
+                        : "border-gold-500"
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {p.icon}
+                  </div>
+                  {p.status === "done" && (
+                    <span
+                      className="absolute -right-1.5 -top-1.5 z-20 flex h-6 w-6 items-center justify-center rounded-full border-2 border-wood-950 bg-emerald-500 text-sm font-black text-wood-950 shadow"
+                      aria-label="Complete"
+                      title="Complete"
+                    >
+                      ✓
+                    </span>
+                  )}
                 </div>
                 <span className="mt-4 text-xs font-bold uppercase tracking-widest text-gold-300">{p.phase}</span>
                 <h3 className="mt-2 font-display text-xl text-foreground sm:text-2xl">{p.title}</h3>

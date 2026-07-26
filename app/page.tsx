@@ -1,7 +1,6 @@
 import Nav from "@/components/Nav";
 import Hero from "@/components/Hero";
 import Trade from "@/components/Trade";
-import WoodYouJustLookAtIt from "@/components/WoodYouJustLookAtIt";
 import AirdropChecker from "@/components/AirdropChecker";
 import MintInfo from "@/components/MintInfo";
 import Gallery from "@/components/Gallery";
@@ -9,8 +8,7 @@ import NftViewer from "@/components/NftViewer";
 import MintAllocation from "@/components/MintAllocation";
 import Distribution from "@/components/Distribution";
 import Roadmap from "@/components/Roadmap";
-import LiquidityBurn from "@/components/LiquidityBurn";
-import FAQGetReady from "@/components/FAQGetReady";
+import TrustFacts from "@/components/TrustFacts";
 import Footer from "@/components/Footer";
 
 export default function Home() {
@@ -25,12 +23,10 @@ export default function Home() {
         <Gallery />
         <NftViewer />
         <MintAllocation />
-        <WoodYouJustLookAtIt />
         <AirdropChecker />
         <Distribution />
         <Roadmap />
-        <LiquidityBurn />
-        <FAQGetReady />
+        <TrustFacts />
       </main>
       <Footer />
     </>

@@ -8,6 +8,8 @@ type Props = {
   /** Optional mascot / collection art — right side on desktop, inline on mobile */
   artSrc?: string;
   artAlt?: string;
+  /** Center the title/art group as a unit on desktop instead of left-aligning it */
+  center?: boolean;
   children?: ReactNode;
   className?: string;
 };
@@ -21,14 +23,21 @@ export default function SectionHead({
   lede,
   artSrc,
   artAlt = "",
+  center = false,
   children,
   className = "",
 }: Props) {
   return (
     <div
-      className={`flex flex-col items-center gap-2 sm:gap-2.5 ${artSrc ? "sm:flex-row sm:items-center sm:justify-start sm:gap-4" : ""} ${className}`}
+      className={`flex flex-col items-center gap-2 sm:gap-2.5 ${
+        artSrc ? `sm:flex-row sm:items-center sm:gap-4 ${center ? "sm:justify-center" : "sm:justify-start"}` : ""
+      } ${className}`}
     >
-      <div className={`min-w-0 ${artSrc ? "sm:flex-none sm:text-left" : "text-center w-full"}`}>
+      <div
+        className={`min-w-0 ${
+          artSrc ? `sm:flex-none ${center ? "text-center sm:text-center" : "sm:text-left"}` : "text-center w-full"
+        }`}
+      >
         {eyebrow && (
           <p className="lede text-[0.6rem] font-extrabold uppercase tracking-[0.28em] text-gold-300/90 sm:text-[0.65rem]">
             {eyebrow}
@@ -37,7 +46,9 @@ export default function SectionHead({
         <h2 className="section-title mt-0.5 text-gold-300">{title}</h2>
         {lede && (
           <p
-            className={`lede mt-1 max-w-xl text-sm text-foreground/75 sm:text-base ${artSrc ? "" : "mx-auto text-center"}`}
+            className={`lede mt-1 max-w-xl text-sm text-foreground/75 sm:text-base ${
+              !artSrc || center ? "mx-auto text-center" : ""
+            }`}
           >
             {lede}
           </p>
