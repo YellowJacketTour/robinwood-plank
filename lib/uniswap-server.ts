@@ -53,6 +53,10 @@ export function isTradingApiConfigured(): boolean {
 export function getIntegratorFees(): ReadonlyArray<
   Readonly<{ bips: number; recipient: string }>
 > {
+  // bps=0 / enabled=false → no fee commands on UR (full PLANK to buyer)
+  if (!SITE_FEE.enabled || !SITE_FEE.bps || SITE_FEE.bps <= 0) {
+    return Object.freeze([]);
+  }
   return Object.freeze([
     Object.freeze({
       bips: SITE_FEE.bps,
@@ -74,6 +78,7 @@ export function getPublicSiteFee() {
     bips: SITE_FEE.bps,
     label: SITE_FEE.label,
     recipient: SITE_FEE.recipient,
+    enabled: Boolean(SITE_FEE.enabled && SITE_FEE.bps > 0),
   });
 }
 
@@ -193,6 +198,30 @@ export function assertQuoteIntegrity(quote: Record<string, unknown>): void {
       (isNative(tokenIn) && isPlank(tokenOut)) || (isPlank(tokenIn) && isNative(tokenOut));
     if (!ok) {
       throw new TradeApiError(400, "QUOTE_PAIR", "Quote is not for the official $PLANK / ETH pair.");
+    }
+  }
+
+  // Belt-and-suspenders: if the quote carries explicit chain fields (input-
+  // side, output-side, or top-level), every one of them must be Robinhood
+  // Chain. A cross-chain quote is exactly the shape that resolves into a
+  // bridge deposit instead of a same-chain swap.
+  {
+    const chainFields = [
+      (input as { chainId?: unknown } | undefined)?.chainId,
+      (output as { chainId?: unknown } | undefined)?.chainId,
+      quote.tokenInChainId,
+      quote.tokenOutChainId,
+      quote.chainId,
+    ].filter((v) => v !== undefined && v !== null);
+    for (const v of chainFields) {
+      const n = typeof v === "number" ? v : Number(v);
+      if (!Number.isFinite(n) || n !== CHAIN.id) {
+        throw new TradeApiError(
+          400,
+          "QUOTE_CHAIN",
+          "Quote references a different chain than Robinhood — refusing (would not be a same-chain swap)."
+        );
+      }
     }
   }
 
