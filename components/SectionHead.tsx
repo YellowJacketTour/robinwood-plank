@@ -26,7 +26,7 @@ export default function SectionHead({
 }: Props) {
   return (
     <div
-      className={`flex flex-col items-center gap-2 sm:gap-2.5 ${artSrc ? "sm:flex-row sm:items-end sm:justify-start sm:gap-4" : ""} ${className}`}
+      className={`flex flex-col items-center gap-2 sm:gap-2.5 ${artSrc ? "sm:flex-row sm:items-center sm:justify-start sm:gap-4" : ""} ${className}`}
     >
       <div className={`min-w-0 ${artSrc ? "sm:flex-none sm:text-left" : "text-center w-full"}`}>
         {eyebrow && (
