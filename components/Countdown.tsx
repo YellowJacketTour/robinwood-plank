@@ -53,7 +53,7 @@ export default function Countdown({ targetDate }: { targetDate?: string }) {
           ].map(([label, value]) => (
             <div key={String(label)} className="rounded-xl border border-gold-500/40 bg-wood-900 p-3 sm:p-5">
               <strong className="block font-display text-3xl text-foreground sm:text-5xl">
-                {typeof value === "number" ? String(value).padStart(2, "0") : "â€”"}
+                {typeof value === "number" ? String(value).padStart(2, "0") : "—"}
               </strong>
               <span className="mt-1 block text-xs font-black uppercase tracking-wide text-gold-300 sm:text-sm">
                 {label}

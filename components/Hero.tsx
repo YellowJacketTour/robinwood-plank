@@ -35,7 +35,7 @@ export default function Hero() {
         <Countdown targetDate={process.env.NEXT_PUBLIC_MINT_START_AT} />
 
         <p className="lede max-w-xl text-balance text-sm text-foreground sm:text-base">
-          1,542 RobinWood NFTs · official trade widget · Good Wood vs Bad Boards
+          1,542 RobinWood NFTs · trade on Uniswap
         </p>
 
         <div className="wood-frame relative aspect-[2/1] w-full max-w-3xl overflow-hidden rounded-xl sm:aspect-[3110/2265]">

@@ -11,8 +11,7 @@ export default function MintInfo() {
             Mint Structure
           </h2>
           <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
-            Live contract. Live supply. Mint here. For $PLANK, use only the official Trade widget
-            after the countdown — not Uniswap.app until launch rules are relaxed.
+            Live contract, live supply.
           </p>
         </Reveal>
 

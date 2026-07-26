@@ -415,10 +415,8 @@ export default function RarityInsights({
     return (
       <div className="rounded-xl border border-gold-500/20 bg-black/20 px-4 py-10 text-center">
         <p className="text-sm text-foreground/65">
-          Insights needs revealed gallery cache. Stay on{" "}
-          <strong className="text-gold-300">Grid</strong> until art starts
-          appearing, then open Insights again — scores and thumbnails load from
-          the same local cache.
+          Waiting on the <strong className="text-gold-300">Grid</strong> to load art —
+          check back here shortly.
         </p>
       </div>
     );
@@ -666,9 +664,6 @@ export default function RarityInsights({
             <div className="mb-3 flex items-end justify-between gap-2">
               <div>
                 <h3 className="font-display text-lg text-gold-300">Rarest right now</h3>
-                <p className="text-xs text-foreground/50">
-                  Collection ranks · art from local cache
-                </p>
               </div>
               <span className="text-[0.65rem] font-bold text-foreground/45">
                 {active ? "filtered cut" : "full sample"}
@@ -708,10 +703,7 @@ export default function RarityInsights({
 
           {holoTokens.length > 0 && (
             <section className="rounded-xl border border-cyan-400/25 bg-black/25 p-3 sm:p-4">
-              <h3 className="font-display text-lg text-cyan-300">Holographic planks</h3>
-              <p className="mb-3 text-xs text-foreground/50">
-                Foil only · sorted by collection rank
-              </p>
+              <h3 className="mb-3 font-display text-lg text-cyan-300">Holographic planks</h3>
               <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
                 {holoTokens.map((t) => (
                   <li key={t.tokenId}>
@@ -763,12 +755,9 @@ export default function RarityInsights({
           </div>
 
           <section className="rounded-xl border border-gold-500/25 bg-black/25 p-3 sm:p-4">
-            <h3 className="mb-1 font-display text-lg text-gold-300">
+            <h3 className="mb-3 font-display text-lg text-gold-300">
               Power bases (avg score)
             </h3>
-            <p className="mb-3 text-xs text-foreground/50">
-              Which meme art scores rarest on average in this cut
-            </p>
             <div className="space-y-2">
               {rarestBases.map((row, i) => (
                 <button
@@ -808,9 +797,7 @@ export default function RarityInsights({
             <h3 className="mb-1 font-display text-lg text-gold-300">
               Base art roster
             </h3>
-            <p className="mb-3 text-xs text-foreground/50">
-              One cached thumbnail per base · tap to filter · open Grid for full set
-            </p>
+            <p className="mb-3 text-xs text-foreground/50">Tap to filter</p>
             <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
               {baseShowcase.map((row) => (
                 <li key={row.base}>
@@ -879,8 +866,7 @@ export default function RarityInsights({
             </ul>
             {filtered.length > 48 && (
               <p className="mt-3 text-center text-xs text-foreground/45">
-                Showing 48 of {filtered.length.toLocaleString()} — tighten
-                filters or switch to Grid for the full cut.
+                48 of {filtered.length.toLocaleString()} — filter to narrow.
               </p>
             )}
           </section>
@@ -963,8 +949,7 @@ export default function RarityInsights({
       )}
 
       <p className="text-center text-[0.7rem] text-foreground/40">
-        {rarityMethodBlurb(scoredCount)} · Insights uses the same local cache as
-        Grid · filters also apply to the Grid cut
+        {rarityMethodBlurb(scoredCount)} · filters also apply to Grid
       </p>
     </div>
   );

@@ -443,7 +443,7 @@ export default function AirdropChecker() {
           <SectionHead
             eyebrow="Allocation · live"
             title="Airdrop"
-            lede="4.2069% pool split by NFTs held (live owner scan). Click columns to sort · Free / Wood / Paid mint caps 2 / 2 / 33."
+            lede="4.2069% pool split by NFTs held, live scan."
             artSrc="/images/collection/plank-bobawood.png"
             artAlt="Boba wood plank"
           />
@@ -775,8 +775,7 @@ export default function AirdropChecker() {
 
             <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 border-t border-[#c4922e]/3 bg-[#1b120a]/55 px-2 py-1 sm:px-2.5">
               <span className="airdrop-meta">
-                Free = free mint · Wood = allowlist · Paid = public · sorted{" "}
-                {sortKey}/{sortDir}
+                Free = free mint · Wood = allowlist · Paid = public
               </span>
               <span className="airdrop-meta opacity-70">
                 Caps 2 / 2 / 33 · estimates

@@ -47,7 +47,7 @@ export default function LiquidityBurn() {
         <Reveal delayMs={160}>
           <div className="mt-3 rounded-lg border border-dashed border-gold-500/45 bg-forest-900/70 px-3 py-2.5 text-center">
             <p className="text-xs font-extrabold uppercase tracking-wide text-gold-300 sm:text-sm">
-              🔥 Fund LP · burn initial LP tokens · verify on-chain 🔥
+              🔥 Fund LP · burn LP · verify on-chain 🔥
             </p>
             <p className="mt-0.5 text-[0.7rem] text-foreground/65">
               Above 4.2069 ETH: buybacks + more LP.

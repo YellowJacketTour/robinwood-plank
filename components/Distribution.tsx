@@ -5,22 +5,19 @@ const FUNDING_FLOW = [
     step: "1",
     title: "First 4.2069 ETH raised",
     value: "Initial LP",
-    description:
-      "100% goes to initial liquidity.",
+    description: "100% to initial liquidity.",
   },
   {
     step: "+",
     title: "Developer contribution",
     value: "1 ETH",
-    description:
-      "Added regardless of the raise.",
+    description: "Added regardless of raise.",
   },
   {
     step: "2",
     title: "Proceeds above 4.2069 ETH",
     value: "Ongoing support",
-    description:
-      "Used for buybacks and more liquidity.",
+    description: "Buybacks + more liquidity.",
   },
 ] as const;
 
@@ -37,10 +34,10 @@ export default function Distribution() {
           </p>
         </Reveal>
 
-        <div className="mt-12 grid gap-6 md:grid-cols-3">
+        <div className="mt-8 grid gap-4 sm:mt-12 sm:gap-6 md:grid-cols-3">
           {FUNDING_FLOW.map((item, index) => (
             <Reveal key={item.title} delayMs={index * 100}>
-              <article className="wood-frame h-full rounded-2xl bg-wood-900/90 p-6">
+              <article className="wood-frame h-full rounded-2xl bg-wood-900/90 p-5 sm:p-6">
                 <div className="flex items-center justify-between gap-4">
                   <span
                     aria-hidden="true"
@@ -52,15 +49,15 @@ export default function Distribution() {
                     {item.value}
                   </span>
                 </div>
-                <h3 className="mt-6 font-display text-2xl text-foreground">{item.title}</h3>
-                <p className="mt-3 text-lg leading-7 text-foreground">{item.description}</p>
+                <h3 className="mt-5 font-display text-xl text-foreground sm:mt-6 sm:text-2xl">{item.title}</h3>
+                <p className="mt-2 text-base leading-6 text-foreground sm:mt-3 sm:text-lg sm:leading-7">{item.description}</p>
               </article>
             </Reveal>
           ))}
         </div>
 
         <Reveal delayMs={320}>
-          <p className="lede mx-auto mt-8 max-w-3xl text-center text-sm text-foreground/65">
+          <p className="lede mx-auto mt-6 max-w-3xl text-center text-xs text-foreground/65 sm:mt-8 sm:text-sm">
             Developer ETH is separate from mint proceeds.
           </p>
         </Reveal>

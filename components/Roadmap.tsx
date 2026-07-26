@@ -6,21 +6,21 @@ const PHASES = [
     icon: "🌱",
     phase: "Phase 1 — Launch",
     title: "Plank the Seed",
-    desc: "Death trap: LP early, site timer later. Off-widget traders → Bad Boards. Good Wood is mint + airdrop. 30m per-wallet cooldowns while we list snipers.",
+    desc: "LP early, 30m cooldowns, snipers get listed.",
     claims: ["DEATH TRAP", "BAD BOARDS", "30M COOLDOWN"],
   },
   {
     icon: "👀",
     phase: "Phase 2 — Look",
     title: "Wood You Just Look At It",
-    desc: "Live Good Wood vs Bad Boards. Fallen Good Wood who left the official path. Export lists before free trade.",
+    desc: "Live Good Wood vs Bad Boards, lists exported before free trade.",
     claims: ["GOOD WOOD", "BAD BOARDS", "FALLEN"],
   },
   {
     icon: "🪓",
     phase: "Phase 3 — Early",
     title: "You Can Plank Me Now",
-    desc: "Cooldowns done, controls off, LP renounced — free trading forever.",
+    desc: "Cooldowns done, LP renounced — free trading forever.",
     claims: ["LP RENOUNCED", "CONTROLS OFF", "FREE TRADE"],
   },
   {
@@ -46,7 +46,7 @@ export default function Roadmap() {
         <Reveal>
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">Roadmap</h2>
           <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
-            Five phases from seed to space.
+            Seed to space, five phases.
           </p>
         </Reveal>
 
@@ -62,7 +62,7 @@ export default function Roadmap() {
           </div>
         </Reveal>
 
-        <ol className="relative mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <ol className="relative mt-10 grid grid-cols-1 gap-4 sm:mt-14 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 xl:grid-cols-5">
           {PHASES.map((p, i) => (
             <Reveal key={p.phase} delayMs={i * 120}>
               <li className="relative flex flex-col items-center rounded-2xl border border-gold-500/20 bg-wood-900/85 p-5 text-center sm:p-6">
@@ -75,8 +75,8 @@ export default function Roadmap() {
                   {p.icon}
                 </div>
                 <span className="mt-4 text-xs font-bold uppercase tracking-widest text-gold-300">{p.phase}</span>
-                <h3 className="mt-2 font-display text-2xl text-foreground">{p.title}</h3>
-                <p className="mt-2 text-lg text-foreground">{p.desc}</p>
+                <h3 className="mt-2 font-display text-xl text-foreground sm:text-2xl">{p.title}</h3>
+                <p className="mt-2 text-sm text-foreground sm:text-lg">{p.desc}</p>
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
                   {p.claims.map((claim) => (
                     <span

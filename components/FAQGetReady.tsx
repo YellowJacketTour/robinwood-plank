@@ -17,14 +17,14 @@ const STEPS = [
   {
     icon: "🪵",
     step: "3",
-    title: "Trade here only",
-    desc: "Wait for timer · plank.love widget · real CA.",
+    title: "Wait for the timer",
+    desc: "Early swaps land in the sniper trap.",
   },
   {
     icon: "📋",
     step: "4",
-    title: "Skip Uniswap.app",
-    desc: "Off-site in the trap → Bad Boards.",
+    title: "Trade on Uniswap",
+    desc: "Buy/sell buttons on this page open it for you.",
   },
 ];
 
@@ -36,7 +36,7 @@ export default function FAQGetReady() {
           <SectionHead
             eyebrow="Guide"
             title="Get Trade-Ready"
-            lede="Wallet · Robinhood Chain · official widget only."
+            lede="Wallet · Robinhood Chain · official Uniswap pair only."
             artSrc="/images/collection/plank-bobawood.png"
             artAlt="BobaWood collection plank"
           />
@@ -64,8 +64,7 @@ export default function FAQGetReady() {
 
         <Reveal delayMs={200}>
           <div className="mt-3 rounded-lg border border-dashed border-gold-500/40 bg-forest-900/75 px-3 py-2 text-xs text-foreground/80">
-            <strong>Stay safe:</strong> Official CA only. Ignore DMs. Mint at #mint · trade at #trade ·
-            boards CSV at #boards.
+            <strong>Stay safe:</strong> Official CA only. Ignore DMs.
           </div>
         </Reveal>
       </div>

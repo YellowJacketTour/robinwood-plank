@@ -374,7 +374,7 @@ export default function WoodYouJustLookAtIt() {
           <SectionHead
             eyebrow="Wooden ledger · live scan"
             title="Wood You Just Look At It"
-            lede="plank.love widget vs off-site/Uniswap labeled. Death trap + post-open off-widget snipes → Bad Boards. One-click CSV for 20lab."
+            lede="Pre-timer snipers land on Bad Boards."
             artSrc="/images/collection/plank-redacted.png"
             artAlt="Redacted collection plank"
           />
@@ -482,7 +482,7 @@ export default function WoodYouJustLookAtIt() {
                 type="button"
                 onClick={runScan}
                 disabled={scanning}
-                className="min-h-8 shrink-0 rounded bg-gold-500 px-2.5 py-1 text-[0.65rem] font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50"
+                className="min-h-11 shrink-0 rounded bg-gold-500 px-2.5 py-1 text-[0.65rem] font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50"
               >
                 {scanning ? "…" : "Scan now"}
               </button>
@@ -492,21 +492,20 @@ export default function WoodYouJustLookAtIt() {
           {/* 20lab blacklist export */}
           <div className="wood-ledger mt-2 flex flex-wrap items-center justify-between gap-2 px-2.5 py-2">
             <p className="text-[0.65rem] text-foreground/60">
-              <strong className="text-gold-300">Blacklist CSV</strong> for 20lab — one click.
-              plank.love widget buyers stay off this list.
+              <strong className="text-gold-300">Blacklist CSV</strong> for 20lab.
             </p>
             <div className="flex flex-wrap gap-1.5">
               <button
                 type="button"
                 onClick={() => downloadBlacklist("csv")}
-                className="min-h-8 rounded bg-orange-500/90 px-3 text-[0.65rem] font-bold text-wood-950 hover:bg-orange-400"
+                className="min-h-11 rounded bg-orange-500/90 px-3 text-[0.65rem] font-bold text-wood-950 hover:bg-orange-400"
               >
                 Download CSV
               </button>
               <button
                 type="button"
                 onClick={() => downloadBlacklist("addresses")}
-                className="min-h-8 rounded border border-[#c4922e]/50 px-3 text-[0.65rem] font-bold text-gold-300 hover:bg-gold-500/10"
+                className="min-h-11 rounded border border-[#c4922e]/50 px-3 text-[0.65rem] font-bold text-gold-300 hover:bg-gold-500/10"
               >
                 Addresses only
               </button>
@@ -549,7 +548,7 @@ export default function WoodYouJustLookAtIt() {
                           }`}
                           title={
                             row.label === "plank.love"
-                              ? "Official plank.love Trade widget"
+                              ? "Verified plank.love buyer"
                               : "Wood List / mint allowlist"
                           }
                         >
@@ -572,7 +571,7 @@ export default function WoodYouJustLookAtIt() {
                     Bad Boards
                   </h3>
                   <span className="text-[0.55rem] font-bold uppercase tracking-wider text-orange-400/70">
-                    {streamLive ? "off-site · uni" : listingLive ? "scanning" : "off-widget"}
+                    {streamLive ? "live" : listingLive ? "scanning" : "idle"}
                   </span>
                 </header>
                 <div className="wood-ledger-ruled max-h-56 overflow-y-auto px-2 py-0.5 sm:max-h-72">
@@ -634,11 +633,11 @@ export default function WoodYouJustLookAtIt() {
                 value={lookupAddr}
                 onChange={(e) => setLookupAddr(e.target.value)}
                 placeholder="0x… check wallet"
-                className="min-h-9 min-w-0 flex-1 rounded border border-[#c4922e]/45 bg-[#1b120a]/85 px-2.5 font-mono text-xs text-gold-300 outline-none placeholder:text-foreground/35 focus:border-gold-400"
+                className="min-h-11 min-w-0 flex-1 rounded border border-[#c4922e]/45 bg-[#1b120a]/85 px-2.5 font-mono text-xs text-gold-300 outline-none placeholder:text-foreground/35 focus:border-gold-400"
               />
               <button
                 type="submit"
-                className="min-h-9 rounded bg-gold-500 px-4 text-xs font-bold text-wood-950 hover:bg-gold-400"
+                className="min-h-11 rounded bg-gold-500 px-4 text-xs font-bold text-wood-950 hover:bg-gold-400"
               >
                 Check
               </button>

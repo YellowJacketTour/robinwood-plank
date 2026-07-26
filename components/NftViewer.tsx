@@ -432,7 +432,7 @@ function NftDetailModal({
                     <AttributeList attributes={nft.attributes} />
                     {nft.attributes.length > 0 && !rarity && (
                       <p className="mt-2 text-xs text-foreground/50">
-                        Open the Gallery to index the collection for live ranks.
+                        Open Gallery for live ranks.
                       </p>
                     )}
                   </>
@@ -891,9 +891,7 @@ export default function NftViewer() {
   async function connectWallet() {
     setMessage("");
     if (!window.ethereum) {
-      setMessage(
-        "Open this page in Robinhood Wallet or install an EVM-compatible browser wallet.",
-      );
+      setMessage("No wallet found — open in Robinhood Wallet or an EVM browser wallet.");
       return;
     }
     try {
@@ -961,8 +959,7 @@ export default function NftViewer() {
             Your Planks
           </h2>
           <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
-            Connect a wallet or paste an address — same live rarity ranks and trait scores as the
-            Gallery.
+            Connect a wallet or paste an address to view its Planks.
           </p>
         </Reveal>
 
@@ -1123,9 +1120,7 @@ export default function NftViewer() {
                     🪵
                   </div>
                   <p className="mt-3 text-lg font-black text-foreground">Empty woodpile</p>
-                  <p className="mt-2 text-foreground/65">
-                    This wallet does not hold any RobinWood Planks yet.
-                  </p>
+                  <p className="mt-2 text-foreground/65">No Planks in this wallet.</p>
                   <a
                     href="#mint"
                     className="mt-5 inline-flex min-h-12 items-center justify-center rounded-lg bg-gold-500 px-6 py-3 font-extrabold text-wood-950"
@@ -1137,7 +1132,7 @@ export default function NftViewer() {
 
               {!viewedAddress && !loading && nfts.length === 0 && (
                 <p className="px-5 py-10 text-center text-sm text-foreground/55">
-                  Tip: works with any public address — ranks use the same live sample as Gallery.
+                  Works with any public address.
                 </p>
               )}
 
