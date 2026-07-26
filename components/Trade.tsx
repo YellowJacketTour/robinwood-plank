@@ -28,8 +28,8 @@ export default function Trade() {
             lede={
               TRADE_PAUSED ? "Not live yet." : `${CHAIN.name} · verified contract only.`
             }
-            artSrc="/images/collection/plank-knightwood.png"
-            artAlt="KnightWood collection plank"
+            artSrc="/images/collection/plank-insidertrader.png"
+            artAlt="Insider Trader collection plank"
           />
         </Reveal>
 
