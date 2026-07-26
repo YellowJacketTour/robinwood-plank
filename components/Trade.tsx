@@ -39,7 +39,7 @@ export default function Trade() {
 
         {!TRADE_PAUSED && isOpen && (
           <Reveal delayMs={55}>
-            <div className="mx-auto mt-4 max-w-xl">
+            <div className="mx-auto mt-3 max-w-xl">
               <UniswapOfficialWindow />
             </div>
           </Reveal>
