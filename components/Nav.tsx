@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NAV_LINKS } from "@/lib/constants";
 
@@ -10,6 +11,12 @@ function navHref(href: string, pathname: string) {
     return `/${href}`;
   }
   return href;
+}
+
+/** Route links use client-side nav (keeps the root layout, and its audio
+ * player, mounted); hash anchors stay plain <a> since they never navigate. */
+function isRoute(href: string) {
+  return href.startsWith("/");
 }
 
 function isActive(href: string, pathname: string) {
@@ -27,7 +34,7 @@ export default function Nav() {
         className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6"
         aria-label="Primary"
       >
-        <a
+        <Link
           href={pathname === "/" ? "#home" : "/"}
           className="flex min-w-0 items-center gap-2 font-display text-base text-gold-300 sm:text-xl"
         >
@@ -41,22 +48,29 @@ export default function Nav() {
           />
           <span className="truncate">RobinWood</span>{" "}
           <span className="hidden text-foreground/60 min-[420px]:inline">($PLANK)</span>
-        </a>
+        </Link>
 
         <div className="hidden items-center gap-3 md:flex lg:gap-5">
           <ul className="flex items-center gap-3 lg:gap-4">
-            {NAV_LINKS.map((link) => (
-              <li key={link.href}>
-                <a
-                  href={navHref(link.href, pathname)}
-                  className={`text-xs font-semibold uppercase tracking-wide transition-colors hover:text-gold-300 lg:text-sm ${
-                    isActive(link.href, pathname) ? "text-gold-300" : "text-foreground/80"
-                  }`}
-                >
-                  {link.label}
-                </a>
-              </li>
-            ))}
+            {NAV_LINKS.map((link) => {
+              const href = navHref(link.href, pathname);
+              const className = `text-xs font-semibold uppercase tracking-wide transition-colors hover:text-gold-300 lg:text-sm ${
+                isActive(link.href, pathname) ? "text-gold-300" : "text-foreground/80"
+              }`;
+              return (
+                <li key={link.href}>
+                  {isRoute(href) ? (
+                    <Link href={href} className={className}>
+                      {link.label}
+                    </Link>
+                  ) : (
+                    <a href={href} className={className}>
+                      {link.label}
+                    </a>
+                  )}
+                </li>
+              );
+            })}
           </ul>
           <a
             href={navHref("#trade", pathname)}
@@ -98,17 +112,24 @@ export default function Nav() {
           className="border-t border-gold-500/20 bg-wood-950 px-4 pb-4 md:hidden"
         >
           <ul className="flex flex-col gap-1 pt-2">
-            {NAV_LINKS.map((link) => (
-              <li key={link.href}>
-                <a
-                  href={navHref(link.href, pathname)}
-                  onClick={() => setOpen(false)}
-                  className="flex min-h-11 items-center rounded-md px-3 py-2 text-base font-semibold uppercase tracking-wide text-foreground/80 hover:bg-wood-900 hover:text-gold-300"
-                >
-                  {link.label}
-                </a>
-              </li>
-            ))}
+            {NAV_LINKS.map((link) => {
+              const href = navHref(link.href, pathname);
+              const className =
+                "flex min-h-11 items-center rounded-md px-3 py-2 text-base font-semibold uppercase tracking-wide text-foreground/80 hover:bg-wood-900 hover:text-gold-300";
+              return (
+                <li key={link.href}>
+                  {isRoute(href) ? (
+                    <Link href={href} onClick={() => setOpen(false)} className={className}>
+                      {link.label}
+                    </Link>
+                  ) : (
+                    <a href={href} onClick={() => setOpen(false)} className={className}>
+                      {link.label}
+                    </a>
+                  )}
+                </li>
+              );
+            })}
             <li>
               <a
                 href={navHref("#trade", pathname)}
