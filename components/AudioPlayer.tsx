@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const TRACK_SRC = "/audio/addiction.mp3";
+const TRACK_SRC = "/audio/sugar.mp3";
 
 /**
  * Single background-audio instance, mounted once in the root layout so it
