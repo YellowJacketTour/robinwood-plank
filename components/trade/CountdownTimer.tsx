@@ -107,41 +107,21 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
   if (paused) {
     return (
       <div
-        className={`rounded-xl border border-orange-500/50 bg-[#2a1208]/95 px-3 py-4 text-center sm:px-4 ${className}`}
+        className={`flex items-center justify-center gap-2 rounded-lg border border-orange-500/50 bg-[#2a1208]/95 px-3 py-2 text-center ${className}`}
         role="status"
         aria-live="polite"
       >
-        <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.28em] text-orange-300">
-          Community notice
-        </p>
-        <p className="mt-1 font-display text-2xl text-gold-300 sm:text-3xl">STAND BY</p>
-        <p className="mt-1.5 text-sm font-semibold text-orange-100/95">
-          Trading is not live
-        </p>
-        <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-foreground/75">
-          {standByMsg || "Wait for the all-clear on plank.love."}
-        </p>
+        <span className="font-display text-base text-gold-300">STAND BY</span>
+        <span className="text-xs text-foreground/75">
+          {standByMsg || "Not live yet."}
+        </span>
       </div>
     );
   }
 
-  if (parts.isOpen) {
-    return (
-      <div
-        className={`rounded-xl border border-forest-600/50 bg-forest-900/70 px-3 py-3 text-center sm:px-4 ${className}`}
-        role="status"
-        aria-live="polite"
-      >
-        <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.25em] text-gold-300">
-          Trade window
-        </p>
-        <p className="mt-0.5 font-display text-2xl text-gold-300 sm:text-3xl">OPEN</p>
-        <p className="mt-0.5 text-xs text-foreground/70">
-          Trade on Uniswap below.
-        </p>
-      </div>
-    );
-  }
+  // Open state needs no card of its own — the Uniswap module rendered
+  // right below already carries the "trade is live" signal.
+  if (parts.isOpen) return null;
 
   const cells = [
     { label: "D", full: "Days", value: pad(parts.days) },
@@ -167,15 +147,15 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
 
   return (
     <div
-      className={`rounded-xl border border-gold-500/30 bg-wood-950/80 px-3 py-3 text-center sm:px-4 sm:py-4 ${className}`}
+      className={`rounded-xl border border-gold-500/30 bg-wood-950/80 px-3 py-2.5 text-center sm:px-4 sm:py-3 ${className}`}
       role="timer"
       aria-live="polite"
       aria-atomic="true"
     >
       <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.25em] text-gold-300/90">
-        Official trade unlocks in
+        Trade unlocks in
       </p>
-      <div className="mt-2 grid grid-cols-4 gap-1.5 sm:mt-3 sm:gap-2">
+      <div className="mt-2 grid grid-cols-4 gap-1.5 sm:mt-2.5 sm:gap-2">
         {cells.map((c) => (
           <div
             key={c.full}
