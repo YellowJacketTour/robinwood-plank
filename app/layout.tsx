@@ -15,9 +15,8 @@ const body = Nunito_Sans({
   subsets: ["latin"],
 });
 
-const title = "RobinWood ($PLANK) — Official Trade & Robinhood Chain Mint";
-const description =
-  "Official plank.love home for $PLANK. Trade only through the official widget until launch rules relax. Robinhood Chain · real CA · community timer. Plank is Plank.";
+const title = "RobinWood ($PLANK) — Robinhood Chain Mint & Trade";
+const description = "Mint RobinWood, trade $PLANK on Uniswap. Robinhood Chain.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

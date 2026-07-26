@@ -310,7 +310,7 @@ export default function MintPanel() {
   async function connectWallet() {
     setMessage("");
     if (!window.ethereum) {
-      setMessage("Open this page in Robinhood Wallet or install an EVM-compatible browser wallet.");
+      setMessage("Open in an EVM wallet browser to mint.");
       return;
     }
     try {
@@ -456,14 +456,14 @@ export default function MintPanel() {
       (stats.paused || soldOut || trulyClosed || phaseLimit === 0));
 
   return (
-    <div className="wood-frame w-full rounded-2xl bg-wood-900/95 p-5 text-left shadow-2xl sm:p-6">
+    <div className="wood-frame w-full rounded-2xl bg-wood-900/95 p-4 text-left shadow-2xl sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gold-500/20 pb-4">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-extrabold uppercase tracking-[0.2em] text-gold-300">
-            Live Robinhood Chain Mint
+            Live Mint
           </p>
-          <p className="mt-1 text-sm text-foreground/60">
-            {address ? `Connected: ${shortAddress(address)}` : "Connect an EVM wallet to mint."}
+          <p className="mt-1 truncate text-xs text-foreground/60 sm:text-sm">
+            {address ? shortAddress(address) : "Connect wallet to mint."}
             {rpcLabel ? ` · ${rpcLabel}` : ""}
           </p>
         </div>
@@ -471,13 +471,13 @@ export default function MintPanel() {
           href={`${ROBINHOOD_EXPLORER_URL}/address/${NFT_CONTRACT_ADDRESS}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-sm font-bold text-gold-300 hover:text-gold-400"
+          className="min-h-11 shrink-0 text-xs font-bold text-gold-300 hover:text-gold-400 sm:text-sm"
         >
-          View contract ↗
+          Contract ↗
         </a>
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-x-5 gap-y-3 text-sm sm:grid-cols-3">
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs sm:grid-cols-3 sm:gap-x-5 sm:text-sm">
         <div>
           <dt className="text-foreground/55">Sale phase</dt>
           <dd className="mt-1 font-bold text-foreground">
@@ -534,7 +534,7 @@ export default function MintPanel() {
             aria-label="Decrease mint quantity"
             disabled={busy || mintQuantity <= 1}
             onClick={() => setQuantity((value) => Math.max(1, value - 1))}
-            className="h-12 w-12 rounded-full text-xl font-bold text-gold-300 disabled:opacity-35"
+            className="min-h-12 min-w-12 rounded-full text-xl font-bold text-gold-300 disabled:opacity-35"
           >
             −
           </button>
@@ -544,7 +544,7 @@ export default function MintPanel() {
             aria-label="Increase mint quantity"
             disabled={busy || mintQuantity >= phaseLimit}
             onClick={() => setQuantity((value) => Math.min(phaseLimit, value + 1))}
-            className="h-12 w-12 rounded-full text-xl font-bold text-gold-300 disabled:opacity-35"
+            className="min-h-12 min-w-12 rounded-full text-xl font-bold text-gold-300 disabled:opacity-35"
           >
             +
           </button>
@@ -569,24 +569,24 @@ export default function MintPanel() {
       </button>
 
       {offline && (
-        <p className="mt-3 text-sm text-amber-200/90">
-          Chain data is offline (RPC). Mint is not necessarily closed — tap Retry.
+        <p className="mt-3 text-xs text-amber-200/90 sm:text-sm">
+          RPC offline — tap Retry.
         </p>
       )}
 
       {stats.live && stats.phase === 3 && (
-        <p className="mt-3 text-sm text-foreground/65">
-          Paid mint is open · 0.01 ETH each · max 33 / wallet
+        <p className="mt-3 text-xs text-foreground/65 sm:text-sm">
+          0.01 ETH each · max 33 / wallet
         </p>
       )}
 
       {stats.communityReleased && (
-        <p className="mt-3 text-sm text-foreground/65">
-          Community minting is closed. Unused community supply has moved to paid capacity.
+        <p className="mt-3 text-xs text-foreground/65 sm:text-sm">
+          Community closed — unused supply moved to paid.
         </p>
       )}
       {message && (
-        <p className="mt-3 text-sm text-foreground/80" role="status" aria-live="polite">
+        <p className="mt-3 break-words text-xs text-foreground/80 sm:text-sm" role="status" aria-live="polite">
           {message}
         </p>
       )}
@@ -595,13 +595,13 @@ export default function MintPanel() {
           href={`${ROBINHOOD_EXPLORER_URL}/tx/${transactionHash}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-2 inline-block text-sm font-bold text-gold-300 hover:text-gold-400"
+          className="mt-2 inline-block min-h-11 text-xs font-bold text-gold-300 hover:text-gold-400 sm:text-sm"
         >
           View transaction ↗
         </a>
       )}
       <p className="mt-3 text-xs text-foreground/45">
-        Gas is paid in ETH on Robinhood Chain (ID 4663).
+        Gas paid in ETH (Chain ID 4663).
       </p>
     </div>
   );

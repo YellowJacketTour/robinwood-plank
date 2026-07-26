@@ -868,7 +868,7 @@ export default function Gallery() {
             </p>
             <h2 className="font-display text-3xl text-gold-300 sm:text-4xl">Gallery</h2>
             <p className="mt-1 max-w-xl text-sm text-foreground/65 sm:text-base">
-              Minted art, live scores, and trait analytics — densest view on any screen.
+              Minted art, live rarity, trait stats.
             </p>
           </div>
           <div className="flex shrink-0 gap-1.5">

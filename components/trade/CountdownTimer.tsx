@@ -26,9 +26,7 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
   const [apiOpen, setApiOpen] = useState<boolean | null>(null);
   const [apiPaused, setApiPaused] = useState<boolean | null>(TRADE_PAUSED ? true : null);
   const [standByMsg, setStandByMsg] = useState<string | null>(
-    TRADE_PAUSED
-      ? "Trading is paused. Stand by — do not trade $PLANK anywhere. Official widget is locked."
-      : null
+    TRADE_PAUSED ? "Trading is paused. Stand by." : null
   );
 
   useEffect(() => {
@@ -121,11 +119,7 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
           Trading is not live
         </p>
         <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-foreground/75">
-          {standByMsg ||
-            "Timer paused. Official widget is locked. Do not trade $PLANK on Uniswap.app or anywhere else — wait for the all-clear on plank.love."}
-        </p>
-        <p className="mt-2 text-[0.65rem] font-bold uppercase tracking-wide text-gold-300/80">
-          Widget off · stand by
+          {standByMsg || "Wait for the all-clear on plank.love."}
         </p>
       </div>
     );
@@ -143,7 +137,7 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
         </p>
         <p className="mt-0.5 font-display text-2xl text-gold-300 sm:text-3xl">OPEN</p>
         <p className="mt-0.5 text-xs text-foreground/70">
-          Official widget live — swap here only.
+          Trade on Uniswap below.
         </p>
       </div>
     );
@@ -160,13 +154,13 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
     phase === "death_trap"
       ? {
           title: "Death trap live",
-          body: `LP may be live · widget locked · ~${SNIPER_TRAP_MINUTES}m sniper window · off-site = Bad Boards`,
+          body: `LP may be live · ~${SNIPER_TRAP_MINUTES}m sniper window · early buys → Bad Boards`,
           tone: "border-orange-500/45 bg-[#3a1510]/85 text-orange-200",
         }
       : phase === "pre_lp"
         ? {
             title: "Pre-LP",
-            body: "Community waits for the timer. Do not use Uniswap.app.",
+            body: "Wait for the timer — don't swap yet.",
             tone: "border-gold-500/30 bg-wood-900/80 text-foreground/75",
           }
         : null;
