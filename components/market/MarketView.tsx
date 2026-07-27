@@ -9,6 +9,7 @@ import ListForm from "@/components/market/ListForm";
 import OfferForm from "@/components/market/OfferForm";
 import SwapPanel from "@/components/market/SwapPanel";
 import MyPositions from "@/components/market/MyPositions";
+import TreasuryDashboard from "@/components/market/TreasuryDashboard";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { fulfillOrder } from "@/lib/market/seaport";
 import { connectWallet, ensureRobinhoodChain, getConnectedAccounts } from "@/lib/wallet";
@@ -206,7 +207,12 @@ export default function MarketView() {
             emptyMessage="No offers yet."
           />
         )}
-        {tab === "swap" && <SwapPanel />}
+        {tab === "swap" && (
+          <div className="space-y-3">
+            <TreasuryDashboard />
+            <SwapPanel />
+          </div>
+        )}
         {tab === "positions" && account && (
           <MyPositions account={account} listings={listings} offers={offers} onChanged={refresh} />
         )}

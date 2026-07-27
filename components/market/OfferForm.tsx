@@ -38,6 +38,7 @@ export default function OfferForm({ account, collection, tokenId, onSubmitted, o
         considerationTokenAddress: collection.contractAddress,
         considerationTokenId: tokenId,
         expiresAt,
+        feeBps: collection.feeBps,
       });
       const res = await fetch("/api/market/orders", {
         method: "POST",
@@ -110,6 +111,10 @@ export default function OfferForm({ account, collection, tokenId, onSubmitted, o
             </button>
           ))}
         </div>
+
+        <p className="text-center text-[0.65rem] text-foreground/50">
+          {collection.feeBps > 0 ? `${(collection.feeBps / 100).toFixed(2)}% marketplace fee` : "No marketplace fee"}
+        </p>
 
         <button
           type="button"

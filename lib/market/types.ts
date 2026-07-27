@@ -17,6 +17,13 @@ export type MarketCollection = {
   derivativeOf?: string;
   /** Vault contract address once a Phase 2 instant-liquidity pool exists for this collection. */
   vaultAddress?: string;
+  /**
+   * Marketplace fee for THIS collection's trades, in basis points (100 = 1%).
+   * 0 = no fee. Toggle any approved collection's fee on/off or adjust the
+   * rate by editing lib/market/collections.ts and redeploying — see
+   * MARKET_DEFAULT_FEE_BPS for the default applied to non-PLANK collections.
+   */
+  feeBps: number;
 };
 
 export type Listing = {
