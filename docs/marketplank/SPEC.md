@@ -166,7 +166,8 @@ Nothing above ships to mainnet with real value until, in order:
 | Vault fee parameters (mint/redeem/premium bps) + fee recipient | ✅ Updated in `scripts/deploy-vault.ts`: 1% / 1% / 2.5%, treasury wallet |
 | Initial pool liquidity (ETH + NFTs to seed) | ✅ Decided 2026-07-27: funded from the fee treasury, not the owner's capital — see §9 for the threshold |
 | Partner collections beyond RobinWood | ⏳ None added — `lib/market/collections.ts` is RobinWood-only until told otherwise |
-| Third-party audit | ⏳ **Scheduled: Fable, at project completion.** Blocks `MARKET_ENABLED=true` regardless of everything else on this list. |
+| Internal adversarial review | ✅ Done 2026-07-27 — 10 findings (2 critical, 4 high) found, fixed, and pinned by regression tests. See `AUDIT-2026-07-27.md` |
+| Third-party audit | ⏳ **Still required.** The internal review found serious defects precisely because it went looking adversarially, but it was the same author reviewing their own code and shares its blind spots. Blocks `MARKET_ENABLED=true` regardless of everything else on this list. |
 | Legal/compliance review of the vault as a financial product | ⏳ Not assessed — flagged, not resolved, by design (outside what an AI assistant can sign off on) |
 
 ## 8. What Remilia/Milady contributed to this design

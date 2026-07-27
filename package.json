@@ -7,8 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:contracts": "hardhat test",
-    "test:market": "tsx --test test/market/*.test.ts"
+    "test:contracts": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json hardhat test",
+    "test:market": "tsx --test test/market/*.test.ts",
+    "test": "npm run test:market && npm run test:contracts"
   },
   "dependencies": {
     "@opensea/seaport-js": "^4.1.5",
@@ -31,12 +32,14 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "chai": "^4.5.0",
+    "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "hardhat": "^2.29.0",
     "mocha": "^11.7.6",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",
+    "tsx": "^4.23.1",
     "typescript": "^5"
   }
 }
