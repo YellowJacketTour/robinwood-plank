@@ -2,7 +2,13 @@ import { Seaport } from "@opensea/seaport-js";
 import { ItemType } from "@opensea/seaport-js/lib/constants";
 import type { Fee } from "@opensea/seaport-js/lib/types";
 import { BrowserProvider } from "ethers";
-import { CHAIN, MARKET_FEE_RECIPIENT, NATIVE_TOKEN_ADDRESS, SEAPORT_ADDRESS } from "@/lib/constants";
+import {
+  CHAIN,
+  MARKET_FEE_RECIPIENT,
+  MARKET_OFFER_CURRENCY,
+  NATIVE_TOKEN_ADDRESS,
+  SEAPORT_ADDRESS,
+} from "@/lib/constants";
 import { ensureRobinhoodChain, getEthereumProvider } from "@/lib/wallet";
 
 /**
@@ -101,6 +107,11 @@ export type OfferInput = {
  * otherwise. Collection-wide offers use Seaport's criteria-based item shape with
  * an empty `identifiers` array, which the protocol treats as "any token ID in
  * this collection" — the same mechanism OpenSea uses for collection offers.
+ *
+ * Denominated in WETH, not native ETH. Seaport has no way to pull ETH from the
+ * offerer when a bid is accepted, so a native-ETH offer can be signed but can
+ * never actually fill — the bidder's wallet would show a valid-looking bid that
+ * silently does nothing. seaport-js handles the ERC-20 approval step for us.
  */
 export async function buildOffer(accountAddress: string, input: OfferInput) {
   const seaport = await getSeaport();
@@ -111,7 +122,7 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
       offer: [
         {
           amount: input.offerWei,
-          token: NATIVE_TOKEN_ADDRESS,
+          token: MARKET_OFFER_CURRENCY,
         },
       ],
       consideration: [

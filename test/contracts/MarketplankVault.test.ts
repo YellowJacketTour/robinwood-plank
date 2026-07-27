@@ -75,24 +75,33 @@ describe("MarketplankVault", () => {
     expect(await nft.ownerOf(1)).to.equal(await vault.getAddress());
   });
 
-  it("redeemRandom: burns a full share and returns a held NFT", async () => {
+  it("random redeem: commits shares up front, delivers on claim", async () => {
     const { alice, nft, vault } = await deployFixture();
     await mintTo(nft, alice, 1);
     await nft.connect(alice).approve(await vault.getAddress(), 1);
     await vault.connect(alice).deposit(1);
 
-    // Top up alice's balance to a full share (mint fee left her short of 1e18).
+    // One deposit alone is never enough to redeem: the mint fee leaves the
+    // depositor below a whole share, and redeeming costs a share plus the
+    // redeem fee. This is inherent to the fee model, not a bug — but it is
+    // the kind of thing the UI has to state plainly so nobody is surprised.
     await mintTo(nft, alice, 2);
     await nft.connect(alice).approve(await vault.getAddress(), 2);
     await vault.connect(alice).deposit(2);
 
     const before = await vault.balanceOf(alice.address);
-    await vault.connect(alice).redeemRandom();
+    await vault.connect(alice).requestRandomRedeem();
     const after = await vault.balanceOf(alice.address);
 
-    expect(before - after).to.equal(SHARE_UNIT);
-    expect(await nft.ownerOf(1) === alice.address || (await nft.ownerOf(2)) === alice.address).to
-      .be.true;
+    const redeemFee = (SHARE_UNIT * REDEEM_FEE_BPS) / 10_000n;
+    expect(before - after).to.equal(SHARE_UNIT + redeemFee);
+
+    await ethers.provider.send("evm_mine", []);
+    await vault.connect(alice).claimRandomRedeem();
+
+    expect(
+      (await nft.ownerOf(1)) === alice.address || (await nft.ownerOf(2)) === alice.address
+    ).to.be.true;
   });
 
   it("redeemTarget: requires the token to be held and charges the premium", async () => {
@@ -117,16 +126,15 @@ describe("MarketplankVault", () => {
   });
 
   it("buyShares / sellShares: constant-product AMM moves price with size", async () => {
-    const { alice, bob, nft, vault } = await deployFixture();
+    const { alice, bob, feeRecipient, nft, vault } = await deployFixture();
     await mintTo(nft, alice, 1);
     await nft.connect(alice).approve(await vault.getAddress(), 1);
     await vault.connect(alice).deposit(1);
 
-    // Seed the pool: vault already holds some shares fee-minted to itself?
-    // No — seed by having alice send some shares to the vault as pool liquidity
-    // and seeding ETH via seedLiquidity, mirroring a real launch sequence.
+    // Mirror a real launch: shares go into the pool, treasury seeds the ETH
+    // side (only the treasury may — see the audit regression suite).
     await vault.connect(alice).transfer(await vault.getAddress(), SHARE_UNIT / 4n);
-    await vault.connect(alice).seedLiquidity({ value: ethers.parseEther("1") });
+    await vault.connect(feeRecipient).seedLiquidity({ value: ethers.parseEther("1") });
 
     const buyTx = await vault.connect(bob).buyShares(0, { value: ethers.parseEther("0.1") });
     await expect(buyTx).to.emit(vault, "Bought");
@@ -138,8 +146,8 @@ describe("MarketplankVault", () => {
   });
 
   it("buyShares reverts below minSharesOut (slippage protection)", async () => {
-    const { alice, bob, vault } = await deployFixture();
-    await vault.connect(alice).seedLiquidity({ value: ethers.parseEther("1") });
+    const { bob, feeRecipient, vault } = await deployFixture();
+    await vault.connect(feeRecipient).seedLiquidity({ value: ethers.parseEther("1") });
     // No share reserve seeded — buying should revert as an empty vault.
     await expect(
       vault.connect(bob).buyShares(1n, { value: ethers.parseEther("0.1") })

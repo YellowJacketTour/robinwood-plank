@@ -7,6 +7,10 @@ type Props = {
   onBuy?: (listing: Listing) => void;
   onOffer?: (listing: Listing) => void;
   buyLabel?: string;
+  /** "offer" styles the card as an incoming bid, not something for sale. */
+  variant?: "listing" | "offer";
+  /** Token IDs the viewer owns — offers they can't fill are disabled. */
+  ownedTokenIds?: Set<string>;
   emptyMessage?: string;
 };
 
@@ -16,6 +20,8 @@ export default function ListingGrid({
   onBuy,
   onOffer,
   buyLabel,
+  variant = "listing",
+  ownedTokenIds,
   emptyMessage = "No listings yet.",
 }: Props) {
   if (listings.length === 0) {
@@ -39,6 +45,14 @@ export default function ListingGrid({
             onBuy={onBuy}
             onOffer={onOffer}
             buyLabel={buyLabel}
+            variant={variant}
+            // A collection-wide bid (no tokenId) is fillable with any token
+            // the viewer owns; an item bid needs that specific one.
+            canFill={
+              variant !== "offer" ||
+              !ownedTokenIds ||
+              (listing.tokenId ? ownedTokenIds.has(listing.tokenId) : ownedTokenIds.size > 0)
+            }
           />
         );
       })}

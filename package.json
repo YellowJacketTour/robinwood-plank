@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:contracts": "hardhat test"
+    "test:contracts": "hardhat test",
+    "test:market": "tsx --test test/market/*.test.ts"
   },
   "dependencies": {
     "@opensea/seaport-js": "^4.1.5",

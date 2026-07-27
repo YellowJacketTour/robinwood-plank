@@ -36,6 +36,13 @@ export type Listing = {
   /** ISO 8601 */
   expiresAt: string;
   kind: "fixed" | "dutch-auction";
+  /**
+   * The token's own artwork, resolved once at listing time. Showing the
+   * collection logo for every item makes a grid look broken or fake — the art
+   * is the product. Falls back to the collection image only if resolution
+   * fails.
+   */
+  imageUrl?: string;
 };
 
 export type Offer = {
@@ -49,4 +56,6 @@ export type Offer = {
   maker: string;
   priceWei: string;
   expiresAt: string;
+  /** Resolved token art; absent for collection-wide offers. */
+  imageUrl?: string;
 };
