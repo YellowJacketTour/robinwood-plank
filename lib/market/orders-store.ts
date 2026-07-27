@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { kv } from "@vercel/kv";
 import type { Listing, Offer } from "@/lib/market/types";
 
 /**
@@ -64,13 +65,11 @@ async function persistToFile(state: OrdersState): Promise<void> {
 // --- Vercel KV backend -------------------------------------------------
 
 async function loadFromKv(): Promise<OrdersState> {
-  const { kv } = await import("@vercel/kv");
   const state = await kv.get<OrdersState>(KV_KEY);
   return state ?? emptyState();
 }
 
 async function persistToKv(state: OrdersState): Promise<void> {
-  const { kv } = await import("@vercel/kv");
   await kv.set(KV_KEY, state);
 }
 
