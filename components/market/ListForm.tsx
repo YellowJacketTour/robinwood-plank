@@ -48,6 +48,7 @@ export default function ListForm({ account, collection, onListed }: Props) {
         offerTokenId: tokenId.trim(),
         considerationWei: priceWei.toString(),
         expiresAt,
+        feeBps: collection.feeBps,
       });
 
       setStatus("Publishing listing…");
@@ -124,6 +125,10 @@ export default function ListForm({ account, collection, onListed }: Props) {
           ))}
         </select>
       </label>
+
+      <p className="text-center text-[0.65rem] text-foreground/50">
+        {collection.feeBps > 0 ? `${(collection.feeBps / 100).toFixed(2)}% marketplace fee` : "No marketplace fee"}
+      </p>
 
       <button
         type="button"

@@ -1,8 +1,19 @@
 import { Seaport } from "@opensea/seaport-js";
 import { ItemType } from "@opensea/seaport-js/lib/constants";
+import type { Fee } from "@opensea/seaport-js/lib/types";
 import { BrowserProvider } from "ethers";
-import { CHAIN, NATIVE_TOKEN_ADDRESS, SEAPORT_ADDRESS } from "@/lib/constants";
+import { CHAIN, MARKET_FEE_RECIPIENT, NATIVE_TOKEN_ADDRESS, SEAPORT_ADDRESS } from "@/lib/constants";
 import { ensureRobinhoodChain, getEthereumProvider } from "@/lib/wallet";
+
+/**
+ * Marketplace fee for one order, as a Seaport `fees` entry. `feeBps` comes
+ * from the collection's own config (lib/market/collections.ts) — 0 means no
+ * fee item is added at all, not a fee item worth zero.
+ */
+function feesFor(feeBps: number): Fee[] | undefined {
+  if (!feeBps || feeBps <= 0) return undefined;
+  return [{ recipient: MARKET_FEE_RECIPIENT, basisPoints: feeBps }];
+}
 
 /**
  * Client-side Seaport instance bound to the connected wallet. Always
@@ -35,9 +46,17 @@ export type ListInput = {
   considerationWei: string;
   /** ISO 8601; converted to unix seconds for Seaport internally. */
   expiresAt: string;
+  /** From the collection's config (lib/market/collections.ts) — 0 for $PLANK. */
+  feeBps: number;
 };
 
-/** Builds and signs a fixed-price sell order. Never broadcasts anything on its own. */
+/**
+ * Builds and signs a fixed-price sell order. Never broadcasts anything on
+ * its own. When feeBps > 0, seaport-js appends the fee as an additional
+ * consideration item automatically — the seller's `considerationWei` amount
+ * is what they receive net, the fee is added on top for the buyer to pay,
+ * matching how OpenSea's own fee mechanic works.
+ */
 export async function buildListing(accountAddress: string, input: ListInput) {
   const seaport = await getSeaport();
   const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
@@ -58,6 +77,7 @@ export async function buildListing(accountAddress: string, input: ListInput) {
           recipient: accountAddress,
         },
       ],
+      fees: feesFor(input.feeBps),
       endTime,
     },
     accountAddress
@@ -72,6 +92,8 @@ export type OfferInput = {
   /** Omit for a collection-wide offer. */
   considerationTokenId?: string;
   expiresAt: string;
+  /** From the collection's config (lib/market/collections.ts) — 0 for $PLANK. */
+  feeBps: number;
 };
 
 /**
@@ -107,6 +129,7 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
               recipient: accountAddress,
             },
       ],
+      fees: feesFor(input.feeBps),
       endTime,
     },
     accountAddress

@@ -179,3 +179,29 @@ export const MARKET_VAULT_ADDRESS: string | null =
 
 /** Seaport protocol version Marketplank targets. */
 export const SEAPORT_VERSION = "1.6";
+
+/**
+ * Marketplank fee model:
+ * - $PLANK / RobinWood trades: always 0% (see lib/market/collections.ts).
+ * - Every other approved collection: this default unless toggled per-collection.
+ * Fees accrue to MARKET_FEE_RECIPIENT in ETH — no new token, no seed capital
+ * from the owner. Once that treasury holds enough, it funds the Phase 2
+ * vault's seed liquidity. See docs/marketplank/SPEC.md §9.
+ */
+export const MARKET_DEFAULT_FEE_BPS = 50; // 0.5%
+
+/**
+ * Marketplace fee treasury — same wallet already receiving the Trade
+ * section's Uniswap integrator fee (SITE_FEE.recipient). One treasury,
+ * not a new address to track.
+ */
+export const MARKET_FEE_RECIPIENT = SITE_FEE.recipient;
+
+/**
+ * ETH the fee treasury should hold before the Phase 2 vault is deployed and
+ * seeded from it — sized so a ~0.5 ETH trade moves the pool price under
+ * ~5% (constant-product AMMs move price roughly trade-size ÷ reserve-size,
+ * so a 15-20x reserve keeps typical trades from swinging price hard).
+ * Adjust freely; this is a starting estimate, not a hard-coded protocol rule.
+ */
+export const MARKET_VAULT_SEED_TARGET_ETH = 7.5;

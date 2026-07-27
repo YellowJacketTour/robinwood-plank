@@ -162,8 +162,9 @@ Nothing above ships to mainnet with real value until, in order:
 | Vault contract written + tested | ✅ 6/6 tests passing, EVM-target bug (Cancun `mcopy`) caught and fixed |
 | Deploy script | ✅ Written (`scripts/deploy-vault.ts`), not executed |
 | Order-relay persistence | ✅ KV-backed (`@vercel/kv`) with file fallback — needs `KV_REST_API_URL`/`KV_REST_API_TOKEN` from a real Upstash/Vercel KV instance before production traffic should trust it |
-| Fee parameters (mint/redeem/premium bps) + fee recipient | ⏳ Defaults proposed in `scripts/deploy-vault.ts` — confirm before deploying |
-| Initial pool liquidity (ETH + NFTs to seed) | ⏳ Owner decision, not yet set |
+| Marketplace fee model (Seaport listings/offers) | ✅ Decided 2026-07-27: $PLANK always 0%, other collections default 0.5%, toggleable per-collection — see §9 |
+| Vault fee parameters (mint/redeem/premium bps) + fee recipient | ✅ Updated in `scripts/deploy-vault.ts`: 1% / 1% / 2.5%, treasury wallet |
+| Initial pool liquidity (ETH + NFTs to seed) | ✅ Decided 2026-07-27: funded from the fee treasury, not the owner's capital — see §9 for the threshold |
 | Partner collections beyond RobinWood | ⏳ None added — `lib/market/collections.ts` is RobinWood-only until told otherwise |
 | Third-party audit | ⏳ **Scheduled: Fable, at project completion.** Blocks `MARKET_ENABLED=true` regardless of everything else on this list. |
 | Legal/compliance review of the vault as a financial product | ⏳ Not assessed — flagged, not resolved, by design (outside what an AI assistant can sign off on) |
@@ -188,3 +189,47 @@ not cultural flavor, actual product decisions:
 
 Explicitly not adopted: their own contract hygiene. Milady/Bonkler/$LADYS have no published
 audit trail — good incentive-design lessons, not an infrastructure model.
+
+## 9. Fee model & the treasury-funded liquidity engine
+
+Decided 2026-07-27, after explicitly rejecting a proposed alternative (see below).
+
+**Per-collection marketplace fee** (`MarketCollection.feeBps` in `lib/market/collections.ts`):
+- $PLANK / RobinWood: always **0%**. Not a promotional rate — a permanent design decision, since
+  Marketplank exists to serve this community first.
+- Every other approved collection: **0.5%** (`MARKET_DEFAULT_FEE_BPS`) by default, toggleable
+  per-collection (edit the file, redeploy — no admin panel, matching the curated-allowlist
+  discipline already in place for Stage A).
+- Mechanism: seaport-js's native `fees` parameter on `createOrder` — the fee is an additional
+  consideration item Seaport computes and enforces on-chain at fulfillment, the same mechanism
+  OpenSea's own frontend uses. Zero custom fee-calculation code, zero new attack surface.
+
+**Vault fees** (`contracts/MarketplankVault.sol`, set at deploy in `scripts/deploy-vault.ts`):
+1% mint, 1% redeem, 2.5% target-redemption premium — kept below what NFTX charges in production,
+because the vault only has a reason to exist if it's cheaper/faster than a 0%-fee Seaport
+listing for $PLANK specifically.
+
+**What we explicitly did not build:** a proposal to launch a second token ($PLINTER) that would
+accrue marketplace fee flow and double as AMM/lending collateral was rejected. The mechanism —
+an asset whose value depends on marketplace activity, used as collateral *for that same
+marketplace* — is structurally the same failure mode behind Terra/UST and, closer to this
+project's own research, JPEG'd's dependency-driven loss: a downturn in activity and a collapse
+in the collateral's value happen simultaneously, not independently. It would also have been a
+second speculative token layered next to $PLANK, the exact pattern already ruled out for
+Blur-style points programs in the original scoping doc.
+
+**What we built instead — the treasury-funded seeding plan:**
+1. Fees (from non-$PLANK collections, once any exist and trade) accrue in ETH to
+   `MARKET_FEE_RECIPIENT` — the same treasury wallet already receiving the Trade section's
+   Uniswap integrator fee. No new address, no new token.
+2. `GET /api/market/treasury` publicly reports the balance and progress toward
+   `MARKET_VAULT_SEED_TARGET_ETH` (7.5 ETH — sized so a ~0.5 ETH trade moves the vault's pool
+   price under ~5%, since constant-product AMMs move price roughly trade-size ÷ reserve-size).
+   Rendered live in `components/market/TreasuryDashboard.tsx` on the Instant Swap tab — this is
+   the actual "liquidity engine," visible to anyone, growing from real fee flow.
+3. The vault is deployed and seeded from that treasury once it clears the target — not from the
+   owner's personal capital. This is the mechanism that gets the stated goal (marketplace pays
+   for its own growth) without the reflexive-collateral risk of a purpose-built token.
+4. One direct consequence worth naming: since $PLANK trades stay 0% fee, RobinWood's own vault
+   ends up funded by *other* collections' trading activity once Stage B opens — chain-wide
+   marketplace growth compounds directly into a benefit for the community that started it.
