@@ -46,3 +46,6 @@ next-env.d.ts
 data/boards-state.json
 
 .data/
+
+.hardhat-cache/
+.hardhat-artifacts/
