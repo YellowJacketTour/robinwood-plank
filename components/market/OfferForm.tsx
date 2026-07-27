@@ -94,7 +94,10 @@ export default function OfferForm({ account, collection, tokenId, onSubmitted, o
             className="min-w-0 flex-1 bg-transparent py-2.5 text-lg font-semibold text-foreground outline-none"
             autoFocus
           />
-          <span className="text-xs font-bold text-gold-300">ETH</span>
+          {/* Bids are WETH, not ETH — Seaport cannot pull native ETH from an
+              offerer, so saying "ETH" here would be wrong about what the
+              bidder actually needs to hold. */}
+          <span className="text-xs font-bold text-gold-300">WETH</span>
         </div>
 
         <div className="flex gap-1.5">

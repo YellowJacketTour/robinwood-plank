@@ -94,7 +94,11 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
                 {row.kind} · {row.tokenId ? `#${row.tokenId}` : "any"}
               </p>
               <p className="text-[0.65rem] text-foreground/50">
-                {formatTokenAmount(row.priceWei, 18, 4)} Ξ · expires{" "}
+                {/* Listings settle in native ETH; bids are WETH-denominated
+                    because Seaport cannot pull ETH from an offerer. Labelling
+                    both "Ξ" would misstate what actually moves. */}
+                {formatTokenAmount(row.priceWei, 18, 4)}{" "}
+                {row.kind === "Offer" ? "WETH" : "Ξ"} · expires{" "}
                 {new Date(row.expiresAt).toLocaleDateString(undefined, {
                   month: "short",
                   day: "numeric",
