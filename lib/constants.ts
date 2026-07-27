@@ -139,3 +139,26 @@ export const SOCIAL_LINKS = {
 // Official Wood List thread — drop your wallet address in the replies.
 export const WOOD_LIST_TWEET_URL =
   "https://x.com/RobinWoodPlank/status/2079327510458982752";
+
+/**
+ * Marketplank — the on-site NFT marketplace. See docs/marketplank/SPEC.md.
+ *
+ * HARD OFF by default. This is not a soft "coming soon" banner — no order-relay
+ * API, no listing/offer contract, and no vault contract exists yet. Do not flip
+ * this true until every gate in SPEC.md §7 is satisfied, especially the
+ * independent third-party audit. Until then every /market route renders
+ * ComingSoonGate and nothing else.
+ */
+export const MARKET_ENABLED =
+  process.env.NEXT_PUBLIC_MARKET_ENABLED?.trim().toLowerCase() === "true";
+
+/** Seaport contract Marketplank will deploy on Robinhood Chain — unset until deployed. */
+export const SEAPORT_ADDRESS: string | null =
+  process.env.NEXT_PUBLIC_SEAPORT_ADDRESS?.trim() || null;
+
+/** NFTX-style vault/AMM contract for the RobinWood collection — unset until deployed. */
+export const MARKET_VAULT_ADDRESS: string | null =
+  process.env.NEXT_PUBLIC_MARKET_VAULT_ADDRESS?.trim() || null;
+
+/** Seaport protocol version Marketplank targets. */
+export const SEAPORT_VERSION = "1.6";
