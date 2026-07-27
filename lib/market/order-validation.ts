@@ -41,7 +41,24 @@ type RawParameters = {
   consideration: RawItem[];
   startTime: string | number;
   endTime: string | number;
+  orderType?: number | string;
+  totalOriginalConsiderationItems?: number | string;
 };
+
+/**
+ * Seaport OrderType. Only FULL_OPEN is accepted.
+ *
+ * - 1 PARTIAL_OPEN: allows fractional fills, meaningless for a single ERC-721
+ *   and extra state we don't model.
+ * - 2/3 *_RESTRICTED: fulfillment is gated by a `zone` contract we neither
+ *   control nor audit.
+ * - 4 CONTRACT: the offerer is a contract that *generates* the real offer and
+ *   consideration at fulfillment time via generateOrder(). The static items we
+ *   validate here need not be what executes, which would render this entire
+ *   validator decorative. Seaport-js can't even construct these, so nothing
+ *   legitimate on Marketplank produces one.
+ */
+const ORDER_TYPE_FULL_OPEN = 0;
 
 type RawOrder = {
   parameters: RawParameters;
@@ -110,6 +127,35 @@ function assertShape(rawOrder: unknown): RawOrder {
     fail("Order asks for nothing in return.");
   }
   if (!isAddressLike(p.offerer)) fail("Order has an invalid offerer.");
+
+  // Only plain open orders. See ORDER_TYPE_FULL_OPEN for why each of the
+  // others is refused — the CONTRACT type in particular would let the real
+  // items be generated at fulfillment, bypassing everything below.
+  const orderType = p.orderType === undefined ? ORDER_TYPE_FULL_OPEN : toItemType(p.orderType);
+  if (orderType !== ORDER_TYPE_FULL_OPEN) {
+    fail("Only standard open orders are accepted on Marketplank.");
+  }
+
+  // Seaport treats only the first `totalOriginalConsiderationItems` entries as
+  // covered by the signature. Anything beyond that is an unsigned tip, so
+  // counting it toward the price would overstate what the order guarantees.
+  if (p.totalOriginalConsiderationItems !== undefined) {
+    const declared = toBig(
+      p.totalOriginalConsiderationItems,
+      "totalOriginalConsiderationItems"
+    );
+    if (declared !== BigInt(p.consideration.length)) {
+      fail("Order carries payment items outside its signature.");
+    }
+  }
+
+  // An order that hasn't started yet would sit in the book looking live and
+  // revert for every buyer who tried it.
+  const startTime = toBig(p.startTime ?? 0, "startTime");
+  if (Number(startTime) * 1000 > Date.now() + 60_000) {
+    fail("Order is not active yet.");
+  }
+
   return o as RawOrder;
 }
 
@@ -274,7 +320,14 @@ export function validateOfferOrder(
  */
 function assertFeeHonored(total: bigint, feePaid: bigint, collection: MarketCollection): void {
   if (!collection.feeBps || collection.feeBps <= 0) return;
-  const expected = (total * BigInt(Math.round(collection.feeBps))) / BigInt(10_000);
+  // seaport-js runs BigInt(basisPoints) when building the fee item, which
+  // throws on any non-integer. A collection configured with, say, 42.07 bps
+  // would fail every listing attempt with an opaque SDK error — catch it here
+  // with a message that names the actual problem.
+  if (!Number.isInteger(collection.feeBps)) {
+    fail("Collection fee must be a whole number of basis points.");
+  }
+  const expected = (total * BigInt(collection.feeBps)) / BigInt(10_000);
   if (expected === BigInt(0)) return;
   const tolerance = expected / BigInt(100) + BigInt(1); // 1% + 1 wei
   if (feePaid + tolerance < expected) {

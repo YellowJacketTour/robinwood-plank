@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { buildListing } from "@/lib/market/seaport";
-import { parseTokenAmount } from "@/lib/trade";
+import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
 import type { MarketCollection } from "@/lib/market/types";
 
 type Props = {
@@ -25,6 +25,18 @@ export default function ListForm({ account, collection, onListed }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+
+  /**
+   * What actually lands in the seller's wallet. seaport-js deducts the fee
+   * from the consideration rather than adding it to the buyer's price, so
+   * this mirrors that exact arithmetic (floor division, same as on-chain).
+   */
+  const netProceeds = useMemo(() => {
+    const wei = parseTokenAmount(priceEth, 18);
+    if (wei === null || wei <= BigInt(0)) return null;
+    const fee = (wei * BigInt(Math.round(collection.feeBps))) / BigInt(10_000);
+    return formatTokenAmount(wei - fee, 18, 6);
+  }, [priceEth, collection.feeBps]);
 
   const submit = async () => {
     setError(null);
@@ -126,8 +138,18 @@ export default function ListForm({ account, collection, onListed }: Props) {
         </select>
       </label>
 
+      {/* The fee comes out of the seller's proceeds, not on top of the buyer's
+          price — so quoting only the rate would leave a seller guessing what
+          actually lands in their wallet. */}
       <p className="text-center text-[0.65rem] text-foreground/50">
-        {collection.feeBps > 0 ? `${(collection.feeBps / 100).toFixed(2)}% marketplace fee` : "No marketplace fee"}
+        {collection.feeBps > 0 ? (
+          <>
+            {(collection.feeBps / 100).toFixed(2)}% fee · you receive{" "}
+            <span className="text-foreground/75">{netProceeds ?? "—"} Ξ</span>
+          </>
+        ) : (
+          "No marketplace fee — you receive the full price"
+        )}
       </p>
 
       <button

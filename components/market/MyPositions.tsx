@@ -58,6 +58,15 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
         const raw = row.rawOrder as { parameters: Parameters<typeof seaport.cancelOrders>[0][number] };
         const tx = seaport.cancelOrders([raw.parameters], account);
         await tx.transact();
+
+        // Cancelling on-chain doesn't remove the order from the relay, so
+        // without this the dead listing keeps showing and buyers waste gas
+        // reverting on it. The endpoint re-checks Seaport itself before
+        // removing anything, so this is a hint, not an authorization.
+        await fetch(`/api/market/orders?id=${encodeURIComponent(row.id)}`, {
+          method: "DELETE",
+        }).catch(() => {});
+
         onChanged();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not cancel.");

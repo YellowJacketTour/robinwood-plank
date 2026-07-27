@@ -3,12 +3,17 @@ import { getCollection } from "@/lib/market/collections";
 import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
 import {
   countOrdersByMaker,
+  getListingRawOrder,
   getListings,
+  getOfferRawOrder,
   getOffers,
   putListing,
   putOffer,
+  removeListing,
+  removeOffer,
   totalOrderCount,
 } from "@/lib/market/orders-store";
+import { getOrderLiveness } from "@/lib/market/order-status";
 import {
   OrderValidationError,
   validateListingOrder,
@@ -49,6 +54,59 @@ export async function GET(req: Request) {
   const items =
     kind === "offer" ? await getOffers(collectionSlug) : await getListings(collectionSlug);
   return publicJson({ kind, items });
+}
+
+/**
+ * Drop an order that is already dead on-chain.
+ *
+ * Deliberately not "delete my order": that would let anyone remove anyone
+ * else's listing. Instead the caller supplies only an id, and the order is
+ * removed *only if Seaport itself reports it cancelled, filled, or invalidated
+ * by a counter bump*. Nothing is taken on trust, so this cannot be used to
+ * grief a competitor's listing — you would have to cancel it on-chain first,
+ * which only its offerer can do.
+ *
+ * Fails closed when the RPC is unreachable: an unavailable node is not
+ * evidence that an order is dead.
+ */
+export async function DELETE(req: Request) {
+  try {
+    const limited = rateLimit(req, { key: "market-orders-del", limit: 60, windowMs: 60_000 });
+    if (limited) return limited;
+
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+    if (!id) {
+      return publicJson({ error: "BAD_ID", message: "id is required." }, 400);
+    }
+
+    const isOffer = id.startsWith("offer-");
+    const rawOrder = isOffer ? await getOfferRawOrder(id) : await getListingRawOrder(id);
+    if (!rawOrder) {
+      // Already gone — nothing to do, and saying so is not an error.
+      return publicJson({ removed: false, reason: "not-found" });
+    }
+
+    const liveness = await getOrderLiveness(rawOrder);
+    if (!liveness.known) {
+      return publicJson(
+        { error: "UNVERIFIED", message: "Couldn't confirm order status on-chain." },
+        503
+      );
+    }
+    if (!liveness.dead) {
+      return publicJson(
+        { error: "STILL_LIVE", message: "That order is still fillable." },
+        409
+      );
+    }
+
+    if (isOffer) await removeOffer(id);
+    else await removeListing(id);
+    return publicJson({ removed: true, reason: liveness.reason });
+  } catch (err) {
+    return publicError(err, "Unexpected error removing order.");
+  }
 }
 
 /**
