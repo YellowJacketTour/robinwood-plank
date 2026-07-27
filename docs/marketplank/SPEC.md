@@ -144,11 +144,29 @@ Nothing above ships to mainnet with real value until, in order:
    are fixed and published before any deposit is accepted. This one **is** a fresh deployment
    and does not inherit anyone else's audit — see gate 3.
 3. **An independent third-party audit** covers the vault/AMM contract and the order-relay API
-   (the two pieces that are genuinely new code, unlike Seaport). This is non-negotiable per the
-   standing project rule established after the swap-widget incident.
+   (the two pieces that are genuinely new code, unlike Seaport). Confirmed 2026-07-27: this will
+   be run via Fable at project completion, once every other piece below is finished and stable —
+   not a rolling review mid-build. This is non-negotiable per the standing project rule
+   established after the swap-widget incident, and it doesn't move regardless of how much of the
+   rest of the build is done.
 4. `MARKET_ENABLED` (see `lib/constants.ts`) flips from `false` to `true`. Until then, every
    route in this spec renders `ComingSoonGate` and nothing else — same pattern as
    `TRADE_PAUSED` gating the existing Trade section.
+
+### Readiness checklist (updated 2026-07-27)
+
+| Item | Status |
+|---|---|
+| Seaport + ConduitController on Robinhood Chain | ✅ Confirmed live, verified — no action needed |
+| Deployer wallet funded with ETH | ✅ Confirmed — owner has ETH ready |
+| Vault contract written + tested | ✅ 6/6 tests passing, EVM-target bug (Cancun `mcopy`) caught and fixed |
+| Deploy script | ✅ Written (`scripts/deploy-vault.ts`), not executed |
+| Order-relay persistence | ✅ KV-backed (`@vercel/kv`) with file fallback — needs `KV_REST_API_URL`/`KV_REST_API_TOKEN` from a real Upstash/Vercel KV instance before production traffic should trust it |
+| Fee parameters (mint/redeem/premium bps) + fee recipient | ⏳ Defaults proposed in `scripts/deploy-vault.ts` — confirm before deploying |
+| Initial pool liquidity (ETH + NFTs to seed) | ⏳ Owner decision, not yet set |
+| Partner collections beyond RobinWood | ⏳ None added — `lib/market/collections.ts` is RobinWood-only until told otherwise |
+| Third-party audit | ⏳ **Scheduled: Fable, at project completion.** Blocks `MARKET_ENABLED=true` regardless of everything else on this list. |
+| Legal/compliance review of the vault as a financial product | ⏳ Not assessed — flagged, not resolved, by design (outside what an AI assistant can sign off on) |
 
 ## 8. What Remilia/Milady contributed to this design
 
