@@ -204,6 +204,91 @@ test("accepts a WETH collection-wide bid and derives its amount", () => {
   assert.equal(d.tokenId, undefined, "collection-wide bid has no single token id");
 });
 
+// ── Second audit pass (2026-07-27, round 2) ─────────────────────────────────
+
+test("ROUND 2: rejects a CONTRACT order, whose items are generated at fulfillment", () => {
+  // Seaport orderType 4 means the offerer is a contract that produces the
+  // real offer/consideration via generateOrder() when the trade executes.
+  // Validating the static JSON tells you nothing about what will actually
+  // move, so the whole validator is bypassed unless this is refused.
+  const contractOrder = listing();
+  (contractOrder.parameters as Record<string, unknown>).orderType = 4;
+  assert.throws(
+    () => validateListingOrder(contractOrder, freeCollection),
+    OrderValidationError
+  );
+});
+
+test("ROUND 2: rejects zone-restricted orders we cannot reason about", () => {
+  for (const orderType of [2, 3]) {
+    const restricted = listing();
+    (restricted.parameters as Record<string, unknown>).orderType = orderType;
+    assert.throws(
+      () => validateListingOrder(restricted, freeCollection),
+      OrderValidationError,
+      `orderType ${orderType} must be rejected`
+    );
+  }
+});
+
+test("ROUND 2: accepts a plain FULL_OPEN order", () => {
+  const open = listing();
+  (open.parameters as Record<string, unknown>).orderType = 0;
+  const d = validateListingOrder(open, freeCollection);
+  assert.equal(d.priceWei, "1000000000000000000");
+});
+
+test("ROUND 2: rejects an order that has not started yet", () => {
+  // Would sit in the book looking live, then revert for every buyer.
+  const notYet = listing();
+  notYet.parameters.startTime = String(Math.floor(Date.now() / 1000) + 3600);
+  assert.throws(() => validateListingOrder(notYet, freeCollection), OrderValidationError);
+});
+
+test("ROUND 2: rejects consideration items beyond the signed set", () => {
+  // Seaport only treats the first `totalOriginalConsiderationItems` entries as
+  // covered by the signature; anything past that is an unsigned tip. Summing
+  // those into the displayed price would misreport what the order guarantees.
+  const tipped = listing();
+  (tipped.parameters as Record<string, unknown>).totalOriginalConsiderationItems = 1;
+  tipped.parameters.consideration.push({
+    itemType: 0,
+    token: NATIVE,
+    identifierOrCriteria: "0",
+    startAmount: "5000000000000000000",
+    endAmount: "5000000000000000000",
+    recipient: ATTACKER,
+  });
+  assert.throws(() => validateListingOrder(tipped, freeCollection), OrderValidationError);
+});
+
+test("ROUND 2: a fractional fee rate is rejected rather than crashing the SDK", () => {
+  // seaport-js does BigInt(basisPoints) internally, which throws on any
+  // non-integer. A collection configured with e.g. 42.07 bps would break
+  // every listing attempt with an opaque error.
+  //
+  // Uses an order that pays a *correct* fee for the rounded rate, so this can
+  // only pass because the fractional rate itself is refused — not because the
+  // fee happens to be missing.
+  const fractional: MarketCollection = { ...freeCollection, feeBps: 42.07 };
+  const withFee = listing();
+  withFee.parameters.consideration[0].startAmount = "995800000000000000";
+  withFee.parameters.consideration[0].endAmount = "995800000000000000";
+  withFee.parameters.consideration.push({
+    itemType: 0,
+    token: NATIVE,
+    identifierOrCriteria: "0",
+    startAmount: "4200000000000000",
+    endAmount: "4200000000000000",
+    recipient: TREASURY,
+  });
+  // Sanity: the same order is fine at an integer rate.
+  assert.doesNotThrow(() =>
+    validateListingOrder(withFee, { ...freeCollection, feeBps: 42 })
+  );
+  assert.throws(() => validateListingOrder(withFee, fractional), OrderValidationError);
+});
+
 test("rejects a bid that would deliver the NFT to someone other than the bidder", () => {
   const rerouted = {
     parameters: {

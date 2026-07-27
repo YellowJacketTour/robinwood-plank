@@ -1,7 +1,8 @@
 # Marketplank — Engineering & UI/UX Spec
 
-Status: **Phase 0 — scaffold + design, no live contracts.** Nothing in this doc describes
-software that moves real funds yet. See "Go-live gates" at the end before that changes.
+Status: **Phase 1 built and audited internally; nothing deployed with real value.** The
+exchange layer runs against the already-audited Seaport deployment. The Phase 2 vault is
+written and tested but NOT deployed and NOT third-party audited. See "Go-live gates".
 
 Background/competitive research lives in the scoping artifact from the planning session
 (OpenSea/Seaport, Blur/Blend, Magic Eden, NFTX, Sudoswap, NFT-lending field, Remilia/Milady).
@@ -100,11 +101,14 @@ offer, and cancel an active listing/offer (`MyPositions.tsx`, via `seaport.cance
 wired through `lib/market/seaport.ts` and the order-relay API. Verified locally end-to-end
 (tabs, empty states, wallet-gated actions) with no console errors.
 
-**Known gap before this can hold real value:** `orders-store.ts` persists to a JSON file on
-disk plus an in-memory `globalThis` cache — this survives a single warm serverless instance but
-is not durable storage on Vercel (ephemeral filesystem, no cross-instance sharing). Fine for
-local/testnet development; needs a real store (Vercel KV, Upstash Redis, or equivalent) before
-any listing placed through it should be trusted to still be there tomorrow.
+Orders are stored in Vercel KV / Upstash when `KV_REST_API_URL` and `KV_REST_API_TOKEN` are
+set, falling back to an ephemeral file + memory store otherwise. Production is KV-backed.
+
+Every displayed field is re-derived from the signed order rather than taken from the client
+(`lib/market/order-validation.ts`) — see the audit for why that distinction is the difference
+between a marketplace and a way to rob its own users. A `DELETE` route removes orders that
+Seaport itself reports cancelled, filled, or counter-invalidated, so a cancelled listing stops
+being offered to buyers without letting anyone delete a listing they do not own.
 
 ## 6. Phase 2 (Instant Swap) data flow
 
@@ -166,7 +170,7 @@ Nothing above ships to mainnet with real value until, in order:
 | Vault fee parameters (mint/redeem/premium bps) + fee recipient | ✅ Updated in `scripts/deploy-vault.ts`: 1% / 1% / 2.5%, treasury wallet |
 | Initial pool liquidity (ETH + NFTs to seed) | ✅ Decided 2026-07-27: funded from the fee treasury, not the owner's capital — see §9 for the threshold |
 | Partner collections beyond RobinWood | ⏳ None added — `lib/market/collections.ts` is RobinWood-only until told otherwise |
-| Internal adversarial review | ✅ Done 2026-07-27 — 10 findings (2 critical, 4 high) found, fixed, and pinned by regression tests. See `AUDIT-2026-07-27.md` |
+| Internal adversarial review | ✅ Two passes, 2026-07-27 — 16 findings (2 critical, 6 high) found, fixed, and pinned by 36 regression tests. See `AUDIT-2026-07-27.md` |
 | Third-party audit | ⏳ **Still required.** The internal review found serious defects precisely because it went looking adversarially, but it was the same author reviewing their own code and shares its blind spots. Blocks `MARKET_ENABLED=true` regardless of everything else on this list. |
 | Legal/compliance review of the vault as a financial product | ⏳ Not assessed — flagged, not resolved, by design (outside what an AI assistant can sign off on) |
 
