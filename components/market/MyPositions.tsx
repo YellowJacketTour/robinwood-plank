@@ -1,16 +1,117 @@
 "use client";
 
-/**
- * Desktop: table (item, type, price, expiry, action).
- * Mobile: same data as stacked cards — see docs/marketplank/SPEC.md §4.
- * Empty until wallet connection + order-relay API exist.
- */
-export default function MyPositions() {
-  return (
-    <div className="wood-ledger p-3">
+import { useCallback, useState } from "react";
+import { getSeaport } from "@/lib/market/seaport";
+import { formatTokenAmount } from "@/lib/trade";
+import type { Listing } from "@/lib/market/types";
+
+type Props = {
+  account: string;
+  listings: Array<Listing & { rawOrder: unknown }>;
+  offers: Array<Listing & { rawOrder: unknown }>;
+  onChanged: () => void;
+};
+
+type Row = {
+  id: string;
+  kind: "Listing" | "Offer";
+  tokenId?: string;
+  priceWei: string;
+  expiresAt: string;
+  rawOrder: unknown;
+};
+
+/** Desktop: table. Mobile: the same rows stacked as cards — SPEC.md §4. */
+export default function MyPositions({ account, listings, offers, onChanged }: Props) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const mine: Row[] = [
+    ...listings
+      .filter((l) => l.maker.toLowerCase() === account.toLowerCase())
+      .map((l) => ({
+        id: l.id,
+        kind: "Listing" as const,
+        tokenId: l.tokenId,
+        priceWei: l.priceWei,
+        expiresAt: l.expiresAt,
+        rawOrder: l.rawOrder,
+      })),
+    ...offers
+      .filter((o) => o.maker?.toLowerCase() === account.toLowerCase())
+      .map((o) => ({
+        id: o.id,
+        kind: "Offer" as const,
+        tokenId: o.tokenId,
+        priceWei: o.priceWei,
+        expiresAt: o.expiresAt,
+        rawOrder: o.rawOrder,
+      })),
+  ];
+
+  const cancel = useCallback(
+    async (row: Row) => {
+      setError(null);
+      try {
+        setBusyId(row.id);
+        const seaport = await getSeaport();
+        const raw = row.rawOrder as { parameters: Parameters<typeof seaport.cancelOrders>[0][number] };
+        const tx = seaport.cancelOrders([raw.parameters], account);
+        await tx.transact();
+        onChanged();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not cancel.");
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [account, onChanged]
+  );
+
+  if (mine.length === 0) {
+    return (
       <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/40 px-4 py-8 text-center text-sm text-foreground/60">
-        Connect your wallet to see your listings, offers, and vault positions.
+        Nothing active.
       </p>
+    );
+  }
+
+  return (
+    <div className="wood-ledger overflow-hidden">
+      {error && (
+        <p className="px-3 pt-2 text-center text-xs text-red-300" role="alert">
+          {error}
+        </p>
+      )}
+      <ul>
+        {mine.map((row) => (
+          <li
+            key={row.id}
+            className="flex items-center justify-between gap-3 border-t border-gold-500/15 px-3 py-2.5 first:border-t-0"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-foreground">
+                {row.kind} · {row.tokenId ? `#${row.tokenId}` : "any"}
+              </p>
+              <p className="text-[0.65rem] text-foreground/50">
+                {formatTokenAmount(row.priceWei, 18, 4)} Ξ · expires{" "}
+                {new Date(row.expiresAt).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                })}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={busyId === row.id}
+              onClick={() => cancel(row)}
+              className="min-h-9 shrink-0 rounded-md border border-red-500/30 px-3 text-xs font-bold text-red-300 transition hover:border-red-400 disabled:opacity-50"
+            >
+              {busyId === row.id ? "…" : "Cancel"}
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

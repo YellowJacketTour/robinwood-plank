@@ -6,6 +6,7 @@ type Props = {
   collections: MarketCollection[];
   onBuy?: (listing: Listing) => void;
   onOffer?: (listing: Listing) => void;
+  buyLabel?: string;
   emptyMessage?: string;
 };
 
@@ -14,6 +15,7 @@ export default function ListingGrid({
   collections,
   onBuy,
   onOffer,
+  buyLabel,
   emptyMessage = "No listings yet.",
 }: Props) {
   if (listings.length === 0) {
@@ -36,6 +38,7 @@ export default function ListingGrid({
             collection={collection}
             onBuy={onBuy}
             onOffer={onOffer}
+            buyLabel={buyLabel}
           />
         );
       })}

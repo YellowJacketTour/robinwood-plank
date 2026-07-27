@@ -94,12 +94,11 @@ forge one) — not a custody system, not a matching engine. It exists because Se
 need *somewhere* to live before they're fulfilled on-chain; OpenSea's own "orderbook" plays the
 identical role.
 
-**Status:** `buildListing`/`buildOffer`/`fulfillOrder` (`lib/market/seaport.ts`) and the
-listing side of the relay (store, API, `ListForm.tsx`, buy button in `MarketView.tsx`) are
-built and functional against the live Seaport deployment. The offer *backend* supports it
-(`buildOffer`, the API's `offer` kind) but there's no offer-submission UI component yet —
-`ListingCard`'s "Offer" button is present but not wired to `buildOffer` — that's the next
-concrete slice of frontend work, not a redesign.
+**Status:** the full Phase 1 loop is built and functional against the live Seaport deployment —
+list (`ListForm.tsx`), buy, make an item or collection-wide offer (`OfferForm.tsx`), accept an
+offer, and cancel an active listing/offer (`MyPositions.tsx`, via `seaport.cancelOrders`), all
+wired through `lib/market/seaport.ts` and the order-relay API. Verified locally end-to-end
+(tabs, empty states, wallet-gated actions) with no console errors.
 
 **Known gap before this can hold real value:** `orders-store.ts` persists to a JSON file on
 disk plus an in-memory `globalThis` cache — this survives a single warm serverless instance but
@@ -119,6 +118,13 @@ Sell         →  deposit specific NFT → mint vTOKEN → swap vTOKEN → ETH o
 This is the NFTX pattern from the scoping doc, scoped initially to the RobinWood collection
 only — a second collection only gets a vault once there's real demand for one, not
 speculatively.
+
+**Status:** `contracts/MarketplankVault.sol` is written and compiles clean (Hardhat,
+`npx hardhat compile`) — deposit/mint, buy/sell shares via a constant-product AMM, and
+random/targeted redemption are all implemented, with a hard ceiling on fees baked into the
+constructor so no deploy can accidentally set a predatory rate. It is explicitly marked
+UNAUDITED in its own header and is not deployed anywhere. This is the one piece of the whole
+build that's genuinely new, unaudited code — see gate 3 below before it goes near mainnet.
 
 ## 7. Go-live gates
 

@@ -23,7 +23,8 @@ export type Listing = {
   id: string;
   collectionSlug: string;
   tokenId: string;
-  seller: string;
+  /** Wallet that placed this order — the seller for a listing. */
+  maker: string;
   priceWei: string;
   /** ISO 8601 */
   expiresAt: string;
@@ -37,7 +38,8 @@ export type Offer = {
   tokenId?: string;
   /** Present when the offer targets a set of traits rather than one token or the whole collection. */
   traits?: Array<{ traitType: string; value: string }>;
-  buyer: string;
+  /** Wallet that placed this order — the buyer for an offer. */
+  maker: string;
   priceWei: string;
   expiresAt: string;
 };

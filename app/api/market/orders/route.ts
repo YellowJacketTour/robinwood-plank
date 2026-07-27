@@ -86,7 +86,7 @@ export async function POST(req: Request) {
         id,
         collectionSlug: body.collectionSlug,
         tokenId: body.tokenId,
-        seller: body.maker,
+        maker: body.maker,
         priceWei: body.priceWei,
         expiresAt: body.expiresAt,
         kind: "fixed",
@@ -100,7 +100,7 @@ export async function POST(req: Request) {
       collectionSlug: body.collectionSlug,
       tokenId: body.tokenId,
       traits: body.traits,
-      buyer: body.maker,
+      maker: body.maker,
       priceWei: body.priceWei,
       expiresAt: body.expiresAt,
     };
