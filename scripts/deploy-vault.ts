@@ -20,12 +20,11 @@
  */
 import { ethers } from "hardhat";
 
-// Same treasury wallet already receiving the Trade section's Uniswap
-// integrator fee (lib/constants.ts SITE_FEE.recipient) — reused here as a
-// default so vault fees land in the wallet already being watched/managed,
-// not a new address to track. Override with MARKET_FEE_RECIPIENT if the
-// vault should pay a different wallet.
-const DEFAULT_FEE_RECIPIENT = "0xfa987d386c4f61b27cb67a1e4e1239866fe8d9ba";
+// Marketplank's dedicated treasury wallet (lib/constants.ts
+// MARKET_FEE_RECIPIENT) — separate from the Trade section's Uniswap
+// integrator fee wallet. Override with the MARKET_FEE_RECIPIENT env var if
+// the vault should pay a different address for some reason.
+const DEFAULT_FEE_RECIPIENT = "0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8";
 
 // Kept deliberately lower than NFTX's typical production rates: the vault's
 // whole value proposition is being faster than a Seaport listing, and

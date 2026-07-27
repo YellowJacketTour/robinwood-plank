@@ -220,8 +220,10 @@ Blur-style points programs in the original scoping doc.
 
 **What we built instead — the treasury-funded seeding plan:**
 1. Fees (from non-$PLANK collections, once any exist and trade) accrue in ETH to
-   `MARKET_FEE_RECIPIENT` — the same treasury wallet already receiving the Trade section's
-   Uniswap integrator fee. No new address, no new token.
+   `MARKET_FEE_RECIPIENT` — Marketplank's own dedicated treasury wallet
+   (`0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8`, set 2026-07-27), separate from the Trade
+   section's Uniswap integrator fee wallet. No new token, just a clean separation of which
+   wallet is accountable for which product's revenue.
 2. `GET /api/market/treasury` publicly reports the balance and progress toward
    `MARKET_VAULT_SEED_TARGET_ETH` (7.5 ETH — sized so a ~0.5 ETH trade moves the vault's pool
    price under ~5%, since constant-product AMMs move price roughly trade-size ÷ reserve-size).
