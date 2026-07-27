@@ -191,11 +191,12 @@ export const SEAPORT_VERSION = "1.6";
 export const MARKET_DEFAULT_FEE_BPS = 50; // 0.5%
 
 /**
- * Marketplace fee treasury — same wallet already receiving the Trade
- * section's Uniswap integrator fee (SITE_FEE.recipient). One treasury,
- * not a new address to track.
+ * Marketplank's dedicated treasury wallet — separate from SITE_FEE.recipient
+ * (the Trade section's Uniswap integrator fee wallet). Every marketplace fee
+ * and vault fee accrues here. Set 2026-07-27; keep this the single source of
+ * truth for the address rather than hard-coding it elsewhere.
  */
-export const MARKET_FEE_RECIPIENT = SITE_FEE.recipient;
+export const MARKET_FEE_RECIPIENT = "0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8";
 
 /**
  * ETH the fee treasury should hold before the Phase 2 vault is deployed and
