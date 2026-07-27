@@ -6,12 +6,30 @@ import type { Listing, Offer } from "@/lib/market/types";
  * Store-and-forward for signed Seaport orders — not custody, not a matching
  * engine. Orders are EIP-712 signed by the maker before they ever reach this
  * store, so the server cannot forge or alter one; it can only lose or serve
- * them. Same file+memory persistence pattern as lib/boards-store.ts.
+ * them.
+ *
+ * Backend: Vercel KV when KV_REST_API_URL / KV_REST_API_TOKEN are set (the
+ * durable, cross-instance-safe path — set those env vars whenever you have
+ * a KV/Upstash instance ready). Falls back to a file + in-memory globalThis
+ * cache otherwise, same pattern as lib/boards-store.ts — fine for local
+ * dev, not durable on Vercel's serverless filesystem in production.
  */
 type OrdersState = {
   listings: Record<string, Listing & { rawOrder: unknown }>;
   offers: Record<string, Offer & { rawOrder: unknown }>;
 };
+
+const KV_KEY = "plank:market:orders";
+
+function hasKv(): boolean {
+  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+}
+
+function emptyState(): OrdersState {
+  return { listings: {}, offers: {} };
+}
+
+// --- File + memory fallback (dev / no KV configured) -----------------------
 
 type GlobalOrders = { __plankMarketOrders?: OrdersState };
 
@@ -19,13 +37,9 @@ function g(): GlobalOrders {
   return globalThis as GlobalOrders;
 }
 
-function emptyState(): OrdersState {
-  return { listings: {}, offers: {} };
-}
-
 const DATA_PATH = path.join(process.cwd(), ".data", "market-orders.json");
 
-async function load(): Promise<OrdersState> {
+async function loadFromFile(): Promise<OrdersState> {
   if (g().__plankMarketOrders) return g().__plankMarketOrders!;
   try {
     const raw = await fs.readFile(DATA_PATH, "utf8");
@@ -36,7 +50,7 @@ async function load(): Promise<OrdersState> {
   return g().__plankMarketOrders!;
 }
 
-async function persist(state: OrdersState): Promise<void> {
+async function persistToFile(state: OrdersState): Promise<void> {
   g().__plankMarketOrders = state;
   try {
     await fs.mkdir(path.dirname(DATA_PATH), { recursive: true });
@@ -45,6 +59,29 @@ async function persist(state: OrdersState): Promise<void> {
     // Best-effort — the in-memory copy on globalThis still serves this
     // warm instance even if disk persistence fails (e.g. read-only fs).
   }
+}
+
+// --- Vercel KV backend -------------------------------------------------
+
+async function loadFromKv(): Promise<OrdersState> {
+  const { kv } = await import("@vercel/kv");
+  const state = await kv.get<OrdersState>(KV_KEY);
+  return state ?? emptyState();
+}
+
+async function persistToKv(state: OrdersState): Promise<void> {
+  const { kv } = await import("@vercel/kv");
+  await kv.set(KV_KEY, state);
+}
+
+// --- Backend-agnostic API ----------------------------------------------
+
+async function load(): Promise<OrdersState> {
+  return hasKv() ? loadFromKv() : loadFromFile();
+}
+
+async function persist(state: OrdersState): Promise<void> {
+  return hasKv() ? persistToKv(state) : persistToFile(state);
 }
 
 function pruneExpired(state: OrdersState): OrdersState {

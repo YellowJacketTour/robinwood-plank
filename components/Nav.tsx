@@ -20,8 +20,7 @@ function isRoute(href: string) {
 }
 
 function isActive(href: string, pathname: string) {
-  if (href === "/gallery") return pathname === "/gallery";
-  return false;
+  return href.startsWith("/") && pathname === href;
 }
 
 export default function Nav() {

@@ -20,18 +20,45 @@
  */
 import { ethers } from "hardhat";
 
+// Same treasury wallet already receiving the Trade section's Uniswap
+// integrator fee (lib/constants.ts SITE_FEE.recipient) — reused here as a
+// default so vault fees land in the wallet already being watched/managed,
+// not a new address to track. Override with MARKET_FEE_RECIPIENT if the
+// vault should pay a different wallet.
+const DEFAULT_FEE_RECIPIENT = "0xfa987d386c4f61b27cb67a1e4e1239866fe8d9ba";
+
+// NFTX charges ~ 0.1-1 ETH-equivalent flat fees per action on mainnet; these
+// bps defaults are a starting proposal scaled to a meme-collection's likely
+// price range, not a researched-optimal number. CONFIRM before deploying —
+// they are immutable the moment this script runs.
+const DEFAULT_MINT_FEE_BPS = 250; // 2.5%
+const DEFAULT_REDEEM_FEE_BPS = 250; // 2.5%
+const DEFAULT_TARGET_PREMIUM_BPS = 500; // 5% extra to pick a specific token ID
+
 async function main() {
   const NFT_COLLECTION_ADDRESS = process.env.MARKET_COLLECTION_ADDRESS;
-  const FEE_RECIPIENT = process.env.MARKET_FEE_RECIPIENT;
-  if (!NFT_COLLECTION_ADDRESS || !FEE_RECIPIENT) {
-    throw new Error(
-      "Set MARKET_COLLECTION_ADDRESS and MARKET_FEE_RECIPIENT env vars before deploying."
-    );
+  if (!NFT_COLLECTION_ADDRESS) {
+    throw new Error("Set MARKET_COLLECTION_ADDRESS before deploying.");
   }
+  const FEE_RECIPIENT = process.env.MARKET_FEE_RECIPIENT || DEFAULT_FEE_RECIPIENT;
 
-  const MINT_FEE_BPS = 250; // 2.5%
-  const REDEEM_FEE_BPS = 250; // 2.5%
-  const TARGET_PREMIUM_BPS = 500; // 5%
+  const MINT_FEE_BPS = process.env.MARKET_MINT_FEE_BPS
+    ? Number(process.env.MARKET_MINT_FEE_BPS)
+    : DEFAULT_MINT_FEE_BPS;
+  const REDEEM_FEE_BPS = process.env.MARKET_REDEEM_FEE_BPS
+    ? Number(process.env.MARKET_REDEEM_FEE_BPS)
+    : DEFAULT_REDEEM_FEE_BPS;
+  const TARGET_PREMIUM_BPS = process.env.MARKET_TARGET_PREMIUM_BPS
+    ? Number(process.env.MARKET_TARGET_PREMIUM_BPS)
+    : DEFAULT_TARGET_PREMIUM_BPS;
+
+  console.log("Deploying with:", {
+    NFT_COLLECTION_ADDRESS,
+    FEE_RECIPIENT,
+    MINT_FEE_BPS,
+    REDEEM_FEE_BPS,
+    TARGET_PREMIUM_BPS,
+  });
 
   const Vault = await ethers.getContractFactory("MarketplankVault");
   const vault = await Vault.deploy(

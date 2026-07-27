@@ -130,6 +130,7 @@ export const NAV_LINKS = [
   { href: "#boards", label: "Boards" },
   { href: "#airdrop", label: "Airdrop" },
   { href: "/gallery", label: "Gallery" },
+  { href: "/market", label: "Market" },
 ] as const;
 
 export const SOCIAL_LINKS = {
