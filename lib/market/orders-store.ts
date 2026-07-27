@@ -112,6 +112,21 @@ export async function getOffers(
   return collectionSlug ? all.filter((o) => o.collectionSlug === collectionSlug) : all;
 }
 
+/** Total live orders across both books — used to cap storage growth. */
+export async function totalOrderCount(): Promise<number> {
+  const state = pruneExpired(await load());
+  return Object.keys(state.listings).length + Object.keys(state.offers).length;
+}
+
+/** Live orders from one maker — used to stop a single wallet flooding the book. */
+export async function countOrdersByMaker(maker: string): Promise<number> {
+  const state = pruneExpired(await load());
+  const m = maker.toLowerCase();
+  const listings = Object.values(state.listings).filter((l) => l.maker.toLowerCase() === m);
+  const offers = Object.values(state.offers).filter((o) => o.maker.toLowerCase() === m);
+  return listings.length + offers.length;
+}
+
 export async function putListing(listing: Listing, rawOrder: unknown): Promise<void> {
   const state = pruneExpired(await load());
   state.listings[listing.id] = { ...listing, rawOrder };

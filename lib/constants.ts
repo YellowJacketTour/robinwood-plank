@@ -206,3 +206,18 @@ export const MARKET_FEE_RECIPIENT = "0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8"
  * Adjust freely; this is a starting estimate, not a hard-coded protocol rule.
  */
 export const MARKET_VAULT_SEED_TARGET_ETH = 7.5;
+
+/**
+ * WETH on Robinhood Chain — the currency all offers/bids are denominated in.
+ *
+ * Seaport cannot pull native ETH from an offerer at fulfillment time, so a bid
+ * has to be made in an ERC-20. Our offer flow originally used native ETH,
+ * which could never have filled; this address is the fix.
+ *
+ * HARD-CODED ON PURPOSE. Verified 2026-07-27 by direct RPC call:
+ * symbol() = "WETH", decimals() = 18, verified proxy over Arbitrum's aeWETH.
+ * At least three impostor contracts on this chain also report the symbol
+ * "WETH" (one with zero supply, one unverified, one an LP token), so this must
+ * never be resolved by symbol lookup or off-chain search.
+ */
+export const MARKET_OFFER_CURRENCY = "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73";
