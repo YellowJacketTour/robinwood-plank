@@ -152,9 +152,25 @@ export const WOOD_LIST_TWEET_URL =
 export const MARKET_ENABLED =
   process.env.NEXT_PUBLIC_MARKET_ENABLED?.trim().toLowerCase() === "true";
 
-/** Seaport contract Marketplank will deploy on Robinhood Chain — unset until deployed. */
-export const SEAPORT_ADDRESS: string | null =
-  process.env.NEXT_PUBLIC_SEAPORT_ADDRESS?.trim() || null;
+/**
+ * Seaport 1.6's canonical CREATE2 deployment address — identical bytecode on
+ * every EVM chain it's deployed to, byte-for-byte the same contract OpenSea,
+ * Trail of Bits, and Code4rena audited. Confirmed live AND verified on
+ * Robinhood Chain via Blockscout (is_contract, is_verified, name: "Seaport")
+ * on 2026-07-27 — no deploy needed, this is an integration, not a fork.
+ * @see https://github.com/ProjectOpenSea/seaport/blob/main/docs/Deployment.md
+ */
+export const SEAPORT_ADDRESS =
+  process.env.NEXT_PUBLIC_SEAPORT_ADDRESS?.trim() ||
+  "0x0000000000000068F116a894984e2DB1123eB395";
+
+/**
+ * Seaport's ConduitController — same deterministic-deployment story as
+ * Seaport itself. Confirmed live and verified on Robinhood Chain alongside it.
+ */
+export const CONDUIT_CONTROLLER_ADDRESS =
+  process.env.NEXT_PUBLIC_CONDUIT_CONTROLLER_ADDRESS?.trim() ||
+  "0x00000000F9490004C11Cef243f5400493c00Ad63";
 
 /** NFTX-style vault/AMM contract for the RobinWood collection — unset until deployed. */
 export const MARKET_VAULT_ADDRESS: string | null =

@@ -27,22 +27,31 @@ mistake this project already made once (the pre-fix Trade section); not repeatin
 ## 2. Information architecture
 
 - Same Next.js app, same layout, same nav — no subdomain (rationale in the scoping doc).
-- `/market` is a client route with tab state in the URL (`?tab=swap`) so links are shareable
-  and back/forward works.
+- `/market` is a client route; tab state is local (`useState`), not yet synced to the URL —
+  a `?tab=` query param is a small follow-up, not done in the initial build.
 - Collection scope starts as an allowlist (`lib/market/collections.ts`): RobinWood only at
   first, expandable by editing that file — not a database, not an admin panel, until Stage B
   (chain-wide permissionless) is actually funded and scoped as its own project.
 
 ## 3. Component tree
 
+Built (real, functioning against the live network — gated behind `MARKET_ENABLED`):
+
 ```
+lib/market/
+├── types.ts               — Listing / Offer / MarketCollection shapes
+├── collections.ts         — curated allowlist (Stage A)
+├── seaport.ts              — seaport-js wrapper: buildListing, buildOffer, fulfillOrder
+└── orders-store.ts         — file+memory store for signed orders (see §5 caveat)
+
+app/api/market/orders/route.ts  — GET (list orders) / POST (store a signed order)
+
 components/market/
 ├── MarketNav.tsx          — tab strip, mirrors CountdownTimer's compact style
 ├── ListingGrid.tsx        — responsive grid, 2-col mobile → 5-col desktop (matches Gallery.tsx)
 ├── ListingCard.tsx        — image, name, price, "Buy" / "Make offer" — dense-card style
-├── ListingModal.tsx       — full listing detail + buy/offer flow, bottom-sheet on mobile
-├── OfferForm.tsx          — amount + expiry + (optional) trait/collection scope
-├── MakeOfferButton.tsx    — opens OfferForm in a modal
+├── ListForm.tsx           — token ID + price + duration, signs and publishes a listing
+├── MarketView.tsx         — ties the above together: fetches orders, wires buy/list actions
 ├── SwapPanel.tsx          — Phase 2 vault buy/sell, reuses SwapWidget's tab pattern
 ├── MyPositions.tsx        — active listings/offers/vault shares for the connected wallet
 └── ComingSoonGate.tsx     — the only thing rendered until contracts are live
@@ -85,6 +94,19 @@ forge one) — not a custody system, not a matching engine. It exists because Se
 need *somewhere* to live before they're fulfilled on-chain; OpenSea's own "orderbook" plays the
 identical role.
 
+**Status:** `buildListing`/`buildOffer`/`fulfillOrder` (`lib/market/seaport.ts`) and the
+listing side of the relay (store, API, `ListForm.tsx`, buy button in `MarketView.tsx`) are
+built and functional against the live Seaport deployment. The offer *backend* supports it
+(`buildOffer`, the API's `offer` kind) but there's no offer-submission UI component yet —
+`ListingCard`'s "Offer" button is present but not wired to `buildOffer` — that's the next
+concrete slice of frontend work, not a redesign.
+
+**Known gap before this can hold real value:** `orders-store.ts` persists to a JSON file on
+disk plus an in-memory `globalThis` cache — this survives a single warm serverless instance but
+is not durable storage on Vercel (ephemeral filesystem, no cross-instance sharing). Fine for
+local/testnet development; needs a real store (Vercel KV, Upstash Redis, or equivalent) before
+any listing placed through it should be trusted to still be there tomorrow.
+
 ## 6. Phase 2 (Instant Swap) data flow
 
 ```
@@ -102,14 +124,22 @@ speculatively.
 
 Nothing above ships to mainnet with real value until, in order:
 
-1. Seaport 1.6 is deployed by us on Robinhood Chain (chain 4663) at a known, verified address —
-   not assumed to already exist there the way it does on chains OpenSea directly supports.
+1. ~~Seaport 1.6 is deployed by us on Robinhood Chain~~ — **confirmed unnecessary.** Verified
+   2026-07-27 via direct RPC (`eth_getCode`) and Blockscout (`is_verified: true`,
+   `name: "Seaport"`) that Seaport 1.6 and its ConduitController already exist on Robinhood
+   Chain at their canonical CREATE2 addresses:
+   `0x0000000000000068F116a894984e2DB1123eB395` (Seaport) and
+   `0x00000000F9490004C11Cef243f5400493c00Ad63` (ConduitController). This is byte-identical
+   bytecode to every other chain's deployment — not a fork, not a redeploy, so the existing
+   OpenZeppelin/Trail of Bits/Code4rena audits genuinely apply. This gate is satisfied for the
+   exchange contract itself; what remains is integration testing (real testnet orders end to
+   end), not a deployment.
 2. The vault/AMM contract (Phase 2) is deployed and its parameters (fees, redemption premium)
-   are fixed and published before any deposit is accepted.
-3. **An independent third-party audit** covers whatever we deployed or modified — not the
-   audits Seaport/NFTX already have elsewhere, since any redeploy or Robinhood-Chain-specific
-   change resets that assurance. This is non-negotiable per the standing project rule
-   established after the swap-widget incident.
+   are fixed and published before any deposit is accepted. This one **is** a fresh deployment
+   and does not inherit anyone else's audit — see gate 3.
+3. **An independent third-party audit** covers the vault/AMM contract and the order-relay API
+   (the two pieces that are genuinely new code, unlike Seaport). This is non-negotiable per the
+   standing project rule established after the swap-widget incident.
 4. `MARKET_ENABLED` (see `lib/constants.ts`) flips from `false` to `true`. Until then, every
    route in this spec renders `ComingSoonGate` and nothing else — same pattern as
    `TRADE_PAUSED` gating the existing Trade section.
