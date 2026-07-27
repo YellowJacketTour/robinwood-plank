@@ -45,3 +45,4 @@ next-env.d.ts
 # Boards runtime state
 data/boards-state.json
 
+.data/
