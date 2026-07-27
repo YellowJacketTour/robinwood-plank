@@ -49,3 +49,4 @@ data/boards-state.json
 
 .hardhat-cache/
 .hardhat-artifacts/
+typechain-types/

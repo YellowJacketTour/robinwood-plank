@@ -1,28 +1,169 @@
+"use client";
+
+import { useState } from "react";
 import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
+import { buyShares, depositForShares, redeemRandom, redeemTarget, sellShares } from "@/lib/market/vault";
+import { connectWallet, ensureRobinhoodChain } from "@/lib/wallet";
+import { parseTokenAmount } from "@/lib/trade";
+
+type Mode = "buy" | "sell" | "deposit" | "redeem";
+
+const MODES: { id: Mode; label: string }[] = [
+  { id: "buy", label: "Buy" },
+  { id: "sell", label: "Sell" },
+  { id: "deposit", label: "Deposit" },
+  { id: "redeem", label: "Redeem" },
+];
 
 /**
- * Phase 2 — NFTX-style vault buy/sell. Renders a scoped notice until a vault
- * contract is deployed for at least one collection (SPEC.md §6).
+ * Phase 2 — NFTX-style vault buy/sell. Fully wired against
+ * contracts/MarketplankVault.sol's ABI (lib/market/vault.ts). Renders a
+ * scoped notice instead of this UI until MARKET_VAULT_ADDRESS is set, which
+ * doesn't happen until the vault is deployed and audited (SPEC.md §7).
  */
 export default function SwapPanel() {
+  const collection = MARKET_COLLECTIONS[0];
   const hasVault = MARKET_VAULT_ADDRESS !== null;
+
+  const [mode, setMode] = useState<Mode>("buy");
+  const [account, setAccount] = useState<string | null>(null);
+  const [amount, setAmount] = useState("");
+  const [tokenId, setTokenId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   if (!hasVault) {
     return (
       <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/40 px-4 py-8 text-center text-sm text-foreground/60">
-        Instant swap opens once a liquidity vault exists for {MARKET_COLLECTIONS[0]?.name ?? "a collection"}. Phase 2 — see the build scope.
+        Instant swap opens once a liquidity vault exists for {collection?.name ?? "a collection"}.
       </p>
     );
   }
 
+  const handleConnect = async () => {
+    setError(null);
+    try {
+      const addr = await connectWallet();
+      await ensureRobinhoodChain();
+      setAccount(addr);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to connect wallet.");
+    }
+  };
+
+  const run = async (action: () => Promise<string>, label: string) => {
+    setError(null);
+    if (!account) {
+      await handleConnect();
+      return;
+    }
+    try {
+      setBusy(true);
+      setStatus(label);
+      await action();
+      setStatus("Confirmed.");
+      setAmount("");
+      setTokenId("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Transaction failed.");
+    } finally {
+      setBusy(false);
+      setTimeout(() => setStatus(null), 3000);
+    }
+  };
+
+  const submit = () => {
+    if (mode === "buy") {
+      if (!amount) return setError("Enter an ETH amount.");
+      return run(() => buyShares(amount), "Buying…");
+    }
+    if (mode === "sell") {
+      const wei = parseTokenAmount(amount, 18);
+      if (wei === null || wei <= BigInt(0)) return setError("Enter a share amount.");
+      return run(() => sellShares(wei), "Selling…");
+    }
+    if (mode === "deposit") {
+      if (!tokenId) return setError("Enter a token ID.");
+      return run(() => depositForShares(tokenId), "Depositing…");
+    }
+    // redeem
+    if (tokenId) return run(() => redeemTarget(tokenId), "Redeeming (targeted)…");
+    return run(() => redeemRandom(), "Redeeming (random)…");
+  };
+
   return (
     <div className="wood-ledger space-y-3 p-3">
-      <p className="text-sm text-foreground/75">
-        Deposit a plank, receive a fungible pool share instantly — or swap ETH for a share and
-        redeem a random plank (or pay a premium to pick one).
-      </p>
-      {/* Wired to the vault contract once MARKET_VAULT_ADDRESS is set. */}
+      <div className="grid grid-cols-4 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/50 p-1">
+        {MODES.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => setMode(m.id)}
+            className={`min-h-9 rounded-md text-xs font-bold uppercase transition-colors ${
+              mode === m.id ? "bg-gold-500 text-wood-950" : "text-foreground/65 hover:text-gold-300"
+            }`}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+
+      {(mode === "buy" || mode === "sell") && (
+        <div className="flex min-h-12 items-center gap-2 rounded-lg border border-gold-500/30 bg-wood-900/70 px-2.5">
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="0.0"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+            className="min-w-0 flex-1 bg-transparent py-2.5 text-lg font-semibold text-foreground outline-none"
+          />
+          <span className="text-xs font-bold text-gold-300">{mode === "buy" ? "ETH" : "SHARE"}</span>
+        </div>
+      )}
+
+      {(mode === "deposit" || mode === "redeem") && (
+        <input
+          type="text"
+          inputMode="numeric"
+          placeholder={mode === "redeem" ? "Token ID (blank = random)" : "Token ID"}
+          value={tokenId}
+          onChange={(e) => setTokenId(e.target.value.replace(/[^0-9]/g, ""))}
+          className="min-h-12 w-full rounded-lg border border-gold-500/30 bg-wood-900/70 px-2.5 text-foreground outline-none focus:border-gold-400"
+        />
+      )}
+
+      {!account ? (
+        <button
+          type="button"
+          onClick={handleConnect}
+          className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
+        >
+          Connect wallet
+        </button>
+      ) : (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={submit}
+          className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
+        >
+          {busy ? (status ?? "Working…") : MODES.find((m) => m.id === mode)?.label}
+        </button>
+      )}
+
+      {error && (
+        <p className="text-center text-xs text-red-300" role="alert">
+          {error}
+        </p>
+      )}
+      {status && !error && (
+        <p className="text-center text-xs text-forest-600" role="status">
+          {status}
+        </p>
+      )}
     </div>
   );
 }
