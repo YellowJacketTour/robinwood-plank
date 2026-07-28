@@ -195,6 +195,34 @@ body :where(.bg-gold-500, .bg-gold-400) {
   55% { opacity: 1; transform: scale(1.03); }
 }
 
+@keyframes organism-float {
+  0% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(6px, -10px) scale(1.04); }
+  50% { transform: translate(-4px, -4px) scale(0.97); }
+  75% { transform: translate(-8px, 6px) scale(1.02); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+.animate-organism-float {
+  animation-name: organism-float;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+@keyframes liquidity-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+.animate-liquidity-pulse {
+  animation: liquidity-pulse 4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-organism-float,
+  .animate-liquidity-pulse {
+    animation: none;
+  }
+}
+
 .animate-float {
   animation: float 6s ease-in-out infinite;
 }

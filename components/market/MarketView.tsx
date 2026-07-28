@@ -13,6 +13,8 @@ import MyNfts from "@/components/market/MyNfts";
 import TreasuryDashboard from "@/components/market/TreasuryDashboard";
 import VaultDashboard from "@/components/market/VaultDashboard";
 import NftPriceChart from "@/components/market/NftPriceChart";
+import VaultTradeHistory from "@/components/market/VaultTradeHistory";
+import LivingLiquidityViz from "@/components/market/LivingLiquidityViz";
 import CollectionStats from "@/components/market/CollectionStats";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import SweepConfirm from "@/components/market/SweepConfirm";
@@ -841,20 +843,31 @@ export default function MarketView() {
           </div>
         )}
         {tab === "activity" && (
-          <ActivityFeed
-            onSelectToken={openDetail}
-            collection={COLLECTION}
-            listings={listings}
-            offers={offers}
-            totalSupply={TOTAL_SUPPLY}
-          />
+          <div className="space-y-3">
+            <ActivityFeed
+              onSelectToken={openDetail}
+              collection={COLLECTION}
+              listings={listings}
+              offers={offers}
+              totalSupply={TOTAL_SUPPLY}
+            />
+            <VaultTradeHistory />
+          </div>
         )}
         {tab === "swap" && (
           <div className="space-y-3">
-            <NftPriceChart />
-            <VaultDashboard />
-            <TreasuryDashboard />
-            <SwapPanel account={account} onConnect={handleConnect} />
+            <LivingLiquidityViz />
+            <div className="grid gap-3 lg:grid-cols-2 lg:items-start">
+              <div className="space-y-3">
+                <NftPriceChart />
+                <VaultTradeHistory />
+              </div>
+              <div className="space-y-3">
+                <VaultDashboard />
+                <TreasuryDashboard />
+                <SwapPanel account={account} onConnect={handleConnect} />
+              </div>
+            </div>
           </div>
         )}
         {tab === "my-nfts" && account && (
