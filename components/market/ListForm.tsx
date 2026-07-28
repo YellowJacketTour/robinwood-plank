@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { makeListingInput, makeListingPostBody } from "@/lib/market/bulk-list";
 import { buildListing } from "@/lib/market/seaport";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
 import type { MarketCollection } from "@/lib/market/types";
@@ -55,27 +56,20 @@ export default function ListForm({ account, collection, onListed }: Props) {
       setStatus("Sign the listing in your wallet…");
       const expiresAt = new Date(Date.now() + durationDays * 86_400_000).toISOString();
 
-      const executed = await buildListing(account, {
-        offerTokenAddress: collection.contractAddress,
-        offerTokenId: tokenId.trim(),
-        considerationWei: priceWei.toString(),
-        expiresAt,
-        feeBps: collection.feeBps,
-      });
+      // Shared with the bulk flow (lib/market/bulk-list.ts) so single and
+      // bulk listings are the same order shape by construction.
+      const executed = await buildListing(
+        account,
+        makeListingInput(collection, tokenId, priceWei, expiresAt)
+      );
 
       setStatus("Publishing listing…");
       const res = await fetch("/api/market/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind: "listing",
-          collectionSlug: collection.slug,
-          tokenId: tokenId.trim(),
-          maker: account,
-          priceWei: priceWei.toString(),
-          expiresAt,
-          rawOrder: executed,
-        }),
+        body: JSON.stringify(
+          makeListingPostBody(collection, tokenId, account, priceWei, expiresAt, executed)
+        ),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Could not publish the listing.");

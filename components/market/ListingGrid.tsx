@@ -1,4 +1,9 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import ListingCard from "@/components/market/ListingCard";
+import { getRarityMap } from "@/lib/market/rarityClient";
+import type { RarityLookup } from "@/lib/market/rarityClient";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 
 type Props = {
@@ -30,6 +35,19 @@ export default function ListingGrid({
   emptyMessage = "No listings yet.",
   floorPriceWei,
 }: Props) {
+  // One shared fetch (module-cached) for every card in every grid on the
+  // page — never N requests for N cards.
+  const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    void getRarityMap().then((map) => {
+      if (!cancelled) setRarity(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   if (listings.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/40 px-4 py-8 text-center text-sm text-foreground/60">
@@ -54,6 +72,7 @@ export default function ListingGrid({
             variant={variant}
             onSelect={onSelect}
             isFloor={Boolean(floorPriceWei) && listing.priceWei === floorPriceWei}
+            rarity={listing.tokenId ? rarity.get(listing.tokenId) : undefined}
             // A collection-wide bid (no tokenId) is fillable with any token
             // the viewer owns; an item bid needs that specific one.
             canFill={

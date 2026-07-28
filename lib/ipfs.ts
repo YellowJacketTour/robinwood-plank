@@ -16,18 +16,25 @@ export const IPFS_GATEWAYS = [
 ] as const;
 
 /**
- * Convert ipfs:// CIDs (and nested paths with spaces) into a gateway URL.
- * Path segments are encoded so filenames like "Is This Art4.png" work.
+ * Convert ipfs:// CIDs (and nested paths with spaces) into a browser-loadable
+ * image URL. Path segments are encoded so filenames like "Is This Art4.png"
+ * work.
+ *
+ * Returns a SAME-ORIGIN proxy path (/api/ipfs/image), not the raw external
+ * gateway URL. Reason, confirmed by direct network inspection, not assumed:
+ * loading an external IPFS gateway URL straight into `<img src>` can fail
+ * with `net::ERR_BLOCKED_BY_ORB` (Opaque Response Blocking) — a browser
+ * security feature distinct from CORS, and unlike CORS not something a
+ * response header can fix. The proxy (app/api/ipfs/image) fetches the bytes
+ * server-side, where neither CORS nor ORB apply, and streams them back from
+ * our own domain. No caller of this function needs the raw external URL for
+ * anything other than eventually rendering an image, so this is safe to
+ * change universally rather than patch call sites one at a time.
  */
-export function resolveIpfsUrl(
-  uri: string,
-  gateway: string = IPFS_GATEWAYS[0],
-): string {
-  if (!uri) return "";
-  if (uri.startsWith("http://") || uri.startsWith("https://") || uri.startsWith("data:")) {
-    return uri;
-  }
-
+/** Raw (non-proxied) gateway URL for an ipfs://-style URI. Used both by
+ * resolveIpfsUrl (which wraps the result in our proxy) and by
+ * ipfsGatewayCandidates (which must NOT wrap it — see that function). */
+function rawGatewayUrl(uri: string, gateway: string): string {
   let path = uri.startsWith("ipfs://")
     ? uri.slice("ipfs://".length)
     : uri.startsWith("/ipfs/")
@@ -45,11 +52,36 @@ export function resolveIpfsUrl(
   return `${gateway}${encoded}`;
 }
 
+export function resolveIpfsUrl(
+  uri: string,
+  gateway: string = IPFS_GATEWAYS[0],
+): string {
+  if (!uri) return "";
+  // Inline data URIs need no fetch at all — never proxy these.
+  if (uri.startsWith("data:")) return uri;
+  // Already one of our own routes (e.g. re-resolving an already-resolved
+  // value) — never double-wrap.
+  if (uri.startsWith("/api/ipfs/")) return uri;
+
+  if (uri.startsWith("http://") || uri.startsWith("https://")) {
+    return `/api/ipfs/image?uri=${encodeURIComponent(uri)}`;
+  }
+
+  const target = rawGatewayUrl(uri, gateway);
+  return `/api/ipfs/image?uri=${encodeURIComponent(target)}`;
+}
+
 export function ipfsGatewayCandidates(uri: string): string[] {
   if (!uri) return [];
   if (uri.startsWith("data:")) return [uri];
 
-  // Already an http(s) URL — still try gateway rewrites if it looks like /ipfs/
+  // Already an http(s) URL — still try gateway rewrites if it looks like /ipfs/.
+  // These stay RAW external URLs on purpose: this function is also called
+  // server-side by app/api/ipfs/image/route.ts to get the real gateway
+  // candidates to fetch — wrapping them in the proxy here would make that
+  // route recursively call itself. Client-side callers that render an <img>
+  // directly from these candidates (NftViewer's fallback cascade) are
+  // responsible for proxying at the point of use.
   if (uri.startsWith("http://") || uri.startsWith("https://")) {
     const match = uri.match(/\/ipfs\/(.+)$/i);
     if (match) {
@@ -62,7 +94,13 @@ export function ipfsGatewayCandidates(uri: string): string[] {
     return [uri];
   }
 
-  return IPFS_GATEWAYS.map((gateway) => resolveIpfsUrl(uri, gateway));
+  // Raw ipfs:// (or bare CID/path) input — build raw external candidates
+  // directly via rawGatewayUrl, NOT resolveIpfsUrl: this function is also
+  // called server-side (fetchNftMetadata's gateway race, and
+  // app/api/ipfs/image/route.ts itself) where a relative /api/ipfs/... path
+  // isn't a fetchable URL at all — Node's fetch() has no page origin to
+  // resolve it against.
+  return IPFS_GATEWAYS.map((gateway) => rawGatewayUrl(uri, gateway));
 }
 
 export type NftAttribute = {
@@ -106,6 +144,32 @@ async function fetchJsonFromUrl(
 }
 
 /**
+ * In the browser, several public IPFS gateways (nftstorage.link,
+ * gateway.pinata.cloud) don't send Access-Control-Allow-Origin, so a direct
+ * `fetch()` from client code is killed by CORS before the response body is
+ * ever read — confirmed via real console errors, not assumed. Server-side
+ * (Node) has no CORS concept, so the identical fetch works fine there; that
+ * asymmetry is exactly why API routes already showed real artwork while
+ * Gallery/NftViewer/MyInventory (client components) did not. Routing the
+ * browser path through our own same-origin proxy (app/api/ipfs/metadata)
+ * fixes every client caller at once without touching each one.
+ */
+async function fetchViaProxy(tokenUri: string): Promise<NftMetadata> {
+  const res = await fetch(`/api/ipfs/metadata?uri=${encodeURIComponent(tokenUri)}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(body?.message || `HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as NftMetadata;
+  if (!isUsableMetadata(data)) {
+    throw new Error("Empty metadata payload");
+  }
+  return data;
+}
+
+/**
  * Race the first N gateways, then walk the rest serially.
  * Never permanently cache failures — only successful usable metadata.
  */
@@ -123,6 +187,12 @@ export async function fetchNftMetadata(
         return cached;
       }
     }
+  }
+
+  if (typeof window !== "undefined") {
+    const data = await fetchViaProxy(tokenUri);
+    setCachedMetadata(tokenUri, data);
+    return data;
   }
 
   const candidates = ipfsGatewayCandidates(tokenUri);

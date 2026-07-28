@@ -1,6 +1,6 @@
 import { CHAIN, MARKET_OFFER_CURRENCY } from "@/lib/constants";
 import { getCollection } from "@/lib/market/collections";
-import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
+import { resolveTokenImage } from "@/lib/market/token-image";
 import {
   countOrdersByMaker,
   getListingRawOrder,
@@ -13,8 +13,10 @@ import {
   removeOffer,
   totalOrderCount,
 } from "@/lib/market/orders-store";
-import { getOrderLiveness, filterLiveOrders } from "@/lib/market/order-status";
+import { getOrderLiveness, filterLiveOrders, computeOrderHash } from "@/lib/market/order-status";
+import { markOrderServed } from "@/lib/market/served-orders";
 import { verifyOrderSignature } from "@/lib/market/signature";
+import { getVerifiedTraitSet } from "@/lib/market/trait-index";
 import { verifyMessage } from "ethers";
 
 /** Message an offerer signs (personal_sign) to authorize deleting their own
@@ -49,6 +51,13 @@ type PostBody = {
    * is how a marketplace robs its own users).
    */
   rawOrder?: unknown;
+  /**
+   * TRAIT BID: names the trait this criteria offer targets. Only the LABEL is
+   * read from the client — the token-id snapshot is taken from the server's
+   * own verified trait index, and the signed order's Merkle root must match
+   * it exactly. A client cannot smuggle an arbitrary set under a trait name.
+   */
+  trait?: unknown;
 };
 
 export async function GET(req: Request) {
@@ -172,48 +181,6 @@ export async function DELETE(req: Request) {
   }
 }
 
-/**
- * Resolve a token's own artwork once, at listing time.
- *
- * Done server-side and stored with the order so the grid doesn't fire N
- * IPFS requests per render — gateways are slow and flaky, and a grid of
- * broken images reads as a scam site. Returns undefined on any failure; the
- * card falls back to the collection image.
- */
-async function resolveTokenImage(
-  contractAddress: string,
-  tokenId: string
-): Promise<string | undefined> {
-  try {
-    const idHex = BigInt(tokenId).toString(16).padStart(64, "0");
-    const res = await fetch(CHAIN.rpcUrls.default, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "eth_call",
-        params: [{ to: contractAddress, data: `0xc87b56dd${idHex}` }, "latest"], // tokenURI
-      }),
-      cache: "no-store",
-    });
-    const data = (await res.json()) as { result?: string };
-    if (!data.result || data.result.length < 130) return undefined;
-
-    const hex = data.result.slice(2);
-    const len = parseInt(hex.slice(64, 128), 16);
-    if (!Number.isFinite(len) || len <= 0) return undefined;
-    const tokenUri = Buffer.from(hex.slice(128, 128 + len * 2), "hex").toString("utf8");
-    if (!tokenUri) return undefined;
-
-    const metadata = await fetchNftMetadata(tokenUri);
-    const image = metadata?.image;
-    return typeof image === "string" && image ? resolveIpfsUrl(image) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /** Confirms the maker actually holds the token they are trying to list. */
 async function ownsToken(
   contractAddress: string,
@@ -249,6 +216,25 @@ async function ownsToken(
 }
 
 /**
+ * Record this order's canonical Seaport hash as "ours" — the only honest
+ * basis for Activity later labeling a fill "Marketplank" (see
+ * lib/market/served-orders.ts for why "executed via our Seaport instance"
+ * alone is not evidence: that contract is shared protocol infrastructure,
+ * not ours to claim). Best-effort: a failure here must never break order
+ * creation, so this never throws into its caller.
+ */
+async function recordServed(rawOrder: unknown): Promise<void> {
+  try {
+    const hash = await computeOrderHash(rawOrder);
+    if (hash) await markOrderServed(hash);
+  } catch {
+    // Non-fatal — the order was already stored; a missed attribution
+    // record only means a future fill of it under-counts as "Marketplank"
+    // rather than mis-counts as someone else's, which is the safe direction.
+  }
+}
+
+/**
  * Store a signed order. The server never builds or alters an order — it
  * accepts one the maker already signed client-side, re-derives every
  * displayed field from that signature's payload, and rejects anything whose
@@ -275,13 +261,53 @@ export async function POST(req: Request) {
       );
     }
 
+    // ── TRAIT BID: resolve the trait label against the SERVER's verified
+    // index. The snapshot never comes from the client; the signed order's
+    // root must commit to exactly this set (checked in validateOfferOrder).
+    let traitLabel: { traitType: string; value: string } | null = null;
+    let traitTokenIds: string[] | null = null;
+    if (body.trait !== undefined) {
+      if (kind !== "offer") {
+        return publicJson(
+          { error: "BAD_ORDER", message: "Only offers can target a trait." },
+          400
+        );
+      }
+      const t = body.trait as { traitType?: unknown; value?: unknown };
+      const traitType = typeof t?.traitType === "string" ? t.traitType.trim() : "";
+      const value = typeof t?.value === "string" ? t.value.trim() : "";
+      if (!traitType || !value || traitType.length > 64 || value.length > 64) {
+        return publicJson({ error: "BAD_TRAIT", message: "Malformed trait." }, 400);
+      }
+      traitTokenIds = await getVerifiedTraitSet(collection, traitType, value);
+      if (!traitTokenIds) {
+        // Unknown trait, or the index has not finished its full verified
+        // scan yet. FAIL CLOSED either way — never store a trait bid whose
+        // snapshot the server cannot vouch for.
+        return publicJson(
+          {
+            error: "TRAIT_UNAVAILABLE",
+            message:
+              "That trait isn't available for bidding yet (unknown trait, or the trait index is still building).",
+          },
+          503
+        );
+      }
+      traitLabel = { traitType, value };
+    }
+
     // ── Everything below comes from the signed order, not the request body ──
     let derived;
     try {
       derived =
         kind === "listing"
           ? validateListingOrder(body.rawOrder, collection)
-          : validateOfferOrder(body.rawOrder, collection, MARKET_OFFER_CURRENCY ?? "");
+          : validateOfferOrder(
+              body.rawOrder,
+              collection,
+              MARKET_OFFER_CURRENCY ?? "",
+              traitTokenIds ? { criteriaTokenIds: traitTokenIds } : undefined
+            );
     } catch (err) {
       if (err instanceof OrderValidationError) {
         return publicJson({ error: "BAD_ORDER", message: err.message }, 400);
@@ -340,11 +366,21 @@ export async function POST(req: Request) {
         imageUrl: await resolveTokenImage(collection.contractAddress, derived.tokenId),
       };
       await putListing(listing, body.rawOrder);
+      await recordServed(body.rawOrder);
       return publicJson({ listing });
     }
 
+    // A trait-labelled request whose signed order is NOT a criteria order
+    // (or vice versa) must not be stored under a mismatched label.
+    if (traitLabel && !derived.criteriaRoot) {
+      return publicJson(
+        { error: "BAD_ORDER", message: "Trait bid is not a criteria order." },
+        400
+      );
+    }
+
     const offer: Offer = {
-      id: `offer-${slug}-${derived.maker}-${derived.tokenId ?? "any"}-${Date.now()}`,
+      id: `offer-${slug}-${derived.maker}-${derived.tokenId ?? (traitLabel ? "trait" : "any")}-${Date.now()}`,
       collectionSlug: slug,
       tokenId: derived.tokenId,
       maker: derived.maker,
@@ -353,8 +389,12 @@ export async function POST(req: Request) {
       imageUrl: derived.tokenId
         ? await resolveTokenImage(collection.contractAddress, derived.tokenId)
         : undefined,
+      ...(traitLabel && traitTokenIds
+        ? { traits: [traitLabel], criteriaTokenIds: traitTokenIds }
+        : {}),
     };
     await putOffer(offer, body.rawOrder);
+    await recordServed(body.rawOrder);
     return publicJson({ offer });
   } catch (err) {
     return publicError(err, "Unexpected error storing order.");

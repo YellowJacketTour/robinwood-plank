@@ -54,3 +54,37 @@ test("collection-wide orders with no token id are excluded by a token search", (
   // ...but survive when no search is active.
   assert.equal(applyFilters(withAny, EMPTY_FILTERS).length, 4);
 });
+
+test("tier filter combines with price/search — the actual point of a combined filter", () => {
+  const rarityMap = new Map([
+    ["1", { tier: "Rare" as const, rank: 1, percentile: 90 }],
+    ["12", { tier: "Common" as const, rank: 900, percentile: 10 }],
+    ["234", { tier: "Rare" as const, rank: 2, percentile: 88 }],
+  ]);
+  // Rare tier alone: #1 and #234.
+  const rareOnly = applyFilters(items, { ...EMPTY_FILTERS, tier: "Rare" }, rarityMap);
+  assert.deepEqual(rareOnly.map((i) => i.tokenId), ["1", "234"]);
+
+  // Rare tier AND price >= 2 ETH: only #234 — proves tier and price compose,
+  // not just each filter working in isolation.
+  const rareAndExpensive = applyFilters(
+    items,
+    { ...EMPTY_FILTERS, tier: "Rare", minEth: "2" },
+    rarityMap
+  );
+  assert.deepEqual(rareAndExpensive.map((i) => i.tokenId), ["234"]);
+});
+
+test("tier filter excludes items with no rarity data, and no rarityMap means every tier filter excludes everything (fail closed, never fail open into showing the wrong tier)", () => {
+  assert.equal(applyFilters(items, { ...EMPTY_FILTERS, tier: "Rare" }).length, 0);
+  const partialMap = new Map([["1", { tier: "Rare" as const, rank: 1, percentile: 90 }]]);
+  const out = applyFilters(items, { ...EMPTY_FILTERS, tier: "Rare" }, partialMap);
+  assert.deepEqual(out.map((i) => i.tokenId), ["1"]);
+});
+
+test("a collection-wide item (no tokenId) never matches a tier filter", () => {
+  const withAny = [...items, { tokenId: undefined, priceWei: "100" }];
+  const rarityMap = new Map([["1", { tier: "Rare" as const, rank: 1, percentile: 90 }]]);
+  const out = applyFilters(withAny, { ...EMPTY_FILTERS, tier: "Rare" }, rarityMap);
+  assert.deepEqual(out.map((i) => i.tokenId), ["1"]);
+});

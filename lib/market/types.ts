@@ -56,6 +56,13 @@ export type Offer = {
   tokenId?: string;
   /** Present when the offer targets a set of traits rather than one token or the whole collection. */
   traits?: Array<{ traitType: string; value: string }>;
+  /**
+   * TRAIT bids only: the token-id snapshot the signed order's Merkle root
+   * commits to, captured at bid-creation time. The accepting seller recomputes
+   * the root from this exact list (client-side, trustlessly — see
+   * assertAcceptableTraitOffer) and derives their fulfillment proof from it.
+   */
+  criteriaTokenIds?: string[];
   /** Wallet that placed this order — the buyer for an offer. */
   maker: string;
   priceWei: string;

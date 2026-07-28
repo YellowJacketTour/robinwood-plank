@@ -1,6 +1,8 @@
 import Image from "next/image";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
+import { tierColor } from "@/lib/market/rarityClient";
+import type { RarityLookup } from "@/lib/market/rarityClient";
 
 type Props = {
   listing: Listing;
@@ -16,6 +18,8 @@ type Props = {
   onSelect?: (tokenId: string) => void;
   /** True marks this card as at the current floor price — the "Floorboard". */
   isFloor?: boolean;
+  /** Same tier/rank math as the Gallery page — one shared source of truth, fetched once per grid. */
+  rarity?: RarityLookup;
 };
 
 const TRUST_ICON: Record<string, string> = {
@@ -35,6 +39,7 @@ export default function ListingCard({
   canFill = true,
   onSelect,
   isFloor = false,
+  rarity,
 }: Props) {
   const isOffer = variant === "offer";
   // Collection-wide bids have no token to open a detail view for.
@@ -44,6 +49,7 @@ export default function ListingCard({
       className={`dense-card flex flex-col overflow-hidden p-0 ${
         isOffer ? "border-emerald-500/40" : ""
       }`}
+      style={rarity ? { boxShadow: `0 0 0 2px ${tierColor(rarity.tier)}` } : undefined}
     >
       <div
         className={`relative aspect-square w-full bg-wood-900 ${
@@ -80,6 +86,15 @@ export default function ListingCard({
             title="Floorboard — cheapest listing"
           >
             Floor
+          </span>
+        )}
+        {rarity && (
+          <span
+            className={`absolute left-1.5 ${isFloor ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950`}
+            style={{ backgroundColor: tierColor(rarity.tier) }}
+            title={`Rank #${rarity.rank} · ${rarity.percentile.toFixed(0)}th percentile`}
+          >
+            {rarity.tier}
           </span>
         )}
         {collection.trustBadges.length > 0 && (

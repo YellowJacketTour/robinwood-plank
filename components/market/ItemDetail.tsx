@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
+import { tierColor } from "@/lib/market/rarityClient";
+import type { RarityTier } from "@/lib/market/rarityClient";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 
 type TokenDetail = {
@@ -18,6 +20,8 @@ type TokenDetail = {
     from: string;
     to: string;
   }>;
+  /** Same rarity math and tier palette as the Gallery page — one source of truth. */
+  rarity: { tier: RarityTier; rank: number; percentile: number } | null;
 };
 
 type Props = {
@@ -81,7 +85,17 @@ export default function ItemDetail({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gold-500/15 px-4 py-3">
-          <p className="font-display text-lg text-foreground">#{tokenId}</p>
+          <div className="flex items-center gap-2">
+            <p className="font-display text-lg text-foreground">#{tokenId}</p>
+            {detail?.rarity && (
+              <span
+                className="rounded-full px-2 py-0.5 text-[0.6rem] font-bold uppercase tracking-wide text-wood-950"
+                style={{ backgroundColor: tierColor(detail.rarity.tier) }}
+              >
+                {detail.rarity.tier} · #{detail.rarity.rank}
+              </span>
+            )}
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -93,7 +107,10 @@ export default function ItemDetail({
         </div>
 
         <div className="grid gap-4 p-4 sm:grid-cols-2">
-          <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-wood-900">
+          <div
+            className="relative aspect-square w-full overflow-hidden rounded-xl bg-wood-900"
+            style={detail?.rarity ? { boxShadow: `0 0 0 3px ${tierColor(detail.rarity.tier)}` } : undefined}
+          >
             <Image
               src={detail?.image || listing?.imageUrl || collection.image}
               alt={`${collection.name} #${tokenId}`}
