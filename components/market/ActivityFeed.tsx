@@ -210,7 +210,7 @@ export default function ActivityFeed({
               <li
                 key={`${e.txHash}-${e.tokenId}`}
                 className={`dense-card flex items-center gap-3 p-2 ${selectable ? "cursor-pointer" : ""} ${
-                  r ? `${tierAnimationClass(r.tier)} holo-card` : ""
+                  r ? tierAnimationClass(r.tier) : ""
                 }`}
                 style={r ? tierCardStyle(r.tier) : undefined}
                 role={selectable ? "button" : undefined}
@@ -234,7 +234,7 @@ export default function ActivityFeed({
                     palette as the Gallery page, never a second color system. */}
                 <div
                   className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-wood-900 ${
-                    r ? tierAnimationClass(r.tier) : ""
+                    r ? "holo-card" : ""
                   }`}
                   style={r ? { boxShadow: tierGlow(r.tier) } : undefined}
                 >

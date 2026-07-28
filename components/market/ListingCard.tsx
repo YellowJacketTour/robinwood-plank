@@ -48,11 +48,13 @@ export default function ListingCard({
     <li
       className={`dense-card flex flex-col overflow-hidden p-0 ${
         isOffer ? "border-emerald-500/40" : ""
-      } ${rarity ? `${tierAnimationClass(rarity.tier)} holo-card` : ""}`}
+      } ${rarity ? tierAnimationClass(rarity.tier) : ""}`}
       style={rarity ? { boxShadow: tierGlow(rarity.tier), ...tierCardStyle(rarity.tier) } : undefined}
     >
+      {/* holo-card scoped to the artwork only — inherits --holo-intensity
+          from the <li> above it, CSS custom properties inherit down. */}
       <div
-        className={`relative aspect-square w-full bg-wood-900 ${
+        className={`relative aspect-square w-full bg-wood-900 ${rarity ? "holo-card" : ""} ${
           selectable ? "cursor-pointer" : ""
         }`}
         role={selectable ? "button" : undefined}

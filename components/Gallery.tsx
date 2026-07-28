@@ -1036,14 +1036,19 @@ export default function Gallery() {
                             type="button"
                             onClick={() => setSelected(nft)}
                             className={`group flex h-full w-full flex-col overflow-hidden rounded-lg border border-gold-500/25 bg-wood-950/70 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-400 ${
-                              tokenRarity ? `${tierAnimationClass(tokenRarity.tier)} holo-card` : ""
+                              tokenRarity ? tierAnimationClass(tokenRarity.tier) : ""
                             }`}
                             style={tokenRarity ? tierCardStyle(tokenRarity.tier) : undefined}
                             aria-label={`Open ${displayName(nft)}`}
                           >
+                            {/* holo-card lives on the artwork only, not the
+                                whole button — the glimmer should track the
+                                image, not spill onto the name/tier text
+                                below it. --holo-intensity is still inherited
+                                from the outer element's style above. */}
                             <div
                               className={`relative aspect-square w-full overflow-hidden bg-wood-950 ${
-                                tokenRarity ? tierAnimationClass(tokenRarity.tier) : ""
+                                tokenRarity ? "holo-card" : ""
                               }`}
                               style={tokenRarity ? { boxShadow: tierGlow(tokenRarity.tier) } : undefined}
                             >
