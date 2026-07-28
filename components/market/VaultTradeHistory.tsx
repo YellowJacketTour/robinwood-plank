@@ -3,6 +3,7 @@
 import { formatTokenAmount } from "@/lib/trade";
 import { useVaultLive, type VaultTradeKind } from "@/lib/market/useVaultLive";
 import { usePendingVaultTx } from "@/lib/market/pendingVaultTx";
+import ScrollBox from "@/components/market/ScrollBox";
 
 const KIND_LABEL: Record<VaultTradeKind, string> = {
   buy: "Buy",
@@ -86,7 +87,11 @@ export default function VaultTradeHistory() {
           No vault trades yet.
         </p>
       ) : (
-        <div className="max-h-64 overflow-y-auto rounded-lg border border-gold-500/15 bg-black/10">
+        <ScrollBox
+          storageKey="vault-trades"
+          defaultHeight={256}
+          className="rounded-lg border border-gold-500/15 bg-black/10"
+        >
           <table className="w-full text-left text-[0.65rem]">
             <thead>
               <tr className="border-b border-gold-500/15 text-[0.55rem] uppercase tracking-wide text-foreground/35">
@@ -133,7 +138,7 @@ export default function VaultTradeHistory() {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollBox>
       )}
     </div>
   );
