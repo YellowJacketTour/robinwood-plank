@@ -16,6 +16,7 @@ import NftPriceChart from "@/components/market/NftPriceChart";
 import VaultTradeHistory from "@/components/market/VaultTradeHistory";
 import LivingLiquidityViz from "@/components/market/LivingLiquidityViz";
 import RedeemOdds from "@/components/market/RedeemOdds";
+import EventCountdown from "@/components/market/EventCountdown";
 import CollectionStats from "@/components/market/CollectionStats";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import SweepConfirm from "@/components/market/SweepConfirm";
@@ -730,6 +731,7 @@ export default function MarketView() {
         <div className={tab === "buy-sell" ? undefined : "hidden"}>
           {visitedTabs.has("buy-sell") && (
           <div className="space-y-3">
+            <EventCountdown />
             {COLLECTION && (
               <CollectionStats
                 collection={COLLECTION}
@@ -868,6 +870,7 @@ export default function MarketView() {
         <div className={tab === "activity" ? undefined : "hidden"}>
           {visitedTabs.has("activity") && (
           <div className="space-y-3">
+            <EventCountdown />
             <ActivityFeed
               onSelectToken={openDetail}
               collection={COLLECTION}
