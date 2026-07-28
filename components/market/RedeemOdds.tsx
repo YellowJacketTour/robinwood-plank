@@ -130,20 +130,19 @@ export default function RedeemOdds({ listings }: Props) {
                   <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
                 </div>
                 <p className="text-[0.58rem] text-foreground/40">
-                  avg beats {row.avgPercentile.toFixed(0)}% of collection
                   {row.floorWei != null ? (
                     <>
-                      {" · floor "}
-                      {formatTokenAmount(row.floorWei, 18, 4)} Ξ
+                      Floor {formatTokenAmount(row.floorWei, 18, 4)} Ξ
                       {delta != null && (
                         <span className={delta >= 0 ? "text-emerald-300" : "text-red-300"}>
                           {" "}
-                          (redeem {delta >= 0 ? "cheaper" : "pricier"} by {Math.abs(delta).toFixed(0)}%)
+                          ({delta >= 0 ? "−" : "+"}
+                          {Math.abs(delta).toFixed(0)}% vs. redeem)
                         </span>
                       )}
                     </>
                   ) : (
-                    " · no active listings to compare"
+                    "No listings"
                   )}
                 </p>
               </div>
@@ -154,8 +153,7 @@ export default function RedeemOdds({ listings }: Props) {
 
       {redeemCostWei != null && (
         <p className="border-t border-gold-500/10 pt-1.5 text-[0.6rem] text-foreground/40">
-          Effective redeem cost ≈ {formatTokenAmount(redeemCostWei, 18, 4)} Ξ (share price + redeem fee +
-          premium)
+          Redeem cost ≈ {formatTokenAmount(redeemCostWei, 18, 4)} Ξ
         </p>
       )}
     </div>

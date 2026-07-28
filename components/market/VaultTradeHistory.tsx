@@ -66,9 +66,7 @@ export default function VaultTradeHistory() {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
-          Liquidity pool trades <span className="font-normal normal-case text-foreground/35">· source: vault AMM</span>
-        </p>
+        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">Trades</p>
         <span
           className={`flex items-center gap-1 text-[0.55rem] font-bold uppercase ${connected ? "text-emerald-300/70" : "text-foreground/30"}`}
         >
