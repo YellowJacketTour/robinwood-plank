@@ -3,71 +3,75 @@
 import { useEffect, useRef, useState } from "react";
 
 const TRACK_SRC = "/audio/sugar.mp3";
+const MUTE_STORAGE_KEY = "plank-audio-muted";
 
 /**
  * Single background-audio instance, mounted once in the root layout so it
  * survives client-side navigation instead of restarting per page.
- * Browsers block unmuted autoplay without a prior gesture — starts muted
- * when that happens and unmutes itself on the visitor's first tap/click.
+ *
+ * Starts muted on every fresh tab, on purpose — no surprise unmuted
+ * autoplay attempt. The visitor's own choice to unmute is remembered in
+ * localStorage and applied as the default for every OTHER tab/page load
+ * from then on: a `storage` event listener means unmuting in one tab
+ * unmutes any other plank.love tab open at the same time too, and a later
+ * visit starts unmuted without asking again. Muting back is remembered the
+ * same way.
  */
 export default function AudioPlayer() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [muted, setMuted] = useState(false);
+  // Only ever read localStorage after mount (useEffect) — reading it during
+  // render would mismatch the server-rendered markup (SSR has no
+  // localStorage) and trip a hydration warning.
+  const [muted, setMuted] = useState(true);
 
   useEffect(() => {
+    const stored = window.localStorage.getItem(MUTE_STORAGE_KEY);
+    // Absent key = first-ever visit = stay muted (the actual "start on
+    // mute" default). Any stored value after that is the visitor's own
+    // remembered choice, muted or not.
+    const initialMuted = stored === null ? true : stored === "true";
+    setMuted(initialMuted);
+
     const audio = audioRef.current;
     if (!audio) return;
+    audio.muted = initialMuted;
+    // Playback itself can still be blocked by the browser without a prior
+    // gesture even when muted=true; that's fine, the mute button still
+    // reflects and controls the real intended state once a gesture unlocks it.
+    void audio.play().catch(() => {});
+  }, []);
 
-    let cancelled = false;
-
-    const tryUnmutedPlay = async () => {
-      try {
-        audio.muted = false;
-        await audio.play();
-        if (!cancelled) setMuted(false);
-      } catch {
-        // Autoplay-with-sound blocked — fall back to muted autoplay, then
-        // unmute on the visitor's first interaction anywhere on the page.
-        try {
-          audio.muted = true;
-          await audio.play();
-          if (!cancelled) setMuted(true);
-        } catch {
-          /* ignore — some browsers block even muted autoplay */
-        }
-
-        const unmuteOnGesture = () => {
-          if (cancelled) return;
-          audio.muted = false;
-          void audio.play();
-          setMuted(false);
-          window.removeEventListener("pointerdown", unmuteOnGesture);
-          window.removeEventListener("keydown", unmuteOnGesture);
-        };
-        window.addEventListener("pointerdown", unmuteOnGesture, { once: true });
-        window.addEventListener("keydown", unmuteOnGesture, { once: true });
+  // Cross-tab sync: another open tab toggling the button should update
+  // this one live, not just on the next full page load.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== MUTE_STORAGE_KEY || e.newValue === null) return;
+      const next = e.newValue === "true";
+      setMuted(next);
+      const audio = audioRef.current;
+      if (audio) {
+        audio.muted = next;
+        if (!next) void audio.play().catch(() => {});
       }
     };
-
-    void tryUnmutedPlay();
-
-    return () => {
-      cancelled = true;
-    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   const toggleMute = () => {
     const audio = audioRef.current;
-    if (!audio) return;
-    if (audio.paused) void audio.play();
-    const next = !audio.muted;
-    audio.muted = next;
+    const next = !muted;
+    if (audio) {
+      audio.muted = next;
+      if (!next) void audio.play().catch(() => {});
+    }
     setMuted(next);
+    window.localStorage.setItem(MUTE_STORAGE_KEY, String(next));
   };
 
   return (
     <>
-      <audio ref={audioRef} src={TRACK_SRC} loop preload="auto" />
+      <audio ref={audioRef} src={TRACK_SRC} loop preload="auto" muted />
       <button
         type="button"
         onClick={toggleMute}
