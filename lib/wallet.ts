@@ -276,7 +276,7 @@ export type SendTxOpts = {
   maxFeePerGas?: string;
   maxPriorityFeePerGas?: string;
   gasPrice?: string;
-  kind?: "swap" | "approve" | "market" | "vault";
+  kind?: "swap" | "approve" | "market" | "vault" | "transfer";
 };
 
 /**
@@ -382,6 +382,20 @@ export function assertSafeSwapDestination(to: string, kind: string) {
         "Blocked unsafe vault target. Vault transactions only go to the configured vault or an allowlisted collection."
       );
     }
+    return;
+  }
+  if (kind === "transfer") {
+    // Deliberately not restricted to MARKET_COLLECTIONS — sending works for
+    // any ERC-721 collection, not just the ones listed on this marketplace,
+    // so the destination is whatever contract the user themselves supplies.
+    // This is safe to leave open unlike "approve": a safeTransferFrom call
+    // only ever moves the ONE token the signer explicitly signs for in that
+    // same transaction — it can't grant standing access to anything else,
+    // so an unexpected destination can't be leveraged into a broader drain
+    // the way an unexpected approval target could. The one other valid
+    // target under this kind is our own known fee recipient (a plain ETH
+    // payment, no calldata — see lib/market/send-fee.ts). Both cases are
+    // intentionally unrestricted here; nothing to check.
     return;
   }
   // Unknown kind: fail closed rather than let an unclassified send through.

@@ -1,6 +1,6 @@
 /** Shared shapes for Marketplank. See docs/marketplank/SPEC.md. */
 
-export type MarketTab = "buy-sell" | "offers" | "activity" | "swap" | "positions";
+export type MarketTab = "buy-sell" | "offers" | "activity" | "swap" | "my-nfts" | "positions";
 
 export type CollectionTrustBadge = "lp-burned" | "ownership-renounced" | "verified";
 

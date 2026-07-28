@@ -8,6 +8,7 @@ const TABS: { id: MarketTab; label: string }[] = [
   { id: "offers", label: "Offers" },
   { id: "activity", label: "Activity" },
   { id: "swap", label: "Instant Swap" },
+  { id: "my-nfts", label: "My NFTs" },
   { id: "positions", label: "My Listings" },
 ];
 
