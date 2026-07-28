@@ -847,7 +847,15 @@ export default function MarketView() {
             )}
           </div>
         )}
-        {tab === "activity" && <ActivityFeed onSelectToken={openDetail} />}
+        {tab === "activity" && (
+          <ActivityFeed
+            onSelectToken={openDetail}
+            collection={COLLECTION}
+            listings={listings}
+            offers={offers}
+            totalSupply={TOTAL_SUPPLY}
+          />
+        )}
         {tab === "swap" && (
           <div className="space-y-3">
             <TreasuryDashboard />

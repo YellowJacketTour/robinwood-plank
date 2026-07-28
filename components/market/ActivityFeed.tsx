@@ -5,6 +5,9 @@ import Image from "next/image";
 import { shortAddress } from "@/lib/trade";
 import { getRarityMap, tierAnimationClass, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+import CollectionStats from "@/components/market/CollectionStats";
+import ActivityStats from "@/components/market/ActivityStats";
+import type { Listing, MarketCollection } from "@/lib/market/types";
 
 type Venue = { kind: "marketplank" | "seaport" | "other"; contract: string } | null;
 
@@ -13,6 +16,7 @@ type ActivityEvent = {
   tokenId: string;
   from: string;
   to: string;
+  priceWei: string | null;
   priceEth: string | null;
   txHash: string;
   timestamp: string | null;
@@ -60,9 +64,22 @@ type KindFilter = "all" | ActivityEvent["kind"];
 type Props = {
   /** Opens the shared item detail modal — same one the marketplace grid uses. */
   onSelectToken?: (tokenId: string) => void;
+  /** Optional — when present, renders the same Floor/Listed/Items/Best-offer
+   * strip Buy&Sell uses, plus a computed volume/sales sidebar, so the
+   * Activity tab isn't just a bare list on a wide desktop screen. */
+  collection?: MarketCollection;
+  listings?: Listing[];
+  offers?: Listing[];
+  totalSupply?: number;
 };
 
-export default function ActivityFeed({ onSelectToken }: Props) {
+export default function ActivityFeed({
+  onSelectToken,
+  collection,
+  listings,
+  offers,
+  totalSupply,
+}: Props) {
   const [events, setEvents] = useState<ActivityEvent[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
@@ -124,8 +141,22 @@ export default function ActivityFeed({ onSelectToken }: Props) {
     return <p className="py-6 text-center text-xs text-foreground/45">No activity yet.</p>;
   }
 
+  // Stats are computed from the FULL unfiltered feed (not `filtered`) — the
+  // sidebar should always answer "what's this collection actually doing,"
+  // not shift every time someone narrows the list below it.
+  const sales = events.filter((e) => e.kind === "sale");
+
   return (
-    <div className="space-y-2">
+    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start xl:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="min-w-0 space-y-2">
+      {collection && (
+        <CollectionStats
+          collection={collection}
+          listings={listings ?? []}
+          offers={offers ?? []}
+          totalSupply={totalSupply}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-1.5">
         <label className="flex items-center gap-1.5">
           <span className="sr-only">Filter by event type</span>
@@ -238,7 +269,7 @@ export default function ActivityFeed({ onSelectToken }: Props) {
                       {e.priceEth
                         ? `${Number(e.priceEth).toFixed(4)} Ξ`
                         : e.kind === "sale"
-                          ? "in WETH"
+                          ? "price unavailable"
                           : ""}
                     </span>
                   </div>
@@ -283,6 +314,14 @@ export default function ActivityFeed({ onSelectToken }: Props) {
           })}
         </ul>
       )}
+    </div>
+
+      {/* Desktop-only sidebar — on a phone this content would just push the
+          list below the fold, so it only renders at lg+ where there's
+          otherwise dead space next to a comfortably-narrow activity list. */}
+      <div className="hidden lg:block lg:sticky lg:top-4">
+        <ActivityStats sales={sales} rarity={rarity} onSelectToken={onSelectToken} />
+      </div>
     </div>
   );
 }
