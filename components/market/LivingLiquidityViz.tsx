@@ -1,19 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { formatTokenAmount } from "@/lib/trade";
 import { formatUsd, weiToUsd } from "@/lib/eth-price";
 import { getRarityMap, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+import { useVaultLive } from "@/lib/market/useVaultLive";
 
 type HeldToken = { tokenId: string; imageUrl: string | null };
-type VaultStats = {
-  ethReserveWei: string;
-  ethUsd: number | null;
-  vaultFeeRevenueWei: string;
-  marketplaceFeeRevenueEstWei: string;
-};
 
 /** Deterministic 0..1 pseudo-random from a token id, so each organism's
  * float path is stable across re-renders instead of jittering on refetch. */
@@ -33,11 +28,18 @@ function seededUnit(seed: string, salt: number): number {
  * the same live data VaultDashboard renders as plain numbers.
  */
 export default function LivingLiquidityViz() {
+  const { stats } = useVaultLive();
   const [held, setHeld] = useState<HeldToken[] | null>(null);
-  const [stats, setStats] = useState<VaultStats | null>(null);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
+  const lastHeldCount = useRef<number | null>(null);
 
   useEffect(() => {
+    void getRarityMap().then((map) => setRarity(map));
+  }, []);
+
+  useEffect(() => {
+    if (stats == null || lastHeldCount.current === stats.heldTokenCount) return;
+    lastHeldCount.current = stats.heldTokenCount;
     let cancelled = false;
     fetch("/api/market/vault/held")
       .then((r) => (r.ok ? r.json() : { tokens: [] }))
@@ -47,19 +49,10 @@ export default function LivingLiquidityViz() {
       .catch(() => {
         if (!cancelled) setHeld([]);
       });
-    fetch("/api/market/vault/stats")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!cancelled && d) setStats(d);
-      })
-      .catch(() => {});
-    void getRarityMap().then((map) => {
-      if (!cancelled) setRarity(map);
-    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [stats]);
 
   const organisms = useMemo(() => {
     if (!held) return [];

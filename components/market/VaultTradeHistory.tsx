@@ -1,19 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { formatTokenAmount } from "@/lib/trade";
-
-type VaultTradeKind = "buy" | "sell" | "deposit" | "redeem";
-
-type VaultTradeEvent = {
-  kind: VaultTradeKind;
-  address: string;
-  ethWei: string | null;
-  sharesWei: string | null;
-  tokenId: string | null;
-  txHash: string;
-  timestamp: string | null;
-};
+import { useVaultLive, type VaultTradeKind } from "@/lib/market/useVaultLive";
+import { usePendingVaultTx } from "@/lib/market/pendingVaultTx";
 
 const KIND_LABEL: Record<VaultTradeKind, string> = {
   buy: "Buy",
@@ -47,45 +36,43 @@ function timeAgo(iso: string | null) {
 
 /**
  * Real on-chain vault trade ticker (buy/sell/deposit/redeem), the dextools-
- * style trade table for Instant Swap — fed by /api/market/vault/activity,
- * which replays the vault's own events directly (lib/market/vault-activity.ts).
- * The NFT-collection Transfer-based /api/market/activity feed that drives
- * the Activity tab has no visibility into these at all, since vault swaps
- * trade the vault's internal share token, not the NFT collection itself.
+ * style trade table for Instant Swap — fed by the shared live stream
+ * (lib/market/useVaultLive.ts, backed by /api/market/vault/stream), which
+ * replays the vault's own events directly. The NFT-collection Transfer-based
+ * /api/market/activity feed that drives the Activity tab has no visibility
+ * into these at all, since vault swaps trade the vault's internal share
+ * token, not the NFT collection itself.
+ *
+ * Rows this tab just submitted appear instantly as "Pending" (see
+ * lib/market/pendingVaultTx.ts) — before confirmation, let alone before the
+ * next stream tick picks them up — and flip to their real row once the
+ * stream confirms the same tx hash.
  */
 export default function VaultTradeHistory() {
-  const [events, setEvents] = useState<VaultTradeEvent[] | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/market/vault/activity")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
-      .then((data: { events?: VaultTradeEvent[] }) => {
-        if (!cancelled) setEvents(data.events ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (failed) {
-    return <p className="py-3 text-center text-xs text-red-300">Could not load trade history.</p>;
-  }
+  const { activity, connected } = useVaultLive();
+  const pending = usePendingVaultTx();
+  const confirmedHashes = new Set(activity.map((e) => e.txHash));
+  const visiblePending = pending.filter((p) => !confirmedHashes.has(p.txHash));
+  const loading = activity.length === 0 && !connected && visiblePending.length === 0;
 
   return (
     <div className="space-y-1.5">
-      <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">Vault trades</p>
-      {events == null ? (
+      <div className="flex items-center justify-between">
+        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">Vault trades</p>
+        <span
+          className={`flex items-center gap-1 text-[0.55rem] font-bold uppercase ${connected ? "text-emerald-300/70" : "text-foreground/30"}`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${connected ? "animate-pulse bg-emerald-400" : "bg-foreground/30"}`} />
+          {connected ? "Live" : "Reconnecting…"}
+        </span>
+      </div>
+      {loading ? (
         <div className="space-y-1">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="h-7 animate-pulse rounded bg-wood-900/60" />
           ))}
         </div>
-      ) : events.length === 0 ? (
+      ) : activity.length === 0 && visiblePending.length === 0 ? (
         <p className="rounded-lg border border-dashed border-gold-500/25 bg-black/10 px-3 py-4 text-center text-xs text-foreground/45">
           No vault trades yet.
         </p>
@@ -93,7 +80,22 @@ export default function VaultTradeHistory() {
         <div className="max-h-64 overflow-y-auto rounded-lg border border-gold-500/15 bg-black/10">
           <table className="w-full text-left text-[0.65rem]">
             <tbody>
-              {events.map((e) => (
+              {visiblePending.map((p) => (
+                <tr key={p.txHash} className="border-b border-gold-500/10 bg-gold-500/5 last:border-0">
+                  <td className={`px-2 py-1.5 font-bold ${KIND_COLOR[p.kind]}`}>{KIND_LABEL[p.kind]}</td>
+                  <td className="px-2 py-1.5 font-mono text-foreground/70">
+                    {p.ethWei != null ? `${formatTokenAmount(p.ethWei, 18, 4)} Ξ` : p.tokenId != null ? `#${p.tokenId}` : "—"}
+                  </td>
+                  <td className="px-2 py-1.5 font-mono text-foreground/45">you</td>
+                  <td className="px-2 py-1.5 text-right">
+                    <span className="inline-flex items-center gap-1 text-amber-300">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+                      Pending
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {activity.map((e) => (
                 <tr key={e.txHash + e.kind + (e.tokenId ?? "")} className="border-b border-gold-500/10 last:border-0">
                   <td className={`px-2 py-1.5 font-bold ${KIND_COLOR[e.kind]}`}>{KIND_LABEL[e.kind]}</td>
                   <td className="px-2 py-1.5 font-mono text-foreground/70">

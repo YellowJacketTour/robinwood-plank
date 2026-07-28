@@ -19,6 +19,7 @@ import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
 import { getOwnedInventory } from "@/lib/market/inventory";
 import TokenPicker, { type PickerToken } from "@/components/market/TokenPicker";
+import { addPendingVaultTx } from "@/lib/market/pendingVaultTx";
 
 type Mode = "buy" | "sell" | "deposit" | "redeem";
 
@@ -282,19 +283,46 @@ export default function SwapPanel({ account, onConnect }: Props) {
     }
     if (mode === "buy") {
       if (!amount) return setError("Enter an ETH amount.");
-      return run(() => buyShares(account, amount, slippageBps as number), "Buying…");
+      const ethWei = parseTokenAmount(amount, 18);
+      return run(
+        () =>
+          buyShares(account, amount, slippageBps as number, (txHash) =>
+            addPendingVaultTx({ txHash, kind: "buy", ethWei: ethWei?.toString() ?? null, tokenId: null })
+          ),
+        "Buying…"
+      );
     }
     if (mode === "sell") {
       const wei = parseTokenAmount(amount, 18);
       if (wei === null || wei <= BigInt(0)) return setError("Enter a share amount.");
-      return run(() => sellShares(account, wei, slippageBps as number), "Selling…");
+      return run(
+        () =>
+          sellShares(account, wei, slippageBps as number, (txHash) =>
+            addPendingVaultTx({ txHash, kind: "sell", ethWei: null, tokenId: null })
+          ),
+        "Selling…"
+      );
     }
     if (mode === "deposit") {
       if (!tokenId) return setError("Enter a token ID.");
-      return run(() => depositForShares(account, tokenId), "Depositing…");
+      return run(
+        () =>
+          depositForShares(account, tokenId, (txHash) =>
+            addPendingVaultTx({ txHash, kind: "deposit", ethWei: null, tokenId })
+          ),
+        "Depositing…"
+      );
     }
     // redeem
-    if (tokenId) return run(() => redeemTarget(account, tokenId), "Redeeming (targeted)…");
+    if (tokenId) {
+      return run(
+        () =>
+          redeemTarget(account, tokenId, (txHash) =>
+            addPendingVaultTx({ txHash, kind: "redeem", ethWei: null, tokenId })
+          ),
+        "Redeeming (targeted)…"
+      );
+    }
     // FLAGGED (drand rework): this is only STEP 1 of the random redemption.
     // It burns the shares and anchors the draw to a drand round ~3-6s in the
     // future; the NFT arrives only after a second claimRandomRedeem() call,
@@ -303,7 +331,10 @@ export default function SwapPanel({ account, onConnect }: Props) {
     // owes a "waiting for drand round N" state and a claim button. See
     // lib/market/vault.ts for the full flow.
     return run(
-      () => requestRandomRedeem(account),
+      () =>
+        requestRandomRedeem(account, (txHash) =>
+          addPendingVaultTx({ txHash, kind: "redeem", ethWei: null, tokenId: null })
+        ),
       "Requesting random redeem (claim in a few seconds)…"
     );
   };

@@ -1,27 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { formatTokenAmount } from "@/lib/trade";
 import { formatUsd, weiToUsd } from "@/lib/eth-price";
 import { getRarityMap, tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
-
-type VaultStats = {
-  poolOpen: boolean;
-  ethReserveWei: string;
-  shareReserveWei: string;
-  heldTokenCount: number;
-  sharePriceWei: string | null;
-  mintFeeBps: number;
-  redeemFeeBps: number;
-  targetPremiumBps: number;
-  ethUsd: number | null;
-  aprPct: number | null;
-  aprBasisHours: number | null;
-  depositCount: number;
-  redeemCount: number;
-};
+import { useVaultLive } from "@/lib/market/useVaultLive";
 
 type HeldToken = { tokenId: string; imageUrl: string | null };
 
@@ -44,22 +29,23 @@ function statCell(label: string, value: string, sub?: string) {
  * Redeemed events — see lib/market/vault-stats.ts.
  */
 export default function VaultDashboard() {
-  const [stats, setStats] = useState<VaultStats | null>(null);
+  const { stats } = useVaultLive();
   const [held, setHeld] = useState<HeldToken[]>([]);
   const [heldLoading, setHeldLoading] = useState(true);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
-  const [failed, setFailed] = useState(false);
+  const lastHeldCount = useRef<number | null>(null);
 
   useEffect(() => {
+    void getRarityMap().then((map) => setRarity(map));
+  }, []);
+
+  // Re-fetch held-token images only when membership actually changes — the
+  // live stream ticks every few seconds, but re-resolving IPFS images that
+  // often would be pure waste since the vault's inventory rarely turns over.
+  useEffect(() => {
+    if (stats == null || lastHeldCount.current === stats.heldTokenCount) return;
+    lastHeldCount.current = stats.heldTokenCount;
     let cancelled = false;
-    fetch("/api/market/vault/stats")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
-      .then((data) => {
-        if (!cancelled) setStats(data);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
     fetch("/api/market/vault/held")
       .then((r) => (r.ok ? r.json() : { tokens: [] }))
       .then((data) => {
@@ -71,17 +57,11 @@ export default function VaultDashboard() {
       .finally(() => {
         if (!cancelled) setHeldLoading(false);
       });
-    void getRarityMap().then((map) => {
-      if (!cancelled) setRarity(map);
-    });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [stats]);
 
-  if (failed) {
-    return <p className="py-4 text-center text-xs text-red-300">Could not read vault stats.</p>;
-  }
   if (!stats) {
     return <p className="py-4 text-center text-xs text-foreground/45">Reading vault dashboard…</p>;
   }

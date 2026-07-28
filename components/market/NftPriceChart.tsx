@@ -33,36 +33,45 @@ export default function NftPriceChart() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/market/activity")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
-      .then((data: { events?: SaleEvent[] }) => {
-        if (cancelled) return;
-        const sales = (data.events ?? [])
-          .filter((e): e is { kind: string; priceWei: string; timestamp: string } =>
-            e.kind === "sale" && e.priceWei != null && e.timestamp != null
-          )
-          .map((e) => ({
-            time: Math.floor(new Date(e.timestamp).getTime() / 1000) as UTCTimestamp,
-            value: ethWeiToNumber(e.priceWei),
-          }))
-          .sort((a, b) => a.time - b.time);
-        // lightweight-charts requires strictly increasing timestamps; two
-        // sales in the same second collapse to the later one.
-        const deduped: typeof sales = [];
-        for (const p of sales) {
-          if (deduped.length > 0 && deduped[deduped.length - 1].time === p.time) {
-            deduped[deduped.length - 1] = p;
-          } else {
-            deduped.push(p);
+
+    const load = () => {
+      fetch("/api/market/activity")
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
+        .then((data: { events?: SaleEvent[] }) => {
+          if (cancelled) return;
+          const sales = (data.events ?? [])
+            .filter((e): e is { kind: string; priceWei: string; timestamp: string } =>
+              e.kind === "sale" && e.priceWei != null && e.timestamp != null
+            )
+            .map((e) => ({
+              time: Math.floor(new Date(e.timestamp).getTime() / 1000) as UTCTimestamp,
+              value: ethWeiToNumber(e.priceWei),
+            }))
+            .sort((a, b) => a.time - b.time);
+          // lightweight-charts requires strictly increasing timestamps; two
+          // sales in the same second collapse to the later one.
+          const deduped: typeof sales = [];
+          for (const p of sales) {
+            if (deduped.length > 0 && deduped[deduped.length - 1].time === p.time) {
+              deduped[deduped.length - 1] = p;
+            } else {
+              deduped.push(p);
+            }
           }
-        }
-        setPoints(deduped);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
+          setPoints(deduped);
+        })
+        .catch(() => {
+          if (!cancelled) setFailed(true);
+        });
+    };
+
+    load();
+    // The activity API is server-cached for 60s (app/api/market/activity),
+    // so polling faster than that would just re-fetch the same response.
+    const interval = setInterval(load, 20_000);
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, []);
 
