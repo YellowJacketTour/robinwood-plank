@@ -1,29 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { formatTokenAmount } from "@/lib/trade";
 import { formatUsd, weiToUsd } from "@/lib/eth-price";
-import { getRarityMap, tierColor, tierGlow } from "@/lib/market/rarityClient";
+import { getRarityMap } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { useVaultLive } from "@/lib/market/useVaultLive";
+import PlankFence from "@/components/market/PlankFence";
 
 type HeldToken = { tokenId: string; imageUrl: string | null };
 
-/** Deterministic 0..1 pseudo-random from a token id, so each organism's
- * float path is stable across re-renders instead of jittering on refetch. */
-function seededUnit(seed: string, salt: number): number {
-  let h = salt;
-  for (let i = 0; i < seed.length; i += 1) {
-    h = (h * 31 + seed.charCodeAt(i)) & 0xffffffff;
-  }
-  return ((h >>> 0) % 10_000) / 10_000;
-}
-
 /**
- * A living picture of the vault: held NFTs drift like organisms on one
- * side, real ETH liquidity and accumulating fees pulse on the other. Purely
- * decorative — every number it reads (reserves, fee totals, held tokens)
+ * A living picture of the vault: held NFTs stand fence-style on one side
+ * (see PlankFence — hover/drag for real stats, not decoration), real ETH
+ * liquidity and accumulating fees pulse on the other. Every number here
  * comes straight from /api/market/vault/stats and /api/market/vault/held,
  * the same live data VaultDashboard renders as plain numbers.
  */
@@ -54,18 +45,6 @@ export default function LivingLiquidityViz() {
     };
   }, [stats]);
 
-  const organisms = useMemo(() => {
-    if (!held) return [];
-    return held.slice(0, 14).map((t, i) => ({
-      ...t,
-      top: 8 + seededUnit(t.tokenId, 1) * 74,
-      left: 6 + seededUnit(t.tokenId, 2) * 78,
-      duration: 5 + seededUnit(t.tokenId, 3) * 5,
-      delay: seededUnit(t.tokenId, i + 4) * -8,
-      size: 34 + seededUnit(t.tokenId, 5) * 20,
-    }));
-  }, [held]);
-
   const ethUsd = stats?.ethUsd ?? 0;
   const ethReserveEth = stats ? Number(formatTokenAmount(stats.ethReserveWei, 18, 4)) : 0;
   const reserveScale = Math.min(1, Math.max(0.25, ethReserveEth / 0.1));
@@ -78,42 +57,10 @@ export default function LivingLiquidityViz() {
         The vault, alive
       </p>
       <div className="relative grid grid-cols-1 sm:grid-cols-2">
-        <div className="relative h-48 overflow-hidden border-b border-gold-500/10 bg-gradient-to-br from-wood-900/40 to-transparent sm:h-64 sm:border-b-0 sm:border-r">
-          {organisms.map((o) => {
-            const r = rarity.get(o.tokenId);
-            const glow = r ? tierGlow(r.tier) : "0 0 10px rgba(212,175,90,0.25)";
-            const ring = r ? tierColor(r.tier) : "rgba(212,175,90,0.4)";
-            return (
-              <div
-                key={o.tokenId}
-                className="absolute animate-organism-float rounded-full"
-                style={{
-                  top: `${o.top}%`,
-                  left: `${o.left}%`,
-                  width: o.size,
-                  height: o.size,
-                  animationDuration: `${o.duration}s`,
-                  animationDelay: `${o.delay}s`,
-                  boxShadow: glow,
-                  border: `1px solid ${ring}`,
-                }}
-                title={r ? `${r.name} · #${o.tokenId} · Rank #${r.rank} · ${r.tier}` : `#${o.tokenId}`}
-              >
-                {o.imageUrl ? (
-                  <Image
-                    src={o.imageUrl}
-                    alt={`#${o.tokenId}`}
-                    fill
-                    sizes="60px"
-                    className="rounded-full object-cover"
-                    unoptimized
-                  />
-                ) : null}
-              </div>
-            );
-          })}
-          <span className="absolute bottom-1.5 left-2 text-[0.55rem] font-bold uppercase tracking-wide text-foreground/35">
-            {held ? `${held.length} planks held` : "loading…"}
+        <div className="relative h-48 overflow-hidden border-b border-gold-500/10 bg-gradient-to-b from-wood-900/40 to-black/30 sm:h-64 sm:border-b-0 sm:border-r">
+          <PlankFence held={held} rarity={rarity} />
+          <span className="pointer-events-none absolute bottom-1.5 left-2 text-[0.55rem] font-bold uppercase tracking-wide text-foreground/35">
+            {held ? `${held.length} planks held · drag one` : "loading…"}
           </span>
         </div>
 

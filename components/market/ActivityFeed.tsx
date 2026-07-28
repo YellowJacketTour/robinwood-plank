@@ -16,7 +16,7 @@ import ActivityStats from "@/components/market/ActivityStats";
 import ScrollBox from "@/components/market/ScrollBox";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 
-type Venue = { kind: "marketplank" | "seaport" | "other"; contract: string } | null;
+type Venue = { kind: "marketplank" | "seaport" | "vault" | "other"; contract: string } | null;
 
 type ActivityEvent = {
   kind: "mint" | "sale" | "transfer";
@@ -44,12 +44,15 @@ const KIND_STYLE: Record<ActivityEvent["kind"], string> = {
  * is shared protocol infrastructure anyone can fulfill through. "Seaport"
  * means the trade went through that protocol but wasn't one of ours (most
  * likely a pre-launch fill, another Seaport-based frontend, or a script) —
- * deliberately not a guessed brand name we have no evidence for.
+ * deliberately not a guessed brand name we have no evidence for. "vault"
+ * means it moved through our own MarketplankVault (a deposit or redeem, not
+ * a sale — priced separately in VaultTradeHistory, never here).
  */
 function venueLabel(venue: Venue): string {
   if (!venue) return "—";
   if (venue.kind === "marketplank") return "Marketplank";
   if (venue.kind === "seaport") return "Seaport (other)";
+  if (venue.kind === "vault") return "Vault";
   return shortAddress(venue.contract);
 }
 
@@ -316,6 +319,10 @@ export default function ActivityFeed({
                           <span className="text-emerald-300" title="This fill's on-chain order hash matched an order we actually served — not just a guess from the contract address.">
                             Marketplank
                           </span>
+                        ) : e.venue.kind === "vault" ? (
+                          <span className="text-sky-300" title="Moved through the liquidity vault — a deposit or redeem, not a marketplace sale. See the Liquidity pool trades table below for its real numbers.">
+                            Vault
+                          </span>
                         ) : (
                           <a
                             href={`${EXPLORER_ADDRESS}${e.venue.contract}`}
@@ -357,7 +364,7 @@ export default function ActivityFeed({
           list below the fold, so it only renders at lg+ where there's
           otherwise dead space next to a comfortably-narrow activity list. */}
       <div className="hidden lg:block lg:sticky lg:top-4">
-        <ActivityStats sales={sales} rarity={rarity} onSelectToken={onSelectToken} />
+        <ActivityStats sales={sales} />
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import {
   ROBINHOOD_CHAIN_ID,
   ROBINHOOD_RPC_URLS,
 } from "@/lib/mint-contract";
-import { MARKET_OFFER_CURRENCY, SEAPORT_ADDRESS } from "@/lib/constants";
+import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS, SEAPORT_ADDRESS } from "@/lib/constants";
 import { resolveTokenImage } from "@/lib/market/token-image";
 import { wasOrderServedByUs } from "@/lib/market/served-orders";
 
@@ -76,6 +76,12 @@ export type ActivityEvent = {
    * "other" — some OTHER contract entirely executed it — a real signal that
    *   a different marketplace/router/bot is active on this chain, which we
    *   could never see from our own relay alone.
+   * "vault" — executed via our own MarketplankVault (deposit/redeem, not a
+   *   sale — no listing, no buyer-paid price, so it must never be
+   *   classified as "sale" or the UI shows a nonsensical "price
+   *   unavailable" on what's actually a vault mechanic already properly
+   *   shown, with its real numbers, in VaultTradeHistory). Direction
+   *   (deposit vs redeem) is visible from `from`/`to` already on this event.
    * null — a plain wallet-to-wallet transfer, no contract intermediary.
    *
    * NOTE ON SCOPE: this only ever sees activity that happens ON THIS CHAIN
@@ -86,7 +92,7 @@ export type ActivityEvent = {
    * but not a brand-new bespoke L3 unless they explicitly add it). That is a
    * business-outreach question, not a code gap.
    */
-  venue: { kind: "marketplank" | "seaport" | "other"; contract: string } | null;
+  venue: { kind: "marketplank" | "seaport" | "vault" | "other"; contract: string } | null;
 };
 
 function topicToAddress(topic: string): string {
@@ -104,9 +110,12 @@ export function classifyTransfer(input: {
   txTo: string | null;
   seaportAddress: string;
   nftContractAddress: string;
+  /** Null when no vault is deployed for this collection yet. */
+  vaultAddress?: string | null;
 }): { kind: ActivityKind; venue: ActivityEvent["venue"] } {
   const nftContract = input.nftContractAddress.toLowerCase();
   const seaport = input.seaportAddress.toLowerCase();
+  const vault = input.vaultAddress?.toLowerCase() ?? null;
   const txTo = input.txTo?.toLowerCase() ?? null;
 
   // A plain wallet-to-wallet transfer calls the NFT contract directly — `to`
@@ -121,6 +130,15 @@ export function classifyTransfer(input: {
   }
   if (!executedViaContract) {
     return { kind: "transfer", venue: null };
+  }
+  // A deposit or redeem, not a sale — no listing, no buyer-paid price. Must
+  // be checked before the generic "any other contract = sale" fallback
+  // below, or it gets mislabeled as a sale with no price to show, which is
+  // exactly the reported bug (VaultTradeHistory already shows these with
+  // their real numbers; this feed just needs to stop double-counting them
+  // as broken sales).
+  if (vault != null && txTo === vault) {
+    return { kind: "transfer", venue: { kind: "vault", contract: input.txTo! } };
   }
   // NOTE: "seaport" here is provisional, never "marketplank" — attribution
   // to us requires a positive orderHash match, applied as a later async
@@ -355,6 +373,7 @@ export async function fetchActivity(
       txTo: tx?.to ?? null,
       seaportAddress: SEAPORT_ADDRESS,
       nftContractAddress: NFT_CONTRACT_ADDRESS,
+      vaultAddress: MARKET_VAULT_ADDRESS,
     });
 
     // Upgrade "seaport" (unattributed) to "marketplank" ONLY on a positive

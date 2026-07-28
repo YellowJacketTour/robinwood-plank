@@ -6,6 +6,7 @@ const SEAPORT = "0x0000000000000068F116a894984e2DB1123eB395";
 const NFT = "0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156";
 const ZERO = "0x0000000000000000000000000000000000000000";
 const OTHER_MARKETPLACE = "0x1234567890123456789012345678901234567890";
+const VAULT = "0xb2019Fd4cA24502e812C0C73b751Fa49979BF708";
 
 test("a mint (from the zero address) is always a mint, regardless of executor", () => {
   const r = classifyTransfer({ from: ZERO, txTo: SEAPORT, seaportAddress: SEAPORT, nftContractAddress: NFT });
@@ -59,6 +60,36 @@ test("classification is case-insensitive on addresses", () => {
   });
   assert.equal(r.kind, "sale");
   assert.equal(r.venue?.kind, "seaport");
+});
+
+test("a call executed via the vault is a transfer, not a sale — venue = vault", () => {
+  // The exact bug reported live: deposit()/redeemTarget()/claimRandomRedeem()
+  // all execute via the vault contract, which the generic "any other
+  // contract = sale" branch above would otherwise misclassify as a sale
+  // with no price to show ("price unavailable"). VaultTradeHistory already
+  // shows these with their real numbers — this feed must not double-count
+  // them as broken sales, and must check vault BEFORE the generic fallback.
+  const r = classifyTransfer({
+    from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",
+    txTo: VAULT,
+    seaportAddress: SEAPORT,
+    nftContractAddress: NFT,
+    vaultAddress: VAULT,
+  });
+  assert.equal(r.kind, "transfer");
+  assert.deepEqual(r.venue, { kind: "vault", contract: VAULT });
+});
+
+test("with no vault configured, a vault-shaped address still falls through to the generic sale path", () => {
+  const r = classifyTransfer({
+    from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",
+    txTo: VAULT,
+    seaportAddress: SEAPORT,
+    nftContractAddress: NFT,
+    vaultAddress: null,
+  });
+  assert.equal(r.kind, "sale");
+  assert.deepEqual(r.venue, { kind: "other", contract: VAULT });
 });
 
 test("an unreadable transaction (txTo null) falls back to plain transfer rather than crashing", () => {
