@@ -12,7 +12,9 @@ export type PickerToken = {
 
 type Props = {
   tokens: PickerToken[];
-  selected: string | null;
+  /** A single id (existing single-select callers), an array (multi-select —
+   * every id in it renders as selected), or null for none. */
+  selected: string | string[] | null;
   onSelect: (tokenId: string) => void;
   loading?: boolean;
   emptyMessage?: string;
@@ -37,6 +39,7 @@ export default function TokenPicker({
   const [manualOpen, setManualOpen] = useState(false);
   const [manualValue, setManualValue] = useState("");
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
+  const selectedSet = Array.isArray(selected) ? new Set(selected) : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -68,7 +71,7 @@ export default function TokenPicker({
         <div className="grid max-h-64 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-6">
           {tokens.map((t) => {
             const r = rarity.get(t.tokenId);
-            const isSelected = selected === t.tokenId;
+            const isSelected = selectedSet ? selectedSet.has(t.tokenId) : selected === t.tokenId;
             return (
               <button
                 key={t.tokenId}
