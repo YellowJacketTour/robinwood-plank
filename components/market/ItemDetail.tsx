@@ -6,6 +6,8 @@ import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
 import type { Listing, MarketCollection } from "@/lib/market/types";
+import { sendNft, validateRecipient } from "@/lib/market/transfer";
+import { quoteSendFee, type SendFeeQuote } from "@/lib/market/send-fee";
 
 type TokenDetail = {
   tokenId: string;
@@ -32,6 +34,10 @@ type Props = {
   onBuy?: (listing: Listing) => void;
   onOffer?: (tokenId: string) => void;
   onClose: () => void;
+  /** Connected wallet, if any — enables the Send action when it matches
+   * this token's on-chain owner. Omit to leave Send unavailable, e.g. in a
+   * read-only context. */
+  account?: string | null;
 };
 
 const EXPLORER_TX = "https://robinhoodchain.blockscout.com/tx/";
@@ -43,9 +49,35 @@ export default function ItemDetail({
   onBuy,
   onOffer,
   onClose,
+  account,
 }: Props) {
   const [detail, setDetail] = useState<TokenDetail | null>(null);
   const [failed, setFailed] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const [sendTo, setSendTo] = useState("");
+  const [sendConfirming, setSendConfirming] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendDone, setSendDone] = useState(false);
+  const [sendFeeQuote, setSendFeeQuote] = useState<SendFeeQuote | null>(null);
+
+  useEffect(() => {
+    if (!sendOpen) {
+      setSendFeeQuote(null);
+      return;
+    }
+    let cancelled = false;
+    quoteSendFee(1)
+      .then((q) => {
+        if (!cancelled) setSendFeeQuote(q);
+      })
+      .catch(() => {
+        if (!cancelled) setSendFeeQuote(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sendOpen]);
 
   // Mounted per token via a `key` at the call site, so there is no stale state
   // to clear here when the token changes.
@@ -169,7 +201,88 @@ export default function ItemDetail({
                   Offer
                 </button>
               )}
+              {account && detail?.owner.toLowerCase() === account.toLowerCase() && !sendDone && (
+                <button
+                  type="button"
+                  onClick={() => setSendOpen((v) => !v)}
+                  className="min-h-11 flex-1 rounded-lg border border-gold-500/40 text-sm font-bold text-gold-300 transition hover:border-gold-400"
+                >
+                  {sendOpen ? "Cancel" : "Send"}
+                </button>
+              )}
             </div>
+
+            {sendOpen && !sendDone && account && (
+              <div className="space-y-2 rounded-lg border border-gold-500/25 bg-black/20 p-2.5">
+                <div className="flex items-center justify-between text-[0.65rem] text-foreground/50">
+                  <span>Send fee</span>
+                  <span className="font-mono font-bold text-gold-300">
+                    {sendFeeQuote ? `${formatTokenAmount(sendFeeQuote.totalFeeWei, 18, 5)} Ξ` : "Quoting…"}
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Recipient address (0x…)"
+                  value={sendTo}
+                  disabled={sendBusy}
+                  onChange={(e) => {
+                    setSendTo(e.target.value);
+                    setSendConfirming(false);
+                    setSendError(null);
+                  }}
+                  className="min-h-10 w-full rounded-lg border border-gold-500/30 bg-wood-900/70 px-2.5 font-mono text-xs text-foreground outline-none focus:border-gold-400"
+                />
+                {sendConfirming && !sendBusy && (
+                  <p className="rounded-lg border border-red-500/30 bg-red-950/20 px-2 py-1.5 text-center text-[0.65rem] text-red-200">
+                    Sending is permanent. Confirm the address, then tap again.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  disabled={sendBusy}
+                  onClick={async () => {
+                    setSendError(null);
+                    try {
+                      validateRecipient(sendTo, account);
+                    } catch (e) {
+                      setSendError(e instanceof Error ? e.message : "Enter a valid address.");
+                      return;
+                    }
+                    if (!sendConfirming) {
+                      setSendConfirming(true);
+                      return;
+                    }
+                    try {
+                      setSendBusy(true);
+                      await sendNft(account, collection.contractAddress, tokenId, sendTo);
+                      setSendDone(true);
+                    } catch (e) {
+                      setSendError(e instanceof Error ? e.message : "Send failed.");
+                    } finally {
+                      setSendBusy(false);
+                      setSendConfirming(false);
+                    }
+                  }}
+                  className={`min-h-10 w-full rounded-lg text-xs font-bold transition disabled:opacity-50 ${
+                    sendConfirming
+                      ? "bg-red-500 text-white hover:bg-red-400"
+                      : "bg-gold-500 text-wood-950 hover:bg-gold-400"
+                  }`}
+                >
+                  {sendBusy ? "Sending…" : sendConfirming ? "Confirm send" : `Send #${tokenId}`}
+                </button>
+                {sendError && (
+                  <p className="text-center text-[0.65rem] text-red-300" role="alert">
+                    {sendError}
+                  </p>
+                )}
+              </div>
+            )}
+            {sendDone && (
+              <p className="rounded-lg border border-emerald-500/30 bg-emerald-950/20 px-2.5 py-2 text-center text-xs text-emerald-300">
+                Sent #{tokenId} to {shortAddress(sendTo)}.
+              </p>
+            )}
 
             <div>
               <p className="mb-1.5 text-[0.6rem] uppercase tracking-wide text-foreground/40">

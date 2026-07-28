@@ -9,6 +9,7 @@ import OfferForm from "@/components/market/OfferForm";
 import SwapPanel from "@/components/market/SwapPanel";
 import MyPositions from "@/components/market/MyPositions";
 import MyInventory from "@/components/market/MyInventory";
+import MyNfts from "@/components/market/MyNfts";
 import TreasuryDashboard from "@/components/market/TreasuryDashboard";
 import CollectionStats from "@/components/market/CollectionStats";
 import BuyConfirm from "@/components/market/BuyConfirm";
@@ -39,7 +40,7 @@ import type { Listing, MarketTab, Offer } from "@/lib/market/types";
 
 const COLLECTION = MARKET_COLLECTIONS[0];
 
-const VALID_TABS: MarketTab[] = ["buy-sell", "offers", "activity", "swap", "positions"];
+const VALID_TABS: MarketTab[] = ["buy-sell", "offers", "activity", "swap", "my-nfts", "positions"];
 
 function isTab(value: string | null): value is MarketTab {
   return value !== null && (VALID_TABS as string[]).includes(value);
@@ -676,6 +677,7 @@ export default function MarketView() {
             void handleOffer({ tokenId } as Listing);
           }}
           onClose={closeDetail}
+          account={account}
         />
       )}
 
@@ -850,6 +852,28 @@ export default function MarketView() {
             <TreasuryDashboard />
             <SwapPanel />
           </div>
+        )}
+        {tab === "my-nfts" && account && (
+          <MyNfts
+            account={account}
+            collections={MARKET_COLLECTIONS}
+            alreadyListed={
+              new Set(
+                listings
+                  .filter((l) => l.maker.toLowerCase() === account.toLowerCase())
+                  .map((l) => `${l.collectionSlug}:${l.tokenId}`)
+              )
+            }
+          />
+        )}
+        {tab === "my-nfts" && !account && (
+          <button
+            type="button"
+            onClick={handleConnect}
+            className="mx-auto flex min-h-11 items-center justify-center rounded-lg bg-gold-500 px-5 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
+          >
+            Connect wallet
+          </button>
         )}
         {tab === "positions" && account && (
           <div className="space-y-3">
