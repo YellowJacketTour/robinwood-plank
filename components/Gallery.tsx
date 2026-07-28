@@ -39,7 +39,6 @@ import {
   type TokenRarity,
 } from "@/lib/rarity";
 import type { GalleryNft } from "@/lib/gallery-types";
-import { holoHandlers } from "@/lib/holo";
 import RarityInsights from "@/components/RarityInsights";
 import {
   ensureNftCacheHydrated,
@@ -1041,7 +1040,6 @@ export default function Gallery() {
                             }`}
                             style={tokenRarity ? tierCardStyle(tokenRarity.tier) : undefined}
                             aria-label={`Open ${displayName(nft)}`}
-                            {...(tokenRarity ? holoHandlers : {})}
                           >
                             <div
                               className={`relative aspect-square w-full overflow-hidden bg-wood-950 ${

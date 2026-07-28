@@ -2,7 +2,6 @@ import Image from "next/image";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
-import { holoHandlers } from "@/lib/holo";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 
 type Props = {
@@ -51,7 +50,6 @@ export default function ListingCard({
         isOffer ? "border-emerald-500/40" : ""
       } ${rarity ? `${tierAnimationClass(rarity.tier)} holo-card` : ""}`}
       style={rarity ? { boxShadow: tierGlow(rarity.tier), ...tierCardStyle(rarity.tier) } : undefined}
-      {...(rarity ? holoHandlers : {})}
     >
       <div
         className={`relative aspect-square w-full bg-wood-900 ${

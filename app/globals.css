@@ -626,49 +626,6 @@ body .nft-modal .nft-modal-body {
 /* Rarity-tier motion — reserved for Legendary/Mythic (lib/rarity.ts
    tierAnimationClass). Reduced-motion users get the static glow only, via
    the prefers-reduced-motion override below. */
-/* Previous version left the highlight visibly parked on the card during its
-   "rest" phase, then snapped back to start — the -150%/250% margins weren't
-   generous enough once the 100deg angle (which extends a gradient's line
-   beyond the element's box) is accounted for, so the glow never fully
-   cleared the visible area before holding. Fixed with: (1) a much narrower
-   band (a thin glint, not a wide wash) so it clears the box quickly, (2)
-   deliberately excessive off-screen margins on both rest positions, (3) a
-   much slower, explicit three-stop keyframe (separate rules, not a
-   comma-shared stop, to rule out any ambiguity there), and (4) `linear`
-   timing so nothing decelerates into a "freeze" right before the loop. */
-@keyframes tier-shimmer-sweep {
-  0% {
-    background-position: -260% 0;
-  }
-  22% {
-    background-position: 360% 0;
-  }
-  100% {
-    background-position: 360% 0;
-  }
-}
-
-.tier-shimmer {
-  position: relative;
-  overflow: hidden;
-}
-
-.tier-shimmer::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(
-    100deg,
-    transparent 46%,
-    rgba(255, 255, 255, 0.32) 49.5%,
-    rgba(255, 255, 255, 0.32) 50.5%,
-    transparent 54%
-  );
-  background-size: 300% 100%;
-  animation: tier-shimmer-sweep 9s linear infinite;
-}
-
 @keyframes tier-pulse-glow {
   0%,
   100% {
@@ -683,30 +640,56 @@ body .nft-modal .nft-modal-body {
   animation: tier-pulse-glow 2.2s ease-in-out infinite;
 }
 
-/* Pointer/touch-reactive holo sheen — a trading-card foil effect that
-   follows the cursor (mouse) or finger (touch drag, via the Pointer Events
-   API which unifies both). Driven by --holo-x/--holo-y/--holo-active,
-   which lib/holo.ts sets directly on the element (no React re-render per
-   mousemove — this needs to stay cheap at 60fps). Uses ::before so it can
-   coexist with .tier-shimmer's ::after on the same element. */
+/* Always-on, cursor-tracking holo field (lib/holo.ts drives --holo-x/
+   --holo-y/--holo-angle/--holo-falloff from ONE shared global pointer
+   position, applied per-card relative to each card's own screen position —
+   see that file for why this replaced a swipe animation: a swipe is a
+   scripted pass with a beginning and end, a real foil card's shine is a
+   permanent property of the surface that just repositions as you (or the
+   light) move. This never turns off; --holo-falloff dims it with distance
+   from the cursor instead of an opacity on/off switch.
+   Two layers: a soft white hotspot (::before) for the base sheen, and a
+   thin rainbow arc (::after) whose hue rotates with --holo-angle — actual
+   foil is iridescent, not just brighter-when-lit. */
 .holo-card {
   position: relative;
   overflow: hidden;
 }
 
-.holo-card::before {
+.holo-card::before,
+.holo-card::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
   z-index: 1;
-  opacity: var(--holo-active, 0);
-  transition: opacity 0.35s ease;
+}
+
+.holo-card::before {
+  opacity: calc(var(--holo-falloff, 0.55) * var(--holo-intensity, 0) * 0.8);
   background: radial-gradient(
-    circle 140px at var(--holo-x, 50%) var(--holo-y, 50%),
-    rgba(255, 255, 255, 0.55),
-    rgba(255, 255, 255, 0.15) 45%,
-    transparent 72%
+    circle 220px at var(--holo-x, 50%) var(--holo-y, 50%),
+    rgba(255, 255, 255, 0.65),
+    rgba(255, 255, 255, 0.18) 40%,
+    transparent 70%
+  );
+  mix-blend-mode: overlay;
+}
+
+.holo-card::after {
+  /* overlay, not color-dodge: dodge blows saturated colors straight to
+     white on this collection's many light/pastel backgrounds, which read
+     as broken rather than iridescent. overlay stays a tint. */
+  opacity: calc(var(--holo-falloff, 0.55) * var(--holo-intensity, 0) * 0.3);
+  background: conic-gradient(
+    from var(--holo-angle, 0deg) at var(--holo-x, 50%) var(--holo-y, 50%),
+    #ff8a8a,
+    #ffd88a,
+    #a8ff8a,
+    #8ad4ff,
+    #c28aff,
+    #ff8ad4,
+    #ff8a8a
   );
   mix-blend-mode: overlay;
 }
