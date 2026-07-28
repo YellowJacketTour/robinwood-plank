@@ -77,8 +77,8 @@ export default function LivingLiquidityViz() {
       <p className="border-b border-gold-500/10 px-3 py-1.5 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
         The vault, alive
       </p>
-      <div className="relative grid h-56 grid-cols-2 sm:h-64">
-        <div className="relative overflow-hidden border-r border-gold-500/10 bg-gradient-to-br from-wood-900/40 to-transparent">
+      <div className="relative grid grid-cols-1 sm:grid-cols-2">
+        <div className="relative h-48 overflow-hidden border-b border-gold-500/10 bg-gradient-to-br from-wood-900/40 to-transparent sm:h-64 sm:border-b-0 sm:border-r">
           {organisms.map((o) => {
             const r = rarity.get(o.tokenId);
             const glow = r ? tierGlow(r.tier) : "0 0 10px rgba(212,175,90,0.25)";
@@ -117,7 +117,7 @@ export default function LivingLiquidityViz() {
           </span>
         </div>
 
-        <div className="relative flex flex-col items-center justify-center gap-3 overflow-hidden bg-gradient-to-bl from-gold-900/10 to-transparent px-3">
+        <div className="relative flex h-48 flex-col items-center justify-center gap-3 overflow-hidden bg-gradient-to-bl from-gold-900/10 to-transparent px-3 sm:h-64">
           <div
             className="animate-liquidity-pulse relative overflow-hidden rounded-full bg-gold-400/20"
             style={{
