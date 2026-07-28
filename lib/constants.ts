@@ -195,6 +195,13 @@ export const MARKET_VAULT_ADDRESS: string | null = (() => {
   return raw;
 })();
 
+/** The vault's own DrandBeacon — read live from the deployed vault's
+ * beacon() getter, not guessed or copied from a deploy script that could
+ * drift. Lives here (not lib/market/drand.ts) so lib/wallet.ts's
+ * destination allowlist and lib/market/drand.ts's send helper can both
+ * import it without importing each other. */
+export const DRAND_BEACON_ADDRESS = "0x87d584df130FED0Fe540954eD48CE2691A18D619";
+
 /** Seaport protocol version Marketplank targets. */
 export const SEAPORT_VERSION = "1.6";
 
