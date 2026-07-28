@@ -273,7 +273,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
                     )}
                     {r && (
                       <span
-                        className={`absolute left-1.5 ${isListed ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950 shadow-[0_1px_3px_rgba(0,0,0,0.6)]`}
+                        className={`tier-badge absolute left-1.5 ${isListed ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950`}
                         style={{ backgroundColor: tierColor(r.tier) }}
                         title={`Rank #${r.rank} · ${r.percentile.toFixed(0)}th percentile`}
                       >
