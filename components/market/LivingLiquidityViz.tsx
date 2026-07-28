@@ -126,14 +126,23 @@ export default function LivingLiquidityViz() {
 
         <div className="relative flex flex-col items-center justify-center gap-3 overflow-hidden bg-gradient-to-bl from-gold-900/10 to-transparent px-3">
           <div
-            className="animate-liquidity-pulse rounded-full bg-gold-400/20"
+            className="animate-liquidity-pulse relative overflow-hidden rounded-full bg-gold-400/20"
             style={{
               width: 70 + reserveScale * 60,
               height: 70 + reserveScale * 60,
               boxShadow: "0 0 30px rgba(244,201,93,0.25)",
               border: "1px solid rgba(244,201,93,0.5)",
             }}
-          />
+          >
+            <Image
+              src="/images/plank-logo.webp"
+              alt=""
+              fill
+              sizes="130px"
+              className="object-contain p-3.5 opacity-90"
+              unoptimized
+            />
+          </div>
           <div className="text-center">
             <p className="font-display text-base text-gold-300">
               {stats ? formatTokenAmount(stats.ethReserveWei, 18, 4) : "…"} Ξ
