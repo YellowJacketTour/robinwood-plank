@@ -65,21 +65,29 @@ export default function VaultTradeHistory() {
   // same shared singleton (lib/market/useVaultLive.ts) — they can never
   // actually show different data; the badge flicker was the only thing
   // that ever made them look out of sync.
-  const { activity, live } = useVaultLive();
+  const { activity, live, connected } = useVaultLive();
   const pending = usePendingVaultTx();
   const confirmedHashes = new Set(activity.map((e) => e.txHash));
   const visiblePending = pending.filter((p) => !confirmedHashes.has(p.txHash));
   const loading = activity.length === 0 && !live && visiblePending.length === 0;
+  // Three real states, not two: `live` data current is "Live"; a socket
+  // that's open/reconnecting but hasn't gone stale yet is "Updating…" (still
+  // fine, just between ticks); only once the data has actually gone stale
+  // AND there's no live socket does it read as "Reconnecting…" — the state
+  // that's actually worth flagging as a problem.
+  const badgeLabel = live ? "Live" : connected ? "Updating…" : "Reconnecting…";
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">Trades</p>
         <span
-          className={`flex items-center gap-1 text-[0.55rem] font-bold uppercase ${live ? "text-emerald-300/70" : "text-foreground/30"}`}
+          className={`flex items-center gap-1 text-[0.55rem] font-bold uppercase ${live ? "text-emerald-300/70" : connected ? "text-gold-300/70" : "text-foreground/30"}`}
         >
-          <span className={`h-1.5 w-1.5 rounded-full ${live ? "animate-pulse bg-emerald-400" : "bg-foreground/30"}`} />
-          {live ? "Live" : "Reconnecting…"}
+          <span
+            className={`h-1.5 w-1.5 rounded-full ${live ? "animate-pulse bg-emerald-400" : connected ? "animate-pulse bg-gold-400" : "bg-foreground/30"}`}
+          />
+          {badgeLabel}
         </span>
       </div>
       {loading ? (

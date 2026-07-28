@@ -94,6 +94,17 @@ let cachedEvents: ActivityEvent[] | null = null;
 let cachedAt = 0;
 const CACHE_TTL_MS = 60_000;
 
+// The list above is capped at 40 most-recent events of ANY kind (mints,
+// transfers, vault moves, sales) — fine for a live feed, but volume/avg
+// price/sparkline computed from that window undercount real totals the
+// moment activity of any kind pushes real sales out of the last 40 rows.
+// ActivityStats needs the same full=1 lineage EventCountdown already uses
+// for "highest sale ever" — same underlying route, its own cache (matches
+// the server's own separate full-mode cache in app/api/market/activity).
+let cachedFullEvents: ActivityEvent[] | null = null;
+let cachedFullAt = 0;
+const FULL_CACHE_TTL_MS = 120_000;
+
 export default function ActivityFeed({
   onSelectToken,
   collection,
@@ -102,6 +113,7 @@ export default function ActivityFeed({
   totalSupply,
 }: Props) {
   const [events, setEvents] = useState<ActivityEvent[] | null>(cachedEvents);
+  const [fullEvents, setFullEvents] = useState<ActivityEvent[] | null>(cachedFullEvents);
   const [failed, setFailed] = useState(false);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [venueFilter, setVenueFilter] = useState<string>("all");
@@ -132,6 +144,27 @@ export default function ActivityFeed({
     void getRarityMap().then((map) => {
       if (!cancelled) setRarity(map);
     });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (cachedFullEvents && Date.now() - cachedFullAt < FULL_CACHE_TTL_MS) {
+      return;
+    }
+    fetch("/api/market/activity?full=1")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
+      .then((data) => {
+        const next = data.events ?? [];
+        cachedFullEvents = next;
+        cachedFullAt = Date.now();
+        if (!cancelled) setFullEvents(next);
+      })
+      .catch(() => {
+        // Stats sidebar just falls back to the capped recent list below.
+      });
     return () => {
       cancelled = true;
     };
@@ -172,10 +205,13 @@ export default function ActivityFeed({
     return <p className="py-6 text-center text-xs text-foreground/45">No activity yet.</p>;
   }
 
-  // Stats are computed from the FULL unfiltered feed (not `filtered`) — the
-  // sidebar should always answer "what's this collection actually doing,"
-  // not shift every time someone narrows the list below it.
-  const sales = events.filter((e) => e.kind === "sale");
+  // Stats prefer the deeper full=1 lineage (300 events, same source
+  // EventCountdown's "highest sale ever" uses) over the capped 40-row recent
+  // feed — the 40-cap mixes in mints/transfers/vault moves alongside sales,
+  // so real sales fall out of that window fast and volume/avg/history
+  // undercounted. Falls back to the recent feed's own sales until the
+  // full-lineage fetch resolves, rather than showing nothing.
+  const sales = (fullEvents ?? events).filter((e) => e.kind === "sale");
 
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start xl:grid-cols-[minmax(0,1fr)_320px]">
