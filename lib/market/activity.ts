@@ -4,7 +4,7 @@ import {
   ROBINHOOD_CHAIN_ID,
   ROBINHOOD_RPC_URLS,
 } from "@/lib/mint-contract";
-import { SEAPORT_ADDRESS } from "@/lib/constants";
+import { MARKET_OFFER_CURRENCY, SEAPORT_ADDRESS } from "@/lib/constants";
 import { resolveTokenImage } from "@/lib/market/token-image";
 import { wasOrderServedByUs } from "@/lib/market/served-orders";
 
@@ -168,18 +168,25 @@ const imageCache = new Map<string, string | undefined>();
 // A fill's on-chain outcome never changes — cache the marketplank-or-not
 // verdict per "txHash:tokenId" permanently, same reasoning as imageCache.
 const attributionCache = new Map<string, boolean>();
+// WETH-denominated sale price per "txHash:tokenId", also permanent — the
+// total the buyer actually paid, summed across every consideration item
+// (seller proceeds + marketplace fee + any royalty), same convention every
+// Seaport frontend uses to display "sale price."
+const priceCache = new Map<string, bigint>();
 // Which transactions we've already decoded receipts for, so a tx with no
 // matching order (nothing added to attributionCache) doesn't get its
 // receipt re-fetched on every subsequent request.
 const attributionResolvedTxs = new Set<string>();
 
 /**
- * Decode every OrderFulfilled log in a transaction and check each one's
- * orderHash against what we served — populates attributionCache keyed by
- * "txHash:tokenId" so the classification loop can do a plain lookup.
+ * Decode every OrderFulfilled log in a transaction: check each one's
+ * orderHash against what we served (populates attributionCache) AND extract
+ * its WETH sale price (populates priceCache) — regardless of who served the
+ * order, since price display shouldn't depend on attribution. Both are
+ * keyed "txHash:tokenId" so the classification loop can do a plain lookup.
  *
  * Fails closed in the sense that matters: any failure here just leaves the
- * event unattributed ("seaport", not "marketplank") rather than guessing.
+ * event unattributed/unpriced rather than guessing.
  */
 async function resolveMarketplankAttribution(
   provider: JsonRpcProvider,
@@ -205,20 +212,29 @@ async function resolveMarketplankAttribution(
 
       const orderHash: string = parsed.args.orderHash;
       const isOurs = await wasOrderServedByUs(orderHash);
-      if (!isOurs) continue;
 
-      // Attribute to every token this specific order actually moved — an
-      // order's offer/consideration items name the NFT(s) it settled.
-      const items = [...parsed.args.offer, ...parsed.args.consideration];
-      for (const item of items) {
+      // Total the buyer paid in WETH — every consideration leg that's the
+      // WETH token, summed (proceeds + marketplace fee + royalty, if any).
+      let weiPaid = BigInt(0);
+      for (const item of parsed.args.consideration) {
+        if (String(item.token).toLowerCase() !== MARKET_OFFER_CURRENCY.toLowerCase()) continue;
+        weiPaid += item.amount as bigint;
+      }
+
+      // Attribute (and, if priced, price) every token this specific order
+      // actually moved — an order's offer items name the NFT(s) it settled.
+      for (const item of parsed.args.offer) {
         if (String(item.token).toLowerCase() !== NFT_CONTRACT_ADDRESS.toLowerCase()) continue;
         const tokenId = (item.identifier as bigint).toString();
-        attributionCache.set(`${txHash}:${tokenId}`, true);
+        const key = `${txHash}:${tokenId}`;
+        if (isOurs) attributionCache.set(key, true);
+        if (weiPaid > BigInt(0)) priceCache.set(key, weiPaid);
       }
     }
   } catch {
     // RPC failure — leave whatever was already cached; new lookups stay
-    // unattributed for this run and can be retried on a future refresh.
+    // unattributed/unpriced for this run and can be retried on a future
+    // refresh.
   }
 }
 
@@ -331,19 +347,23 @@ export async function fetchActivity(limit = 40): Promise<ActivityEvent[]> {
       if (attributed) venue.kind = "marketplank";
     }
 
-    // A price is only readable when native ETH actually moved in the
-    // transaction — true regardless of which contract executed it. A
-    // WETH-denominated fill moves no ETH, so we report no price rather than
-    // a misleading zero, on our own Seaport or anyone else's.
-    const hasPrice = kind === "sale" && tx != null && tx.value > BigInt(0);
+    // Price comes from whichever leg of the sale actually moved value: a
+    // plain native-ETH fill moves it via tx.value; a WETH-denominated fill
+    // (the common case here — Seaport can't pull native ETH from an
+    // offerer, so every bid/offer is WETH) moves it as an ERC-20
+    // consideration leg instead, decoded into priceCache above. Anything
+    // else genuinely has no readable price rather than a misleading zero.
+    const nativeWei = kind === "sale" && tx != null && tx.value > BigInt(0) ? tx.value : null;
+    const wethWei = kind === "sale" ? priceCache.get(`${log.transactionHash}:${tokenId}`) ?? null : null;
+    const priceWei = nativeWei ?? wethWei;
 
     events.push({
       kind,
       tokenId,
       from,
       to,
-      priceWei: hasPrice ? tx!.value.toString() : null,
-      priceEth: hasPrice ? formatEther(tx!.value) : null,
+      priceWei: priceWei != null ? priceWei.toString() : null,
+      priceEth: priceWei != null ? formatEther(priceWei) : null,
       txHash: log.transactionHash,
       blockNumber: Number(BigInt(log.blockNumber)),
       timestamp: timestamp == null ? null : new Date(timestamp * 1000).toISOString(),
