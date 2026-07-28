@@ -92,6 +92,7 @@ export async function getRaritySnapshot(): Promise<RaritySnapshot> {
 }
 
 export type CompactRarity = {
+  name: string;
   tier: RarityTier;
   rank: number;
   percentile: number;
@@ -104,5 +105,11 @@ export function compactRarityFor(
 ): CompactRarity | null {
   const r = snapshot.byTokenId.get(tokenId);
   if (!r) return null;
-  return { tier: r.tier, rank: r.rank, percentile: r.percentile, normalizedScore: r.normalizedScore };
+  return {
+    name: r.name,
+    tier: r.tier,
+    rank: r.rank,
+    percentile: r.percentile,
+    normalizedScore: r.normalizedScore,
+  };
 }

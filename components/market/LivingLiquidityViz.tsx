@@ -97,7 +97,7 @@ export default function LivingLiquidityViz() {
                   boxShadow: glow,
                   border: `1px solid ${ring}`,
                 }}
-                title={`#${o.tokenId}${r ? ` · ${r.tier}` : ""}`}
+                title={r ? `${r.name} · #${o.tokenId} · Rank #${r.rank} · ${r.tier}` : `#${o.tokenId}`}
               >
                 {o.imageUrl ? (
                   <Image

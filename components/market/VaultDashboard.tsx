@@ -134,7 +134,7 @@ export default function VaultDashboard() {
                     r ? `${tierAnimationClass(r.tier)} holo-card` : ""
                   }`}
                   style={r ? { boxShadow: tierGlow(r.tier), ...tierCardStyle(r.tier) } : undefined}
-                  title={r ? `#${t.tokenId} · ${r.tier}` : `#${t.tokenId}`}
+                  title={r ? `${r.name} · #${t.tokenId} · Rank #${r.rank} · ${r.tier}` : `#${t.tokenId}`}
                 >
                   {t.imageUrl ? (
                     <Image src={t.imageUrl} alt={`#${t.tokenId}`} fill sizes="80px" className="object-cover" unoptimized />
@@ -143,8 +143,14 @@ export default function VaultDashboard() {
                       #{t.tokenId}
                     </div>
                   )}
-                  <span className="card-overlay legible-text absolute inset-x-0 bottom-0 bg-black/75 px-1 py-0.5 text-center font-mono text-[0.55rem] font-bold text-gold-300">
-                    #{t.tokenId}
+                  <span className="card-overlay legible-text absolute inset-x-0 bottom-0 flex flex-col items-center bg-black/75 px-1 py-0.5 text-center leading-tight">
+                    <span className="w-full truncate font-bold text-gold-300 text-[0.55rem]">
+                      {r?.name ?? `#${t.tokenId}`}
+                    </span>
+                    <span className="w-full truncate font-mono text-[0.45rem] text-foreground/50">
+                      #{t.tokenId}
+                      {r ? ` · R${r.rank}` : ""}
+                    </span>
                   </span>
                   {r && (
                     <span

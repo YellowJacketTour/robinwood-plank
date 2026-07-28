@@ -5,12 +5,13 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
- * Compact tier/rank map for every token — one bulk fetch, cached client-side
- * (see lib/market/rarityClient.ts), so every card/row can show a consistent
- * tier color without an N-request fan-out. Full trait breakdown for a single
- * token still comes from /api/market/token, which stays the source for
- * detail-view depth; this route is deliberately small (tier+rank+percentile
- * only) since it's meant to be fetched once per session.
+ * Compact name/tier/rank map for every token — one bulk fetch, cached
+ * client-side (see lib/market/rarityClient.ts), so every card/row can show
+ * a consistent name and tier color without an N-request fan-out. `name` is
+ * the Base trait's value (see lib/rarity.ts's TokenRarity.name doc) — the
+ * same rule Gallery already used, now shared everywhere a plank is shown.
+ * Full trait breakdown for a single token still comes from
+ * /api/market/token, which stays the source for detail-view depth.
  */
 export async function GET(req: Request) {
   const limited = rateLimit(req, { key: "market-rarity", limit: 30, windowMs: 60_000 });
@@ -18,9 +19,9 @@ export async function GET(req: Request) {
 
   try {
     const snapshot = await getRaritySnapshot();
-    const byTokenId: Record<string, { tier: string; rank: number; percentile: number }> = {};
+    const byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number }> = {};
     for (const [tokenId, r] of snapshot.byTokenId) {
-      byTokenId[String(tokenId)] = { tier: r.tier, rank: r.rank, percentile: r.percentile };
+      byTokenId[String(tokenId)] = { name: r.name, tier: r.tier, rank: r.rank, percentile: r.percentile };
     }
     return publicJson({
       sampleSize: snapshot.sampleSize,

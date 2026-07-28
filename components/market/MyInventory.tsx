@@ -253,8 +253,14 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                         {r.tier}
                       </span>
                     )}
-                    <span className="card-overlay legible-text absolute bottom-1.5 left-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-foreground">
-                      #{item.tokenId}
+                    <span className="card-overlay legible-text absolute inset-x-1.5 bottom-1.5 flex flex-col rounded-lg bg-black/60 px-2 py-0.5 leading-tight">
+                      <span className="truncate text-[0.6rem] font-bold text-foreground">
+                        {r?.name ?? `#${item.tokenId}`}
+                      </span>
+                      <span className="truncate text-[0.5rem] text-foreground/60">
+                        #{item.tokenId}
+                        {r ? ` · R${r.rank} · ${r.tier}` : ""}
+                      </span>
                     </span>
                   </button>
                 </li>
