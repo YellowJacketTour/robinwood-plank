@@ -84,19 +84,19 @@ export default function ListingCard({
         />
         {isFloor && (
           <span
-            className="legible-text absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-gold-300"
+            className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-gold-300"
             title="Floorboard — cheapest listing"
           >
             Floor
           </span>
         )}
         {rarity && (
-          // Dark text on the tier's own bright fill (not white-on-color) —
-          // the highest-contrast pairing against colors that range from
-          // near-white (Uncommon green) to pale lavender (Epic).
+          // Tier-colored text on a guaranteed-dark backing (.tier-badge) —
+          // not the tier's own fill as a background, which goes illegible
+          // against similarly-light/pastel artwork (confirmed live).
           <span
-            className={`tier-badge absolute left-1.5 ${isFloor ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950`}
-            style={{ backgroundColor: tierColor(rarity.tier) }}
+            className={`tier-badge absolute left-1.5 ${isFloor ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide`}
+            style={{ color: tierColor(rarity.tier) }}
             title={`Rank #${rarity.rank} · ${rarity.percentile.toFixed(0)}th percentile`}
           >
             {rarity.tier}
@@ -104,7 +104,7 @@ export default function ListingCard({
         )}
         {collection.trustBadges.length > 0 && (
           <span
-            className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-[0.65rem] text-emerald-300"
+            className="card-overlay absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-[0.65rem] text-emerald-300"
             title={collection.trustBadges.join(", ")}
           >
             {TRUST_ICON[collection.trustBadges[0]] ?? "✓"}

@@ -6,6 +6,7 @@ import { getOwnedInventory, type OwnedInventory } from "@/lib/market/inventory";
 import { sendNft, sendNftBatch, validateRecipient, type BatchSendStatus } from "@/lib/market/transfer";
 import { quoteSendFee, type SendFeeQuote } from "@/lib/market/send-fee";
 import { formatTokenAmount } from "@/lib/trade";
+import ItemDetail from "@/components/market/ItemDetail";
 import {
   getRarityMap,
   tierAnimationClass,
@@ -58,6 +59,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
   const [feeQuote, setFeeQuote] = useState<SendFeeQuote | null>(null);
   const [feeQuoting, setFeeQuoting] = useState(false);
+  const [detailItem, setDetailItem] = useState<SelectedItem | null>(null);
 
   const refresh = useCallback(() => {
     setInventory(null);
@@ -240,9 +242,23 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
               return (
                 <li
                   key={key}
-                  className={`dense-card overflow-hidden p-0 ${r ? tierAnimationClass(r.tier) : ""}`}
+                  className={`relative dense-card overflow-hidden p-0 ${r ? tierAnimationClass(r.tier) : ""}`}
                   style={r ? { boxShadow: tierGlow(r.tier), ...tierCardStyle(r.tier) } : undefined}
                 >
+                  {/* Separate from the select action — tapping the card
+                      selects it for send, this opens full metadata/rarity/
+                      traits without changing the selection. */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDetailItem({ collection: group.collection, tokenId: item.tokenId });
+                    }}
+                    aria-label={`View details for #${item.tokenId}`}
+                    className="absolute bottom-1.5 right-1.5 z-[3] flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-xs text-gold-300 backdrop-blur-sm transition hover:bg-black/90 hover:text-gold-200"
+                  >
+                    ⓘ
+                  </button>
                   <button
                     type="button"
                     disabled={isListed || busy}
@@ -262,25 +278,25 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
                       unoptimized={Boolean(item.imageUrl)}
                     />
                     {isSelected && (
-                      <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold-500 text-[0.7rem] font-bold text-wood-950">
+                      <span className="card-overlay absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold-500 text-[0.7rem] font-bold text-wood-950">
                         ✓
                       </span>
                     )}
                     {isListed && (
-                      <span className="legible-text absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
+                      <span className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
                         Listed
                       </span>
                     )}
                     {r && (
                       <span
-                        className={`tier-badge absolute left-1.5 ${isListed ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950`}
-                        style={{ backgroundColor: tierColor(r.tier) }}
+                        className={`tier-badge absolute left-1.5 ${isListed ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide`}
+                        style={{ color: tierColor(r.tier) }}
                         title={`Rank #${r.rank} · ${r.percentile.toFixed(0)}th percentile`}
                       >
                         {r.tier}
                       </span>
                     )}
-                    <span className="legible-text absolute bottom-1.5 left-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-foreground">
+                    <span className="card-overlay legible-text absolute bottom-1.5 left-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-foreground">
                       #{item.tokenId}
                     </span>
                   </button>
@@ -407,6 +423,16 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
             </li>
           ))}
         </ul>
+      )}
+
+      {detailItem && (
+        <ItemDetail
+          key={`${detailItem.collection.slug}:${detailItem.tokenId}`}
+          tokenId={detailItem.tokenId}
+          collection={detailItem.collection}
+          account={account}
+          onClose={() => setDetailItem(null)}
+        />
       )}
     </div>
   );

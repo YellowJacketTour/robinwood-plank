@@ -114,8 +114,8 @@ export default function ActivityStats({ sales, rarity, onSelectToken }: Props) {
             #{top.tokenId}
             {topRarity && (
               <span
-                className="tier-badge rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950"
-                style={{ backgroundColor: tierColor(topRarity.tier) }}
+                className="tier-badge rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide"
+                style={{ color: tierColor(topRarity.tier) }}
               >
                 {topRarity.tier}
               </span>

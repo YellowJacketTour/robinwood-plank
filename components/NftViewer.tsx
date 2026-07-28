@@ -1186,12 +1186,12 @@ export default function NftViewer() {
                               alt=""
                               className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                             />
-                            <span className="absolute left-1.5 top-1.5 rounded bg-black/75 px-1.5 py-0.5 font-mono text-[0.65rem] font-bold text-gold-300">
+                            <span className="card-overlay absolute left-1.5 top-1.5 rounded bg-black/75 px-1.5 py-0.5 font-mono text-[0.65rem] font-bold text-gold-300">
                               #{nft.tokenId}
                             </span>
                             {tokenRarity && (
                               <span
-                                className="absolute bottom-1.5 right-1.5 rounded px-1.5 py-0.5 text-[0.6rem] font-black"
+                                className="card-overlay absolute bottom-1.5 right-1.5 rounded px-1.5 py-0.5 text-[0.6rem] font-black"
                                 style={{
                                   color: tierColor(tokenRarity.tier),
                                   background: "rgba(0,0,0,0.75)",

@@ -235,25 +235,25 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                     />
                     {/* Same badge/overlay pattern as ListingCard's Floor badge. */}
                     {isSelected && (
-                      <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold-500 text-[0.7rem] font-bold text-wood-950">
+                      <span className="card-overlay absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold-500 text-[0.7rem] font-bold text-wood-950">
                         ✓
                       </span>
                     )}
                     {isListed && (
-                      <span className="legible-text absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
+                      <span className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
                         Listed
                       </span>
                     )}
                     {r && (
                       <span
-                        className={`tier-badge absolute left-1.5 ${isListed ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950`}
-                        style={{ backgroundColor: tierColor(r.tier) }}
+                        className={`tier-badge absolute left-1.5 ${isListed ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide`}
+                        style={{ color: tierColor(r.tier) }}
                         title={`Rank #${r.rank} · ${r.percentile.toFixed(0)}th percentile`}
                       >
                         {r.tier}
                       </span>
                     )}
-                    <span className="legible-text absolute bottom-1.5 left-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-foreground">
+                    <span className="card-overlay legible-text absolute bottom-1.5 left-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-foreground">
                       #{item.tokenId}
                     </span>
                   </button>

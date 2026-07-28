@@ -14,7 +14,6 @@ import {
   redeemTarget,
   sellShares,
 } from "@/lib/market/vault";
-import { connectWallet, ensureRobinhoodChain } from "@/lib/wallet";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
@@ -108,18 +107,26 @@ function TokenPreviewCard({ tokenId }: { tokenId: string }) {
   );
 }
 
+type Props = {
+  /** Shared with the rest of MarketView — was previously its own isolated
+   * state, which meant a wallet already connected in the page header (and
+   * every other tab) still showed "Connect wallet" here again the moment
+   * you opened Instant Swap. One connection, one source of truth. */
+  account: string | null;
+  onConnect: () => void;
+};
+
 /**
  * Phase 2 — NFTX-style vault buy/sell. Fully wired against
  * contracts/MarketplankVault.sol's ABI (lib/market/vault.ts). Renders a
  * scoped notice instead of this UI until MARKET_VAULT_ADDRESS is set, which
  * doesn't happen until the vault is deployed and audited (SPEC.md §7).
  */
-export default function SwapPanel() {
+export default function SwapPanel({ account, onConnect }: Props) {
   const collection = MARKET_COLLECTIONS[0];
   const hasVault = MARKET_VAULT_ADDRESS !== null;
 
   const [mode, setMode] = useState<Mode>("buy");
-  const [account, setAccount] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [tokenId, setTokenId] = useState("");
   /** Max slippage, percent. Converted to bps; vault trades REFUSE min-out of 0. */
@@ -240,21 +247,10 @@ export default function SwapPanel() {
     );
   }
 
-  const handleConnect = async () => {
-    setError(null);
-    try {
-      const addr = await connectWallet();
-      await ensureRobinhoodChain();
-      setAccount(addr);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to connect wallet.");
-    }
-  };
-
   const run = async (action: () => Promise<string>, label: string) => {
     setError(null);
     if (!account) {
-      await handleConnect();
+      onConnect();
       return;
     }
     try {
@@ -472,7 +468,7 @@ export default function SwapPanel() {
         {!account ? (
           <button
             type="button"
-            onClick={handleConnect}
+            onClick={onConnect}
             className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
           >
             Connect wallet

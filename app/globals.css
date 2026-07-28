@@ -623,19 +623,39 @@ body .nft-modal .nft-modal-body {
     0 0 2px rgba(0, 0, 0, 0.95);
 }
 
-/* Tier badges (Common/Rare/Epic/...) fill with the tier's own color —
-   several tiers are light/pastel (Common, Uncommon, Rare, Epic), and this
-   collection's art backgrounds cover that same light/pastel range, so a
-   badge can end up nearly the same color as the card behind it (confirmed
-   live: a light-blue "Rare" badge on a light-blue card was almost
-   unreadable). A fixed dark outline, independent of the tier's own color,
-   guarantees the badge is always visually separated from whatever art sits
-   behind it, on every tier and every background. */
+/* Tier badges. First attempt kept dark text ON the tier's own light fill
+   (Common/Uncommon/Rare/Epic are all light/pastel) plus a border — still
+   unreadable in practice, confirmed live, because dark-on-light-pastel is
+   inherently low-contrast at this badge's small size regardless of the
+   border. Fixed properly this time by flipping the whole scheme to the
+   SAME pattern already proven legible elsewhere on this site (Gallery's
+   rank badge): a near-opaque dark backing plate with the tier's color used
+   for the TEXT, not the fill. Callers set `color: tierColor(tier)` inline;
+   this class supplies the guaranteed-dark background + border so that
+   bright text always has a backdrop, whatever art or holo sheen sits
+   underneath. z-index lifts it above .holo-card's ::before/::after (both
+   z-index: 1) — those were painting over badge text inside the same
+   holo-card element without this, which is what made some tiers look
+   genuinely garbled rather than merely low-contrast. */
 .tier-badge {
-  border: 1.5px solid rgba(15, 8, 3, 0.85);
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.6),
-    inset 0 0 0 0.5px rgba(255, 255, 255, 0.35);
+  position: relative;
+  z-index: 2;
+  background: rgba(10, 6, 2, 0.88);
+  border: 1px solid currentColor;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+
+/* Same root cause as .tier-badge above, generalized: ANY overlay badge/
+   label/checkmark sitting inside a .holo-card element needs an explicit
+   z-index above 1, or the holo sheen's ::before/::after (z-index: 1) paints
+   over it regardless of the badge's own color scheme — z-index:auto always
+   loses to an explicit z-index even if the auto element comes later in the
+   DOM. Applied to every non-tier overlay (selection checkmarks, "Listed"
+   labels, Floor/trust badges, id/rank badges) so none of them can suffer
+   the same bug independently. */
+.card-overlay {
+  position: relative;
+  z-index: 2;
 }
 
 /* Rarity-tier motion — reserved for Legendary/Mythic (lib/rarity.ts
