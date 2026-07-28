@@ -5,9 +5,9 @@ import type { MarketTab } from "@/lib/market/types";
 
 const TABS: { id: MarketTab; label: string }[] = [
   { id: "buy-sell", label: "Buy & Sell" },
+  { id: "swap", label: "Instant Swap" },
   { id: "offers", label: "Offers" },
   { id: "activity", label: "Activity" },
-  { id: "swap", label: "Instant Swap" },
   { id: "my-nfts", label: "My NFTs" },
   { id: "positions", label: "My Listings" },
 ];

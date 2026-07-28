@@ -11,6 +11,8 @@ import MyPositions from "@/components/market/MyPositions";
 import MyInventory from "@/components/market/MyInventory";
 import MyNfts from "@/components/market/MyNfts";
 import TreasuryDashboard from "@/components/market/TreasuryDashboard";
+import VaultDashboard from "@/components/market/VaultDashboard";
+import NftPriceChart from "@/components/market/NftPriceChart";
 import CollectionStats from "@/components/market/CollectionStats";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import SweepConfirm from "@/components/market/SweepConfirm";
@@ -849,6 +851,8 @@ export default function MarketView() {
         )}
         {tab === "swap" && (
           <div className="space-y-3">
+            <NftPriceChart />
+            <VaultDashboard />
             <TreasuryDashboard />
             <SwapPanel account={account} onConnect={handleConnect} />
           </div>
