@@ -1,6 +1,4 @@
 import { formatTokenAmount } from "@/lib/trade";
-import { tierColor } from "@/lib/market/rarityClient";
-import type { RarityLookup } from "@/lib/market/rarityClient";
 
 type SaleLike = {
   tokenId: string;
@@ -10,8 +8,6 @@ type SaleLike = {
 
 type Props = {
   sales: SaleLike[];
-  rarity: Map<string, RarityLookup>;
-  onSelectToken?: (tokenId: string) => void;
 };
 
 function stat(label: string, value: string, accent?: string) {
@@ -38,7 +34,7 @@ function stat(label: string, value: string, accent?: string) {
  * narrow activity list into the volume/floor-trend data every established
  * marketplace (OpenSea, Blur, Magic Eden) leads with.
  */
-export default function ActivityStats({ sales, rarity, onSelectToken }: Props) {
+export default function ActivityStats({ sales }: Props) {
   const priced = sales
     .filter((s): s is SaleLike & { priceWei: string } => s.priceWei != null)
     .map((s) => ({ ...s, wei: BigInt(s.priceWei) }));
@@ -59,8 +55,6 @@ export default function ActivityStats({ sales, rarity, onSelectToken }: Props) {
   const volume24hWei = sumWei(last24h);
   const avgWei = priced.length ? totalVolumeWei / BigInt(priced.length) : BigInt(0);
 
-  const top = priced.reduce((best, r) => (r.wei > best.wei ? r : best), priced[0]);
-
   // Oldest → newest, last 24 points, for the sparkline — matches how the
   // feed itself reads top-to-newest, just reversed for a left-to-right chart.
   const series = [...priced].reverse().slice(-24);
@@ -73,8 +67,6 @@ export default function ActivityStats({ sales, rarity, onSelectToken }: Props) {
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(" ");
-
-  const topRarity = rarity.get(top.tokenId);
 
   return (
     <div className="space-y-3">
@@ -100,32 +92,6 @@ export default function ActivityStats({ sales, rarity, onSelectToken }: Props) {
         </svg>
       </div>
 
-      <button
-        type="button"
-        onClick={onSelectToken ? () => onSelectToken(top.tokenId) : undefined}
-        disabled={!onSelectToken}
-        className="w-full rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5 text-left transition hover:border-gold-400 disabled:cursor-default disabled:hover:border-gold-500/20"
-      >
-        <p className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">
-          Top sale
-        </p>
-        <div className="mt-0.5 flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 text-sm font-bold text-foreground">
-            #{top.tokenId}
-            {topRarity && (
-              <span
-                className="tier-badge rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide"
-                style={{ color: tierColor(topRarity.tier) }}
-              >
-                {topRarity.tier}
-              </span>
-            )}
-          </span>
-          <span className="font-mono text-sm font-bold text-gold-300">
-            {formatTokenAmount(top.wei, 18, 4)} Ξ
-          </span>
-        </div>
-      </button>
     </div>
   );
 }

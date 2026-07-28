@@ -909,17 +909,23 @@ export default function MarketView() {
           {visitedTabs.has("swap") && (
           <div className="space-y-3">
             <LivingLiquidityViz />
-            <div className="grid gap-3 lg:grid-cols-2 lg:items-start">
-              <div className="space-y-3">
-                <NftPriceChart />
-                <VaultTradeHistory />
-              </div>
-              <div className="space-y-3">
-                <VaultDashboard />
-                <RedeemOdds listings={listings} />
-                <TreasuryDashboard />
-                <SwapPanel account={account} onConnect={handleConnect} />
-              </div>
+            {/* CSS multi-column masonry, not a manual 2-column split — a
+                manual split left one side visibly taller than the other
+                (a whole empty quadrant under the shorter column, the
+                reported "hanging module" complaint) because these panels'
+                heights are all data-dependent and unequal. Columns
+                self-balance by filling whichever is currently shortest.
+                SwapPanel goes first so the actual action panel lands at
+                the top of column 1, not wherever the flow happens to put
+                it. break-inside-avoid keeps each card from being sliced
+                across the column break. */}
+            <div className="gap-3 [column-fill:balance] sm:columns-2 [&>*]:mb-3 [&>*]:break-inside-avoid">
+              <SwapPanel account={account} onConnect={handleConnect} />
+              <VaultDashboard />
+              <NftPriceChart />
+              <RedeemOdds listings={listings} />
+              <VaultTradeHistory />
+              <TreasuryDashboard />
             </div>
           </div>
           )}
