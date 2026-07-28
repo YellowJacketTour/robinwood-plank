@@ -70,8 +70,17 @@ export async function connectWallet(): Promise<string> {
       method: "wallet_requestPermissions",
       params: [{ eth_accounts: {} }],
     });
-  } catch {
-    /* optional */
+  } catch (err) {
+    // Code 4001 = user explicitly rejected/closed the prompt. Respect that
+    // and stop — falling through to eth_requestAccounts here immediately
+    // fires a second popup right after they closed the first one, which
+    // just looks like the prompt won't go away.
+    if ((err as { code?: number })?.code === 4001) {
+      throw new Error("Connection request closed.");
+    }
+    // Otherwise: this wallet may not support wallet_requestPermissions at
+    // all (not every injected provider does) — fall through and let
+    // eth_requestAccounts be the real connect attempt.
   }
   const accounts = (await provider.request({
     method: "eth_requestAccounts",
