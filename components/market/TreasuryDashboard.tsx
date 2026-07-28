@@ -11,15 +11,12 @@ type TreasuryData = {
 };
 
 /**
- * The actual "liquidity engine" — fees in ETH, publicly watchable, no new
- * token. See docs/marketplank/SPEC.md §9.
- *
- * There is no fixed target: the owner seeds at their own pace across as many
- * calls as they want, then decides when to call the vault's one-way
- * `openPool()`. Pre-deploy this reads the fee treasury's raw balance as a
- * proxy (the only real number that exists yet). Once the vault ships,
- * `/api/market/treasury` switches to `ethReserve()`/`poolOpen()` straight off
- * the deployed contract.
+ * Pre-launch bootstrap progress only — "the owner is stocking the vault,
+ * here's how full it is." Once poolOpen flips true this has nothing left
+ * to say (VaultDashboard already shows real liquidity/rate/inventory), so
+ * it renders nothing rather than a stale "the workshop is open" message
+ * sitting on screen forever after it stopped being useful. See
+ * docs/marketplank/SPEC.md §9.
  */
 export default function TreasuryDashboard() {
   const [data, setData] = useState<TreasuryData | null>(null);
@@ -37,7 +34,7 @@ export default function TreasuryDashboard() {
     };
   }, []);
 
-  if (!data) return null;
+  if (!data || data.open) return null;
 
   const balanceEth = formatTokenAmount(data.balanceWei, 18, 4);
 
@@ -45,16 +42,12 @@ export default function TreasuryDashboard() {
     <div className="wood-ledger space-y-2 p-3">
       <div className="flex items-baseline justify-between">
         <span className="text-[0.65rem] font-bold uppercase tracking-wider text-foreground/50">
-          Workshop fund
+          Bootstrapping
         </span>
         <span className="font-display text-lg text-gold-300">{balanceEth} Ξ</span>
       </div>
       <p className="text-center text-[0.65rem] text-foreground/50">
-        {data.open
-          ? "Workshop's open — instant swap is live, for good."
-          : data.source === "vault"
-            ? "Stocking up — the owner opens the workshop when it's ready."
-            : "Built from marketplace fees — grows toward the vault's opening day."}
+        {data.source === "vault" ? "Stocking the vault." : "Building toward launch."}
       </p>
     </div>
   );

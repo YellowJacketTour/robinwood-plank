@@ -60,13 +60,13 @@ export default function LivingLiquidityViz() {
   return (
     <div className="overflow-hidden rounded-lg border border-gold-500/15 bg-black/20">
       <p className="border-b border-gold-500/10 px-3 py-1.5 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
-        On The Fence <span className="font-normal normal-case text-foreground/35">· held planks vs. live bid/ask</span>
+        On The Fence
       </p>
       <div className="relative grid grid-cols-1 sm:grid-cols-2">
         <div className="relative h-48 overflow-hidden border-b border-gold-500/10 bg-gradient-to-b from-wood-900/40 to-black/30 sm:h-64 sm:border-b-0 sm:border-r">
           <PlankFence held={held} rarity={rarity} />
           <span className="pointer-events-none absolute bottom-1.5 left-2 text-[0.55rem] font-bold uppercase tracking-wide text-foreground/35">
-            {held ? `${held.length} planks held · drag one` : "loading…"}
+            {held ? `${held.length} held` : "…"}
           </span>
         </div>
 

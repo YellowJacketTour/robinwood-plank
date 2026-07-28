@@ -81,21 +81,21 @@ export default function VaultDashboard() {
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {statCell("Liquidity (ETH side)", ethAndUsd(stats.ethReserveWei))}
+        {statCell("ETH liquidity", ethAndUsd(stats.ethReserveWei))}
         {statCell(
-          "Liquidity (share side)",
+          "Share liquidity",
           `${formatTokenAmount(stats.shareReserveWei, 18, 2)} shares`,
-          stats.sharePriceWei ? `≈ ${ethAndUsd(stats.sharePriceWei, 5)} / share` : undefined
+          stats.sharePriceWei ? `${ethAndUsd(stats.sharePriceWei, 5)}/share` : undefined
         )}
-        {statCell("NFTs held", String(stats.heldTokenCount))}
+        {statCell("Held", String(stats.heldTokenCount))}
         {statCell(
-          "Depositor APR",
+          "APR",
           stats.aprPct != null ? `${stats.aprPct.toFixed(1)}%` : "—",
           stats.aprPct != null
-            ? "est., trailing fee revenue"
+            ? "est."
             : stats.aprBasisHours != null
-              ? `only ${stats.aprBasisHours.toFixed(1)}h of history yet`
-              : "no activity yet"
+              ? `${stats.aprBasisHours.toFixed(1)}h data`
+              : "no data"
         )}
       </div>
 
@@ -116,7 +116,7 @@ export default function VaultDashboard() {
 
       <div>
         <p className="mb-1.5 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
-          Vault inventory · {stats.heldTokenCount} plank{stats.heldTokenCount === 1 ? "" : "s"}
+          Inventory · {stats.heldTokenCount}
         </p>
         {heldLoading ? (
           <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
