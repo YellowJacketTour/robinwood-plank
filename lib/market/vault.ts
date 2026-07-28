@@ -76,7 +76,8 @@ async function assertVaultWrapsOurCollection(vault: Contract): Promise<void> {
 async function sendVaultTx(
   accountAddress: string,
   data: string,
-  valueWei?: bigint
+  valueWei?: bigint,
+  onSubmitted?: (hash: string) => void
 ): Promise<string> {
   const hash = await sendTransaction({
     to: requireVaultAddress(),
@@ -85,6 +86,10 @@ async function sendVaultTx(
     value: valueWei !== undefined ? valueWei.toString() : undefined,
     kind: "vault",
   });
+  // Fires as soon as the wallet returns a hash, well before confirmation —
+  // lets the UI show a "pending" row immediately instead of only after
+  // waitForTransaction resolves below.
+  onSubmitted?.(hash);
   await waitForTransaction(hash, { label: "Vault transaction" });
   return hash;
 }
@@ -111,7 +116,8 @@ export function applySlippage(expected: bigint, slippageBps: number): bigint {
  */
 export async function depositForShares(
   accountAddress: string,
-  tokenId: string
+  tokenId: string,
+  onSubmitted?: (hash: string) => void
 ): Promise<string> {
   const vault = await getVaultReader();
   await assertVaultWrapsOurCollection(vault);
@@ -147,7 +153,7 @@ export async function depositForShares(
     await waitForTransaction(approveHash, { label: "Deposit approval" });
   }
 
-  return sendVaultTx(accountAddress, VAULT_IFACE.encodeFunctionData("deposit", [tokenId]));
+  return sendVaultTx(accountAddress, VAULT_IFACE.encodeFunctionData("deposit", [tokenId]), undefined, onSubmitted);
 }
 
 /**
@@ -199,7 +205,8 @@ export async function quoteSellShares(
 export async function buyShares(
   accountAddress: string,
   ethAmount: string,
-  slippageBps: number
+  slippageBps: number,
+  onSubmitted?: (hash: string) => void
 ): Promise<string> {
   const vault = await getVaultReader();
   await assertVaultWrapsOurCollection(vault);
@@ -212,7 +219,8 @@ export async function buyShares(
   return sendVaultTx(
     accountAddress,
     VAULT_IFACE.encodeFunctionData("buyShares", [minSharesOut]),
-    value
+    value,
+    onSubmitted
   );
 }
 
@@ -220,7 +228,8 @@ export async function buyShares(
 export async function sellShares(
   accountAddress: string,
   sharesWei: bigint,
-  slippageBps: number
+  slippageBps: number,
+  onSubmitted?: (hash: string) => void
 ): Promise<string> {
   const vault = await getVaultReader();
   await assertVaultWrapsOurCollection(vault);
@@ -230,7 +239,9 @@ export async function sellShares(
   const minEthOut = applySlippage(expected, slippageBps);
   return sendVaultTx(
     accountAddress,
-    VAULT_IFACE.encodeFunctionData("sellShares", [sharesWei, minEthOut])
+    VAULT_IFACE.encodeFunctionData("sellShares", [sharesWei, minEthOut]),
+    undefined,
+    onSubmitted
   );
 }
 
@@ -255,7 +266,10 @@ export async function sellShares(
  * round N" state. That UI work is intentionally NOT done here so it does not
  * collide with whatever else is in flight on that component.
  */
-export async function requestRandomRedeem(accountAddress: string): Promise<string> {
+export async function requestRandomRedeem(
+  accountAddress: string,
+  onSubmitted?: (hash: string) => void
+): Promise<string> {
   const vault = await getVaultReader();
   await assertVaultWrapsOurCollection(vault);
   const held = (await vault.heldTokenCount()) as bigint;
@@ -264,7 +278,9 @@ export async function requestRandomRedeem(accountAddress: string): Promise<strin
   }
   return sendVaultTx(
     accountAddress,
-    VAULT_IFACE.encodeFunctionData("requestRandomRedeem", [])
+    VAULT_IFACE.encodeFunctionData("requestRandomRedeem", []),
+    undefined,
+    onSubmitted
   );
 }
 
@@ -284,7 +300,8 @@ export async function getPendingRound(): Promise<{ round: bigint; available: boo
 
 export async function redeemTarget(
   accountAddress: string,
-  tokenId: string
+  tokenId: string,
+  onSubmitted?: (hash: string) => void
 ): Promise<string> {
   const vault = await getVaultReader();
   await assertVaultWrapsOurCollection(vault);
@@ -309,7 +326,12 @@ export async function redeemTarget(
   if (owner !== requireVaultAddress().toLowerCase()) {
     throw new Error(`Token #${tokenId} is not held by the vault.`);
   }
-  return sendVaultTx(accountAddress, VAULT_IFACE.encodeFunctionData("redeemTarget", [tokenId]));
+  return sendVaultTx(
+    accountAddress,
+    VAULT_IFACE.encodeFunctionData("redeemTarget", [tokenId]),
+    undefined,
+    onSubmitted
+  );
 }
 
 export async function getVaultShareBalance(account: string): Promise<bigint> {
