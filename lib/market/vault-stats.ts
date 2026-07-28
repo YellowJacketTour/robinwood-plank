@@ -4,6 +4,8 @@ import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import vaultAbi from "@/lib/market/vault-abi.json";
 import { getVaultHeldTokenIds } from "@/lib/market/vault-held";
 import { getEthUsdPrice } from "@/lib/eth-price";
+import { fetchActivity } from "@/lib/market/activity";
+import { MARKET_DEFAULT_FEE_BPS } from "@/lib/constants";
 
 const IFACE = new Interface(vaultAbi);
 const CHUNK_BLOCKS = 50_000;
@@ -48,6 +50,16 @@ export type VaultStats = {
   aprBasisHours: number | null;
   depositCount: number;
   redeemCount: number;
+  /** Vault mint/redeem fee revenue actually observed over the same replay
+   * window as aprBasisHours, valued at the current share price. Not the
+   * lifetime total (the replay only walks back MAX_CHUNKS * CHUNK_BLOCKS)
+   * — a lower bound on real fees collected, never fabricated. */
+  vaultFeeRevenueWei: string;
+  /** Marketplace (Seaport) listing/offer fee revenue — ESTIMATED as
+   * MARKET_DEFAULT_FEE_BPS of observed sale volume from the same recent
+   * activity feed the Activity tab uses, since individual fee-consideration
+   * amounts aren't separately indexed. Clearly an estimate, not a ledger. */
+  marketplaceFeeRevenueEstWei: string;
 };
 
 /**
@@ -98,15 +110,11 @@ export async function getVaultStats(): Promise<VaultStats | null> {
   const sharePriceWei =
     shareReserveWei > BigInt(0) ? (ethReserveWei * BigInt(1_000_000_000_000_000_000)) / shareReserveWei : null;
 
-  const { aprPct, aprBasisHours, depositCount, redeemCount } = await estimateApr(
-    provider,
-    vault,
-    sharePriceWei,
-    mintFeeBps,
-    redeemFeeBps,
-    targetPremiumBps,
-    ethReserveWei
-  );
+  const [{ aprPct, aprBasisHours, depositCount, redeemCount, feeRevenueWei }, marketplaceFeeRevenueEstWei] =
+    await Promise.all([
+      estimateApr(provider, vault, sharePriceWei, mintFeeBps, redeemFeeBps, targetPremiumBps, ethReserveWei),
+      estimateMarketplaceFeeRevenue(),
+    ]);
 
   return {
     poolOpen,
@@ -123,7 +131,22 @@ export async function getVaultStats(): Promise<VaultStats | null> {
     aprBasisHours,
     depositCount,
     redeemCount,
+    vaultFeeRevenueWei: feeRevenueWei.toString(),
+    marketplaceFeeRevenueEstWei: marketplaceFeeRevenueEstWei.toString(),
   };
+}
+
+async function estimateMarketplaceFeeRevenue(): Promise<bigint> {
+  try {
+    const events = await fetchActivity(40);
+    const total = events.reduce((sum, e) => {
+      if (e.kind !== "sale" || e.priceWei == null) return sum;
+      return sum + BigInt(e.priceWei);
+    }, BigInt(0));
+    return (total * BigInt(MARKET_DEFAULT_FEE_BPS)) / BigInt(10_000);
+  } catch {
+    return BigInt(0);
+  }
 }
 
 async function estimateApr(
@@ -134,8 +157,14 @@ async function estimateApr(
   redeemFeeBps: number,
   targetPremiumBps: number,
   ethReserveWei: bigint
-): Promise<{ aprPct: number | null; aprBasisHours: number | null; depositCount: number; redeemCount: number }> {
-  const none = { aprPct: null, aprBasisHours: null, depositCount: 0, redeemCount: 0 };
+): Promise<{
+  aprPct: number | null;
+  aprBasisHours: number | null;
+  depositCount: number;
+  redeemCount: number;
+  feeRevenueWei: bigint;
+}> {
+  const none = { aprPct: null, aprBasisHours: null, depositCount: 0, redeemCount: 0, feeRevenueWei: BigInt(0) };
   if (sharePriceWei == null || ethReserveWei <= BigInt(0)) return none;
 
   const depositedTopic = IFACE.getEvent("Deposited")!.topicHash;
@@ -199,15 +228,15 @@ async function estimateApr(
 
   const hoursObserved = Math.max((latestTs - earliest) / 3600, 0.01);
   if (hoursObserved < MIN_HOURS_FOR_APR) {
-    return { aprPct: null, aprBasisHours: hoursObserved, depositCount, redeemCount };
+    return { aprPct: null, aprBasisHours: hoursObserved, depositCount, redeemCount, feeRevenueWei };
   }
 
   const revenueNum = Number(feeRevenueWei) / 1e18;
   const tvlNum = Number(ethReserveWei) / 1e18;
-  if (tvlNum <= 0) return none;
+  if (tvlNum <= 0) return { ...none, feeRevenueWei };
 
   const hourlyRate = revenueNum / hoursObserved;
   const aprPct = ((hourlyRate * 24 * 365) / tvlNum) * 100;
 
-  return { aprPct, aprBasisHours: hoursObserved, depositCount, redeemCount };
+  return { aprPct, aprBasisHours: hoursObserved, depositCount, redeemCount, feeRevenueWei };
 }
