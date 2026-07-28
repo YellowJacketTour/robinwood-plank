@@ -17,9 +17,21 @@ type Props = {
  * the Deposit tab above — same public deposit() everyone uses), seed
  * shares+ETH atomically, then open the pool once, forever.
  */
+// Module-level so switching tabs away and back (which unmounts this) still
+// paints instantly instead of flashing "Reading vault state…" again. Short
+// TTL and always-bypassed after an actual seed/open action (`refresh(true)`
+// below) — this drives real financial decisions, so the moment right after
+// you take an action is exactly when stale data would be actively
+// misleading about whether it actually landed.
+let cachedStatus: Awaited<ReturnType<typeof getPoolStatus>> | null = null;
+let cachedAt = 0;
+const CACHE_TTL_MS = 15_000;
+
 export default function TreasuryBootstrap({ account }: Props) {
-  const [status, setStatus] = useState<Awaited<ReturnType<typeof getPoolStatus>> | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<Awaited<ReturnType<typeof getPoolStatus>> | null>(
+    cachedStatus
+  );
+  const [loading, setLoading] = useState(!cachedStatus);
   const [shareAmount, setShareAmount] = useState("");
   const [ethAmount, setEthAmount] = useState("");
   const [confirmOpen, setConfirmOpen] = useState("");
@@ -27,11 +39,18 @@ export default function TreasuryBootstrap({ account }: Props) {
   const [actionStatus, setStatusMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = () => {
-    setLoading(true);
+  const refresh = (force = false) => {
+    if (!force && cachedStatus && Date.now() - cachedAt < CACHE_TTL_MS) return;
+    setLoading(!cachedStatus);
     getPoolStatus()
-      .then(setStatus)
-      .catch(() => setStatus(null))
+      .then((next) => {
+        cachedStatus = next;
+        cachedAt = Date.now();
+        setStatus(next);
+      })
+      .catch(() => {
+        if (!cachedStatus) setStatus(null);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -61,7 +80,7 @@ export default function TreasuryBootstrap({ account }: Props) {
       setStatusMsg(label);
       await action();
       setStatusMsg("Confirmed.");
-      refresh();
+      refresh(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Transaction failed.");
     } finally {

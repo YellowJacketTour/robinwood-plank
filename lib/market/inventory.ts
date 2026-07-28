@@ -1,9 +1,11 @@
 import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
 import {
+  getCachedInventory,
   getCachedToken,
   hasFreshMetadata,
   putTokenMetadata,
   putTokenUri,
+  setCachedInventory,
 } from "@/lib/nft-cache";
 import type { MarketCollection } from "@/lib/market/types";
 
@@ -14,11 +16,25 @@ import type { MarketCollection } from "@/lib/market/types";
  * Without it, a user clicks Accept on someone's offer, signs, and the
  * transaction reverts — which reads as a broken marketplace rather than
  * "you don't own that one".
+ *
+ * Previously did a full balanceOf + N×tokenOfOwnerByIndex RPC round trip on
+ * EVERY call, including switching to My NFTs, away, and back within the
+ * same minute — confirmed live, no caching at all despite nft-cache.ts
+ * already having purpose-built inventory TTL machinery sitting unused here.
+ * Now checks that cache first (keyed by collection+wallet, so a second
+ * collection can never collide with this one) and only re-hits the chain
+ * once it's actually gone stale.
  */
 export async function getOwnedTokenIds(
   contractAddress: string,
   owner: string
 ): Promise<Set<string>> {
+  const cacheKey = `${contractAddress.toLowerCase()}:${owner.toLowerCase()}`;
+  const cachedHit = getCachedInventory(cacheKey);
+  if (cachedHit?.fresh) {
+    return new Set(cachedHit.ids.map(String));
+  }
+
   const owned = new Set<string>();
   try {
     const pad = (hex: string) => hex.replace(/^0x/, "").toLowerCase().padStart(64, "0");
@@ -26,23 +42,28 @@ export async function getOwnedTokenIds(
     const call = (data: string) => ethCall(contractAddress, data);
 
     const balHex = await call(`0x70a08231${pad(owner)}`); // balanceOf
-    if (!balHex) return owned;
-    const balance = Number(BigInt(balHex));
-    if (!Number.isFinite(balance) || balance <= 0) return owned;
+    const balance = balHex ? Number(BigInt(balHex)) : 0;
 
-    // Cap the walk — a whale shouldn't stall the page.
-    const limit = Math.min(balance, 200);
-    const results = await Promise.all(
-      Array.from({ length: limit }, (_, i) =>
-        // tokenOfOwnerByIndex(address,uint256)
-        call(`0x2f745c59${pad(owner)}${pad(BigInt(i).toString(16))}`)
-      )
-    );
-    for (const r of results) {
-      if (r && r !== "0x") owned.add(BigInt(r).toString());
+    if (Number.isFinite(balance) && balance > 0) {
+      // Cap the walk — a whale shouldn't stall the page.
+      const limit = Math.min(balance, 200);
+      const results = await Promise.all(
+        Array.from({ length: limit }, (_, i) =>
+          // tokenOfOwnerByIndex(address,uint256)
+          call(`0x2f745c59${pad(owner)}${pad(BigInt(i).toString(16))}`)
+        )
+      );
+      for (const r of results) {
+        if (r && r !== "0x") owned.add(BigInt(r).toString());
+      }
     }
+    // Cache even a zero-balance result — that's still a real, cacheable
+    // answer, and a whale being capped at 200 just means the CACHED set is
+    // the same capped view a fresh call would've produced anyway.
+    setCachedInventory(cacheKey, Array.from(owned, Number));
   } catch {
-    // Fail open: an empty set only means we can't pre-disable buttons.
+    // Fail open: an empty set only means we can't pre-disable buttons. Not
+    // cached — a transient RPC failure shouldn't stick as "owns nothing."
   }
   return owned;
 }
