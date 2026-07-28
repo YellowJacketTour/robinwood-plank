@@ -88,6 +88,19 @@ let source: EventSource | null = null;
 let refCount = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let restHydrated = false;
+let consecutiveErrors = 0;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+/** Fixed 1.5s retries forever is exactly how a real outage turns into a
+ * connection that never recovers and never falls back to anything —
+ * confirmed as the reported "data feed failing connection live." Backs off
+ * on repeated failures, and once it's failed enough in a row to look like a
+ * real outage rather than the routine ~290s recycle, switches to plain
+ * REST polling as the primary data source (SSE keeps retrying in the
+ * background so it can take back over once healthy). */
+const BASE_RECONNECT_MS = 1_500;
+const MAX_RECONNECT_MS = 20_000;
+const POLL_FALLBACK_AFTER_ERRORS = 4;
+const POLL_INTERVAL_MS = 12_000;
 /** The server ticks every 4s but only actually refreshes chain data every
  * 10s (see app/api/market/vault/stream/route.ts), so most ticks resend the
  * identical payload — comparing the raw text before parsing/emitting skips
@@ -130,6 +143,39 @@ function hydrateFromRest() {
     });
 }
 
+/** REST polling fallback — the same requests hydrateFromRest fires once,
+ * repeated, for as long as the SSE connection is unhealthy. Runs alongside
+ * connect()'s continuing reconnect attempts, not instead of them. */
+function pollOnce() {
+  Promise.all([
+    fetch("/api/market/vault/stats").then((r) => (r.ok ? r.json() : null)),
+    fetch("/api/market/vault/activity").then((r) => (r.ok ? r.json() : null)),
+  ])
+    .then(([stats, activityRes]) => {
+      if (!stats || state.connected) return;
+      const activity = activityRes?.events ?? state.activity;
+      state = { stats, activity, connected: false };
+      saveSnapshot(stats, activity);
+      emit();
+    })
+    .catch(() => {
+      // next poll tick tries again
+    });
+}
+
+function startPollFallback() {
+  if (pollTimer) return;
+  pollOnce();
+  pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
+}
+
+function stopPollFallback() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
 function connect() {
   hydrateFromRest();
   if (source || typeof window === "undefined") return;
@@ -144,6 +190,10 @@ function connect() {
       const data = JSON.parse(raw) as { stats: VaultStats; activity: VaultTradeEvent[] };
       state = { stats: data.stats, activity: data.activity, connected: true };
       saveSnapshot(data.stats, data.activity);
+      // A real tick landed — the connection is healthy again, so drop the
+      // backoff and stand down the polling fallback (SSE is back in charge).
+      consecutiveErrors = 0;
+      stopPollFallback();
       // A trade this tab just submitted (see lib/market/pendingVaultTx.ts)
       // graduates out of "pending" the moment it shows up as a real event.
       for (const e of data.activity) clearPendingVaultTx(e.txHash);
@@ -160,15 +210,19 @@ function connect() {
     // — only the connection badge flips, never the content itself.
     state = { ...state, connected: false };
     emit();
+    consecutiveErrors += 1;
+    if (consecutiveErrors >= POLL_FALLBACK_AFTER_ERRORS) startPollFallback();
     if (refCount > 0 && !reconnectTimer) {
       // The connection cycles proactively every ~290s server-side (see
-      // app/api/market/vault/stream/route.ts's MAX_STREAM_MS) — that's the
-      // routine case, not a network failure, so reconnect fast enough that
-      // it reads as a brief blip rather than a visible "reconnecting" state.
+      // app/api/market/vault/stream/route.ts's MAX_STREAM_MS) — the FIRST
+      // retry after that routine recycle should be fast so it reads as a
+      // blip, not a visible "reconnecting" state. Repeated failures back
+      // off instead of hammering an endpoint that's actually down.
+      const delay = Math.min(BASE_RECONNECT_MS * 2 ** (consecutiveErrors - 1), MAX_RECONNECT_MS);
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         if (refCount > 0) connect();
-      }, 1_500);
+      }, delay);
     }
   };
 }
@@ -178,6 +232,8 @@ function disconnect() {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
+  stopPollFallback();
+  consecutiveErrors = 0;
   source?.close();
   source = null;
 }

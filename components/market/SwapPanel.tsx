@@ -678,9 +678,25 @@ export default function SwapPanel({ account, onConnect }: Props) {
                   </span>
                 </div>
                 {redeemInsufficient && (
-                  <p className="mt-1 font-bold">
-                    Not enough shares yet — deposit or buy more before you can redeem.
-                  </p>
+                  <>
+                    <p className="mt-1 font-bold">
+                      {shareBalance != null && shareBalance > BigInt(0)
+                        ? "Not enough for a whole plank — but you don't need a redemption to get your ETH back."
+                        : "Nothing to redeem — no shares yet."}
+                    </p>
+                    {shareBalance != null && shareBalance > BigInt(0) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode("sell");
+                          setAmount(formatTokenAmount(shareBalance, 18, 18));
+                        }}
+                        className="mt-1.5 w-full rounded-md border border-emerald-400/40 bg-emerald-400/10 px-2 py-1.5 text-[0.65rem] font-bold text-emerald-200 transition hover:border-emerald-300"
+                      >
+                        Sell your {formatTokenAmount(shareBalance, 18, 4)} shares for ETH instead →
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             )}
