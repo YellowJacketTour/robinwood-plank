@@ -5,7 +5,6 @@ import Reveal from "@/components/Reveal";
 import SectionHead from "@/components/SectionHead";
 import MarketNav from "@/components/market/MarketNav";
 import ListingGrid from "@/components/market/ListingGrid";
-import ListForm from "@/components/market/ListForm";
 import OfferForm from "@/components/market/OfferForm";
 import SwapPanel from "@/components/market/SwapPanel";
 import MyPositions from "@/components/market/MyPositions";
@@ -99,7 +98,6 @@ export default function MarketView() {
   const [account, setAccount] = useState<string | null>(null);
   const [listings, setListings] = useState<Array<WithOrder<Listing>>>([]);
   const [offers, setOffers] = useState<Array<WithOrder<Listing>>>([]);
-  const [showListForm, setShowListForm] = useState(false);
   const [offerTarget, setOfferTarget] = useState<{ tokenId?: string; trait?: boolean } | null>(
     null
   );
@@ -496,12 +494,16 @@ export default function MarketView() {
           {account && <WalletChip account={account} />}
           {tab === "buy-sell" &&
             (account ? (
+              // Routes to "My Listings" (MyInventory) rather than opening a
+              // form that asks for a typed token ID — that form duplicated,
+              // less visually, what tap-to-select inventory browsing already
+              // does. One picker, not two.
               <button
                 type="button"
-                onClick={() => setShowListForm((v) => !v)}
+                onClick={() => selectTab("positions")}
                 className="min-h-10 shrink-0 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
               >
-                {showListForm ? "Cancel" : "Sell"}
+                Sell
               </button>
             ) : (
               <button
@@ -527,19 +529,6 @@ export default function MarketView() {
         >
           {error ?? status}
         </p>
-      )}
-
-      {tab === "buy-sell" && showListForm && account && COLLECTION && (
-        <Reveal>
-          <ListForm
-            account={account}
-            collection={COLLECTION}
-            onListed={() => {
-              setShowListForm(false);
-              void refresh();
-            }}
-          />
-        </Reveal>
       )}
 
       {offerTarget && account && COLLECTION && (

@@ -151,6 +151,48 @@ export async function depositForShares(
 }
 
 /**
+ * Read-only quotes — the SAME staticCall buyShares/sellShares already use
+ * internally to compute their min-out, exposed standalone so the UI can show
+ * "you receive ~Y" live, before signing anything. staticCall never sends a
+ * transaction or spends gas; it's a plain eth_call under the hood. Returns
+ * null on any failure (no liquidity, bad amount, RPC hiccup) — the caller
+ * shows "quote unavailable" rather than a stale or fabricated number.
+ */
+export async function quoteBuyShares(
+  accountAddress: string,
+  ethAmount: string
+): Promise<bigint | null> {
+  try {
+    const vault = await getVaultReader();
+    await assertVaultWrapsOurCollection(vault);
+    const value = parseEther(ethAmount);
+    if (value <= BigInt(0)) return null;
+    return (await vault.buyShares.staticCall(BigInt(0), {
+      value,
+      from: accountAddress,
+    })) as bigint;
+  } catch {
+    return null;
+  }
+}
+
+export async function quoteSellShares(
+  accountAddress: string,
+  sharesWei: bigint
+): Promise<bigint | null> {
+  try {
+    if (sharesWei <= BigInt(0)) return null;
+    const vault = await getVaultReader();
+    await assertVaultWrapsOurCollection(vault);
+    return (await vault.sellShares.staticCall(sharesWei, BigInt(0), {
+      from: accountAddress,
+    })) as bigint;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Buy shares with ETH. The expected output is quoted by eth_call-ing the swap
  * itself, then bounded by `slippageBps` — there is no zero-min path anymore.
  */

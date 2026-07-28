@@ -1,4 +1,3 @@
-import { CHAIN } from "@/lib/constants";
 import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
 import {
   getCachedToken,
@@ -24,20 +23,7 @@ export async function getOwnedTokenIds(
   try {
     const pad = (hex: string) => hex.replace(/^0x/, "").toLowerCase().padStart(64, "0");
 
-    const call = async (data: string): Promise<string | null> => {
-      const res = await fetch(CHAIN.rpcUrls.default, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "eth_call",
-          params: [{ to: contractAddress, data }, "latest"],
-        }),
-      });
-      const json = (await res.json()) as { result?: string };
-      return json.result ?? null;
-    };
+    const call = (data: string) => ethCall(contractAddress, data);
 
     const balHex = await call(`0x70a08231${pad(owner)}`); // balanceOf
     if (!balHex) return owned;
@@ -74,9 +60,16 @@ export type OwnedInventory = {
   items: OwnedNft[];
 };
 
+/**
+ * Same-origin RPC proxy (app/api/rpc), not CHAIN.rpcUrls.default directly —
+ * the public RPC sends a malformed duplicate CORS header that a direct
+ * client-side fetch() gets silently killed by (confirmed live: this whole
+ * function was failing closed on every call, per the catch-and-return-null
+ * below, which is why it read as merely "best effort" rather than broken).
+ */
 async function ethCall(to: string, data: string): Promise<string | null> {
   try {
-    const res = await fetch(CHAIN.rpcUrls.default, {
+    const res = await fetch("/api/rpc", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
