@@ -626,20 +626,25 @@ body .nft-modal .nft-modal-body {
 /* Rarity-tier motion — reserved for Legendary/Mythic (lib/rarity.ts
    tierAnimationClass). Reduced-motion users get the static glow only, via
    the prefers-reduced-motion override below. */
-/* A single continuous back-to-back sweep at constant speed read as a
-   choppy "scanning" loop. Real holographic-card shimmer is a gentle,
-   infrequent pass: the highlight crosses in ~1.6s, then rests fully
-   off-screen (both -150% and 250% are outside the visible box) for a few
-   seconds before the next pass. `linear` (not ease-in-out) so there's no
-   deceleration-then-snap at the loop boundary — the only thing that ever
-   moves does so at one smooth constant speed. */
+/* Previous version left the highlight visibly parked on the card during its
+   "rest" phase, then snapped back to start — the -150%/250% margins weren't
+   generous enough once the 100deg angle (which extends a gradient's line
+   beyond the element's box) is accounted for, so the glow never fully
+   cleared the visible area before holding. Fixed with: (1) a much narrower
+   band (a thin glint, not a wide wash) so it clears the box quickly, (2)
+   deliberately excessive off-screen margins on both rest positions, (3) a
+   much slower, explicit three-stop keyframe (separate rules, not a
+   comma-shared stop, to rule out any ambiguity there), and (4) `linear`
+   timing so nothing decelerates into a "freeze" right before the loop. */
 @keyframes tier-shimmer-sweep {
   0% {
-    background-position: -150% 0;
+    background-position: -260% 0;
   }
-  35%,
+  22% {
+    background-position: 360% 0;
+  }
   100% {
-    background-position: 250% 0;
+    background-position: 360% 0;
   }
 }
 
@@ -655,13 +660,13 @@ body .nft-modal .nft-modal-body {
   pointer-events: none;
   background: linear-gradient(
     100deg,
-    transparent 30%,
-    rgba(255, 255, 255, 0.35) 48%,
-    rgba(255, 255, 255, 0.35) 52%,
-    transparent 70%
+    transparent 46%,
+    rgba(255, 255, 255, 0.32) 49.5%,
+    rgba(255, 255, 255, 0.32) 50.5%,
+    transparent 54%
   );
-  background-size: 250% 100%;
-  animation: tier-shimmer-sweep 4.8s linear infinite;
+  background-size: 300% 100%;
+  animation: tier-shimmer-sweep 9s linear infinite;
 }
 
 @keyframes tier-pulse-glow {
