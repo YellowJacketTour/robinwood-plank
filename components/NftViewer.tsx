@@ -45,11 +45,13 @@ import {
   computeRaritySnapshot,
   formatRank,
   tierAnimationClass,
+  tierCardStyle,
   tierColor,
   tierGlow,
   type RarityTier,
   type TokenRarity,
 } from "@/lib/rarity";
+import { holoHandlers } from "@/lib/holo";
 
 type EthereumProvider = Eip1193Provider & {
   on?: (event: string, listener: (...args: unknown[]) => void) => void;
@@ -1172,9 +1174,14 @@ export default function NftViewer() {
                         >
                           <div
                             className={`relative aspect-square w-full overflow-hidden bg-wood-950 ${
-                              tokenRarity ? tierAnimationClass(tokenRarity.tier) : ""
+                              tokenRarity ? `${tierAnimationClass(tokenRarity.tier)} holo-card` : ""
                             }`}
-                            style={tokenRarity ? { boxShadow: tierGlow(tokenRarity.tier) } : undefined}
+                            style={
+                              tokenRarity
+                                ? { boxShadow: tierGlow(tokenRarity.tier), ...tierCardStyle(tokenRarity.tier) }
+                                : undefined
+                            }
+                            {...(tokenRarity ? holoHandlers : {})}
                           >
                             <NftImage
                               imageUri={nft.imageUri}

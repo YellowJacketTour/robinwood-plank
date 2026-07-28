@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { getRarityMap, tierAnimationClass, tierGlow } from "@/lib/market/rarityClient";
+import { getRarityMap, tierAnimationClass, tierCardStyle, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+import { holoHandlers } from "@/lib/holo";
 
 export type PickerToken = {
   tokenId: string;
@@ -77,9 +78,10 @@ export default function TokenPicker({
                 aria-pressed={isSelected}
                 aria-label={`Select #${t.tokenId}`}
                 className={`group relative aspect-square overflow-hidden rounded-lg bg-wood-900 transition ${
-                  r ? tierAnimationClass(r.tier) : ""
+                  r ? `${tierAnimationClass(r.tier)} holo-card` : ""
                 } ${isSelected ? "ring-2 ring-gold-300" : ""}`}
-                style={r && !isSelected ? { boxShadow: tierGlow(r.tier) } : undefined}
+                style={r && !isSelected ? { boxShadow: tierGlow(r.tier), ...tierCardStyle(r.tier) } : undefined}
+                {...(r ? holoHandlers : {})}
               >
                 {t.imageUrl ? (
                   <Image

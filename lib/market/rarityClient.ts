@@ -1,6 +1,6 @@
 "use client";
 
-import { tierAnimationClass, tierColor, tierGlow } from "@/lib/rarity";
+import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/rarity";
 import type { RarityTier } from "@/lib/rarity";
 
 export type RarityLookup = {
@@ -45,5 +45,5 @@ export async function getRarityMap(): Promise<Map<string, RarityLookup>> {
   return inflight;
 }
 
-export { tierColor, tierGlow, tierAnimationClass };
+export { tierColor, tierGlow, tierAnimationClass, tierCardStyle };
 export type { RarityTier };

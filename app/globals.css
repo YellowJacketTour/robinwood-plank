@@ -604,13 +604,40 @@ body .nft-modal .nft-modal-body {
   scrollbar-gutter: stable;
 }
 
+/* Text sitting on top of NFT artwork has to stay readable against ANY
+   background color the art happens to use (this collection ranges from
+   near-white to saturated green/purple/orange). A flat color alone isn't
+   enough — bright fill + a dark stroke/shadow stack keeps it legible on
+   every one of them, the same principle as comic-lettering or map labels. */
+.legible-text {
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 0 6px rgba(0, 0, 0, 0.75),
+    0 0 1px rgba(0, 0, 0, 0.9);
+}
+
+.legible-text-strong {
+  text-shadow:
+    0 1px 3px rgba(0, 0, 0, 1),
+    0 0 10px rgba(0, 0, 0, 0.85),
+    0 0 2px rgba(0, 0, 0, 0.95);
+}
+
 /* Rarity-tier motion — reserved for Legendary/Mythic (lib/rarity.ts
    tierAnimationClass). Reduced-motion users get the static glow only, via
    the prefers-reduced-motion override below. */
+/* A single continuous back-to-back sweep at constant speed read as a
+   choppy "scanning" loop. Real holographic-card shimmer is a gentle,
+   infrequent pass: the highlight crosses in ~1.6s, then rests fully
+   off-screen (both -150% and 250% are outside the visible box) for a few
+   seconds before the next pass. `linear` (not ease-in-out) so there's no
+   deceleration-then-snap at the loop boundary — the only thing that ever
+   moves does so at one smooth constant speed. */
 @keyframes tier-shimmer-sweep {
   0% {
     background-position: -150% 0;
   }
+  35%,
   100% {
     background-position: 250% 0;
   }
@@ -634,7 +661,7 @@ body .nft-modal .nft-modal-body {
     transparent 70%
   );
   background-size: 250% 100%;
-  animation: tier-shimmer-sweep 2.6s ease-in-out infinite;
+  animation: tier-shimmer-sweep 4.8s linear infinite;
 }
 
 @keyframes tier-pulse-glow {
@@ -649,6 +676,34 @@ body .nft-modal .nft-modal-body {
 
 .tier-pulse {
   animation: tier-pulse-glow 2.2s ease-in-out infinite;
+}
+
+/* Pointer/touch-reactive holo sheen — a trading-card foil effect that
+   follows the cursor (mouse) or finger (touch drag, via the Pointer Events
+   API which unifies both). Driven by --holo-x/--holo-y/--holo-active,
+   which lib/holo.ts sets directly on the element (no React re-render per
+   mousemove — this needs to stay cheap at 60fps). Uses ::before so it can
+   coexist with .tier-shimmer's ::after on the same element. */
+.holo-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.holo-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: var(--holo-active, 0);
+  transition: opacity 0.35s ease;
+  background: radial-gradient(
+    circle 140px at var(--holo-x, 50%) var(--holo-y, 50%),
+    rgba(255, 255, 255, 0.55),
+    rgba(255, 255, 255, 0.15) 45%,
+    transparent 72%
+  );
+  mix-blend-mode: overlay;
 }
 
 @media (prefers-reduced-motion: reduce) {

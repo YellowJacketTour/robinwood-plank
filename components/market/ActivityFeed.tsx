@@ -3,7 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { shortAddress } from "@/lib/trade";
-import { getRarityMap, tierAnimationClass, tierColor, tierGlow } from "@/lib/market/rarityClient";
+import {
+  getRarityMap,
+  tierAnimationClass,
+  tierCardStyle,
+  tierColor,
+  tierGlow,
+} from "@/lib/market/rarityClient";
+import { holoHandlers } from "@/lib/holo";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import CollectionStats from "@/components/market/CollectionStats";
 import ActivityStats from "@/components/market/ActivityStats";
@@ -203,7 +210,11 @@ export default function ActivityFeed({
             return (
               <li
                 key={`${e.txHash}-${e.tokenId}`}
-                className={`dense-card flex items-center gap-3 p-2 ${selectable ? "cursor-pointer" : ""}`}
+                className={`dense-card flex items-center gap-3 p-2 ${selectable ? "cursor-pointer" : ""} ${
+                  r ? `${tierAnimationClass(r.tier)} holo-card` : ""
+                }`}
+                style={r ? tierCardStyle(r.tier) : undefined}
+                {...(r ? holoHandlers : {})}
                 role={selectable ? "button" : undefined}
                 tabIndex={selectable ? 0 : undefined}
                 aria-label={selectable ? `View #${e.tokenId}` : undefined}
@@ -259,7 +270,7 @@ export default function ActivityFeed({
                     <span className="text-xs font-bold text-foreground">#{e.tokenId}</span>
                     {r && (
                       <span
-                        className="rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950"
+                        className="rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950 shadow-[0_1px_3px_rgba(0,0,0,0.6)]"
                         style={{ backgroundColor: tierColor(r.tier) }}
                       >
                         {r.tier}

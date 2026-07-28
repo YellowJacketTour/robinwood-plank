@@ -1,7 +1,8 @@
 import Image from "next/image";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
-import { tierAnimationClass, tierColor, tierGlow } from "@/lib/market/rarityClient";
+import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
+import { holoHandlers } from "@/lib/holo";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 
 type Props = {
@@ -48,8 +49,9 @@ export default function ListingCard({
     <li
       className={`dense-card flex flex-col overflow-hidden p-0 ${
         isOffer ? "border-emerald-500/40" : ""
-      } ${rarity ? tierAnimationClass(rarity.tier) : ""}`}
-      style={rarity ? { boxShadow: tierGlow(rarity.tier) } : undefined}
+      } ${rarity ? `${tierAnimationClass(rarity.tier)} holo-card` : ""}`}
+      style={rarity ? { boxShadow: tierGlow(rarity.tier), ...tierCardStyle(rarity.tier) } : undefined}
+      {...(rarity ? holoHandlers : {})}
     >
       <div
         className={`relative aspect-square w-full bg-wood-900 ${
@@ -82,15 +84,18 @@ export default function ListingCard({
         />
         {isFloor && (
           <span
-            className="absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-gold-300"
+            className="legible-text absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-gold-300"
             title="Floorboard — cheapest listing"
           >
             Floor
           </span>
         )}
         {rarity && (
+          // Dark text on the tier's own bright fill (not white-on-color) —
+          // the highest-contrast pairing against colors that range from
+          // near-white (Uncommon green) to pale lavender (Epic).
           <span
-            className={`absolute left-1.5 ${isFloor ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950`}
+            className={`absolute left-1.5 ${isFloor ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950 shadow-[0_1px_3px_rgba(0,0,0,0.6)]`}
             style={{ backgroundColor: tierColor(rarity.tier) }}
             title={`Rank #${rarity.rank} · ${rarity.percentile.toFixed(0)}th percentile`}
           >

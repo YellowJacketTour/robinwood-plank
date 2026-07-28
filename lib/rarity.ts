@@ -165,6 +165,29 @@ export function tierGlow(tier: RarityTier): string {
   }
 }
 
+/**
+ * Whole-card treatment for the CONTAINER a tiered asset sits in — not just
+ * the artwork's own ring. Every "vessel" around a specific NFT (a listing
+ * card, an activity row, an inventory tile, a picker cell) should read as
+ * that tier at a glance, not just the thumbnail inside it. A soft tinted
+ * wash + matching border, deliberately much subtler than tierGlow's ring so
+ * text inside the card stays readable — the ring stays the loud signal, this
+ * is the quiet one that extends it outward.
+ */
+export function tierCardStyle(tier: RarityTier): { backgroundImage?: string; borderColor?: string } {
+  const c = tierColor(tier);
+  if (tier === "Common") return {};
+  return {
+    // backgroundImage, not the `background` shorthand: a card's own dark
+    // base color usually comes from a CSS class's `background-color` (or
+    // `background` shorthand), and this needs to layer a tint ON TOP of
+    // that, not replace it. Setting only backgroundImage inline leaves the
+    // class's background-color intact underneath.
+    backgroundImage: `linear-gradient(160deg, ${c}14, transparent 65%)`,
+    borderColor: `${c}40`,
+  };
+}
+
 /** CSS class for tier-specific motion (see .tier-shimmer / .tier-pulse in
  * app/globals.css). Only the most exclusive tiers animate — motion itself is
  * part of the escalation, not just color/glow. */
