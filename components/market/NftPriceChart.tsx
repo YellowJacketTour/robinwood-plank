@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, ColorType, LineSeries, LineStyle } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, LineData, UTCTimestamp } from "lightweight-charts";
 import { ethWeiToNumber } from "@/lib/eth-price";
+import { useVaultLive } from "@/lib/market/useVaultLive";
 
 type SaleEvent = { kind: string; priceWei: string | null; timestamp: string | null };
 
@@ -16,20 +17,25 @@ const RANGE_MS: Record<Range, number | null> = {
 };
 
 /**
- * Real settled-sale price history for the collection, charted like a
- * DEX/meme-coin pair. Every point is an actual on-chain sale from
- * /api/market/activity (same feed ActivityStats already reads) — there is
- * no synthetic candle aggregation since sale volume here is still low
- * enough that a line-of-real-trades is more honest than fabricated OHLC
- * bars with mostly-empty candles.
+ * Real price history for RobinWood, charted like a DEX/meme-coin pair.
+ * Merges two live sources: settled fixed-price marketplace sales
+ * (/api/market/activity) and the vault's own AMM trades (Bought/Sold, via
+ * the shared live stream) — the vault is where nearly all price action
+ * actually happens now, so a sales-only chart would sit stuck at an old
+ * price while real, lower vault sells were printing. A share is the
+ * vault's per-NFT redemption unit, so its ETH-per-share price is a
+ * like-for-like point on the same chart, not a different asset. No
+ * synthetic candle aggregation — a line of real trades is more honest than
+ * fabricated OHLC bars with mostly-empty candles.
  */
 export default function NftPriceChart() {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const [points, setPoints] = useState<LineData<UTCTimestamp>[] | null>(null);
+  const [salePoints, setSalePoints] = useState<LineData<UTCTimestamp>[] | null>(null);
   const [range, setRange] = useState<Range>("ALL");
   const [failed, setFailed] = useState(false);
+  const { activity: vaultActivity } = useVaultLive();
 
   useEffect(() => {
     let cancelled = false;
@@ -46,19 +52,8 @@ export default function NftPriceChart() {
             .map((e) => ({
               time: Math.floor(new Date(e.timestamp).getTime() / 1000) as UTCTimestamp,
               value: ethWeiToNumber(e.priceWei),
-            }))
-            .sort((a, b) => a.time - b.time);
-          // lightweight-charts requires strictly increasing timestamps; two
-          // sales in the same second collapse to the later one.
-          const deduped: typeof sales = [];
-          for (const p of sales) {
-            if (deduped.length > 0 && deduped[deduped.length - 1].time === p.time) {
-              deduped[deduped.length - 1] = p;
-            } else {
-              deduped.push(p);
-            }
-          }
-          setPoints(deduped);
+            }));
+          setSalePoints(sales);
         })
         .catch(() => {
           if (!cancelled) setFailed(true);
@@ -74,6 +69,39 @@ export default function NftPriceChart() {
       clearInterval(interval);
     };
   }, []);
+
+  // Real fixed-price marketplace sales are rare; almost all price discovery
+  // now happens on the vault's own AMM (Bought/Sold), which a sales-only
+  // chart is completely blind to — the reported bug (chart stuck at an old
+  // price while vault sells were printing lower). A share is the vault's
+  // per-NFT redemption unit, so its ETH-per-share price is a like-for-like
+  // point on the same chart, not a different asset.
+  const vaultPoints = useMemo<LineData<UTCTimestamp>[]>(() => {
+    return vaultActivity
+      .filter((e) => (e.kind === "buy" || e.kind === "sell") && e.ethWei != null && e.sharesWei != null && e.timestamp != null)
+      .map((e) => ({
+        time: Math.floor(new Date(e.timestamp!).getTime() / 1000) as UTCTimestamp,
+        // Both amounts are wei-scaled (18 decimals), so their ratio is
+        // already the ETH-per-share price — no rescaling needed.
+        value: Number(e.ethWei) / Number(e.sharesWei),
+      }));
+  }, [vaultActivity]);
+
+  const points = useMemo<LineData<UTCTimestamp>[] | null>(() => {
+    if (salePoints == null) return null;
+    const merged = [...salePoints, ...vaultPoints].sort((a, b) => a.time - b.time);
+    // lightweight-charts requires strictly increasing timestamps; two trades
+    // in the same second collapse to the later one.
+    const deduped: typeof merged = [];
+    for (const p of merged) {
+      if (deduped.length > 0 && deduped[deduped.length - 1].time === p.time) {
+        deduped[deduped.length - 1] = p;
+      } else {
+        deduped.push(p);
+      }
+    }
+    return deduped;
+  }, [salePoints, vaultPoints]);
 
   useEffect(() => {
     if (!containerRef.current || points == null) return;
