@@ -50,3 +50,13 @@ data/boards-state.json
 .hardhat-cache/
 .hardhat-artifacts/
 typechain-types/
+
+# Standalone owner-run deploy tool (scripts/deploy-tool) — its own isolated
+# npm install, build output, and compiled contract JSON are all regenerated
+# locally per README.md; committing them risks shipping a stale artifact
+# that silently deploys different bytecode than what's in contracts/.
+scripts/deploy-tool/node_modules/
+scripts/deploy-tool/wallet-bundle.js
+scripts/deploy-tool/package-lock.json
+scripts/deploy-tool/DrandBeacon.json
+scripts/deploy-tool/MarketplankVault.json

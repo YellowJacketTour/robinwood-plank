@@ -43,7 +43,18 @@ type RawParameters = {
   endTime: string | number;
   orderType?: number | string;
   totalOriginalConsiderationItems?: number | string;
+  conduitKey?: string;
 };
+
+/**
+ * The only conduit configuration we produce: no conduit at all (Seaport pulls
+ * approvals directly). seaport-js resolves the offerer's operator from the
+ * order's conduitKey; an unknown key yields an undefined operator and a
+ * guaranteed revert at fill, and the OpenSea conduit is not deployed on this
+ * chain. FAIL CLOSED on anything but absent/zero.
+ */
+const ZERO_CONDUIT_KEY =
+  "0x0000000000000000000000000000000000000000000000000000000000000000";
 
 /**
  * Seaport OrderType. Only FULL_OPEN is accepted.
@@ -78,7 +89,11 @@ function fail(message: string): never {
 
 function toBig(v: unknown, field: string): bigint {
   if (typeof v === "bigint") return v;
-  if (typeof v === "number" && Number.isInteger(v)) return BigInt(v);
+  // Number.isSafeInteger, not isInteger: unquoted JSON integers above 2^53
+  // have ALREADY lost precision by the time they reach us, so converting them
+  // to BigInt would silently validate an amount different from what was
+  // signed. Reject; large values must arrive as strings.
+  if (typeof v === "number" && Number.isSafeInteger(v)) return BigInt(v);
   if (typeof v === "string" && /^\d+$/.test(v)) return BigInt(v);
   fail(`Order field "${field}" is not a valid integer.`);
 }
@@ -149,6 +164,16 @@ function assertShape(rawOrder: unknown): RawOrder {
     }
   }
 
+  // conduitKey: only "no conduit" is acceptable. Any other key either points
+  // at a conduit we haven't audited or (more likely on chain 4663) one that
+  // does not exist, making every fill revert. Absent is fine — getSeaport
+  // produces the zero key. FAIL CLOSED on anything else.
+  if (p.conduitKey !== undefined) {
+    if (typeof p.conduitKey !== "string" || p.conduitKey.toLowerCase() !== ZERO_CONDUIT_KEY) {
+      fail("Order uses an unsupported conduit.");
+    }
+  }
+
   // An order that hasn't started yet would sit in the book looking live and
   // revert for every buyer who tried it.
   const startTime = toBig(p.startTime ?? 0, "startTime");
@@ -176,7 +201,12 @@ function fixedAmount(item: RawItem, label: string): bigint {
 function endTimeToIso(p: RawParameters): string {
   const end = toBig(p.endTime, "endTime");
   const ms = Number(end) * 1000;
-  if (!Number.isFinite(ms) || ms <= 0) fail("Order has an invalid expiry.");
+  // Date can only represent ±8.64e15 ms; a finite ms beyond that makes
+  // toISOString() throw a raw RangeError (a 500 at the route) instead of a
+  // clean validation error. Bound it here.
+  if (!Number.isFinite(ms) || ms <= 0 || ms > 8_640_000_000_000_000) {
+    fail("Order has an invalid expiry.");
+  }
   return new Date(ms).toISOString();
 }
 
@@ -190,6 +220,15 @@ export function validateListingOrder(
 ): DerivedOrder {
   const order = assertShape(rawOrder);
   const p = order.parameters;
+
+  // ERC-1155 collections: the validator below asserts ERC-721 semantics
+  // (quantity exactly 1, one token per order). We have no audited quantity
+  // model for 1155 — accepting one here would be silent quantity inflation —
+  // so REJECT explicitly until a dedicated 1155 path exists. (No allowlisted
+  // collection is 1155 today.)
+  if (collection.tokenStandard !== "ERC721") {
+    fail("Only ERC-721 collections are tradable on Marketplank for now.");
+  }
 
   if (p.offer.length !== 1) {
     fail("Marketplank listings must offer exactly one NFT.");
@@ -230,7 +269,9 @@ export function validateListingOrder(
   assertFeeHonored(total, feePaid, collection);
 
   return {
-    maker: p.offerer,
+    // Lowercased: order ids and per-maker caps are keyed on this string, so
+    // echoing attacker-chosen casing would mint distinct identities per wallet.
+    maker: p.offerer.toLowerCase(),
     tokenId,
     priceWei: total.toString(),
     expiresAt: endTimeToIso(p),
@@ -251,6 +292,11 @@ export function validateOfferOrder(
   const order = assertShape(rawOrder);
   const p = order.parameters;
 
+  // Same fail-closed 1155 stance as listings — see validateListingOrder.
+  if (collection.tokenStandard !== "ERC721") {
+    fail("Only ERC-721 collections are tradable on Marketplank for now.");
+  }
+
   if (p.offer.length !== 1) fail("Offers must offer exactly one payment item.");
   const offered = p.offer[0];
   if (toItemType(offered.itemType) !== ITEM_ERC20) {
@@ -265,7 +311,7 @@ export function validateOfferOrder(
   if (total <= BigInt(0)) fail("Offer amount must be greater than zero.");
 
   let tokenId: string | undefined;
-  let sawCollectionItem = false;
+  let nftItemCount = 0;
   let feePaid = BigInt(0);
 
   for (let i = 0; i < p.consideration.length; i++) {
@@ -279,9 +325,30 @@ export function validateOfferOrder(
       if (!sameAddress(item.recipient, p.offerer)) {
         fail("Offer would deliver the NFT to someone other than the bidder.");
       }
-      sawCollectionItem = true;
+      // ERC-721 quantity is definitionally 1. Seaport reverts on anything
+      // else, so a larger amount is at minimum a griefing order — and the
+      // same unchecked field would be silent quantity inflation on an 1155
+      // path. Assert it here regardless.
+      if (fixedAmount(item, `consideration[${i}]`) !== BigInt(1)) {
+        fail("Offer NFT quantity must be exactly 1.");
+      }
+      nftItemCount++;
+      // One payment, one plank: a second NFT item would validate, display as
+      // an offer on one token, and hand over both for a single payment.
+      if (nftItemCount > 1) {
+        fail("Offer must ask for exactly one NFT.");
+      }
       if (type === ITEM_ERC721) {
         tokenId = toBig(item.identifierOrCriteria, `consideration[${i}].identifier`).toString();
+      } else {
+        // Criteria form: a non-zero identifierOrCriteria is a Merkle root
+        // restricting which token ids can fill. We have no way to display or
+        // verify the root's contents, so a rooted bid would render as "offer
+        // on any plank" while being unfillable for most sellers. Only the
+        // wildcard (root 0 = any id) is accepted. FAIL CLOSED otherwise.
+        if (toBig(item.identifierOrCriteria, `consideration[${i}].criteria`) !== BigInt(0)) {
+          fail("Criteria offers must apply to the whole collection.");
+        }
       }
       continue;
     }
@@ -290,22 +357,35 @@ export function validateOfferOrder(
       if (!sameAddress(item.token, expectedCurrency)) {
         fail("Offer fee is denominated in an unexpected token.");
       }
-      const amount = fixedAmount(item, `consideration[${i}]`);
-      if (sameAddress(item.recipient, MARKET_FEE_RECIPIENT)) feePaid += amount;
+      // The fulfiller (the seller accepting this bid) pays every consideration
+      // item out of the offered funds. An ERC-20 item routed anywhere but the
+      // marketplace treasury is a clawback siphoning the headline amount back
+      // to an attacker-chosen address — REJECT it outright.
+      if (!sameAddress(item.recipient, MARKET_FEE_RECIPIENT)) {
+        fail("Offer routes payment away from the seller.");
+      }
+      feePaid += fixedAmount(item, `consideration[${i}]`);
       continue;
     }
 
     fail("Offer contains an unsupported item type.");
   }
 
-  if (!sawCollectionItem) fail("Offer does not ask for an NFT from this collection.");
+  if (nftItemCount !== 1) fail("Offer does not ask for an NFT from this collection.");
 
   assertFeeHonored(total, feePaid, collection);
 
+  // The seller NETS the offered amount minus everything clawed back as
+  // consideration (post-checks above, that is only the treasury fee). This is
+  // the number to display — showing the gross would overstate the bid.
+  const net = total - feePaid;
+  if (net <= BigInt(0)) fail("Offer nets the seller nothing.");
+
   return {
-    maker: p.offerer,
+    // Lowercased — see validateListingOrder.
+    maker: p.offerer.toLowerCase(),
     tokenId,
-    priceWei: total.toString(),
+    priceWei: net.toString(),
     expiresAt: endTimeToIso(p),
     currency: expectedCurrency,
   };
@@ -319,7 +399,15 @@ export function validateOfferOrder(
  * Allows a 1 wei tolerance for integer-division rounding inside seaport-js.
  */
 function assertFeeHonored(total: bigint, feePaid: bigint, collection: MarketCollection): void {
-  if (!collection.feeBps || collection.feeBps <= 0) return;
+  if (!collection.feeBps || collection.feeBps <= 0) {
+    // No fee configured: any amount routed to the treasury would be value
+    // silently diverted from the maker (and, for offers, understate the net
+    // shown after subtraction). Fail closed on unexpected fee items.
+    if (feePaid > BigInt(0)) {
+      fail("Order pays a marketplace fee this collection does not charge.");
+    }
+    return;
+  }
   // seaport-js runs BigInt(basisPoints) when building the fee item, which
   // throws on any non-integer. A collection configured with, say, 42.07 bps
   // would fail every listing attempt with an opaque SDK error — catch it here
@@ -332,5 +420,11 @@ function assertFeeHonored(total: bigint, feePaid: bigint, collection: MarketColl
   const tolerance = expected / BigInt(100) + BigInt(1); // 1% + 1 wei
   if (feePaid + tolerance < expected) {
     fail("Order does not pay the marketplace fee for this collection.");
+  }
+  // UPPER bound too: a "fee" far above the configured rate is not a fee, it
+  // is value siphoned to the treasury address while the maker believes they
+  // are paying the standard rate (and it would gut the seller's net on bids).
+  if (feePaid > expected + tolerance) {
+    fail("Order overpays the marketplace fee for this collection.");
   }
 }

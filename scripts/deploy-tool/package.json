@@ -1,0 +1,8 @@
+{
+  "name": "marketplank-deploy-tool",
+  "private": true,
+  "description": "Standalone owner-run deploy page. Not part of the Next.js app's dependency tree or bundle.",
+  "scripts": {
+    "build": "node build.mjs"
+  }
+}

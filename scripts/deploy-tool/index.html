@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Marketplank Vault Deploy — owner-signed, no keys shared</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: dark; }
+  body { font: 14px/1.5 ui-monospace, monospace; background: #14100a; color: #f0e6d2; max-width: 780px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 18px; color: #e8c25f; }
+  h2 { font-size: 14px; color: #e8c25f; margin-top: 32px; border-top: 1px solid #3a2f20; padding-top: 16px; }
+  .warn { background: #3a1010; border: 1px solid #8a2020; padding: 10px 12px; border-radius: 6px; margin: 12px 0; }
+  .ok { background: #10301a; border: 1px solid #2a7a45; padding: 10px 12px; border-radius: 6px; margin: 12px 0; }
+  .step { border: 1px solid #3a2f20; border-radius: 8px; padding: 14px; margin: 12px 0; }
+  .step.done { border-color: #2a7a45; }
+  label { display: block; margin: 8px 0 3px; color: #c9b98a; font-size: 12px; }
+  input { width: 100%; box-sizing: border-box; background: #0c0906; border: 1px solid #3a2f20; color: #f0e6d2; padding: 7px 9px; border-radius: 5px; font-family: inherit; font-size: 13px; }
+  button { background: #e8c25f; color: #14100a; border: none; border-radius: 6px; padding: 9px 16px; font-weight: bold; cursor: pointer; margin-top: 10px; font-family: inherit; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.secondary { background: transparent; border: 1px solid #e8c25f; color: #e8c25f; }
+  code, .mono { font-family: inherit; word-break: break-all; }
+  pre { background: #0c0906; padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
+  a { color: #e8c25f; }
+  .hint { color: #8a7a5c; font-size: 12px; }
+  .addr { background: #0c0906; padding: 6px 8px; border-radius: 5px; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<h1>Marketplank Vault — owner-signed deployment</h1>
+
+<div class="warn">
+  <strong>This page runs entirely in your browser.</strong> It never asks for a
+  private key. Every transaction is built here and sent to <code>window.ethereum</code>
+  for YOUR wallet to sign — nothing leaves this tab except what your wallet
+  broadcasts once you approve it. It is not part of the production site and is
+  never deployed to plank.love.
+  <strong>Run it over a local HTTP server</strong> — most browsers block the
+  contract JSON fetch under <code>file://</code> (CORS). From this directory:
+  <code>npx serve .</code> (or <code>python -m http.server 8000</code>), then
+  open the printed <code>http://localhost:…</code> URL.
+</div>
+
+<div class="warn">
+  <strong>Before you do anything else:</strong> contracts/MarketplankVault.sol
+  and contracts/DrandBeacon.sol have <u>not</u> had an independent third-party
+  audit. See <code>docs/marketplank/AUDIT-2026-07-27-fable.md</code>. Deploying
+  is your decision to make as the owner, not something this tool decides for you.
+</div>
+
+<h2>Step 0 — connect wallet</h2>
+<div class="step" id="step0">
+  <p class="hint">
+    Two ways in, same result: whichever you pick, this page ends up holding an
+    EIP-1193 provider that your wallet — not this page — approves every
+    transaction through. Nothing about signing changes between them.
+  </p>
+  <button id="btnConnect">Connect browser wallet (extension)</button>
+  <button id="btnConnectWC" class="secondary">Connect via WalletConnect (mobile, QR code)</button>
+
+  <div id="wcSetup" style="margin-top:14px;">
+    <label>WalletConnect / Reown Project ID</label>
+    <input id="wcProjectId" placeholder="paste your own — see note below" />
+    <p class="hint">
+      WalletConnect v2 requires a free project ID from
+      <a href="https://cloud.reown.com" target="_blank">cloud.reown.com</a> (formerly
+      WalletConnect Cloud) — sign up, create a project, paste the ID here. This
+      is yours, not mine: I cannot create one for you, and using someone else's
+      shared ID is not something you want for a page that deploys contracts.
+      It's saved only in this browser's <code>localStorage</code> so you don't
+      re-paste it every time.
+    </p>
+  </div>
+
+  <div id="accountInfo" class="hint"></div>
+</div>
+
+<h2>Step 1 — verify drand parameters</h2>
+<div class="step" id="step1">
+  <p class="hint">
+    <strong>Pre-filled below with values I independently fetched from
+    api.drand.sh and api2.drand.sh</strong> (both agreed exactly) and proved
+    end-to-end: I fetched a real, currently-published round from this beacon
+    and confirmed the on-chain verifier (with this exact public key) accepts
+    it — see <code>test/contracts/fixtures/drand-round.json</code> and
+    <code>docs/marketplank/AUDIT-2026-07-27-fable.md</code> §5b. That is
+    stronger evidence than "looks well-formed," but it is still my fetch, not
+    yours — re-check it yourself against a mirror before you trust it with
+    real value. Expected scheme: BN254 unchained
+    (<code>bls-bn254-unchained-on-g1</code>) — NOT BLS12-381 quicknet.
+  </p>
+  <label>Chain hash (bytes32, 0x…)</label>
+  <input id="chainHash" value="0x04f1e9062b8a81f848fded9c12306733282b2727ecced50032187751166ec8c3" />
+  <label>Group public key — 4 field elements, comma-separated (x_imag, x_real, y_imag, y_real per EIP-197 G2 ordering — verified against BLSBN254.sol's actual precompile call, not assumed)</label>
+  <input id="pubKey" value="0x07e1d1d335df83fa98462005690372c643340060d205306a9aa8106b6bd0b382, 0x0557ec32c2ad488e4d4f6008f89a346f18492092ccc0d594610de2732c8b808f, 0x0095685ae3a85ba243747b1b2f426049010f6b73a0cf1d389351d5aaaa1047f6, 0x297d3a4f9749b33eb2d904c9d9ebf17224150ddd7abd7567a9bec6c74480ee0b" />
+  <label>Genesis time (unix seconds)</label>
+  <input id="genesis" value="1727521075" />
+  <label>Period (seconds)</label>
+  <input id="period" value="3" />
+  <label>Domain separation tag (ASCII, will be UTF-8 encoded)</label>
+  <input id="domain" value="BLS_SIG_BN254G1_XMD:KECCAK-256_SVDW_RO_NUL_" />
+  <div class="hint" id="beaconValidation"></div>
+</div>
+
+<h2>Step 2 — deploy DrandBeacon</h2>
+<div class="step" id="step2">
+  <button id="btnDeployBeacon" disabled>Deploy DrandBeacon</button>
+  <div id="beaconResult"></div>
+</div>
+
+<h2>Step 3 — vault parameters</h2>
+<div class="step" id="step3">
+  <label>RobinWood NFT collection address</label>
+  <input id="collection" value="0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156" />
+  <label>Treasury address (receives fees, only address allowed to seed liquidity)</label>
+  <input id="treasury" value="0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8" />
+  <div class="warn" id="treasuryWarn">
+    You told the audit you're reusing this address. On-chain it showed
+    <strong>nonce 0, balance 0</strong> — nobody has demonstrated control of it yet.
+    <strong>Send a trivial transaction from this address before you deploy</strong>,
+    or you may be routing every fee to a key nobody holds.
+  </div>
+  <label>Mint fee (bps, 100 = 1%)</label>
+  <input id="mintFee" value="100" />
+  <label>Redeem fee (bps)</label>
+  <input id="redeemFee" value="100" />
+  <label>Target-redeem premium (bps)</label>
+  <input id="premium" value="250" />
+  <div class="hint">
+    No fixed liquidity target — the vault deploys CLOSED to trading. Seed NFTs,
+    shares and ETH across as many transactions as you want, at your own pace,
+    then use Step 6 below to open it whenever you decide it's ready. That
+    decision is entirely yours, made after this deploy, not baked in now.
+  </div>
+</div>
+
+<h2>Step 4 — deploy MarketplankVault</h2>
+<div class="step" id="step4">
+  <button id="btnDeployVault" disabled>Deploy MarketplankVault</button>
+  <div id="vaultResult"></div>
+</div>
+
+<h2>Step 5 — independent on-chain verification</h2>
+<div class="step" id="step5">
+  <p class="hint">
+    Re-reads every constructor argument straight off the deployed contract —
+    not from what this page remembers asking for — so a bug in this tool
+    can't quietly lie to you about what actually got deployed.
+  </p>
+  <button id="btnVerify" disabled>Verify deployed contracts</button>
+  <pre id="verifyResult"></pre>
+</div>
+
+<h2>Step 6 — seed, then open the workshop when YOU decide</h2>
+<div class="step" id="step6">
+  <p class="hint">
+    Do this over as many transactions as you want, whenever you want — none of
+    it is on this page, and none of it is time-pressured:
+  </p>
+  <ol>
+    <li>Bootstrap order matters: <code>collection.transferFrom(you, vault, tokenId)</code>
+      or <code>vault.deposit(tokenId)</code> for each NFT you're seeding with,
+      <strong>then</strong> <code>vault.seedShares{value: ...}(shares)</code> from
+      the treasury wallet. <code>seedLiquidity()</code> alone (ETH with no
+      shares) bricks the pool until you call <code>seedShares</code> too —
+      see the audit.</li>
+  </ol>
+  <p class="hint">
+    When — and only when — you're satisfied with what's seeded, come back here
+    and open trading. This is <strong>permanent and one-way</strong>: the
+    instant you sign it, the public can trade, and
+    <code>seedLiquidity()</code>/<code>seedShares()</code> revert forever for
+    everyone, including you. There is no minimum enforced by the contract —
+    that judgment call is entirely yours, made at this moment, not baked in
+    at deploy time.
+  </p>
+  <button id="btnOpenPool" disabled>Open the workshop (openPool)</button>
+  <div id="openPoolResult"></div>
+</div>
+
+<h2>Step 7 — next steps (not automated here)</h2>
+<div class="step">
+  <ol>
+    <li>Run <code>scripts/relay-drand.ts</code> (or have someone else run it —
+      it's permissionless) so pending redemptions actually resolve.</li>
+    <li>Set <code>NEXT_PUBLIC_MARKET_VAULT_ADDRESS</code> in Vercel to the
+      vault address above, keep <code>NEXT_PUBLIC_MARKET_ENABLED</code> as you
+      decide, and redeploy the site.</li>
+  </ol>
+</div>
+
+<script type="module">
+// Vendored locally, not via CDN — esm.sh could not transpile
+// @walletconnect/ethereum-provider's dependency tree (confirmed: 404s on
+// uint8arrays and @walletconnect/relay-auth deep imports). Run `npm install
+// && npm run build` in this directory first — see README.md.
+import { ethers, EthereumProvider } from "./wallet-bundle.js";
+
+const ROBINHOOD_CHAIN_ID = 4663;
+const ROBINHOOD_RPC = "https://rpc.mainnet.chain.robinhood.com";
+
+let provider, signer, account;
+let rawWalletProvider = null; // the EIP-1193 object underneath `provider` — either window.ethereum or the WC provider
+let beaconAddress = null, vaultAddress = null;
+let beaconArtifact, vaultArtifact;
+
+async function loadArtifacts() {
+  // Served alongside this file — see scripts/deploy-tool/README.md.
+  beaconArtifact = await (await fetch("./DrandBeacon.json")).json();
+  vaultArtifact = await (await fetch("./MarketplankVault.json")).json();
+}
+
+function $(id) { return document.getElementById(id); }
+function markDone(id) { $(id).classList.add("done"); }
+
+/**
+ * Same chain-pinning logic regardless of HOW the wallet got connected — an
+ * injected extension and a WalletConnect session both expose an EIP-1193
+ * `.request()`, so this doesn't need to know which one it's talking to.
+ */
+async function ensureChain(eip1193) {
+  let chainIdHex;
+  try {
+    chainIdHex = await eip1193.request({ method: "eth_chainId" });
+  } catch {
+    return; // some WC wallets don't support eth_chainId pre-session; the
+             // required-chain constraint at session-proposal time covers it.
+  }
+  if (Number(chainIdHex) === ROBINHOOD_CHAIN_ID) return;
+  await eip1193.request({
+    method: "wallet_switchEthereumChain",
+    params: [{ chainId: "0x" + ROBINHOOD_CHAIN_ID.toString(16) }],
+  }).catch(async (err) => {
+    if (err.code === 4902) {
+      await eip1193.request({
+        method: "wallet_addEthereumChain",
+        params: [{
+          chainId: "0x" + ROBINHOOD_CHAIN_ID.toString(16),
+          chainName: "Robinhood Chain",
+          nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+          rpcUrls: [ROBINHOOD_RPC],
+          blockExplorerUrls: ["https://robinhoodchain.blockscout.com"],
+        }],
+      });
+    }
+    // Otherwise swallow it: WalletConnect sessions scoped to chain 4663 at
+    // proposal time don't need — and some mobile wallets don't support — an
+    // explicit post-connect switch. Step 5's on-chain reads are what
+    // actually confirm you ended up on the right chain, not this call.
+  });
+}
+
+async function finishConnecting(accounts) {
+  account = accounts[0];
+  signer = await provider.getSigner();
+  const network = await provider.getNetwork();
+  const onRightChain = Number(network.chainId) === ROBINHOOD_CHAIN_ID;
+  $("accountInfo").innerHTML =
+    // account comes from the wallet provider — not trusted, escaped before
+    // it touches innerHTML, unlike everything else here (addresses/hashes
+    // that pass through ethers' checksum/hex formatting are already safe).
+    `Connected: <span class="mono">${escapeHtml(account)}</span> — chainId ${network.chainId}` +
+    (onRightChain ? " ✓" : " ⚠ wrong chain — switch in your wallet before deploying");
+  markDone("step0");
+  await loadArtifacts();
+  validateBeaconInputs();
+  // Deliberately NOT armed on the wrong chain — deploying there would either
+  // revert or, worse, silently succeed against a different chain's state.
+  // Both deploy handlers re-check this again immediately before signing,
+  // since the wallet can switch chains after this point.
+  $("btnDeployBeacon").disabled = !onRightChain;
+}
+
+$("btnConnect").onclick = async () => {
+  if (!window.ethereum) {
+    $("accountInfo").textContent = "No injected wallet found (window.ethereum is undefined). Try WalletConnect instead.";
+    return;
+  }
+  rawWalletProvider = window.ethereum;
+  provider = new ethers.BrowserProvider(rawWalletProvider);
+  const accounts = await provider.send("eth_requestAccounts", []);
+  await ensureChain(rawWalletProvider);
+  // Re-create the provider after a possible chain switch so it isn't stuck
+  // caching the pre-switch network.
+  provider = new ethers.BrowserProvider(rawWalletProvider);
+  await finishConnecting(accounts);
+};
+
+$("btnConnectWC").onclick = async () => {
+  const savedId = localStorage.getItem("marketplank-wc-project-id");
+  if (savedId && !$("wcProjectId").value) $("wcProjectId").value = savedId;
+  const projectId = $("wcProjectId").value.trim();
+  if (!projectId) {
+    $("accountInfo").textContent = "Paste a WalletConnect/Reown project ID above first (free, from cloud.reown.com — yours, not mine).";
+    return;
+  }
+  localStorage.setItem("marketplank-wc-project-id", projectId);
+
+  $("accountInfo").textContent = "Opening WalletConnect — scan the QR code with your mobile wallet…";
+  try {
+    const wc = await EthereumProvider.init({
+      projectId,
+      chains: [ROBINHOOD_CHAIN_ID],
+      rpcMap: { [ROBINHOOD_CHAIN_ID]: ROBINHOOD_RPC },
+      showQrModal: true,
+      metadata: {
+        name: "Marketplank Vault Deploy",
+        description: "Owner-signed contract deployment — no keys ever leave your wallet",
+        url: window.location.origin,
+        icons: [],
+      },
+    });
+    rawWalletProvider = wc;
+    const accounts = await wc.enable(); // opens the QR modal, resolves once the mobile wallet approves
+    provider = new ethers.BrowserProvider(wc);
+    await ensureChain(rawWalletProvider);
+    provider = new ethers.BrowserProvider(wc);
+    await finishConnecting(accounts);
+  } catch (err) {
+    $("accountInfo").textContent = "WalletConnect failed: " + String(err.message || err);
+  }
+};
+
+function parsePubKey(raw) {
+  const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  if (parts.length !== 4) return null;
+  try {
+    return parts.map((p) => BigInt(p));
+  } catch {
+    return null;
+  }
+}
+
+function validateBeaconInputs() {
+  const chainHash = $("chainHash").value.trim();
+  const pk = parsePubKey($("pubKey").value);
+  const genesis = $("genesis").value.trim();
+  const period = $("period").value.trim();
+  const problems = [];
+  if (!/^0x[0-9a-fA-F]{64}$/.test(chainHash)) problems.push("chain hash must be a 32-byte 0x-hex value");
+  if (!pk) problems.push("public key must be exactly 4 comma-separated field elements");
+  if (!genesis || !/^\d+$/.test(genesis)) problems.push("genesis must be a plain integer (unix seconds)");
+  if (!period || !/^\d+$/.test(period)) problems.push("period must be a plain integer (seconds)");
+  $("beaconValidation").textContent = problems.length ? "⚠ " + problems.join("; ") : "Inputs look well-formed. This does NOT confirm they match the live drand network — you must have cross-checked that yourself.";
+  return problems.length === 0;
+}
+["chainHash", "pubKey", "genesis", "period", "domain"].forEach((id) =>
+  $(id).addEventListener("input", validateBeaconInputs)
+);
+
+/**
+ * Re-checks the chain immediately before a deploy signs, not just at
+ * connect time — the wallet can switch chains at any point in between,
+ * including mid-session on a mobile wallet over WalletConnect. Returns
+ * false and refuses to proceed rather than let a deploy sign on the wrong
+ * chain silently.
+ */
+async function refuseIfWrongChain(resultEl) {
+  const network = await provider.getNetwork();
+  if (Number(network.chainId) === ROBINHOOD_CHAIN_ID) return true;
+  $(resultEl).innerHTML = `<div class="warn">Refusing to deploy: wallet is on chainId ${network.chainId}, not ${ROBINHOOD_CHAIN_ID}. Switch chains in your wallet and try again.</div>`;
+  return false;
+}
+
+$("btnDeployBeacon").onclick = async () => {
+  if (!validateBeaconInputs()) return;
+  if (!(await refuseIfWrongChain("beaconResult"))) return;
+  const btn = $("btnDeployBeacon");
+  btn.disabled = true;
+  $("beaconResult").textContent = "Building transaction — approve it in your wallet…";
+  try {
+    const factory = new ethers.ContractFactory(beaconArtifact.abi, beaconArtifact.bytecode, signer);
+    const chainHash = $("chainHash").value.trim();
+    const pk = parsePubKey($("pubKey").value);
+    const genesis = BigInt($("genesis").value.trim());
+    const period = BigInt($("period").value.trim());
+    const domain = ethers.toUtf8Bytes($("domain").value);
+    const contract = await factory.deploy(chainHash, pk, genesis, period, domain);
+    $("beaconResult").innerHTML = `Waiting for confirmation… tx <span class="mono">${contract.deploymentTransaction().hash}</span>`;
+    await contract.waitForDeployment();
+    beaconAddress = await contract.getAddress();
+    $("beaconResult").innerHTML =
+      `<div class="ok">Deployed. <div class="addr mono">${beaconAddress}</div>` +
+      `<a href="https://robinhoodchain.blockscout.com/address/${beaconAddress}" target="_blank">View on Blockscout</a></div>`;
+    markDone("step2");
+    $("btnDeployVault").disabled = false;
+  } catch (err) {
+    $("beaconResult").innerHTML = `<div class="warn">Failed: ${escapeHtml(String(err.message || err))}</div>`;
+    btn.disabled = false;
+  }
+};
+
+$("btnDeployVault").onclick = async () => {
+  if (!(await refuseIfWrongChain("vaultResult"))) return;
+  const btn = $("btnDeployVault");
+  btn.disabled = true;
+  $("vaultResult").textContent = "Building transaction — approve it in your wallet…";
+  try {
+    const factory = new ethers.ContractFactory(vaultArtifact.abi, vaultArtifact.bytecode, signer);
+    const collection = $("collection").value.trim();
+    const treasury = $("treasury").value.trim();
+    if (!ethers.isAddress(collection) || !ethers.isAddress(treasury)) {
+      throw new Error("Collection and treasury must be valid addresses.");
+    }
+    const contract = await factory.deploy(
+      collection,
+      "Marketplank RobinWood Vault",
+      "vROBIN",
+      BigInt($("mintFee").value),
+      BigInt($("redeemFee").value),
+      BigInt($("premium").value),
+      treasury,
+      beaconAddress
+    );
+    $("vaultResult").innerHTML = `Waiting for confirmation… tx <span class="mono">${contract.deploymentTransaction().hash}</span>`;
+    await contract.waitForDeployment();
+    vaultAddress = await contract.getAddress();
+    $("vaultResult").innerHTML =
+      `<div class="ok">Deployed. <div class="addr mono">${vaultAddress}</div>` +
+      `<a href="https://robinhoodchain.blockscout.com/address/${vaultAddress}" target="_blank">View on Blockscout</a></div>`;
+    markDone("step4");
+    $("btnVerify").disabled = false;
+  } catch (err) {
+    $("vaultResult").innerHTML = `<div class="warn">Failed: ${escapeHtml(String(err.message || err))}</div>`;
+    btn.disabled = false;
+  }
+};
+
+$("btnVerify").onclick = async () => {
+  const out = [];
+  try {
+    const beacon = new ethers.Contract(beaconAddress, beaconArtifact.abi, provider);
+    const vault = new ethers.Contract(vaultAddress, vaultArtifact.abi, provider);
+
+    const beaconCode = await provider.getCode(beaconAddress);
+    const vaultCode = await provider.getCode(vaultAddress);
+    out.push(`beacon code present: ${beaconCode !== "0x"} (${beaconCode.length} chars)`);
+    out.push(`vault code present:  ${vaultCode !== "0x"} (${vaultCode.length} chars)`);
+
+    // Every value below is a live eth_call against the deployed address —
+    // none of it is echoed from this page's own memory of what it asked for.
+    out.push(`beacon.chainHash()      = ${await beacon.chainHash()}`);
+    out.push(`beacon.genesisTimestamp()= ${await beacon.genesisTimestamp()}`);
+    out.push(`beacon.period()         = ${await beacon.period()}`);
+    out.push(`beacon.domain()         = ${ethers.toUtf8String(await beacon.domain())}`);
+    const pk = await beacon.getPublicKey();
+    out.push(`beacon.getPublicKey()   = ${pk.map((x) => x.toString()).join(", ")}`);
+    const pkExpected = parsePubKey($("pubKey").value);
+    const pkMatches = pkExpected && pk.length === 4 && pk.every((x, i) => x === pkExpected[i]);
+    out.push(`                          ${pkMatches ? "✓ matches input" : "⚠ MISMATCH — the security-critical value; do not proceed if this doesn't match"}`);
+
+    const collection = await vault.collection();
+    const treasury = await vault.treasury();
+    const beaconOnVault = await vault.beacon();
+    out.push(`vault.collection()  = ${collection}  ${collection.toLowerCase() === $("collection").value.trim().toLowerCase() ? "✓ matches input" : "⚠ MISMATCH"}`);
+    out.push(`vault.treasury()    = ${treasury}  ${treasury.toLowerCase() === $("treasury").value.trim().toLowerCase() ? "✓ matches input" : "⚠ MISMATCH"}`);
+    out.push(`vault.beacon()      = ${beaconOnVault}  ${beaconOnVault.toLowerCase() === beaconAddress.toLowerCase() ? "✓ matches the beacon just deployed" : "⚠ MISMATCH — vault is reading randomness from a different beacon than the one above"}`);
+    out.push(`vault.mintFeeBps()      = ${await vault.mintFeeBps()}`);
+    out.push(`vault.redeemFeeBps()    = ${await vault.redeemFeeBps()}`);
+    out.push(`vault.targetPremiumBps()= ${await vault.targetPremiumBps()}`);
+    out.push(`vault.heldTokenCount()  = ${await vault.heldTokenCount()} (expect 0 — nothing deposited yet)`);
+    out.push(`vault.ethReserve()      = ${ethers.formatEther(await vault.ethReserve())} ETH`);
+    out.push(`vault.poolOpen()        = ${await vault.poolOpen()} (expect false — you haven't opened it yet)`);
+
+    $("verifyResult").textContent = out.join("\n");
+    $("btnOpenPool").disabled = false;
+  } catch (err) {
+    $("verifyResult").textContent = "Verification failed: " + String(err.message || err);
+  }
+};
+
+$("btnOpenPool").onclick = async () => {
+  if (!(await refuseIfWrongChain("openPoolResult"))) return;
+  if (
+    !window.confirm(
+      "This is permanent and irreversible. Once you sign this, trading opens to the public forever, and seeding locks forever for everyone including you. Continue?"
+    )
+  ) {
+    return;
+  }
+  const btn = $("btnOpenPool");
+  btn.disabled = true;
+  $("openPoolResult").textContent = "Building transaction — approve it in your wallet…";
+  try {
+    const vault = new ethers.Contract(vaultAddress, vaultArtifact.abi, signer);
+    const tx = await vault.openPool();
+    $("openPoolResult").innerHTML = `Waiting for confirmation… tx <span class="mono">${tx.hash}</span>`;
+    await tx.wait();
+    const stillOpen = await new ethers.Contract(vaultAddress, vaultArtifact.abi, provider).poolOpen();
+    $("openPoolResult").innerHTML = `<div class="ok">Done. vault.poolOpen() now reads: <strong>${stillOpen}</strong> — trading is live, seeding is closed forever.</div>`;
+    markDone("step6");
+  } catch (err) {
+    $("openPoolResult").innerHTML = `<div class="warn">Failed: ${escapeHtml(String(err.message || err))}</div>`;
+    btn.disabled = false;
+  }
+};
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+</script>
+</body>
+</html>

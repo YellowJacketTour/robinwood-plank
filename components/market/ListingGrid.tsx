@@ -11,7 +11,11 @@ type Props = {
   variant?: "listing" | "offer";
   /** Token IDs the viewer owns — offers they can't fill are disabled. */
   ownedTokenIds?: Set<string>;
+  /** Opens the item detail view. Omit to leave cards inert. */
+  onSelect?: (tokenId: string) => void;
   emptyMessage?: string;
+  /** Listings at exactly this price get the "Floor" badge. */
+  floorPriceWei?: string;
 };
 
 export default function ListingGrid({
@@ -22,7 +26,9 @@ export default function ListingGrid({
   buyLabel,
   variant = "listing",
   ownedTokenIds,
+  onSelect,
   emptyMessage = "No listings yet.",
+  floorPriceWei,
 }: Props) {
   if (listings.length === 0) {
     return (
@@ -46,6 +52,8 @@ export default function ListingGrid({
             onOffer={onOffer}
             buyLabel={buyLabel}
             variant={variant}
+            onSelect={onSelect}
+            isFloor={Boolean(floorPriceWei) && listing.priceWei === floorPriceWei}
             // A collection-wide bid (no tokenId) is fillable with any token
             // the viewer owns; an item bid needs that specific one.
             canFill={

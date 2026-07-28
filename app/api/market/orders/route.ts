@@ -13,7 +13,15 @@ import {
   removeOffer,
   totalOrderCount,
 } from "@/lib/market/orders-store";
-import { getOrderLiveness } from "@/lib/market/order-status";
+import { getOrderLiveness, filterLiveOrders } from "@/lib/market/order-status";
+import { verifyOrderSignature } from "@/lib/market/signature";
+import { verifyMessage } from "ethers";
+
+/** Message an offerer signs (personal_sign) to authorize deleting their own
+ * order. Bound to the order id so a captured proof can't remove another. */
+function deleteMessage(id: string): string {
+  return `marketplank:delete-order:${id}`;
+}
 import {
   OrderValidationError,
   validateListingOrder,
@@ -53,7 +61,14 @@ export async function GET(req: Request) {
 
   const items =
     kind === "offer" ? await getOffers(collectionSlug) : await getListings(collectionSlug);
-  return publicJson({ kind, items });
+  // Drop orders that are dead on-chain (cancelled / filled / counter-advanced)
+  // so users never click a listing that is guaranteed to revert. Cached
+  // server-side; unknown-liveness rows are kept rather than hiding the whole
+  // book during an RPC outage (audit finding 4).
+  const live = await filterLiveOrders(
+    items as Array<{ id?: string; rawOrder?: unknown }>
+  );
+  return publicJson({ kind, items: live });
 }
 
 /**
@@ -85,6 +100,54 @@ export async function DELETE(req: Request) {
     if (!rawOrder) {
       // Already gone — nothing to do, and saying so is not an error.
       return publicJson({ removed: false, reason: "not-found" });
+    }
+
+    // (audit finding 2, corrected by a later security review) A forged /
+    // never-signed order is never "dead" on-chain, so the on-chain-dead path
+    // alone can never remove it — letting 100 forged orders permanently
+    // exhaust MAX_ORDERS_PER_MAKER against a victim who then cannot list.
+    //
+    // The original fix here purged on `signatureFailsOffline` alone — an
+    // OFFLINE ecrecover check. That is wrong for contract-wallet (EIP-1271)
+    // orders: a Safe/smart-account order recovers to a random EOA under
+    // plain ecrecover and would ALWAYS look "forged" by that check, even
+    // when it is a perfectly genuine order. Since this endpoint requires no
+    // proof of identity to call, that meant ANYONE could delete ANY
+    // contract-wallet listing on demand — an unauthenticated deletion bug,
+    // not just a false positive. Fixed to run the SAME fail-closed verifier
+    // POST uses (on-chain EIP-1271 check included), and to purge only on a
+    // genuine, non-transient failure — an RPC hiccup must never be grounds
+    // to delete a listing that may be perfectly valid (see `transient` on
+    // VerifyResult).
+    const verified = await verifyOrderSignature(rawOrder);
+    if (!verified.ok && !verified.transient) {
+      if (isOffer) await removeOffer(id);
+      else await removeListing(id);
+      return publicJson({ removed: true, reason: "forged" });
+    }
+
+    // (audit finding 2c) Let the genuine offerer delete their own order by
+    // proving control of the address, without waiting for an on-chain cancel.
+    // The proof is a personal_sign over a message bound to this exact order id,
+    // so it cannot be replayed against a different order.
+    const proof =
+      searchParams.get("proof") ||
+      (typeof (rawOrder as { __deleteProof?: unknown })?.__deleteProof === "string"
+        ? (rawOrder as { __deleteProof?: string }).__deleteProof
+        : null);
+    const offerer = (rawOrder as { parameters?: { offerer?: string } })?.parameters?.offerer;
+    if (proof && typeof offerer === "string") {
+      try {
+        const recovered = verifyMessage(deleteMessage(id), proof);
+        if (recovered.toLowerCase() === offerer.toLowerCase()) {
+          if (isOffer) await removeOffer(id);
+          else await removeListing(id);
+          return publicJson({ removed: true, reason: "owner" });
+        }
+      } catch {
+        // Bad proof — fall through to the on-chain-dead path. Fail closed:
+        // an unparseable proof never authorizes removal.
+      }
     }
 
     const liveness = await getOrderLiveness(rawOrder);
@@ -175,10 +238,13 @@ async function ownsToken(
     const owner = `0x${data.result.slice(-40)}`;
     return owner.toLowerCase() === maker.toLowerCase();
   } catch {
-    // An RPC hiccup must not become a listing outage. The order still cannot
-    // be fulfilled on-chain unless the maker really owns and approved it, so
-    // failing open here costs a junk row, never a user's funds.
-    return true;
+    // FAIL CLOSED (audit finding 5). Previously this returned `true` on any RPC
+    // error, so a single unauthenticated RPC hiccup decided whether a listing
+    // was real — an attacker who can nudge the node into errors could seed
+    // listings for tokens the "maker" does not hold. A junk row that misleads
+    // buyers is a real harm; refusing to list on an unverifiable owner is the
+    // safe default. The maker can retry once the RPC recovers.
+    return false;
   }
 }
 
@@ -221,6 +287,17 @@ export async function POST(req: Request) {
         return publicJson({ error: "BAD_ORDER", message: err.message }, 400);
       }
       throw err;
+    }
+
+    // ── SIGNATURE VERIFICATION (audit finding 1) ──────────────────────────
+    // The single most important check: prove the claimed offerer actually
+    // signed this exact order. Without it anyone could list in a victim's name
+    // with a garbage signature. Fails closed on any RPC problem — an order is
+    // admitted only on positive proof (EOA ecrecover or EIP-1271 magic value)
+    // AND a matching on-chain counter.
+    const verified = await verifyOrderSignature(body.rawOrder);
+    if (!verified.ok) {
+      return publicJson({ error: "BAD_SIGNATURE", message: verified.reason }, 400);
     }
 
     const expiryMs = Date.parse(derived.expiresAt);

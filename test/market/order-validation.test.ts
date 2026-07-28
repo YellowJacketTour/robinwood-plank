@@ -289,6 +289,73 @@ test("ROUND 2: a fractional fee rate is rejected rather than crashing the SDK", 
   assert.throws(() => validateListingOrder(withFee, fractional), OrderValidationError);
 });
 
+// ── Round 3 fixes (2026-07-27) ──────────────────────────────────────────────
+
+test("ROUND 3: rejects an order carrying a non-zero conduitKey", () => {
+  // seaport-js resolves the offerer's operator from conduitKey; an unknown key
+  // means undefined operator and guaranteed-revert fills. Our own getSeaport
+  // only ever produces the zero key.
+  const withConduit = listing({
+    conduitKey: "0x0000007b02230091a7ed01230072f7006a004d60a8d4e71d599b8104250f0000",
+  });
+  assert.throws(() => validateListingOrder(withConduit, freeCollection), /conduit/i);
+});
+
+test("ROUND 3: accepts absent or zero conduitKey", () => {
+  assert.doesNotThrow(() => validateListingOrder(listing(), freeCollection));
+  const zero = listing({
+    conduitKey: "0x0000000000000000000000000000000000000000000000000000000000000000",
+  });
+  assert.doesNotThrow(() => validateListingOrder(zero, freeCollection));
+});
+
+test("ROUND 3: rejects unquoted JSON integers above 2^53 (silent precision loss)", () => {
+  const big = listing();
+  // 1e18 + 1 as a raw number has already lost its low bits in JSON.parse.
+  (big.parameters.consideration[0] as Record<string, unknown>).startAmount = 1000000000000000001;
+  (big.parameters.consideration[0] as Record<string, unknown>).endAmount = 1000000000000000001;
+  assert.throws(() => validateListingOrder(big, freeCollection), OrderValidationError);
+});
+
+test("ROUND 3: rejects a listing that grossly OVERPAYS the fee (treasury siphon)", () => {
+  const overpaid = listing();
+  overpaid.parameters.consideration[0].startAmount = "500000000000000000";
+  overpaid.parameters.consideration[0].endAmount = "500000000000000000";
+  overpaid.parameters.consideration.push({
+    itemType: 0,
+    token: NATIVE,
+    identifierOrCriteria: "0",
+    startAmount: "500000000000000000", // 50% "fee" on a 50 bps collection
+    endAmount: "500000000000000000",
+    recipient: TREASURY,
+  });
+  assert.throws(() => validateListingOrder(overpaid, paidCollection), OrderValidationError);
+});
+
+test("ROUND 3: rejects a fee item on a collection that charges no fee", () => {
+  const sneaky = listing();
+  sneaky.parameters.consideration.push({
+    itemType: 0,
+    token: NATIVE,
+    identifierOrCriteria: "0",
+    startAmount: "100000000000000000",
+    endAmount: "100000000000000000",
+    recipient: TREASURY,
+  });
+  assert.throws(() => validateListingOrder(sneaky, freeCollection), OrderValidationError);
+});
+
+test("ROUND 3: rejects orders for an ERC-1155 collection (no audited quantity model)", () => {
+  const c1155: MarketCollection = { ...freeCollection, tokenStandard: "ERC1155" };
+  assert.throws(() => validateListingOrder(listing(), c1155), OrderValidationError);
+});
+
+test("ROUND 3: maker is stored lowercased", () => {
+  const mixed = listing({ offerer: "0xAbCdAbCdAbCdAbCdAbCdAbCdAbCdAbCdAbCdAbCd" });
+  const d = validateListingOrder(mixed, freeCollection);
+  assert.equal(d.maker, "0xabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd");
+});
+
 test("rejects a bid that would deliver the NFT to someone other than the bidder", () => {
   const rerouted = {
     parameters: {

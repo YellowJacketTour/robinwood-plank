@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { deployBeaconMock, relayPendingRound } from "./helpers/beacon";
 
 /**
  * Second audit pass, focused on the AMM's money math rather than its access
@@ -14,6 +15,7 @@ describe("MarketplankVault — AMM economics (audit round 2)", () => {
     const [, treasury, alice, bob] = await ethers.getSigners();
     const Nft = await ethers.getContractFactory("MockRobinWoodNft");
     const nft: any = await Nft.deploy();
+    const beacon: any = await deployBeaconMock();
     const Vault = await ethers.getContractFactory("MarketplankVault");
     const vault: any = await Vault.deploy(
       await nft.getAddress(),
@@ -22,7 +24,8 @@ describe("MarketplankVault — AMM economics (audit round 2)", () => {
       feeBps,
       feeBps,
       feeBps,
-      treasury.address
+      treasury.address,
+      await beacon.getAddress()
     );
 
     // Alice deposits four NFTs, puts two shares into the pool as liquidity,
@@ -34,8 +37,10 @@ describe("MarketplankVault — AMM economics (audit round 2)", () => {
     }
     await vault.connect(alice).transfer(await vault.getAddress(), SHARE_UNIT * 2n);
     await vault.connect(treasury).seedLiquidity({ value: ethers.parseEther("4") });
+    // Trading is closed until the treasury explicitly opens the pool.
+    await vault.connect(treasury).openPool();
 
-    return { treasury, alice, bob, nft, vault };
+    return { treasury, alice, bob, nft, vault, beacon };
   }
 
   it("a buy-then-immediate-sell round trip never profits the trader", async () => {
@@ -101,7 +106,11 @@ describe("MarketplankVault — AMM economics (audit round 2)", () => {
     const bal: bigint = await vault.balanceOf(bob.address);
     await vault.connect(bob).sellShares(bal, 0n);
     await check();
-    await vault.connect(treasury).seedLiquidity({ value: ethers.parseEther("1") });
+    // Post-open, seeding is permanently dead — and a rejected seed must not
+    // disturb the accounting either.
+    await expect(
+      vault.connect(treasury).seedLiquidity({ value: ethers.parseEther("1") })
+    ).to.be.revertedWithCustomError(vault, "BootstrapComplete");
     await check();
     await vault.connect(alice).transfer(addr, SHARE_UNIT / 2n);
     await check();
@@ -136,7 +145,7 @@ describe("MarketplankVault — AMM economics (audit round 2)", () => {
 
   it("fees never let redemption outrun the NFTs backing it", async () => {
     // Run the full lifecycle with fees on and assert solvency throughout.
-    const { alice, nft, vault } = await seededVault(100n);
+    const { alice, nft, vault, beacon } = await seededVault(100n);
 
     // Top Alice up: with fees on, each deposit returns less than a whole
     // share while each redemption costs more than one, so four deposits do
@@ -161,7 +170,7 @@ describe("MarketplankVault — AMM economics (audit round 2)", () => {
     await check();
     await vault.connect(alice).requestRandomRedeem();
     await check();
-    await ethers.provider.send("evm_mine", []);
+    await relayPendingRound(vault, beacon);
     await vault.connect(alice).claimRandomRedeem();
     await check();
   });

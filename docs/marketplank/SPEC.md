@@ -229,9 +229,16 @@ Blur-style points programs in the original scoping doc.
    (`0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8`, set 2026-07-27), separate from the Trade
    section's Uniswap integrator fee wallet. No new token, just a clean separation of which
    wallet is accountable for which product's revenue.
-2. `GET /api/market/treasury` publicly reports the balance and progress toward
-   `MARKET_VAULT_SEED_TARGET_ETH` (7.5 ETH — sized so a ~0.5 ETH trade moves the vault's pool
-   price under ~5%, since constant-product AMMs move price roughly trade-size ÷ reserve-size).
+2. `GET /api/market/treasury` publicly reports the accumulated balance. As of
+   2026-07-28 there is no fixed ETH target: `MarketplankVault` deploys closed
+   to trading, the treasury seeds NFTs/shares/ETH across as many calls as it
+   wants, in any order, and calls the one-way `openPool()` whenever the owner
+   personally decides the pool is deep enough — no protocol-enforced minimum.
+   Stated plainly: a shallower pool has higher slippage per trade (constant-
+   product AMMs move price roughly trade-size ÷ reserve-size), so a small
+   first pool will visibly reprice on modest swaps until more liquidity is
+   seeded. That trade-off is now entirely the owner's call, made at open time,
+   not a number picked in advance.
    Rendered live in `components/market/TreasuryDashboard.tsx` on the Instant Swap tab — this is
    the actual "liquidity engine," visible to anyone, growing from real fee flow.
 3. The vault is deployed and seeded from that treasury once it clears the target — not from the

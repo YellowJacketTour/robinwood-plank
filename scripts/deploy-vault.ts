@@ -42,6 +42,18 @@ async function main() {
   }
   const FEE_RECIPIENT = process.env.MARKET_FEE_RECIPIENT || DEFAULT_FEE_RECIPIENT;
 
+  // The vault draws its randomness from a deployed DrandBeacon (see
+  // contracts/DrandBeacon.sol). Deploy and verify that FIRST — with drand
+  // parameters you cross-checked against multiple independent mirrors — then
+  // pass its address here. There is no default: a wrong beacon is a silently
+  // broken redemption path, so this must be a deliberate act.
+  const BEACON_ADDRESS = process.env.MARKET_DRAND_BEACON_ADDRESS;
+  if (!BEACON_ADDRESS) {
+    throw new Error(
+      "Set MARKET_DRAND_BEACON_ADDRESS to a deployed DrandBeacon before deploying the vault."
+    );
+  }
+
   const MINT_FEE_BPS = process.env.MARKET_MINT_FEE_BPS
     ? Number(process.env.MARKET_MINT_FEE_BPS)
     : DEFAULT_MINT_FEE_BPS;
@@ -52,12 +64,20 @@ async function main() {
     ? Number(process.env.MARKET_TARGET_PREMIUM_BPS)
     : DEFAULT_TARGET_PREMIUM_BPS;
 
+  console.log(
+    "The vault deploys CLOSED: nobody can trade until the treasury calls openPool(). " +
+      "Seed shares + ETH at your own pace, then call openPool() — it is ONE-WAY: " +
+      "trading becomes public forever and seedLiquidity/seedShares lock forever, " +
+      "for everyone, treasury included."
+  );
+
   console.log("Deploying with:", {
     NFT_COLLECTION_ADDRESS,
     FEE_RECIPIENT,
     MINT_FEE_BPS,
     REDEEM_FEE_BPS,
     TARGET_PREMIUM_BPS,
+    BEACON_ADDRESS,
   });
 
   const Vault = await ethers.getContractFactory("MarketplankVault");
@@ -68,14 +88,18 @@ async function main() {
     MINT_FEE_BPS,
     REDEEM_FEE_BPS,
     TARGET_PREMIUM_BPS,
-    FEE_RECIPIENT
+    FEE_RECIPIENT,
+    BEACON_ADDRESS
   );
   await vault.waitForDeployment();
 
   const address = await vault.getAddress();
   console.log("MarketplankVault deployed at:", address);
   console.log("Set NEXT_PUBLIC_MARKET_VAULT_ADDRESS =", address, "in Vercel env vars.");
-  console.log("Then seed liquidity by calling seedLiquidity() with an initial ETH amount.");
+  console.log(
+    "Then seed the pool (deposit NFTs, seedShares()/seedLiquidity()) and finally call " +
+      "openPool() to make trading public — one-way, seeding locks forever."
+  );
 }
 
 main().catch((err) => {

@@ -1,0 +1,119 @@
+/**
+ * relay-drand.ts — push published drand rounds on-chain.
+ *
+ * THIS IS OPTIONAL CONVENIENCE INFRASTRUCTURE, NOT A TRUST DEPENDENCY.
+ *
+ * DrandBeacon.submitRound is permissionless and verifies the BLS signature
+ * on-chain. This script has no privilege whatsoever: it fetches a round that
+ * drand already published to the whole world over plain HTTP and forwards it.
+ * Anyone can run it — the vault owner as a cron job, a user waiting on their
+ * own redemption, a random bot, a competitor. If nobody runs it, a pending
+ * redemption simply waits (and can be forfeited after ~24h); if a hundred
+ * people run it, the first valid submission wins and the rest are cheap
+ * no-ops. It cannot influence the value it relays, and a wrong or forged
+ * value is rejected by the contract, not by this script.
+ *
+ * The signer is a LOW-PRIVILEGE relayer identity: any wallet with a little gas
+ * works. Never point this at a deploy or treasury key — it does not need one
+ * and there is no reason to expose one.
+ *
+ *   RELAYER_PRIVATE_KEY=0x...        # throwaway, gas-only
+ *   RPC_URL=https://...              # Robinhood Chain RPC (chainId 4663)
+ *   BEACON_ADDRESS=0x...             # deployed DrandBeacon
+ *   DRAND_CHAIN_HASH=...             # hex, no 0x, e.g. the evmnet chain hash
+ *   DRAND_API=https://api.drand.sh   # optional; mirrors: api2/api3.drand.sh
+ *   ROUND=12345                      # optional; default = latest
+ *   WATCH=1                          # optional; keep relaying every period
+ *
+ * Usage:
+ *   npx tsx scripts/relay-drand.ts
+ */
+import { JsonRpcProvider, Wallet, Contract } from "ethers";
+
+const BEACON_ABI = [
+  "function submitRound(uint64 round, uint256[2] signature)",
+  "function isRoundAvailable(uint64 round) view returns (bool)",
+  "function period() view returns (uint256)",
+];
+
+type DrandRound = { round: number; signature: string; randomness?: string };
+
+function required(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing required env var ${name}`);
+  return v;
+}
+
+/**
+ * drand's BN254 beacon serialises a G1 signature as 64 bytes: x || y, each a
+ * 32-byte big-endian field element. (Some drand beacons use compressed points;
+ * if the hex is 32 bytes long you are talking to a compressed-G1 beacon and
+ * this needs a decompression step — fail loudly rather than guess.)
+ */
+function parseG1(hex: string): [bigint, bigint] {
+  const h = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (h.length !== 128) {
+    throw new Error(
+      `Expected an uncompressed 64-byte G1 signature (128 hex chars), got ${h.length}. ` +
+        `This beacon may use point compression — decompress before submitting; do not guess.`
+    );
+  }
+  return [BigInt("0x" + h.slice(0, 64)), BigInt("0x" + h.slice(64))];
+}
+
+async function fetchRound(api: string, chainHash: string, round?: string): Promise<DrandRound> {
+  const suffix = round ? round : "latest";
+  const url = `${api.replace(/\/$/, "")}/${chainHash}/public/${suffix}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`drand API ${url} returned ${res.status}`);
+  return (await res.json()) as DrandRound;
+}
+
+async function main() {
+  const provider = new JsonRpcProvider(required("RPC_URL"));
+  const wallet = new Wallet(required("RELAYER_PRIVATE_KEY"), provider);
+  const beacon = new Contract(required("BEACON_ADDRESS"), BEACON_ABI, wallet);
+  const api = process.env.DRAND_API || "https://api.drand.sh";
+  const chainHash = required("DRAND_CHAIN_HASH").replace(/^0x/, "");
+  const watch = process.env.WATCH === "1";
+
+  const relayOnce = async () => {
+    const data = await fetchRound(api, chainHash, process.env.ROUND);
+    const sig = parseG1(data.signature);
+
+    if (await beacon.isRoundAvailable(data.round)) {
+      console.log(`round ${data.round} already on-chain — nothing to do`);
+      return;
+    }
+    // The chain, not this script, decides whether the signature is real. A bad
+    // one reverts here and writes nothing.
+    const tx = await beacon.submitRound(data.round, sig);
+    console.log(`submitting round ${data.round} in ${tx.hash} …`);
+    const receipt = await tx.wait();
+    console.log(`round ${data.round} verified on-chain (block ${receipt?.blockNumber})`);
+  };
+
+  if (!watch) {
+    await relayOnce();
+    return;
+  }
+
+  const periodMs = Number(await beacon.period()) * 1000;
+  console.log(`watching; relaying every ${periodMs}ms. Ctrl-C to stop.`);
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      await relayOnce();
+    } catch (err) {
+      // A relayer losing a race or hitting a transient API blip is normal and
+      // must never stop the loop.
+      console.error("relay attempt failed:", (err as Error).message);
+    }
+    await new Promise((r) => setTimeout(r, periodMs));
+  }
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exitCode = 1;
+});

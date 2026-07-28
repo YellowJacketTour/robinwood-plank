@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { deployBeaconMock, relayPendingRound } from "./helpers/beacon";
 
 /**
  * Audit regression tests — each of these encodes a specific vulnerability
@@ -13,6 +14,7 @@ describe("MarketplankVault — audit regressions", () => {
     const [deployer, treasury, alice, attacker] = await ethers.getSigners();
     const Nft = await ethers.getContractFactory("MockRobinWoodNft");
     const nft: any = await Nft.deploy();
+    const beacon: any = await deployBeaconMock();
     const Vault = await ethers.getContractFactory("MarketplankVault");
     const vault: any = await Vault.deploy(
       await nft.getAddress(),
@@ -21,9 +23,10 @@ describe("MarketplankVault — audit regressions", () => {
       100n, // 1% mint
       100n, // 1% redeem
       250n, // 2.5% target premium
-      treasury.address
+      treasury.address,
+      await beacon.getAddress()
     );
-    return { deployer, treasury, alice, attacker, nft, vault };
+    return { deployer, treasury, alice, attacker, nft, vault, beacon };
   }
 
   async function depositOne(nft: any, vault: any, who: any, tokenId: number) {
@@ -44,9 +47,12 @@ describe("MarketplankVault — audit regressions", () => {
 
     // The exploit: sell a dust amount of shares against a zero share reserve.
     // Pre-fix this returned the ENTIRE ethReserve for 1 wei of shares.
+    // Today TWO independent guards stand in the way: the pool cannot even be
+    // opened with a zero share reserve, so PoolNotOpen fires first — and the
+    // EmptyVault guard remains beneath it as defense in depth.
     await expect(vault.connect(attacker).sellShares(1n, 0n)).to.be.revertedWithCustomError(
       vault,
-      "EmptyVault"
+      "PoolNotOpen"
     );
 
     // Pool ETH is untouched.
@@ -77,6 +83,7 @@ describe("MarketplankVault — audit regressions", () => {
     await depositOne(nft, vault, alice, 1);
     await vault.connect(alice).transfer(await vault.getAddress(), SHARE_UNIT / 2n);
     await vault.connect(treasury).seedLiquidity({ value: ethers.parseEther("1") });
+    await vault.connect(treasury).openPool();
 
     // 1 wei of ETH rounds to 0 shares out — must revert, not pocket the wei.
     await expect(vault.connect(alice).buyShares(0n, { value: 1n })).to.be.revertedWithCustomError(
@@ -93,7 +100,7 @@ describe("MarketplankVault — audit regressions", () => {
   });
 
   it("FINDING 5 (high): a contract cannot draw and act on a random redeem in one tx", async () => {
-    const { alice, nft, vault } = await deploy();
+    const { alice, nft, vault, beacon } = await deploy();
 
     // Fund an attacker contract with enough shares to redeem.
     const Attacker = await ethers.getContractFactory("MockRerollAttacker");
@@ -103,17 +110,20 @@ describe("MarketplankVault — audit regressions", () => {
 
     // The reroll attack: commit and claim inside one transaction, so the
     // caller could inspect the drawn token and revert if it wasn't rare.
-    // The committed block has no hash yet, so this is unreachable.
+    // Revision 4: the request anchors to a drand round that does not exist
+    // yet, so the seed cannot possibly be readable in the same transaction —
+    // the guarantee is identical, only the error name changed from TooSoon
+    // (blockhash not yet available) to RandomnessNotAvailable.
     await expect(attackerC.commitAndClaimSameTx()).to.be.revertedWithCustomError(
       vault,
-      "TooSoon"
+      "RandomnessNotAvailable"
     );
 
     // Split across blocks it works, and the shares were burned at commit —
     // so abandoning an unwanted draw costs the full share, never free.
     await attackerC.commit();
     const supplyAfterCommit = await vault.totalSupply();
-    await ethers.provider.send("evm_mine", []);
+    await relayPendingRound(vault, beacon);
     await attackerC.claim();
 
     expect(await vault.totalSupply()).to.equal(supplyAfterCommit);
@@ -129,6 +139,7 @@ describe("MarketplankVault — audit regressions", () => {
     const [, treasury, alice, attacker] = await ethers.getSigners();
     const Nft = await ethers.getContractFactory("MockRobinWoodNft");
     const nft: any = await Nft.deploy();
+    const beacon: any = await deployBeaconMock();
     const Vault = await ethers.getContractFactory("MarketplankVault");
     const vault: any = await Vault.deploy(
       await nft.getAddress(),
@@ -137,7 +148,8 @@ describe("MarketplankVault — audit regressions", () => {
       0n,
       0n,
       0n,
-      treasury.address
+      treasury.address,
+      await beacon.getAddress()
     );
 
     await depositOne(nft, vault, alice, 1);
@@ -147,26 +159,36 @@ describe("MarketplankVault — audit regressions", () => {
     await vault.connect(alice).requestRandomRedeem();
     expect(await vault.pendingRedeemCount()).to.equal(1n);
 
+    // Revision 3: which NFT is reserved is no longer "whatever happens to be
+    // left at claim time" — it is pinned to a concrete token as soon as the
+    // committed block's hash exists, and nothing can move it afterwards. So
+    // resolve the draw first, then test the guard against the token it names.
+    await relayPendingRound(vault, beacon);
+    await vault.connect(alice).pinPendingDraw();
+    const [isPinned, drawn] = await vault.pendingDraw();
+    expect(isPinned).to.equal(true);
+    const other = drawn === 1n ? 2n : 1n;
+
     // She takes the one genuinely unreserved NFT.
-    await vault.connect(alice).redeemTarget(2);
+    await vault.connect(alice).redeemTarget(other);
     expect(await vault.heldTokenCount()).to.equal(1n);
 
     // The last NFT backs her pending draw. Targeting it must fail — this is
     // the check that stops an already-paid-for redemption being stranded.
-    await expect(vault.connect(attacker).redeemTarget(1)).to.be.revertedWithCustomError(
+    await expect(vault.connect(attacker).redeemTarget(drawn)).to.be.revertedWithCustomError(
       vault,
       "ReservedForPendingRedeem"
     );
 
-    // And she can still claim it.
-    await ethers.provider.send("evm_mine", []);
+    // And she still gets exactly the token she was pinned to.
     await vault.connect(alice).claimRandomRedeem();
+    expect(await nft.ownerOf(drawn)).to.equal(alice.address);
     expect(await vault.pendingRedeemCount()).to.equal(0n);
     expect(await vault.heldTokenCount()).to.equal(0n);
   });
 
   it("solvency invariant holds across a randomized sequence of operations", async () => {
-    const { treasury, alice, attacker, nft, vault } = await deploy();
+    const { treasury, alice, attacker, nft, vault, beacon } = await deploy();
     let nextId = 1;
 
     const check = async () => {
@@ -186,13 +208,14 @@ describe("MarketplankVault — audit regressions", () => {
 
     await vault.connect(attacker).requestRandomRedeem();
     await check();
-    await ethers.provider.send("evm_mine", []);
+    await relayPendingRound(vault, beacon);
     await vault.connect(attacker).claimRandomRedeem();
     await check();
 
     // Pool activity must not disturb the invariant either.
     await vault.connect(alice).transfer(await vault.getAddress(), SHARE_UNIT);
     await vault.connect(treasury).seedLiquidity({ value: ethers.parseEther("2") });
+    await vault.connect(treasury).openPool();
     await check();
     await vault.connect(attacker).buyShares(0n, { value: ethers.parseEther("0.1") });
     await check();

@@ -33,12 +33,27 @@
       },
       {
         "internalType": "address",
-        "name": "feeRecipient_",
+        "name": "treasury_",
+        "type": "address"
+      },
+      {
+        "internalType": "contract IDrandBeacon",
+        "name": "beacon_",
         "type": "address"
       }
     ],
     "stateMutability": "nonpayable",
     "type": "constructor"
+  },
+  {
+    "inputs": [],
+    "name": "AlreadyHeld",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "DrawNotPinned",
+    "type": "error"
   },
   {
     "inputs": [],
@@ -57,7 +72,57 @@
   },
   {
     "inputs": [],
+    "name": "InvalidBeacon",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NoRequest",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NotTreasury",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NothingToSeed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "RandomnessExpired",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "RandomnessNotAvailable",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "RequestPending",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ReservedForPendingRedeem",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "SolvencyBroken",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "TokenNotHeld",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "TooSoon",
     "type": "error"
   },
   {
@@ -140,6 +205,57 @@
       {
         "indexed": true,
         "internalType": "address",
+        "name": "by",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "name": "DrawPinned",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "by",
+        "type": "address"
+      }
+    ],
+    "name": "RedeemForfeited",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "by",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "targetRound",
+        "type": "uint64"
+      }
+    ],
+    "name": "RedeemRequested",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
         "name": "to",
         "type": "address"
       },
@@ -157,6 +273,25 @@
       }
     ],
     "name": "Redeemed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "shares",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "ethIn",
+        "type": "uint256"
+      }
+    ],
+    "name": "SharesSeeded",
     "type": "event"
   },
   {
@@ -258,6 +393,19 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "availableTokenCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -271,6 +419,19 @@
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "beacon",
+    "outputs": [
+      {
+        "internalType": "contract IDrandBeacon",
+        "name": "",
+        "type": "address"
       }
     ],
     "stateMutability": "view",
@@ -293,6 +454,38 @@
       }
     ],
     "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "claimRandomRedeem",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "requester",
+        "type": "address"
+      }
+    ],
+    "name": "claimRandomRedeemFor",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -372,16 +565,16 @@
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "feeRecipient",
-    "outputs": [
+    "inputs": [
       {
         "internalType": "address",
-        "name": "",
+        "name": "requester",
         "type": "address"
       }
     ],
-    "stateMutability": "view",
+    "name": "forfeitExpiredRedeem",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -419,6 +612,25 @@
       }
     ],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "name": "isTokenHeld",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -483,6 +695,75 @@
   },
   {
     "inputs": [],
+    "name": "pendingDraw",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "pinned",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "tokenId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "pendingRedeemCount",
+    "outputs": [
+      {
+        "internalType": "uint96",
+        "name": "",
+        "type": "uint96"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "pendingRequester",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "pendingRound",
+    "outputs": [
+      {
+        "internalType": "uint64",
+        "name": "round",
+        "type": "uint64"
+      },
+      {
+        "internalType": "bool",
+        "name": "available",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "pinPendingDraw",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "redeemFeeBps",
     "outputs": [
       {
@@ -495,16 +776,42 @@
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "redeemRandom",
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "redeemRequests",
     "outputs": [
       {
+        "internalType": "uint64",
+        "name": "targetRound",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint64",
+        "name": "frozenLen",
+        "type": "uint64"
+      },
+      {
+        "internalType": "bool",
+        "name": "active",
+        "type": "bool"
+      },
+      {
+        "internalType": "bool",
+        "name": "pinned",
+        "type": "bool"
+      },
+      {
         "internalType": "uint256",
-        "name": "tokenId",
+        "name": "drawnTokenId",
         "type": "uint256"
       }
     ],
-    "stateMutability": "nonpayable",
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -522,7 +829,27 @@
   },
   {
     "inputs": [],
+    "name": "requestRandomRedeem",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "seedLiquidity",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "shares",
+        "type": "uint256"
+      }
+    ],
+    "name": "seedShares",
     "outputs": [],
     "stateMutability": "payable",
     "type": "function"
@@ -641,6 +968,19 @@
       }
     ],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "treasury",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   }
 ]

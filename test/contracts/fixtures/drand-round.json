@@ -1,0 +1,18 @@
+{
+  "_provenance": "drand evmnet, fetched 2026-07-27 from api.drand.sh and api2.drand.sh (exact match on both). Public key hex words are already EIP-197 order (x_imag, x_real, y_imag, y_real) — kyber gfP2 marshals imaginary coefficient first. Verified on-curve and against this round's signature with @noble/curves' independent pairing before being committed here.",
+  "publicKey": [
+    "3565178688866727608783247307855519961161197286613423629330948765523825963906",
+    "2416910118189096557713698606232949750075245832257361418817199221841198809231",
+    "263980444642394177375858669180402387903005329333277938776544051059273779190",
+    "18766085122067595057703228467555884757373773082319035490740181099798629248523"
+  ],
+  "domain": "BLS_SIG_BN254G1_XMD:KECCAK-256_SVDW_RO_NUL_",
+  "genesis": 1727521075,
+  "period": 3,
+  "chainHash": "0x04f1e9062b8a81f848fded9c12306733282b2727ecced50032187751166ec8c3",
+  "round": 19229507,
+  "signature": [
+    "0x2de4c0ff45fc3da9c41a2afcaadd6e566690644c58114924a2ce2b00613e0803",
+    "0x20c945382f304d01ebd8fba7cca09b4a13487eb17bee4f276ca6f4922d4db3bc"
+  ]
+}
