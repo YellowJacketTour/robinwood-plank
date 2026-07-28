@@ -286,7 +286,7 @@ export default function ActivityFeed({
                     >
                       {e.kind}
                     </a>
-                    <span className="text-xs font-bold text-foreground">#{e.tokenId}</span>
+                    <span className="truncate text-xs font-bold text-foreground">{r?.name ?? `#${e.tokenId}`}</span>
                     {r && (
                       <span
                         className="tier-badge rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide"
@@ -304,6 +304,10 @@ export default function ActivityFeed({
                     </span>
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.65rem] text-foreground/50">
+                    <span className="font-mono text-foreground/40">
+                      #{e.tokenId}
+                      {r ? ` · R${r.rank}` : ""}
+                    </span>
                     <span>
                       {e.venue ? (
                         e.venue.kind === "marketplank" ? (

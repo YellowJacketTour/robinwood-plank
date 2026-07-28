@@ -23,7 +23,7 @@ type TokenDetail = {
     to: string;
   }>;
   /** Same rarity math and tier palette as the Gallery page — one source of truth. */
-  rarity: { tier: RarityTier; rank: number; percentile: number } | null;
+  rarity: { name: string; tier: RarityTier; rank: number; percentile: number } | null;
 };
 
 type Props = {
@@ -123,16 +123,24 @@ export default function ItemDetail({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gold-500/15 px-4 py-3">
-          <div className="flex items-center gap-2">
-            <p className="font-display text-lg text-foreground">#{tokenId}</p>
-            {detail?.rarity && (
-              <span
-                className="tier-badge rounded-full px-2 py-0.5 text-[0.6rem] font-bold uppercase tracking-wide"
-                style={{ color: tierColor(detail.rarity.tier) }}
-              >
-                {detail.rarity.tier} · #{detail.rarity.rank}
-              </span>
-            )}
+          <div className="min-w-0 leading-tight">
+            <p className="truncate font-display text-lg text-foreground">
+              {detail?.rarity?.name ?? `#${tokenId}`}
+            </p>
+            <p className="text-[0.65rem] text-foreground/45">
+              #{tokenId}
+              {detail?.rarity && (
+                <>
+                  {" · "}
+                  <span
+                    className="tier-badge rounded-full px-1.5 py-0.5 text-[0.6rem] font-bold uppercase tracking-wide"
+                    style={{ color: tierColor(detail.rarity.tier) }}
+                  >
+                    Rank #{detail.rarity.rank} · {detail.rarity.tier}
+                  </span>
+                </>
+              )}
+            </p>
           </div>
           <button
             type="button"

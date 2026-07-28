@@ -112,9 +112,17 @@ export default function ListingCard({
         )}
       </div>
       <div className="flex flex-1 flex-col gap-1 p-2.5 sm:p-3">
-        <p className="truncate text-xs font-bold text-foreground sm:text-sm">
-          {listing.tokenId ? `#${listing.tokenId}` : "Any plank"}
-        </p>
+        <div className="min-w-0 leading-tight">
+          <p className="truncate text-xs font-bold text-foreground sm:text-sm">
+            {listing.tokenId ? (rarity?.name ?? `#${listing.tokenId}`) : "Any plank"}
+          </p>
+          {listing.tokenId && (
+            <p className="truncate text-[0.55rem] text-foreground/40">
+              #{listing.tokenId}
+              {rarity ? ` · R${rarity.rank} · ${rarity.tier}` : ""}
+            </p>
+          )}
+        </div>
         <p className="truncate text-[0.6rem] text-foreground/45" title={listing.maker}>
           {isOffer ? "bid by " : ""}
           {shortAddress(listing.maker)}

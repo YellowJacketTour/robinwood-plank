@@ -4,13 +4,16 @@ import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/ra
 import type { RarityTier } from "@/lib/rarity";
 
 export type RarityLookup = {
+  /** Base trait value — the collection's real plank name, not the raw
+   * "RobinWood Plank #N" metadata name. Falls back to `Plank #{tokenId}`. */
+  name: string;
   tier: RarityTier;
   rank: number;
   percentile: number;
 };
 
 type RarityResponse = {
-  byTokenId: Record<string, { tier: RarityTier; rank: number; percentile: number }>;
+  byTokenId: Record<string, { name: string; tier: RarityTier; rank: number; percentile: number }>;
 };
 
 let inflight: Promise<Map<string, RarityLookup>> | null = null;

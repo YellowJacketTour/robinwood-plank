@@ -60,6 +60,10 @@ export type TokenTraitBreakdown = {
 
 export type TokenRarity = {
   tokenId: number;
+  /** The Base trait's value — the deployer put real plank names there;
+   * metadata `name` is just "RobinWood Plank #N". Falls back to
+   * `Plank #{tokenId}` when no Base trait is present (unrevealed, etc). */
+  name: string;
   /** Sum of trait information-content scores (bits). */
   score: number;
   /**
@@ -351,6 +355,7 @@ export function computeRaritySnapshot(items: RarityInput[]): RaritySnapshot {
 
   type Raw = {
     tokenId: number;
+    name: string;
     score: number;
     traits: TokenTraitBreakdown[];
   };
@@ -369,8 +374,13 @@ export function computeRaritySnapshot(items: RarityInput[]): RaritySnapshot {
     });
     // Sum of bits across present canonical traits
     const score = breakdown.reduce((sum, row) => sum + row.score, 0);
+    // Same rule Gallery's displayName() uses — kept in lockstep so the
+    // name shown here and there never disagrees.
+    const base = breakdown.find((t) => t.trait.trim().toLowerCase() === "base");
+    const name = base?.value?.trim() || `Plank #${tokenId}`;
     return {
       tokenId,
+      name,
       score,
       traits: breakdown.sort((a, b) => b.score - a.score),
     };
@@ -423,6 +433,7 @@ export function computeRaritySnapshot(items: RarityInput[]): RaritySnapshot {
       tierCounts[tier] += 1;
       byTokenId.set(row.tokenId, {
         tokenId: row.tokenId,
+        name: row.name,
         score: row.score,
         normalizedScore,
         rank,
