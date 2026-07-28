@@ -27,6 +27,7 @@ import { getOwnedInventory } from "@/lib/market/inventory";
 import TokenPicker, { type PickerToken } from "@/components/market/TokenPicker";
 import { addPendingVaultTx } from "@/lib/market/pendingVaultTx";
 import { useVaultLive } from "@/lib/market/useVaultLive";
+import { relayDrandRound } from "@/lib/market/drand";
 
 type Mode = "buy" | "sell" | "deposit" | "redeem";
 
@@ -123,6 +124,90 @@ type Props = {
   account: string | null;
   onConnect: () => void;
 };
+
+/**
+ * The vault has exactly ONE random-redeem slot vault-wide — a pending
+ * request that never gets relayed doesn't just block its own requester, it
+ * blocks EVERY other requestRandomRedeem/redeemTarget call too
+ * (RequestPending / ReservedForPendingRedeem), confirmed live against the
+ * real deployed vault. Relaying is normally automatic (a GitHub Actions
+ * cron, see .github/workflows/relay-drand.yml) but that's a single point
+ * of failure with no visible symptom until someone tries to redeem and
+ * silently can't. DrandBeacon.submitRound is permissionless (see
+ * lib/market/drand.ts), so this gives ANY connected wallet — not just
+ * whoever's request is stuck — a way to unstick the whole vault
+ * themselves, the moment the round they're waiting on is actually
+ * published (drand publishes globally over plain HTTP well before most
+ * relayers would ever catch up).
+ */
+function StuckRedeemRelay({ account }: { account: string | null }) {
+  const [round, setRound] = useState<bigint | null>(null);
+  const [available, setAvailable] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => {
+      getPendingRound()
+        .then((r) => {
+          if (cancelled) return;
+          setRound(r.round > BigInt(0) ? r.round : null);
+          setAvailable(r.available);
+        })
+        .catch(() => {});
+    };
+    check();
+    const interval = setInterval(check, 6_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const stuck = round != null && !available;
+  if (!stuck || done) return null;
+
+  const relay = async () => {
+    if (!account || round == null) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await relayDrandRound(account, round);
+      setDone(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Relay failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-sky-400/40 bg-sky-400/10 p-3">
+      <p className="text-xs font-bold uppercase tracking-wide text-sky-300">
+        A pending redemption is blocking new ones
+      </p>
+      <p className="text-xs text-foreground/70">
+        Round {round.toString()} has been published — it just hasn't reached this chain yet. Anyone
+        can deliver it; it costs a bit of gas and nothing else.
+      </p>
+      {account ? (
+        <button
+          type="button"
+          onClick={relay}
+          disabled={busy}
+          className="min-h-9 w-full rounded-lg bg-sky-400 text-xs font-bold uppercase text-wood-950 disabled:opacity-50"
+        >
+          {busy ? "Relaying…" : "Relay now"}
+        </button>
+      ) : (
+        <p className="text-xs text-foreground/50">Connect a wallet to relay it.</p>
+      )}
+      {error && <p className="text-xs text-red-300">{error}</p>}
+    </div>
+  );
+}
 
 /** Random redeem is TWO on-chain transactions (see lib/market/vault.ts's
  * doc comment on requestRandomRedeem): step 1 burns the shares and anchors
@@ -532,6 +617,7 @@ export default function SwapPanel({ account, onConnect }: Props) {
           <TreasuryBootstrap account={account} />
         )}
 
+        <StuckRedeemRelay account={account} />
         <PendingRedeemClaim account={account} />
 
         <div className="grid grid-cols-4 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/50 p-1">

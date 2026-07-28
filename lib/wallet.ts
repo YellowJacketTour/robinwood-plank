@@ -1,6 +1,7 @@
 import {
   CHAIN,
   CONTRACT_ADDRESS,
+  DRAND_BEACON_ADDRESS,
   MARKET_OFFER_CURRENCY,
   MARKET_VAULT_ADDRESS,
   PERMIT2_ADDRESS,
@@ -276,7 +277,7 @@ export type SendTxOpts = {
   maxFeePerGas?: string;
   maxPriorityFeePerGas?: string;
   gasPrice?: string;
-  kind?: "swap" | "approve" | "market" | "vault" | "transfer";
+  kind?: "swap" | "approve" | "market" | "vault" | "transfer" | "beacon";
 };
 
 /**
@@ -396,6 +397,17 @@ export function assertSafeSwapDestination(to: string, kind: string) {
     // target under this kind is our own known fee recipient (a plain ETH
     // payment, no calldata — see lib/market/send-fee.ts). Both cases are
     // intentionally unrestricted here; nothing to check.
+    return;
+  }
+  if (kind === "beacon") {
+    // The drand beacon's submitRound is permissionless (verifies a BLS
+    // signature on-chain, no privilege in calling it — see
+    // lib/market/drand.ts) but the destination still needs to be exactly
+    // OUR deployed beacon, not an arbitrary contract someone could trick a
+    // user into sending calldata to.
+    if (to.toLowerCase() !== DRAND_BEACON_ADDRESS.toLowerCase()) {
+      throw new Error("Blocked unsafe beacon target. Relay transactions only go to the vault's own drand beacon.");
+    }
     return;
   }
   // Unknown kind: fail closed rather than let an unclassified send through.
