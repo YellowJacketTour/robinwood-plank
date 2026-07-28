@@ -15,6 +15,7 @@ import VaultDashboard from "@/components/market/VaultDashboard";
 import NftPriceChart from "@/components/market/NftPriceChart";
 import VaultTradeHistory from "@/components/market/VaultTradeHistory";
 import LivingLiquidityViz from "@/components/market/LivingLiquidityViz";
+import RedeemOdds from "@/components/market/RedeemOdds";
 import CollectionStats from "@/components/market/CollectionStats";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import SweepConfirm from "@/components/market/SweepConfirm";
@@ -864,6 +865,7 @@ export default function MarketView() {
               </div>
               <div className="space-y-3">
                 <VaultDashboard />
+                <RedeemOdds listings={listings} />
                 <TreasuryDashboard />
                 <SwapPanel account={account} onConnect={handleConnect} />
               </div>
