@@ -7,14 +7,18 @@ import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import {
   buyShares,
   depositForShares,
+  quoteBuyShares,
+  quoteSellShares,
   requestRandomRedeem,
   redeemTarget,
   sellShares,
 } from "@/lib/market/vault";
 import { connectWallet, ensureRobinhoodChain } from "@/lib/wallet";
-import { parseTokenAmount } from "@/lib/trade";
+import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
+import { getOwnedInventory } from "@/lib/market/inventory";
+import TokenPicker, { type PickerToken } from "@/components/market/TokenPicker";
 
 type Mode = "buy" | "sell" | "deposit" | "redeem";
 
@@ -122,6 +126,89 @@ export default function SwapPanel() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Deposit picks FROM what the connected wallet actually owns — visual,
+  // never a blind typed id. Redeem (targeted) picks from what the vault
+  // actually holds right now, same principle, different source.
+  const [ownedTokens, setOwnedTokens] = useState<PickerToken[]>([]);
+  const [ownedLoading, setOwnedLoading] = useState(false);
+  const [heldTokens, setHeldTokens] = useState<PickerToken[]>([]);
+  const [heldLoading, setHeldLoading] = useState(false);
+
+  useEffect(() => {
+    if (mode !== "deposit" || !account) return;
+    let cancelled = false;
+    setOwnedLoading(true);
+    getOwnedInventory(MARKET_COLLECTIONS, account)
+      .then((inv) => {
+        if (cancelled) return;
+        const items = inv.flatMap((i) => i.items).map((i) => ({ tokenId: i.tokenId, imageUrl: i.imageUrl }));
+        setOwnedTokens(items);
+      })
+      .catch(() => {
+        if (!cancelled) setOwnedTokens([]);
+      })
+      .finally(() => {
+        if (!cancelled) setOwnedLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, account]);
+
+  // Live "you receive ~Y" quote — the actual staticCall the transaction
+  // itself will use, not an estimate. Debounced so it doesn't fire an
+  // eth_call per keystroke, and cleared immediately on any input/mode
+  // change so a stale quote is never shown as current.
+  const [quote, setQuote] = useState<bigint | null>(null);
+  const [quoting, setQuoting] = useState(false);
+
+  useEffect(() => {
+    setQuote(null);
+    if ((mode !== "buy" && mode !== "sell") || !account || !amount) return;
+    let cancelled = false;
+    setQuoting(true);
+    const timer = setTimeout(() => {
+      const run =
+        mode === "buy"
+          ? quoteBuyShares(account, amount)
+          : (() => {
+              const wei = parseTokenAmount(amount, 18);
+              return wei && wei > BigInt(0) ? quoteSellShares(account, wei) : Promise.resolve(null);
+            })();
+      run
+        .then((q) => {
+          if (!cancelled) setQuote(q);
+        })
+        .finally(() => {
+          if (!cancelled) setQuoting(false);
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [mode, account, amount]);
+
+  useEffect(() => {
+    if (mode !== "redeem") return;
+    let cancelled = false;
+    setHeldLoading(true);
+    fetch("/api/market/vault/held")
+      .then((r) => (r.ok ? r.json() : { tokens: [] }))
+      .then((data) => {
+        if (!cancelled) setHeldTokens(data.tokens ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setHeldTokens([]);
+      })
+      .finally(() => {
+        if (!cancelled) setHeldLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode]);
 
   if (!hasVault) {
     return (
@@ -292,6 +379,28 @@ export default function SwapPanel() {
         )}
 
         {(mode === "buy" || mode === "sell") && (
+          <div className="rounded-lg border border-dashed border-gold-500/25 bg-black/15 px-2.5 py-2">
+            <div className="flex items-center justify-between text-[0.6rem] font-bold uppercase tracking-wide text-foreground/45">
+              <span>You receive</span>
+              <span>{mode === "buy" ? "Vault share" : "ETH"}</span>
+            </div>
+            <p className="mt-0.5 font-display text-lg text-gold-300">
+              {!account
+                ? "Connect wallet for a live quote"
+                : !amount
+                  ? "—"
+                  : quoting
+                    ? "Quoting…"
+                    : quote != null
+                      ? `~${formatTokenAmount(quote, 18, mode === "buy" ? 4 : 6)} ${
+                          mode === "buy" ? "shares" : "Ξ"
+                        }`
+                      : "Quote unavailable — try a smaller amount"}
+            </p>
+          </div>
+        )}
+
+        {(mode === "buy" || mode === "sell") && (
           <label className="flex items-center justify-between gap-2 rounded-lg border border-gold-500/20 bg-wood-900/50 px-2.5 py-2">
             <span className="text-[0.7rem] text-foreground/60">Max slippage</span>
             <span className="flex items-center gap-1">
@@ -308,20 +417,50 @@ export default function SwapPanel() {
           </label>
         )}
 
-        {(mode === "deposit" || mode === "redeem") && (
+        {mode === "deposit" && (
           <div className="space-y-2">
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder={mode === "redeem" ? "Token ID (blank = random)" : "Token ID"}
-              value={tokenId}
-              onChange={(e) => setTokenId(e.target.value.replace(/[^0-9]/g, ""))}
-              className="min-h-12 w-full rounded-lg border border-gold-500/30 bg-wood-900/70 px-2.5 text-foreground outline-none focus:border-gold-400"
+            <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/45">
+              Choose which Plank to deposit
+            </p>
+            <TokenPicker
+              tokens={ownedTokens}
+              loading={ownedLoading}
+              selected={tokenId || null}
+              onSelect={setTokenId}
+              emptyMessage={
+                account
+                  ? `You don't own any ${collection?.name ?? "eligible"} tokens right now.`
+                  : "Connect a wallet to see what you can deposit."
+              }
             />
-            {/* Visual confirmation of exactly which Plank this is before
-                signing — the raw ID box alone gave zero confidence it was
-                the right token. */}
-            <TokenPreviewCard tokenId={tokenId} />
+            {tokenId && <TokenPreviewCard tokenId={tokenId} />}
+          </div>
+        )}
+
+        {mode === "redeem" && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/45">
+                Choose which Plank to redeem
+              </p>
+              <button
+                type="button"
+                onClick={() => setTokenId("")}
+                className={`text-[0.65rem] font-bold underline decoration-dotted ${
+                  tokenId ? "text-foreground/45 hover:text-gold-300" : "text-gold-300"
+                }`}
+              >
+                {tokenId ? "Redeem random instead" : "Random selected ✓"}
+              </button>
+            </div>
+            <TokenPicker
+              tokens={heldTokens}
+              loading={heldLoading}
+              selected={tokenId || null}
+              onSelect={setTokenId}
+              emptyMessage="The vault isn't holding anything right now."
+            />
+            {tokenId && <TokenPreviewCard tokenId={tokenId} />}
           </div>
         )}
 
