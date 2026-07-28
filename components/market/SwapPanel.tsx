@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
+import { MARKET_FEE_RECIPIENT, MARKET_VAULT_ADDRESS } from "@/lib/constants";
+import TreasuryBootstrap from "@/components/market/TreasuryBootstrap";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import {
   buyShares,
@@ -338,6 +339,10 @@ export default function SwapPanel() {
       </div>
 
       <div className="space-y-3 p-3">
+        {account && account.toLowerCase() === MARKET_FEE_RECIPIENT.toLowerCase() && (
+          <TreasuryBootstrap account={account} />
+        )}
+
         <div className="grid grid-cols-4 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/50 p-1">
           {MODES.map((m) => (
             <button

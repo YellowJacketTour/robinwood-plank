@@ -52,6 +52,11 @@
   },
   {
     "inputs": [],
+    "name": "BootstrapComplete",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "DrawNotPinned",
     "type": "error"
   },
@@ -88,6 +93,16 @@
   {
     "inputs": [],
     "name": "NothingToSeed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PoolAlreadyOpen",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "PoolNotOpen",
     "type": "error"
   },
   {
@@ -216,6 +231,25 @@
       }
     ],
     "name": "DrawPinned",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "ethReserve",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "shareReserve",
+        "type": "uint256"
+      }
+    ],
+    "name": "PoolOpened",
     "type": "event"
   },
   {
@@ -695,6 +729,13 @@
   },
   {
     "inputs": [],
+    "name": "openPool",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "pendingDraw",
     "outputs": [
       {
@@ -760,6 +801,19 @@
     "name": "pinPendingDraw",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "poolOpen",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
