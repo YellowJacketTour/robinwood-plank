@@ -141,6 +141,39 @@ export function tierColor(tier: RarityTier): string {
   }
 }
 
+/**
+ * Escalating visual intensity by tier — box-shadow ring that gets brighter
+ * and thicker the more exclusive the tier, so exclusivity reads at a glance
+ * without needing to read the tier label. Common gets no glow at all (the
+ * baseline every other tier stands out against).
+ */
+export function tierGlow(tier: RarityTier): string {
+  const c = tierColor(tier);
+  switch (tier) {
+    case "Mythic":
+      return `0 0 0 2px ${c}, 0 0 22px 4px ${c}99, 0 0 44px 10px ${c}44`;
+    case "Legendary":
+      return `0 0 0 2px ${c}, 0 0 16px 3px ${c}80`;
+    case "Epic":
+      return `0 0 0 1.5px ${c}, 0 0 10px 2px ${c}66`;
+    case "Rare":
+      return `0 0 0 1.5px ${c}, 0 0 6px 1px ${c}4d`;
+    case "Uncommon":
+      return `0 0 0 1px ${c}88`;
+    default:
+      return `0 0 0 1px ${c}33`;
+  }
+}
+
+/** CSS class for tier-specific motion (see .tier-shimmer / .tier-pulse in
+ * app/globals.css). Only the most exclusive tiers animate — motion itself is
+ * part of the escalation, not just color/glow. */
+export function tierAnimationClass(tier: RarityTier): string {
+  if (tier === "Mythic") return "tier-shimmer tier-pulse";
+  if (tier === "Legendary") return "tier-shimmer";
+  return "";
+}
+
 function attrKey(trait: string, value: string) {
   return `${trait}\0${value}`;
 }

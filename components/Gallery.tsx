@@ -32,7 +32,9 @@ import {
 import {
   computeRaritySnapshot,
   formatRank,
+  tierAnimationClass,
   tierColor,
+  tierGlow,
   type TokenRarity,
 } from "@/lib/rarity";
 import type { GalleryNft } from "@/lib/gallery-types";
@@ -854,7 +856,10 @@ export default function Gallery() {
 
   return (
     <section id="gallery" className="scroll-mt-20 px-3 py-10 sm:px-5 sm:py-12">
-      <div className="mx-auto max-w-6xl">
+      {/* Widened from max-w-6xl (1152px): the grid below is a browsing
+          surface, not a prose column — on a wide desktop monitor a narrow
+          cap just leaves the screen half-empty either side. */}
+      <div className="mx-auto max-w-[1800px]">
         <div className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
             <p className="text-[0.7rem] font-extrabold uppercase tracking-[0.18em] text-gold-300">
@@ -1018,7 +1023,7 @@ export default function Gallery() {
                 )}
 
                 {visible.length > 0 && (
-                  <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-2.5 md:grid-cols-4 lg:grid-cols-5">
+                  <ul className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2 sm:gap-2.5">
                     {visible.map((nft, index) => {
                       const tokenRarity = rarity.byTokenId.get(nft.tokenId);
                       return (
@@ -1032,7 +1037,12 @@ export default function Gallery() {
                             className="group flex h-full w-full flex-col overflow-hidden rounded-lg border border-gold-500/25 bg-wood-950/70 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-400"
                             aria-label={`Open ${displayName(nft)}`}
                           >
-                            <div className="relative aspect-square w-full overflow-hidden bg-wood-950">
+                            <div
+                              className={`relative aspect-square w-full overflow-hidden bg-wood-950 ${
+                                tokenRarity ? tierAnimationClass(tokenRarity.tier) : ""
+                              }`}
+                              style={tokenRarity ? { boxShadow: tierGlow(tokenRarity.tier) } : undefined}
+                            >
                               {!nft.loaded && !nft.imageUri ? (
                                 <div className="flex h-full w-full animate-pulse items-center justify-center bg-wood-950/80 text-xl">
                                   🪵

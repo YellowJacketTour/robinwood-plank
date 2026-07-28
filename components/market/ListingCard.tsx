@@ -1,7 +1,7 @@
 import Image from "next/image";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
-import { tierColor } from "@/lib/market/rarityClient";
+import { tierAnimationClass, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 
 type Props = {
@@ -48,8 +48,8 @@ export default function ListingCard({
     <li
       className={`dense-card flex flex-col overflow-hidden p-0 ${
         isOffer ? "border-emerald-500/40" : ""
-      }`}
-      style={rarity ? { boxShadow: `0 0 0 2px ${tierColor(rarity.tier)}` } : undefined}
+      } ${rarity ? tierAnimationClass(rarity.tier) : ""}`}
+      style={rarity ? { boxShadow: tierGlow(rarity.tier) } : undefined}
     >
       <div
         className={`relative aspect-square w-full bg-wood-900 ${

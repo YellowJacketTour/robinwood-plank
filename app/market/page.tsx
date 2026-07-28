@@ -20,7 +20,13 @@ export default function MarketPage() {
     <>
       <Nav />
       <main className="flex-1 px-3 py-10 sm:px-5">
-        <div className="site-shell">{MARKET_ENABLED ? <MarketView /> : <ComingSoonGate />}</div>
+        {/* Browsing a listing grid benefits from real desktop width — the
+            site-wide 64rem prose column (.site-shell) is right for the
+            marketing/coming-soon state but starves the grid on wide
+            monitors once the market is live. */}
+        <div className={MARKET_ENABLED ? "mx-auto w-full max-w-[1800px]" : "site-shell"}>
+          {MARKET_ENABLED ? <MarketView /> : <ComingSoonGate />}
+        </div>
       </main>
       <Footer />
     </>

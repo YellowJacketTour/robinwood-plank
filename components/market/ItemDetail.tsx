@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
-import { tierColor } from "@/lib/market/rarityClient";
+import { tierAnimationClass, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 
@@ -108,8 +108,10 @@ export default function ItemDetail({
 
         <div className="grid gap-4 p-4 sm:grid-cols-2">
           <div
-            className="relative aspect-square w-full overflow-hidden rounded-xl bg-wood-900"
-            style={detail?.rarity ? { boxShadow: `0 0 0 3px ${tierColor(detail.rarity.tier)}` } : undefined}
+            className={`relative aspect-square w-full overflow-hidden rounded-xl bg-wood-900 ${
+              detail?.rarity ? tierAnimationClass(detail.rarity.tier) : ""
+            }`}
+            style={detail?.rarity ? { boxShadow: tierGlow(detail.rarity.tier) } : undefined}
           >
             <Image
               src={detail?.image || listing?.imageUrl || collection.image}
