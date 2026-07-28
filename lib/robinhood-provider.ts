@@ -3,8 +3,24 @@ import {
   NFT_ABI,
   NFT_CONTRACT_ADDRESS,
   ROBINHOOD_CHAIN_ID,
-  ROBINHOOD_RPC_URLS,
 } from "@/lib/mint-contract";
+
+/**
+ * Client-side reads go through our own same-origin proxy (app/api/rpc), not
+ * the raw external RPC URLs — the public RPC sends a malformed duplicate
+ * CORS header that browsers reject outright. The proxy itself falls back
+ * across ROBINHOOD_RPC_URLS server-side, so the browser only ever needs
+ * this one endpoint.
+ *
+ * ethers' JsonRpcProvider requires an absolute URL (confirmed live: a bare
+ * "/api/rpc" throws UNSUPPORTED_OPERATION, unlike a plain fetch() which
+ * resolves relative URLs against the page origin automatically) — so this
+ * is resolved against window.location at call time rather than hardcoded.
+ */
+function clientRpcUrls(): string[] {
+  if (typeof window === "undefined") return [];
+  return [`${window.location.origin}/api/rpc`];
+}
 
 export type MintContractRead = {
   provider: Provider;
@@ -80,7 +96,7 @@ export async function getMintReadClient(force = false): Promise<MintContractRead
   }
 
   let lastError: unknown;
-  for (const rpcUrl of ROBINHOOD_RPC_URLS) {
+  for (const rpcUrl of clientRpcUrls()) {
     try {
       const client = await probe(rpcUrl);
       cached = { client, expiresAt: Date.now() + CACHE_MS };
