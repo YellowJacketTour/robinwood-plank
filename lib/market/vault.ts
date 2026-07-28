@@ -94,6 +94,73 @@ async function sendVaultTx(
   return hash;
 }
 
+/** 1.0 share, in wei (18 decimals) — the unit every redeem burns at least one of. */
+export const SHARE_UNIT = BigInt(1_000_000_000_000_000_000);
+
+/** What a redeem actually costs in shares: 1.0 + the redeem fee, plus the
+ * targeted-redeem premium on top when picking a specific plank instead of a
+ * random one. Exposed so the UI can show it next to the user's real balance
+ * BEFORE they submit, instead of them finding out via a failed transaction —
+ * previously the only way anyone found out they didn't have enough. */
+export function redeemCostWei(redeemFeeBps: number, targetPremiumBps: number, targeted: boolean): bigint {
+  const bps = BigInt(redeemFeeBps + (targeted ? targetPremiumBps : 0));
+  return SHARE_UNIT + (SHARE_UNIT * bps) / BigInt(10_000);
+}
+
+/** Human text for this vault's own Solidity custom errors — a raw revert
+ * otherwise reaches the user as opaque hex/generic "execution reverted",
+ * indistinguishable whether the real cause was "you don't have enough
+ * shares," "someone else's redeem is already in flight vault-wide," or
+ * something else entirely. Tries every place a wallet/provider might have
+ * put the raw revert data before giving up and falling back to whatever
+ * message text it did get. */
+const VAULT_ERROR_MESSAGES: Record<string, string> = {
+  RequestPending:
+    "Someone else's random redeem is already in progress — only one can be pending vault-wide at a time (this prevents front-running the draw). Try again in a few minutes, or redeem a specific plank instead.",
+  EmptyVault: "The vault has no unreserved planks left to redeem right now.",
+  TokenNotHeld: "That plank isn't currently held by the vault.",
+  ReservedForPendingRedeem:
+    "That plank is reserved for someone else's in-flight redemption, or every remaining plank is. Try again shortly.",
+  NoRequest: "You don't have a pending random redemption to claim.",
+  RandomnessNotAvailable: "The drand round for your redemption hasn't been relayed yet — try again in a few seconds.",
+  RandomnessExpired: "Your redemption's drand round expired before it was claimed.",
+  DrawNotPinned: "Your redemption's draw hasn't resolved yet — try again in a few seconds.",
+  InsufficientOutput: "Price moved — try again with a fresh quote or a higher slippage tolerance.",
+  PoolNotOpen: "The vault isn't open for trading yet.",
+  NotTreasury: "Only the vault's treasury can do that.",
+  AlreadyHeld: "The vault already holds that plank.",
+};
+
+export function decodeVaultError(err: unknown): string {
+  const e = err as {
+    message?: string;
+    shortMessage?: string;
+    data?: unknown;
+    error?: { data?: unknown; message?: string };
+    info?: { error?: { data?: unknown; message?: string } };
+    cause?: { data?: unknown; message?: string };
+  };
+  const candidates = [e?.data, e?.error?.data, e?.info?.error?.data, e?.cause?.data];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string" || !candidate.startsWith("0x") || candidate.length < 10) continue;
+    try {
+      const parsed = VAULT_IFACE.parseError(candidate);
+      if (parsed && VAULT_ERROR_MESSAGES[parsed.name]) return VAULT_ERROR_MESSAGES[parsed.name];
+      if (parsed) return `Reverted: ${parsed.name}.`;
+    } catch {
+      // not a vault-ABI error — try the next candidate / fall through
+    }
+  }
+  return (
+    e?.shortMessage ||
+    e?.message ||
+    e?.error?.message ||
+    e?.info?.error?.message ||
+    e?.cause?.message ||
+    "Transaction failed."
+  );
+}
+
 /** min-out = expected * (10000 - slippageBps) / 10000, failing closed on nonsense. */
 export function applySlippage(expected: bigint, slippageBps: number): bigint {
   if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10_000) {
