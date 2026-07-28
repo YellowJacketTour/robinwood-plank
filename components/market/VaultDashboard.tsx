@@ -7,6 +7,7 @@ import { formatUsd, weiToUsd } from "@/lib/eth-price";
 import { getRarityMap, tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { useVaultLive } from "@/lib/market/useVaultLive";
+import ScrollBox from "@/components/market/ScrollBox";
 
 type HeldToken = { tokenId: string; imageUrl: string | null };
 
@@ -128,6 +129,7 @@ export default function VaultDashboard() {
             Nothing held right now.
           </p>
         ) : (
+          <ScrollBox storageKey="vault-inventory" defaultHeight={220} maxHeight={600}>
           <ul className="grid grid-cols-4 gap-2 sm:grid-cols-6">
             {held.map((t) => {
               const r = rarity.get(t.tokenId);
@@ -168,6 +170,7 @@ export default function VaultDashboard() {
               );
             })}
           </ul>
+          </ScrollBox>
         )}
       </div>
     </div>

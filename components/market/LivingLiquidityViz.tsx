@@ -12,11 +12,12 @@ import PlankFence from "@/components/market/PlankFence";
 type HeldToken = { tokenId: string; imageUrl: string | null };
 
 /**
- * A living picture of the vault: held NFTs stand fence-style on one side
- * (see PlankFence — hover/drag for real stats, not decoration), real ETH
- * liquidity and accumulating fees pulse on the other. Every number here
- * comes straight from /api/market/vault/stats and /api/market/vault/held,
- * the same live data VaultDashboard renders as plain numbers.
+ * "On The Fence" — held planks literally sitting on a fence (see
+ * PlankFence — hover/drag for real stats, not decoration) next to the
+ * vault's live bid/ask side: buy pressure (ETH liquidity) on the right,
+ * the inventory it's backed by on the left. Every number here comes
+ * straight from /api/market/vault/stats and /api/market/vault/held, the
+ * same live data VaultDashboard renders as plain numbers.
  */
 export default function LivingLiquidityViz() {
   const { stats } = useVaultLive();
@@ -59,7 +60,7 @@ export default function LivingLiquidityViz() {
   return (
     <div className="overflow-hidden rounded-lg border border-gold-500/15 bg-black/20">
       <p className="border-b border-gold-500/10 px-3 py-1.5 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
-        The vault, alive
+        On The Fence <span className="font-normal normal-case text-foreground/35">· held planks vs. live bid/ask</span>
       </p>
       <div className="relative grid grid-cols-1 sm:grid-cols-2">
         <div className="relative h-48 overflow-hidden border-b border-gold-500/10 bg-gradient-to-b from-wood-900/40 to-black/30 sm:h-64 sm:border-b-0 sm:border-r">
