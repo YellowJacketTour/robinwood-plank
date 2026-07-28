@@ -1,4 +1,5 @@
 import { MARKET_FEE_RECIPIENT, NATIVE_TOKEN_ADDRESS } from "@/lib/constants";
+import { computeCriteriaRoot, CriteriaError } from "@/lib/market/criteria";
 import type { MarketCollection } from "@/lib/market/types";
 
 /**
@@ -98,6 +99,16 @@ function toBig(v: unknown, field: string): bigint {
   fail(`Order field "${field}" is not a valid integer.`);
 }
 
+/**
+ * A criteria item's `identifierOrCriteria` is a Merkle root, and seaport-js
+ * emits it as 0x-hex when it builds the order (everything else is decimal).
+ * Accept exactly those two shapes — never for amounts or token ids.
+ */
+function toCriteriaBig(v: unknown, field: string): bigint {
+  if (typeof v === "string" && /^0x[0-9a-fA-F]{1,64}$/.test(v)) return BigInt(v);
+  return toBig(v, field);
+}
+
 function toItemType(v: unknown): number {
   if (typeof v === "number") return v;
   if (typeof v === "string" && /^\d+$/.test(v)) return Number(v);
@@ -127,6 +138,13 @@ export type DerivedOrder = {
   expiresAt: string;
   /** Payment currency: native ETH, or an ERC-20 (offers). */
   currency: string;
+  /**
+   * Present only for TRAIT-scoped criteria offers: the non-zero Merkle root
+   * (0x-prefixed, 32 bytes, lowercase) the signed order commits to. Recomputed
+   * from the caller-supplied token-id snapshot and asserted equal — never
+   * taken from the order alone.
+   */
+  criteriaRoot?: string;
 };
 
 function assertShape(rawOrder: unknown): RawOrder {
@@ -287,10 +305,22 @@ export function validateListingOrder(
 export function validateOfferOrder(
   rawOrder: unknown,
   collection: MarketCollection,
-  expectedCurrency: string
+  expectedCurrency: string,
+  opts?: {
+    /**
+     * TRAIT-BID token-id snapshot. When present, a criteria consideration
+     * item's non-zero Merkle root MUST equal computeCriteriaRoot(snapshot) —
+     * i.e. the order provably commits to exactly this set and nothing else.
+     * When absent, the pre-existing rule stands unchanged: a non-zero root is
+     * rejected outright (audit A5 — an opaque root would display as "any
+     * plank" while being unfillable for most sellers).
+     */
+    criteriaTokenIds?: readonly string[];
+  }
 ): DerivedOrder {
   const order = assertShape(rawOrder);
   const p = order.parameters;
+  let criteriaRoot: string | undefined;
 
   // Same fail-closed 1155 stance as listings — see validateListingOrder.
   if (collection.tokenStandard !== "ERC721") {
@@ -342,11 +372,39 @@ export function validateOfferOrder(
         tokenId = toBig(item.identifierOrCriteria, `consideration[${i}].identifier`).toString();
       } else {
         // Criteria form: a non-zero identifierOrCriteria is a Merkle root
-        // restricting which token ids can fill. We have no way to display or
-        // verify the root's contents, so a rooted bid would render as "offer
-        // on any plank" while being unfillable for most sellers. Only the
-        // wildcard (root 0 = any id) is accepted. FAIL CLOSED otherwise.
-        if (toBig(item.identifierOrCriteria, `consideration[${i}].criteria`) !== BigInt(0)) {
+        // restricting which token ids can fill.
+        //
+        // TRAIT BIDS (2026-07-28): when the caller supplies the token-id
+        // snapshot the bid claims to commit to, we recompute the root with
+        // the same tree construction seaport-js signs with and require exact
+        // equality — the root's contents are then fully verified, displayed
+        // honestly, and fillable by construction (proven end-to-end against
+        // the real Seaport 1.6 bytecode in SeaportCriteriaFulfill.test.ts).
+        //
+        // WITHOUT a snapshot, the original audit rule stands: an opaque
+        // non-zero root would render as "offer on any plank" while being
+        // unfillable for most sellers. FAIL CLOSED.
+        const rootBig = toCriteriaBig(
+          item.identifierOrCriteria,
+          `consideration[${i}].criteria`
+        );
+        if (opts?.criteriaTokenIds !== undefined) {
+          if (rootBig === BigInt(0)) {
+            fail("Trait offer carries no criteria root.");
+          }
+          let expectedRoot: string;
+          try {
+            expectedRoot = computeCriteriaRoot(opts.criteriaTokenIds);
+          } catch (e) {
+            fail(
+              e instanceof CriteriaError ? e.message : "Trait criteria set is invalid."
+            );
+          }
+          if (rootBig !== BigInt(expectedRoot)) {
+            fail("Offer's criteria root does not match its claimed token set.");
+          }
+          criteriaRoot = expectedRoot;
+        } else if (rootBig !== BigInt(0)) {
           fail("Criteria offers must apply to the whole collection.");
         }
       }
@@ -373,6 +431,12 @@ export function validateOfferOrder(
 
   if (nftItemCount !== 1) fail("Offer does not ask for an NFT from this collection.");
 
+  // A trait bid must actually BE a criteria order — a snapshot alongside a
+  // plain fixed-token item is a shape mismatch, not a trait bid.
+  if (opts?.criteriaTokenIds !== undefined && !criteriaRoot) {
+    fail("Trait offer is not a criteria order.");
+  }
+
   assertFeeHonored(total, feePaid, collection);
 
   // The seller NETS the offered amount minus everything clawed back as
@@ -388,6 +452,7 @@ export function validateOfferOrder(
     priceWei: net.toString(),
     expiresAt: endTimeToIso(p),
     currency: expectedCurrency,
+    ...(criteriaRoot ? { criteriaRoot } : {}),
   };
 }
 

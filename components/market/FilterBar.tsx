@@ -1,25 +1,34 @@
 "use client";
 
+import { TIER_ORDER } from "@/lib/rarity";
+import type { RarityTier } from "@/lib/rarity";
+import type { RarityLookup } from "@/lib/market/rarityClient";
+
 export type MarketFilters = {
   /** Free-text token id search. */
   query: string;
   /** Price bounds in ETH, as typed. Empty string means unbounded. */
   minEth: string;
   maxEth: string;
+  /** "all" or one of the site's shared rarity tiers (lib/rarity.ts) — the
+   * SAME six-tier scale shown everywhere else, never a second scheme. */
+  tier: RarityTier | "all";
 };
 
-export const EMPTY_FILTERS: MarketFilters = { query: "", minEth: "", maxEth: "" };
+export const EMPTY_FILTERS: MarketFilters = { query: "", minEth: "", maxEth: "", tier: "all" };
 
 type Props = {
   filters: MarketFilters;
   onChange: (next: MarketFilters) => void;
   /** Count after filtering, shown so an empty grid is never ambiguous. */
   resultCount: number;
+  /** Omit to hide the tier filter entirely (e.g. rarity data not loaded yet). */
+  rarityAvailable?: boolean;
 };
 
-export default function FilterBar({ filters, onChange, resultCount }: Props) {
+export default function FilterBar({ filters, onChange, resultCount, rarityAvailable }: Props) {
   const dirty =
-    filters.query !== "" || filters.minEth !== "" || filters.maxEth !== "";
+    filters.query !== "" || filters.minEth !== "" || filters.maxEth !== "" || filters.tier !== "all";
 
   return (
     <div className="flex flex-1 flex-wrap items-center gap-1.5">
@@ -50,6 +59,23 @@ export default function FilterBar({ filters, onChange, resultCount }: Props) {
         aria-label="Maximum price in ETH"
         className="min-h-9 w-[4.5rem] rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground placeholder:text-foreground/30"
       />
+      {rarityAvailable && (
+        <label className="flex items-center gap-1.5">
+          <span className="sr-only">Filter by rarity tier</span>
+          <select
+            value={filters.tier}
+            onChange={(e) => onChange({ ...filters, tier: e.target.value as MarketFilters["tier"] })}
+            className="min-h-9 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
+          >
+            <option value="all">Any rarity</option>
+            {TIER_ORDER.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {dirty && (
         <button
           type="button"
@@ -71,10 +97,13 @@ export default function FilterBar({ filters, onChange, resultCount }: Props) {
  *
  * Price bounds are parsed leniently: an unparseable bound is treated as absent
  * rather than as zero, so a half-typed "0." never silently hides every item.
+ * Rarity is looked up from the SAME shared map every card/badge on the page
+ * reads (lib/market/rarityClient.ts) — never a second, drifted rarity source.
  */
 export function applyFilters<T extends { tokenId?: string; priceWei: string }>(
   items: T[],
-  filters: MarketFilters
+  filters: MarketFilters,
+  rarityMap?: Map<string, RarityLookup>
 ): T[] {
   const q = filters.query.trim();
   const min = toWei(filters.minEth);
@@ -90,6 +119,12 @@ export function applyFilters<T extends { tokenId?: string; priceWei: string }>(
     }
     if (min !== null && price < min) return false;
     if (max !== null && price > max) return false;
+    if (filters.tier !== "all") {
+      // A collection-wide item (no tokenId) has no rarity to match — excluded
+      // under any specific tier filter, same as it would be under a search.
+      const r = item.tokenId ? rarityMap?.get(item.tokenId) : undefined;
+      if (!r || r.tier !== filters.tier) return false;
+    }
     return true;
   });
 }

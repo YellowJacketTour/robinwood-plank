@@ -158,7 +158,19 @@ function NftImage({
   className?: string;
   priority?: boolean;
 }) {
-  const candidates = useMemo(() => ipfsGatewayCandidates(imageUri), [imageUri]);
+  const candidates = useMemo(
+    () =>
+      ipfsGatewayCandidates(imageUri).map(
+        (url) =>
+          // Proxy every candidate same-origin — a raw external gateway URL in
+          // <img src> can fail with ERR_BLOCKED_BY_ORB, same issue fixed for
+          // resolveIpfsUrl callers, just via the direct-cascade path here.
+          url.startsWith("data:")
+            ? url
+            : `/api/ipfs/image?uri=${encodeURIComponent(url)}`,
+      ),
+    [imageUri],
+  );
   const [index, setIndex] = useState(0);
   const [failed, setFailed] = useState(false);
 

@@ -72,10 +72,17 @@ export type OrderLiveness =
  * Returns `known: false` on any RPC problem. Callers must fail closed on that:
  * an unreachable node is not evidence that an order is dead.
  */
-export async function getOrderLiveness(rawOrder: unknown): Promise<OrderLiveness> {
+/**
+ * The canonical Seaport order hash for a raw order — asks Seaport itself
+ * rather than re-deriving the struct hash locally, so this can never drift
+ * from what the contract actually computes. Returns null on any failure
+ * (malformed order, unreachable RPC) — callers must not treat null as "no
+ * hash" in a way that admits or attributes anything.
+ */
+export async function computeOrderHash(rawOrder: unknown): Promise<string | null> {
   const order = rawOrder as { parameters?: OrderComponentsLike } | null;
   const p = order?.parameters;
-  if (!p || !p.offerer) return { known: false };
+  if (!p || !p.offerer) return null;
 
   const components = {
     offerer: p.offerer,
@@ -91,15 +98,24 @@ export async function getOrderLiveness(rawOrder: unknown): Promise<OrderLiveness
     counter: String(p.counter ?? 0),
   };
 
-  let orderHash: string;
   try {
     const encoded = SEAPORT_ABI.encodeFunctionData("getOrderHash", [components]);
     const result = await ethCall(encoded);
-    if (!result || result === "0x") return { known: false };
-    [orderHash] = SEAPORT_ABI.decodeFunctionResult("getOrderHash", result) as unknown as [string];
+    if (!result || result === "0x") return null;
+    const [hash] = SEAPORT_ABI.decodeFunctionResult("getOrderHash", result) as unknown as [string];
+    return hash;
   } catch {
-    return { known: false };
+    return null;
   }
+}
+
+export async function getOrderLiveness(rawOrder: unknown): Promise<OrderLiveness> {
+  const order = rawOrder as { parameters?: OrderComponentsLike } | null;
+  const p = order?.parameters;
+  if (!p || !p.offerer) return { known: false };
+
+  const orderHash = await computeOrderHash(rawOrder);
+  if (!orderHash) return { known: false };
 
   try {
     const statusCall = SEAPORT_ABI.encodeFunctionData("getOrderStatus", [orderHash]);
@@ -122,7 +138,7 @@ export async function getOrderLiveness(rawOrder: unknown): Promise<OrderLiveness
     const counterRes = await ethCall(counterCall);
     if (counterRes && counterRes !== "0x") {
       const [current] = SEAPORT_ABI.decodeFunctionResult("getCounter", counterRes) as unknown as [bigint];
-      if (current !== BigInt(components.counter)) {
+      if (current !== BigInt(String(p.counter ?? 0))) {
         return { known: true, dead: true, reason: "counter-advanced" };
       }
     }

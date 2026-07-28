@@ -1,6 +1,6 @@
 import { Seaport } from "@opensea/seaport-js";
 import { ItemType } from "@opensea/seaport-js/lib/constants";
-import type { Fee } from "@opensea/seaport-js/lib/types";
+import type { Fee, InputCriteria } from "@opensea/seaport-js/lib/types";
 import { BrowserProvider, Interface } from "ethers";
 import {
   CHAIN,
@@ -9,6 +9,12 @@ import {
   NATIVE_TOKEN_ADDRESS,
   SEAPORT_ADDRESS,
 } from "@/lib/constants";
+import {
+  computeCriteriaProof,
+  computeCriteriaRoot,
+  normalizeTokenIds,
+  verifyCriteriaProof,
+} from "@/lib/market/criteria";
 import type { DerivedOrder } from "@/lib/market/order-validation";
 import { assertSweepTotal } from "@/lib/market/sweep";
 import type { SweepItem } from "@/lib/market/sweep";
@@ -174,8 +180,18 @@ export async function buildListing(accountAddress: string, input: ListInput) {
 export type OfferInput = {
   offerWei: string;
   considerationTokenAddress: string;
-  /** REQUIRED — collection-wide ("any") offers are disabled, see below. */
+  /** Set for a single-token bid. Mutually exclusive with criteriaTokenIds. */
   considerationTokenId?: string;
+  /**
+   * TRAIT BID: the snapshot of token ids this bid is willing to accept
+   * (every token currently carrying the chosen trait). seaport-js computes
+   * the ERC721_WITH_CRITERIA Merkle root from exactly this list; the same
+   * list must be stored with the offer so the accepting seller can compute
+   * their fulfillment proof against the identical tree. Fillability of this
+   * shape is proven against the real Seaport 1.6 bytecode in
+   * test/contracts/SeaportCriteriaFulfill.test.ts.
+   */
+  criteriaTokenIds?: string[];
   expiresAt: string;
   /** From the collection's config (lib/market/collections.ts) — 0 for $PLANK. */
   feeBps: number;
@@ -185,21 +201,50 @@ export type OfferInput = {
  * Builds and signs an item-level offer, denominated in WETH (Seaport cannot
  * pull native ETH from an offerer at fulfillment).
  *
- * COLLECTION-WIDE OFFERS ARE DISABLED (fail closed, audit 2026-07-27): the
- * previous criteria-based build produced orders that were unfillable — the
+ * COLLECTION-WIDE OFFERS REMAIN DISABLED (fail closed, audit 2026-07-27): the
+ * original criteria-based build produced orders that were unfillable — the
  * fulfill path never supplied a considerationCriteria resolver/proof, so the
  * seller was never asked which token to hand over and fulfillment reverted.
- * Until the resolver path is wired AND verified end-to-end, refusing to sign
- * one is strictly safer than minting dead bids that still move a live WETH
- * approval.
+ *
+ * TRAIT-SCOPED criteria bids (2026-07-28) ARE supported: the resolver path is
+ * now wired (fulfillOrder's considerationCriteria + assertAcceptableTraitOffer)
+ * and proven end-to-end against the real deployed Seaport 1.6 bytecode in
+ * test/contracts/SeaportCriteriaFulfill.test.ts, including negative cases.
+ * The wildcard root-0 "any" form stays off until it gets the same proof.
  *
  * exactApproval=true bounds the WETH allowance to this bid's amount instead
  * of the previous unlimited (2^256-1) approve.
  */
 export async function buildOffer(accountAddress: string, input: OfferInput) {
-  if (!input.considerationTokenId) {
+  if (input.considerationTokenId && input.criteriaTokenIds) {
+    throw new Error("An offer cannot be both single-token and trait-scoped.");
+  }
+  let considerationItem:
+    | { itemType: ItemType.ERC721; token: string; identifier: string; recipient: string }
+    | { itemType: ItemType.ERC721; token: string; identifiers: string[]; recipient: string };
+  if (input.considerationTokenId) {
+    considerationItem = {
+      itemType: ItemType.ERC721,
+      token: input.considerationTokenAddress,
+      identifier: input.considerationTokenId,
+      recipient: accountAddress,
+    };
+  } else if (input.criteriaTokenIds && input.criteriaTokenIds.length > 0) {
+    // TRAIT BID (criteria order). seaport-js converts `identifiers` into an
+    // ERC721_WITH_CRITERIA item whose identifierOrCriteria is the Merkle root
+    // of this exact set (lib/utils/order.js). normalizeTokenIds throws on
+    // malformed/oversized sets BEFORE anything reaches the wallet.
+    considerationItem = {
+      itemType: ItemType.ERC721,
+      token: input.considerationTokenAddress,
+      identifiers: normalizeTokenIds(input.criteriaTokenIds),
+      recipient: accountAddress,
+    };
+  } else {
+    // Collection-wide ("any") offers stay DISABLED — the wildcard root-0 form
+    // was never proven fillable. Trait bids are the supported criteria shape.
     throw new Error(
-      "Collection-wide offers are temporarily disabled — bid on a specific token instead."
+      "Collection-wide offers are temporarily disabled — bid on a specific token or a trait instead."
     );
   }
   const seaport = await getSeaport();
@@ -213,14 +258,7 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
           token: MARKET_OFFER_CURRENCY,
         },
       ],
-      consideration: [
-        {
-          itemType: ItemType.ERC721,
-          token: input.considerationTokenAddress,
-          identifier: input.considerationTokenId,
-          recipient: accountAddress,
-        },
-      ],
+      consideration: [considerationItem],
       fees: feesFor(input.feeBps),
       endTime,
     },
@@ -242,12 +280,20 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
  */
 export async function fulfillOrder(
   order: Parameters<Seaport["fulfillOrder"]>[0]["order"],
-  accountAddress: string
+  accountAddress: string,
+  /**
+   * For TRAIT-criteria bids only: the concrete token id being delivered plus
+   * its Merkle proof against the order's committed root. seaport-js folds this
+   * into the CriteriaResolver array of fulfillAdvancedOrder. Callers must
+   * obtain it from assertAcceptableTraitOffer — never construct it ad hoc.
+   */
+  considerationCriteria?: InputCriteria[]
 ) {
   const seaport = await getSeaport();
   const { actions } = await seaport.fulfillOrder({
     order,
     accountAddress,
+    ...(considerationCriteria ? { considerationCriteria } : {}),
     // ERC-721: single-token approve, not setApprovalForAll; ERC-20: bounded
     // allowance, not 2^256-1.
     exactApproval: true,
@@ -335,6 +381,7 @@ export function assertAcceptableOffer(
 ): void {
   if (!derived.tokenId || !offer.tokenId) {
     // Collection-wide (criteria) offers are disabled — see buildOffer.
+    // TRAIT-criteria offers go through assertAcceptableTraitOffer instead.
     throw new Error("This offer is not for a specific token and cannot be accepted.");
   }
   if (derived.tokenId !== offer.tokenId) {
@@ -343,6 +390,53 @@ export function assertAcceptableOffer(
   if (derived.priceWei !== offer.priceWei) {
     throw new Error("This offer's price doesn't match its signature.");
   }
+}
+
+/**
+ * TRAIT-bid counterpart of assertAcceptableOffer, for a seller accepting a
+ * criteria bid with token `sellTokenId` they own. Pure and unit-tested.
+ *
+ * Verifies, in this browser, with no trust in the relay:
+ *  - the signed order really is a trait-criteria bid (derived.criteriaRoot,
+ *    which validateOfferOrder only sets after recomputing the root from the
+ *    stored snapshot and matching it against the signature-covered value);
+ *  - the seller's token is IN the committed snapshot;
+ *  - the displayed net price equals the signature-derived one;
+ *  - the freshly computed Merkle proof passes an independent implementation
+ *    of Seaport's own on-chain verification against the committed root.
+ *
+ * Returns the InputCriteria to hand to fulfillOrder. Throws on any mismatch.
+ */
+export function assertAcceptableTraitOffer(
+  offer: { priceWei: string; criteriaTokenIds?: string[] },
+  derived: DerivedOrder,
+  sellTokenId: string
+): InputCriteria {
+  if (!derived.criteriaRoot) {
+    throw new Error("This offer is not a trait offer.");
+  }
+  if (!offer.criteriaTokenIds || offer.criteriaTokenIds.length === 0) {
+    throw new Error("This trait offer is missing its token snapshot.");
+  }
+  if (derived.priceWei !== offer.priceWei) {
+    throw new Error("This offer's price doesn't match its signature.");
+  }
+  const ids = normalizeTokenIds(offer.criteriaTokenIds);
+  const root = computeCriteriaRoot(ids);
+  if (BigInt(root) !== BigInt(derived.criteriaRoot)) {
+    throw new Error("This offer's token snapshot doesn't match its signature.");
+  }
+  const canonicalId = BigInt(sellTokenId).toString();
+  if (!ids.includes(canonicalId)) {
+    throw new Error("Your token doesn't qualify for this trait offer.");
+  }
+  const proof = computeCriteriaProof(ids, canonicalId);
+  if (!verifyCriteriaProof(root, canonicalId, proof)) {
+    // Construction and verification use independent implementations; a
+    // disagreement means something is deeply wrong — never send that fill.
+    throw new Error("Could not build a valid fulfillment proof for this offer.");
+  }
+  return { identifier: canonicalId, proof };
 }
 
 // ---------------------------------------------------------------------------

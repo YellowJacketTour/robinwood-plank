@@ -7,6 +7,7 @@ import {
 } from "@/lib/mint-contract";
 import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
 import { fetchActivity } from "@/lib/market/activity";
+import { compactRarityFor, getRaritySnapshot } from "@/lib/market/rarity-snapshot";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -86,7 +87,18 @@ export async function GET(req: Request) {
       history = [];
     }
 
-    const payload = { tokenId, owner, image, attributes, history };
+    // Rarity is a nice-to-have on top of a real token, not a precondition for
+    // showing one — a snapshot failure degrades to "no rarity shown", same
+    // pattern as metadata/history above.
+    let rarity = null;
+    try {
+      const snapshot = await getRaritySnapshot();
+      rarity = compactRarityFor(snapshot, Number(tokenId));
+    } catch {
+      rarity = null;
+    }
+
+    const payload = { tokenId, owner, image, attributes, history, rarity };
     cache.set(tokenId, { at: Date.now(), payload });
     return publicJson(payload);
   } catch (error) {
