@@ -127,8 +127,8 @@ export default function ItemDetail({
             <p className="font-display text-lg text-foreground">#{tokenId}</p>
             {detail?.rarity && (
               <span
-                className="tier-badge rounded-full px-2 py-0.5 text-[0.6rem] font-bold uppercase tracking-wide text-wood-950"
-                style={{ backgroundColor: tierColor(detail.rarity.tier) }}
+                className="tier-badge rounded-full px-2 py-0.5 text-[0.6rem] font-bold uppercase tracking-wide"
+                style={{ color: tierColor(detail.rarity.tier) }}
               >
                 {detail.rarity.tier} · #{detail.rarity.rank}
               </span>

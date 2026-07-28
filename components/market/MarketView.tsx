@@ -850,7 +850,7 @@ export default function MarketView() {
         {tab === "swap" && (
           <div className="space-y-3">
             <TreasuryDashboard />
-            <SwapPanel />
+            <SwapPanel account={account} onConnect={handleConnect} />
           </div>
         )}
         {tab === "my-nfts" && account && (

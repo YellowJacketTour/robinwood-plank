@@ -268,8 +268,8 @@ export default function ActivityFeed({
                     <span className="text-xs font-bold text-foreground">#{e.tokenId}</span>
                     {r && (
                       <span
-                        className="tier-badge rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950"
-                        style={{ backgroundColor: tierColor(r.tier) }}
+                        className="tier-badge rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide"
+                        style={{ color: tierColor(r.tier) }}
                       >
                         {r.tier}
                       </span>
