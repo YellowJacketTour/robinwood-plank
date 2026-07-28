@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { formatTokenAmount } from "@/lib/trade";
 import { formatUsd, weiToUsd } from "@/lib/eth-price";
@@ -22,15 +22,20 @@ export default function LivingLiquidityViz() {
   const { stats } = useVaultLive();
   const [held, setHeld] = useState<HeldToken[] | null>(null);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
-  const lastHeldCount = useRef<number | null>(null);
+  const heldTokenCount = stats?.heldTokenCount ?? null;
 
   useEffect(() => {
     void getRarityMap().then((map) => setRarity(map));
   }, []);
 
+  // Depending on the primitive count, not the whole `stats` object — see
+  // VaultDashboard.tsx's identical fix for why: `stats` gets a new object
+  // reference on every live tick even when heldTokenCount hasn't changed,
+  // which was re-running this effect constantly and cancelling the
+  // in-flight fetch before it ever resolved (confirmed live: held images
+  // never loaded, stuck on the loading skeleton forever).
   useEffect(() => {
-    if (stats == null || lastHeldCount.current === stats.heldTokenCount) return;
-    lastHeldCount.current = stats.heldTokenCount;
+    if (heldTokenCount == null) return;
     let cancelled = false;
     fetch("/api/market/vault/held")
       .then((r) => (r.ok ? r.json() : { tokens: [] }))
@@ -43,7 +48,7 @@ export default function LivingLiquidityViz() {
     return () => {
       cancelled = true;
     };
-  }, [stats]);
+  }, [heldTokenCount]);
 
   const ethUsd = stats?.ethUsd ?? 0;
   const ethReserveEth = stats ? Number(formatTokenAmount(stats.ethReserveWei, 18, 4)) : 0;
