@@ -37,8 +37,21 @@ export type VaultStats = {
 type VaultLiveState = {
   stats: VaultStats | null;
   activity: VaultTradeEvent[];
+  /** True only while the literal SSE connection is open right now. Not what
+   * the UI should badge as "Live" — see `live` below. */
   connected: boolean;
+  /** Data-freshness based, not connection-based: true whenever the data on
+   * screen is recent, whether it arrived via the live stream, the REST
+   * fallback, or a poll. A routine ~1.5s reconnect (the server proactively
+   * recycles the stream every ~290s) used to flash "Reconnecting…" even
+   * though the data was still perfectly current — a real, reported "why
+   * does this look broken when nothing is actually wrong" bug. `live` only
+   * goes false once nothing has actually arrived in a while. */
+  live: boolean;
 };
+
+const FRESH_WINDOW_MS = 45_000;
+let lastUpdateAt = 0;
 
 const SNAPSHOT_KEY = "plank-vault-snapshot";
 /** A snapshot older than this is more likely to mislead than help — past
@@ -46,19 +59,24 @@ const SNAPSHOT_KEY = "plank-vault-snapshot";
  * this cache existed. */
 const SNAPSHOT_MAX_AGE_MS = 30 * 60_000;
 
+function makeState(stats: VaultStats | null, activity: VaultTradeEvent[], connected: boolean): VaultLiveState {
+  return { stats, activity, connected, live: Date.now() - lastUpdateAt < FRESH_WINDOW_MS };
+}
+
 function loadSnapshot(): VaultLiveState {
-  if (typeof window === "undefined") return { stats: null, activity: [], connected: false };
+  if (typeof window === "undefined") return makeState(null, [], false);
   try {
     const raw = localStorage.getItem(SNAPSHOT_KEY);
-    if (!raw) return { stats: null, activity: [], connected: false };
+    if (!raw) return makeState(null, [], false);
     const parsed = JSON.parse(raw) as { stats: VaultStats; activity: VaultTradeEvent[]; at: number };
-    if (Date.now() - parsed.at > SNAPSHOT_MAX_AGE_MS) return { stats: null, activity: [], connected: false };
-    // connected: false is deliberate — this is last-known data from a prior
-    // visit or a page refresh, not a live read, and the UI should say so
-    // (a "Reconnecting…"/"Live" badge) rather than imply it's current.
-    return { stats: parsed.stats, activity: parsed.activity, connected: false };
+    if (Date.now() - parsed.at > SNAPSHOT_MAX_AGE_MS) return makeState(null, [], false);
+    // A cached snapshot young enough to still count as "fresh" (well under
+    // FRESH_WINDOW_MS) shows as live immediately, no flash of "connecting"
+    // on a cold load when the data is genuinely still current.
+    lastUpdateAt = parsed.at;
+    return makeState(parsed.stats, parsed.activity, false);
   } catch {
-    return { stats: null, activity: [], connected: false };
+    return makeState(null, [], false);
   }
 }
 
@@ -133,7 +151,8 @@ function hydrateFromRest() {
       if (state.connected) return; // a live SSE tick already beat us to it
       const activity = activityRes?.events ?? state.activity;
       if (stats) {
-        state = { stats, activity, connected: false };
+        lastUpdateAt = Date.now();
+        state = makeState(stats, activity, false);
         saveSnapshot(stats, activity);
         emit();
       }
@@ -154,7 +173,8 @@ function pollOnce() {
     .then(([stats, activityRes]) => {
       if (!stats || state.connected) return;
       const activity = activityRes?.events ?? state.activity;
-      state = { stats, activity, connected: false };
+      lastUpdateAt = Date.now();
+      state = makeState(stats, activity, false);
       saveSnapshot(stats, activity);
       emit();
     })
@@ -188,7 +208,8 @@ function connect() {
     lastRaw = raw;
     try {
       const data = JSON.parse(raw) as { stats: VaultStats; activity: VaultTradeEvent[] };
-      state = { stats: data.stats, activity: data.activity, connected: true };
+      lastUpdateAt = Date.now();
+      state = makeState(data.stats, data.activity, true);
       saveSnapshot(data.stats, data.activity);
       // A real tick landed — the connection is healthy again, so drop the
       // backoff and stand down the polling fallback (SSE is back in charge).
@@ -207,8 +228,10 @@ function connect() {
     es.close();
     if (source === es) source = null;
     // Keep whatever data is already showing (live or last-known-snapshot)
-    // — only the connection badge flips, never the content itself.
-    state = { ...state, connected: false };
+    // — connected flips false, but `live` stays true as long as that data
+    // is still within FRESH_WINDOW_MS, so a routine reconnect doesn't flash
+    // "Reconnecting" over data that's still perfectly current.
+    state = makeState(state.stats, state.activity, false);
     emit();
     consecutiveErrors += 1;
     if (consecutiveErrors >= POLL_FALLBACK_AFTER_ERRORS) startPollFallback();
@@ -227,12 +250,39 @@ function connect() {
   };
 }
 
+/** `live` is time-based, not event-based — without this, it would only
+ * ever get re-evaluated when a new tick/poll/error happens to call
+ * makeState(). If nothing happens for FRESH_WINDOW_MS (a genuinely dead
+ * connection with no retries succeeding), nothing would ever flip `live`
+ * back to false on its own. Ticks slowly since it only matters for the
+ * boundary case, not routine updates. */
+let freshnessTimer: ReturnType<typeof setInterval> | null = null;
+
+function startFreshnessTimer() {
+  if (freshnessTimer) return;
+  freshnessTimer = setInterval(() => {
+    const nowLive = Date.now() - lastUpdateAt < FRESH_WINDOW_MS;
+    if (nowLive !== state.live) {
+      state = { ...state, live: nowLive };
+      emit();
+    }
+  }, 5_000);
+}
+
+function stopFreshnessTimer() {
+  if (freshnessTimer) {
+    clearInterval(freshnessTimer);
+    freshnessTimer = null;
+  }
+}
+
 function disconnect() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
   stopPollFallback();
+  stopFreshnessTimer();
   consecutiveErrors = 0;
   source?.close();
   source = null;
@@ -251,6 +301,7 @@ export function useVaultLive(): VaultLiveState {
   useEffect(() => {
     refCount += 1;
     connect();
+    startFreshnessTimer();
     listeners.add(setLocal);
     setLocal(state);
     return () => {
