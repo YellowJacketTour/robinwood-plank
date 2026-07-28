@@ -79,6 +79,17 @@ type Props = {
   totalSupply?: number;
 };
 
+// Module-level, not component state — survives switching away to another
+// tab and back (which unmounts this component) within the same session.
+// Confirmed live: without this, every single tab switch back to Activity
+// re-showed "Loading…" and re-fetched, even seconds after it had already
+// fully loaded. TTL matches the server route's own 60s cache (app/api/
+// market/activity/route.ts) — no point treating client data as fresher
+// than the server itself is willing to call it.
+let cachedEvents: ActivityEvent[] | null = null;
+let cachedAt = 0;
+const CACHE_TTL_MS = 60_000;
+
 export default function ActivityFeed({
   onSelectToken,
   collection,
@@ -86,7 +97,7 @@ export default function ActivityFeed({
   offers,
   totalSupply,
 }: Props) {
-  const [events, setEvents] = useState<ActivityEvent[] | null>(null);
+  const [events, setEvents] = useState<ActivityEvent[] | null>(cachedEvents);
   const [failed, setFailed] = useState(false);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [venueFilter, setVenueFilter] = useState<string>("all");
@@ -94,15 +105,25 @@ export default function ActivityFeed({
 
   useEffect(() => {
     let cancelled = false;
+    // Cached data (even if a little stale) paints instantly; a background
+    // refresh still runs unless it was fetched within the TTL window, so a
+    // rapid tab-away-and-back never re-hits the network at all.
+    if (cachedEvents && Date.now() - cachedAt < CACHE_TTL_MS) {
+      return;
+    }
     fetch("/api/market/activity")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
       .then((data) => {
-        if (!cancelled) setEvents(data.events ?? []);
+        const next = data.events ?? [];
+        cachedEvents = next;
+        cachedAt = Date.now();
+        if (!cancelled) setEvents(next);
       })
       .catch(() => {
-        // Distinguish "nothing traded" from "we could not look" — showing an
-        // empty feed for an RPC failure would misrepresent the collection.
-        if (!cancelled) setFailed(true);
+        // A background refresh failing should never blank out perfectly
+        // good stale data that's already on screen — only show the "could
+        // not look" state when there was nothing cached to fall back to.
+        if (!cancelled && !cachedEvents) setFailed(true);
       });
     void getRarityMap().then((map) => {
       if (!cancelled) setRarity(map);
