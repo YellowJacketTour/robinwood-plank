@@ -63,10 +63,10 @@ export default function Hero() {
             Trade
           </a>
           <a
-            href="#boards"
+            href="/market"
             className="rounded-lg border border-gold-500/50 bg-wood-900/80 px-4 py-2.5 text-center text-sm font-bold text-gold-300 sm:min-w-[9rem]"
           >
-            Boards
+            Market
           </a>
           <a
             href="#mint"
