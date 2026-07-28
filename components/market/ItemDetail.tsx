@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
-import { tierAnimationClass, tierColor, tierGlow } from "@/lib/market/rarityClient";
+import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
+import { holoHandlers } from "@/lib/holo";
 import type { RarityTier } from "@/lib/market/rarityClient";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 
@@ -80,8 +81,14 @@ export default function ItemDetail({
       aria-label={`${collection.name} #${tokenId}`}
       onClick={onClose}
     >
+      {/* Whole-modal tint + border, but NOT tierAnimationClass here — that
+          class's shimmer relies on `overflow: hidden`, which would fight
+          this container's own overflow-y-auto (the modal needs to scroll on
+          tall content). The image panel below still gets the full
+          glow+shimmer treatment. */}
       <div
         className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-2xl border border-gold-500/30 bg-wood-950 sm:rounded-2xl"
+        style={detail?.rarity ? tierCardStyle(detail.rarity.tier) : undefined}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-gold-500/15 px-4 py-3">
@@ -89,7 +96,7 @@ export default function ItemDetail({
             <p className="font-display text-lg text-foreground">#{tokenId}</p>
             {detail?.rarity && (
               <span
-                className="rounded-full px-2 py-0.5 text-[0.6rem] font-bold uppercase tracking-wide text-wood-950"
+                className="rounded-full px-2 py-0.5 text-[0.6rem] font-bold uppercase tracking-wide text-wood-950 shadow-[0_1px_3px_rgba(0,0,0,0.6)]"
                 style={{ backgroundColor: tierColor(detail.rarity.tier) }}
               >
                 {detail.rarity.tier} · #{detail.rarity.rank}
@@ -109,9 +116,10 @@ export default function ItemDetail({
         <div className="grid gap-4 p-4 sm:grid-cols-2">
           <div
             className={`relative aspect-square w-full overflow-hidden rounded-xl bg-wood-900 ${
-              detail?.rarity ? tierAnimationClass(detail.rarity.tier) : ""
+              detail?.rarity ? `${tierAnimationClass(detail.rarity.tier)} holo-card` : ""
             }`}
             style={detail?.rarity ? { boxShadow: tierGlow(detail.rarity.tier) } : undefined}
+            {...(detail?.rarity ? holoHandlers : {})}
           >
             <Image
               src={detail?.image || listing?.imageUrl || collection.image}

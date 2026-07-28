@@ -14,7 +14,14 @@ import {
 import { getOwnedInventory, type OwnedInventory } from "@/lib/market/inventory";
 import { buildListing } from "@/lib/market/seaport";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
-import { getRarityMap, tierAnimationClass, tierColor, tierGlow } from "@/lib/market/rarityClient";
+import {
+  getRarityMap,
+  tierAnimationClass,
+  tierCardStyle,
+  tierColor,
+  tierGlow,
+} from "@/lib/market/rarityClient";
+import { holoHandlers } from "@/lib/holo";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import type { MarketCollection } from "@/lib/market/types";
 
@@ -204,8 +211,11 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
               return (
                 <li
                   key={key}
-                  className={`dense-card overflow-hidden p-0 ${r ? tierAnimationClass(r.tier) : ""}`}
-                  style={r ? { boxShadow: tierGlow(r.tier) } : undefined}
+                  className={`dense-card overflow-hidden p-0 ${
+                    r ? `${tierAnimationClass(r.tier)} holo-card` : ""
+                  }`}
+                  style={r ? { boxShadow: tierGlow(r.tier), ...tierCardStyle(r.tier) } : undefined}
+                  {...(r ? holoHandlers : {})}
                 >
                   <button
                     type="button"
@@ -232,20 +242,20 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                       </span>
                     )}
                     {isListed && (
-                      <span className="absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
+                      <span className="legible-text absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
                         Listed
                       </span>
                     )}
                     {r && (
                       <span
-                        className={`absolute left-1.5 ${isListed ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950`}
+                        className={`absolute left-1.5 ${isListed ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide text-wood-950 shadow-[0_1px_3px_rgba(0,0,0,0.6)]`}
                         style={{ backgroundColor: tierColor(r.tier) }}
                         title={`Rank #${r.rank} · ${r.percentile.toFixed(0)}th percentile`}
                       >
                         {r.tier}
                       </span>
                     )}
-                    <span className="absolute bottom-1.5 left-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-foreground">
+                    <span className="legible-text absolute bottom-1.5 left-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-foreground">
                       #{item.tokenId}
                     </span>
                   </button>

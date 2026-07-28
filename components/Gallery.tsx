@@ -33,11 +33,13 @@ import {
   computeRaritySnapshot,
   formatRank,
   tierAnimationClass,
+  tierCardStyle,
   tierColor,
   tierGlow,
   type TokenRarity,
 } from "@/lib/rarity";
 import type { GalleryNft } from "@/lib/gallery-types";
+import { holoHandlers } from "@/lib/holo";
 import RarityInsights from "@/components/RarityInsights";
 import {
   ensureNftCacheHydrated,
@@ -1034,8 +1036,12 @@ export default function Gallery() {
                           <button
                             type="button"
                             onClick={() => setSelected(nft)}
-                            className="group flex h-full w-full flex-col overflow-hidden rounded-lg border border-gold-500/25 bg-wood-950/70 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-400"
+                            className={`group flex h-full w-full flex-col overflow-hidden rounded-lg border border-gold-500/25 bg-wood-950/70 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-400 ${
+                              tokenRarity ? `${tierAnimationClass(tokenRarity.tier)} holo-card` : ""
+                            }`}
+                            style={tokenRarity ? tierCardStyle(tokenRarity.tier) : undefined}
                             aria-label={`Open ${displayName(nft)}`}
+                            {...(tokenRarity ? holoHandlers : {})}
                           >
                             <div
                               className={`relative aspect-square w-full overflow-hidden bg-wood-950 ${
