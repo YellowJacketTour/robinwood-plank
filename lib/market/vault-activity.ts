@@ -44,10 +44,14 @@ async function firstHealthyProvider(): Promise<JsonRpcProvider> {
  * topic (only Deposited/Redeemed move an NFT, and Bought/Sold trade the
  * vault's internal share token).
  */
-export async function getVaultActivity(limit = 40): Promise<VaultTradeEvent[]> {
+export async function getVaultActivity(
+  limit = 40,
+  opts?: { full?: boolean }
+): Promise<VaultTradeEvent[]> {
   if (!MARKET_VAULT_ADDRESS) return [];
   const provider = await firstHealthyProvider();
   const vault = MARKET_VAULT_ADDRESS;
+  const full = opts?.full ?? false;
 
   const boughtTopic = IFACE.getEvent("Bought")!.topicHash;
   const soldTopic = IFACE.getEvent("Sold")!.topicHash;
@@ -58,7 +62,11 @@ export async function getVaultActivity(limit = 40): Promise<VaultTradeEvent[]> {
   const latest = await provider.getBlockNumber();
   const rawLogs: Array<{ topics: string[]; data: string; blockNumber: string; transactionHash: string; logIndex: string }> = [];
   let toBlock = latest;
-  for (let chunk = 0; chunk < MAX_CHUNKS && toBlock >= 0 && rawLogs.length < limit * 3; chunk += 1) {
+  // The recent-N callers (the trade ticker) only need enough chunks to fill
+  // their limit, so they stop early — the "full lineage" chart needs every
+  // chunk MAX_CHUNKS allows, or it silently drops older history the same
+  // way the final .slice() below used to.
+  for (let chunk = 0; chunk < MAX_CHUNKS && toBlock >= 0 && (full || rawLogs.length < limit * 3); chunk += 1) {
     const fromBlock = Math.max(0, toBlock - CHUNK_BLOCKS);
     const found = (await provider.send("eth_getLogs", [
       {
@@ -79,7 +87,7 @@ export async function getVaultActivity(limit = 40): Promise<VaultTradeEvent[]> {
     if (bn !== 0) return bn;
     return Number(BigInt(b.logIndex) - BigInt(a.logIndex));
   });
-  const trimmed = rawLogs.slice(0, limit);
+  const trimmed = full ? rawLogs : rawLogs.slice(0, limit);
 
   const blockNumbers = [...new Set(trimmed.map((l) => l.blockNumber))];
   const blocks = await Promise.all(blockNumbers.map((bn) => provider.getBlock(Number(BigInt(bn)))));

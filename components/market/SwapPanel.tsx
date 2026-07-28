@@ -7,7 +7,10 @@ import TreasuryBootstrap from "@/components/market/TreasuryBootstrap";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import {
   buyShares,
+  claimRandomRedeem,
   depositForShares,
+  getPendingRequester,
+  getPendingRound,
   quoteBuyShares,
   quoteSellShares,
   requestRandomRedeem,
@@ -116,6 +119,124 @@ type Props = {
   account: string | null;
   onConnect: () => void;
 };
+
+/** Random redeem is TWO on-chain transactions (see lib/market/vault.ts's
+ * doc comment on requestRandomRedeem): step 1 burns the shares and anchors
+ * a future drand round; step 2, claimRandomRedeem, is the only way the NFT
+ * actually leaves the vault. There is only one pending slot vault-wide
+ * (pendingRequester), so this checks whether IT belongs to the connected
+ * wallet — including on a fresh page load, a different device, or a
+ * request made in a past session, none of which local component state
+ * could ever recover on its own. Previously nothing in the UI ever called
+ * claimRandomRedeem, so anyone who chose random redeem had their shares
+ * burned with no way to get the NFT out. */
+function PendingRedeemClaim({ account }: { account: string | null }) {
+  const [isPending, setIsPending] = useState(false);
+  const [round, setRound] = useState<bigint | null>(null);
+  const [available, setAvailable] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!account) {
+      setIsPending(false);
+      return;
+    }
+    let cancelled = false;
+
+    const check = () => {
+      getPendingRequester()
+        .then((requester) => {
+          if (cancelled) return;
+          setIsPending(requester.toLowerCase() === account.toLowerCase());
+        })
+        .catch(() => {
+          if (!cancelled) setIsPending(false);
+        });
+    };
+
+    check();
+    // Polls even when nothing is pending — cheap read, and it's the only
+    // way to notice a request made from a different tab/device/session.
+    const interval = setInterval(check, 8_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [account]);
+
+  useEffect(() => {
+    if (!isPending) {
+      setRound(null);
+      setAvailable(false);
+      return;
+    }
+    let cancelled = false;
+    const poll = () => {
+      getPendingRound()
+        .then((r) => {
+          if (cancelled) return;
+          setRound(r.round);
+          setAvailable(r.available);
+        })
+        .catch(() => {});
+    };
+    poll();
+    const interval = setInterval(poll, 4_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isPending]);
+
+  if (!isPending) return null;
+
+  const claim = async () => {
+    if (!account) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await claimRandomRedeem(account, (txHash) =>
+        addPendingVaultTx({ txHash, kind: "redeem", ethWei: null, tokenId: null })
+      );
+      setIsPending(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Claim failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3">
+      <p className="text-xs font-bold uppercase tracking-wide text-amber-300">
+        You have a pending random redeem
+      </p>
+      {available ? (
+        <>
+          <p className="text-xs text-foreground/70">
+            Drand round {round?.toString()} has landed — your NFT is ready to claim.
+          </p>
+          <button
+            type="button"
+            onClick={claim}
+            disabled={busy}
+            className="min-h-9 w-full rounded-lg bg-amber-400 text-xs font-bold uppercase text-wood-950 disabled:opacity-50"
+          >
+            {busy ? "Claiming…" : "Claim your NFT"}
+          </button>
+        </>
+      ) : (
+        <p className="text-xs text-foreground/60">
+          Waiting on drand round {round?.toString() ?? "…"} to be relayed — this resolves
+          automatically, usually within a few minutes. Come back and this'll turn into a
+          Claim button, or just leave the tab open; it checks every few seconds.
+        </p>
+      )}
+      {error && <p className="text-xs text-red-300">{error}</p>}
+    </div>
+  );
+}
 
 /**
  * Phase 2 — NFTX-style vault buy/sell. Fully wired against
@@ -369,6 +490,8 @@ export default function SwapPanel({ account, onConnect }: Props) {
         {account && account.toLowerCase() === MARKET_FEE_RECIPIENT.toLowerCase() && (
           <TreasuryBootstrap account={account} />
         )}
+
+        <PendingRedeemClaim account={account} />
 
         <div className="grid grid-cols-4 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/50 p-1">
           {MODES.map((m) => (

@@ -7,6 +7,24 @@ import { ethWeiToNumber } from "@/lib/eth-price";
 import { useVaultLive } from "@/lib/market/useVaultLive";
 
 type SaleEvent = { kind: string; priceWei: string | null; timestamp: string | null };
+type VaultEvent = {
+  kind: string;
+  ethWei: string | null;
+  sharesWei: string | null;
+  timestamp: string | null;
+};
+
+function vaultEventToPoint(e: VaultEvent): LineData<UTCTimestamp> | null {
+  if ((e.kind !== "buy" && e.kind !== "sell") || e.ethWei == null || e.sharesWei == null || e.timestamp == null) {
+    return null;
+  }
+  return {
+    time: Math.floor(new Date(e.timestamp).getTime() / 1000) as UTCTimestamp,
+    // Both amounts are wei-scaled (18 decimals), so their ratio is already
+    // the ETH-per-share price — no rescaling needed.
+    value: Number(e.ethWei) / Number(e.sharesWei),
+  };
+}
 
 type Range = "24H" | "7D" | "ALL";
 const RANGES: Range[] = ["24H", "7D", "ALL"];
@@ -17,22 +35,27 @@ const RANGE_MS: Record<Range, number | null> = {
 };
 
 /**
- * Real price history for RobinWood, charted like a DEX/meme-coin pair.
- * Merges two live sources: settled fixed-price marketplace sales
- * (/api/market/activity) and the vault's own AMM trades (Bought/Sold, via
- * the shared live stream) — the vault is where nearly all price action
- * actually happens now, so a sales-only chart would sit stuck at an old
- * price while real, lower vault sells were printing. A share is the
- * vault's per-NFT redemption unit, so its ETH-per-share price is a
- * like-for-like point on the same chart, not a different asset. No
- * synthetic candle aggregation — a line of real trades is more honest than
- * fabricated OHLC bars with mostly-empty candles.
+ * The true full-lineage price history for RobinWood, charted like a
+ * DEX/meme-coin pair. Merges every blockchain-timestamped trade from both
+ * venues: settled fixed-price marketplace sales (/api/market/activity, all
+ * of them via ?full=1, not just the most recent 40) and every vault AMM
+ * trade (Bought/Sold — /api/market/vault/activity?full=1 for history, then
+ * the shared live stream for anything new). The vault is where nearly all
+ * price action actually happens now, so a sales-only chart would sit stuck
+ * at an old price while real, lower vault sells were printing — the
+ * originally reported bug. A share is the vault's per-NFT redemption unit,
+ * so its ETH-per-share price is a like-for-like point on the same chart,
+ * not a different asset. New trades arrive over the live stream (a
+ * standing server push, not a manual refresh) the moment they're mined —
+ * no synthetic candle aggregation, a line of real trades is more honest
+ * than fabricated OHLC bars with mostly-empty candles.
  */
 export default function NftPriceChart() {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const [salePoints, setSalePoints] = useState<LineData<UTCTimestamp>[] | null>(null);
+  const [vaultHistoryPoints, setVaultHistoryPoints] = useState<LineData<UTCTimestamp>[]>([]);
   const [range, setRange] = useState<Range>("ALL");
   const [failed, setFailed] = useState(false);
   const { activity: vaultActivity } = useVaultLive();
@@ -41,7 +64,7 @@ export default function NftPriceChart() {
     let cancelled = false;
 
     const load = () => {
-      fetch("/api/market/activity")
+      fetch("/api/market/activity?full=1")
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
         .then((data: { events?: SaleEvent[] }) => {
           if (cancelled) return;
@@ -61,35 +84,42 @@ export default function NftPriceChart() {
     };
 
     load();
-    // The activity API is server-cached for 60s (app/api/market/activity),
-    // so polling faster than that would just re-fetch the same response.
-    const interval = setInterval(load, 20_000);
+    // The full-history endpoint is server-cached for 120s, and new trades
+    // arrive live via the SSE stream anyway — this is just a slow safety
+    // net against a missed tick, not the primary update path.
+    const interval = setInterval(load, 60_000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
   }, []);
 
-  // Real fixed-price marketplace sales are rare; almost all price discovery
-  // now happens on the vault's own AMM (Bought/Sold), which a sales-only
-  // chart is completely blind to — the reported bug (chart stuck at an old
-  // price while vault sells were printing lower). A share is the vault's
-  // per-NFT redemption unit, so its ETH-per-share price is a like-for-like
-  // point on the same chart, not a different asset.
-  const vaultPoints = useMemo<LineData<UTCTimestamp>[]>(() => {
-    return vaultActivity
-      .filter((e) => (e.kind === "buy" || e.kind === "sell") && e.ethWei != null && e.sharesWei != null && e.timestamp != null)
-      .map((e) => ({
-        time: Math.floor(new Date(e.timestamp!).getTime() / 1000) as UTCTimestamp,
-        // Both amounts are wei-scaled (18 decimals), so their ratio is
-        // already the ETH-per-share price — no rescaling needed.
-        value: Number(e.ethWei) / Number(e.sharesWei),
-      }));
+  // One-time full vault trade history, merged with whatever the live
+  // stream carries — the stream only holds the ~30 most recent vault
+  // trades, which is fine for the ticker but was silently truncating this
+  // chart's older history.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/market/vault/activity?full=1")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
+      .then((data: { events?: VaultEvent[] }) => {
+        if (cancelled) return;
+        const pts = (data.events ?? []).map(vaultEventToPoint).filter((p): p is LineData<UTCTimestamp> => p != null);
+        setVaultHistoryPoints(pts);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const vaultLivePoints = useMemo<LineData<UTCTimestamp>[]>(() => {
+    return vaultActivity.map(vaultEventToPoint).filter((p): p is LineData<UTCTimestamp> => p != null);
   }, [vaultActivity]);
 
   const points = useMemo<LineData<UTCTimestamp>[] | null>(() => {
     if (salePoints == null) return null;
-    const merged = [...salePoints, ...vaultPoints].sort((a, b) => a.time - b.time);
+    const merged = [...salePoints, ...vaultHistoryPoints, ...vaultLivePoints].sort((a, b) => a.time - b.time);
     // lightweight-charts requires strictly increasing timestamps; two trades
     // in the same second collapse to the later one.
     const deduped: typeof merged = [];
@@ -101,10 +131,10 @@ export default function NftPriceChart() {
       }
     }
     return deduped;
-  }, [salePoints, vaultPoints]);
+  }, [salePoints, vaultHistoryPoints, vaultLivePoints]);
 
   useEffect(() => {
-    if (!containerRef.current || points == null) return;
+    if (!containerRef.current) return;
 
     const chart = createChart(containerRef.current, {
       layout: {
@@ -145,7 +175,13 @@ export default function NftPriceChart() {
       chartRef.current = null;
       seriesRef.current = null;
     };
-  }, [points]);
+    // Mount once — this used to depend on [points] and tore down/rebuilt
+    // the ENTIRE chart on every 20s poll and every live vault trade, which
+    // is real, avoidable jank. Data updates go through series.setData() in
+    // the effect below instead, which is what that effect already did; it
+    // just never got the chance to run against a stable chart before.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!seriesRef.current || !chartRef.current || points == null) return;
