@@ -1,4 +1,4 @@
-import { BrowserProvider, Contract, Interface, parseEther } from "ethers";
+import { BrowserProvider, Contract, Interface, JsonRpcProvider, parseEther } from "ethers";
 import vaultAbi from "@/lib/market/vault-abi.json";
 import { CHAIN, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
@@ -56,6 +56,25 @@ async function getVaultReader(): Promise<Contract> {
   if (!injected) throw new Error("No wallet found.");
   const provider = new BrowserProvider(injected, { chainId: CHAIN.id, name: CHAIN.name });
   return new Contract(address, vaultAbi, provider);
+}
+
+let publicVaultReaderCache: Contract | null = null;
+/**
+ * Same reads as getVaultReader(), but over the chain's own public RPC —
+ * never touches window.ethereum. These are plain contract-state reads with
+ * no notion of "which account," so they don't need a wallet at all; routing
+ * them through the injected provider needlessly calls ensureRobinhoodChain()
+ * (which can fire a wallet_switchEthereumChain prompt) on every poll tick.
+ * Components that poll this on an interval (StuckRedeemRelay,
+ * PendingRedeemClaim) were doing exactly that every 6-8s, which looked like
+ * a connect popup that "keeps coming back" even with no wallet connected.
+ */
+function getPublicVaultReader(): Contract {
+  if (publicVaultReaderCache) return publicVaultReaderCache;
+  const address = requireVaultAddress();
+  const provider = new JsonRpcProvider(CHAIN.rpcUrls.default, { chainId: CHAIN.id, name: CHAIN.name });
+  publicVaultReaderCache = new Contract(address, vaultAbi, provider);
+  return publicVaultReaderCache;
 }
 
 /**
@@ -368,7 +387,7 @@ export async function claimRandomRedeem(
 
 /** The drand round the in-flight request waits on, and whether it has landed. */
 export async function getPendingRound(): Promise<{ round: bigint; available: boolean }> {
-  const vault = await getVaultReader();
+  const vault = getPublicVaultReader();
   const [round, available] = (await vault.pendingRound()) as [bigint, boolean];
   return { round, available };
 }
@@ -376,7 +395,7 @@ export async function getPendingRound(): Promise<{ round: bigint; available: boo
 /** address(0) when nobody has an in-flight random redemption (there is only
  * ever one vault-wide slot — see contracts/MarketplankVault.sol). */
 export async function getPendingRequester(): Promise<string> {
-  const vault = await getVaultReader();
+  const vault = getPublicVaultReader();
   return (await vault.pendingRequester()) as string;
 }
 
