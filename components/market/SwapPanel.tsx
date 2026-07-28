@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import { MARKET_FEE_RECIPIENT, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import TreasuryBootstrap from "@/components/market/TreasuryBootstrap";
@@ -8,11 +8,14 @@ import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import {
   buyShares,
   claimRandomRedeem,
+  decodeVaultError,
   depositForShares,
   getPendingRequester,
   getPendingRound,
+  getVaultShareBalance,
   quoteBuyShares,
   quoteSellShares,
+  redeemCostWei,
   requestRandomRedeem,
   redeemTarget,
   sellShares,
@@ -23,6 +26,7 @@ import type { RarityTier } from "@/lib/market/rarityClient";
 import { getOwnedInventory } from "@/lib/market/inventory";
 import TokenPicker, { type PickerToken } from "@/components/market/TokenPicker";
 import { addPendingVaultTx } from "@/lib/market/pendingVaultTx";
+import { useVaultLive } from "@/lib/market/useVaultLive";
 
 type Mode = "buy" | "sell" | "deposit" | "redeem";
 
@@ -201,7 +205,7 @@ function PendingRedeemClaim({ account }: { account: string | null }) {
       );
       setIsPending(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Claim failed.");
+      setError(decodeVaultError(e));
     } finally {
       setBusy(false);
     }
@@ -248,6 +252,7 @@ export default function SwapPanel({ account, onConnect }: Props) {
   const collection = MARKET_COLLECTIONS[0];
   const hasVault = MARKET_VAULT_ADDRESS !== null;
 
+  const { stats } = useVaultLive();
   const [mode, setMode] = useState<Mode>("buy");
   const [amount, setAmount] = useState("");
   const [tokenId, setTokenId] = useState("");
@@ -256,6 +261,28 @@ export default function SwapPanel({ account, onConnect }: Props) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // The single biggest reason "I can't withdraw" happened before this: a
+  // redeem costs 1.0 share (+ fee, + a premium on top for a targeted pick),
+  // but the user's actual share balance was never shown next to that cost —
+  // the only way anyone found out they were short was a failed transaction
+  // with an opaque revert. Fetched whenever redeem mode opens and refreshed
+  // after every transaction (run(), below).
+  const [shareBalance, setShareBalance] = useState<bigint | null>(null);
+  const refreshShareBalance = useCallback(async () => {
+    if (!account) return;
+    try {
+      setShareBalance(await getVaultShareBalance(account));
+    } catch {
+      // leave whatever balance we last had — a failed read shouldn't blank
+      // out a number the user was already relying on
+    }
+  }, [account]);
+
+  useEffect(() => {
+    if (mode !== "redeem" || !account) return;
+    void refreshShareBalance();
+  }, [mode, account, refreshShareBalance]);
 
   // Deposit picks FROM what the connected wallet actually owns — visual,
   // never a blind typed id. Redeem (targeted) picks from what the vault
@@ -382,13 +409,20 @@ export default function SwapPanel({ account, onConnect }: Props) {
       setStatus("Confirmed.");
       setAmount("");
       setTokenId("");
+      void refreshShareBalance();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Transaction failed.");
+      setError(decodeVaultError(e));
     } finally {
       setBusy(false);
       setTimeout(() => setStatus(null), 3000);
     }
   };
+
+  const redeemCostForMode = stats
+    ? redeemCostWei(stats.redeemFeeBps, stats.targetPremiumBps, Boolean(tokenId))
+    : BigInt(0);
+  const redeemInsufficient =
+    mode === "redeem" && stats != null && shareBalance != null && shareBalance < redeemCostForMode;
 
   /** "1" → 100 bps; null when unparseable/out of range (fail closed). */
   const slippageBps = (() => {
@@ -401,6 +435,13 @@ export default function SwapPanel({ account, onConnect }: Props) {
     if (!account) return; // run() reconnects, but every path below needs it typed
     if (mode === "buy" || mode === "sell") {
       if (slippageBps === null) return setError("Enter a slippage between 0 and 99%.");
+    }
+    if (mode === "redeem" && redeemInsufficient) {
+      return setError(
+        `You need ${formatTokenAmount(redeemCostForMode, 18, 4)} shares to redeem${tokenId ? " that specific plank" : ""}, but you have ${
+          shareBalance != null ? formatTokenAmount(shareBalance, 18, 4) : "0"
+        }.`
+      );
     }
     if (mode === "buy") {
       if (!amount) return setError("Enter an ETH amount.");
@@ -616,6 +657,33 @@ export default function SwapPanel({ account, onConnect }: Props) {
               emptyMessage="The vault isn't holding anything right now."
             />
             {tokenId && <TokenPreviewCard tokenId={tokenId} />}
+            {stats && (
+              <div
+                className={`rounded-lg border px-2.5 py-2 text-[0.65rem] ${
+                  redeemInsufficient
+                    ? "border-red-500/40 bg-red-500/10 text-red-200"
+                    : "border-gold-500/20 bg-black/15 text-foreground/60"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span>Your balance</span>
+                  <span className="font-mono font-bold text-foreground">
+                    {shareBalance != null ? formatTokenAmount(shareBalance, 18, 4) : "…"} shares
+                  </span>
+                </div>
+                <div className="mt-0.5 flex items-center justify-between">
+                  <span>Costs{tokenId ? " (targeted, +premium)" : " (random)"}</span>
+                  <span className="font-mono font-bold text-foreground">
+                    {formatTokenAmount(redeemCostForMode, 18, 4)} shares
+                  </span>
+                </div>
+                {redeemInsufficient && (
+                  <p className="mt-1 font-bold">
+                    Not enough shares yet — deposit or buy more before you can redeem.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -630,11 +698,11 @@ export default function SwapPanel({ account, onConnect }: Props) {
         ) : (
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || redeemInsufficient}
             onClick={submit}
             className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
           >
-            {busy ? (status ?? "Working…") : activeMode.label}
+            {busy ? (status ?? "Working…") : redeemInsufficient ? "Not enough shares" : activeMode.label}
           </button>
         )}
 
