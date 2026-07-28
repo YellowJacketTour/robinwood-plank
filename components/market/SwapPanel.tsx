@@ -3,7 +3,13 @@
 import { useState } from "react";
 import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
-import { buyShares, depositForShares, redeemRandom, redeemTarget, sellShares } from "@/lib/market/vault";
+import {
+  buyShares,
+  depositForShares,
+  requestRandomRedeem,
+  redeemTarget,
+  sellShares,
+} from "@/lib/market/vault";
 import { connectWallet, ensureRobinhoodChain } from "@/lib/wallet";
 import { parseTokenAmount } from "@/lib/trade";
 
@@ -30,6 +36,8 @@ export default function SwapPanel() {
   const [account, setAccount] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [tokenId, setTokenId] = useState("");
+  /** Max slippage, percent. Converted to bps; vault trades REFUSE min-out of 0. */
+  const [slippagePct, setSlippagePct] = useState("1");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +45,7 @@ export default function SwapPanel() {
   if (!hasVault) {
     return (
       <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/40 px-4 py-8 text-center text-sm text-foreground/60">
-        Instant swap opens once a liquidity vault exists for {collection?.name ?? "a collection"}.
+        The workshop isn't open yet — instant swap unlocks once the vault is stocked for {collection?.name ?? "a collection"}.
       </p>
     );
   }
@@ -74,23 +82,44 @@ export default function SwapPanel() {
     }
   };
 
+  /** "1" → 100 bps; null when unparseable/out of range (fail closed). */
+  const slippageBps = (() => {
+    const pct = Number(slippagePct);
+    if (!Number.isFinite(pct) || pct < 0 || pct >= 100) return null;
+    return Math.round(pct * 100);
+  })();
+
   const submit = () => {
+    if (!account) return; // run() reconnects, but every path below needs it typed
+    if (mode === "buy" || mode === "sell") {
+      if (slippageBps === null) return setError("Enter a slippage between 0 and 99%.");
+    }
     if (mode === "buy") {
       if (!amount) return setError("Enter an ETH amount.");
-      return run(() => buyShares(amount), "Buying…");
+      return run(() => buyShares(account, amount, slippageBps as number), "Buying…");
     }
     if (mode === "sell") {
       const wei = parseTokenAmount(amount, 18);
       if (wei === null || wei <= BigInt(0)) return setError("Enter a share amount.");
-      return run(() => sellShares(wei), "Selling…");
+      return run(() => sellShares(account, wei, slippageBps as number), "Selling…");
     }
     if (mode === "deposit") {
       if (!tokenId) return setError("Enter a token ID.");
-      return run(() => depositForShares(tokenId), "Depositing…");
+      return run(() => depositForShares(account, tokenId), "Depositing…");
     }
     // redeem
-    if (tokenId) return run(() => redeemTarget(tokenId), "Redeeming (targeted)…");
-    return run(() => redeemRandom(), "Redeeming (random)…");
+    if (tokenId) return run(() => redeemTarget(account, tokenId), "Redeeming (targeted)…");
+    // FLAGGED (drand rework): this is only STEP 1 of the random redemption.
+    // It burns the shares and anchors the draw to a drand round ~3-6s in the
+    // future; the NFT arrives only after a second claimRandomRedeem() call,
+    // once anyone relays that round. This still calls the correct entry point
+    // (the old redeemRandom() did not exist and always reverted), but the UI
+    // owes a "waiting for drand round N" state and a claim button. See
+    // lib/market/vault.ts for the full flow.
+    return run(
+      () => requestRandomRedeem(account),
+      "Requesting random redeem (claim in a few seconds)…"
+    );
   };
 
   return (
@@ -122,6 +151,23 @@ export default function SwapPanel() {
           />
           <span className="text-xs font-bold text-gold-300">{mode === "buy" ? "ETH" : "SHARE"}</span>
         </div>
+      )}
+
+      {(mode === "buy" || mode === "sell") && (
+        <label className="flex items-center justify-between gap-2 rounded-lg border border-gold-500/20 bg-wood-900/50 px-2.5 py-2">
+          <span className="text-[0.7rem] text-foreground/60">Max slippage</span>
+          <span className="flex items-center gap-1">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={slippagePct}
+              onChange={(e) => setSlippagePct(e.target.value.replace(/[^0-9.]/g, ""))}
+              className="w-14 rounded-md border border-gold-500/30 bg-wood-950 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-gold-400"
+              aria-label="Max slippage percent"
+            />
+            <span className="text-xs font-bold text-gold-300">%</span>
+          </span>
+        </label>
       )}
 
       {(mode === "deposit" || mode === "redeem") && (

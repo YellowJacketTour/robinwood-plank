@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { buildOffer } from "@/lib/market/seaport";
 import { parseTokenAmount } from "@/lib/trade";
 import type { MarketCollection } from "@/lib/market/types";
@@ -22,6 +22,15 @@ export default function OfferForm({ account, collection, tokenId, onSubmitted, o
   const [days, setDays] = useState(7);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Consistent with the item detail modal — Escape dismisses either.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const submit = async () => {
     setError(null);

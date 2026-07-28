@@ -1,0 +1,107 @@
+"use client";
+
+export type MarketFilters = {
+  /** Free-text token id search. */
+  query: string;
+  /** Price bounds in ETH, as typed. Empty string means unbounded. */
+  minEth: string;
+  maxEth: string;
+};
+
+export const EMPTY_FILTERS: MarketFilters = { query: "", minEth: "", maxEth: "" };
+
+type Props = {
+  filters: MarketFilters;
+  onChange: (next: MarketFilters) => void;
+  /** Count after filtering, shown so an empty grid is never ambiguous. */
+  resultCount: number;
+};
+
+export default function FilterBar({ filters, onChange, resultCount }: Props) {
+  const dirty =
+    filters.query !== "" || filters.minEth !== "" || filters.maxEth !== "";
+
+  return (
+    <div className="flex flex-1 flex-wrap items-center gap-1.5">
+      <input
+        type="search"
+        inputMode="numeric"
+        value={filters.query}
+        onChange={(e) => onChange({ ...filters, query: e.target.value })}
+        placeholder="Token ID"
+        aria-label="Search by token ID"
+        className="min-h-9 min-w-0 flex-1 rounded-md border border-gold-500/30 bg-wood-950 px-2.5 text-xs text-foreground placeholder:text-foreground/30 sm:max-w-[10rem]"
+      />
+      <input
+        type="text"
+        inputMode="decimal"
+        value={filters.minEth}
+        onChange={(e) => onChange({ ...filters, minEth: e.target.value })}
+        placeholder="Min Ξ"
+        aria-label="Minimum price in ETH"
+        className="min-h-9 w-[4.5rem] rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground placeholder:text-foreground/30"
+      />
+      <input
+        type="text"
+        inputMode="decimal"
+        value={filters.maxEth}
+        onChange={(e) => onChange({ ...filters, maxEth: e.target.value })}
+        placeholder="Max Ξ"
+        aria-label="Maximum price in ETH"
+        className="min-h-9 w-[4.5rem] rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground placeholder:text-foreground/30"
+      />
+      {dirty && (
+        <button
+          type="button"
+          onClick={() => onChange(EMPTY_FILTERS)}
+          className="min-h-9 rounded-md border border-gold-500/30 px-2.5 text-xs text-foreground/60 transition hover:border-gold-400"
+        >
+          Clear
+        </button>
+      )}
+      <span className="ml-auto whitespace-nowrap text-[0.65rem] text-foreground/45">
+        {resultCount} items
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Apply the filters to a list of orders.
+ *
+ * Price bounds are parsed leniently: an unparseable bound is treated as absent
+ * rather than as zero, so a half-typed "0." never silently hides every item.
+ */
+export function applyFilters<T extends { tokenId?: string; priceWei: string }>(
+  items: T[],
+  filters: MarketFilters
+): T[] {
+  const q = filters.query.trim();
+  const min = toWei(filters.minEth);
+  const max = toWei(filters.maxEth);
+
+  return items.filter((item) => {
+    if (q && !(item.tokenId ?? "").includes(q)) return false;
+    let price: bigint;
+    try {
+      price = BigInt(item.priceWei);
+    } catch {
+      return false;
+    }
+    if (min !== null && price < min) return false;
+    if (max !== null && price > max) return false;
+    return true;
+  });
+}
+
+function toWei(value: string): bigint | null {
+  const trimmed = value.trim();
+  if (!trimmed || !/^\d*\.?\d*$/.test(trimmed) || trimmed === ".") return null;
+  const [whole, frac = ""] = trimmed.split(".");
+  const padded = (frac + "0".repeat(18)).slice(0, 18);
+  try {
+    return BigInt(whole || "0") * BigInt("1000000000000000000") + BigInt(padded || "0");
+  } catch {
+    return null;
+  }
+}

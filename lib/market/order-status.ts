@@ -132,3 +132,59 @@ export async function getOrderLiveness(rawOrder: unknown): Promise<OrderLiveness
     return { known: false };
   }
 }
+
+/**
+ * Read-time liveness filter (audit finding 4).
+ *
+ * GET previously served every non-expired order, including ones cancelled,
+ * filled, or counter-invalidated on-chain — so users clicked listings that
+ * were guaranteed to revert and burned gas. This checks each order's on-chain
+ * status and drops the dead ones, with a short server-side cache so a busy
+ * book doesn't hammer the RPC on every request.
+ *
+ * Fail-open-for-DISPLAY on purpose: when the RPC can't confirm status
+ * (`known:false`) the order is KEPT, so an RPC outage does not blank the entire
+ * marketplace. This is the opposite tradeoff from removal/admission (which fail
+ * closed) and is safe because showing a possibly-dead order at worst wastes a
+ * click, whereas hiding the whole book breaks the product. A stale row is also
+ * bounded — the cache TTL forces a recheck within 30s.
+ */
+const LIVENESS_TTL_MS = 30_000;
+type LivenessCacheEntry = { dead: boolean; at: number };
+const livenessCache = new Map<string, LivenessCacheEntry>();
+const MAX_LIVENESS_CACHE = 10_000;
+
+function orderCacheKey(item: { id?: string }): string {
+  return typeof item.id === "string" ? item.id : "";
+}
+
+export async function filterLiveOrders<T extends { id?: string; rawOrder?: unknown }>(
+  items: T[]
+): Promise<T[]> {
+  const now = Date.now();
+  if (livenessCache.size > MAX_LIVENESS_CACHE) {
+    for (const [k, v] of livenessCache) {
+      if (now - v.at > LIVENESS_TTL_MS) livenessCache.delete(k);
+    }
+  }
+
+  const out: T[] = [];
+  for (const item of items) {
+    const key = orderCacheKey(item);
+    const cached = key ? livenessCache.get(key) : undefined;
+    if (cached && now - cached.at < LIVENESS_TTL_MS) {
+      if (!cached.dead) out.push(item);
+      continue;
+    }
+
+    const liveness = await getOrderLiveness(item.rawOrder);
+    if (liveness.known) {
+      if (key) livenessCache.set(key, { dead: liveness.dead, at: now });
+      if (!liveness.dead) out.push(item);
+    } else {
+      // Unknown — keep it (fail open for display) and do not cache the miss.
+      out.push(item);
+    }
+  }
+  return out;
+}

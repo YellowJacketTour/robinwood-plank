@@ -1,4 +1,13 @@
-import { CHAIN, CONTRACT_ADDRESS, PERMIT2_ADDRESS, UNIVERSAL_ROUTER_ADDRESS } from "@/lib/constants";
+import {
+  CHAIN,
+  CONTRACT_ADDRESS,
+  MARKET_OFFER_CURRENCY,
+  MARKET_VAULT_ADDRESS,
+  PERMIT2_ADDRESS,
+  SEAPORT_ADDRESS,
+  UNIVERSAL_ROUTER_ADDRESS,
+} from "@/lib/constants";
+import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 
 export type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
@@ -267,7 +276,7 @@ export type SendTxOpts = {
   maxFeePerGas?: string;
   maxPriorityFeePerGas?: string;
   gasPrice?: string;
-  kind?: "swap" | "approve";
+  kind?: "swap" | "approve" | "market" | "vault";
 };
 
 /**
@@ -321,7 +330,25 @@ const APPROVE_SPENDERS = new Set([
   CONTRACT_ADDRESS.toLowerCase(),
 ]);
 
-function assertSafeSwapDestination(to: string, kind: string) {
+/**
+ * Marketplank sends: Seaport itself (fulfill/cancel), the WETH offer currency
+ * (approve/revoke), and each allowlisted collection contract (setApprovalForAll
+ * / approve / revoke live ON the NFT contract, so it is the tx `to`).
+ */
+const MARKET_DESTINATIONS = new Set([
+  SEAPORT_ADDRESS.toLowerCase(),
+  MARKET_OFFER_CURRENCY.toLowerCase(),
+  ...MARKET_COLLECTIONS.map((c) => c.contractAddress.toLowerCase()),
+]);
+
+/** Vault sends: the vault itself, plus collection contracts for the deposit approval. */
+function vaultDestinations(): Set<string> {
+  const set = new Set(MARKET_COLLECTIONS.map((c) => c.contractAddress.toLowerCase()));
+  if (MARKET_VAULT_ADDRESS) set.add(MARKET_VAULT_ADDRESS.toLowerCase());
+  return set;
+}
+
+export function assertSafeSwapDestination(to: string, kind: string) {
   if (kind === "swap") {
     if (to.toLowerCase() !== UNIVERSAL_ROUTER_ADDRESS.toLowerCase()) {
       throw new Error(
@@ -330,11 +357,35 @@ function assertSafeSwapDestination(to: string, kind: string) {
     }
     return;
   }
-  if (kind === "approve" && !APPROVE_SPENDERS.has(to.toLowerCase())) {
-    throw new Error(
-      "Blocked unsafe approval target. Approvals only go to Permit2 or the $PLANK contract."
-    );
+  if (kind === "approve") {
+    if (!APPROVE_SPENDERS.has(to.toLowerCase())) {
+      throw new Error(
+        "Blocked unsafe approval target. Approvals only go to Permit2 or the $PLANK contract."
+      );
+    }
+    return;
   }
+  if (kind === "market") {
+    if (!MARKET_DESTINATIONS.has(to.toLowerCase())) {
+      throw new Error(
+        "Blocked unsafe marketplace target. Market transactions only go to Seaport, the offer currency, or an allowlisted collection."
+      );
+    }
+    return;
+  }
+  if (kind === "vault") {
+    if (!MARKET_VAULT_ADDRESS) {
+      throw new Error("No liquidity vault deployed — vault transactions are disabled.");
+    }
+    if (!vaultDestinations().has(to.toLowerCase())) {
+      throw new Error(
+        "Blocked unsafe vault target. Vault transactions only go to the configured vault or an allowlisted collection."
+      );
+    }
+    return;
+  }
+  // Unknown kind: fail closed rather than let an unclassified send through.
+  throw new Error(`Blocked transaction of unknown kind "${kind}".`);
 }
 
 /**
@@ -379,9 +430,11 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
     }
   }
 
-  // --- Swaps: must simulate successfully before wallet popup ---
+  // --- Swaps AND market/vault sends: must simulate successfully before the
+  // wallet popup. Only bare `approve` skips the hard-fail (a failed approve
+  // estimate falls back to the gas floor). ---
   let gasLimit = parseQuantity(tx.gasLimit ?? tx.gas);
-  if (kind === "swap") {
+  if (kind !== "approve") {
     const sim = await simulateTransaction({
       to: base.to,
       from: base.from,
@@ -407,7 +460,10 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
     }
   }
 
-  const floor = kind === "approve" ? MIN_APPROVE_GAS : MIN_SWAP_GAS;
+  // Swap keeps its hard 650k floor (UR OOG-revert history). Market/vault txs
+  // are sized by their own hard-fail simulation above, so they take the
+  // smaller floor like approvals do.
+  const floor = kind === "swap" ? MIN_SWAP_GAS : MIN_APPROVE_GAS;
   if (!gasLimit || gasLimit < floor) gasLimit = floor;
   if (gasLimit > BigInt(3_000_000)) gasLimit = BigInt(3_000_000);
 

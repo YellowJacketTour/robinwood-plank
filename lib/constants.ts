@@ -16,7 +16,11 @@ export const CHAIN = {
   blockExplorers: {
     default: {
       name: "Robinhood Chain Explorer",
-      url: "https://explorer.mainnet.chain.robinhood.com",
+      // Verified 2026-07-27: https://explorer.mainnet.chain.robinhood.com is a
+      // 3xx redirect to this Blockscout host. wallet_addEthereumChain seeds
+      // this URL permanently into users' wallets, so store the canonical
+      // final host, not a redirect that can rot.
+      url: "https://robinhoodchain.blockscout.com",
     },
   },
   /** Uniswap app chain slug used in custom interface links. */
@@ -39,7 +43,7 @@ export const UNIVERSAL_ROUTER_ADDRESS =
  * deploys it to (deterministic CREATE2 deployment). Sell approvals may only
  * target this address or the $PLANK contract itself — nothing else.
  */
-export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA" as const;
+export const PERMIT2_ADDRESS = "0x000000000022D473030F116dDEE9F6B43aC78BA3" as const;
 
 /** ETH (wei) buyers must keep free for gas after the buy amount. */
 export const BUY_GAS_RESERVE_WEI = BigInt("4000000000000000"); // 0.004 ETH
@@ -161,21 +165,36 @@ export const MARKET_ENABLED =
  * on 2026-07-27 — no deploy needed, this is an integration, not a fork.
  * @see https://github.com/ProjectOpenSea/seaport/blob/main/docs/Deployment.md
  */
-export const SEAPORT_ADDRESS =
-  process.env.NEXT_PUBLIC_SEAPORT_ADDRESS?.trim() ||
-  "0x0000000000000068F116a894984e2DB1123eB395";
+// HARD-CODED ON PURPOSE (audit 2026-07-27): this was previously overridable
+// via NEXT_PUBLIC_SEAPORT_ADDRESS, which meant one wrong env var silently
+// repointed every order + every approval at an arbitrary contract. The
+// canonical CREATE2 address never changes per-chain, so there is no
+// legitimate reason for it to be configurable.
+export const SEAPORT_ADDRESS = "0x0000000000000068F116a894984e2DB1123eB395";
 
 /**
  * Seaport's ConduitController — same deterministic-deployment story as
  * Seaport itself. Confirmed live and verified on Robinhood Chain alongside it.
  */
-export const CONDUIT_CONTROLLER_ADDRESS =
-  process.env.NEXT_PUBLIC_CONDUIT_CONTROLLER_ADDRESS?.trim() ||
-  "0x00000000F9490004C11Cef243f5400493c00Ad63";
+// Hard-coded for the same reason as SEAPORT_ADDRESS above.
+export const CONDUIT_CONTROLLER_ADDRESS = "0x00000000F9490004C11Cef243f5400493c00Ad63";
 
-/** NFTX-style vault/AMM contract for the RobinWood collection — unset until deployed. */
-export const MARKET_VAULT_ADDRESS: string | null =
-  process.env.NEXT_PUBLIC_MARKET_VAULT_ADDRESS?.trim() || null;
+/**
+ * NFTX-style vault/AMM contract for the RobinWood collection — unset until
+ * deployed. This one MUST stay env-configurable (it is a real deploy output),
+ * but a malformed value fails closed at module load instead of silently
+ * pointing every vault call at garbage.
+ */
+export const MARKET_VAULT_ADDRESS: string | null = (() => {
+  const raw = process.env.NEXT_PUBLIC_MARKET_VAULT_ADDRESS?.trim();
+  if (!raw) return null;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) {
+    throw new Error(
+      `NEXT_PUBLIC_MARKET_VAULT_ADDRESS is set but is not a valid 20-byte address: "${raw}"`
+    );
+  }
+  return raw;
+})();
 
 /** Seaport protocol version Marketplank targets. */
 export const SEAPORT_VERSION = "1.6";
@@ -199,15 +218,6 @@ export const MARKET_DEFAULT_FEE_BPS = 50; // 0.5%
 export const MARKET_FEE_RECIPIENT = "0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8";
 
 /**
- * ETH the fee treasury should hold before the Phase 2 vault is deployed and
- * seeded from it — sized so a ~0.5 ETH trade moves the pool price under
- * ~5% (constant-product AMMs move price roughly trade-size ÷ reserve-size,
- * so a 15-20x reserve keeps typical trades from swinging price hard).
- * Adjust freely; this is a starting estimate, not a hard-coded protocol rule.
- */
-export const MARKET_VAULT_SEED_TARGET_ETH = 7.5;
-
-/**
  * WETH on Robinhood Chain — the currency all offers/bids are denominated in.
  *
  * Seaport cannot pull native ETH from an offerer at fulfillment time, so a bid
@@ -221,3 +231,33 @@ export const MARKET_VAULT_SEED_TARGET_ETH = 7.5;
  * never be resolved by symbol lookup or off-chain search.
  */
 export const MARKET_OFFER_CURRENCY = "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73";
+
+/**
+ * STARTUP ASSERTION (audit 2026-07-27, AUDIT-1): PERMIT2_ADDRESS shipped with
+ * a truncated 39-hex-char literal, which made the swap approval allowlist
+ * unmatchable and killed every $PLANK sell. TypeScript cannot catch a
+ * one-character-short address string, so every exported address constant is
+ * shape-checked once at module load. Throwing here fails the build / first
+ * render loudly instead of failing silently at the wallet boundary.
+ */
+export const EXPORTED_ADDRESS_CONSTANTS: Readonly<Record<string, string>> =
+  Object.freeze({
+    CONTRACT_ADDRESS,
+    NATIVE_TOKEN_ADDRESS,
+    UNIVERSAL_ROUTER_ADDRESS,
+    PERMIT2_ADDRESS,
+    "SITE_FEE.recipient": SITE_FEE.recipient,
+    SEAPORT_ADDRESS,
+    CONDUIT_CONTROLLER_ADDRESS,
+    MARKET_FEE_RECIPIENT,
+    MARKET_OFFER_CURRENCY,
+    ...(MARKET_VAULT_ADDRESS ? { MARKET_VAULT_ADDRESS } : {}),
+  });
+
+for (const [name, value] of Object.entries(EXPORTED_ADDRESS_CONSTANTS)) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(value)) {
+    throw new Error(
+      `Address constant ${name} is malformed ("${value}", ${value.length} chars) — refusing to start with a broken address allowlist.`
+    );
+  }
+}

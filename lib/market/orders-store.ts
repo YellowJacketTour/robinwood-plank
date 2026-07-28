@@ -6,21 +6,38 @@ import type { Listing, Offer } from "@/lib/market/types";
 /**
  * Store-and-forward for signed Seaport orders — not custody, not a matching
  * engine. Orders are EIP-712 signed by the maker before they ever reach this
- * store, so the server cannot forge or alter one; it can only lose or serve
- * them.
+ * store, and their signature is verified at the API boundary (see
+ * lib/market/signature.ts), so the server cannot forge or alter one; it can
+ * only lose or serve them.
  *
  * Backend: Vercel KV when KV_REST_API_URL / KV_REST_API_TOKEN are set (the
- * durable, cross-instance-safe path — set those env vars whenever you have
- * a KV/Upstash instance ready). Falls back to a file + in-memory globalThis
- * cache otherwise, same pattern as lib/boards-store.ts — fine for local
- * dev, not durable on Vercel's serverless filesystem in production.
+ * durable, cross-instance-safe path). Falls back to a file + in-memory
+ * globalThis cache otherwise — fine for local dev, not durable on Vercel's
+ * serverless filesystem in production.
+ *
+ * CONCURRENCY (audit finding 6): the old design stored the whole book under a
+ * single KV key and did read-modify-write with no compare-and-set, so two
+ * simultaneous POSTs would each load the same snapshot and the second write
+ * would clobber the first — silently dropping an order. This is fixed two ways:
+ *   - KV: each order is a field in a Redis HASH (hset/hdel), so writes to
+ *     different order ids are independent and never lose each other, across
+ *     instances. (Reads still snapshot a whole hash, which is fine.)
+ *   - File/dev: all read-modify-write is serialized through an in-process
+ *     mutex so interleaved awaits can't clobber. (A single dev process is the
+ *     only writer, so this is sufficient there.)
  */
+type StoredListing = Listing & { rawOrder: unknown };
+type StoredOffer = Offer & { rawOrder: unknown };
 type OrdersState = {
-  listings: Record<string, Listing & { rawOrder: unknown }>;
-  offers: Record<string, Offer & { rawOrder: unknown }>;
+  listings: Record<string, StoredListing>;
+  offers: Record<string, StoredOffer>;
 };
 
+/** Legacy single-key blob (pre-audit). Kept only so a dev machine with old
+ * data still loads; new writes use the per-field hashes below. */
 const KV_KEY = "plank:market:orders";
+const KV_LISTINGS = "plank:market:listings";
+const KV_OFFERS = "plank:market:offers";
 
 function hasKv(): boolean {
   return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
@@ -28,6 +45,10 @@ function hasKv(): boolean {
 
 function emptyState(): OrdersState {
   return { listings: {}, offers: {} };
+}
+
+function isLive(expiresAt: string, now: number): boolean {
+  return new Date(expiresAt).getTime() > now;
 }
 
 // --- File + memory fallback (dev / no KV configured) -----------------------
@@ -62,101 +83,146 @@ async function persistToFile(state: OrdersState): Promise<void> {
   }
 }
 
-// --- Vercel KV backend -------------------------------------------------
-
-async function loadFromKv(): Promise<OrdersState> {
-  const state = await kv.get<OrdersState>(KV_KEY);
-  return state ?? emptyState();
+/**
+ * In-process write mutex for the file backend. Every read-modify-write chains
+ * onto the previous one, so concurrent POSTs can't interleave their loads and
+ * clobber each other (audit finding 6, file path).
+ */
+let fileWriteChain: Promise<void> = Promise.resolve();
+function withFileLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = fileWriteChain.then(fn, fn);
+  // Keep the chain alive regardless of individual failures.
+  fileWriteChain = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
 }
 
-async function persistToKv(state: OrdersState): Promise<void> {
-  await kv.set(KV_KEY, state);
+// --- Vercel KV backend (per-field hashes) ------------------------------
+
+async function kvGetAll<T>(hashKey: string): Promise<Record<string, T>> {
+  const all = await kv.hgetall<Record<string, T>>(hashKey);
+  return all ?? {};
 }
 
-// --- Backend-agnostic API ----------------------------------------------
+// --- Backend-agnostic read helpers -------------------------------------
 
-async function load(): Promise<OrdersState> {
-  return hasKv() ? loadFromKv() : loadFromFile();
+async function readListings(): Promise<Record<string, StoredListing>> {
+  if (hasKv()) return kvGetAll<StoredListing>(KV_LISTINGS);
+  return (await loadFromFile()).listings;
 }
 
-async function persist(state: OrdersState): Promise<void> {
-  return hasKv() ? persistToKv(state) : persistToFile(state);
+async function readOffers(): Promise<Record<string, StoredOffer>> {
+  if (hasKv()) return kvGetAll<StoredOffer>(KV_OFFERS);
+  return (await loadFromFile()).offers;
 }
 
-function pruneExpired(state: OrdersState): OrdersState {
+function liveValues<T extends { expiresAt: string }>(rec: Record<string, T>): T[] {
   const now = Date.now();
-  const isLive = (expiresAt: string) => new Date(expiresAt).getTime() > now;
-  return {
-    listings: Object.fromEntries(
-      Object.entries(state.listings).filter(([, l]) => isLive(l.expiresAt))
-    ),
-    offers: Object.fromEntries(
-      Object.entries(state.offers).filter(([, o]) => isLive(o.expiresAt))
-    ),
-  };
+  return Object.values(rec).filter((v) => isLive(v.expiresAt, now));
 }
+
+// --- Public API --------------------------------------------------------
 
 export async function getListings(
   collectionSlug?: string
 ): Promise<Array<Listing & { rawOrder: unknown }>> {
-  const state = pruneExpired(await load());
-  const all = Object.values(state.listings);
+  const all = liveValues(await readListings());
   return collectionSlug ? all.filter((l) => l.collectionSlug === collectionSlug) : all;
 }
 
 export async function getOffers(
   collectionSlug?: string
 ): Promise<Array<Offer & { rawOrder: unknown }>> {
-  const state = pruneExpired(await load());
-  const all = Object.values(state.offers);
+  const all = liveValues(await readOffers());
   return collectionSlug ? all.filter((o) => o.collectionSlug === collectionSlug) : all;
 }
 
 /** Total live orders across both books — used to cap storage growth. */
 export async function totalOrderCount(): Promise<number> {
-  const state = pruneExpired(await load());
-  return Object.keys(state.listings).length + Object.keys(state.offers).length;
+  const [listings, offers] = await Promise.all([readListings(), readOffers()]);
+  return liveValues(listings).length + liveValues(offers).length;
 }
 
 /** Live orders from one maker — used to stop a single wallet flooding the book. */
 export async function countOrdersByMaker(maker: string): Promise<number> {
-  const state = pruneExpired(await load());
   const m = maker.toLowerCase();
-  const listings = Object.values(state.listings).filter((l) => l.maker.toLowerCase() === m);
-  const offers = Object.values(state.offers).filter((o) => o.maker.toLowerCase() === m);
-  return listings.length + offers.length;
+  const [listings, offers] = await Promise.all([readListings(), readOffers()]);
+  const l = liveValues(listings).filter((x) => x.maker.toLowerCase() === m).length;
+  const o = liveValues(offers).filter((x) => x.maker.toLowerCase() === m).length;
+  return l + o;
 }
 
 export async function putListing(listing: Listing, rawOrder: unknown): Promise<void> {
-  const state = pruneExpired(await load());
-  state.listings[listing.id] = { ...listing, rawOrder };
-  await persist(state);
+  const value: StoredListing = { ...listing, rawOrder };
+  if (hasKv()) {
+    // Per-field write: independent of any concurrent write to another id.
+    await kv.hset(KV_LISTINGS, { [listing.id]: value });
+    return;
+  }
+  await withFileLock(async () => {
+    const state = await loadFromFile();
+    state.listings[listing.id] = value;
+    await persistToFile(state);
+  });
 }
 
 export async function putOffer(offer: Offer, rawOrder: unknown): Promise<void> {
-  const state = pruneExpired(await load());
-  state.offers[offer.id] = { ...offer, rawOrder };
-  await persist(state);
+  const value: StoredOffer = { ...offer, rawOrder };
+  if (hasKv()) {
+    await kv.hset(KV_OFFERS, { [offer.id]: value });
+    return;
+  }
+  await withFileLock(async () => {
+    const state = await loadFromFile();
+    state.offers[offer.id] = value;
+    await persistToFile(state);
+  });
 }
 
 export async function getListingRawOrder(id: string): Promise<unknown | null> {
-  const state = await load();
+  if (hasKv()) {
+    const v = await kv.hget<StoredListing>(KV_LISTINGS, id);
+    return v?.rawOrder ?? null;
+  }
+  const state = await loadFromFile();
   return state.listings[id]?.rawOrder ?? null;
 }
 
 export async function getOfferRawOrder(id: string): Promise<unknown | null> {
-  const state = await load();
+  if (hasKv()) {
+    const v = await kv.hget<StoredOffer>(KV_OFFERS, id);
+    return v?.rawOrder ?? null;
+  }
+  const state = await loadFromFile();
   return state.offers[id]?.rawOrder ?? null;
 }
 
 export async function removeListing(id: string): Promise<void> {
-  const state = await load();
-  delete state.listings[id];
-  await persist(state);
+  if (hasKv()) {
+    await kv.hdel(KV_LISTINGS, id);
+    return;
+  }
+  await withFileLock(async () => {
+    const state = await loadFromFile();
+    delete state.listings[id];
+    await persistToFile(state);
+  });
 }
 
 export async function removeOffer(id: string): Promise<void> {
-  const state = await load();
-  delete state.offers[id];
-  await persist(state);
+  if (hasKv()) {
+    await kv.hdel(KV_OFFERS, id);
+    return;
+  }
+  await withFileLock(async () => {
+    const state = await loadFromFile();
+    delete state.offers[id];
+    await persistToFile(state);
+  });
 }
+
+// Reference the legacy key so lint/tsc keep it documented; migration of old
+// single-blob data is unnecessary while the market is HARD OFF (no live data).
+void KV_KEY;

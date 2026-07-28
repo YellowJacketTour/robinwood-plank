@@ -1,6 +1,6 @@
 /** Shared shapes for Marketplank. See docs/marketplank/SPEC.md. */
 
-export type MarketTab = "buy-sell" | "offers" | "swap" | "positions";
+export type MarketTab = "buy-sell" | "offers" | "activity" | "swap" | "positions";
 
 export type CollectionTrustBadge = "lp-burned" | "ownership-renounced" | "verified";
 
@@ -9,7 +9,11 @@ export type MarketCollection = {
   slug: string;
   name: string;
   contractAddress: string;
-  /** ERC-721 or ERC-1155 — Seaport supports both, vault/AMM (Phase 2) is 721-only for now. */
+  /**
+   * ERC-721 or ERC-1155 — Seaport supports both, but the order validator
+   * currently REJECTS ERC-1155 collections outright (no audited quantity
+   * model; see order-validation.ts). Vault/AMM (Phase 2) is 721-only too.
+   */
   tokenStandard: "ERC721" | "ERC1155";
   image: string;
   trustBadges: CollectionTrustBadge[];

@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import { deployBeaconMock, relayPendingRound } from "./helpers/beacon";
 
 /**
  * Test suite for contracts/MarketplankVault.sol — UNAUDITED contract, see its
@@ -22,6 +23,7 @@ describe("MarketplankVault", () => {
     const Nft = await ethers.getContractFactory("MockRobinWoodNft");
     const nft: any = await Nft.deploy();
 
+    const beacon: any = await deployBeaconMock();
     const Vault = await ethers.getContractFactory("MarketplankVault");
     const vault: any = await Vault.deploy(
       await nft.getAddress(),
@@ -30,10 +32,11 @@ describe("MarketplankVault", () => {
       MINT_FEE_BPS,
       REDEEM_FEE_BPS,
       TARGET_PREMIUM_BPS,
-      feeRecipient.address
+      feeRecipient.address,
+      await beacon.getAddress()
     );
 
-    return { deployer, feeRecipient, alice, bob, nft, vault };
+    return { deployer, feeRecipient, alice, bob, nft, vault, beacon };
   }
 
   async function mintTo(nft: any, to: HardhatEthersSigner, tokenId: number) {
@@ -44,19 +47,35 @@ describe("MarketplankVault", () => {
     const [, feeRecipient] = await ethers.getSigners();
     const Nft = await ethers.getContractFactory("MockRobinWoodNft");
     const nft = await Nft.deploy();
+    const beaconAddr = await (await deployBeaconMock()).getAddress();
     const Vault = await ethers.getContractFactory("MarketplankVault");
 
     await expect(
-      Vault.deploy(await nft.getAddress(), "V", "V", 1_001n, 0n, 0n, feeRecipient.address)
+      Vault.deploy(await nft.getAddress(), "V", "V", 1_001n, 0n, 0n, feeRecipient.address, beaconAddr)
     ).to.be.revertedWithCustomError(Vault, "FeeTooHigh");
 
     await expect(
-      Vault.deploy(await nft.getAddress(), "V", "V", 0n, 1_001n, 0n, feeRecipient.address)
+      Vault.deploy(await nft.getAddress(), "V", "V", 0n, 1_001n, 0n, feeRecipient.address, beaconAddr)
     ).to.be.revertedWithCustomError(Vault, "FeeTooHigh");
 
     await expect(
-      Vault.deploy(await nft.getAddress(), "V", "V", 0n, 0n, 2_001n, feeRecipient.address)
+      Vault.deploy(await nft.getAddress(), "V", "V", 0n, 0n, 2_001n, feeRecipient.address, beaconAddr)
     ).to.be.revertedWithCustomError(Vault, "FeeTooHigh");
+
+    // A vault with no randomness beacon would burn shares for redemptions it
+    // could never settle. Fail closed at construction.
+    await expect(
+      Vault.deploy(
+        await nft.getAddress(),
+        "V",
+        "V",
+        0n,
+        0n,
+        0n,
+        feeRecipient.address,
+        ethers.ZeroAddress
+      )
+    ).to.be.revertedWithCustomError(Vault, "InvalidBeacon");
   });
 
   it("deposit: mints shares to the depositor and fee to the treasury", async () => {
@@ -76,7 +95,7 @@ describe("MarketplankVault", () => {
   });
 
   it("random redeem: commits shares up front, delivers on claim", async () => {
-    const { alice, nft, vault } = await deployFixture();
+    const { alice, nft, vault, beacon } = await deployFixture();
     await mintTo(nft, alice, 1);
     await nft.connect(alice).approve(await vault.getAddress(), 1);
     await vault.connect(alice).deposit(1);
@@ -96,7 +115,7 @@ describe("MarketplankVault", () => {
     const redeemFee = (SHARE_UNIT * REDEEM_FEE_BPS) / 10_000n;
     expect(before - after).to.equal(SHARE_UNIT + redeemFee);
 
-    await ethers.provider.send("evm_mine", []);
+    await relayPendingRound(vault, beacon);
     await vault.connect(alice).claimRandomRedeem();
 
     expect(
@@ -135,6 +154,8 @@ describe("MarketplankVault", () => {
     // side (only the treasury may — see the audit regression suite).
     await vault.connect(alice).transfer(await vault.getAddress(), SHARE_UNIT / 4n);
     await vault.connect(feeRecipient).seedLiquidity({ value: ethers.parseEther("1") });
+    // Trading is closed until the treasury explicitly opens the pool.
+    await vault.connect(feeRecipient).openPool();
 
     const buyTx = await vault.connect(bob).buyShares(0, { value: ethers.parseEther("0.1") });
     await expect(buyTx).to.emit(vault, "Bought");
@@ -148,9 +169,10 @@ describe("MarketplankVault", () => {
   it("buyShares reverts below minSharesOut (slippage protection)", async () => {
     const { bob, feeRecipient, vault } = await deployFixture();
     await vault.connect(feeRecipient).seedLiquidity({ value: ethers.parseEther("1") });
-    // No share reserve seeded — buying should revert as an empty vault.
+    // No share reserve seeded, so the pool cannot even be opened yet — the
+    // PoolNotOpen gate fires first and buying reverts.
     await expect(
       vault.connect(bob).buyShares(1n, { value: ethers.parseEther("0.1") })
-    ).to.be.revertedWithCustomError(vault, "EmptyVault");
+    ).to.be.revertedWithCustomError(vault, "PoolNotOpen");
   });
 });

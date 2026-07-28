@@ -12,15 +12,46 @@ import MyPositions from "@/components/market/MyPositions";
 import TreasuryDashboard from "@/components/market/TreasuryDashboard";
 import CollectionStats from "@/components/market/CollectionStats";
 import BuyConfirm from "@/components/market/BuyConfirm";
+import SweepConfirm from "@/components/market/SweepConfirm";
+import SweepFloorboards from "@/components/market/SweepFloorboards";
 import ListingSkeleton from "@/components/market/ListingSkeleton";
+import ActivityFeed from "@/components/market/ActivityFeed";
+import ItemDetail from "@/components/market/ItemDetail";
+import WalletChip from "@/components/market/WalletChip";
+import FilterBar, { applyFilters, EMPTY_FILTERS } from "@/components/market/FilterBar";
+import type { MarketFilters } from "@/components/market/FilterBar";
 import { getOwnedTokenIds } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
-import { fulfillOrder } from "@/lib/market/seaport";
-import { validateListingOrder } from "@/lib/market/order-validation";
+import { assertAcceptableOffer, fulfillOrder, sweepFloor } from "@/lib/market/seaport";
+import type { SweepPlan } from "@/lib/market/sweep";
+import { validateListingOrder, validateOfferOrder } from "@/lib/market/order-validation";
 import { connectWallet, ensureRobinhoodChain, getConnectedAccounts } from "@/lib/wallet";
+import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
+import { formatTokenAmount } from "@/lib/trade";
 import type { Listing, MarketTab } from "@/lib/market/types";
 
 const COLLECTION = MARKET_COLLECTIONS[0];
+
+const VALID_TABS: MarketTab[] = ["buy-sell", "offers", "activity", "swap", "positions"];
+
+function isTab(value: string | null): value is MarketTab {
+  return value !== null && (VALID_TABS as string[]).includes(value);
+}
+
+/**
+ * Mirror the view into the URL so a tab or an item can be linked and shared.
+ * Read in an effect rather than during render: the server has no location, and
+ * seeding state from it directly would hydrate mismatched markup.
+ */
+function readUrlState(): { tab: MarketTab | null; item: string | null } {
+  const params = new URLSearchParams(window.location.search);
+  const tab = params.get("tab");
+  const item = params.get("item");
+  return {
+    tab: isTab(tab) ? tab : null,
+    item: item && /^\d{1,5}$/.test(item) ? item : null,
+  };
+}
 
 /** RobinWood's fixed supply — shown as "Items" in the stats strip. */
 const TOTAL_SUPPLY = 1542;
@@ -54,6 +85,8 @@ function sortListings<T extends Listing>(items: T[], key: SortKey): T[] {
 
 export default function MarketView() {
   const [tab, setTab] = useState<MarketTab>("buy-sell");
+  const [filters, setFilters] = useState<MarketFilters>(EMPTY_FILTERS);
+  const [detailTokenId, setDetailTokenId] = useState<string | null>(null);
   const [account, setAccount] = useState<string | null>(null);
   const [listings, setListings] = useState<Array<WithOrder<Listing>>>([]);
   const [offers, setOffers] = useState<Array<WithOrder<Listing>>>([]);
@@ -63,6 +96,15 @@ export default function MarketView() {
     listing: WithOrder<Listing>;
     verifiedPriceWei: string;
   } | null>(null);
+  const [acceptTarget, setAcceptTarget] = useState<{
+    offer: WithOrder<Listing>;
+    /** Seller NET proceeds in WETH wei, re-derived from the signed order. */
+    verifiedNetWei: string;
+    tokenId: string;
+  } | null>(null);
+  const [accepting, setAccepting] = useState(false);
+  const [sweepTarget, setSweepTarget] = useState<SweepPlan | null>(null);
+  const [sweeping, setSweeping] = useState(false);
   const [sort, setSort] = useState<SortKey>("price-asc");
   const [loading, setLoading] = useState(true);
   const [ownedTokenIds, setOwnedTokenIds] = useState<Set<string> | undefined>(undefined);
@@ -91,6 +133,51 @@ export default function MarketView() {
       if (accounts[0]) setAccount(accounts[0]);
     });
   }, [refresh]);
+
+  // Adopt the URL on load, and keep following it through Back/Forward.
+  useEffect(() => {
+    const sync = () => {
+      const { tab: urlTab, item } = readUrlState();
+      setTab(urlTab ?? "buy-sell");
+      setDetailTokenId(item);
+    };
+    sync();
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+
+  /** Single writer for the URL, so tab and item can never disagree with it. */
+  const writeUrl = useCallback((nextTab: MarketTab, nextItem: string | null) => {
+    const params = new URLSearchParams(window.location.search);
+    if (nextTab === "buy-sell") params.delete("tab");
+    else params.set("tab", nextTab);
+    if (nextItem) params.set("item", nextItem);
+    else params.delete("item");
+    const query = params.toString();
+    window.history.pushState(null, "", query ? `?${query}` : window.location.pathname);
+  }, []);
+
+  const selectTab = useCallback(
+    (next: MarketTab) => {
+      setTab(next);
+      setDetailTokenId(null);
+      writeUrl(next, null);
+    },
+    [writeUrl]
+  );
+
+  const openDetail = useCallback(
+    (tokenId: string) => {
+      setDetailTokenId(tokenId);
+      writeUrl(tab, tokenId);
+    },
+    [tab, writeUrl]
+  );
+
+  const closeDetail = useCallback(() => {
+    setDetailTokenId(null);
+    writeUrl(tab, null);
+  }, [tab, writeUrl]);
 
   // Which planks this wallet holds — decides which incoming bids it can fill.
   useEffect(() => {
@@ -170,6 +257,40 @@ export default function MarketView() {
     }
   }, [buyTarget, account, refresh]);
 
+  /**
+   * Opens the sweep checkout. The plan arrives already validated (planSweep
+   * re-derived every order in this browser); the same derivation runs once
+   * more inside sweepFloor at send time. Nothing reaches the wallet from here.
+   */
+  const handleSweep = useCallback(
+    async (plan: SweepPlan) => {
+      setError(null);
+      const who = await requireAccount();
+      if (!who) return;
+      if (plan.items.length === 0) return;
+      setSweepTarget(plan);
+    },
+    [requireAccount]
+  );
+
+  const confirmSweep = useCallback(async () => {
+    if (!sweepTarget || !account || sweeping || !COLLECTION) return; // busy lock
+    setError(null);
+    try {
+      setSweeping(true);
+      setStatus("Confirm in wallet…");
+      await sweepFloor(sweepTarget.items, account, COLLECTION, sweepTarget.totalWei);
+      setSweepTarget(null);
+      setStatus("Sweep confirmed.");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sweep failed.");
+    } finally {
+      setSweeping(false);
+      setStatus(null);
+    }
+  }, [sweepTarget, account, sweeping, refresh]);
+
   const handleOffer = useCallback(
     async (listing: Listing) => {
       const who = await requireAccount();
@@ -179,26 +300,72 @@ export default function MarketView() {
     [requireAccount]
   );
 
+  /**
+   * Opens the accept-offer checkout. Mirrors handleBuy exactly: the order is
+   * re-derived and validated in THIS browser (validateOfferOrder), and the
+   * relay's claimed tokenId/price must match the signature-covered values —
+   * a compromised relay cannot show one offer and have the wallet approve /
+   * transfer against another. Nothing reaches the wallet from here.
+   */
   const handleAcceptOffer = useCallback(
     async (offer: Listing) => {
       setError(null);
       const who = await requireAccount();
       if (!who) return;
       try {
-        setStatus(`Accepting offer on #${offer.tokenId}…`);
         const full = offers.find((o) => o.id === offer.id);
         if (!full) throw new Error("Offer no longer available.");
-        await fulfillOrder(full.rawOrder as Parameters<typeof fulfillOrder>[0], who);
-        setStatus("Offer accepted.");
-        await refresh();
+        if (!COLLECTION) throw new Error("Unknown collection.");
+
+        const derived = validateOfferOrder(full.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY);
+        assertAcceptableOffer(full, derived);
+        // derived.priceWei is the seller's NET proceeds (order-validation
+        // OFFER semantics) — the number the seller must see before signing.
+        setAcceptTarget({
+          offer: full,
+          verifiedNetWei: derived.priceWei,
+          tokenId: derived.tokenId as string,
+        });
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Could not accept offer.");
-      } finally {
-        setStatus(null);
+        setError(e instanceof Error ? e.message : "Could not open this offer.");
       }
     },
-    [offers, refresh, requireAccount]
+    [offers, requireAccount]
   );
+
+  const confirmAcceptOffer = useCallback(async () => {
+    if (!acceptTarget || !account || accepting) return; // busy lock
+    setError(null);
+    try {
+      setAccepting(true);
+      setStatus(`Accepting offer on #${acceptTarget.tokenId}…`);
+      await fulfillOrder(
+        acceptTarget.offer.rawOrder as Parameters<typeof fulfillOrder>[0],
+        account
+      );
+      setAcceptTarget(null);
+      setStatus("Offer accepted.");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not accept offer.");
+    } finally {
+      setAccepting(false);
+      setStatus(null);
+    }
+  }, [acceptTarget, account, accepting, refresh]);
+
+  const visibleListings = applyFilters(listings, filters);
+  // Floor = cheapest live listing; every card at that exact price gets the badge.
+  const floorPriceWei =
+    listings.length > 0
+      ? listings.reduce(
+          (min, l) => (BigInt(l.priceWei) < BigInt(min) ? l.priceWei : min),
+          listings[0].priceWei
+        )
+      : undefined;
+  const detailListing = detailTokenId
+    ? listings.find((l) => l.tokenId === detailTokenId)
+    : undefined;
 
   return (
     <div className="space-y-5">
@@ -208,7 +375,8 @@ export default function MarketView() {
 
       <Reveal delayMs={40}>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <MarketNav active={tab} onChange={setTab} />
+          <MarketNav active={tab} onChange={selectTab} />
+          {account && <WalletChip account={account} />}
           {tab === "buy-sell" &&
             (account ? (
               <button
@@ -227,15 +395,11 @@ export default function MarketView() {
                 Connect
               </button>
             ))}
-          {tab === "offers" && account && (
-            <button
-              type="button"
-              onClick={() => setOfferTarget({})}
-              className="min-h-10 shrink-0 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
-            >
-              Offer any
-            </button>
-          )}
+          {/* "Offer any" (collection-wide bid) removed — FAIL CLOSED, audit
+              2026-07-27: the criteria order it produced was unfillable (no
+              considerationCriteria resolver was ever supplied at fulfillment),
+              so it only minted dead bids backed by a live WETH approval.
+              Re-enable only after the resolver path is wired and verified. */}
         </div>
       </Reveal>
 
@@ -274,6 +438,80 @@ export default function MarketView() {
         />
       )}
 
+      {acceptTarget && COLLECTION && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm accepting offer"
+        >
+          <div className="wood-ledger w-full max-w-sm space-y-3 p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-display text-lg text-gold-300">Accept offer</h3>
+              <button
+                type="button"
+                onClick={() => !accepting && setAcceptTarget(null)}
+                aria-label="Cancel"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-foreground/60 hover:text-gold-300"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-sm text-foreground">
+              You are selling {COLLECTION.name} #{acceptTarget.tokenId}.
+            </p>
+            <dl className="space-y-1 rounded-lg border border-gold-500/20 bg-wood-900/60 px-3 py-2 text-xs">
+              <div className="flex justify-between border-t border-gold-500/15 pt-1 first:border-t-0 first:pt-0">
+                <dt className="font-bold text-foreground">You receive (net)</dt>
+                <dd className="font-display tabular-nums text-gold-300">
+                  {formatTokenAmount(acceptTarget.verifiedNetWei, 18, 6)} WETH
+                </dd>
+              </div>
+            </dl>
+            <p className="text-center text-[0.6rem] text-foreground/40">
+              Amount verified against the buyer's signed order in this browser. Plus network gas.
+            </p>
+            <button
+              type="button"
+              disabled={accepting}
+              onClick={confirmAcceptOffer}
+              className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
+            >
+              {accepting ? "Confirm in wallet…" : "Accept offer"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {detailTokenId && COLLECTION && (
+        <ItemDetail
+          key={detailTokenId}
+          tokenId={detailTokenId}
+          collection={COLLECTION}
+          listing={detailListing}
+          onBuy={(l) => {
+            closeDetail();
+            void handleBuy(l);
+          }}
+          onOffer={(tokenId) => {
+            closeDetail();
+            void handleOffer({ tokenId } as Listing);
+          }}
+          onClose={closeDetail}
+        />
+      )}
+
+      {sweepTarget && COLLECTION && (
+        <SweepConfirm
+          items={sweepTarget.items}
+          collection={COLLECTION}
+          verifiedTotalWei={sweepTarget.totalWei}
+          busy={sweeping}
+          onConfirm={confirmSweep}
+          onCancel={() => setSweepTarget(null)}
+        />
+      )}
+
       {buyTarget && COLLECTION && (
         <BuyConfirm
           listing={buyTarget.listing}
@@ -296,10 +534,20 @@ export default function MarketView() {
                 totalSupply={TOTAL_SUPPLY}
               />
             )}
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[0.65rem] text-foreground/45">
-                {loading ? "Loading…" : `${listings.length} listed`}
-              </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <FilterBar
+                filters={filters}
+                onChange={setFilters}
+                resultCount={loading ? 0 : visibleListings.length}
+              />
+              {COLLECTION && !loading && (
+                <SweepFloorboards
+                  listings={listings}
+                  collection={COLLECTION}
+                  account={account}
+                  onSweep={(plan) => void handleSweep(plan)}
+                />
+              )}
               <label className="flex items-center gap-1.5">
                 <span className="sr-only">Sort listings</span>
                 <select
@@ -319,11 +567,17 @@ export default function MarketView() {
               <ListingSkeleton />
             ) : (
               <ListingGrid
-                listings={sortListings(listings, sort)}
+                listings={sortListings(visibleListings, sort)}
                 collections={MARKET_COLLECTIONS}
                 onBuy={handleBuy}
                 onOffer={handleOffer}
-                emptyMessage="No listings yet — be the first to sell."
+                onSelect={openDetail}
+                floorPriceWei={floorPriceWei}
+                emptyMessage={
+                  listings.length === 0
+                    ? "No listings yet — be the first to sell."
+                    : "No matches."
+                }
               />
             )}
           </div>
@@ -340,6 +594,7 @@ export default function MarketView() {
                 listings={sortListings(offers, sort === "price-asc" ? "price-desc" : sort)}
                 collections={MARKET_COLLECTIONS}
                 onBuy={handleAcceptOffer}
+                onSelect={openDetail}
                 buyLabel="Accept"
                 variant="offer"
                 ownedTokenIds={ownedTokenIds}
@@ -348,6 +603,7 @@ export default function MarketView() {
             )}
           </div>
         )}
+        {tab === "activity" && <ActivityFeed />}
         {tab === "swap" && (
           <div className="space-y-3">
             <TreasuryDashboard />

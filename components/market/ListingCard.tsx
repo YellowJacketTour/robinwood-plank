@@ -12,6 +12,10 @@ type Props = {
   variant?: "listing" | "offer";
   /** False disables the action when the viewer can't fill this order. */
   canFill?: boolean;
+  /** Opens the item detail view. Omit to leave the card inert. */
+  onSelect?: (tokenId: string) => void;
+  /** True marks this card as at the current floor price — the "Floorboard". */
+  isFloor?: boolean;
 };
 
 const TRUST_ICON: Record<string, string> = {
@@ -29,15 +33,37 @@ export default function ListingCard({
   buyLabel,
   variant = "listing",
   canFill = true,
+  onSelect,
+  isFloor = false,
 }: Props) {
   const isOffer = variant === "offer";
+  // Collection-wide bids have no token to open a detail view for.
+  const selectable = Boolean(onSelect && listing.tokenId);
   return (
     <li
       className={`dense-card flex flex-col overflow-hidden p-0 ${
         isOffer ? "border-emerald-500/40" : ""
       }`}
     >
-      <div className="relative aspect-square w-full bg-wood-900">
+      <div
+        className={`relative aspect-square w-full bg-wood-900 ${
+          selectable ? "cursor-pointer" : ""
+        }`}
+        role={selectable ? "button" : undefined}
+        tabIndex={selectable ? 0 : undefined}
+        aria-label={selectable ? `View #${listing.tokenId}` : undefined}
+        onClick={selectable ? () => onSelect!(listing.tokenId) : undefined}
+        onKeyDown={
+          selectable
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelect!(listing.tokenId);
+                }
+              }
+            : undefined
+        }
+      >
         <Image
           // The token's own art, not the collection logo — a grid of identical
           // logos reads as broken. Falls back only if resolution failed.
@@ -48,6 +74,14 @@ export default function ListingCard({
           className="object-cover"
           unoptimized={Boolean(listing.imageUrl)}
         />
+        {isFloor && (
+          <span
+            className="absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-gold-300"
+            title="Floorboard — cheapest listing"
+          >
+            Floor
+          </span>
+        )}
         {collection.trustBadges.length > 0 && (
           <span
             className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-[0.65rem] text-emerald-300"
