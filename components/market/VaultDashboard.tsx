@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { formatTokenAmount } from "@/lib/trade";
 import { formatUsd, weiToUsd } from "@/lib/eth-price";
@@ -33,7 +33,7 @@ export default function VaultDashboard() {
   const [held, setHeld] = useState<HeldToken[]>([]);
   const [heldLoading, setHeldLoading] = useState(true);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
-  const lastHeldCount = useRef<number | null>(null);
+  const heldTokenCount = stats?.heldTokenCount ?? null;
 
   useEffect(() => {
     void getRarityMap().then((map) => setRarity(map));
@@ -42,9 +42,13 @@ export default function VaultDashboard() {
   // Re-fetch held-token images only when membership actually changes — the
   // live stream ticks every few seconds, but re-resolving IPFS images that
   // often would be pure waste since the vault's inventory rarely turns over.
+  // Depending on the primitive count (not the whole `stats` object) matters:
+  // `stats` gets a new object reference on every tick even when the count
+  // is unchanged (ethUsd and other fields still move), which was re-running
+  // this effect every tick and cancelling the in-flight fetch before it
+  // ever resolved — a real, confirmed-live bug (held images never loaded).
   useEffect(() => {
-    if (stats == null || lastHeldCount.current === stats.heldTokenCount) return;
-    lastHeldCount.current = stats.heldTokenCount;
+    if (heldTokenCount == null) return;
     let cancelled = false;
     fetch("/api/market/vault/held")
       .then((r) => (r.ok ? r.json() : { tokens: [] }))
@@ -60,7 +64,7 @@ export default function VaultDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [stats]);
+  }, [heldTokenCount]);
 
   if (!stats) {
     return <p className="py-4 text-center text-xs text-foreground/45">Reading vault dashboard…</p>;
