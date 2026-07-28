@@ -244,14 +244,31 @@ async function resolveMarketplankAttribution(
  * Fails closed: any RPC error propagates rather than returning a short list
  * that would render as "no activity" and read as a dead marketplace.
  */
-export async function fetchActivity(limit = 40): Promise<ActivityEvent[]> {
+/**
+ * `full` raises the cap well past the ticker's default 40, for a real
+ * "full lineage" price chart — but NOT to true-unbounded. Unlike the
+ * vault's own trade log (a handful of events so far), this walks EVERY
+ * ERC-721 Transfer on the collection — 1,542 mints alone — and enriches
+ * each one with its own getTransaction() call to recover a sale price.
+ * Removing the cap entirely here would trade one performance complaint for
+ * a much worse one. 300 comfortably covers the collection's real sale
+ * history without that blowup; see app/api/market/activity/route.ts for
+ * the separate, longer-lived cache this variant gets.
+ */
+const FULL_LINEAGE_LIMIT = 300;
+
+export async function fetchActivity(
+  limit = 40,
+  opts?: { full?: boolean }
+): Promise<ActivityEvent[]> {
+  const effectiveLimit = opts?.full ? FULL_LINEAGE_LIMIT : limit;
   const provider = await firstHealthyProvider();
   const latest = await provider.getBlockNumber();
 
   const logs: RawLog[] = [];
   let toBlock = latest;
 
-  for (let chunk = 0; chunk < MAX_CHUNKS && logs.length < limit && toBlock > 0; chunk += 1) {
+  for (let chunk = 0; chunk < MAX_CHUNKS && logs.length < effectiveLimit && toBlock > 0; chunk += 1) {
     const fromBlock = Math.max(0, toBlock - CHUNK_BLOCKS);
     const found = (await provider.send("eth_getLogs", [
       {
@@ -272,7 +289,7 @@ export async function fetchActivity(limit = 40): Promise<ActivityEvent[]> {
   const transfers = logs
     .filter((log) => log.topics.length === 4)
     .sort((a, b) => Number(BigInt(b.blockNumber) - BigInt(a.blockNumber)))
-    .slice(0, limit);
+    .slice(0, effectiveLimit);
 
   const blockCache = new Map<string, number | null>();
   const txCache = new Map<string, { to: string | null; value: bigint } | null>();

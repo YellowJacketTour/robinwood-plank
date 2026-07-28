@@ -13,9 +13,13 @@ const TICK_MS = 4_000;
  * every open tab shares one server-side refresh cadence instead of each
  * triggering its own. */
 const REFRESH_MS = 10_000;
-/** Cap per-connection lifetime; client reconnects (EventSource does this
- * automatically, and lib/market/useVaultLive.ts also force-reconnects). */
-const MAX_STREAM_MS = 280_000;
+/** Cap per-connection lifetime, just under maxDuration's ceiling — Vercel
+ * Node serverless functions aren't guaranteed to sustain a stream past
+ * their configured maxDuration, so this proactively recycles the
+ * connection instead of risking the platform killing it mid-tick. The
+ * client (lib/market/useVaultLive.ts) reconnects quickly, so this cycle
+ * should be a brief, unnoticed blip, not a visible drop. */
+const MAX_STREAM_MS = 290_000;
 
 let cache: { at: number; stats: unknown; activity: unknown[] } | null = null;
 let inflight: Promise<void> | null = null;

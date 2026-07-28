@@ -45,6 +45,13 @@ const listeners = new Set<(s: VaultLiveState) => void>();
 let source: EventSource | null = null;
 let refCount = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+/** The server ticks every 4s but only actually refreshes chain data every
+ * 10s (see app/api/market/vault/stream/route.ts), so most ticks resend the
+ * identical payload — comparing the raw text before parsing/emitting skips
+ * those, which otherwise re-rendered every subscribed swap-tab component
+ * (VaultDashboard, VaultTradeHistory, LivingLiquidityViz) 2-3x more often
+ * than the underlying data actually changed. */
+let lastRaw: string | null = null;
 
 function emit() {
   listeners.forEach((l) => l(state));
@@ -56,8 +63,11 @@ function connect() {
   source = es;
 
   es.addEventListener("vault", (ev) => {
+    const raw = (ev as MessageEvent).data as string;
+    if (raw === lastRaw && state.connected) return;
+    lastRaw = raw;
     try {
-      const data = JSON.parse((ev as MessageEvent).data) as { stats: VaultStats; activity: VaultTradeEvent[] };
+      const data = JSON.parse(raw) as { stats: VaultStats; activity: VaultTradeEvent[] };
       state = { stats: data.stats, activity: data.activity, connected: true };
       // A trade this tab just submitted (see lib/market/pendingVaultTx.ts)
       // graduates out of "pending" the moment it shows up as a real event.
@@ -74,10 +84,14 @@ function connect() {
     state = { ...state, connected: false };
     emit();
     if (refCount > 0 && !reconnectTimer) {
+      // The connection cycles proactively every ~290s server-side (see
+      // app/api/market/vault/stream/route.ts's MAX_STREAM_MS) — that's the
+      // routine case, not a network failure, so reconnect fast enough that
+      // it reads as a brief blip rather than a visible "reconnecting" state.
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         if (refCount > 0) connect();
-      }, 4_000);
+      }, 1_500);
     }
   };
 }

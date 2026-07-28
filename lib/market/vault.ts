@@ -285,10 +285,18 @@ export async function requestRandomRedeem(
 }
 
 /** Step 2: claim once the target drand round has been relayed. */
-export async function claimRandomRedeem(accountAddress: string): Promise<string> {
+export async function claimRandomRedeem(
+  accountAddress: string,
+  onSubmitted?: (hash: string) => void
+): Promise<string> {
   const vault = await getVaultReader();
   await assertVaultWrapsOurCollection(vault);
-  return sendVaultTx(accountAddress, VAULT_IFACE.encodeFunctionData("claimRandomRedeem", []));
+  return sendVaultTx(
+    accountAddress,
+    VAULT_IFACE.encodeFunctionData("claimRandomRedeem", []),
+    undefined,
+    onSubmitted
+  );
 }
 
 /** The drand round the in-flight request waits on, and whether it has landed. */
@@ -296,6 +304,13 @@ export async function getPendingRound(): Promise<{ round: bigint; available: boo
   const vault = await getVaultReader();
   const [round, available] = (await vault.pendingRound()) as [bigint, boolean];
   return { round, available };
+}
+
+/** address(0) when nobody has an in-flight random redemption (there is only
+ * ever one vault-wide slot — see contracts/MarketplankVault.sol). */
+export async function getPendingRequester(): Promise<string> {
+  const vault = await getVaultReader();
+  return (await vault.pendingRequester()) as string;
 }
 
 export async function redeemTarget(
