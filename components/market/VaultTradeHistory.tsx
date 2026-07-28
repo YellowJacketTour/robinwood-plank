@@ -57,21 +57,29 @@ function timeAgo(iso: string | null) {
  * stream confirms the same tx hash.
  */
 export default function VaultTradeHistory() {
-  const { activity, connected } = useVaultLive();
+  // `live` (data-freshness) drives the badge, not `connected` (literal SSE
+  // socket state) — a routine ~1.5s reconnect used to flash "Reconnecting…"
+  // even though the data on screen was still perfectly current, which read
+  // as broken when nothing actually was. Both Activity and Instant Swap
+  // render their own instance of this component, but both read the exact
+  // same shared singleton (lib/market/useVaultLive.ts) — they can never
+  // actually show different data; the badge flicker was the only thing
+  // that ever made them look out of sync.
+  const { activity, live } = useVaultLive();
   const pending = usePendingVaultTx();
   const confirmedHashes = new Set(activity.map((e) => e.txHash));
   const visiblePending = pending.filter((p) => !confirmedHashes.has(p.txHash));
-  const loading = activity.length === 0 && !connected && visiblePending.length === 0;
+  const loading = activity.length === 0 && !live && visiblePending.length === 0;
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">Trades</p>
         <span
-          className={`flex items-center gap-1 text-[0.55rem] font-bold uppercase ${connected ? "text-emerald-300/70" : "text-foreground/30"}`}
+          className={`flex items-center gap-1 text-[0.55rem] font-bold uppercase ${live ? "text-emerald-300/70" : "text-foreground/30"}`}
         >
-          <span className={`h-1.5 w-1.5 rounded-full ${connected ? "animate-pulse bg-emerald-400" : "bg-foreground/30"}`} />
-          {connected ? "Live" : "Reconnecting…"}
+          <span className={`h-1.5 w-1.5 rounded-full ${live ? "animate-pulse bg-emerald-400" : "bg-foreground/30"}`} />
+          {live ? "Live" : "Reconnecting…"}
         </span>
       </div>
       {loading ? (
