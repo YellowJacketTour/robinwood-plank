@@ -98,6 +98,15 @@ function sortListings<T extends Listing>(items: T[], key: SortKey): T[] {
 
 export default function MarketView() {
   const [tab, setTab] = useState<MarketTab>("buy-sell");
+  // Each tab mounts the first time it's actually opened, then stays mounted
+  // (hidden, not removed) for the rest of the visit — switching back to an
+  // already-opened tab is then instant with no re-fetch. Mounting every tab
+  // up front instead was tried and reverted: it fires every tab's RPC-heavy
+  // requests simultaneously on first load, which measurably 429'd the
+  // public RPC and left several panels stuck on "Could not read vault
+  // state." A lazy-then-sticky mount gets the same instant-switch outcome
+  // without the request burst.
+  const [visitedTabs, setVisitedTabs] = useState<Set<MarketTab>>(() => new Set(["buy-sell"]));
   const [filters, setFilters] = useState<MarketFilters>(EMPTY_FILTERS);
   const [rarityMap, setRarityMap] = useState<Map<string, RarityLookup>>(new Map());
   const [detailTokenId, setDetailTokenId] = useState<string | null>(null);
@@ -174,7 +183,9 @@ export default function MarketView() {
   useEffect(() => {
     const sync = () => {
       const { tab: urlTab, item } = readUrlState();
-      setTab(urlTab ?? "buy-sell");
+      const resolved = urlTab ?? "buy-sell";
+      setTab(resolved);
+      setVisitedTabs((prev) => (prev.has(resolved) ? prev : new Set(prev).add(resolved)));
       setDetailTokenId(item);
     };
     sync();
@@ -196,6 +207,7 @@ export default function MarketView() {
   const selectTab = useCallback(
     (next: MarketTab) => {
       setTab(next);
+      setVisitedTabs((prev) => (prev.has(next) ? prev : new Set(prev).add(next)));
       setDetailTokenId(null);
       writeUrl(next, null);
     },
@@ -708,8 +720,15 @@ export default function MarketView() {
         />
       )}
 
+      {/* Every tab below stays mounted once first visited instead of
+          unmounting on switch — a tab you've already opened snaps back
+          instantly (its data, images, and any live connections are still
+          there) instead of re-fetching and re-rendering from scratch.
+          Reveal's fade still plays via its own `key`; hidden tabs are just
+          display:none, not removed from the tree. */}
       <Reveal delayMs={70}>
-        {tab === "buy-sell" && (
+        <div className={tab === "buy-sell" ? undefined : "hidden"}>
+          {visitedTabs.has("buy-sell") && (
           <div className="space-y-3">
             {COLLECTION && (
               <CollectionStats
@@ -767,8 +786,10 @@ export default function MarketView() {
               />
             )}
           </div>
-        )}
-        {tab === "offers" && (
+          )}
+        </div>
+        <div className={tab === "offers" ? undefined : "hidden"}>
+          {visitedTabs.has("offers") && (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="min-w-0 flex-1 rounded-lg border border-dashed border-emerald-500/30 bg-forest-900/50 px-3 py-2 text-center text-[0.7rem] text-foreground/70">
@@ -842,8 +863,10 @@ export default function MarketView() {
               />
             )}
           </div>
-        )}
-        {tab === "activity" && (
+          )}
+        </div>
+        <div className={tab === "activity" ? undefined : "hidden"}>
+          {visitedTabs.has("activity") && (
           <div className="space-y-3">
             <ActivityFeed
               onSelectToken={openDetail}
@@ -854,8 +877,10 @@ export default function MarketView() {
             />
             <VaultTradeHistory />
           </div>
-        )}
-        {tab === "swap" && (
+          )}
+        </div>
+        <div className={tab === "swap" ? undefined : "hidden"}>
+          {visitedTabs.has("swap") && (
           <div className="space-y-3">
             <LivingLiquidityViz />
             <div className="grid gap-3 lg:grid-cols-2 lg:items-start">
@@ -871,65 +896,68 @@ export default function MarketView() {
               </div>
             </div>
           </div>
-        )}
-        {tab === "my-nfts" && account && (
-          <MyNfts
-            account={account}
-            collections={MARKET_COLLECTIONS}
-            alreadyListed={
-              new Set(
-                listings
-                  .filter((l) => l.maker.toLowerCase() === account.toLowerCase())
-                  .map((l) => `${l.collectionSlug}:${l.tokenId}`)
-              )
-            }
-          />
-        )}
-        {tab === "my-nfts" && !account && (
-          <button
-            type="button"
-            onClick={handleConnect}
-            className="mx-auto flex min-h-11 items-center justify-center rounded-lg bg-gold-500 px-5 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
-          >
-            Connect wallet
-          </button>
-        )}
-        {tab === "positions" && account && (
-          <div className="space-y-3">
+          )}
+        </div>
+        <div className={tab === "my-nfts" ? undefined : "hidden"}>
+          {visitedTabs.has("my-nfts") && (account ? (
+            <MyNfts
+              account={account}
+              collections={MARKET_COLLECTIONS}
+              alreadyListed={
+                new Set(
+                  listings
+                    .filter((l) => l.maker.toLowerCase() === account.toLowerCase())
+                    .map((l) => `${l.collectionSlug}:${l.tokenId}`)
+                )
+              }
+            />
+          ) : (
             <button
               type="button"
-              onClick={() => setShowInventory((v) => !v)}
-              aria-expanded={showInventory}
-              className="min-h-10 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
+              onClick={handleConnect}
+              className="mx-auto flex min-h-11 items-center justify-center rounded-lg bg-gold-500 px-5 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
             >
-              {showInventory ? "Hide my planks" : "List from your wallet"}
+              Connect wallet
             </button>
-            {showInventory && (
-              <MyInventory
-                account={account}
-                collections={MARKET_COLLECTIONS}
-                alreadyListed={
-                  new Set(
-                    listings
-                      .filter((l) => l.maker.toLowerCase() === account.toLowerCase())
-                      .map((l) => `${l.collectionSlug}:${l.tokenId}`)
-                  )
-                }
-                onListed={() => void refresh()}
-              />
-            )}
-            <MyPositions account={account} listings={listings} offers={offers} onChanged={refresh} />
-          </div>
-        )}
-        {tab === "positions" && !account && (
-          <button
-            type="button"
-            onClick={handleConnect}
-            className="mx-auto flex min-h-11 items-center justify-center rounded-lg bg-gold-500 px-5 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
-          >
-            Connect wallet
-          </button>
-        )}
+          ))}
+        </div>
+        <div className={tab === "positions" ? undefined : "hidden"}>
+          {visitedTabs.has("positions") && (account ? (
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => setShowInventory((v) => !v)}
+                aria-expanded={showInventory}
+                className="min-h-10 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
+              >
+                {showInventory ? "Hide my planks" : "List from your wallet"}
+              </button>
+              {showInventory && (
+                <MyInventory
+                  account={account}
+                  collections={MARKET_COLLECTIONS}
+                  alreadyListed={
+                    new Set(
+                      listings
+                        .filter((l) => l.maker.toLowerCase() === account.toLowerCase())
+                        .map((l) => `${l.collectionSlug}:${l.tokenId}`)
+                    )
+                  }
+                  onListed={() => void refresh()}
+                />
+              )}
+              <MyPositions account={account} listings={listings} offers={offers} onChanged={refresh} />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleConnect}
+              className="mx-auto flex min-h-11 items-center justify-center rounded-lg bg-gold-500 px-5 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
+            >
+              Connect wallet
+            </button>
+          ))}
+        </div>
       </Reveal>
     </div>
   );
