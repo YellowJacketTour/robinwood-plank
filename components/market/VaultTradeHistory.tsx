@@ -22,6 +22,13 @@ function shortAddr(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
+function pricePerShare(ethWei: string | null, sharesWei: string | null): string {
+  if (ethWei == null || sharesWei == null || Number(sharesWei) === 0) return "—";
+  // Both amounts are wei-scaled (18 decimals), so their ratio is already
+  // the ETH-per-share price — no rescaling needed.
+  return `${(Number(ethWei) / Number(sharesWei)).toFixed(5)} Ξ`;
+}
+
 function timeAgo(iso: string | null) {
   if (!iso) return "—";
   const ms = Date.now() - new Date(iso).getTime();
@@ -58,7 +65,9 @@ export default function VaultTradeHistory() {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">Vault trades</p>
+        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
+          Liquidity pool trades <span className="font-normal normal-case text-foreground/35">· source: vault AMM</span>
+        </p>
         <span
           className={`flex items-center gap-1 text-[0.55rem] font-bold uppercase ${connected ? "text-emerald-300/70" : "text-foreground/30"}`}
         >
@@ -79,6 +88,15 @@ export default function VaultTradeHistory() {
       ) : (
         <div className="max-h-64 overflow-y-auto rounded-lg border border-gold-500/15 bg-black/10">
           <table className="w-full text-left text-[0.65rem]">
+            <thead>
+              <tr className="border-b border-gold-500/15 text-[0.55rem] uppercase tracking-wide text-foreground/35">
+                <th className="px-2 py-1 font-bold">Kind</th>
+                <th className="px-2 py-1 font-bold">Amount</th>
+                <th className="px-2 py-1 font-bold">Price/share</th>
+                <th className="px-2 py-1 font-bold">Trader</th>
+                <th className="px-2 py-1 text-right font-bold">Time</th>
+              </tr>
+            </thead>
             <tbody>
               {visiblePending.map((p) => (
                 <tr key={p.txHash} className="border-b border-gold-500/10 bg-gold-500/5 last:border-0">
@@ -86,6 +104,7 @@ export default function VaultTradeHistory() {
                   <td className="px-2 py-1.5 font-mono text-foreground/70">
                     {p.ethWei != null ? `${formatTokenAmount(p.ethWei, 18, 4)} Ξ` : p.tokenId != null ? `#${p.tokenId}` : "—"}
                   </td>
+                  <td className="px-2 py-1.5 font-mono text-foreground/45">—</td>
                   <td className="px-2 py-1.5 font-mono text-foreground/45">you</td>
                   <td className="px-2 py-1.5 text-right">
                     <span className="inline-flex items-center gap-1 text-amber-300">
@@ -104,6 +123,9 @@ export default function VaultTradeHistory() {
                       : e.tokenId != null
                         ? `#${e.tokenId}`
                         : "—"}
+                  </td>
+                  <td className="px-2 py-1.5 font-mono text-foreground/55">
+                    {e.kind === "buy" || e.kind === "sell" ? pricePerShare(e.ethWei, e.sharesWei) : "—"}
                   </td>
                   <td className="px-2 py-1.5 font-mono text-foreground/45">{shortAddr(e.address)}</td>
                   <td className="px-2 py-1.5 text-right text-foreground/40">{timeAgo(e.timestamp)}</td>
