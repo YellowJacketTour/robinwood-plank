@@ -210,11 +210,11 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
               return (
                 <li
                   key={key}
-                  className={`dense-card overflow-hidden p-0 ${
-                    r ? `${tierAnimationClass(r.tier)} holo-card` : ""
-                  }`}
+                  className={`dense-card overflow-hidden p-0 ${r ? tierAnimationClass(r.tier) : ""}`}
                   style={r ? { boxShadow: tierGlow(r.tier), ...tierCardStyle(r.tier) } : undefined}
                 >
+                  {/* holo-card scoped to the artwork button only, not the
+                      whole tile — inherits --holo-intensity from the <li>. */}
                   <button
                     type="button"
                     disabled={isListed || busy}
@@ -222,8 +222,8 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                     aria-label={`${isSelected ? "Deselect" : "Select"} #${item.tokenId}`}
                     onClick={() => toggle(group.collection, item.tokenId)}
                     className={`relative block aspect-square w-full bg-wood-900 outline-none transition ${
-                      isSelected ? "ring-2 ring-inset ring-gold-400" : ""
-                    } ${isListed ? "cursor-not-allowed opacity-50" : "cursor-pointer focus-visible:ring-2 focus-visible:ring-gold-400/60"}`}
+                      r ? "holo-card" : ""
+                    } ${isSelected ? "ring-2 ring-inset ring-gold-400" : ""} ${isListed ? "cursor-not-allowed opacity-50" : "cursor-pointer focus-visible:ring-2 focus-visible:ring-gold-400/60"}`}
                   >
                     <Image
                       src={item.imageUrl || group.collection.image}
