@@ -321,3 +321,65 @@ export async function getVaultHeldCount(): Promise<bigint> {
   const vault = await getVaultReader();
   return vault.heldTokenCount();
 }
+
+/**
+ * Treasury-only bootstrap trio. Documented on-chain sequence
+ * (contracts/MarketplankVault.sol seedShares() dev comment):
+ *   1. treasury deposit()s NFTs — same public deposit() everyone uses,
+ *      minting shares to the treasury itself (see depositForShares above).
+ *   2. treasury calls seedShares(shares) with ETH attached — moves those
+ *      shares AND the ETH into the pool atomically, so it's never live with
+ *      one empty side.
+ *   3. treasury calls openPool() — one-way, opens buy/sell to everyone,
+ *      forever. No withdrawal path exists for seeded ETH by design.
+ * Every function here reverts on-chain (NotTreasury) if called by anyone
+ * else — this is a UX nicety, not the actual access control.
+ */
+export async function getVaultTreasury(): Promise<string> {
+  const vault = await getVaultReader();
+  return vault.treasury();
+}
+
+export async function getPoolStatus(): Promise<{
+  open: boolean;
+  ethReserveWei: bigint;
+  shareReserve: bigint;
+  heldCount: bigint;
+  treasuryShareBalance: bigint;
+}> {
+  const vault = await getVaultReader();
+  const treasury = (await vault.treasury()) as string;
+  const [open, ethReserveWei, shareReserve, heldCount, treasuryShareBalance] = await Promise.all([
+    vault.poolOpen() as Promise<boolean>,
+    vault.ethReserve() as Promise<bigint>,
+    vault.balanceOf(requireVaultAddress()) as Promise<bigint>,
+    vault.heldTokenCount() as Promise<bigint>,
+    vault.balanceOf(treasury) as Promise<bigint>,
+  ]);
+  return { open, ethReserveWei, shareReserve, heldCount, treasuryShareBalance };
+}
+
+/** Step 2: move `shares` (already held by the treasury from prior deposits)
+ * plus `ethAmount` ETH into the pool, atomically. Treasury-only on-chain. */
+export async function seedShares(
+  accountAddress: string,
+  shares: bigint,
+  ethAmount: string
+): Promise<string> {
+  const vault = await getVaultReader();
+  await assertVaultWrapsOurCollection(vault);
+  if (shares <= BigInt(0)) throw new Error("Enter a positive share amount to seed.");
+  const value = ethAmount ? parseEther(ethAmount) : BigInt(0);
+  return sendVaultTx(
+    accountAddress,
+    VAULT_IFACE.encodeFunctionData("seedShares", [shares]),
+    value
+  );
+}
+
+/** Step 3: the one-way, permanent switch. Treasury-only on-chain. */
+export async function openPool(accountAddress: string): Promise<string> {
+  const vault = await getVaultReader();
+  await assertVaultWrapsOurCollection(vault);
+  return sendVaultTx(accountAddress, VAULT_IFACE.encodeFunctionData("openPool", []));
+}
