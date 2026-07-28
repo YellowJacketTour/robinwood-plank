@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { shortAddress } from "@/lib/trade";
-import { getRarityMap, tierColor } from "@/lib/market/rarityClient";
+import { getRarityMap, tierAnimationClass, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 
 type Venue = { kind: "marketplank" | "seaport" | "other"; contract: string } | null;
@@ -193,8 +193,10 @@ export default function ActivityFeed({ onSelectToken }: Props) {
                     tier-colored ring reuses the exact same rarity math and
                     palette as the Gallery page, never a second color system. */}
                 <div
-                  className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-wood-900"
-                  style={r ? { boxShadow: `0 0 0 2px ${tierColor(r.tier)}` } : undefined}
+                  className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-wood-900 ${
+                    r ? tierAnimationClass(r.tier) : ""
+                  }`}
+                  style={r ? { boxShadow: tierGlow(r.tier) } : undefined}
                 >
                   {e.imageUrl ? (
                     <Image

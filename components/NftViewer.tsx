@@ -44,7 +44,9 @@ import {
   TIER_ORDER,
   computeRaritySnapshot,
   formatRank,
+  tierAnimationClass,
   tierColor,
+  tierGlow,
   type RarityTier,
   type TokenRarity,
 } from "@/lib/rarity";
@@ -965,7 +967,7 @@ export default function NftViewer() {
 
   return (
     <section id="collection" className="scroll-mt-20 section-tight px-3 sm:px-5">
-      <div className="mx-auto max-w-6xl">
+      <div className="mx-auto max-w-[1400px]">
         <Reveal>
           <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">
             Your Planks
@@ -976,7 +978,7 @@ export default function NftViewer() {
         </Reveal>
 
         <Reveal delayMs={120}>
-          <div className="wood-frame mx-auto mt-10 flex max-w-5xl flex-col overflow-hidden rounded-2xl bg-wood-900/95">
+          <div className="wood-frame mx-auto mt-10 flex max-w-[1400px] flex-col overflow-hidden rounded-2xl bg-wood-900/95">
             <div className="border-b border-gold-500/20 p-4 sm:p-5">
               <form
                 onSubmit={onSubmit}
@@ -1108,7 +1110,7 @@ export default function NftViewer() {
             >
               {loading && nfts.length === 0 && (
                 <div
-                  className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:gap-4 sm:p-4 lg:grid-cols-4"
+                  className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3 p-3 sm:gap-4 sm:p-4"
                   aria-hidden="true"
                 >
                   {Array.from({ length: 8 }).map((_, index) => (
@@ -1149,7 +1151,7 @@ export default function NftViewer() {
               )}
 
               {visibleNfts.length > 0 && (
-                <ul className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 sm:gap-4 sm:p-4 lg:grid-cols-4">
+                <ul className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3 p-3 sm:gap-4 sm:p-4">
                   {visibleNfts.map((nft) => {
                     const tokenRarity = collectionRarity.byTokenId.get(nft.tokenId);
                     return (
@@ -1168,7 +1170,12 @@ export default function NftViewer() {
                               : `Open details for ${nft.name}`
                           }
                         >
-                          <div className="relative aspect-square w-full overflow-hidden bg-wood-950">
+                          <div
+                            className={`relative aspect-square w-full overflow-hidden bg-wood-950 ${
+                              tokenRarity ? tierAnimationClass(tokenRarity.tier) : ""
+                            }`}
+                            style={tokenRarity ? { boxShadow: tierGlow(tokenRarity.tier) } : undefined}
+                          >
                             <NftImage
                               imageUri={nft.imageUri}
                               alt=""

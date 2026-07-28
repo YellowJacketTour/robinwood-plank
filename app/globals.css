@@ -604,6 +604,53 @@ body .nft-modal .nft-modal-body {
   scrollbar-gutter: stable;
 }
 
+/* Rarity-tier motion — reserved for Legendary/Mythic (lib/rarity.ts
+   tierAnimationClass). Reduced-motion users get the static glow only, via
+   the prefers-reduced-motion override below. */
+@keyframes tier-shimmer-sweep {
+  0% {
+    background-position: -150% 0;
+  }
+  100% {
+    background-position: 250% 0;
+  }
+}
+
+.tier-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.tier-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.35) 48%,
+    rgba(255, 255, 255, 0.35) 52%,
+    transparent 70%
+  );
+  background-size: 250% 100%;
+  animation: tier-shimmer-sweep 2.6s ease-in-out infinite;
+}
+
+@keyframes tier-pulse-glow {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.12);
+  }
+}
+
+.tier-pulse {
+  animation: tier-pulse-glow 2.2s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

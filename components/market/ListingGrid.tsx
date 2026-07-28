@@ -57,7 +57,11 @@ export default function ListingGrid({
   }
 
   return (
-    <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 xl:grid-cols-5">
+    // Fluid auto-fill instead of a fixed breakpoint ladder: the column count
+    // scales continuously with actual available width (2-up on a phone,
+    // 10+ across on a wide desktop monitor) instead of plateauing at a
+    // handful of columns and leaving the rest of a wide screen empty.
+    <ul className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5 sm:gap-3">
       {listings.map((listing) => {
         const collection = collections.find((c) => c.slug === listing.collectionSlug);
         if (!collection) return null;

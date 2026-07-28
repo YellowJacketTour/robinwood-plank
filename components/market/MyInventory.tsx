@@ -14,7 +14,7 @@ import {
 import { getOwnedInventory, type OwnedInventory } from "@/lib/market/inventory";
 import { buildListing } from "@/lib/market/seaport";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
-import { getRarityMap, tierColor } from "@/lib/market/rarityClient";
+import { getRarityMap, tierAnimationClass, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import type { MarketCollection } from "@/lib/market/types";
 
@@ -195,7 +195,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
           <h3 className="text-xs font-bold uppercase tracking-wider text-foreground/50">
             {group.collection.name} · {group.items.length} owned
           </h3>
-          <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+          <ul className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2">
             {group.items.map((item) => {
               const key = `${group.collection.slug}:${item.tokenId}`;
               const isSelected = selected.has(key);
@@ -204,8 +204,8 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
               return (
                 <li
                   key={key}
-                  className="dense-card overflow-hidden p-0"
-                  style={r ? { boxShadow: `0 0 0 2px ${tierColor(r.tier)}` } : undefined}
+                  className={`dense-card overflow-hidden p-0 ${r ? tierAnimationClass(r.tier) : ""}`}
+                  style={r ? { boxShadow: tierGlow(r.tier) } : undefined}
                 >
                   <button
                     type="button"
