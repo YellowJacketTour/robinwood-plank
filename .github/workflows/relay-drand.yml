@@ -31,6 +31,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      # package-lock.json was generated with npm 11.6.2. Both npm 10 (bundled
+      # with Node 20) and npm 11.18.0 disagree with it on optional-dependency
+      # resolution and fail `npm ci` outright ("Missing: @emnapi/... from
+      # lock file") — confirmed by reproducing locally with each version.
+      # Pin to the exact version that works until the lockfile is next
+      # regenerated and re-verified against npm ci.
+      - run: npm install -g npm@11.6.2
       - run: npm ci
       - name: Relay latest drand round
         env:
