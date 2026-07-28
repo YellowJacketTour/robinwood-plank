@@ -34,6 +34,29 @@ const RANGE_MS: Record<Range, number | null> = {
   ALL: null,
 };
 
+/** Same instant-hydrate-from-last-visit pattern as
+ * lib/market/useVaultLive.ts's snapshot — a refresh shows the last chart
+ * immediately instead of an empty "loading" state, and it's replaced the
+ * moment the real fetch resolves either way. */
+function loadCachedPoints(key: string): LineData<UTCTimestamp>[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(`plank-chart-cache:${key}`);
+    return raw ? (JSON.parse(raw) as LineData<UTCTimestamp>[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedPoints(key: string, points: LineData<UTCTimestamp>[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(`plank-chart-cache:${key}`, JSON.stringify(points));
+  } catch {
+    // storage full/unavailable — chart still works, just no instant-hydrate
+  }
+}
+
 /**
  * The true full-lineage price history for RobinWood, charted like a
  * DEX/meme-coin pair. Merges every blockchain-timestamped trade from both
@@ -54,8 +77,12 @@ export default function NftPriceChart() {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const [salePoints, setSalePoints] = useState<LineData<UTCTimestamp>[] | null>(null);
-  const [vaultHistoryPoints, setVaultHistoryPoints] = useState<LineData<UTCTimestamp>[]>([]);
+  const [salePoints, setSalePoints] = useState<LineData<UTCTimestamp>[] | null>(() =>
+    loadCachedPoints("sale-points")
+  );
+  const [vaultHistoryPoints, setVaultHistoryPoints] = useState<LineData<UTCTimestamp>[]>(
+    () => loadCachedPoints("vault-history-points") ?? []
+  );
   const [range, setRange] = useState<Range>("ALL");
   const [failed, setFailed] = useState(false);
   const { activity: vaultActivity } = useVaultLive();
@@ -77,6 +104,7 @@ export default function NftPriceChart() {
               value: ethWeiToNumber(e.priceWei),
             }));
           setSalePoints(sales);
+          saveCachedPoints("sale-points", sales);
         })
         .catch(() => {
           if (!cancelled) setFailed(true);
@@ -106,6 +134,7 @@ export default function NftPriceChart() {
         if (cancelled) return;
         const pts = (data.events ?? []).map(vaultEventToPoint).filter((p): p is LineData<UTCTimestamp> => p != null);
         setVaultHistoryPoints(pts);
+        saveCachedPoints("vault-history-points", pts);
       })
       .catch(() => {});
     return () => {

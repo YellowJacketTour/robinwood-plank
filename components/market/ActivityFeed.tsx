@@ -13,6 +13,7 @@ import {
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import CollectionStats from "@/components/market/CollectionStats";
 import ActivityStats from "@/components/market/ActivityStats";
+import ScrollBox from "@/components/market/ScrollBox";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 
 type Venue = { kind: "marketplank" | "seaport" | "other"; contract: string } | null;
@@ -223,6 +224,7 @@ export default function ActivityFeed({
       {filtered.length === 0 ? (
         <p className="py-6 text-center text-xs text-foreground/45">No matches.</p>
       ) : (
+        <ScrollBox storageKey="activity-feed" defaultHeight={420} maxHeight={1000}>
         <ul className="space-y-1.5">
           {filtered.map((e) => {
             const r = rarity.get(e.tokenId);
@@ -347,6 +349,7 @@ export default function ActivityFeed({
             );
           })}
         </ul>
+        </ScrollBox>
       )}
     </div>
 

@@ -194,6 +194,29 @@ export default function MarketView() {
     return () => window.removeEventListener("popstate", sync);
   }, []);
 
+  // While the user lingers on whichever tab they landed on, quietly mount
+  // one more not-yet-visited tab every few seconds in the background (still
+  // hidden — same lazy-then-sticky mechanism as an actual click, see
+  // visitedTabs above) so by the time they do click over, it's often
+  // already loaded. Deliberately staggered, not all six at once: mounting
+  // everything simultaneously on page load was tried and reverted earlier
+  // (see visitedTabs' own comment) — it 429'd the public RPC. One at a time
+  // on a real delay avoids that same burst while still getting there.
+  useEffect(() => {
+    const STAGGER_MS = 6_000;
+    const timer = window.setInterval(() => {
+      setVisitedTabs((prev) => {
+        const next = VALID_TABS.find((t) => !prev.has(t));
+        if (!next) {
+          window.clearInterval(timer);
+          return prev;
+        }
+        return new Set(prev).add(next);
+      });
+    }, STAGGER_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
   /** Single writer for the URL, so tab and item can never disagree with it. */
   const writeUrl = useCallback((nextTab: MarketTab, nextItem: string | null) => {
     const params = new URLSearchParams(window.location.search);
