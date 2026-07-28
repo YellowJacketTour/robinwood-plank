@@ -4,6 +4,7 @@ import "./globals.css";
 import { SITE_URL } from "@/lib/constants";
 import PlankBackground from "@/components/PlankBackground";
 import AudioPlayer from "@/components/AudioPlayer";
+import HoloField from "@/lib/holo";
 
 const stencil = Uncial_Antiqua({
   variable: "--font-stencil",
@@ -66,6 +67,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <PlankBackground />
         <AudioPlayer />
+        <HoloField />
         {children}
       </body>
     </html>

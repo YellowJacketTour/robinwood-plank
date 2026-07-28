@@ -10,7 +10,6 @@ import {
   tierColor,
   tierGlow,
 } from "@/lib/market/rarityClient";
-import { holoHandlers } from "@/lib/holo";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import CollectionStats from "@/components/market/CollectionStats";
 import ActivityStats from "@/components/market/ActivityStats";
@@ -214,7 +213,6 @@ export default function ActivityFeed({
                   r ? `${tierAnimationClass(r.tier)} holo-card` : ""
                 }`}
                 style={r ? tierCardStyle(r.tier) : undefined}
-                {...(r ? holoHandlers : {})}
                 role={selectable ? "button" : undefined}
                 tabIndex={selectable ? 0 : undefined}
                 aria-label={selectable ? `View #${e.tokenId}` : undefined}

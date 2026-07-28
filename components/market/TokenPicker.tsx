@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { getRarityMap, tierAnimationClass, tierCardStyle, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
-import { holoHandlers } from "@/lib/holo";
 
 export type PickerToken = {
   tokenId: string;
@@ -81,7 +80,6 @@ export default function TokenPicker({
                   r ? `${tierAnimationClass(r.tier)} holo-card` : ""
                 } ${isSelected ? "ring-2 ring-gold-300" : ""}`}
                 style={r && !isSelected ? { boxShadow: tierGlow(r.tier), ...tierCardStyle(r.tier) } : undefined}
-                {...(r ? holoHandlers : {})}
               >
                 {t.imageUrl ? (
                   <Image

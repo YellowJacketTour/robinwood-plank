@@ -51,7 +51,6 @@ import {
   type RarityTier,
   type TokenRarity,
 } from "@/lib/rarity";
-import { holoHandlers } from "@/lib/holo";
 
 type EthereumProvider = Eip1193Provider & {
   on?: (event: string, listener: (...args: unknown[]) => void) => void;
@@ -1181,7 +1180,6 @@ export default function NftViewer() {
                                 ? { boxShadow: tierGlow(tokenRarity.tier), ...tierCardStyle(tokenRarity.tier) }
                                 : undefined
                             }
-                            {...(tokenRarity ? holoHandlers : {})}
                           >
                             <NftImage
                               imageUri={nft.imageUri}

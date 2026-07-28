@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
-import { holoHandlers } from "@/lib/holo";
 import type { RarityTier } from "@/lib/market/rarityClient";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 
@@ -118,8 +117,11 @@ export default function ItemDetail({
             className={`relative aspect-square w-full overflow-hidden rounded-xl bg-wood-900 ${
               detail?.rarity ? `${tierAnimationClass(detail.rarity.tier)} holo-card` : ""
             }`}
-            style={detail?.rarity ? { boxShadow: tierGlow(detail.rarity.tier) } : undefined}
-            {...(detail?.rarity ? holoHandlers : {})}
+            style={
+              detail?.rarity
+                ? { boxShadow: tierGlow(detail.rarity.tier), ...tierCardStyle(detail.rarity.tier) }
+                : undefined
+            }
           >
             <Image
               src={detail?.image || listing?.imageUrl || collection.image}

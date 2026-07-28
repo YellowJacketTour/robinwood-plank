@@ -21,7 +21,6 @@ import {
   tierColor,
   tierGlow,
 } from "@/lib/market/rarityClient";
-import { holoHandlers } from "@/lib/holo";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import type { MarketCollection } from "@/lib/market/types";
 
@@ -215,7 +214,6 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                     r ? `${tierAnimationClass(r.tier)} holo-card` : ""
                   }`}
                   style={r ? { boxShadow: tierGlow(r.tier), ...tierCardStyle(r.tier) } : undefined}
-                  {...(r ? holoHandlers : {})}
                 >
                   <button
                     type="button"

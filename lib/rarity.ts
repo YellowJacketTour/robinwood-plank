@@ -174,9 +174,33 @@ export function tierGlow(tier: RarityTier): string {
  * text inside the card stays readable — the ring stays the loud signal, this
  * is the quiet one that extends it outward.
  */
-export function tierCardStyle(tier: RarityTier): { backgroundImage?: string; borderColor?: string } {
+/** How strongly the always-on cursor-tracking holo field (lib/holo.ts,
+ * .holo-card in app/globals.css) shows on a given tier — 0 for Common (no
+ * effect, the neutral baseline) up to 1 for Mythic. Exclusivity still has
+ * to read even though the effect itself is no longer on/off. */
+export function tierHoloIntensity(tier: RarityTier): number {
+  switch (tier) {
+    case "Mythic":
+      return 1;
+    case "Legendary":
+      return 0.82;
+    case "Epic":
+      return 0.62;
+    case "Rare":
+      return 0.44;
+    case "Uncommon":
+      return 0.26;
+    default:
+      return 0;
+  }
+}
+
+export function tierCardStyle(
+  tier: RarityTier
+): { backgroundImage?: string; borderColor?: string } & Record<string, string> {
   const c = tierColor(tier);
-  if (tier === "Common") return {};
+  const holoIntensity = { "--holo-intensity": String(tierHoloIntensity(tier)) };
+  if (tier === "Common") return holoIntensity;
   return {
     // backgroundImage, not the `background` shorthand: a card's own dark
     // base color usually comes from a CSS class's `background-color` (or
@@ -185,15 +209,16 @@ export function tierCardStyle(tier: RarityTier): { backgroundImage?: string; bor
     // class's background-color intact underneath.
     backgroundImage: `linear-gradient(160deg, ${c}14, transparent 65%)`,
     borderColor: `${c}40`,
+    ...holoIntensity,
   };
 }
 
-/** CSS class for tier-specific motion (see .tier-shimmer / .tier-pulse in
- * app/globals.css). Only the most exclusive tiers animate — motion itself is
- * part of the escalation, not just color/glow. */
+/** CSS class for tier-specific motion (see .tier-pulse in app/globals.css).
+ * Only Mythic gets the brightness breathing — the holo field itself (always
+ * on, intensity-scaled via tierCardStyle) carries the rest of the
+ * escalation now. */
 export function tierAnimationClass(tier: RarityTier): string {
-  if (tier === "Mythic") return "tier-shimmer tier-pulse";
-  if (tier === "Legendary") return "tier-shimmer";
+  if (tier === "Mythic") return "tier-pulse";
   return "";
 }
 
