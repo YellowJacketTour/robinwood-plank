@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { MARKET_FEE_RECIPIENT, MARKET_VAULT_ADDRESS } from "@/lib/constants";
+import { getNativeBalance } from "@/lib/wallet";
 import TreasuryBootstrap from "@/components/market/TreasuryBootstrap";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import {
@@ -623,6 +624,7 @@ export default function SwapPanel({
   // with an opaque revert. Fetched whenever redeem mode opens and refreshed
   // after every transaction (run(), below).
   const [shareBalance, setShareBalance] = useState<bigint | null>(null);
+  const [ethBalance, setEthBalance] = useState<bigint | null>(null);
   const refreshShareBalance = useCallback(async () => {
     if (!account) return;
     try {
@@ -633,16 +635,29 @@ export default function SwapPanel({
     }
   }, [account, vaultAddress]);
 
-  // Always show wallet share balance for existing depositors (any mode).
-  // Deposits mint shares to the wallet — not the pool — so this is the number
-  // that unlocks Redeem / Sell / Add LP. Refresh on account, mode, and after txs.
+  const refreshEthBalance = useCallback(async () => {
+    if (!account) {
+      setEthBalance(null);
+      return;
+    }
+    try {
+      setEthBalance(await getNativeBalance(account));
+    } catch {
+      /* keep last */
+    }
+  }, [account]);
+
+  // Always show wallet share + ETH balances for trade forms (buy needs ETH,
+  // sell needs shares; receive side shows the other asset you already hold).
   useEffect(() => {
     if (!account) {
       setShareBalance(null);
+      setEthBalance(null);
       return;
     }
     void refreshShareBalance();
-  }, [mode, account, refreshShareBalance, vaultAddress]);
+    void refreshEthBalance();
+  }, [mode, account, refreshShareBalance, refreshEthBalance, vaultAddress]);
 
   // Deposit picks FROM what the connected wallet actually owns — visual,
   // never a blind typed id. Redeem (targeted) picks from what the vault
@@ -777,6 +792,7 @@ export default function SwapPanel({
       setLpEth("");
       setTokenId("");
       void refreshShareBalance();
+      void refreshEthBalance();
       void refreshLpCredit();
     } catch (e) {
       setError(decodeVaultError(e));
@@ -1006,12 +1022,21 @@ export default function SwapPanel({
         {account && (
           <div className="rounded-lg border border-gold-500/25 bg-black/25 px-3 py-2 text-[0.7rem] leading-relaxed text-foreground/75">
             <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <p>
-                <span className="font-bold uppercase tracking-wide text-foreground/45">Your shares </span>
-                <span className="font-mono text-gold-200">
-                  {shareBalance != null ? formatTokenAmount(shareBalance, 18, 4) : "…"}
+              <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                <span>
+                  <span className="font-bold uppercase tracking-wide text-foreground/45">Your shares </span>
+                  <span className="font-mono text-gold-200">
+                    {shareBalance != null ? formatTokenAmount(shareBalance, 18, 4) : "…"}
+                  </span>
+                  <span className="text-foreground/45"> vROBIN</span>
                 </span>
-                <span className="text-foreground/45"> vROBIN in your wallet</span>
+                <span>
+                  <span className="font-bold uppercase tracking-wide text-foreground/45">ETH </span>
+                  <span className="font-mono text-gold-200">
+                    {ethBalance != null ? formatTokenAmount(ethBalance, 18, 4) : "…"}
+                  </span>
+                  <span className="text-foreground/45"> Ξ</span>
+                </span>
               </p>
               {stats && (
                 <p className="text-foreground/45">
@@ -1059,9 +1084,50 @@ export default function SwapPanel({
 
         {(mode === "buy" || mode === "sell") && (
           <div className="rounded-lg border border-gold-500/30 bg-wood-900/70 p-2.5">
-            <div className="flex items-center justify-between text-[0.6rem] font-bold uppercase tracking-wide text-foreground/45">
+            <div className="flex items-center justify-between gap-2 text-[0.6rem] font-bold uppercase tracking-wide text-foreground/45">
               <span>You pay</span>
-              <span>{mode === "buy" ? "ETH" : "Vault share"}</span>
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 font-normal normal-case">
+                <span className="font-bold uppercase tracking-wide text-foreground/45">
+                  {mode === "buy" ? "ETH" : "Vault share"}
+                </span>
+                {account && (
+                  <>
+                    <span className="font-mono text-foreground/70">
+                      bal{" "}
+                      <span className="font-semibold text-gold-200">
+                        {mode === "buy"
+                          ? ethBalance != null
+                            ? formatTokenAmount(ethBalance, 18, 4)
+                            : "…"
+                          : shareBalance != null
+                            ? formatTokenAmount(shareBalance, 18, 4)
+                            : "…"}
+                      </span>
+                      {mode === "buy" ? " Ξ" : " sh"}
+                    </span>
+                    <button
+                      type="button"
+                      className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                      onClick={() => {
+                        if (mode === "buy") {
+                          if (ethBalance == null || ethBalance <= BigInt(0)) return;
+                          // Leave a small gas buffer so Max does not empty the wallet.
+                          const gasPad = parseTokenAmount("0.0003", 18) ?? BigInt(0);
+                          const usable =
+                            ethBalance > gasPad ? ethBalance - gasPad : BigInt(0);
+                          setAmount(
+                            usable > BigInt(0) ? formatTokenAmount(usable, 18, 6) : "0"
+                          );
+                        } else if (shareBalance != null && shareBalance > BigInt(0)) {
+                          setAmount(formatTokenAmount(shareBalance, 18, 6));
+                        }
+                      }}
+                    >
+                      Max
+                    </button>
+                  </>
+                )}
+              </span>
             </div>
             <div className="mt-1 flex items-center gap-2">
               <span
@@ -1244,9 +1310,29 @@ export default function SwapPanel({
 
         {(mode === "buy" || mode === "sell") && (
           <div className="rounded-lg border border-dashed border-gold-500/25 bg-black/15 px-2.5 py-2">
-            <div className="flex items-center justify-between text-[0.6rem] font-bold uppercase tracking-wide text-foreground/45">
+            <div className="flex items-center justify-between gap-2 text-[0.6rem] font-bold uppercase tracking-wide text-foreground/45">
               <span>You receive</span>
-              <span>{mode === "buy" ? "Vault share" : "ETH"}</span>
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 font-normal normal-case">
+                <span className="font-bold uppercase tracking-wide text-foreground/45">
+                  {mode === "buy" ? "Vault share" : "ETH"}
+                </span>
+                {account && (
+                  <span className="font-mono text-foreground/70">
+                    bal{" "}
+                    <span className="font-semibold text-gold-200">
+                      {mode === "buy"
+                        ? shareBalance != null
+                          ? formatTokenAmount(shareBalance, 18, 4)
+                          : "…"
+                        : ethBalance != null
+                          ? formatTokenAmount(ethBalance, 18, 4)
+                          : "…"}
+                    </span>
+                    {mode === "buy" ? " sh" : " Ξ"}
+                    <span className="text-foreground/40"> now</span>
+                  </span>
+                )}
+              </span>
             </div>
             <p className="mt-0.5 font-display text-lg text-gold-300">
               {!amount
