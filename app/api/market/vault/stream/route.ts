@@ -1,5 +1,10 @@
 import { getVaultStats } from "@/lib/market/vault-stats";
 import { getVaultActivity } from "@/lib/market/vault-activity";
+import {
+  isFreshEnough,
+  readVaultStatsCache,
+  writeVaultStatsCache,
+} from "@/lib/market/vault-stats-cache";
 import { rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -7,12 +12,12 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 /** How often a connected client receives a tick. */
-const TICK_MS = 4_000;
+const TICK_MS = 8_000;
 /** How often the underlying chain data is actually re-read — the vault
  * replay (reserves + fee-revenue log walk) is real RPC work, not free, so
  * every open tab shares one server-side refresh cadence instead of each
- * triggering its own. */
-const REFRESH_MS = 10_000;
+ * triggering its own. Slower on CF to avoid RH RPC 429s. */
+const REFRESH_MS = 20_000;
 /** Cap per-connection lifetime, just under maxDuration's ceiling — Vercel
  * Node serverless functions aren't guaranteed to sustain a stream past
  * their configured maxDuration, so this proactively recycles the
@@ -29,8 +34,26 @@ async function refresh() {
   if (inflight) return inflight;
   inflight = (async () => {
     try {
-      const [stats, activity] = await Promise.all([getVaultStats(), getVaultActivity(30)]);
-      cache = { at: Date.now(), stats, activity };
+      const [stats, activity] = await Promise.all([
+        getVaultStats().catch(async (err) => {
+          const stale = await readVaultStatsCache();
+          if (stale && isFreshEnough(stale)) return stale.stats;
+          // keep previous cache stats rather than failing the whole tick
+          return (cache?.stats as import("@/lib/market/vault-stats").VaultStats | undefined) ?? null;
+        }),
+        getVaultActivity(40).catch(() => (cache?.activity as unknown[]) ?? []),
+      ]);
+      // Never store empty activity over a non-empty previous tick
+      const nextActivity =
+        Array.isArray(activity) && activity.length > 0
+          ? activity
+          : (cache?.activity as unknown[]) ?? [];
+      if (stats) {
+        cache = { at: Date.now(), stats, activity: nextActivity };
+        void writeVaultStatsCache(stats as import("@/lib/market/vault-stats").VaultStats);
+      } else if (cache && nextActivity.length > 0) {
+        cache = { ...cache, at: Date.now(), activity: nextActivity };
+      }
     } finally {
       inflight = null;
     }

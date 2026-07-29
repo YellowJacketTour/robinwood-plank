@@ -95,7 +95,12 @@ async function main() {
 
   const address = await vault.getAddress();
   console.log("MarketplankVault deployed at:", address);
-  console.log("Set NEXT_PUBLIC_MARKET_VAULT_ADDRESS =", address, "in Vercel env vars.");
+  console.log("Dual-vault migrate env (safe — do not drop V1 until empty):");
+  console.log("  NEXT_PUBLIC_MARKET_VAULT_ADDRESS =", address, "  # new primary (V2)");
+  console.log(
+    "  NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS = 0xb2019Fd4cA24502e812C0C73b751Fa49979BF708  # existing deposits"
+  );
+  console.log("Also set both in wrangler.jsonc vars and redeploy the site.");
   console.log(
     "Then seed the pool (deposit NFTs, seedShares()/seedLiquidity()) and finally call " +
       "openPool() to make trading public — one-way, seeding locks forever."

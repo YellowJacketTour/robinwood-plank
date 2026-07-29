@@ -133,6 +133,7 @@ export const NAV_LINKS = [
   { href: "#trade", label: "Trade" },
   { href: "#mint", label: "Mint" },
   { href: "/gallery", label: "Gallery" },
+  { href: "/learn", label: "Learn" },
   { href: "#airdrop", label: "Airdrop" },
 ] as const;
 
@@ -184,16 +185,56 @@ export const CONDUIT_CONTROLLER_ADDRESS = "0x00000000F9490004C11Cef243f5400493c0
  * but a malformed value fails closed at module load instead of silently
  * pointing every vault call at garbage.
  */
-export const MARKET_VAULT_ADDRESS: string | null = (() => {
-  const raw = process.env.NEXT_PUBLIC_MARKET_VAULT_ADDRESS?.trim();
-  if (!raw) return null;
-  if (!/^0x[0-9a-fA-F]{40}$/.test(raw)) {
-    throw new Error(
-      `NEXT_PUBLIC_MARKET_VAULT_ADDRESS is set but is not a valid 20-byte address: "${raw}"`
-    );
+function parseOptionalAddress(raw: string | undefined, envName: string): string | null {
+  const v = raw?.trim();
+  if (!v) return null;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(v)) {
+    throw new Error(`${envName} is set but is not a valid 20-byte address: "${v}"`);
   }
-  return raw;
+  return v;
+}
+
+/**
+ * Primary Instant Swap vault — preferred for new deposits / LP after a V2
+ * migrate. Until V2 is deployed this is the live V1 address.
+ */
+export const MARKET_VAULT_ADDRESS: string | null = parseOptionalAddress(
+  process.env.NEXT_PUBLIC_MARKET_VAULT_ADDRESS,
+  "NEXT_PUBLIC_MARKET_VAULT_ADDRESS"
+);
+
+/**
+ * Legacy vault that still holds pre-migrate deposits. Keep this set to V1
+ * when PRIMARY points at a new vault so holders can redeem without being
+ * stranded. Optional: null means single-vault mode.
+ */
+export const MARKET_VAULT_LEGACY_ADDRESS: string | null = (() => {
+  const legacy = parseOptionalAddress(
+    process.env.NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS,
+    "NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS"
+  );
+  if (!legacy || !MARKET_VAULT_ADDRESS) return legacy;
+  if (legacy.toLowerCase() === MARKET_VAULT_ADDRESS.toLowerCase()) return null;
+  return legacy;
 })();
+
+/**
+ * Known production V1 vault (Robinhood). Used for migration copy and as a
+ * hard fallback label so we never "forget" where the first 57 deposits live.
+ */
+export const MARKET_VAULT_V1_KNOWN = "0xb2019Fd4cA24502e812C0C73b751Fa49979BF708" as const;
+
+/** Every vault address the UI/wallet may talk to (primary + legacy). */
+export const MARKET_VAULT_ADDRESSES: readonly string[] = (() => {
+  const out: string[] = [];
+  if (MARKET_VAULT_ADDRESS) out.push(MARKET_VAULT_ADDRESS);
+  if (MARKET_VAULT_LEGACY_ADDRESS) out.push(MARKET_VAULT_LEGACY_ADDRESS);
+  return out;
+})();
+
+/** True when primary and legacy are both set and different. */
+export const MARKET_VAULT_DUAL_MODE =
+  MARKET_VAULT_ADDRESS !== null && MARKET_VAULT_LEGACY_ADDRESS !== null;
 
 /** The vault's own DrandBeacon — read live from the deployed vault's
  * beacon() getter, not guessed or copied from a deploy script that could
@@ -258,6 +299,7 @@ export const EXPORTED_ADDRESS_CONSTANTS: Readonly<Record<string, string>> =
     MARKET_FEE_RECIPIENT,
     MARKET_OFFER_CURRENCY,
     ...(MARKET_VAULT_ADDRESS ? { MARKET_VAULT_ADDRESS } : {}),
+    ...(MARKET_VAULT_LEGACY_ADDRESS ? { MARKET_VAULT_LEGACY_ADDRESS } : {}),
   });
 
 for (const [name, value] of Object.entries(EXPORTED_ADDRESS_CONSTANTS)) {

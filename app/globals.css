@@ -686,9 +686,9 @@ body .nft-modal .nft-modal-body {
   z-index: 2;
 }
 
-/* Rarity-tier motion — reserved for Legendary/Mythic (lib/rarity.ts
-   tierAnimationClass). Reduced-motion users get the static glow only, via
-   the prefers-reduced-motion override below. */
+/* Rarity-tier motion — Legendary top tier (lib/rarity.ts tierAnimationClass).
+   Reduced-motion users get the static glow only, via the prefers-reduced-motion
+   override below. */
 @keyframes tier-pulse-glow {
   0%,
   100% {

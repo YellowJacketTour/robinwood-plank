@@ -1,20 +1,37 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ipfsGatewayCandidates } from "@/lib/ipfs";
+import { resolveIpfsUrl, ipfsGatewayCandidates } from "@/lib/ipfs";
+import { ensureArtCached } from "@/lib/art-cache";
 
 export default function NftImage({
   imageUri,
   alt,
   className,
   priority = false,
+  tokenId,
 }: {
   imageUri: string;
   alt: string;
   className?: string;
   priority?: boolean;
+  tokenId?: string | number;
 }) {
-  const candidates = useMemo(() => ipfsGatewayCandidates(imageUri), [imageUri]);
+  // Canonical path: same-origin proxy only (ORB-safe). Fallbacks still go
+  // through resolveIpfsUrl so we never paint raw gateway URLs in <img>.
+  const candidates = useMemo(() => {
+    if (!imageUri) return [] as string[];
+    if (imageUri.startsWith("/api/ipfs/")) return [imageUri];
+    if (imageUri.startsWith("data:")) return [imageUri];
+    // Build proxy chain from raw gateway candidates.
+    const raw = ipfsGatewayCandidates(imageUri);
+    const proxied = raw.map((u) =>
+      u.startsWith("/api/ipfs/") || u.startsWith("data:") ? u : resolveIpfsUrl(u)
+    );
+    // Dedupe
+    return [...new Set(proxied.filter(Boolean))];
+  }, [imageUri]);
+
   const [index, setIndex] = useState(0);
   const [failed, setFailed] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
@@ -24,7 +41,6 @@ export default function NftImage({
     setFailed(false);
   }, [imageUri]);
 
-  // If every gateway failed, soft-retry after a short pause (new pins propagate)
   useEffect(() => {
     if (!failed || !imageUri) return;
     const timer = window.setTimeout(() => {
@@ -34,6 +50,13 @@ export default function NftImage({
     }, 8_000);
     return () => window.clearTimeout(timer);
   }, [failed, imageUri]);
+
+  const src = candidates[Math.min(index, Math.max(0, candidates.length - 1))] || "";
+
+  useEffect(() => {
+    if (!src || !tokenId) return;
+    void ensureArtCached(String(tokenId), src);
+  }, [src, tokenId]);
 
   if (!imageUri || candidates.length === 0) {
     return (
@@ -58,10 +81,8 @@ export default function NftImage({
     );
   }
 
-  const src = candidates[Math.min(index, candidates.length - 1)];
-
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- IPFS multi-gateway fallback needs native onError
+    // eslint-disable-next-line @next/next/no-img-element -- multi-candidate fallback needs native onError
     <img
       key={`${src}-${retryTick}`}
       src={src}

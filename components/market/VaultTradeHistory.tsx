@@ -6,10 +6,10 @@ import { usePendingVaultTx } from "@/lib/market/pendingVaultTx";
 import ScrollBox from "@/components/market/ScrollBox";
 
 const KIND_LABEL: Record<VaultTradeKind, string> = {
-  buy: "Buy",
-  sell: "Sell",
-  deposit: "Deposit",
-  redeem: "Redeem",
+  buy: "Buy shares",
+  sell: "Sell shares",
+  deposit: "Deposit NFT",
+  redeem: "Redeem NFT",
 };
 
 const KIND_COLOR: Record<VaultTradeKind, string> = {
@@ -43,13 +43,8 @@ function timeAgo(iso: string | null) {
 }
 
 /**
- * Real on-chain vault trade ticker (buy/sell/deposit/redeem), the dextools-
- * style trade table for Instant Swap — fed by the shared live stream
- * (lib/market/useVaultLive.ts, backed by /api/market/vault/stream), which
- * replays the vault's own events directly. The NFT-collection Transfer-based
- * /api/market/activity feed that drives the Activity tab has no visibility
- * into these at all, since vault swaps trade the vault's internal share
- * token, not the NFT collection itself.
+ * Vault share + NFT inventory ticker (buy/sell shares, deposit/redeem NFT).
+ * NFT marketplace sales (Seaport/OpenSea) live on the Activity tab, not here.
  *
  * Rows this tab just submitted appear instantly as "Pending" (see
  * lib/market/pendingVaultTx.ts) — before confirmation, let alone before the
@@ -75,7 +70,14 @@ export default function VaultTradeHistory() {
   // fine, just between ticks); only once the data has actually gone stale
   // AND there's no live socket does it read as "Reconnecting…" — the state
   // that's actually worth flagging as a problem.
-  const badgeLabel = live ? "Live" : connected ? "Updating…" : "Reconnecting…";
+  // If we already have trade rows, never label "Reconnecting…" — that was
+  // thrashing Live ↔ Reconnecting while REST still had a full history.
+  const badgeLabel =
+    activity.length > 0 || live
+      ? "Live"
+      : connected
+        ? "Updating…"
+        : "Reconnecting…";
 
   return (
     <div className="space-y-1.5">

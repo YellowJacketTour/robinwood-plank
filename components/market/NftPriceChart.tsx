@@ -83,6 +83,9 @@ export default function NftPriceChart() {
   const [vaultHistoryPoints, setVaultHistoryPoints] = useState<LineData<UTCTimestamp>[]>(
     () => loadCachedPoints("vault-history-points") ?? []
   );
+  const [vaultHistoryLoaded, setVaultHistoryLoaded] = useState(
+    () => (loadCachedPoints("vault-history-points")?.length ?? 0) > 0
+  );
   const [range, setRange] = useState<Range>("ALL");
   const [failed, setFailed] = useState(false);
   const { activity: vaultActivity } = useVaultLive();
@@ -91,11 +94,19 @@ export default function NftPriceChart() {
     let cancelled = false;
 
     const load = () => {
-      fetch("/api/market/activity?full=1")
-        .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
-        .then((data: { events?: SaleEvent[] }) => {
+      // Prefer the short feed if full lineage is empty/cached-empty — chart
+      // should still paint from any priced sales or vault AMM trades.
+      Promise.all([
+        fetch("/api/market/activity?full=1").then((r) => (r.ok ? r.json() : null)),
+        fetch("/api/market/activity").then((r) => (r.ok ? r.json() : null)),
+      ])
+        .then(([full, short]) => {
           if (cancelled) return;
-          const sales = (data.events ?? [])
+          const events = [
+            ...((full?.events as SaleEvent[] | undefined) ?? []),
+            ...((short?.events as SaleEvent[] | undefined) ?? []),
+          ];
+          const sales = events
             .filter((e): e is { kind: string; priceWei: string; timestamp: string } =>
               e.kind === "sale" && e.priceWei != null && e.timestamp != null
             )
@@ -104,17 +115,16 @@ export default function NftPriceChart() {
               value: ethWeiToNumber(e.priceWei),
             }));
           setSalePoints(sales);
-          saveCachedPoints("sale-points", sales);
+          if (sales.length > 0) saveCachedPoints("sale-points", sales);
+          setFailed(false);
         })
         .catch(() => {
-          if (!cancelled) setFailed(true);
+          // Don't hard-fail the whole chart — vault AMM points still count.
+          if (!cancelled) setSalePoints((prev) => prev ?? []);
         });
     };
 
     load();
-    // The full-history endpoint is server-cached for 120s, and new trades
-    // arrive live via the SSE stream anyway — this is just a slow safety
-    // net against a missed tick, not the primary update path.
     const interval = setInterval(load, 60_000);
     return () => {
       cancelled = true;
@@ -122,23 +132,51 @@ export default function NftPriceChart() {
     };
   }, []);
 
-  // One-time full vault trade history, merged with whatever the live
-  // stream carries — the stream only holds the ~30 most recent vault
-  // trades, which is fine for the ticker but was silently truncating this
-  // chart's older history.
+  // Vault AMM history is the main price series post-launch (ETH per share).
+  // Prefer short feed first (fast) then full lineage; never leave chart
+  // empty while full=1 is still hanging.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/market/vault/activity?full=1")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
-      .then((data: { events?: VaultEvent[] }) => {
-        if (cancelled) return;
-        const pts = (data.events ?? []).map(vaultEventToPoint).filter((p): p is LineData<UTCTimestamp> => p != null);
-        setVaultHistoryPoints(pts);
+    const apply = (events: VaultEvent[]) => {
+      const pts = events
+        .map(vaultEventToPoint)
+        .filter((p): p is LineData<UTCTimestamp> => p != null);
+      if (pts.length === 0) return;
+      setVaultHistoryPoints((prev) => {
+        if (pts.length < prev.length) return prev;
         saveCachedPoints("vault-history-points", pts);
-      })
-      .catch(() => {});
+        return pts;
+      });
+    };
+
+    const loadVault = () => {
+      // Short first — paints quickly from the same feed as the trade ticker.
+      fetch("/api/market/vault/activity")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((short) => {
+          if (cancelled) return;
+          apply((short?.events as VaultEvent[] | undefined) ?? []);
+          setVaultHistoryLoaded(true);
+        })
+        .catch(() => {
+          if (!cancelled) setVaultHistoryLoaded(true);
+        });
+
+      fetch("/api/market/vault/activity?full=1")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((full) => {
+          if (cancelled) return;
+          apply((full?.events as VaultEvent[] | undefined) ?? []);
+          setVaultHistoryLoaded(true);
+        })
+        .catch(() => {});
+    };
+
+    loadVault();
+    const interval = setInterval(loadVault, 45_000);
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, []);
 
@@ -147,8 +185,28 @@ export default function NftPriceChart() {
   }, [vaultActivity]);
 
   const points = useMemo<LineData<UTCTimestamp>[] | null>(() => {
-    if (salePoints == null) return null;
-    const merged = [...salePoints, ...vaultHistoryPoints, ...vaultLivePoints].sort((a, b) => a.time - b.time);
+    // Wait for vault history attempt OR live/history points before painting
+    // empty — empty sales alone used to flash "no trades" while vault still loaded.
+    if (
+      !vaultHistoryLoaded &&
+      vaultHistoryPoints.length === 0 &&
+      vaultLivePoints.length === 0 &&
+      salePoints == null
+    ) {
+      return null;
+    }
+    if (
+      !vaultHistoryLoaded &&
+      vaultHistoryPoints.length === 0 &&
+      vaultLivePoints.length === 0 &&
+      (salePoints == null || salePoints.length === 0)
+    ) {
+      return null;
+    }
+    const sales = salePoints ?? [];
+    const merged = [...sales, ...vaultHistoryPoints, ...vaultLivePoints].sort(
+      (a, b) => a.time - b.time
+    );
     // lightweight-charts requires strictly increasing timestamps; two trades
     // in the same second collapse to the later one.
     const deduped: typeof merged = [];
@@ -160,7 +218,7 @@ export default function NftPriceChart() {
       }
     }
     return deduped;
-  }, [salePoints, vaultHistoryPoints, vaultLivePoints]);
+  }, [salePoints, vaultHistoryPoints, vaultLivePoints, vaultHistoryLoaded]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -220,15 +278,15 @@ export default function NftPriceChart() {
     chartRef.current.timeScale().fitContent();
   }, [range, points]);
 
-  if (failed) {
-    return <p className="py-4 text-center text-xs text-red-300">Could not load sale history.</p>;
+  if (failed && (points == null || points.length === 0)) {
+    return <p className="py-4 text-center text-xs text-red-300">Could not load price history.</p>;
   }
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
-          RobinWood sale price
+          Price history (vault + sales)
         </p>
         <div className="flex gap-1">
           {RANGES.map((r) => (
@@ -249,10 +307,14 @@ export default function NftPriceChart() {
       </div>
       {points != null && points.length === 0 ? (
         <p className="rounded-lg border border-dashed border-gold-500/25 bg-black/10 px-3 py-10 text-center text-xs text-foreground/45">
-          No settled sales yet — chart fills in as trades happen.
+          No priced vault trades or sales yet — chart fills in as they print.
+        </p>
+      ) : points == null ? (
+        <p className="rounded-lg border border-dashed border-gold-500/25 bg-black/10 px-3 py-10 text-center text-xs text-foreground/45">
+          Loading price history…
         </p>
       ) : (
-        <div ref={containerRef} className="w-full overflow-hidden rounded-lg border border-gold-500/15 bg-black/10" />
+        <div ref={containerRef} className="w-full min-h-[260px] overflow-hidden rounded-lg border border-gold-500/15 bg-black/10" />
       )}
     </div>
   );

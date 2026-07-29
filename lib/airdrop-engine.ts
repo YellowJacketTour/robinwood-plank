@@ -9,10 +9,9 @@
  * Official: NFT holders get 4.2069% of token supply (@RobinWoodPlank).
  */
 
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { CONTRACT_ADDRESS, CHAIN } from "@/lib/constants";
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
+import { readPublicJson } from "@/lib/public-json";
 
 export type AirdropSource = "wood_list" | "airdrop" | "both";
 
@@ -181,13 +180,7 @@ function g(): GlobalAirdrop {
 }
 
 async function readJsonFile<T>(rel: string): Promise<T | null> {
-  try {
-    const full = path.join(process.cwd(), /* turbopackIgnore: true */ rel);
-    const raw = await fs.readFile(full, "utf8");
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
+  return readPublicJson<T>(rel);
 }
 
 async function rpcCall(method: string, params: unknown[]): Promise<unknown> {

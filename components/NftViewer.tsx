@@ -608,7 +608,6 @@ export default function NftViewer() {
 
   const bagTierCounts = useMemo(() => {
     const counts: Record<RarityTier, number> = {
-      Mythic: 0,
       Legendary: 0,
       Epic: 0,
       Rare: 0,

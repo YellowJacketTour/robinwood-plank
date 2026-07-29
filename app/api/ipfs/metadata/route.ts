@@ -1,4 +1,5 @@
 import { fetchNftMetadata } from "@/lib/ipfs";
+import { cachedPublicJson } from "@/lib/http-cache";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +39,8 @@ export async function GET(req: Request) {
 
   try {
     const metadata = await fetchNftMetadata(uri);
-    return publicJson(metadata);
+    // Content-addressed — safe to cache hard at the edge.
+    return cachedPublicJson(metadata, "immutable");
   } catch (error) {
     return publicError(error, "Could not load NFT metadata right now.");
   }

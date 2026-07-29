@@ -24,13 +24,16 @@ export async function getEthUsdPrice(): Promise<{ usd: number; source: string; a
   let source = hit?.source ?? "stale";
 
   try {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 2_500);
     const res = await fetch(
       "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
       {
         headers: { Accept: "application/json" },
         cache: "no-store",
+        signal: ac.signal,
       }
-    );
+    ).finally(() => clearTimeout(t));
     if (res.ok) {
       const data = (await res.json()) as { ethereum?: { usd?: number } };
       const n = data?.ethereum?.usd;
@@ -46,10 +49,13 @@ export async function getEthUsdPrice(): Promise<{ usd: number; source: string; a
   // Fallback: Coinbase if CG failed and we have no price yet
   if (!(usd > 0)) {
     try {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 2_500);
       const res = await fetch("https://api.coinbase.com/v2/prices/ETH-USD/spot", {
         headers: { Accept: "application/json" },
         cache: "no-store",
-      });
+        signal: ac.signal,
+      }).finally(() => clearTimeout(t));
       if (res.ok) {
         const data = (await res.json()) as { data?: { amount?: string } };
         const n = Number(data?.data?.amount);

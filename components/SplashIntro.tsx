@@ -59,11 +59,23 @@ export default function SplashIntro() {
     }
     if (seen) return;
 
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduceMotion) {
+    // Wallet in-app browsers (Rabby / MetaMask / etc.) and low-power mobile
+    // often never fire a clean window "load" (audio/fonts hang) — a full-screen
+    // splash that waits forever looks like "the site won't load."
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    const isWalletWebView =
+      /Rabby|MetaMask|Coinbase|Trust|Rainbow|WebView|wv\)/i.test(ua) ||
+      // Many wallet browsers report as Chrome Mobile without "Mobile Safari"
+      (/Android/i.test(ua) && /Version\/4\.0/i.test(ua));
+    const reduceMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduceMotion || isWalletWebView) {
       try {
         localStorage.setItem(SEEN_KEY, "1");
-      } catch {}
+      } catch {
+        /* ignore */
+      }
       return;
     }
 
@@ -78,7 +90,16 @@ export default function SplashIntro() {
     } else {
       window.addEventListener("load", onLoad);
     }
-    return () => window.removeEventListener("load", onLoad);
+    // Hard cap: never block the site more than ~2.5s even if load never fires.
+    const maxWait = window.setTimeout(() => {
+      pageLoadedRef.current = true;
+      cyclesRef.current = Math.max(cyclesRef.current, MIN_CYCLES);
+      dismissRef.current();
+    }, 2500);
+    return () => {
+      window.removeEventListener("load", onLoad);
+      window.clearTimeout(maxWait);
+    };
   }, []);
 
   if (phase === "hidden") return null;

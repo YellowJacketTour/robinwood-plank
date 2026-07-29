@@ -2,25 +2,30 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { buildOffer } from "@/lib/market/seaport";
-import { fetchTraitIndex, getTokenIdsForTrait, traitFloorWei } from "@/lib/market/traits";
+import { fetchTraitIndex } from "@/lib/market/traits";
 import type { TraitIndexResponse } from "@/lib/market/traits";
-import { parseTokenAmount, formatTokenAmount } from "@/lib/trade";
+import {
+  clausesToTraitLabels,
+  defaultFirstClause,
+  formatCriteriaLabel,
+  resolveCriteriaTokenIds,
+  type CriteriaClause,
+} from "@/lib/market/trait-criteria";
+import { parseTokenAmount } from "@/lib/trade";
 import type { Listing, MarketCollection } from "@/lib/market/types";
+import TraitCriteriaPicker from "@/components/market/TraitCriteriaPicker";
 
 type Props = {
   account: string;
   collection: MarketCollection;
-  /** Set for a single-token offer; omit WITH traitMode for a trait-floor bid. */
+  /** Set for a single-token offer; omit WITH traitMode for a criteria bid. */
   tokenId?: string;
   /**
-   * TRAIT-FLOOR BID mode: pick a trait, see how many planks qualify and the
-   * current floor among live listings, then bid on any one of them. The bid is
-   * a Seaport criteria order whose fulfillability is proven end-to-end in
-   * test/contracts/SeaportCriteriaFulfill.test.ts. Collection-wide ("any")
-   * offers remain disabled.
+   * Criteria bid mode: trait, rarity, and/or combos (AND). Snapshot is
+   * re-resolved server-side from the verified trait index.
    */
   traitMode?: boolean;
-  /** Live listings — used only to show the trait's current floor price. */
+  /** Live listings — used only to show the criteria's current floor price. */
   listings?: Array<Pick<Listing, "tokenId" | "priceWei">>;
   onSubmitted: () => void;
   onClose: () => void;
@@ -43,13 +48,10 @@ export default function OfferForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Trait mode state — options come from the server's verified index only.
   const [index, setIndex] = useState<TraitIndexResponse | null>(null);
   const [indexError, setIndexError] = useState<string | null>(null);
-  const [traitType, setTraitType] = useState("");
-  const [traitValue, setTraitValue] = useState("");
+  const [clauses, setClauses] = useState<CriteriaClause[]>([]);
 
-  // Consistent with the item detail modal — Escape dismisses either.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -65,11 +67,12 @@ export default function OfferForm({
       .then((res) => {
         if (cancelled) return;
         setIndex(res);
-        const firstType = res.traits ? Object.keys(res.traits)[0] : undefined;
-        if (firstType) {
-          setTraitType(firstType);
-          const firstValue = Object.keys(res.traits![firstType])[0];
-          if (firstValue) setTraitValue(firstValue);
+        if (res.complete && res.traits) {
+          setClauses((prev) => {
+            if (prev.length > 0) return prev;
+            const first = defaultFirstClause(res.traits!);
+            return first ? [first] : [];
+          });
         }
       })
       .catch((e) => {
@@ -80,21 +83,9 @@ export default function OfferForm({
     };
   }, [traitMode, collection]);
 
-  const traitTypes = useMemo(
-    () => (index?.traits ? Object.keys(index.traits).sort() : []),
-    [index]
-  );
-  const traitValues = useMemo(() => {
-    if (!index?.traits || !traitType) return [];
-    return Object.keys(index.traits[traitType] ?? {}).sort();
-  }, [index, traitType]);
   const qualifyingIds = useMemo(
-    () => (index && traitType && traitValue ? getTokenIdsForTrait(index, traitType, traitValue) : []),
-    [index, traitType, traitValue]
-  );
-  const floorWei = useMemo(
-    () => (listings && qualifyingIds.length > 0 ? traitFloorWei(listings, qualifyingIds) : null),
-    [listings, qualifyingIds]
+    () => resolveCriteriaTokenIds(index?.traits, clauses),
+    [index, clauses]
   );
 
   const submit = async () => {
@@ -104,8 +95,8 @@ export default function OfferForm({
       setError("Enter an amount.");
       return;
     }
-    if (traitMode && (!traitType || !traitValue || qualifyingIds.length === 0)) {
-      setError("Pick a trait first.");
+    if (traitMode && (clauses.length === 0 || qualifyingIds.length === 0)) {
+      setError("Pick at least one trait or rarity that matches some planks.");
       return;
     }
     try {
@@ -119,6 +110,10 @@ export default function OfferForm({
         expiresAt,
         feeBps: collection.feeBps,
       });
+
+      const traitPairs = clausesToTraitLabels(clauses).filter((t) => t.traitType !== "Rarity");
+      const rarityClause = clauses.find((c): c is Extract<CriteriaClause, { kind: "rarity" }> => c.kind === "rarity");
+
       const res = await fetch("/api/market/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -126,10 +121,15 @@ export default function OfferForm({
           kind: "offer",
           collectionSlug: collection.slug,
           rawOrder: executed,
-          // TRAIT bid: only the LABEL travels — the server resolves the
-          // token-id snapshot from its own verified index and requires the
-          // signed order's Merkle root to match it exactly.
-          ...(traitMode ? { trait: { traitType, value: traitValue } } : {}),
+          // Labels only — server re-resolves token ids from verified index.
+          ...(traitMode
+            ? {
+                criteria: {
+                  traits: traitPairs,
+                  ...(rarityClause ? { rarityTier: rarityClause.tier } : {}),
+                },
+              }
+            : {}),
         }),
       });
       const data = await res.json();
@@ -142,7 +142,9 @@ export default function OfferForm({
     }
   };
 
-  const traitReady = !traitMode || Boolean(index?.complete && index.traits);
+  const traitReady =
+    !traitMode ||
+    Boolean(index?.complete && index.traits && clauses.length > 0 && qualifyingIds.length > 0);
 
   return (
     <div
@@ -150,11 +152,11 @@ export default function OfferForm({
       role="dialog"
       aria-modal="true"
     >
-      <div className="wood-ledger w-full max-w-sm space-y-3 rounded-b-none p-4 sm:rounded-b-xl">
+      <div className="wood-ledger w-full max-w-md space-y-3 rounded-b-none p-4 sm:rounded-b-xl">
         <div className="flex items-center justify-between">
           <h3 className="font-display text-lg text-gold-300">
             {traitMode
-              ? "Bid on a trait floor"
+              ? "Bid on criteria"
               : tokenId
                 ? `Offer · #${tokenId}`
                 : `Offer · any ${collection.name}`}
@@ -171,74 +173,61 @@ export default function OfferForm({
 
         {traitMode && (
           <div className="space-y-2">
-            {indexError && (
-              <p className="text-center text-xs text-red-300" role="alert">
-                {indexError}
+            <p className="text-center text-[0.65rem] text-foreground/55">
+              Same scopes as Sweep: rarity tier, single trait, or AND combo. Sellers of any
+              matching plank can accept.
+            </p>
+            {/* Quick-start chips mirror SweepFloorboards (Rarity / Trait). */}
+            <div className="flex flex-wrap justify-center gap-1">
+              {(
+                [
+                  { id: "rarity", label: "Rarity" },
+                  { id: "trait", label: "Trait" },
+                  { id: "combo", label: "Combo" },
+                ] as const
+              ).map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    if (!index?.traits) return;
+                    if (m.id === "rarity") {
+                      setClauses([{ kind: "rarity", tier: "Rare" }]);
+                    } else if (m.id === "trait") {
+                      const first = defaultFirstClause(index.traits);
+                      setClauses(first ? [first] : []);
+                    } else {
+                      const first = defaultFirstClause(index.traits);
+                      setClauses(
+                        first
+                          ? [first, { kind: "rarity", tier: "Epic" }]
+                          : [{ kind: "rarity", tier: "Epic" }]
+                      );
+                    }
+                  }}
+                  className="min-h-8 rounded-md border border-gold-500/35 px-2.5 text-[0.65rem] font-bold text-gold-300 transition hover:border-gold-400"
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <TraitCriteriaPicker
+              traits={index?.traits ?? null}
+              complete={Boolean(index?.complete && index.traits)}
+              building={index?.building}
+              scanned={index?.scanned}
+              totalSupply={index?.totalSupply}
+              loading={!index && !indexError}
+              loadError={indexError}
+              clauses={clauses}
+              onChange={setClauses}
+              listings={listings}
+            />
+            {clauses.length > 0 && qualifyingIds.length > 0 && (
+              <p className="text-center text-[0.6rem] text-foreground/40">
+                Bid locks {formatCriteriaLabel(clauses)} · {qualifyingIds.length} planks
+                snapshotted into the signed order.
               </p>
-            )}
-            {!indexError && !index && (
-              <p className="text-center text-xs text-foreground/60">Loading traits…</p>
-            )}
-            {index && !index.complete && (
-              <p className="text-center text-xs text-foreground/60" role="status">
-                Trait index is still building ({index.scanned}
-                {index.totalSupply ? ` / ${index.totalSupply}` : ""} planks scanned) — trait
-                bids open once every plank is indexed.
-              </p>
-            )}
-            {index?.complete && index.traits && (
-              <>
-                <div className="flex gap-2">
-                  <label className="flex-1">
-                    <span className="mb-1 block text-[0.65rem] font-bold text-foreground/60">
-                      Trait
-                    </span>
-                    <select
-                      value={traitType}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        setTraitType(next);
-                        const values = Object.keys(index.traits![next] ?? {}).sort();
-                        setTraitValue(values[0] ?? "");
-                      }}
-                      className="min-h-10 w-full rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
-                    >
-                      {traitTypes.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex-1">
-                    <span className="mb-1 block text-[0.65rem] font-bold text-foreground/60">
-                      Value
-                    </span>
-                    <select
-                      value={traitValue}
-                      onChange={(e) => setTraitValue(e.target.value)}
-                      className="min-h-10 w-full rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
-                    >
-                      {traitValues.map((v) => (
-                        <option key={v} value={v}>
-                          {v}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <p className="text-center text-[0.7rem] text-foreground/70">
-                  {qualifyingIds.length} plank{qualifyingIds.length === 1 ? "" : "s"} qualify
-                  {floorWei
-                    ? ` · floor ${formatTokenAmount(floorWei, 18, 6)} ETH`
-                    : " · none listed right now"}
-                </p>
-                <p className="text-center text-[0.6rem] text-foreground/40">
-                  Your bid can be accepted by the seller of ANY qualifying plank — including
-                  the floor one. The qualifying set is snapshotted now and locked into your
-                  signed bid.
-                </p>
-              </>
             )}
           </div>
         )}
@@ -251,11 +240,8 @@ export default function OfferForm({
             value={priceEth}
             onChange={(e) => setPriceEth(e.target.value.replace(/[^0-9.]/g, ""))}
             className="min-w-0 flex-1 bg-transparent py-2.5 text-lg font-semibold text-foreground outline-none"
-            autoFocus
+            autoFocus={!traitMode}
           />
-          {/* Bids are WETH, not ETH — Seaport cannot pull native ETH from an
-              offerer, so saying "ETH" here would be wrong about what the
-              bidder actually needs to hold. */}
           <span className="text-xs font-bold text-gold-300">WETH</span>
         </div>
 
@@ -275,7 +261,9 @@ export default function OfferForm({
         </div>
 
         <p className="text-center text-[0.65rem] text-foreground/50">
-          {collection.feeBps > 0 ? `${(collection.feeBps / 100).toFixed(2)}% marketplace fee` : "No marketplace fee"}
+          {collection.feeBps > 0
+            ? `${(collection.feeBps / 100).toFixed(2)}% marketplace fee`
+            : "No marketplace fee"}
         </p>
 
         <button
@@ -284,7 +272,13 @@ export default function OfferForm({
           onClick={submit}
           className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
         >
-          {busy ? "Signing…" : traitMode ? "Bid on trait floor" : "Make offer"}
+          {busy
+            ? "Signing…"
+            : traitMode
+              ? clauses.length > 1
+                ? "Bid on combo"
+                : "Bid on criteria"
+              : "Make offer"}
         </button>
         {error && (
           <p className="text-center text-xs text-red-300" role="alert">

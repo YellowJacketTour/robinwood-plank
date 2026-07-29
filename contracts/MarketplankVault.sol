@@ -209,6 +209,17 @@ contract MarketplankVault is ERC20, ReentrancyGuard, IERC721Receiver {
     /// @dev Constant-product pool: ETH side. Share side is balanceOf(this).
     uint256 public ethReserve;
 
+    /**
+     * @notice Per-address credits for public LP (contributeLiquidity only).
+     * @dev Treasury seedLiquidity/seedShares do NOT mint credits — bootstrap
+     * ETH remains non-withdrawable so the treasury key cannot rug the pool.
+     * sellShares into the pool also does not mint credits (that is a trade).
+     * Credits are absolute amounts; removeLiquidity fails closed if reserves
+     * have been traded below the credited amount (user may remove less).
+     */
+    mapping(address => uint256) public lpShareCredit;
+    mapping(address => uint256) public lpEthCredit;
+
     struct RedeemRequest {
         /// @dev drand round whose verified randomness seeds the draw. It does
         /// not exist yet when the request is made. Shares are already burned.
@@ -246,6 +257,11 @@ contract MarketplankVault is ERC20, ReentrancyGuard, IERC721Receiver {
     event Bought(address indexed buyer, uint256 ethIn, uint256 sharesOut);
     event Sold(address indexed seller, uint256 sharesIn, uint256 ethOut);
     event PoolOpened(uint256 ethReserve, uint256 shareReserve);
+    /// @notice Public contribution of shares and/or ETH into the AMM reserves.
+    /// Tracked per-address so the same user can removeLiquidity later.
+    event LiquidityContributed(address indexed from, uint256 sharesIn, uint256 ethIn);
+    /// @notice Withdraw previously contributed LP (up to credit and reserves).
+    event LiquidityRemoved(address indexed to, uint256 sharesOut, uint256 ethOut);
 
     error FeeTooHigh();
     error EmptyVault();
@@ -272,6 +288,10 @@ contract MarketplankVault is ERC20, ReentrancyGuard, IERC721Receiver {
     error PoolNotOpen();
     /// @notice openPool() already happened; it is one-way and unrepeatable.
     error PoolAlreadyOpen();
+    /// @notice removeLiquidity exceeds this address's contributeLiquidity credit.
+    error InsufficientLpCredit();
+    /// @notice Pool reserves cannot cover the withdrawal (traded away or empty).
+    error InsufficientLpReserve();
 
     constructor(
         IERC721 collection_,
@@ -526,10 +546,71 @@ contract MarketplankVault is ERC20, ReentrancyGuard, IERC721Receiver {
     }
 
     /**
+     * @notice Add pool depth: move your shares into the AMM share reserve
+     * and/or send ETH into ethReserve. Credits are tracked for removeLiquidity.
+     *
+     * @dev Not a Uniswap V2 LP token — credits are absolute share/ETH amounts
+     * from contributeLiquidity only. Treasury seed does not create credits.
+     * Trades against the pool can reduce reserves below total credits; removal
+     * then fails closed until reserves recover (or remove a smaller amount).
+     *
+     * Requires poolOpen. At least one of sharesIn or msg.value must be non-zero.
+     * Does not change totalSupply or held NFTs — only moves existing shares
+     * into the pool and/or adds ETH.
+     */
+    function contributeLiquidity(uint256 sharesIn) external payable nonReentrant {
+        if (!poolOpen) revert PoolNotOpen();
+        if (sharesIn == 0 && msg.value == 0) revert InsufficientOutput();
+        if (sharesIn > 0) {
+            _transfer(msg.sender, address(this), sharesIn);
+            lpShareCredit[msg.sender] += sharesIn;
+        }
+        if (msg.value > 0) {
+            ethReserve += msg.value;
+            lpEthCredit[msg.sender] += msg.value;
+        }
+        emit LiquidityContributed(msg.sender, sharesIn, msg.value);
+    }
+
+    /**
+     * @notice Remove previously contributed LP (shares and/or ETH).
+     *
+     * @dev Caps: (1) caller's lpShareCredit / lpEthCredit from
+     * contributeLiquidity, (2) live pool reserves. Does not touch treasury
+     * seed or other users' credits. Does not change totalSupply or held NFTs
+     * — only moves pool shares back to the caller and/or sends ETH out while
+     * reducing ethReserve.
+     *
+     * If after removal either pool side is zero, buyShares/sellShares will
+     * revert EmptyVault until both sides are non-zero again — same as any
+     * drained book. Callers who want out without LP credit should use
+     * sellShares (trade) instead.
+     */
+    function removeLiquidity(uint256 sharesOut, uint256 ethOut) external nonReentrant {
+        if (!poolOpen) revert PoolNotOpen();
+        if (sharesOut == 0 && ethOut == 0) revert InsufficientOutput();
+
+        if (sharesOut > 0) {
+            if (sharesOut > lpShareCredit[msg.sender]) revert InsufficientLpCredit();
+            if (balanceOf(address(this)) < sharesOut) revert InsufficientLpReserve();
+            lpShareCredit[msg.sender] -= sharesOut;
+            _transfer(address(this), msg.sender, sharesOut);
+        }
+        if (ethOut > 0) {
+            if (ethOut > lpEthCredit[msg.sender]) revert InsufficientLpCredit();
+            if (ethReserve < ethOut) revert InsufficientLpReserve();
+            lpEthCredit[msg.sender] -= ethOut;
+            ethReserve -= ethOut;
+            (bool ok, ) = msg.sender.call{value: ethOut}("");
+            if (!ok) revert TransferFailed();
+        }
+        emit LiquidityRemoved(msg.sender, sharesOut, ethOut);
+    }
+
+    /**
      * @notice Add ETH to the pool. Treasury only.
-     * @dev There is deliberately no withdrawal path: pool ETH is committed
-     * permanently, so the vault cannot be rugged by whoever holds the
-     * treasury key.
+     * @dev Bootstrap only (pre-openPool). No LP credit — treasury cannot
+     * later pull seed ETH via removeLiquidity.
      */
     function seedLiquidity() external payable {
         if (msg.sender != treasury) revert NotTreasury();

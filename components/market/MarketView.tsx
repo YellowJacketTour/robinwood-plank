@@ -7,6 +7,14 @@ import MarketNav from "@/components/market/MarketNav";
 import ListingGrid from "@/components/market/ListingGrid";
 import OfferForm from "@/components/market/OfferForm";
 import SwapPanel from "@/components/market/SwapPanel";
+import InstantVaultSwitcher from "@/components/market/InstantVaultSwitcher";
+import VaultMigrate from "@/components/market/VaultMigrate";
+import SeedVaultPanel from "@/components/market/SeedVaultPanel";
+import {
+  dualVaultMode,
+  getVaultByRole,
+  type VaultRole,
+} from "@/lib/market/vault-registry";
 import MyPositions from "@/components/market/MyPositions";
 import MyInventory from "@/components/market/MyInventory";
 import MyNfts from "@/components/market/MyNfts";
@@ -21,6 +29,8 @@ import CollectionStats from "@/components/market/CollectionStats";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import SweepConfirm from "@/components/market/SweepConfirm";
 import SweepFloorboards from "@/components/market/SweepFloorboards";
+import RarityFloorStrip from "@/components/market/RarityFloorStrip";
+import IncomingBids from "@/components/market/IncomingBids";
 import ListingSkeleton from "@/components/market/ListingSkeleton";
 import ActivityFeed from "@/components/market/ActivityFeed";
 import ItemDetail from "@/components/market/ItemDetail";
@@ -29,6 +39,7 @@ import FilterBar, { applyFilters, EMPTY_FILTERS } from "@/components/market/Filt
 import type { MarketFilters } from "@/components/market/FilterBar";
 import { getRarityMap } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+import { prefetchJson } from "@/lib/market/swr-fetch";
 import { getOwnedTokenIds } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import {
@@ -39,10 +50,15 @@ import {
 } from "@/lib/market/seaport";
 import type { SweepPlan } from "@/lib/market/sweep";
 import { validateListingOrder, validateOfferOrder } from "@/lib/market/order-validation";
-import { connectWallet, ensureRobinhoodChain, getConnectedAccounts } from "@/lib/wallet";
+import { ensureRobinhoodChain, getConnectedAccounts } from "@/lib/wallet";
 import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
 import { formatTokenAmount } from "@/lib/trade";
 import type { Listing, MarketTab, Offer } from "@/lib/market/types";
+import dynamic from "next/dynamic";
+
+const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModal"), {
+  ssr: false,
+});
 
 const COLLECTION = MARKET_COLLECTIONS[0];
 
@@ -99,6 +115,9 @@ function sortListings<T extends Listing>(items: T[], key: SortKey): T[] {
 
 export default function MarketView() {
   const [tab, setTab] = useState<MarketTab>("buy-sell");
+  /** Instant Swap vault book: primary = V2, legacy = V1 deposits. */
+  const [vaultRole, setVaultRole] = useState<VaultRole>("primary");
+  const activeVault = getVaultByRole(vaultRole) ?? getVaultByRole("primary");
   // Each tab mounts the first time it's actually opened, then stays mounted
   // (hidden, not removed) for the rest of the visit — switching back to an
   // already-opened tab is then instant with no re-fetch. Mounting every tab
@@ -148,11 +167,17 @@ export default function MarketView() {
   const refresh = useCallback(async () => {
     if (!COLLECTION) return;
     try {
+      const slug = COLLECTION.slug;
+      const { swrJson } = await import("@/lib/market/swr-fetch");
       const [listingsRes, offersRes] = await Promise.all([
-        fetch(`/api/market/orders?collection=${COLLECTION.slug}&kind=listing`).then((r) =>
-          r.json()
+        swrJson<{ items?: Array<WithOrder<Listing>> }>(
+          `/api/market/orders?collection=${slug}&kind=listing`,
+          { ttlMs: 12_000, swrMs: 60_000, session: true }
         ),
-        fetch(`/api/market/orders?collection=${COLLECTION.slug}&kind=offer`).then((r) => r.json()),
+        swrJson<{ items?: Array<WithOrder<Listing>> }>(
+          `/api/market/orders?collection=${slug}&kind=offer`,
+          { ttlMs: 12_000, swrMs: 60_000, session: true }
+        ),
       ]);
       setListings(listingsRes.items ?? []);
       setOffers(offersRes.items ?? []);
@@ -167,6 +192,31 @@ export default function MarketView() {
       if (accounts[0]) setAccount(accounts[0]);
     });
   }, [refresh]);
+
+  // Warm every public tab's data as soon as /market mounts so tab switches
+  // hit memory/session/SWR (and edge Cache-Control), not a cold Worker trip.
+  useEffect(() => {
+    const slug = COLLECTION?.slug ?? "robinwood";
+    // Buy & Sell + Offers book
+    prefetchJson(`/api/market/orders?collection=${slug}&kind=listing`, {
+      ttlMs: 12_000,
+      swrMs: 60_000,
+      session: true,
+    });
+    prefetchJson(`/api/market/orders?collection=${slug}&kind=offer`, {
+      ttlMs: 12_000,
+      swrMs: 60_000,
+      session: true,
+    });
+    // Activity feed + stats lineage
+    prefetchJson("/api/market/activity", { ttlMs: 20_000, swrMs: 120_000, session: true });
+    prefetchJson("/api/market/activity?full=1", { ttlMs: 45_000, swrMs: 180_000, session: true });
+    // Instant Swap
+    prefetchJson("/api/market/vault/stats", { ttlMs: 10_000, swrMs: 90_000, session: true });
+    prefetchJson("/api/market/vault/held", { ttlMs: 15_000, swrMs: 120_000, session: true });
+    prefetchJson("/api/market/vault/activity", { ttlMs: 12_000, swrMs: 90_000, session: true });
+    void getRarityMap();
+  }, []);
 
   // Same shared, module-cached fetch every rarity-aware grid on the page
   // uses — the tier filter reads the identical map the card badges do.
@@ -266,20 +316,26 @@ export default function MarketView() {
     };
   }, [account]);
 
-  const handleConnect = useCallback(async () => {
+  const [connectOpen, setConnectOpen] = useState(false);
+
+  const handleConnect = useCallback(() => {
     setError(null);
+    setConnectOpen(true);
+  }, []);
+
+  const onWalletConnected = useCallback(async (addr: string) => {
     try {
-      const addr = await connectWallet();
       await ensureRobinhoodChain();
-      setAccount(addr);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to connect wallet.");
+    } catch {
+      /* WC may already be on 4663; ensure will prompt if not */
     }
+    setAccount(addr);
+    setConnectOpen(false);
   }, []);
 
   const requireAccount = useCallback(async () => {
     if (account) return account;
-    await handleConnect();
+    handleConnect();
     return null;
   }, [account, handleConnect]);
 
@@ -526,6 +582,11 @@ export default function MarketView() {
 
   return (
     <div className="space-y-5">
+      <ConnectWalletModal
+        open={connectOpen}
+        onClose={() => setConnectOpen(false)}
+        onConnected={(addr) => void onWalletConnected(addr)}
+      />
       <Reveal>
         <SectionHead eyebrow="Robinhood Chain" title="Marketplank" />
       </Reveal>
@@ -763,7 +824,26 @@ export default function MarketView() {
                 totalSupply={TOTAL_SUPPLY}
               />
             )}
-            <div className="flex flex-wrap items-center gap-2">
+            {!loading && rarityMap.size > 0 && listings.length > 0 && (
+              <RarityFloorStrip
+                listings={listings}
+                rarity={rarityMap}
+                activeTier={filters.tier}
+                onSelectTier={(tier) => {
+                  setFilters((f) => ({ ...f, tier }));
+                }}
+              />
+            )}
+            {account && !loading && (
+              <IncomingBids
+                dense
+                offers={offers as unknown as Array<WithOrder<Offer>>}
+                ownedTokenIds={ownedTokenIds}
+                onAcceptToken={(o) => void handleAcceptOffer(o as unknown as Listing)}
+                onAcceptCriteria={(o) => void handleAcceptTraitOffer(o as WithOrder<Offer>)}
+              />
+            )}
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start">
               <FilterBar
                 filters={filters}
                 onChange={setFilters}
@@ -775,8 +855,23 @@ export default function MarketView() {
                   listings={listings}
                   collection={COLLECTION}
                   account={account}
+                  rarity={rarityMap}
+                  tierScope={filters.tier}
                   onSweep={(plan) => void handleSweep(plan)}
                 />
+              )}
+              {COLLECTION && !loading && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const who = await requireAccount();
+                    if (who) setOfferTarget({ trait: true });
+                  }}
+                  className="min-h-9 shrink-0 rounded-lg border border-gold-500/40 px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+                  title="Bid on any plank matching trait, rarity, or combo"
+                >
+                  Bid on trait / rarity
+                </button>
               )}
               <label className="flex items-center gap-1.5">
                 <span className="sr-only">Sort listings</span>
@@ -818,7 +913,8 @@ export default function MarketView() {
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="min-w-0 flex-1 rounded-lg border border-dashed border-emerald-500/30 bg-forest-900/50 px-3 py-2 text-center text-[0.7rem] text-foreground/70">
-                Bids from buyers. Accepting one sells them your plank.
+                Bids from buyers — trait, rarity, combo, or single plank. Accepting one sells them
+                your matching plank.
               </p>
               <button
                 type="button"
@@ -828,9 +924,17 @@ export default function MarketView() {
                 }}
                 className="min-h-10 shrink-0 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
               >
-                Bid on trait floor
+                Bid on trait / rarity / combo
               </button>
             </div>
+            {account && !loading && (
+              <IncomingBids
+                offers={offers as unknown as Array<WithOrder<Offer>>}
+                ownedTokenIds={ownedTokenIds}
+                onAcceptToken={(o) => void handleAcceptOffer(o as unknown as Listing)}
+                onAcceptCriteria={(o) => void handleAcceptTraitOffer(o as WithOrder<Offer>)}
+              />
+            )}
             {!loading && traitOffers.length > 0 && (
               <ul className="space-y-2">
                 {traitOffers.map((o) => {
@@ -919,11 +1023,31 @@ export default function MarketView() {
                 the top of column 1, not wherever the flow happens to put
                 it. break-inside-avoid keeps each card from being sliced
                 across the column break. */}
+            {/* Dual vault: pick V1 (legacy deposits) or V2 (new book / LP) first */}
+            <InstantVaultSwitcher role={vaultRole} onChange={setVaultRole} />
+            {/* Seed/bootstrap only on primary (V2) — never seed into legacy V1 */}
+            {vaultRole === "primary" && (
+              <SeedVaultPanel account={account} onConnect={handleConnect} />
+            )}
+            {dualVaultMode() && (
+              <VaultMigrate account={account} onConnect={handleConnect} />
+            )}
             <div className="gap-3 [column-fill:balance] sm:columns-2 [&>*]:mb-3 [&>*]:break-inside-avoid">
-              <SwapPanel account={account} onConnect={handleConnect} />
+              <SwapPanel
+                account={account}
+                onConnect={handleConnect}
+                vaultAddress={activeVault?.address ?? null}
+                vaultLabel={
+                  vaultRole === "legacy"
+                    ? "V1 — legacy deposits"
+                    : activeVault?.isV1
+                      ? "Primary vault"
+                      : "V2 — new Instant Swap"
+                }
+              />
               <VaultDashboard />
               <NftPriceChart />
-              <RedeemOdds listings={listings} />
+              <RedeemOdds />
               <VaultTradeHistory />
               <TreasuryDashboard />
             </div>
@@ -956,6 +1080,12 @@ export default function MarketView() {
         <div className={tab === "positions" ? undefined : "hidden"}>
           {visitedTabs.has("positions") && (account ? (
             <div className="space-y-3">
+              <IncomingBids
+                offers={offers as unknown as Array<WithOrder<Offer>>}
+                ownedTokenIds={ownedTokenIds}
+                onAcceptToken={(o) => void handleAcceptOffer(o as unknown as Listing)}
+                onAcceptCriteria={(o) => void handleAcceptTraitOffer(o as WithOrder<Offer>)}
+              />
               <button
                 type="button"
                 onClick={() => setShowInventory((v) => !v)}

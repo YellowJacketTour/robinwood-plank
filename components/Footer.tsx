@@ -42,6 +42,18 @@ export default function Footer() {
           Meme coin. No promised return. Not financial advice. DYOR.
         </p>
 
+        <p className="flex flex-wrap justify-center gap-3 text-xs text-foreground/50">
+          <a href="/learn" className="text-gold-300/90 underline hover:text-gold-300">
+            Learn how everything works
+          </a>
+          <a href="/market" className="underline hover:text-gold-300">
+            Market
+          </a>
+          <a href="/gallery" className="underline hover:text-gold-300">
+            Gallery
+          </a>
+        </p>
+
         <p className="text-xs text-foreground/40">© {new Date().getFullYear()} RobinWood. All rights reserved.</p>
       </div>
     </footer>

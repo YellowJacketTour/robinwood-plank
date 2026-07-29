@@ -15,6 +15,7 @@ import type {
   NiceLedgerEntry,
   WidgetSession,
 } from "@/lib/boards-types";
+import { readPublicJson } from "@/lib/public-json";
 
 type GlobalBoards = {
   __plankBoardsState?: BoardsState;
@@ -51,10 +52,20 @@ function recomputeTotalEth(state: BoardsState): void {
   state.totalEthSpentWei = total.toString();
 }
 
-const TMP_PATH =
-  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
-    ? path.join("/tmp", "plank-boards-state.json")
-    : path.join(process.cwd(), "data", "boards-state.json");
+/** Serverless / edge-like: no durable local disk (Vercel, Cloudflare, Lambda). */
+function isEphemeralRuntime(): boolean {
+  return Boolean(
+    process.env.VERCEL ||
+      process.env.AWS_LAMBDA_FUNCTION_NAME ||
+      process.env.CF_PAGES ||
+      process.env.CF_WORKER ||
+      process.env.WORKERS_CI
+  );
+}
+
+const TMP_PATH = isEphemeralRuntime()
+  ? path.join("/tmp", "plank-boards-state.json")
+  : path.join(process.cwd(), "data", "boards-state.json");
 
 async function ensureLoaded(): Promise<BoardsState> {
   const glob = g();
@@ -83,6 +94,7 @@ async function ensureLoaded(): Promise<BoardsState> {
     };
     recomputeTotalEth(glob.__plankBoardsState);
   } catch {
+    // Cloudflare has no durable /tmp across isolates — in-memory is fine
     glob.__plankBoardsState = emptyState();
   }
   return glob.__plankBoardsState;
@@ -92,7 +104,7 @@ async function persist(state: BoardsState): Promise<void> {
   state.updatedAt = new Date().toISOString();
   g().__plankBoardsState = state;
   try {
-    if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    if (!isEphemeralRuntime()) {
       await fs.mkdir(path.dirname(TMP_PATH), { recursive: true });
     }
     await fs.writeFile(TMP_PATH, JSON.stringify(state), "utf8");
@@ -112,10 +124,10 @@ export async function loadGoodWoodSet(): Promise<Set<string>> {
   const set = new Set<string>();
 
   try {
-    const proofsPath = path.join(process.cwd(), "public", "proofs.json");
-    const raw = await fs.readFile(proofsPath, "utf8");
-    const data = JSON.parse(raw) as { proofs?: Record<string, unknown> };
-    if (data.proofs) {
+    const data = await readPublicJson<{ proofs?: Record<string, unknown> }>(
+      "public/proofs.json"
+    );
+    if (data?.proofs) {
       for (const addr of Object.keys(data.proofs)) {
         if (/^0x[a-fA-F0-9]{40}$/i.test(addr)) set.add(normalizeAddress(addr));
       }
@@ -125,13 +137,15 @@ export async function loadGoodWoodSet(): Promise<Set<string>> {
   }
 
   try {
-    const airdropPath = path.join(process.cwd(), "public", "airdrop.json");
-    const raw = await fs.readFile(airdropPath, "utf8");
-    const data = JSON.parse(raw) as { addresses?: string[] } | string[];
-    const list = Array.isArray(data) ? data : data.addresses || [];
-    for (const addr of list) {
-      if (typeof addr === "string" && /^0x[a-fA-F0-9]{40}$/i.test(addr)) {
-        set.add(normalizeAddress(addr));
+    const data = await readPublicJson<{ addresses?: string[] } | string[]>(
+      "public/airdrop.json"
+    );
+    if (data) {
+      const list = Array.isArray(data) ? data : data.addresses || [];
+      for (const addr of list) {
+        if (typeof addr === "string" && /^0x[a-fA-F0-9]{40}$/i.test(addr)) {
+          set.add(normalizeAddress(addr));
+        }
       }
     }
   } catch {

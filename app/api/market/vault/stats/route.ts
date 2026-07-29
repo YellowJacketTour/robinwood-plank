@@ -1,40 +1,43 @@
-import { NextResponse } from "next/server";
 import { getVaultStats } from "@/lib/market/vault-stats";
+import {
+  isFreshEnough,
+  readVaultStatsCache,
+  writeVaultStatsCache,
+} from "@/lib/market/vault-stats-cache";
+import { cachedPublicJson } from "@/lib/http-cache";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 let cache: { at: number; data: unknown } | null = null;
-const CACHE_MS = 20_000;
-
-/** publicJson forces Cache-Control: no-store everywhere, which is right for
- * most routes but was the actual reason this one felt slow on every
- * refresh: even with the module-level cache below, the BROWSER/CDN was
- * told to never reuse a response, so every load re-hit this function (and
- * on Vercel serverless, a cold instance means the module cache above isn't
- * even there to hit). This is read-only, public, non-sensitive vault data —
- * safe to let the edge cache briefly. */
-function cachedPublicJson(data: unknown): NextResponse {
-  return NextResponse.json(data, {
-    headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60" },
-  });
-}
+const CACHE_MS = 15_000;
+/** Serve KV without waiting on RPC when younger than this. */
+const KV_FAST_MS = 25_000;
 
 /**
- * Public read-only vault dashboard data — reserves, live rate, fee
- * schedule, USD conversion, current NFT inventory, and a trailing APR
- * estimate. Everything here is either a direct on-chain read or replayed
- * from real Deposited/Redeemed events (lib/market/vault-stats.ts) — nothing
- * is assumed or hardcoded. Cached briefly server-side since the APR replay
- * walks chain logs and shouldn't re-scan on every page view.
+ * Public read-only vault dashboard data.
+ * Layers: isolate memory → Upstash (fast path) → chain → stale KV fallback.
  */
 export async function GET(req: Request) {
   const limited = rateLimit(req, { key: "vault-stats", limit: 60, windowMs: 60_000 });
   if (limited) return limited;
 
   if (cache && Date.now() - cache.at < CACHE_MS) {
-    return cachedPublicJson(cache.data);
+    return cachedPublicJson(cache.data, "live", { headers: { "X-Vault-Stats": "memory" } });
+  }
+
+  // Fast path: durable cache warm enough that we skip a cold RPC round-trip.
+  // Don't short-circuit if APR was never computed (null) — re-fetch so the
+  // dashboard can fill APR after a code fix / partial cache write.
+  const kvHit = await readVaultStatsCache();
+  if (
+    kvHit &&
+    Date.now() - kvHit.at < KV_FAST_MS &&
+    kvHit.stats.aprPct != null
+  ) {
+    cache = { at: Date.now(), data: kvHit.stats };
+    return cachedPublicJson(kvHit.stats, "live", { headers: { "X-Vault-Stats": "kv-fresh" } });
   }
 
   try {
@@ -43,8 +46,17 @@ export async function GET(req: Request) {
       return publicJson({ error: "NO_VAULT", message: "No vault configured." }, 404);
     }
     cache = { at: Date.now(), data: stats };
-    return cachedPublicJson(stats);
+    void writeVaultStatsCache(stats);
+    return cachedPublicJson(stats, "live", { headers: { "X-Vault-Stats": "fresh" } });
   } catch (error) {
-    return publicError(error, "Could not read vault stats right now.");
+    if (kvHit && isFreshEnough(kvHit)) {
+      cache = { at: Date.now(), data: kvHit.stats };
+      return cachedPublicJson(kvHit.stats, "live", { headers: { "X-Vault-Stats": "stale-cache" } });
+    }
+    if (cache?.data) {
+      return cachedPublicJson(cache.data, "live", { headers: { "X-Vault-Stats": "memory-cache" } });
+    }
+    const detail = error instanceof Error ? error.message : "Could not read vault stats right now.";
+    return publicError(error, detail);
   }
 }

@@ -1,35 +1,54 @@
 import { getRaritySnapshot } from "@/lib/market/rarity-snapshot";
-import { publicError, publicJson, rateLimit } from "@/lib/security";
+import { cachedPublicJson } from "@/lib/http-cache";
+import { publicError, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+/** Isolate-level payload so concurrent rarity hits don't rebuild the map. */
+let payloadCache: { at: number; body: unknown } | null = null;
+const PAYLOAD_MS = 120_000;
+
 /**
- * Compact name/tier/rank map for every token — one bulk fetch, cached
- * client-side (see lib/market/rarityClient.ts), so every card/row can show
- * a consistent name and tier color without an N-request fan-out. `name` is
- * the Base trait's value (see lib/rarity.ts's TokenRarity.name doc) — the
- * same rule Gallery already used, now shared everywhere a plank is shown.
- * Full trait breakdown for a single token still comes from
- * /api/market/token, which stays the source for detail-view depth.
+ * Compact name/tier/rank map for every token. Cache aggressively — traits are
+ * immutable after reveal.
  */
 export async function GET(req: Request) {
-  const limited = rateLimit(req, { key: "market-rarity", limit: 30, windowMs: 60_000 });
+  const limited = rateLimit(req, { key: "market-rarity", limit: 60, windowMs: 60_000 });
   if (limited) return limited;
+
+  if (payloadCache && Date.now() - payloadCache.at < PAYLOAD_MS) {
+    return cachedPublicJson(payloadCache.body, "rarity", {
+      headers: { "X-Rarity": "memory" },
+    });
+  }
 
   try {
     const snapshot = await getRaritySnapshot();
-    const byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number }> = {};
+    const byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number }> =
+      {};
     for (const [tokenId, r] of snapshot.byTokenId) {
-      byTokenId[String(tokenId)] = { name: r.name, tier: r.tier, rank: r.rank, percentile: r.percentile };
+      byTokenId[String(tokenId)] = {
+        name: r.name,
+        tier: r.tier,
+        rank: r.rank,
+        percentile: r.percentile,
+      };
     }
-    return publicJson({
+    const body = {
       sampleSize: snapshot.sampleSize,
       scoredCount: snapshot.scoredCount,
       tierCounts: snapshot.tierCounts,
       byTokenId,
-    });
+    };
+    payloadCache = { at: Date.now(), body };
+    return cachedPublicJson(body, "rarity", { headers: { "X-Rarity": "fresh" } });
   } catch (error) {
+    if (payloadCache?.body) {
+      return cachedPublicJson(payloadCache.body, "rarity", {
+        headers: { "X-Rarity": "memory-stale" },
+      });
+    }
     return publicError(error, "Could not compute rarity right now.");
   }
 }

@@ -23,9 +23,33 @@
   a { color: #e8c25f; }
   .hint { color: #8a7a5c; font-size: 12px; }
   .addr { background: #0c0906; padding: 6px 8px; border-radius: 5px; margin-top: 6px; }
+  #wcQrOverlay {
+    display: none; position: fixed; inset: 0; z-index: 9999;
+    background: rgba(0,0,0,0.82); align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  #wcQrOverlay.open { display: flex; }
+  #wcQrBox {
+    background: #1a1410; border: 1px solid #e8c25f; border-radius: 12px;
+    padding: 20px; max-width: 360px; width: 100%; text-align: center;
+  }
+  #wcQrBox img { width: 280px; height: 280px; background: #fff; border-radius: 8px; }
+  #wcQrUri { font-size: 10px; word-break: break-all; color: #8a7a5c; margin-top: 10px; max-height: 60px; overflow: auto; }
 </style>
 </head>
 <body>
+
+<div id="wcQrOverlay" aria-modal="true" role="dialog">
+  <div id="wcQrBox">
+    <h2 style="margin-top:0">Scan with mobile wallet</h2>
+    <p class="hint">Rabby / Robinhood / MetaMask — WalletConnect or Scan QR</p>
+    <img id="wcQrImg" alt="WalletConnect QR code" width="280" height="280" />
+    <p id="wcQrStatus" class="hint">Waiting for phone to approve…</p>
+    <div id="wcQrUri" class="mono"></div>
+    <button type="button" id="btnWcCopy" class="secondary">Copy connection URI</button>
+    <button type="button" id="btnWcCancel" class="secondary">Cancel</button>
+  </div>
+</div>
 
 <h1>Marketplank Vault — owner-signed deployment</h1>
 
@@ -59,16 +83,14 @@
   <button id="btnConnectWC" class="secondary">Connect via WalletConnect (mobile, QR code)</button>
 
   <div id="wcSetup" style="margin-top:14px;">
-    <label>WalletConnect / Reown Project ID</label>
-    <input id="wcProjectId" placeholder="paste your own — see note below" />
+    <label>WalletConnect / Reown Project ID <strong style="color:#e8c25f">(required for QR)</strong></label>
+    <input id="wcProjectId" placeholder="paste Project ID from cloud.reown.com first" autocomplete="off" />
     <p class="hint">
-      WalletConnect v2 requires a free project ID from
-      <a href="https://cloud.reown.com" target="_blank">cloud.reown.com</a> (formerly
-      WalletConnect Cloud) — sign up, create a project, paste the ID here. This
-      is yours, not mine: I cannot create one for you, and using someone else's
-      shared ID is not something you want for a page that deploys contracts.
-      It's saved only in this browser's <code>localStorage</code> so you don't
-      re-paste it every time.
+      QR will <strong>not</strong> open without a Project ID. Free in ~1 minute:
+      <a href="https://cloud.reown.com" target="_blank" rel="noreferrer">cloud.reown.com</a>
+      → create project → copy <strong>Project ID</strong> → paste above → click WalletConnect again.
+      Saved only in this browser’s <code>localStorage</code>.
+      If you have Rabby as a <em>browser extension</em> on this PC, use “Connect browser wallet” instead (no QR needed).
     </p>
   </div>
 
@@ -102,9 +124,16 @@
   <div class="hint" id="beaconValidation"></div>
 </div>
 
-<h2>Step 2 — deploy DrandBeacon</h2>
+<h2>Step 2 — deploy DrandBeacon <span class="hint">(or reuse V1's)</span></h2>
 <div class="step" id="step2">
-  <button id="btnDeployBeacon" disabled>Deploy DrandBeacon</button>
+  <p class="hint">
+    V1 already uses beacon <code>0x87d584df130FED0Fe540954eD48CE2691A18D619</code>.
+    For a second vault (V2 LP migrate), prefer reusing it — same randomness, one less deploy.
+  </p>
+  <label>Existing beacon address (optional — paste to skip deploy)</label>
+  <input id="existingBeacon" value="0x87d584df130FED0Fe540954eD48CE2691A18D619" />
+  <button id="btnUseExistingBeacon" class="secondary" disabled>Use existing beacon (skip deploy)</button>
+  <button id="btnDeployBeacon" disabled>Deploy new DrandBeacon</button>
   <div id="beaconResult"></div>
 </div>
 
@@ -151,42 +180,67 @@
   <pre id="verifyResult"></pre>
 </div>
 
-<h2>Step 6 — seed, then open the workshop when YOU decide</h2>
+<h2>Step 6 — seed V2 (same multi-tx flow as V1)</h2>
 <div class="step" id="step6">
   <p class="hint">
-    Do this over as many transactions as you want, whenever you want — none of
-    it is on this page, and none of it is time-pressured:
+    Connect with <strong>treasury</strong> (<code>0xcdb7…e9d8</code>) via extension or WalletConnect QR.
+    Do as many deposits as you want, then seed shares+ETH, then open. Do <strong>not</strong> open until
+    both sides are non-zero.
   </p>
-  <ol>
-    <li>Bootstrap order matters: <code>collection.transferFrom(you, vault, tokenId)</code>
-      or <code>vault.deposit(tokenId)</code> for each NFT you're seeding with,
-      <strong>then</strong> <code>vault.seedShares{value: ...}(shares)</code> from
-      the treasury wallet. <code>seedLiquidity()</code> alone (ETH with no
-      shares) bricks the pool until you call <code>seedShares</code> too —
-      see the audit.</li>
-  </ol>
+
+  <label>Vault address to seed (paste V2 if not auto-filled)</label>
+  <input id="seedVaultAddr" placeholder="0x… new vault from Step 4" />
+
+  <button type="button" id="btnSeedRefresh" class="secondary" disabled>Refresh vault status</button>
+  <pre id="seedStatus">Connect wallet, paste vault address, then Refresh.</pre>
+
+  <h3 style="color:#e8c25f;font-size:13px;margin-top:18px">6a — Deposit NFTs (repeat)</h3>
+  <p class="hint">Each deposit = approve (if needed) + deposit. You get ~0.99 shares per plank (1% mint fee).</p>
+  <label>Token ID to deposit</label>
+  <input id="seedTokenId" placeholder="e.g. 42" inputmode="numeric" />
+  <button type="button" id="btnDepositNft" disabled>Deposit this NFT into vault</button>
+  <div id="depositResult"></div>
+
+  <h3 style="color:#e8c25f;font-size:13px;margin-top:18px">6b — Seed shares + ETH into the AMM book</h3>
   <p class="hint">
-    When — and only when — you're satisfied with what's seeded, come back here
-    and open trading. This is <strong>permanent and one-way</strong>: the
-    instant you sign it, the public can trade, and
-    <code>seedLiquidity()</code>/<code>seedShares()</code> revert forever for
-    everyone, including you. There is no minimum enforced by the contract —
-    that judgment call is entirely yours, made at this moment, not baked in
-    at deploy time.
+    Treasury only. Moves your vault shares into the pool and adds ETH in one tx.
+    Never seed ETH alone. Shares amount must be ≤ your share balance (use Max after refresh).
+  </p>
+  <label>Shares to seed into pool</label>
+  <input id="seedSharesAmt" placeholder="e.g. 1.98" />
+  <button type="button" id="btnSeedMax" class="secondary" disabled>Max = my share balance</button>
+  <label>ETH to seed (msg.value)</label>
+  <input id="seedEthAmt" placeholder="e.g. 0.03" />
+  <button type="button" id="btnSeedShares" disabled>seedShares (shares + ETH)</button>
+  <div id="seedSharesResult"></div>
+
+  <h3 style="color:#e8c25f;font-size:13px;margin-top:18px">6c — Open trading (permanent)</h3>
+  <p class="hint">
+    Only when held &gt; 0, pool shares &gt; 0, ethReserve &gt; 0. After this, seeding locks forever.
   </p>
   <button id="btnOpenPool" disabled>Open the workshop (openPool)</button>
   <div id="openPoolResult"></div>
 </div>
 
-<h2>Step 7 — next steps (not automated here)</h2>
+<h2>Step 7 — dual-vault site env (V2 + keep V1 for depositors)</h2>
 <div class="step">
+  <p class="hint">
+    Do <strong>not</strong> only set the new address. Existing deposits stay on V1 until
+    holders redeem. Paste both into <code>wrangler.jsonc</code> / Cloudflare vars, then
+    <code>npm run deploy</code> from the repo root (or tell the agent the new vault
+    address only — never a private key).
+  </p>
+  <pre id="dualEnvHint">After vault deploys, env snippet appears here.</pre>
   <ol>
-    <li>Run <code>scripts/relay-drand.ts</code> (or have someone else run it —
-      it's permissionless) so pending redemptions actually resolve.</li>
-    <li>Set <code>NEXT_PUBLIC_MARKET_VAULT_ADDRESS</code> in Vercel to the
-      vault address above, keep <code>NEXT_PUBLIC_MARKET_ENABLED</code> as you
-      decide, and redeploy the site.</li>
+    <li>Seed V2 from treasury: deposit NFTs → <code>seedShares&#123;value&#125;(shares)</code> → <code>openPool()</code>.</li>
+    <li>Set env as above; redeploy plank.love.</li>
+    <li>Users: Market → Instant Swap → <strong>Safe migrate</strong> (redeem V1 → deposit V2).</li>
+    <li>Drand relay is still permissionless on the beacon (same as V1).</li>
   </ol>
+  <p class="hint">
+    Same treasury key as V1 is fine and recommended. It does <strong>not</strong> move V1 pool
+    ETH (~0.024) to V2 — that stays non-withdrawable by design. Reseed V2 with fresh ETH.
+  </p>
 </div>
 
 <script type="module">
@@ -194,7 +248,7 @@
 // @walletconnect/ethereum-provider's dependency tree (confirmed: 404s on
 // uint8arrays and @walletconnect/relay-auth deep imports). Run `npm install
 // && npm run build` in this directory first — see README.md.
-import { ethers, EthereumProvider } from "./wallet-bundle.js";
+import { ethers, EthereumProvider, QRCode } from "./wallet-bundle.js";
 
 const ROBINHOOD_CHAIN_ID = 4663;
 const ROBINHOOD_RPC = "https://rpc.mainnet.chain.robinhood.com";
@@ -269,7 +323,206 @@ async function finishConnecting(accounts) {
   // Both deploy handlers re-check this again immediately before signing,
   // since the wallet can switch chains after this point.
   $("btnDeployBeacon").disabled = !onRightChain;
+  $("btnUseExistingBeacon").disabled = !onRightChain;
+  armSeedButtons();
 }
+
+function armSeedButtons() {
+  const ok = Boolean(signer && provider);
+  $("btnSeedRefresh").disabled = !ok;
+  $("btnDepositNft").disabled = !ok;
+  $("btnSeedMax").disabled = !ok;
+  $("btnSeedShares").disabled = !ok;
+  // openPool stays disabled until refresh proves both sides seeded (or verify)
+}
+
+function resolveSeedVault() {
+  const raw = ($("seedVaultAddr").value || vaultAddress || "").trim();
+  if (!raw || !ethers.isAddress(raw)) throw new Error("Paste a valid vault address in Step 6.");
+  return raw;
+}
+
+async function refreshSeedStatus() {
+  if (!provider) throw new Error("Connect wallet first.");
+  await loadArtifacts();
+  const addr = resolveSeedVault();
+  const vault = new ethers.Contract(addr, vaultArtifact.abi, provider);
+  const collection = $("collection").value.trim();
+  const nft = new ethers.Contract(
+    collection,
+    [
+      "function balanceOf(address) view returns (uint256)",
+      "function tokenOfOwnerByIndex(address,uint256) view returns (uint256)",
+    ],
+    provider
+  );
+
+  const [held, totalSupply, ethReserve, poolShares, poolOpen, treasury, myShares, myEth] =
+    await Promise.all([
+      vault.heldTokenCount(),
+      vault.totalSupply(),
+      vault.ethReserve(),
+      vault.balanceOf(addr),
+      vault.poolOpen(),
+      vault.treasury(),
+      account ? vault.balanceOf(account) : Promise.resolve(0n),
+      account ? provider.getBalance(account) : Promise.resolve(0n),
+    ]);
+
+  let nftBal = "?";
+  try {
+    if (account) nftBal = (await nft.balanceOf(account)).toString();
+  } catch {
+    nftBal = "(enumerable not available — deposit by token id still works)";
+  }
+
+  const isTreasury =
+    account && treasury && account.toLowerCase() === String(treasury).toLowerCase();
+  const ready =
+    !poolOpen && held > 0n && poolShares > 0n && ethReserve > 0n;
+
+  $("seedStatus").textContent = [
+    `vault: ${addr}`,
+    `poolOpen: ${poolOpen}  ${poolOpen ? "⚠ already open — seeding locked" : "✓ still closed"}`,
+    `held NFTs: ${held}`,
+    `totalSupply (all shares): ${ethers.formatEther(totalSupply)}`,
+    `pool share reserve: ${ethers.formatEther(poolShares)}`,
+    `ethReserve: ${ethers.formatEther(ethReserve)} ETH`,
+    `treasury: ${treasury}`,
+    `you: ${account || "(not connected)"}`,
+    `your shares: ${ethers.formatEther(myShares)}`,
+    `your ETH: ${ethers.formatEther(myEth)}`,
+    `your RobinWood NFTs (balanceOf): ${nftBal}`,
+    isTreasury ? "✓ connected as TREASURY — can seedShares + openPool" : "⚠ not treasury — deposit works; seedShares/openPool need 0xcdb7…",
+    ready ? "✓ both sides non-zero — safe to openPool when YOU are happy" : "○ not ready to open (need held>0, pool shares>0, ethReserve>0)",
+  ].join("\n");
+
+  $("btnOpenPool").disabled = !ready || !isTreasury || !signer;
+  return { myShares, ready, isTreasury, poolOpen };
+}
+
+$("btnSeedRefresh").onclick = async () => {
+  try {
+    $("seedStatus").textContent = "Reading…";
+    await refreshSeedStatus();
+  } catch (err) {
+    $("seedStatus").textContent = "Refresh failed: " + String(err.message || err);
+  }
+};
+
+$("btnDepositNft").onclick = async () => {
+  if (!(await refuseIfWrongChain("depositResult"))) return;
+  const btn = $("btnDepositNft");
+  btn.disabled = true;
+  $("depositResult").textContent = "Building deposit…";
+  try {
+    await loadArtifacts();
+    const vaultAddr = resolveSeedVault();
+    const tokenId = $("seedTokenId").value.trim();
+    if (!/^\d+$/.test(tokenId)) throw new Error("Enter a numeric token ID.");
+    const collection = $("collection").value.trim();
+    const nft = new ethers.Contract(
+      collection,
+      [
+        "function getApproved(uint256) view returns (address)",
+        "function isApprovedForAll(address,address) view returns (bool)",
+        "function approve(address,uint256)",
+        "function ownerOf(uint256) view returns (address)",
+      ],
+      signer
+    );
+    const owner = await nft.ownerOf(tokenId);
+    if (owner.toLowerCase() !== account.toLowerCase()) {
+      throw new Error(`Token #${tokenId} is owned by ${owner}, not your connected wallet.`);
+    }
+    const approved = await nft.getApproved(tokenId);
+    const all = await nft.isApprovedForAll(account, vaultAddr);
+    if (approved.toLowerCase() !== vaultAddr.toLowerCase() && !all) {
+      $("depositResult").textContent = "Approve NFT for vault — sign in wallet…";
+      const txA = await nft.approve(vaultAddr, tokenId);
+      $("depositResult").innerHTML = `Waiting approve… <span class="mono">${txA.hash}</span>`;
+      await txA.wait();
+    }
+    const vault = new ethers.Contract(vaultAddr, vaultArtifact.abi, signer);
+    $("depositResult").textContent = "Deposit — sign in wallet…";
+    const tx = await vault.deposit(tokenId);
+    $("depositResult").innerHTML = `Waiting deposit… <span class="mono">${tx.hash}</span>`;
+    await tx.wait();
+    $("depositResult").innerHTML = `<div class="ok">Deposited #${tokenId}. Refresh status — your shares should rise ~0.99.</div>`;
+    $("seedTokenId").value = "";
+    await refreshSeedStatus();
+  } catch (err) {
+    $("depositResult").innerHTML = `<div class="warn">Deposit failed: ${escapeHtml(String(err.message || err))}</div>`;
+  } finally {
+    armSeedButtons();
+  }
+};
+
+$("btnSeedMax").onclick = async () => {
+  try {
+    const { myShares } = await refreshSeedStatus();
+    // leave a tiny dust so float formatting doesn't overshoot
+    const use = myShares > 1000n ? myShares - 1n : myShares;
+    $("seedSharesAmt").value = ethers.formatEther(use);
+  } catch (err) {
+    $("seedSharesResult").textContent = String(err.message || err);
+  }
+};
+
+$("btnSeedShares").onclick = async () => {
+  if (!(await refuseIfWrongChain("seedSharesResult"))) return;
+  const btn = $("btnSeedShares");
+  btn.disabled = true;
+  $("seedSharesResult").textContent = "Building seedShares…";
+  try {
+    await loadArtifacts();
+    const vaultAddr = resolveSeedVault();
+    const shares = ethers.parseEther(($("seedSharesAmt").value || "0").trim());
+    const eth = ethers.parseEther(($("seedEthAmt").value || "0").trim());
+    if (shares <= 0n) throw new Error("Shares must be > 0.");
+    if (eth <= 0n) throw new Error("ETH must be > 0 (never seed ETH-only via seedLiquidity).");
+    const vault = new ethers.Contract(vaultAddr, vaultArtifact.abi, signer);
+    const treasury = await vault.treasury();
+    if (account.toLowerCase() !== String(treasury).toLowerCase()) {
+      throw new Error(`Connected ${account} is not treasury ${treasury}. Switch wallet / QR as treasury.`);
+    }
+    $("seedSharesResult").textContent = "seedShares — sign in wallet (shares + ETH)…";
+    const tx = await vault.seedShares(shares, { value: eth });
+    $("seedSharesResult").innerHTML = `Waiting… <span class="mono">${tx.hash}</span>`;
+    await tx.wait();
+    $("seedSharesResult").innerHTML = `<div class="ok">Seeded. Refresh — pool shares and ethReserve should both be &gt; 0.</div>`;
+    await refreshSeedStatus();
+  } catch (err) {
+    $("seedSharesResult").innerHTML = `<div class="warn">seedShares failed: ${escapeHtml(String(err.message || err))}</div>`;
+  } finally {
+    armSeedButtons();
+  }
+};
+
+$("btnUseExistingBeacon").onclick = async () => {
+  if (!(await refuseIfWrongChain("beaconResult"))) return;
+  const addr = $("existingBeacon").value.trim();
+  if (!ethers.isAddress(addr)) {
+    $("beaconResult").innerHTML = `<div class="warn">Not a valid address.</div>`;
+    return;
+  }
+  try {
+    await loadArtifacts();
+    const code = await provider.getCode(addr);
+    if (!code || code === "0x") {
+      $("beaconResult").innerHTML = `<div class="warn">No contract code at that address on this chain.</div>`;
+      return;
+    }
+    beaconAddress = addr;
+    $("beaconResult").innerHTML =
+      `<div class="ok">Using existing beacon. <div class="addr mono">${beaconAddress}</div>` +
+      `<a href="https://robinhoodchain.blockscout.com/address/${beaconAddress}" target="_blank">View on Blockscout</a></div>`;
+    markDone("step2");
+    $("btnDeployVault").disabled = false;
+  } catch (err) {
+    $("beaconResult").innerHTML = `<div class="warn">Failed: ${escapeHtml(String(err.message || err))}</div>`;
+  }
+};
 
 $("btnConnect").onclick = async () => {
   if (!window.ethereum) {
@@ -286,38 +539,174 @@ $("btnConnect").onclick = async () => {
   await finishConnecting(accounts);
 };
 
+/** Local QR (no external image CDN) + always show URI for paste. */
+async function showWcQr(uri) {
+  try {
+    // QRCode from wallet-bundle — works offline / with trackers blocked
+    const dataUrl = await QRCode.toDataURL(uri, {
+      width: 280,
+      margin: 2,
+      errorCorrectionLevel: "M",
+      color: { dark: "#000000", light: "#ffffff" },
+    });
+    $("wcQrImg").src = dataUrl;
+  } catch (err) {
+    console.warn("[deploy-tool] local QR failed, falling back to image API", err);
+    $("wcQrImg").src =
+      "https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=12&data=" +
+      encodeURIComponent(uri);
+  }
+  $("wcQrUri").textContent = uri;
+  $("wcQrStatus").textContent =
+    "Scan with Rabby / Robinhood, or Copy URI → WalletConnect → paste.";
+  $("wcQrOverlay").classList.add("open");
+  $("btnWcCopy").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(uri);
+      $("wcQrStatus").textContent = "URI copied — in Rabby: WalletConnect / paste code.";
+    } catch {
+      $("wcQrStatus").textContent = "Select the URI text below and copy manually.";
+    }
+  };
+}
+function hideWcQr() {
+  $("wcQrOverlay").classList.remove("open");
+  $("wcQrImg").removeAttribute("src");
+  $("wcQrUri").textContent = "";
+}
+
+let wcProvider = null;
+
+$("btnWcCancel").onclick = async () => {
+  hideWcQr();
+  try {
+    if (wcProvider?.disconnect) await wcProvider.disconnect();
+  } catch { /* ignore */ }
+  $("accountInfo").textContent = "WalletConnect cancelled. Click WalletConnect again for a new QR.";
+};
+
 $("btnConnectWC").onclick = async () => {
   const savedId = localStorage.getItem("marketplank-wc-project-id");
   if (savedId && !$("wcProjectId").value) $("wcProjectId").value = savedId;
   const projectId = $("wcProjectId").value.trim();
   if (!projectId) {
-    $("accountInfo").textContent = "Paste a WalletConnect/Reown project ID above first (free, from cloud.reown.com — yours, not mine).";
+    $("accountInfo").textContent =
+      "Paste a WalletConnect/Reown Project ID above first (cloud.reown.com). Without it, no QR.";
+    $("wcProjectId").focus();
+    return;
+  }
+  if (projectId.length < 20) {
+    $("accountInfo").textContent =
+      "Project ID looks too short. Copy the full ID from cloud.reown.com → project settings.";
     return;
   }
   localStorage.setItem("marketplank-wc-project-id", projectId);
 
-  $("accountInfo").textContent = "Opening WalletConnect — scan the QR code with your mobile wallet…";
+  $("accountInfo").textContent = "Starting WalletConnect (requesting pairing URI)…";
+  $("btnConnectWC").disabled = true;
+  hideWcQr();
+
   try {
+    // Drop stale session so display_uri always fires again
+    if (wcProvider) {
+      try {
+        await wcProvider.disconnect();
+      } catch { /* ignore */ }
+      wcProvider = null;
+    }
+
     const wc = await EthereumProvider.init({
       projectId,
+      // Include 1 as optional so some WC relays don't reject unknown-only chains
       chains: [ROBINHOOD_CHAIN_ID],
-      rpcMap: { [ROBINHOOD_CHAIN_ID]: ROBINHOOD_RPC },
-      showQrModal: true,
+      optionalChains: [1, ROBINHOOD_CHAIN_ID],
+      rpcMap: {
+        [ROBINHOOD_CHAIN_ID]: ROBINHOOD_RPC,
+        1: "https://cloudflare-eth.com",
+      },
+      showQrModal: false,
+      disableProviderPing: true,
       metadata: {
         name: "Marketplank Vault Deploy",
-        description: "Owner-signed contract deployment — no keys ever leave your wallet",
-        url: window.location.origin,
-        icons: [],
+        description: "Owner-signed deploy/seed — keys stay in your wallet",
+        url: typeof window !== "undefined" ? window.location.origin : "http://localhost:8787",
+        icons: ["https://plank.love/plank-social.jpg"],
       },
     });
+    wcProvider = wc;
+
+    let uriSeen = false;
+    const onUri = (uri) => {
+      if (!uri || typeof uri !== "string") return;
+      uriSeen = true;
+      console.log("[deploy-tool] display_uri len=", uri.length);
+      void showWcQr(uri);
+      $("accountInfo").textContent =
+        "QR ready — scan with phone, or Copy URI into Rabby WalletConnect.";
+    };
+    // Both spellings / attach early
+    wc.on("display_uri", onUri);
+    if (typeof wc.once === "function") wc.once("display_uri", onUri);
+
     rawWalletProvider = wc;
-    const accounts = await wc.enable(); // opens the QR modal, resolves once the mobile wallet approves
+
+    // Prefer connect() — enable() sometimes skips URI if a ghost session exists
+    const connectPromise = (async () => {
+      try {
+        await wc.connect();
+      } catch (e1) {
+        console.warn("[deploy-tool] connect() failed, trying enable()", e1);
+        await wc.enable();
+      }
+      const accs = wc.accounts?.length
+        ? wc.accounts
+        : await wc.request({ method: "eth_requestAccounts" });
+      return accs;
+    })();
+
+    // Poll for uri if event missed (some builds expose it late)
+    const poll = setInterval(() => {
+      try {
+        const u = wc.uri || wc.session?.topic;
+        // ethereum-provider may expose signer connection uri differently
+        if (!uriSeen && wc.signer?.connection?.uri) {
+          onUri(wc.signer.connection.uri);
+        }
+      } catch { /* ignore */ }
+    }, 500);
+
+    setTimeout(() => {
+      if (!uriSeen) {
+        $("accountInfo").textContent =
+          "Still no QR URI. 1) Confirm Project ID  2) Disable ad-block on localhost  3) F12 console for errors  4) Use “Connect browser wallet” if Rabby extension is on this PC.";
+        // Force overlay open with instructions even without QR image
+        $("wcQrOverlay").classList.add("open");
+        $("wcQrStatus").textContent =
+          "No pairing URI received from WalletConnect relay. Check Project ID + network.";
+        $("wcQrUri").textContent = "(no uri — connection stuck before QR)";
+      }
+    }, 5000);
+
+    const accounts = await connectPromise;
+    clearInterval(poll);
+    hideWcQr();
+    if (!accounts || !accounts.length) {
+      throw new Error("Connected but no accounts returned.");
+    }
     provider = new ethers.BrowserProvider(wc);
     await ensureChain(rawWalletProvider);
     provider = new ethers.BrowserProvider(wc);
     await finishConnecting(accounts);
   } catch (err) {
-    $("accountInfo").textContent = "WalletConnect failed: " + String(err.message || err);
+    hideWcQr();
+    console.error("[deploy-tool] WalletConnect failed", err);
+    const msg = String(err?.message || err);
+    $("accountInfo").textContent =
+      "WalletConnect failed: " +
+      msg +
+      " — Try: new Project ID, hard refresh (Ctrl+Shift+R), or browser extension connect.";
+  } finally {
+    $("btnConnectWC").disabled = false;
   }
 };
 
@@ -420,6 +809,14 @@ $("btnDeployVault").onclick = async () => {
       `<a href="https://robinhoodchain.blockscout.com/address/${vaultAddress}" target="_blank">View on Blockscout</a></div>`;
     markDone("step4");
     $("btnVerify").disabled = false;
+    $("seedVaultAddr").value = vaultAddress;
+    armSeedButtons();
+    const v1 = "0xb2019Fd4cA24502e812C0C73b751Fa49979BF708";
+    $("dualEnvHint").textContent =
+      `NEXT_PUBLIC_MARKET_VAULT_ADDRESS=${vaultAddress}\n` +
+      `NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=${v1}\n\n` +
+      `# wrangler.jsonc vars — same two keys\n` +
+      `# Then: npm run deploy  (site only; keys never leave your wallet)`;
   } catch (err) {
     $("vaultResult").innerHTML = `<div class="warn">Failed: ${escapeHtml(String(err.message || err))}</div>`;
     btn.disabled = false;
@@ -471,6 +868,17 @@ $("btnVerify").onclick = async () => {
 
 $("btnOpenPool").onclick = async () => {
   if (!(await refuseIfWrongChain("openPoolResult"))) return;
+  try {
+    const st = await refreshSeedStatus();
+    if (st.poolOpen) throw new Error("Pool already open.");
+    if (!st.ready) {
+      throw new Error("Not ready: need held NFTs, pool shares > 0, and ethReserve > 0. Deposit + seedShares first.");
+    }
+    if (!st.isTreasury) throw new Error("Connect as treasury to openPool.");
+  } catch (err) {
+    $("openPoolResult").innerHTML = `<div class="warn">${escapeHtml(String(err.message || err))}</div>`;
+    return;
+  }
   if (
     !window.confirm(
       "This is permanent and irreversible. Once you sign this, trading opens to the public forever, and seeding locks forever for everyone including you. Continue?"
@@ -482,13 +890,16 @@ $("btnOpenPool").onclick = async () => {
   btn.disabled = true;
   $("openPoolResult").textContent = "Building transaction — approve it in your wallet…";
   try {
-    const vault = new ethers.Contract(vaultAddress, vaultArtifact.abi, signer);
+    await loadArtifacts();
+    const addr = resolveSeedVault();
+    const vault = new ethers.Contract(addr, vaultArtifact.abi, signer);
     const tx = await vault.openPool();
     $("openPoolResult").innerHTML = `Waiting for confirmation… tx <span class="mono">${tx.hash}</span>`;
     await tx.wait();
-    const stillOpen = await new ethers.Contract(vaultAddress, vaultArtifact.abi, provider).poolOpen();
-    $("openPoolResult").innerHTML = `<div class="ok">Done. vault.poolOpen() now reads: <strong>${stillOpen}</strong> — trading is live, seeding is closed forever.</div>`;
+    const stillOpen = await new ethers.Contract(addr, vaultArtifact.abi, provider).poolOpen();
+    $("openPoolResult").innerHTML = `<div class="ok">Done. vault.poolOpen() now reads: <strong>${stillOpen}</strong> — trading is live, seeding is closed forever. Set dual-vault env on plank.love next.</div>`;
     markDone("step6");
+    await refreshSeedStatus();
   } catch (err) {
     $("openPoolResult").innerHTML = `<div class="warn">Failed: ${escapeHtml(String(err.message || err))}</div>`;
     btn.disabled = false;

@@ -24,14 +24,20 @@ import type { NftAttribute } from "@/lib/ipfs";
  * Percentile: “rarer than X% of the scored sample”
  *   = 100 * (tokens with strictly lower score) / N
  *
- * Tier: from that percentile (how exclusive the token is in-sample).
+ * Tier: primarily from the Background trait value (Legendary / Epic / Rare /
+ * Uncommon / Common, including *Graded variants). Statistical percentile is
+ * only a fallback when Background is missing.
+ *
+ * There is no Mythic tier in this collection's metadata — top is Legendary.
+ *
+ * Rank / percentile: still from information-content score within the sample
+ * ("how exclusive is this combination"), separate from the official tier label.
  *
  * IMPORTANT: N = currently revealed/loaded sample, not full 1542 until
  * the gallery has indexed everything. Ranks recompute as the sample grows.
  */
 
 export type RarityTier =
-  | "Mythic"
   | "Legendary"
   | "Epic"
   | "Rare"
@@ -107,7 +113,6 @@ export const CANONICAL_TRAITS = ["Base", "Background", "Holographic"] as const;
 export type CanonicalTrait = (typeof CANONICAL_TRAITS)[number];
 
 const TIER_ORDER: RarityTier[] = [
-  "Mythic",
   "Legendary",
   "Epic",
   "Rare",
@@ -115,12 +120,52 @@ const TIER_ORDER: RarityTier[] = [
   "Common",
 ];
 
+export function emptyTierCounts(): Record<RarityTier, number> {
+  return {
+    Legendary: 0,
+    Epic: 0,
+    Rare: 0,
+    Uncommon: 0,
+    Common: 0,
+  };
+}
+
+/** Coerce legacy "Mythic" (removed — never in collection metadata) to Legendary. */
+export function normalizeRarityTier(tier: string | null | undefined): RarityTier {
+  if (tier === "Legendary" || tier === "Epic" || tier === "Rare" || tier === "Uncommon" || tier === "Common") {
+    return tier;
+  }
+  if (tier === "Mythic" || (typeof tier === "string" && tier.toLowerCase().includes("mythic"))) {
+    return "Legendary";
+  }
+  return "Common";
+}
+
+/**
+ * Official RobinWood tier is encoded on the Background trait (e.g. "Legendary",
+ * "RareGraded", "Epic"). Statistical percentiles are a fallback only.
+ * Collection top tier is Legendary — there is no Mythic Background value.
+ */
+export function tierFromBackground(value: string | null | undefined): RarityTier | null {
+  if (value == null) return null;
+  const s = String(value).toLowerCase().replace(/[\s_-]+/g, "");
+  if (!s) return null;
+  // Longest / most specific first so "uncommon" wins over "common".
+  // "mythic" is not a real collection tier; map to Legendary if ever seen.
+  if (s.includes("mythic") || s.includes("legendary")) return "Legendary";
+  if (s.includes("epic")) return "Epic";
+  if (s.includes("rare")) return "Rare";
+  if (s.includes("uncommon")) return "Uncommon";
+  if (s.includes("common")) return "Common";
+  return null;
+}
+
 /**
  * Tier from exclusivity percentile (share of sample outranked).
  * Cutoffs are population quantiles of the *scored sample*.
+ * Used only when Background is missing/unrevealed. Top band = Legendary.
  */
 export function tierFromPercentile(percentile: number): RarityTier {
-  if (percentile >= 99) return "Mythic";
   if (percentile >= 95) return "Legendary";
   if (percentile >= 85) return "Epic";
   if (percentile >= 70) return "Rare";
@@ -130,8 +175,6 @@ export function tierFromPercentile(percentile: number): RarityTier {
 
 export function tierColor(tier: RarityTier): string {
   switch (tier) {
-    case "Mythic":
-      return "#f0abfc";
     case "Legendary":
       return "#f8d98a";
     case "Epic":
@@ -154,10 +197,8 @@ export function tierColor(tier: RarityTier): string {
 export function tierGlow(tier: RarityTier): string {
   const c = tierColor(tier);
   switch (tier) {
-    case "Mythic":
-      return `0 0 0 2px ${c}, 0 0 22px 4px ${c}99, 0 0 44px 10px ${c}44`;
     case "Legendary":
-      return `0 0 0 2px ${c}, 0 0 16px 3px ${c}80`;
+      return `0 0 0 2px ${c}, 0 0 16px 3px ${c}80, 0 0 28px 6px ${c}40`;
     case "Epic":
       return `0 0 0 1.5px ${c}, 0 0 10px 2px ${c}66`;
     case "Rare":
@@ -180,20 +221,17 @@ export function tierGlow(tier: RarityTier): string {
  */
 /** How strongly the always-on cursor-tracking holo field (lib/holo.ts,
  * .holo-card in app/globals.css) shows on a given tier — 0 for Common (no
- * effect, the neutral baseline) up to 1 for Mythic. Exclusivity still has
- * to read even though the effect itself is no longer on/off. */
+ * effect, the neutral baseline) up to 1 for Legendary (collection top). */
 export function tierHoloIntensity(tier: RarityTier): number {
   switch (tier) {
-    case "Mythic":
-      return 1;
     case "Legendary":
-      return 0.82;
+      return 1;
     case "Epic":
-      return 0.62;
+      return 0.7;
     case "Rare":
-      return 0.44;
+      return 0.48;
     case "Uncommon":
-      return 0.26;
+      return 0.28;
     default:
       return 0;
   }
@@ -218,11 +256,9 @@ export function tierCardStyle(
 }
 
 /** CSS class for tier-specific motion (see .tier-pulse in app/globals.css).
- * Only Mythic gets the brightness breathing — the holo field itself (always
- * on, intensity-scaled via tierCardStyle) carries the rest of the
- * escalation now. */
+ * Legendary (top collection tier) gets the brightness pulse. */
 export function tierAnimationClass(tier: RarityTier): string {
-  if (tier === "Mythic") return "tier-pulse";
+  if (tier === "Legendary") return "tier-pulse";
   return "";
 }
 
@@ -289,14 +325,7 @@ export function computeRaritySnapshot(items: RarityInput[]): RaritySnapshot {
     traitStats: new Map(),
     traitOrder: [],
     histogram: [],
-    tierCounts: {
-      Mythic: 0,
-      Legendary: 0,
-      Epic: 0,
-      Rare: 0,
-      Uncommon: 0,
-      Common: 0,
-    },
+    tierCounts: emptyTierCounts(),
     topRarest: [],
     uniqueBases: 0,
     holoYes: 0,
@@ -391,14 +420,7 @@ export function computeRaritySnapshot(items: RarityInput[]): RaritySnapshot {
 
   // Competition ranks + percentiles from score mass
   const byTokenId = new Map<number, TokenRarity>();
-  const tierCounts: Record<RarityTier, number> = {
-    Mythic: 0,
-    Legendary: 0,
-    Epic: 0,
-    Rare: 0,
-    Uncommon: 0,
-    Common: 0,
-  };
+  const tierCounts: Record<RarityTier, number> = emptyTierCounts();
 
   // Precompute how many tokens have score < S (for percentile)
   const scoresAsc = [...rawScores].map((r) => r.score).sort((a, b) => a - b);
@@ -423,13 +445,21 @@ export function computeRaritySnapshot(items: RarityInput[]): RaritySnapshot {
     // Competition rank: 1-based index of first member of this tie group
     const rank = i + 1;
     const below = countStrictlyBelow(score);
-    const percentile = sampleSize > 0 ? (below / sampleSize) * 100 : 0;
-    // Display score 0–100 mirrors exclusivity (same units as percentile)
-    const normalizedScore = percentile;
-    const tier = tierFromPercentile(percentile);
+    // Score-mass percentile (how much of the sample is strictly less rare).
+    const scorePercentile = sampleSize > 0 ? (below / sampleSize) * 100 : 0;
 
     for (let k = i; k < j; k += 1) {
       const row = rawScores[k];
+      // Rank/percentile still use sort position (statistical exclusivity).
+      // Display *tier* prefers the Background trait — Legendary is the top
+      // real collection label (no Mythic in metadata).
+      const positionPct =
+        sampleSize > 1 ? ((sampleSize - 1 - k) / (sampleSize - 1)) * 100 : 100;
+      const bgValue = row.traits.find((t) => t.trait.trim().toLowerCase() === "background")?.value;
+      const tier =
+        tierFromBackground(bgValue) ?? tierFromPercentile(positionPct);
+      const percentile = Math.max(scorePercentile, positionPct);
+      const normalizedScore = percentile;
       tierCounts[tier] += 1;
       byTokenId.set(row.tokenId, {
         tokenId: row.tokenId,

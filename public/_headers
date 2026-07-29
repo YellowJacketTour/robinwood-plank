@@ -1,0 +1,41 @@
+# Cloudflare Workers static assets (OpenNext copies this under assets/)
+
+# Keep document routes short-lived so dual-vault Instant Swap UI ships promptly
+/market
+  Cache-Control: public, max-age=0, s-maxage=30, stale-while-revalidate=60
+
+/
+  Cache-Control: public, max-age=0, s-maxage=60, stale-while-revalidate=120
+
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/images/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/*.webp
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/*.png
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/*.jpg
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/*.svg
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/*.woff2
+  Cache-Control: public, max-age=31536000, immutable
+
+/proofs.json
+  Cache-Control: public, max-age=300, stale-while-revalidate=3600
+
+/airdrop.json
+  Cache-Control: public, max-age=300, stale-while-revalidate=3600
+
+/exports/*
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+
+/plank-social.jpg
+  Cache-Control: public, max-age=31536000, immutable

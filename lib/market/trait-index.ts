@@ -1,154 +1,68 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import { CHAIN } from "@/lib/constants";
+import { kv } from "@vercel/kv";
 import { fetchNftMetadata } from "@/lib/ipfs";
 import type { NftAttribute } from "@/lib/ipfs";
+import { fetchTokenInstances } from "@/lib/market/blockscout";
+import { robinwoodTokenUri } from "@/lib/market/token-image";
 import type { MarketCollection } from "@/lib/market/types";
+import {
+  resolveCriteriaTokenIds,
+  type CriteriaClause,
+} from "@/lib/market/trait-criteria";
 
 /**
- * Server-side trait → token-id index for trait-scoped bids.
+ * Server-side trait → token-id index for trait-scoped bids / sweeps.
  *
- * WHY THIS EXISTS: a trait bid's Merkle root commits to "every token id whose
- * metadata carries trait X = Y" at bid time. That set must come from a source
- * the SERVER has verified — not from whatever list a client POSTs — otherwise
- * a malicious bidder could label an arbitrary token set "Holographic: Yes"
- * and mislead sellers. The orders route therefore requires a bid's claimed
- * snapshot to EXACTLY equal this index's set for the named trait.
+ * Cloudflare Workers cannot rely on:
+ *  - process.cwd()/.data filesystem (ephemeral / unwritable)
+ *  - fire-and-forget background scans (isolate freezes after the response)
  *
- * COST MODEL: 1,542 tokens, metadata immutable once revealed (IPFS,
- * content-addressed). The scan is bounded and done ONCE per process+disk:
- * results persist to .data/ and to globalThis, entries never expire, and a
- * supply increase (new mints) only scans the missing ids. No request ever
- * triggers a synchronous full scan — the build runs in the background and the
- * API reports progress until it completes.
+ * So this mirrors rarity-snapshot: Blockscout REST + IPFS backfill, durable
+ * Upstash KV, in-request build with inflight dedupe.
  *
- * FAIL CLOSED: trait bids are only accepted while the index is COMPLETE
- * (every token scanned successfully). A partial index could under-commit a
- * trait set; refusing until the scan finishes is strictly safer.
+ * FAIL CLOSED: trait bids only when complete (every token successfully
+ * attributed, failed empty). Partial indexes never leave the API as traits.
  */
 
 export type TraitIndex = {
   collectionSlug: string;
   totalSupply: number;
-  /** tokenIds successfully scanned (metadata parsed). */
+  /** tokenIds successfully scanned (metadata parsed with ≥1 attribute). */
   scanned: number;
-  /** tokenIds whose metadata could not be fetched (retried on next build tick). */
+  /** tokenIds whose metadata could not be fetched (retried on rebuild). */
   failed: number[];
   /** traitType → value → sorted token-id list (decimal strings). */
   traits: Record<string, Record<string, string[]>>;
   builtAt: number;
 };
 
+const KV_PREFIX = "plank:market:trait-index-v1:";
+const KV_TTL_SEC = 7 * 24 * 60 * 60; // 7d — metadata immutable post-reveal
+/** Official RobinWood supply used when RPC is unavailable. */
+const ROBINWOOD_SUPPLY = 1542;
+const MAX_IPFS_BACKFILL = 800;
+const IPFS_CONCURRENCY = 12;
+const MAX_TRAIT_STRING = 64;
+
 type BuildState = {
   index: TraitIndex | null;
   building: boolean;
-  lastSupplyCheck: number;
+  inflight: Promise<TraitIndex | null> | null;
 };
 
-type GlobalTraitIndex = { __plankTraitIndex?: Record<string, BuildState> };
+type GlobalTraitIndex = { __plankTraitIndexV2?: Record<string, BuildState> };
 
 function g(): Record<string, BuildState> {
   const store = globalThis as GlobalTraitIndex;
-  if (!store.__plankTraitIndex) store.__plankTraitIndex = {};
-  return store.__plankTraitIndex;
+  if (!store.__plankTraitIndexV2) store.__plankTraitIndexV2 = {};
+  return store.__plankTraitIndexV2;
 }
 
-function dataPath(slug: string): string {
-  return path.join(process.cwd(), ".data", `trait-index-${slug}.json`);
+function hasKv(): boolean {
+  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 }
 
-const SUPPLY_RECHECK_MS = 10 * 60 * 1000;
-const SCAN_CONCURRENCY = 8;
-/** Traits with values longer than this are junk, not traits. */
-const MAX_TRAIT_STRING = 64;
-
-async function rpcBatch(calls: Array<{ to: string; data: string }>): Promise<(string | null)[]> {
-  const payload = calls.map((c, i) => ({
-    jsonrpc: "2.0",
-    id: i,
-    method: "eth_call",
-    params: [{ to: c.to, data: c.data }, "latest"],
-  }));
-  const res = await fetch(CHAIN.rpcUrls.default, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    cache: "no-store",
-  });
-  const json = (await res.json()) as Array<{ id: number; result?: string }>;
-  if (!Array.isArray(json)) throw new Error("RPC batch failed");
-  const out: (string | null)[] = new Array(calls.length).fill(null);
-  for (const entry of json) {
-    if (typeof entry?.id === "number" && typeof entry.result === "string") {
-      out[entry.id] = entry.result;
-    }
-  }
-  return out;
-}
-
-function decodeUint(hex: string | null): number | null {
-  if (!hex || !/^0x[0-9a-fA-F]*$/.test(hex)) return null;
-  const v = Number(BigInt(hex));
-  return Number.isSafeInteger(v) ? v : null;
-}
-
-function decodeString(hex: string | null): string | null {
-  if (!hex || hex.length < 130) return null;
-  try {
-    const body = hex.slice(2);
-    const len = parseInt(body.slice(64, 128), 16);
-    if (!Number.isFinite(len) || len <= 0) return null;
-    return Buffer.from(body.slice(128, 128 + len * 2), "hex").toString("utf8");
-  } catch {
-    return null;
-  }
-}
-
-async function fetchTotalSupply(contractAddress: string): Promise<number> {
-  const [hex] = await rpcBatch([{ to: contractAddress, data: "0x18160ddd" }]);
-  const v = decodeUint(hex);
-  if (v === null || v <= 0) throw new Error("Could not read totalSupply");
-  return v;
-}
-
-/** Enumerate real token ids via ERC721Enumerable tokenByIndex, batched. */
-async function enumerateTokenIds(contractAddress: string, totalSupply: number): Promise<string[]> {
-  const ids: string[] = [];
-  const CHUNK = 200;
-  for (let start = 0; start < totalSupply; start += CHUNK) {
-    const count = Math.min(CHUNK, totalSupply - start);
-    const calls = Array.from({ length: count }, (_, i) => ({
-      to: contractAddress,
-      data: "0x4f6ccce7" + BigInt(start + i).toString(16).padStart(64, "0"), // tokenByIndex
-    }));
-    const results = await rpcBatch(calls);
-    for (const r of results) {
-      const v = r && /^0x[0-9a-fA-F]{64}$/.test(r) ? BigInt(r).toString() : null;
-      if (v !== null) ids.push(v);
-    }
-  }
-  return ids;
-}
-
-async function fetchTokenUris(
-  contractAddress: string,
-  tokenIds: string[]
-): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
-  const CHUNK = 200;
-  for (let start = 0; start < tokenIds.length; start += CHUNK) {
-    const slice = tokenIds.slice(start, start + CHUNK);
-    const calls = slice.map((id) => ({
-      to: contractAddress,
-      data: "0xc87b56dd" + BigInt(id).toString(16).padStart(64, "0"), // tokenURI
-    }));
-    const results = await rpcBatch(calls);
-    for (let i = 0; i < slice.length; i++) {
-      const uri = decodeString(results[i]);
-      if (uri) out.set(slice[i], uri);
-    }
-  }
-  return out;
+function kvKey(slug: string): string {
+  return `${KV_PREFIX}${slug}`;
 }
 
 function cleanTrait(s: unknown): string | null {
@@ -171,32 +85,11 @@ function addAttributes(index: TraitIndex, tokenId: string, attributes: NftAttrib
 function sortIndex(index: TraitIndex): void {
   for (const byValue of Object.values(index.traits)) {
     for (const key of Object.keys(byValue)) {
-      byValue[key].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
+      byValue[key].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0));
     }
   }
 }
 
-async function loadPersisted(slug: string): Promise<TraitIndex | null> {
-  try {
-    const raw = await fs.readFile(dataPath(slug), "utf8");
-    const parsed = JSON.parse(raw) as TraitIndex;
-    if (parsed && parsed.collectionSlug === slug && parsed.traits) return parsed;
-  } catch {
-    /* no persisted index yet */
-  }
-  return null;
-}
-
-async function persist(index: TraitIndex): Promise<void> {
-  try {
-    await fs.mkdir(path.dirname(dataPath(index.collectionSlug)), { recursive: true });
-    await fs.writeFile(dataPath(index.collectionSlug), JSON.stringify(index), "utf8");
-  } catch {
-    // Best-effort; the in-memory copy still serves this instance.
-  }
-}
-
-/** Which token ids the index already covers (scanned successfully). */
 function coveredIds(index: TraitIndex): Set<string> {
   const covered = new Set<string>();
   for (const byValue of Object.values(index.traits)) {
@@ -207,9 +100,95 @@ function coveredIds(index: TraitIndex): Set<string> {
   return covered;
 }
 
-async function buildMissing(collection: MarketCollection, state: BuildState): Promise<void> {
-  const totalSupply = await fetchTotalSupply(collection.contractAddress);
-  const index: TraitIndex = state.index ?? {
+function isComplete(index: TraitIndex | null | undefined): boolean {
+  return Boolean(
+    index &&
+      index.builtAt > 0 &&
+      index.failed.length === 0 &&
+      index.scanned >= index.totalSupply &&
+      index.totalSupply > 0
+  );
+}
+
+async function readKv(slug: string): Promise<TraitIndex | null> {
+  if (!hasKv()) return null;
+  try {
+    let raw = await kv.get<TraitIndex | string | { value?: TraitIndex; ex?: number }>(kvKey(slug));
+    if (typeof raw === "string") {
+      try {
+        raw = JSON.parse(raw) as TraitIndex | { value?: TraitIndex };
+      } catch {
+        return null;
+      }
+    }
+    // Tolerate a mis-seeded wrapper { value: TraitIndex, ex } from raw REST writes.
+    if (
+      raw &&
+      typeof raw === "object" &&
+      "value" in raw &&
+      (raw as { value?: TraitIndex }).value &&
+      typeof (raw as { value?: TraitIndex }).value === "object" &&
+      (raw as { value: TraitIndex }).value.traits
+    ) {
+      raw = (raw as { value: TraitIndex }).value;
+    }
+    const idx = raw as TraitIndex | null;
+    if (!idx || idx.collectionSlug !== slug || !idx.traits) return null;
+    if (idx.scanned < 50) return null;
+    return idx;
+  } catch {
+    return null;
+  }
+}
+
+async function writeKv(index: TraitIndex): Promise<void> {
+  if (!hasKv()) return;
+  try {
+    await kv.set(kvKey(index.collectionSlug), index, { ex: KV_TTL_SEC });
+  } catch {
+    /* best-effort */
+  }
+}
+
+async function traitsFromIpfs(tokenId: number): Promise<NftAttribute[]> {
+  try {
+    const meta = await fetchNftMetadata(robinwoodTokenUri(tokenId));
+    return Array.isArray(meta.attributes) ? meta.attributes : [];
+  } catch {
+    return [];
+  }
+}
+
+async function backfillIpfs(
+  index: TraitIndex,
+  missingIds: number[]
+): Promise<number[]> {
+  const queue = missingIds.slice(0, MAX_IPFS_BACKFILL);
+  const stillFailed: number[] = missingIds.slice(MAX_IPFS_BACKFILL);
+  for (let i = 0; i < queue.length; i += IPFS_CONCURRENCY) {
+    const slice = queue.slice(i, i + IPFS_CONCURRENCY);
+    await Promise.all(
+      slice.map(async (id) => {
+        const attrs = await traitsFromIpfs(id);
+        if (attrs.length === 0) {
+          stillFailed.push(id);
+          return;
+        }
+        addAttributes(index, String(id), attrs);
+      })
+    );
+  }
+  return stillFailed;
+}
+
+/**
+ * Build from Blockscout token instances (CF-safe REST) + IPFS for gaps.
+ * Prefer RobinWood fixed supply 1..N so missing Blockscout pages still leave
+ * a concrete work list.
+ */
+async function buildIndex(collection: MarketCollection): Promise<TraitIndex> {
+  const totalSupply = ROBINWOOD_SUPPLY;
+  const index: TraitIndex = {
     collectionSlug: collection.slug,
     totalSupply,
     scanned: 0,
@@ -217,71 +196,44 @@ async function buildMissing(collection: MarketCollection, state: BuildState): Pr
     traits: {},
     builtAt: 0,
   };
-  index.totalSupply = totalSupply;
 
-  const allIds = await enumerateTokenIds(collection.contractAddress, totalSupply);
-  const covered = coveredIds(index);
-  // NOTE: a token with metadata but zero valid attributes would re-scan each
-  // build; harmless (metadata layer caches) and vanishingly rare here — every
-  // revealed RobinWood carries Base/Background/Holographic.
-  const missing = allIds.filter((id) => !covered.has(id));
-  if (missing.length === 0) {
-    index.scanned = allIds.length;
-    index.failed = [];
-    index.builtAt = Date.now();
-    state.index = index;
-    await persist(index);
-    return;
-  }
-
-  const uris = await fetchTokenUris(collection.contractAddress, missing);
-  const failed: string[] = [];
-  let cursor = 0;
-  let sincePersist = 0;
-
-  async function worker(): Promise<void> {
-    for (;;) {
-      const i = cursor++;
-      if (i >= missing.length) return;
-      const tokenId = missing[i];
-      const uri = uris.get(tokenId);
-      if (!uri) {
-        failed.push(tokenId);
-        continue;
-      }
-      try {
-        const metadata = await fetchNftMetadata(uri);
-        const attrs = Array.isArray(metadata.attributes) ? metadata.attributes : [];
-        if (attrs.length === 0) {
-          failed.push(tokenId); // unrevealed — retry on a later build
-          continue;
-        }
-        addAttributes(index, tokenId, attrs);
-        index.scanned = coveredIds(index).size;
-        if (++sincePersist >= 100) {
-          sincePersist = 0;
-          sortIndex(index);
-          await persist(index);
-        }
-      } catch {
-        failed.push(tokenId);
-      }
+  try {
+    const items = await fetchTokenInstances(collection.contractAddress, { maxPages: 40 });
+    for (const it of items) {
+      const id = String(it.id);
+      const attrs = (it.metadata?.attributes || []).map((a) => ({
+        trait_type: String(a.trait_type || ""),
+        value: a.value as string | number | boolean,
+      }));
+      if (attrs.length === 0) continue;
+      addAttributes(index, id, attrs);
     }
+  } catch {
+    // Blockscout down — fall through to pure IPFS fill
   }
 
-  await Promise.all(Array.from({ length: SCAN_CONCURRENCY }, () => worker()));
+  const covered = coveredIds(index);
+  const missing: number[] = [];
+  for (let id = 1; id <= totalSupply; id += 1) {
+    if (!covered.has(String(id))) missing.push(id);
+  }
+
+  if (missing.length > 0) {
+    const stillFailed = await backfillIpfs(index, missing);
+    index.failed = stillFailed;
+  } else {
+    index.failed = [];
+  }
 
   sortIndex(index);
   index.scanned = coveredIds(index).size;
-  index.failed = failed.map((id) => Number(id)).filter((n) => Number.isSafeInteger(n));
   index.builtAt = Date.now();
-  state.index = index;
-  await persist(index);
+  return index;
 }
 
 /**
- * Current index state; kicks a background (re)build when needed. Never blocks
- * on the scan itself.
+ * Current index state. On cold miss, AWAITS a real build (Blockscout + IPFS)
+ * so Cloudflare actually finishes instead of returning forever-zero.
  */
 export async function getTraitIndex(
   collection: MarketCollection
@@ -290,37 +242,57 @@ export async function getTraitIndex(
   const state = (store[collection.slug] ??= {
     index: null,
     building: false,
-    lastSupplyCheck: 0,
+    inflight: null,
   });
 
-  if (!state.index) {
-    state.index = await loadPersisted(collection.slug);
+  if (isComplete(state.index)) {
+    return { index: state.index, complete: true, building: false };
   }
 
-  const now = Date.now();
-  const needsSupplyCheck = now - state.lastSupplyCheck > SUPPLY_RECHECK_MS;
-  const incomplete =
-    !state.index ||
-    state.index.failed.length > 0 ||
-    state.index.scanned < state.index.totalSupply;
+  // Warm from KV once per isolate
+  if (!state.index) {
+    const fromKv = await readKv(collection.slug);
+    if (fromKv) {
+      state.index = fromKv;
+      if (isComplete(fromKv)) {
+        return { index: fromKv, complete: true, building: false };
+      }
+    }
+  }
 
-  if (!state.building && (incomplete || needsSupplyCheck)) {
-    state.building = true;
-    state.lastSupplyCheck = now;
-    void buildMissing(collection, state)
-      .catch(() => {
-        /* transient RPC/IPFS failure — next request retries */
-      })
-      .finally(() => {
-        state.building = false;
-      });
+  // Rebuild if incomplete / missing
+  if (!isComplete(state.index)) {
+    if (!state.inflight) {
+      state.building = true;
+      state.inflight = buildIndex(collection)
+        .then(async (idx) => {
+          state.index = idx;
+          if (isComplete(idx) || idx.scanned > (state.index?.scanned ?? 0)) {
+            await writeKv(idx);
+          }
+          return idx;
+        })
+        .catch(() => state.index)
+        .finally(() => {
+          state.building = false;
+          state.inflight = null;
+        });
+    }
+    // Await the in-flight build so this request (and concurrent ones) get
+    // a real result when the Worker still has CPU budget.
+    try {
+      await state.inflight;
+    } catch {
+      /* leave state as-is */
+    }
   }
 
   const index = state.index;
-  const complete = Boolean(
-    index && index.failed.length === 0 && index.scanned >= index.totalSupply && index.builtAt > 0
-  );
-  return { index, complete, building: state.building };
+  return {
+    index,
+    complete: isComplete(index),
+    building: state.building || Boolean(state.inflight),
+  };
 }
 
 /**
@@ -336,4 +308,19 @@ export async function getVerifiedTraitSet(
   if (!index || !complete) return null;
   const list = index.traits[traitType]?.[value];
   return list && list.length > 0 ? [...list] : null;
+}
+
+/**
+ * Verified token-id set for multi-clause criteria (AND of traits + optional
+ * rarity tier). Same fail-closed rules as getVerifiedTraitSet.
+ */
+export async function getVerifiedCriteriaTokenIds(
+  collection: MarketCollection,
+  clauses: readonly CriteriaClause[]
+): Promise<{ tokenIds: string[] } | null> {
+  const { index, complete } = await getTraitIndex(collection);
+  if (!index || !complete || clauses.length === 0) return null;
+  const tokenIds = resolveCriteriaTokenIds(index.traits, clauses);
+  if (tokenIds.length === 0) return null;
+  return { tokenIds };
 }

@@ -1,6 +1,6 @@
 import { BrowserProvider, Contract, Interface, JsonRpcProvider, parseEther } from "ethers";
 import vaultAbi from "@/lib/market/vault-abi.json";
-import { CHAIN, MARKET_VAULT_ADDRESS } from "@/lib/constants";
+import { CHAIN, MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } from "@/lib/constants";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import {
   ensureRobinhoodChain,
@@ -35,7 +35,20 @@ const ERC721_IFACE = new Interface([
   "function approve(address to, uint256 tokenId)",
 ]);
 
-function requireVaultAddress(): string {
+/** Default primary; pass an explicit address for legacy vault ops. */
+function requireVaultAddress(vaultAddress?: string | null): string {
+  if (vaultAddress) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(vaultAddress)) {
+      throw new Error("Invalid vault address.");
+    }
+    if (
+      MARKET_VAULT_ADDRESSES.length > 0 &&
+      !MARKET_VAULT_ADDRESSES.some((a) => a.toLowerCase() === vaultAddress.toLowerCase())
+    ) {
+      throw new Error("That vault address is not configured (primary/legacy).");
+    }
+    return vaultAddress;
+  }
   if (!MARKET_VAULT_ADDRESS) {
     throw new Error("No liquidity vault deployed for this collection yet.");
   }
@@ -49,8 +62,8 @@ function collectionAddress(): string {
 }
 
 /** Read-only contract handle (never used to send). */
-async function getVaultReader(): Promise<Contract> {
-  const address = requireVaultAddress();
+async function getVaultReader(vaultAddress?: string | null): Promise<Contract> {
+  const address = requireVaultAddress(vaultAddress);
   await ensureRobinhoodChain();
   const injected = getEthereumProvider();
   if (!injected) throw new Error("No wallet found.");
@@ -58,7 +71,7 @@ async function getVaultReader(): Promise<Contract> {
   return new Contract(address, vaultAbi, provider);
 }
 
-let publicVaultReaderCache: Contract | null = null;
+const publicVaultReaderCache = new Map<string, Contract>();
 /**
  * Same reads as getVaultReader(), but over the chain's own public RPC —
  * never touches window.ethereum. These are plain contract-state reads with
@@ -69,12 +82,15 @@ let publicVaultReaderCache: Contract | null = null;
  * PendingRedeemClaim) were doing exactly that every 6-8s, which looked like
  * a connect popup that "keeps coming back" even with no wallet connected.
  */
-function getPublicVaultReader(): Contract {
-  if (publicVaultReaderCache) return publicVaultReaderCache;
-  const address = requireVaultAddress();
+function getPublicVaultReader(vaultAddress?: string | null): Contract {
+  const address = requireVaultAddress(vaultAddress);
+  const key = address.toLowerCase();
+  const hit = publicVaultReaderCache.get(key);
+  if (hit) return hit;
   const provider = new JsonRpcProvider(CHAIN.rpcUrls.default, { chainId: CHAIN.id, name: CHAIN.name });
-  publicVaultReaderCache = new Contract(address, vaultAbi, provider);
-  return publicVaultReaderCache;
+  const c = new Contract(address, vaultAbi, provider);
+  publicVaultReaderCache.set(key, c);
+  return c;
 }
 
 /**
@@ -96,10 +112,11 @@ async function sendVaultTx(
   accountAddress: string,
   data: string,
   valueWei?: bigint,
-  onSubmitted?: (hash: string) => void
+  onSubmitted?: (hash: string) => void,
+  vaultAddress?: string | null
 ): Promise<string> {
   const hash = await sendTransaction({
-    to: requireVaultAddress(),
+    to: requireVaultAddress(vaultAddress),
     from: accountAddress,
     data,
     value: valueWei !== undefined ? valueWei.toString() : undefined,
@@ -148,6 +165,10 @@ const VAULT_ERROR_MESSAGES: Record<string, string> = {
   PoolNotOpen: "The vault isn't open for trading yet.",
   NotTreasury: "Only the vault's treasury can do that.",
   AlreadyHeld: "The vault already holds that plank.",
+  InsufficientLpCredit:
+    "That exceeds your Add LP credit. You can only remove shares/ETH you previously contributed (not treasury seed or other traders' depth).",
+  InsufficientLpReserve:
+    "Pool reserves are lower than that amount right now (traded away). Try a smaller remove, or wait for the book to refill.",
 };
 
 export function decodeVaultError(err: unknown): string {
@@ -203,11 +224,12 @@ export function applySlippage(expected: bigint, slippageBps: number): bigint {
 export async function depositForShares(
   accountAddress: string,
   tokenId: string,
-  onSubmitted?: (hash: string) => void
+  onSubmitted?: (hash: string) => void,
+  vaultAddress?: string | null
 ): Promise<string> {
-  const vault = await getVaultReader();
+  const vault = await getVaultReader(vaultAddress);
   await assertVaultWrapsOurCollection(vault);
-  const vaultAddr = requireVaultAddress();
+  const vaultAddr = requireVaultAddress(vaultAddress);
   const nft = collectionAddress();
   const injected = getEthereumProvider();
   if (!injected) throw new Error("No wallet found.");
@@ -239,46 +261,57 @@ export async function depositForShares(
     await waitForTransaction(approveHash, { label: "Deposit approval" });
   }
 
-  return sendVaultTx(accountAddress, VAULT_IFACE.encodeFunctionData("deposit", [tokenId]), undefined, onSubmitted);
+  return sendVaultTx(
+    accountAddress,
+    VAULT_IFACE.encodeFunctionData("deposit", [tokenId]),
+    undefined,
+    onSubmitted,
+    vaultAddress
+  );
 }
 
 /**
- * Read-only quotes — the SAME staticCall buyShares/sellShares already use
- * internally to compute their min-out, exposed standalone so the UI can show
- * "you receive ~Y" live, before signing anything. staticCall never sends a
- * transaction or spends gas; it's a plain eth_call under the hood. Returns
- * null on any failure (no liquidity, bad amount, RPC hiccup) — the caller
- * shows "quote unavailable" rather than a stale or fabricated number.
+ * Read-only quotes via public RPC (no wallet). Formula matches
+ * MarketplankVault.buyShares/sellShares exactly:
+ *   out = (in * reserveOut) / (reserveIn + in)
+ * Previously these went through getVaultReader() → window.ethereum, so
+ * Buy/Sell showed "—" / "Quote unavailable" without a wallet (and often
+ * failed even with one when the injected provider couldn't staticCall).
  */
 export async function quoteBuyShares(
-  accountAddress: string,
-  ethAmount: string
+  _accountAddress: string | null | undefined,
+  ethAmount: string,
+  vaultAddress?: string | null
 ): Promise<bigint | null> {
   try {
-    const vault = await getVaultReader();
-    await assertVaultWrapsOurCollection(vault);
     const value = parseEther(ethAmount);
     if (value <= BigInt(0)) return null;
-    return (await vault.buyShares.staticCall(BigInt(0), {
-      value,
-      from: accountAddress,
-    })) as bigint;
+    const addr = requireVaultAddress(vaultAddress);
+    const vault = getPublicVaultReader(addr);
+    const ethReserve = (await vault.ethReserve()) as bigint;
+    const shareReserve = (await vault.balanceOf(addr)) as bigint;
+    if (shareReserve <= BigInt(0) || ethReserve <= BigInt(0)) return null;
+    const sharesOut = (value * shareReserve) / (ethReserve + value);
+    return sharesOut > BigInt(0) ? sharesOut : null;
   } catch {
     return null;
   }
 }
 
 export async function quoteSellShares(
-  accountAddress: string,
-  sharesWei: bigint
+  _accountAddress: string | null | undefined,
+  sharesWei: bigint,
+  vaultAddress?: string | null
 ): Promise<bigint | null> {
   try {
     if (sharesWei <= BigInt(0)) return null;
-    const vault = await getVaultReader();
-    await assertVaultWrapsOurCollection(vault);
-    return (await vault.sellShares.staticCall(sharesWei, BigInt(0), {
-      from: accountAddress,
-    })) as bigint;
+    const addr = requireVaultAddress(vaultAddress);
+    const vault = getPublicVaultReader(addr);
+    const ethReserve = (await vault.ethReserve()) as bigint;
+    const shareReserve = (await vault.balanceOf(addr)) as bigint;
+    if (shareReserve <= BigInt(0) || ethReserve <= BigInt(0)) return null;
+    const ethOut = (sharesWei * ethReserve) / (shareReserve + sharesWei);
+    return ethOut > BigInt(0) ? ethOut : null;
   } catch {
     return null;
   }
@@ -292,9 +325,10 @@ export async function buyShares(
   accountAddress: string,
   ethAmount: string,
   slippageBps: number,
-  onSubmitted?: (hash: string) => void
+  onSubmitted?: (hash: string) => void,
+  vaultAddress?: string | null
 ): Promise<string> {
-  const vault = await getVaultReader();
+  const vault = await getVaultReader(vaultAddress);
   await assertVaultWrapsOurCollection(vault);
   const value = parseEther(ethAmount);
   const expected = (await vault.buyShares.staticCall(BigInt(0), {
@@ -306,7 +340,8 @@ export async function buyShares(
     accountAddress,
     VAULT_IFACE.encodeFunctionData("buyShares", [minSharesOut]),
     value,
-    onSubmitted
+    onSubmitted,
+    vaultAddress
   );
 }
 
@@ -315,9 +350,10 @@ export async function sellShares(
   accountAddress: string,
   sharesWei: bigint,
   slippageBps: number,
-  onSubmitted?: (hash: string) => void
+  onSubmitted?: (hash: string) => void,
+  vaultAddress?: string | null
 ): Promise<string> {
-  const vault = await getVaultReader();
+  const vault = await getVaultReader(vaultAddress);
   await assertVaultWrapsOurCollection(vault);
   const expected = (await vault.sellShares.staticCall(sharesWei, BigInt(0), {
     from: accountAddress,
@@ -327,36 +363,25 @@ export async function sellShares(
     accountAddress,
     VAULT_IFACE.encodeFunctionData("sellShares", [sharesWei, minEthOut]),
     undefined,
-    onSubmitted
+    onSubmitted,
+    vaultAddress
   );
 }
 
 /**
- * !!! FLAGGED FOR THE UI OWNER — the random-redemption flow is now TWO
- * transactions, and this function only does the first half.
- *
- * It always was two on-chain steps (the commit-reveal split), but this wrapper
- * still called a `redeemRandom()` that has not existed since revision 2, so it
- * reverted unconditionally. It is corrected here to the real entry point.
- *
- * The full flow after the revision-4 drand rework:
- *   1. requestRandomRedeem()  — burns the shares, anchors to a FUTURE drand
- *      round (see getPendingRound below).
- *   2. wait ~3-6 seconds for that round to be published and relayed on-chain
- *      by anyone (scripts/relay-drand.ts, or any other relayer).
- *   3. claimRandomRedeem()    — delivers the NFT.
- *
- * Between 1 and 2, claimRandomRedeem reverts with RandomnessNotAvailable.
- * components/market/SwapPanel.tsx currently fires this and considers the
- * redemption done; it needs a second step and a short "waiting for drand
- * round N" state. That UI work is intentionally NOT done here so it does not
- * collide with whatever else is in flight on that component.
+ * Step 1 of random redemption only — burns shares and anchors a future drand
+ * round. NFT delivery is claimRandomRedeem() after the round is on-chain
+ * (see SwapPanel PendingRedeemClaim). Full flow:
+ *   1. requestRandomRedeem()
+ *   2. wait for drand publish + relay (GH Actions cron, in-app Relay, or any wallet)
+ *   3. claimRandomRedeem()
  */
 export async function requestRandomRedeem(
   accountAddress: string,
-  onSubmitted?: (hash: string) => void
+  onSubmitted?: (hash: string) => void,
+  vaultAddress?: string | null
 ): Promise<string> {
-  const vault = await getVaultReader();
+  const vault = await getVaultReader(vaultAddress);
   await assertVaultWrapsOurCollection(vault);
   const held = (await vault.heldTokenCount()) as bigint;
   if (held <= BigInt(0)) {
@@ -366,45 +391,93 @@ export async function requestRandomRedeem(
     accountAddress,
     VAULT_IFACE.encodeFunctionData("requestRandomRedeem", []),
     undefined,
-    onSubmitted
+    onSubmitted,
+    vaultAddress
   );
 }
 
 /** Step 2: claim once the target drand round has been relayed. */
 export async function claimRandomRedeem(
   accountAddress: string,
-  onSubmitted?: (hash: string) => void
+  onSubmitted?: (hash: string) => void,
+  vaultAddress?: string | null
 ): Promise<string> {
-  const vault = await getVaultReader();
+  const vault = await getVaultReader(vaultAddress);
   await assertVaultWrapsOurCollection(vault);
   return sendVaultTx(
     accountAddress,
     VAULT_IFACE.encodeFunctionData("claimRandomRedeem", []),
     undefined,
-    onSubmitted
+    onSubmitted,
+    vaultAddress
+  );
+}
+
+/**
+ * Permissionless settle: deliver someone else's pinned random redeem to them.
+ * Prevents a abandoned claim from locking the single vault-wide redeem slot.
+ */
+export async function claimRandomRedeemFor(
+  accountAddress: string,
+  requester: string,
+  onSubmitted?: (hash: string) => void,
+  vaultAddress?: string | null
+): Promise<string> {
+  const vault = await getVaultReader(vaultAddress);
+  await assertVaultWrapsOurCollection(vault);
+  return sendVaultTx(
+    accountAddress,
+    VAULT_IFACE.encodeFunctionData("claimRandomRedeemFor", [requester]),
+    undefined,
+    onSubmitted,
+    vaultAddress
+  );
+}
+
+/**
+ * Permissionless forfeit of an expired, never-pinned request — frees the
+ * vault-wide slot. Redeemer loses the burned share (treasury remint).
+ */
+export async function forfeitExpiredRedeem(
+  accountAddress: string,
+  requester: string,
+  onSubmitted?: (hash: string) => void,
+  vaultAddress?: string | null
+): Promise<string> {
+  const vault = await getVaultReader(vaultAddress);
+  await assertVaultWrapsOurCollection(vault);
+  return sendVaultTx(
+    accountAddress,
+    VAULT_IFACE.encodeFunctionData("forfeitExpiredRedeem", [requester]),
+    undefined,
+    onSubmitted,
+    vaultAddress
   );
 }
 
 /** The drand round the in-flight request waits on, and whether it has landed. */
-export async function getPendingRound(): Promise<{ round: bigint; available: boolean }> {
-  const vault = getPublicVaultReader();
+export async function getPendingRound(
+  vaultAddress?: string | null
+): Promise<{ round: bigint; available: boolean }> {
+  const vault = getPublicVaultReader(vaultAddress);
   const [round, available] = (await vault.pendingRound()) as [bigint, boolean];
   return { round, available };
 }
 
 /** address(0) when nobody has an in-flight random redemption (there is only
  * ever one vault-wide slot — see contracts/MarketplankVault.sol). */
-export async function getPendingRequester(): Promise<string> {
-  const vault = getPublicVaultReader();
+export async function getPendingRequester(vaultAddress?: string | null): Promise<string> {
+  const vault = getPublicVaultReader(vaultAddress);
   return (await vault.pendingRequester()) as string;
 }
 
 export async function redeemTarget(
   accountAddress: string,
   tokenId: string,
-  onSubmitted?: (hash: string) => void
+  onSubmitted?: (hash: string) => void,
+  vaultAddress?: string | null
 ): Promise<string> {
-  const vault = await getVaultReader();
+  const vault = await getVaultReader(vaultAddress);
   await assertVaultWrapsOurCollection(vault);
   // Pre-check the vault actually holds this token so the user doesn't burn
   // gas on a guaranteed TokenNotHeld revert (the wallet-side simulation would
@@ -424,20 +497,284 @@ export async function redeemTarget(
   } catch {
     throw new Error(`Token #${tokenId} does not exist.`);
   }
-  if (owner !== requireVaultAddress().toLowerCase()) {
+  if (owner !== requireVaultAddress(vaultAddress).toLowerCase()) {
     throw new Error(`Token #${tokenId} is not held by the vault.`);
   }
   return sendVaultTx(
     accountAddress,
     VAULT_IFACE.encodeFunctionData("redeemTarget", [tokenId]),
     undefined,
-    onSubmitted
+    onSubmitted,
+    vaultAddress
   );
 }
 
-export async function getVaultShareBalance(account: string): Promise<bigint> {
-  const vault = await getVaultReader();
+export async function getVaultShareBalance(
+  account: string,
+  vaultAddress?: string | null
+): Promise<bigint> {
+  // Public RPC — no wallet prompt when checking balances on legacy + primary.
+  const vault = getPublicVaultReader(vaultAddress);
   return vault.balanceOf(account);
+}
+
+export type VaultOnChainSnapshot = {
+  address: string;
+  held: number;
+  totalSupply: bigint;
+  shareBalance: bigint;
+  ethReserve: bigint;
+  shareReserve: bigint;
+  mintFeeBps: number;
+  redeemFeeBps: number;
+  targetPremiumBps: number;
+  poolOpen: boolean;
+  supportsRemoveLp: boolean;
+};
+
+/** Public snapshot for migrate UI (no wallet). */
+export async function getVaultOnChainSnapshot(
+  vaultAddress: string,
+  account?: string | null
+): Promise<VaultOnChainSnapshot> {
+  const vault = getPublicVaultReader(vaultAddress);
+  const [held, totalSupply, ethReserve, shareReserve, mintFeeBps, redeemFeeBps, targetPremiumBps, poolOpen] =
+    await Promise.all([
+      vault.heldTokenCount() as Promise<bigint>,
+      vault.totalSupply() as Promise<bigint>,
+      vault.ethReserve() as Promise<bigint>,
+      vault.balanceOf(vaultAddress) as Promise<bigint>,
+      vault.mintFeeBps() as Promise<bigint>,
+      vault.redeemFeeBps() as Promise<bigint>,
+      vault.targetPremiumBps() as Promise<bigint>,
+      vault.poolOpen() as Promise<boolean>,
+    ]);
+  let shareBalance = BigInt(0);
+  if (account) {
+    try {
+      shareBalance = (await vault.balanceOf(account)) as bigint;
+    } catch {
+      shareBalance = BigInt(0);
+    }
+  }
+  let supportsRemoveLp = false;
+  try {
+    const code = await getVaultBytecodeAt(vaultAddress);
+    supportsRemoveLp = code.includes("9d7de6b3");
+  } catch {
+    supportsRemoveLp = false;
+  }
+  return {
+    address: vaultAddress,
+    held: Number(held),
+    totalSupply,
+    shareBalance,
+    ethReserve,
+    shareReserve,
+    mintFeeBps: Number(mintFeeBps),
+    redeemFeeBps: Number(redeemFeeBps),
+    targetPremiumBps: Number(targetPremiumBps),
+    poolOpen,
+    supportsRemoveLp,
+  };
+}
+
+async function getVaultBytecodeAt(addr: string): Promise<string> {
+  const res = await fetch(CHAIN.rpcUrls.default, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_getCode",
+      params: [addr, "latest"],
+    }),
+  });
+  const json = (await res.json()) as { result?: string };
+  return (json.result || "").toLowerCase();
+}
+
+async function getVaultBytecode(): Promise<string> {
+  const addr = requireVaultAddress();
+  const res = await fetch(CHAIN.rpcUrls.default, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_getCode",
+      params: [addr, "latest"],
+    }),
+  });
+  const json = (await res.json()) as { result?: string };
+  return (json.result || "").toLowerCase();
+}
+
+/** True if the deployed vault bytecode includes contributeLiquidity(uint256). */
+export async function vaultSupportsContributeLiquidity(
+  vaultAddress?: string | null
+): Promise<boolean> {
+  try {
+    // selector contributeLiquidity(uint256) = 0xc1244a5c
+    const code = vaultAddress
+      ? await getVaultBytecodeAt(requireVaultAddress(vaultAddress))
+      : await getVaultBytecode();
+    return code.includes("c1244a5c");
+  } catch {
+    return false;
+  }
+}
+
+/** True if removeLiquidity(uint256,uint256) is present (tracked LP withdraw). */
+export async function vaultSupportsRemoveLiquidity(
+  vaultAddress?: string | null
+): Promise<boolean> {
+  try {
+    // selector removeLiquidity(uint256,uint256) = 0x9d7de6b3
+    const code = vaultAddress
+      ? await getVaultBytecodeAt(requireVaultAddress(vaultAddress))
+      : await getVaultBytecode();
+    return code.includes("9d7de6b3");
+  } catch {
+    return false;
+  }
+}
+
+export type LpCredit = { shareCredit: bigint; ethCredit: bigint };
+
+/** Per-address contributeLiquidity credits (0 when vault has no credit getters). */
+export async function getLpCredit(
+  account: string,
+  vaultAddress?: string | null
+): Promise<LpCredit> {
+  // Live vault (0xb2019…) has neither lpShareCredit nor removeLiquidity — never
+  // eth_call those (they revert with empty data and spam RPC noise).
+  if (!(await vaultSupportsRemoveLiquidity(vaultAddress))) {
+    return { shareCredit: BigInt(0), ethCredit: BigInt(0) };
+  }
+  try {
+    const vault = getPublicVaultReader(vaultAddress);
+    const [shareCredit, ethCredit] = await Promise.all([
+      vault.lpShareCredit(account) as Promise<bigint>,
+      vault.lpEthCredit(account) as Promise<bigint>,
+    ]);
+    return { shareCredit, ethCredit };
+  } catch {
+    return { shareCredit: BigInt(0), ethCredit: BigInt(0) };
+  }
+}
+
+/**
+ * Capabilities of the configured vault. Existing deposits stay on the live
+ * address forever until holders redeem — never silently repoint the env.
+ */
+export type VaultCapabilities = {
+  contributeLiquidity: boolean;
+  removeLiquidity: boolean;
+  /** Share-side deepen via ERC-20 transfer into the vault (always true if ERC-20). */
+  shareTransferLp: boolean;
+};
+
+export async function getVaultCapabilities(): Promise<VaultCapabilities> {
+  const [contributeLiquidity, removeLiquidity] = await Promise.all([
+    vaultSupportsContributeLiquidity(),
+    vaultSupportsRemoveLiquidity(),
+  ]);
+  return {
+    contributeLiquidity,
+    removeLiquidity,
+    // Any ERC-20 vault can receive shares; live vault uses this for ask-side depth.
+    shareTransferLp: true,
+  };
+}
+
+/**
+ * Add depth to the Instant Swap AMM.
+ * - If the vault has contributeLiquidity: shares + optional ETH (tracked credit).
+ * - Else (live vault before upgrade): transfer shares to the vault address
+ *   (deepens share reserve only; no remove credit; ETH cannot update ethReserve).
+ */
+export async function contributeLiquidity(
+  accountAddress: string,
+  sharesIn: bigint,
+  ethInWei: bigint,
+  onSubmitted?: (hash: string) => void,
+  vaultAddress?: string | null
+): Promise<{ hash: string; mode: "full" | "shares-only" }> {
+  if (sharesIn <= BigInt(0) && ethInWei <= BigInt(0)) {
+    throw new Error("Enter shares and/or ETH to add to the pool.");
+  }
+  const vault = await getVaultReader(vaultAddress);
+  await assertVaultWrapsOurCollection(vault);
+  const open = (await vault.poolOpen()) as boolean;
+  if (!open) throw new Error("The pool is not open for liquidity yet.");
+
+  const supports = await vaultSupportsContributeLiquidity(vaultAddress);
+  if (supports) {
+    const hash = await sendVaultTx(
+      accountAddress,
+      VAULT_IFACE.encodeFunctionData("contributeLiquidity", [sharesIn]),
+      ethInWei > BigInt(0) ? ethInWei : undefined,
+      onSubmitted,
+      vaultAddress
+    );
+    return { hash, mode: "full" };
+  }
+
+  // Legacy path: only shares — ERC-20 transfer to vault increases balanceOf(this).
+  if (ethInWei > BigInt(0)) {
+    throw new Error(
+      "This vault build cannot credit ETH to the pool yet (contributeLiquidity not deployed). Add shares only, or use Sell if you want ETH out of the pool."
+    );
+  }
+  if (sharesIn <= BigInt(0)) {
+    throw new Error("Enter a share amount to add to the pool.");
+  }
+  const hash = await sendVaultTx(
+    accountAddress,
+    VAULT_IFACE.encodeFunctionData("transfer", [
+      requireVaultAddress(vaultAddress),
+      sharesIn,
+    ]),
+    undefined,
+    onSubmitted,
+    vaultAddress
+  );
+  return { hash, mode: "shares-only" };
+}
+
+/**
+ * Withdraw previously contributed LP (up to credit and live reserves).
+ * Requires vault with removeLiquidity — no legacy path (raw transfers never
+ * minted credit).
+ */
+export async function removeLiquidity(
+  accountAddress: string,
+  sharesOut: bigint,
+  ethOutWei: bigint,
+  onSubmitted?: (hash: string) => void,
+  vaultAddress?: string | null
+): Promise<string> {
+  if (sharesOut <= BigInt(0) && ethOutWei <= BigInt(0)) {
+    throw new Error("Enter shares and/or ETH to remove from the pool.");
+  }
+  if (!(await vaultSupportsRemoveLiquidity(vaultAddress))) {
+    throw new Error(
+      "This vault build cannot remove LP yet (removeLiquidity not deployed). Use Sell to trade shares for ETH, or wait for the vault upgrade."
+    );
+  }
+  const vault = await getVaultReader(vaultAddress);
+  await assertVaultWrapsOurCollection(vault);
+  const open = (await vault.poolOpen()) as boolean;
+  if (!open) throw new Error("The pool is not open yet.");
+
+  return sendVaultTx(
+    accountAddress,
+    VAULT_IFACE.encodeFunctionData("removeLiquidity", [sharesOut, ethOutWei]),
+    undefined,
+    onSubmitted,
+    vaultAddress
+  );
 }
 
 export async function getVaultHeldCount(): Promise<bigint> {

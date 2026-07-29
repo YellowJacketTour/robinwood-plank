@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 /**
  * Security headers + ensure server secrets are never treated as public.
@@ -43,6 +44,27 @@ const nextConfig: NextConfig = {
         source: "/:path*",
         headers: securityHeaders,
       },
+      // App HTML must not stick for a year at the edge (stale Instant Swap
+      // clients after vault/env cutovers). Short edge cache + revalidate.
+      {
+        source: "/market",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=0, s-maxage=30, stale-while-revalidate=60",
+          },
+          { key: "CDN-Cache-Control", value: "public, max-age=0, s-maxage=30, stale-while-revalidate=60" },
+        ],
+      },
+      {
+        source: "/",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=0, s-maxage=60, stale-while-revalidate=120",
+          },
+        ],
+      },
       {
         source: "/api/:path*",
         headers: [
@@ -51,36 +73,96 @@ const nextConfig: NextConfig = {
         ],
       },
       // Later entries win over an earlier match on the same path/header —
-      // this carves a handful of public, non-sensitive, read-only
-      // market-data routes out of the blanket no-store rule above. Every
-      // one of these routes already sets its own short Cache-Control
-      // header in code; the blanket rule was silently clobbering it, which
-      // was the actual cause of "images and stats load slowly on every
-      // refresh" — no route-level fix could work while this stayed in
-      // front of it. Do NOT add wallet-specific, order-signing, or
-      // transaction-submitting routes here.
-      // Exact paths only — NOT a /:path* wildcard, which would also catch
-      // /api/market/vault/stream (the SSE route) and break its live push
-      // by letting it get cached.
+      // carve public read-only routes out of the blanket no-store above.
+      // Exact paths only — never /api/market/vault/stream (SSE).
       {
         source: "/api/market/vault/stats",
-        headers: [{ key: "Cache-Control", value: "public, s-maxage=15, stale-while-revalidate=60" }],
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=5, s-maxage=15, stale-while-revalidate=60",
+          },
+        ],
       },
       {
         source: "/api/market/vault/held",
-        headers: [{ key: "Cache-Control", value: "public, s-maxage=15, stale-while-revalidate=60" }],
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=10, s-maxage=20, stale-while-revalidate=120",
+          },
+        ],
       },
       {
         source: "/api/market/vault/activity",
-        headers: [{ key: "Cache-Control", value: "public, s-maxage=15, stale-while-revalidate=60" }],
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=10, s-maxage=20, stale-while-revalidate=120",
+          },
+        ],
       },
       {
         source: "/api/market/activity",
-        headers: [{ key: "Cache-Control", value: "public, s-maxage=15, stale-while-revalidate=60" }],
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=10, s-maxage=20, stale-while-revalidate=120",
+          },
+        ],
       },
       {
         source: "/api/market/rarity",
-        headers: [{ key: "Cache-Control", value: "public, s-maxage=60, stale-while-revalidate=300" }],
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=60, s-maxage=300, stale-while-revalidate=3600",
+          },
+        ],
+      },
+      {
+        source: "/api/market/token",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=30, s-maxage=120, stale-while-revalidate=600",
+          },
+        ],
+      },
+      {
+        source: "/api/market/traits",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=60, s-maxage=300, stale-while-revalidate=3600",
+          },
+        ],
+      },
+      {
+        source: "/api/market/treasury",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=10, s-maxage=30, stale-while-revalidate=120",
+          },
+        ],
+      },
+      {
+        source: "/api/ipfs/image",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
+      {
+        source: "/api/ipfs/metadata",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800",
+          },
+        ],
+      },
+      {
+        source: "/images/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }],
       },
       {
         source: "/plank-social.jpg",
@@ -96,3 +178,6 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+
+// Enable Cloudflare bindings during `next dev`.
+initOpenNextCloudflareForDev();
