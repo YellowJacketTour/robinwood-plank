@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { MARKET_FEE_RECIPIENT, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { getNativeBalance } from "@/lib/wallet";
@@ -568,6 +568,8 @@ export default function SwapPanel({
   /** Optional ETH amount when adding/removing LP. */
   const [lpEth, setLpEth] = useState("");
   const [lpDirection, setLpDirection] = useState<LpDirection>("add");
+  /** Which LP field the user last edited — drives auto-ratio fill of the other. */
+  const [lpEditSide, setLpEditSide] = useState<"shares" | "eth" | null>(null);
   const [tokenId, setTokenId] = useState("");
   /** Max slippage, percent. Converted to bps; vault trades REFUSE min-out of 0. */
   const [slippagePct, setSlippagePct] = useState("1");
@@ -577,6 +579,79 @@ export default function SwapPanel({
   const [lpFull, setLpFull] = useState<boolean | null>(null);
   const [lpRemove, setLpRemove] = useState<boolean | null>(null);
   const [lpCredit, setLpCredit] = useState<{ shareCredit: bigint; ethCredit: bigint } | null>(null);
+
+  /** Pool ratio for balanced LP: eth = shares * ethR / shareR (and inverse). */
+  const lpPoolRatio = useMemo(() => {
+    if (!stats) return null;
+    try {
+      const shareR = BigInt(stats.shareReserveWei || "0");
+      const ethR = BigInt(stats.ethReserveWei || "0");
+      if (shareR <= BigInt(0) || ethR <= BigInt(0)) return null;
+      return { shareR, ethR };
+    } catch {
+      return null;
+    }
+  }, [stats]);
+
+  const ethFromShares = useCallback(
+    (sharesWei: bigint): bigint | null => {
+      if (!lpPoolRatio || sharesWei <= BigInt(0)) return null;
+      return (sharesWei * lpPoolRatio.ethR) / lpPoolRatio.shareR;
+    },
+    [lpPoolRatio]
+  );
+
+  const sharesFromEth = useCallback(
+    (ethWei: bigint): bigint | null => {
+      if (!lpPoolRatio || ethWei <= BigInt(0)) return null;
+      return (ethWei * lpPoolRatio.shareR) / lpPoolRatio.ethR;
+    },
+    [lpPoolRatio]
+  );
+
+  /** User typed shares — fill ETH to match pool ratio (add LP). */
+  const onLpSharesChange = useCallback(
+    (raw: string) => {
+      const cleaned = raw.replace(/[^0-9.]/g, "");
+      setLpEditSide("shares");
+      setAmount(cleaned);
+      if (lpDirection !== "add" || !lpPoolRatio || !lpFull) return;
+      const wei = parseTokenAmount(cleaned, 18);
+      if (wei == null || wei <= BigInt(0)) {
+        setLpEth("");
+        return;
+      }
+      const ethWei = ethFromShares(wei);
+      if (ethWei == null || ethWei <= BigInt(0)) {
+        setLpEth("");
+        return;
+      }
+      setLpEth(formatTokenAmount(ethWei, 18, 6));
+    },
+    [lpDirection, lpPoolRatio, lpFull, ethFromShares]
+  );
+
+  /** User typed ETH — fill shares to match pool ratio (add LP). */
+  const onLpEthChange = useCallback(
+    (raw: string) => {
+      const cleaned = raw.replace(/[^0-9.]/g, "");
+      setLpEditSide("eth");
+      setLpEth(cleaned);
+      if (lpDirection !== "add" || !lpPoolRatio || !lpFull) return;
+      const wei = parseTokenAmount(cleaned, 18);
+      if (wei == null || wei <= BigInt(0)) {
+        setAmount("");
+        return;
+      }
+      const sh = sharesFromEth(wei);
+      if (sh == null || sh <= BigInt(0)) {
+        setAmount("");
+        return;
+      }
+      setAmount(formatTokenAmount(sh, 18, 6));
+    },
+    [lpDirection, lpPoolRatio, lpFull, sharesFromEth]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -625,6 +700,52 @@ export default function SwapPanel({
   // after every transaction (run(), below).
   const [shareBalance, setShareBalance] = useState<bigint | null>(null);
   const [ethBalance, setEthBalance] = useState<bigint | null>(null);
+
+  /** Max shares add: wallet shares, capped so matching ETH still fits (gas pad). */
+  const maxLpSharesAdd = useCallback(() => {
+    if (shareBalance == null || shareBalance <= BigInt(0)) return;
+    setLpEditSide("shares");
+    let shares = shareBalance;
+    let ethWei = ethFromShares(shares);
+    if (ethWei != null && ethBalance != null && ethBalance > BigInt(0)) {
+      const gasPad = parseTokenAmount("0.0003", 18) ?? BigInt(0);
+      const ethCap = ethBalance > gasPad ? ethBalance - gasPad : BigInt(0);
+      if (ethWei > ethCap && ethCap > BigInt(0)) {
+        ethWei = ethCap;
+        const cappedShares = sharesFromEth(ethCap);
+        if (cappedShares != null && cappedShares > BigInt(0) && cappedShares < shares) {
+          shares = cappedShares;
+        }
+      }
+    }
+    setAmount(formatTokenAmount(shares, 18, 6));
+    if (lpFull && ethWei != null && ethWei > BigInt(0)) {
+      setLpEth(formatTokenAmount(ethWei, 18, 6));
+    } else if (lpFull) {
+      setLpEth("");
+    }
+  }, [shareBalance, ethBalance, ethFromShares, sharesFromEth, lpFull]);
+
+  /** Max ETH add: wallet ETH minus gas pad, capped so matching shares fit. */
+  const maxLpEthAdd = useCallback(() => {
+    if (ethBalance == null || ethBalance <= BigInt(0)) return;
+    setLpEditSide("eth");
+    const gasPad = parseTokenAmount("0.0003", 18) ?? BigInt(0);
+    let ethWei = ethBalance > gasPad ? ethBalance - gasPad : BigInt(0);
+    if (ethWei <= BigInt(0)) return;
+    let shares = sharesFromEth(ethWei);
+    if (shares != null && shareBalance != null && shares > shareBalance) {
+      shares = shareBalance;
+      const ethFromSh = ethFromShares(shareBalance);
+      if (ethFromSh != null && ethFromSh > BigInt(0)) ethWei = ethFromSh;
+    }
+    setLpEth(formatTokenAmount(ethWei, 18, 6));
+    if (shares != null && shares > BigInt(0)) {
+      setAmount(formatTokenAmount(shares, 18, 6));
+    } else {
+      setAmount("");
+    }
+  }, [ethBalance, shareBalance, sharesFromEth, ethFromShares]);
   const refreshShareBalance = useCallback(async () => {
     if (!account) return;
     try {
@@ -1184,10 +1305,13 @@ export default function SwapPanel({
               {lpDirection === "add" ? (
                 <>
                   <strong className="text-foreground/85">Deposit is not LP.</strong> After deposit, shares
-                  sit in <em>your wallet</em> (see balance above) — you can Redeem anytime.{" "}
-                  <strong className="text-foreground/85">Add LP</strong> optionally moves some of those
-                  shares into the trading pool so Instant Swap has more depth
-                  {lpFull ? " (and credits you for Remove LP)" : ""}.
+                  sit in <em>your wallet</em> (see balance above).{" "}
+                  <strong className="text-foreground/85">Add LP</strong> moves shares and/or ETH into the
+                  pool
+                  {lpFull && lpPoolRatio
+                    ? " — enter either side and the other auto-matches the pool ratio"
+                    : ""}
+                  {lpFull ? " (credits you for Remove LP)" : ""}.
                 </>
               ) : lpRemove ? (
                 <>
@@ -1213,50 +1337,100 @@ export default function SwapPanel({
               </p>
             )}
             <div className="rounded-xl border border-gold-500/30 bg-wood-900/70 px-3 py-2.5">
-              <div className="flex items-center justify-between text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
                 <span>{lpDirection === "remove" ? "Shares to remove" : "Shares to add"}</span>
-                {lpDirection === "add" && shareBalance != null && (
-                  <button
-                    type="button"
-                    className="text-gold-300 hover:underline"
-                    onClick={() => setAmount(formatTokenAmount(shareBalance, 18, 6))}
-                  >
-                    Max {formatTokenAmount(shareBalance, 18, 4)}
-                  </button>
-                )}
-                {lpDirection === "remove" && lpCredit && lpCredit.shareCredit > BigInt(0) && (
-                  <button
-                    type="button"
-                    className="text-gold-300 hover:underline"
-                    onClick={() => setAmount(formatTokenAmount(lpCredit.shareCredit, 18, 6))}
-                  >
-                    Max {formatTokenAmount(lpCredit.shareCredit, 18, 4)}
-                  </button>
-                )}
+                <span className="flex flex-wrap items-center gap-2 font-normal normal-case">
+                  {account && shareBalance != null && lpDirection === "add" && (
+                    <span className="font-mono text-foreground/60">
+                      bal{" "}
+                      <span className="font-semibold text-gold-200">
+                        {formatTokenAmount(shareBalance, 18, 4)}
+                      </span>{" "}
+                      sh
+                    </span>
+                  )}
+                  {lpDirection === "add" && shareBalance != null && shareBalance > BigInt(0) && (
+                    <button
+                      type="button"
+                      className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                      onClick={maxLpSharesAdd}
+                    >
+                      Max
+                    </button>
+                  )}
+                  {lpDirection === "remove" && lpCredit && lpCredit.shareCredit > BigInt(0) && (
+                    <button
+                      type="button"
+                      className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                      onClick={() => {
+                        setLpEditSide("shares");
+                        setAmount(formatTokenAmount(lpCredit.shareCredit, 18, 6));
+                      }}
+                    >
+                      Max {formatTokenAmount(lpCredit.shareCredit, 18, 4)}
+                    </button>
+                  )}
+                </span>
               </div>
               <input
                 type="text"
                 inputMode="decimal"
                 placeholder="0.0"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+                onChange={(e) =>
+                  lpDirection === "add"
+                    ? onLpSharesChange(e.target.value)
+                    : setAmount(e.target.value.replace(/[^0-9.]/g, ""))
+                }
                 className="mt-1 w-full bg-transparent text-xl font-semibold text-foreground outline-none"
               />
             </div>
             <div className="rounded-xl border border-gold-500/30 bg-wood-900/70 px-3 py-2.5">
-              <div className="flex items-center justify-between text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
-                <span>{lpDirection === "remove" ? "ETH to remove" : "ETH to add (optional)"}</span>
-                {lpDirection === "remove" && lpCredit && lpCredit.ethCredit > BigInt(0) ? (
-                  <button
-                    type="button"
-                    className="text-gold-300 hover:underline"
-                    onClick={() => setLpEth(formatTokenAmount(lpCredit.ethCredit, 18, 6))}
-                  >
-                    Max {formatTokenAmount(lpCredit.ethCredit, 18, 5)} Ξ
-                  </button>
-                ) : (
-                  <span className="text-gold-300">Ξ</span>
-                )}
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
+                <span>
+                  {lpDirection === "remove"
+                    ? "ETH to remove"
+                    : lpFull
+                      ? "ETH to add"
+                      : "ETH to add (optional)"}
+                </span>
+                <span className="flex flex-wrap items-center gap-2 font-normal normal-case">
+                  {account && ethBalance != null && lpDirection === "add" && lpFull && (
+                    <span className="font-mono text-foreground/60">
+                      bal{" "}
+                      <span className="font-semibold text-gold-200">
+                        {formatTokenAmount(ethBalance, 18, 4)}
+                      </span>{" "}
+                      Ξ
+                    </span>
+                  )}
+                  {lpDirection === "add" &&
+                    lpFull &&
+                    ethBalance != null &&
+                    ethBalance > BigInt(0) && (
+                      <button
+                        type="button"
+                        className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                        onClick={maxLpEthAdd}
+                      >
+                        Max
+                      </button>
+                    )}
+                  {lpDirection === "remove" && lpCredit && lpCredit.ethCredit > BigInt(0) ? (
+                    <button
+                      type="button"
+                      className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                      onClick={() => {
+                        setLpEditSide("eth");
+                        setLpEth(formatTokenAmount(lpCredit.ethCredit, 18, 6));
+                      }}
+                    >
+                      Max {formatTokenAmount(lpCredit.ethCredit, 18, 5)} Ξ
+                    </button>
+                  ) : lpDirection === "remove" ? (
+                    <span className="text-gold-300">Ξ</span>
+                  ) : null}
+                </span>
               </div>
               <input
                 type="text"
@@ -1273,10 +1447,35 @@ export default function SwapPanel({
                   (lpDirection === "add" && lpFull === false) ||
                   (lpDirection === "remove" && lpRemove === false)
                 }
-                onChange={(e) => setLpEth(e.target.value.replace(/[^0-9.]/g, ""))}
+                onChange={(e) =>
+                  lpDirection === "add"
+                    ? onLpEthChange(e.target.value)
+                    : setLpEth(e.target.value.replace(/[^0-9.]/g, ""))
+                }
                 className="mt-1 w-full bg-transparent text-xl font-semibold text-foreground outline-none disabled:opacity-40"
               />
             </div>
+            {lpDirection === "add" && lpFull && lpPoolRatio && (
+              <p className="text-[0.6rem] text-foreground/50">
+                Auto-balance uses pool ratio{" "}
+                <span className="font-mono text-foreground/70">
+                  1 sh ≈{" "}
+                  {formatTokenAmount(
+                    (lpPoolRatio.ethR * BigInt(10) ** BigInt(18)) / lpPoolRatio.shareR,
+                    18,
+                    6
+                  )}{" "}
+                  Ξ
+                </span>
+                {lpEditSide ? (
+                  <>
+                    {" "}
+                    · last edited <strong className="text-foreground/75">{lpEditSide}</strong>
+                  </>
+                ) : null}
+                . Max caps to your wallet on both sides.
+              </p>
+            )}
             {stats && (
               <p className="text-[0.6rem] text-foreground/45">
                 Pool now: {formatTokenAmount(stats.shareReserveWei, 18, 4)} shares ·{" "}
