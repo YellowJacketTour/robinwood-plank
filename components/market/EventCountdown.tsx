@@ -30,36 +30,43 @@ function pad(n: number | undefined) {
   return typeof n === "number" ? String(n).padStart(2, "0") : "—";
 }
 
-type SaleEvent = { kind: string; tokenId: string; priceWei: string | null; to: string; timestamp: string | null };
 type RecordSale = { tokenId: string; priceWei: string; buyer: string; image: string | null };
 
 /**
- * Highest confirmed marketplace sale to date — walked from the SAME full
- * activity history the price chart uses (/api/market/activity?full=1), not
- * a hardcoded number, so it stays correct as new sales land. Vault AMM
- * trades are a different mechanism (buying a random/any share of the pool,
- * not a specific listed Plank) and are deliberately excluded from "highest
- * sale" — that title belongs to a real fixed-price sale of a specific NFT.
+ * Highest confirmed marketplace sale — from the durable on-chain sales
+ * catalog (/api/market/sales-stats), seeded from Blockscout marketplace
+ * fills (Seaport + other venues). Vault AMM is excluded.
  */
 function useRecordSale(): RecordSale | null | undefined {
   const [record, setRecord] = useState<RecordSale | null | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/market/activity?full=1")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
-      .then((data: { events?: SaleEvent[] }) => {
+    import("@/lib/market/swr-fetch")
+      .then(({ swrJson }) =>
+        swrJson<{
+          highestWei?: string | null;
+          highestTokenId?: string | null;
+          highestPlatform?: string | null;
+        }>("/api/market/sales-stats", {
+          ttlMs: 60_000,
+          swrMs: 300_000,
+          session: true,
+        })
+      )
+      .then((data) => {
         if (cancelled) return;
-        const sales = (data.events ?? []).filter(
-          (e): e is SaleEvent & { priceWei: string } => e.kind === "sale" && e.priceWei != null
-        );
-        if (sales.length === 0) {
+        if (!data.highestWei || !data.highestTokenId) {
           setRecord(null);
           return;
         }
-        const top = sales.reduce((max, e) => (BigInt(e.priceWei) > BigInt(max.priceWei) ? e : max));
-        setRecord({ tokenId: top.tokenId, priceWei: top.priceWei, buyer: top.to, image: null });
-        fetch(`/api/market/token?tokenId=${encodeURIComponent(top.tokenId)}`)
+        setRecord({
+          tokenId: data.highestTokenId,
+          priceWei: data.highestWei,
+          buyer: data.highestPlatform === "seaport" ? "OpenSea/Seaport" : data.highestPlatform || "",
+          image: null,
+        });
+        fetch(`/api/market/token?tokenId=${encodeURIComponent(data.highestTokenId)}`)
           .then((r) => (r.ok ? r.json() : null))
           .then((t) => {
             if (!cancelled && t?.image) {
@@ -113,8 +120,16 @@ export default function EventCountdown() {
           )}
           <p className="min-w-0 truncate text-[0.7rem] text-foreground/70">
             <span className="font-bold text-gold-300">Highest sale: {formatTokenAmount(record.priceWei, 18, 4)} Ξ</span>
-            {" · "}Plank #{record.tokenId} {" · "}
-            <span className="font-mono">{shortAddress(record.buyer)}</span>
+            {" · "}Plank #{record.tokenId}
+            {record.buyer ? (
+              <>
+                {" · "}
+                <span className="text-foreground/55">
+                  {record.buyer.startsWith("0x") ? shortAddress(record.buyer) : record.buyer}
+                </span>
+              </>
+            ) : null}
+            <span className="text-foreground/40"> · royalty paid</span>
           </p>
         </div>
       ) : (

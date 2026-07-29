@@ -1,4 +1,5 @@
 import { ipfsGatewayCandidates } from "@/lib/ipfs";
+import { cachedBinary } from "@/lib/http-cache";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +39,49 @@ export async function GET(req: Request) {
     return publicJson({ error: "BAD_URI", message: "uri is required." }, 400);
   }
 
-  const candidates = ipfsGatewayCandidates(uri);
+  // SSRF guard: only start from allowlisted public IPFS gateways. Gateways
+  // often 30x-redirect to CID subdomains (e.g. bafy….ipfs.dweb.link) — those
+  // must be accepted on the FINAL url or every dweb/pinata image 500s.
+  const ALLOWED_HOSTS = new Set([
+    "gateway.pinata.cloud",
+    "ipfs.io",
+    "nftstorage.link",
+    "w3s.link",
+    "dweb.link",
+    "4everland.io",
+    "cloudflare-ipfs.com",
+  ]);
+  function isAllowedHost(hostname: string): boolean {
+    const h = hostname.toLowerCase();
+    if (ALLOWED_HOSTS.has(h)) return true;
+    // CID subdomain gateways after redirect
+    if (/\.ipfs\.(dweb\.link|nftstorage\.link|w3s\.link|4everland\.io)$/i.test(h)) return true;
+    if (h.endsWith(".ipfs.localhost")) return false;
+    return false;
+  }
+  function isAllowedFetchUrl(url: string): boolean {
+    try {
+      const u = new URL(url);
+      if (u.protocol !== "https:") return false;
+      if (!isAllowedHost(u.hostname)) return false;
+      // Path-style gateways need /ipfs/; subdomain style may not.
+      if (ALLOWED_HOSTS.has(u.hostname.toLowerCase()) && !u.pathname.includes("/ipfs/")) {
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Expand candidates; if the stored URI is an already-allowed gateway URL
+  // that redirects, include rewritten gateway variants from the CID path.
+  let candidates = ipfsGatewayCandidates(uri).filter(isAllowedFetchUrl);
+  // Prefer Pinata first (collection art resolves reliably there).
+  candidates = [
+    ...candidates.filter((c) => c.includes("gateway.pinata.cloud")),
+    ...candidates.filter((c) => !c.includes("gateway.pinata.cloud")),
+  ];
   if (candidates.length === 0) {
     return publicJson({ error: "BAD_URI", message: "Could not resolve this URI." }, 400);
   }
@@ -47,18 +90,29 @@ export async function GET(req: Request) {
   for (const url of candidates) {
     try {
       const res = await fetch(url, {
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(12_000),
         cache: "no-store",
+        // Follow gateway→CID-subdomain redirects; validate final host below.
+        redirect: "follow",
       });
       if (!res.ok) {
         lastError = new Error(`HTTP ${res.status}`);
         continue;
       }
-      const contentType = res.headers.get("content-type") || "application/octet-stream";
-      if (!contentType.startsWith("image/")) {
-        // A gateway returning HTML/JSON where an image was expected (error
-        // page, redirect page) is exactly the shape that trips ORB when
-        // loaded directly — reject it here too rather than pass it through.
+      // Reject open redirects off our allowlist (SSRF hardening).
+      if (res.url && !isAllowedFetchUrl(res.url) && !isAllowedHost(new URL(res.url).hostname)) {
+        lastError = new Error(`Blocked redirect host: ${res.url}`);
+        continue;
+      }
+      const contentType = (res.headers.get("content-type") || "application/octet-stream")
+        .split(";")[0]
+        .trim()
+        .toLowerCase();
+      // Some gateways return image/png; charset=… or application/octet-stream for png.
+      const looksImage =
+        contentType.startsWith("image/") ||
+        contentType === "application/octet-stream";
+      if (!looksImage) {
         lastError = new Error(`Unexpected content-type: ${contentType}`);
         continue;
       }
@@ -67,13 +121,20 @@ export async function GET(req: Request) {
         lastError = new Error(`Unusable size: ${buf.byteLength}`);
         continue;
       }
-      return new Response(buf, {
-        status: 200,
-        headers: {
-          "Content-Type": contentType,
-          "Cache-Control": "public, max-age=31536000, immutable",
-        },
-      });
+      // Sniff PNG/JPEG/WebP/GIF magic if gateway lied with octet-stream.
+      const bytes = new Uint8Array(buf.slice(0, 12));
+      let ct = contentType.startsWith("image/") ? contentType : "application/octet-stream";
+      if (ct === "application/octet-stream") {
+        if (bytes[0] === 0x89 && bytes[1] === 0x50) ct = "image/png";
+        else if (bytes[0] === 0xff && bytes[1] === 0xd8) ct = "image/jpeg";
+        else if (bytes[0] === 0x47 && bytes[1] === 0x49) ct = "image/gif";
+        else if (bytes[0] === 0x52 && bytes[1] === 0x49) ct = "image/webp";
+        else {
+          lastError = new Error("Not an image payload");
+          continue;
+        }
+      }
+      return cachedBinary(buf, ct, "immutable");
     } catch (error) {
       lastError = error;
     }

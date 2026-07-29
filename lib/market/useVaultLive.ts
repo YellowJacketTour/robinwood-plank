@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { clearPendingVaultTx } from "@/lib/market/pendingVaultTx";
+import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 
 export type VaultTradeKind = "buy" | "sell" | "deposit" | "redeem";
 
@@ -13,6 +14,9 @@ export type VaultTradeEvent = {
   tokenId: string | null;
   txHash: string;
   timestamp: string | null;
+  /** Present on server payloads — used for stable client-side dedupe. */
+  logIndex?: number;
+  blockNumber?: number;
 };
 
 export type VaultStats = {
@@ -50,10 +54,11 @@ type VaultLiveState = {
   live: boolean;
 };
 
-const FRESH_WINDOW_MS = 45_000;
+const FRESH_WINDOW_MS = 90_000;
 let lastUpdateAt = 0;
 
-const SNAPSHOT_KEY = "plank-vault-snapshot";
+// Include vault address so a primary switch (V1→V2) does not hydrate stale poolOpen.
+const SNAPSHOT_KEY = `plank-vault-snapshot:${(MARKET_VAULT_ADDRESS ?? "none").toLowerCase()}`;
 /** A snapshot older than this is more likely to mislead than help — past
  * this age just start from empty and wait for a real fetch, same as before
  * this cache existed. */
@@ -117,8 +122,9 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
  * background so it can take back over once healthy). */
 const BASE_RECONNECT_MS = 1_500;
 const MAX_RECONNECT_MS = 20_000;
-const POLL_FALLBACK_AFTER_ERRORS = 4;
-const POLL_INTERVAL_MS = 12_000;
+/** Start REST trade polling almost immediately — SSE is flaky on CF under RPC pressure. */
+const POLL_FALLBACK_AFTER_ERRORS = 1;
+const POLL_INTERVAL_MS = 10_000;
 /** The server ticks every 4s but only actually refreshes chain data every
  * 10s (see app/api/market/vault/stream/route.ts), so most ticks resend the
  * identical payload — comparing the raw text before parsing/emitting skips
@@ -129,6 +135,33 @@ let lastRaw: string | null = null;
 
 function emit() {
   listeners.forEach((l) => l(state));
+}
+
+/** Never shrink the trade ticker to a partial payload (SSE/REST races were
+ * leaving Instant Swap on a single row while the activity API still had 40+). */
+function mergeActivity(
+  incoming: VaultTradeEvent[] | null | undefined,
+  current: VaultTradeEvent[]
+): VaultTradeEvent[] {
+  if (!incoming?.length) return current;
+  if (!current.length) return incoming;
+  const map = new Map<string, VaultTradeEvent>();
+  for (const e of [...incoming, ...current]) {
+    // Prefer logIndex when present so REST (timestamped) and SSE (null ts)
+    // of the same log don't double-count. Fall back without timestamp.
+    const key = `${e.txHash}|${e.logIndex ?? ""}|${e.kind}|${e.tokenId ?? ""}`;
+    const prev = map.get(key);
+    // Prefer row with a real timestamp when merging duplicates.
+    if (!prev || (!prev.timestamp && e.timestamp)) map.set(key, e);
+  }
+  return Array.from(map.values())
+    .sort((a, b) => {
+      const ba = a.blockNumber ?? 0;
+      const bb = b.blockNumber ?? 0;
+      if (ba !== bb) return bb - ba;
+      return (b.logIndex ?? 0) - (a.logIndex ?? 0);
+    })
+    .slice(0, 100);
 }
 
 /**
@@ -143,44 +176,65 @@ function emit() {
 function hydrateFromRest() {
   if (restHydrated || typeof window === "undefined") return;
   restHydrated = true;
-  Promise.all([
-    fetch("/api/market/vault/stats").then((r) => (r.ok ? r.json() : null)),
-    fetch("/api/market/vault/activity").then((r) => (r.ok ? r.json() : null)),
-  ])
-    .then(([stats, activityRes]) => {
-      if (state.connected) return; // a live SSE tick already beat us to it
-      const activity = activityRes?.events ?? state.activity;
-      if (stats) {
-        lastUpdateAt = Date.now();
-        state = makeState(stats, activity, false);
-        saveSnapshot(stats, activity);
-        emit();
-      }
-    })
-    .catch(() => {
-      // stream connection is still the primary path — nothing to do here
-    });
+  // Always pull REST activity once — SSE was wiping trades when it
+  // reconnected with empty activity arrays.
+  // Prefer shared SWR so Instant Swap panels + this poller de-dupe.
+  void Promise.all([
+    import("@/lib/market/swr-fetch").then(({ swrJson }) =>
+      swrJson<VaultStats | null>("/api/market/vault/stats", {
+        ttlMs: 8_000,
+        swrMs: 60_000,
+        session: true,
+      }).catch(() => null)
+    ),
+    import("@/lib/market/swr-fetch").then(({ swrJson }) =>
+      swrJson<{ events?: VaultTradeEvent[] }>("/api/market/vault/activity", {
+        ttlMs: 10_000,
+        swrMs: 90_000,
+        session: true,
+      }).catch(() => null)
+    ),
+  ]).then(([stats, activityRes]) => {
+    const restActivity: VaultTradeEvent[] = activityRes?.events ?? [];
+    const activity = mergeActivity(restActivity, state.activity);
+    const nextStats = (stats && "poolOpen" in (stats as object) ? stats : null) || state.stats;
+    if (!nextStats && activity.length === 0) return;
+    lastUpdateAt = Date.now();
+    state = makeState(nextStats as VaultStats | null, activity, state.connected);
+    saveSnapshot(nextStats as VaultStats | null, activity);
+    emit();
+  });
 }
 
 /** REST polling fallback — the same requests hydrateFromRest fires once,
  * repeated, for as long as the SSE connection is unhealthy. Runs alongside
  * connect()'s continuing reconnect attempts, not instead of them. */
 function pollOnce() {
-  Promise.all([
-    fetch("/api/market/vault/stats").then((r) => (r.ok ? r.json() : null)),
-    fetch("/api/market/vault/activity").then((r) => (r.ok ? r.json() : null)),
-  ])
-    .then(([stats, activityRes]) => {
-      if (!stats || state.connected) return;
-      const activity = activityRes?.events ?? state.activity;
-      lastUpdateAt = Date.now();
-      state = makeState(stats, activity, false);
-      saveSnapshot(stats, activity);
-      emit();
-    })
-    .catch(() => {
-      // next poll tick tries again
-    });
+  void Promise.all([
+    import("@/lib/market/swr-fetch").then(({ swrJson }) =>
+      swrJson<VaultStats | null>("/api/market/vault/stats", {
+        ttlMs: 8_000,
+        swrMs: 60_000,
+        session: true,
+      }).catch(() => null)
+    ),
+    import("@/lib/market/swr-fetch").then(({ swrJson }) =>
+      swrJson<{ events?: VaultTradeEvent[] }>("/api/market/vault/activity", {
+        ttlMs: 10_000,
+        swrMs: 90_000,
+        session: true,
+      }).catch(() => null)
+    ),
+  ]).then(([stats, activityRes]) => {
+    const restActivity: VaultTradeEvent[] = activityRes?.events ?? [];
+    const activity = mergeActivity(restActivity, state.activity);
+    const nextStats = (stats && "poolOpen" in (stats as object) ? stats : null) || state.stats;
+    if (!nextStats && activity.length === 0) return;
+    lastUpdateAt = Date.now();
+    state = makeState(nextStats as VaultStats | null, activity, state.connected);
+    saveSnapshot(nextStats as VaultStats | null, activity);
+    emit();
+  });
 }
 
 function startPollFallback() {
@@ -198,6 +252,8 @@ function stopPollFallback() {
 
 function connect() {
   hydrateFromRest();
+  // Always keep REST poll warm so the trade ticker never depends solely on SSE.
+  startPollFallback();
   if (source || typeof window === "undefined") return;
   const es = new EventSource("/api/market/vault/stream");
   source = es;
@@ -207,41 +263,52 @@ function connect() {
     if (raw === lastRaw && state.connected) return;
     lastRaw = raw;
     try {
-      const data = JSON.parse(raw) as { stats: VaultStats; activity: VaultTradeEvent[] };
+      const data = JSON.parse(raw) as { stats: VaultStats | null; activity: VaultTradeEvent[] | null };
+      // Never wipe a good trade list with an empty/partial SSE payload —
+      // merge so a 1-row tick can't replace a 40-row REST history.
+      const nextStats = data.stats ?? state.stats;
+      const nextActivity = mergeActivity(
+        Array.isArray(data.activity) ? data.activity : null,
+        state.activity
+      );
+      if (!nextStats && nextActivity.length === 0) return;
       lastUpdateAt = Date.now();
-      state = makeState(data.stats, data.activity, true);
-      saveSnapshot(data.stats, data.activity);
-      // A real tick landed — the connection is healthy again, so drop the
-      // backoff and stand down the polling fallback (SSE is back in charge).
+      state = makeState(nextStats, nextActivity, true);
+      saveSnapshot(nextStats, nextActivity);
       consecutiveErrors = 0;
-      stopPollFallback();
-      // A trade this tab just submitted (see lib/market/pendingVaultTx.ts)
-      // graduates out of "pending" the moment it shows up as a real event.
-      for (const e of data.activity) clearPendingVaultTx(e.txHash);
+      // Keep REST poll running as a backstop — stopping it caused empty
+      // tickers whenever SSE flapped.
+      for (const e of nextActivity) clearPendingVaultTx(e.txHash);
       emit();
     } catch {
       // malformed tick — skip it, the next one will self-correct
     }
   });
 
+  // Explicit server error ticks — do NOT tear down the EventSource; the
+  // platform already keeps the stream open. Only onerror means a real drop.
+  es.addEventListener("error", () => {
+    // keep last activity; mark not connected only if we've gone stale
+    consecutiveErrors += 1;
+    if (consecutiveErrors >= POLL_FALLBACK_AFTER_ERRORS) startPollFallback();
+  });
+
   es.onerror = () => {
     es.close();
     if (source === es) source = null;
-    // Keep whatever data is already showing (live or last-known-snapshot)
-    // — connected flips false, but `live` stays true as long as that data
-    // is still within FRESH_WINDOW_MS, so a routine reconnect doesn't flash
-    // "Reconnecting" over data that's still perfectly current.
+    // Preserve trades/stats — only flip connected. `live` stays true while
+    // data is fresh so the badge doesn't thrash "Reconnecting…".
     state = makeState(state.stats, state.activity, false);
     emit();
     consecutiveErrors += 1;
     if (consecutiveErrors >= POLL_FALLBACK_AFTER_ERRORS) startPollFallback();
     if (refCount > 0 && !reconnectTimer) {
-      // The connection cycles proactively every ~290s server-side (see
-      // app/api/market/vault/stream/route.ts's MAX_STREAM_MS) — the FIRST
-      // retry after that routine recycle should be fast so it reads as a
-      // blip, not a visible "reconnecting" state. Repeated failures back
-      // off instead of hammering an endpoint that's actually down.
-      const delay = Math.min(BASE_RECONNECT_MS * 2 ** (consecutiveErrors - 1), MAX_RECONNECT_MS);
+      // Back off harder so we don't flap Live/Reconnecting every few seconds
+      // when the Worker stream dies under RPC pressure.
+      const delay = Math.min(
+        BASE_RECONNECT_MS * 2 ** Math.min(consecutiveErrors - 1, 4),
+        MAX_RECONNECT_MS
+      );
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         if (refCount > 0) connect();

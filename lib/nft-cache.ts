@@ -428,6 +428,17 @@ export function setCachedInventory(wallet: string, ids: number[]) {
   schedulePersist();
 }
 
+/** Drop one wallet bag (or all inventory) so the next read hits the chain. */
+export function clearCachedInventory(wallet?: string) {
+  hydrateFromStorage();
+  if (wallet) {
+    memory.inventory.delete(wallet.toLowerCase());
+  } else {
+    memory.inventory.clear();
+  }
+  schedulePersist();
+}
+
 // ─── Supply / mint stats ────────────────────────────────────────────────────
 
 export function getCachedSupply(): { value: number; fresh: boolean } | null {

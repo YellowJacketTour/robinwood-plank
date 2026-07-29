@@ -49,17 +49,34 @@ export type SweepPlan = {
  * - Ordering is by DERIVED price ascending, so "cheapest" is judged on the
  *   signed order, never on relay metadata.
  */
+export type SweepScope = {
+  /** When set, only listings whose tokenId is in this set are candidates
+   * (rarity filter or trait-scoped sweep). Empty set → empty plan. */
+  tokenIds?: ReadonlySet<string> | readonly string[];
+};
+
 export function planSweep(
   listings: Array<Listing & { rawOrder: unknown }>,
   count: number,
   collection: MarketCollection,
-  buyerAddress?: string
+  buyerAddress?: string,
+  scope?: SweepScope
 ): SweepPlan {
   const take = Math.max(0, Math.min(Math.floor(count), SWEEP_MAX));
   const valid: SweepItem[] = [];
   let droppedInvalid = 0;
 
+  const allow =
+    scope?.tokenIds == null
+      ? null
+      : scope.tokenIds instanceof Set
+        ? scope.tokenIds
+        : new Set([...scope.tokenIds].map((id) => BigInt(id).toString()));
+
   for (const listing of listings) {
+    if (allow) {
+      if (!listing.tokenId || !allow.has(BigInt(listing.tokenId).toString())) continue;
+    }
     let derived: DerivedOrder;
     try {
       derived = validateListingOrder(listing.rawOrder, collection);

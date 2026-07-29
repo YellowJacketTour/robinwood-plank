@@ -1,13 +1,10 @@
-import { Contract, JsonRpcProvider } from "ethers";
-import {
-  NFT_ABI,
-  NFT_CONTRACT_ADDRESS,
-  ROBINHOOD_CHAIN_ID,
-  ROBINHOOD_RPC_URLS,
-} from "@/lib/mint-contract";
+import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
+import { ethCall } from "@/lib/market/fetch-rpc";
+import { robinwoodTokenUri, resolveTokenImage } from "@/lib/market/token-image";
 import { fetchActivity } from "@/lib/market/activity";
 import { compactRarityFor, getRaritySnapshot } from "@/lib/market/rarity-snapshot";
+import { cachedPublicJson } from "@/lib/http-cache";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -19,25 +16,16 @@ const MAX_TOKEN_ID = 1542;
 const CACHE_MS = 5 * 60_000;
 const cache = new Map<string, { at: number; payload: unknown }>();
 
-async function readToken(tokenId: string) {
-  let lastError: unknown = null;
-  for (const url of ROBINHOOD_RPC_URLS) {
-    try {
-      const provider = new JsonRpcProvider(url, ROBINHOOD_CHAIN_ID, {
-        staticNetwork: true,
-        batchMaxCount: 1,
-      });
-      const contract = new Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, provider);
-      const [tokenUri, owner] = await Promise.all([
-        contract.tokenURI(tokenId) as Promise<string>,
-        contract.ownerOf(tokenId) as Promise<string>,
-      ]);
-      return { tokenUri, owner };
-    } catch (error) {
-      lastError = error;
-    }
+async function readOwner(tokenId: string): Promise<string | null> {
+  try {
+    const idHex = BigInt(tokenId).toString(16).padStart(64, "0");
+    // ownerOf(uint256) selector 0x6352211e
+    const result = await ethCall(NFT_CONTRACT_ADDRESS, `0x6352211e${idHex}`);
+    if (!result || result.length < 66) return null;
+    return `0x${result.slice(-40)}`;
+  } catch {
+    return null;
   }
-  throw new Error(`Could not read token ${tokenId}: ${String(lastError)}`);
 }
 
 export async function GET(req: Request) {
@@ -59,32 +47,41 @@ export async function GET(req: Request) {
 
   const hit = cache.get(tokenId);
   if (hit && Date.now() - hit.at < CACHE_MS) {
-    return publicJson(hit.payload);
+    return cachedPublicJson(hit.payload, "token");
   }
 
   try {
-    const { tokenUri, owner } = await readToken(tokenId);
+    // Prefer known metadata CID + pinata (Workers-safe). ownerOf is optional.
+    const [owner, imageResolved] = await Promise.all([
+      readOwner(tokenId),
+      resolveTokenImage(NFT_CONTRACT_ADDRESS, tokenId),
+    ]);
 
     // Metadata comes from IPFS and may be slow or missing; the token is still
     // real without it, so a failure degrades to "no traits" rather than a 500.
     let attributes: Array<{ trait_type?: string; value?: string | number | boolean }> = [];
-    let image: string | null = null;
+    let image: string | null = imageResolved ?? null;
     try {
-      const metadata = await fetchNftMetadata(tokenUri);
+      const metadata = await fetchNftMetadata(robinwoodTokenUri(tokenId));
       attributes = metadata.attributes ?? [];
-      // Resolve to an https gateway URL: a raw ipfs:// URI is blocked by the
-      // site's own img-src CSP, so returning one guarantees a broken image.
-      image = metadata.image ? resolveIpfsUrl(metadata.image) : null;
+      if (!image && metadata.image) {
+        image = resolveIpfsUrl(metadata.image);
+      }
     } catch {
       attributes = [];
     }
 
+    // History is optional and expensive (collection log walk). Item detail
+    // can pass history=1; fence/image callers skip it for fast art resolve.
     let history: unknown[] = [];
-    try {
-      const all = await fetchActivity(200);
-      history = all.filter((e) => e.tokenId === tokenId).slice(0, 12);
-    } catch {
-      history = [];
+    const wantHistory = new URL(req.url).searchParams.get("history") === "1";
+    if (wantHistory) {
+      try {
+        const all = await fetchActivity(200);
+        history = all.filter((e) => e.tokenId === tokenId).slice(0, 12);
+      } catch {
+        history = [];
+      }
     }
 
     // Rarity is a nice-to-have on top of a real token, not a precondition for
@@ -100,8 +97,10 @@ export async function GET(req: Request) {
 
     const payload = { tokenId, owner, image, attributes, history, rarity };
     cache.set(tokenId, { at: Date.now(), payload });
-    return publicJson(payload);
+    return cachedPublicJson(payload, "token");
   } catch (error) {
+    const hit2 = cache.get(tokenId);
+    if (hit2) return cachedPublicJson(hit2.payload, "token");
     return publicError(error, "Could not load this item.");
   }
 }

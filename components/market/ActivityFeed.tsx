@@ -15,6 +15,7 @@ import CollectionStats from "@/components/market/CollectionStats";
 import ActivityStats from "@/components/market/ActivityStats";
 import ScrollBox from "@/components/market/ScrollBox";
 import type { Listing, MarketCollection } from "@/lib/market/types";
+import { swrJson } from "@/lib/market/swr-fetch";
 
 type Venue = { kind: "marketplank" | "seaport" | "vault" | "other"; contract: string } | null;
 
@@ -83,27 +84,10 @@ type Props = {
   totalSupply?: number;
 };
 
-// Module-level, not component state — survives switching away to another
-// tab and back (which unmounts this component) within the same session.
-// Confirmed live: without this, every single tab switch back to Activity
-// re-showed "Loading…" and re-fetched, even seconds after it had already
-// fully loaded. TTL matches the server route's own 60s cache (app/api/
-// market/activity/route.ts) — no point treating client data as fresher
-// than the server itself is willing to call it.
+// Module snapshot for instant first paint before SWR resolves — shared with
+// MarketView's mount prefetch via swrJson (same URLs).
 let cachedEvents: ActivityEvent[] | null = null;
-let cachedAt = 0;
-const CACHE_TTL_MS = 60_000;
-
-// The list above is capped at 40 most-recent events of ANY kind (mints,
-// transfers, vault moves, sales) — fine for a live feed, but volume/avg
-// price/sparkline computed from that window undercount real totals the
-// moment activity of any kind pushes real sales out of the last 40 rows.
-// ActivityStats needs the same full=1 lineage EventCountdown already uses
-// for "highest sale ever" — same underlying route, its own cache (matches
-// the server's own separate full-mode cache in app/api/market/activity).
 let cachedFullEvents: ActivityEvent[] | null = null;
-let cachedFullAt = 0;
-const FULL_CACHE_TTL_MS = 120_000;
 
 export default function ActivityFeed({
   onSelectToken,
@@ -121,24 +105,19 @@ export default function ActivityFeed({
 
   useEffect(() => {
     let cancelled = false;
-    // Cached data (even if a little stale) paints instantly; a background
-    // refresh still runs unless it was fetched within the TTL window, so a
-    // rapid tab-away-and-back never re-hits the network at all.
-    if (cachedEvents && Date.now() - cachedAt < CACHE_TTL_MS) {
-      return;
-    }
-    fetch("/api/market/activity")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
+    // Shared SWR: hits memory/session filled by MarketView prefetch, then
+    // edge/server cache. Soft-stale still paints instantly + revalidates.
+    swrJson<{ events?: ActivityEvent[] }>("/api/market/activity", {
+      ttlMs: 20_000,
+      swrMs: 120_000,
+      session: true,
+    })
       .then((data) => {
         const next = data.events ?? [];
         cachedEvents = next;
-        cachedAt = Date.now();
         if (!cancelled) setEvents(next);
       })
       .catch(() => {
-        // A background refresh failing should never blank out perfectly
-        // good stale data that's already on screen — only show the "could
-        // not look" state when there was nothing cached to fall back to.
         if (!cancelled && !cachedEvents) setFailed(true);
       });
     void getRarityMap().then((map) => {
@@ -151,19 +130,18 @@ export default function ActivityFeed({
 
   useEffect(() => {
     let cancelled = false;
-    if (cachedFullEvents && Date.now() - cachedFullAt < FULL_CACHE_TTL_MS) {
-      return;
-    }
-    fetch("/api/market/activity?full=1")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
+    swrJson<{ events?: ActivityEvent[] }>("/api/market/activity?full=1", {
+      ttlMs: 45_000,
+      swrMs: 180_000,
+      session: true,
+    })
       .then((data) => {
         const next = data.events ?? [];
         cachedFullEvents = next;
-        cachedFullAt = Date.now();
         if (!cancelled) setFullEvents(next);
       })
       .catch(() => {
-        // Stats sidebar just falls back to the capped recent list below.
+        // Stats sidebar falls back to the capped recent list.
       });
     return () => {
       cancelled = true;

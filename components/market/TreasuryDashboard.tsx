@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatTokenAmount } from "@/lib/trade";
+import { useVaultLive } from "@/lib/market/useVaultLive";
 
 type TreasuryData = {
   balanceWei: string;
@@ -11,14 +12,15 @@ type TreasuryData = {
 };
 
 /**
- * Pre-launch bootstrap progress only — "the owner is stocking the vault,
- * here's how full it is." Once poolOpen flips true this has nothing left
- * to say (VaultDashboard already shows real liquidity/rate/inventory), so
- * it renders nothing rather than a stale "the workshop is open" message
- * sitting on screen forever after it stopped being useful. See
- * docs/marketplank/SPEC.md §9.
+ * Pre-launch bootstrap progress only — once the pool is open this has
+ * nothing left to say (VaultDashboard already shows real liquidity).
+ * Uses live vault stats.poolOpen as source of truth: /api/market/treasury
+ * was falling back to treasury-proxy with open:false after the vault RPC
+ * failed on Cloudflare, which re-mounted this "Bootstrapping" card on a
+ * live Instant Swap page.
  */
 export default function TreasuryDashboard() {
+  const { stats } = useVaultLive();
   const [data, setData] = useState<TreasuryData | null>(null);
 
   useEffect(() => {
@@ -34,7 +36,14 @@ export default function TreasuryDashboard() {
     };
   }, []);
 
-  if (!data || data.open) return null;
+  // Live stats win: if the vault is open, never show bootstrap chrome.
+  if (stats?.poolOpen === true) return null;
+  if (data?.open === true) return null;
+  // Still loading — don't flash bootstrap.
+  if (stats == null && !data) return null;
+  // Only show when we positively know the pool is still closed.
+  if (stats?.poolOpen !== false && data?.open !== false) return null;
+  if (!data) return null;
 
   const balanceEth = formatTokenAmount(data.balanceWei, 18, 4);
 

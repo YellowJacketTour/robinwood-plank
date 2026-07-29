@@ -1,5 +1,9 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { formatTokenAmount } from "@/lib/trade";
 import type { Listing, MarketCollection } from "@/lib/market/types";
+import { swrJson } from "@/lib/market/swr-fetch";
 
 type Props = {
   collection: MarketCollection;
@@ -10,13 +14,9 @@ type Props = {
 };
 
 /**
- * Floor / listed / items / best offer strip. Every major marketplace leads
- * with these, and without a floor price a user has no way to judge whether a
- * given ask is cheap — the single element whose absence most makes a page
- * fail to read as a marketplace.
- *
- * Everything here is computed from orders we already hold; nothing is
- * estimated or filled in with a placeholder.
+ * Floor / listed / items / best offer / record sale strip.
+ * Live book fields come from orders we hold; highest sale is from full
+ * on-chain activity (same catalog as the Activity tab / EventCountdown).
  */
 export default function CollectionStats({
   collection,
@@ -24,6 +24,29 @@ export default function CollectionStats({
   offers,
   totalSupply,
 }: Props) {
+  const [recordWei, setRecordWei] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    swrJson<{ highestWei?: string | null; highestPlatform?: string | null }>(
+      "/api/market/sales-stats",
+      {
+        ttlMs: 60_000,
+        swrMs: 300_000,
+        session: true,
+      }
+    )
+      .then((data) => {
+        if (!cancelled) setRecordWei(data.highestWei ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setRecordWei(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const floorWei = listings.reduce<bigint | null>((min, l) => {
     const v = BigInt(l.priceWei);
     return min === null || v < min ? v : min;
@@ -40,12 +63,16 @@ export default function CollectionStats({
     { label: "Items", value: totalSupply ? totalSupply.toLocaleString() : "—" },
     {
       label: "Best offer",
-      value: bestOfferWei === null ? "—" : `${formatTokenAmount(bestOfferWei, 18, 4)} Ξ`,
+      value: bestOfferWei === null ? "—" : `${formatTokenAmount(bestOfferWei, 18, 4)} WETH`,
+    },
+    {
+      label: "Highest sale",
+      value: recordWei == null ? "…" : `${formatTokenAmount(recordWei, 18, 4)} Ξ`,
     },
   ];
 
   return (
-    <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-gold-500/20 bg-gold-500/20 sm:grid-cols-4">
+    <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-gold-500/20 bg-gold-500/20 sm:grid-cols-5">
       {stats.map((s) => (
         <div key={s.label} className="bg-wood-900/90 px-3 py-2 text-center">
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">

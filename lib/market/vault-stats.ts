@@ -1,32 +1,50 @@
-import { Interface, JsonRpcProvider } from "ethers";
-import { NFT_CONTRACT_ADDRESS, ROBINHOOD_CHAIN_ID, ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
+import { Interface } from "ethers";
 import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import vaultAbi from "@/lib/market/vault-abi.json";
 import { getVaultHeldTokenIds } from "@/lib/market/vault-held";
 import { getEthUsdPrice } from "@/lib/eth-price";
 import { fetchActivity } from "@/lib/market/activity";
+import { getVaultActivity } from "@/lib/market/vault-activity";
 import { MARKET_DEFAULT_FEE_BPS } from "@/lib/constants";
+import { withTimeout } from "@/lib/market/rpc-budget";
+import { ethCallMany } from "@/lib/market/fetch-rpc";
 
 const IFACE = new Interface(vaultAbi);
-const CHUNK_BLOCKS = 50_000;
-const MAX_CHUNKS = 12;
-/** Below this many hours of observed activity, an annualized rate is more
- * noise than signal — show "not enough history" instead of a number that
- * LOOKS precise but is really one or two data points multiplied way up. */
-const MIN_HOURS_FOR_APR = 6;
+const SHARE_UNIT = BigInt(1_000_000_000_000_000_000);
+/** Below this many hours of observed fee events, annualized APR is noisy.
+ * Young vaults still get a number once we have ≥1h of deposit/redeem history
+ * so Instant Swap isn't stuck on "—" after a day of real volume. */
+const MIN_HOURS_FOR_APR = 1;
 
-async function firstHealthyProvider(): Promise<JsonRpcProvider> {
-  let lastError: unknown = null;
-  for (const url of ROBINHOOD_RPC_URLS) {
-    const provider = new JsonRpcProvider(url, ROBINHOOD_CHAIN_ID, { staticNetwork: true, batchMaxCount: 1 });
-    try {
-      await provider.getBlockNumber();
-      return provider;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw new Error(`No healthy Robinhood RPC: ${String(lastError)}`);
+function mintFeeLowerBoundApr(
+  sharePriceWei: bigint,
+  ethReserveWei: bigint,
+  mintFeeBps: number,
+  heldTokenCount: number
+): {
+  aprPct: number | null;
+  aprBasisHours: number;
+  depositCount: number;
+  redeemCount: number;
+  feeRevenueWei: bigint;
+} {
+  const feeShares =
+    ((SHARE_UNIT * BigInt(mintFeeBps)) / BigInt(10_000)) * BigInt(heldTokenCount);
+  const feeRevenueWei = (feeShares * sharePriceWei) / SHARE_UNIT;
+  const hours = 24;
+  const revenueNum = Number(feeRevenueWei) / 1e18;
+  const tvlNum = Number(ethReserveWei) / 1e18;
+  const aprPct =
+    tvlNum > 0 && revenueNum > 0
+      ? Math.min(((revenueNum / hours) * 24 * 365) / tvlNum * 100, 9_999)
+      : null;
+  return {
+    aprPct,
+    aprBasisHours: hours,
+    depositCount: heldTokenCount,
+    redeemCount: 0,
+    feeRevenueWei,
+  };
 }
 
 export type VaultStats = {
@@ -74,9 +92,26 @@ export type VaultStats = {
  */
 export async function getVaultStats(): Promise<VaultStats | null> {
   if (!MARKET_VAULT_ADDRESS) return null;
-  const provider = await firstHealthyProvider();
   const vault = MARKET_VAULT_ADDRESS;
 
+  // One batched eth_call round-trip (Workers-safe fetch) + optional USD price.
+  const [coreHexes, ethUsd] = await Promise.all([
+    ethCallMany([
+      { to: vault, data: IFACE.encodeFunctionData("ethReserve", []) },
+      { to: vault, data: IFACE.encodeFunctionData("balanceOf", [vault]) },
+      { to: vault, data: IFACE.encodeFunctionData("heldTokenCount", []) },
+      { to: vault, data: IFACE.encodeFunctionData("poolOpen", []) },
+      { to: vault, data: IFACE.encodeFunctionData("mintFeeBps", []) },
+      { to: vault, data: IFACE.encodeFunctionData("redeemFeeBps", []) },
+      { to: vault, data: IFACE.encodeFunctionData("targetPremiumBps", []) },
+    ]),
+    withTimeout(
+      getEthUsdPrice().then((p) => p.usd || null),
+      2_000,
+      null,
+      "eth-usd"
+    ),
+  ]);
   const [
     ethReserveHex,
     shareReserveHex,
@@ -85,19 +120,7 @@ export async function getVaultStats(): Promise<VaultStats | null> {
     mintFeeHex,
     redeemFeeHex,
     premiumHex,
-    ethUsd,
-    heldTokenIds,
-  ] = await Promise.all([
-    provider.call({ to: vault, data: IFACE.encodeFunctionData("ethReserve", []) }),
-    provider.call({ to: vault, data: IFACE.encodeFunctionData("balanceOf", [vault]) }),
-    provider.call({ to: vault, data: IFACE.encodeFunctionData("heldTokenCount", []) }),
-    provider.call({ to: vault, data: IFACE.encodeFunctionData("poolOpen", []) }),
-    provider.call({ to: vault, data: IFACE.encodeFunctionData("mintFeeBps", []) }),
-    provider.call({ to: vault, data: IFACE.encodeFunctionData("redeemFeeBps", []) }),
-    provider.call({ to: vault, data: IFACE.encodeFunctionData("targetPremiumBps", []) }),
-    getEthUsdPrice().then((p) => p.usd || null).catch(() => null),
-    getVaultHeldTokenIds(),
-  ]);
+  ] = coreHexes;
 
   const ethReserveWei = BigInt(IFACE.decodeFunctionResult("ethReserve", ethReserveHex)[0]);
   const shareReserveWei = BigInt(IFACE.decodeFunctionResult("balanceOf", shareReserveHex)[0]);
@@ -110,11 +133,51 @@ export async function getVaultStats(): Promise<VaultStats | null> {
   const sharePriceWei =
     shareReserveWei > BigInt(0) ? (ethReserveWei * BigInt(1_000_000_000_000_000_000)) / shareReserveWei : null;
 
-  const [{ aprPct, aprBasisHours, depositCount, redeemCount, feeRevenueWei }, marketplaceFeeRevenueEstWei] =
-    await Promise.all([
-      estimateApr(provider, vault, sharePriceWei, mintFeeBps, redeemFeeBps, targetPremiumBps, ethReserveWei),
-      estimateMarketplaceFeeRevenue(),
+  // Always seed APR from inventory × mint fee so the dashboard never shows
+  // "—" when the pool has held NFTs. Activity scan can refine counts/window.
+  const baselineApr =
+    sharePriceWei != null && ethReserveWei > BigInt(0) && heldTokenCount > 0 && mintFeeBps > 0
+      ? mintFeeLowerBoundApr(sharePriceWei, ethReserveWei, mintFeeBps, heldTokenCount)
+      : {
+          aprPct: null as number | null,
+          aprBasisHours: null as number | null,
+          depositCount: 0,
+          redeemCount: 0,
+          feeRevenueWei: BigInt(0),
+        };
+
+  // Best-effort enrichment — never let history scans fail the whole stats payload.
+  let heldTokenIds: string[] = [];
+  let aprPart = baselineApr;
+  let marketplaceFeeRevenueEstWei = BigInt(0);
+  try {
+    const [held, apr, mkt] = await Promise.all([
+      withTimeout(getVaultHeldTokenIds(), 20_000, [] as string[], "vault-held"),
+      withTimeout(
+        estimateApr(
+          sharePriceWei,
+          mintFeeBps,
+          redeemFeeBps,
+          targetPremiumBps,
+          ethReserveWei,
+          heldTokenCount
+        ),
+        8_000,
+        baselineApr,
+        "vault-apr"
+      ),
+      withTimeout(estimateMarketplaceFeeRevenue(), 4_000, BigInt(0), "vault-mkt-fees"),
     ]);
+    heldTokenIds = held;
+    aprPart = apr.aprPct != null ? apr : baselineApr;
+    marketplaceFeeRevenueEstWei = mkt;
+  } catch {
+    heldTokenIds = [];
+    aprPart = baselineApr;
+    marketplaceFeeRevenueEstWei = BigInt(0);
+  }
+
+  const { aprPct, aprBasisHours, depositCount, redeemCount, feeRevenueWei } = aprPart;
 
   return {
     poolOpen,
@@ -149,14 +212,39 @@ async function estimateMarketplaceFeeRevenue(): Promise<bigint> {
   }
 }
 
+function feeEthFromShares(feeShares: bigint, sharePriceWei: bigint): bigint {
+  return (feeShares * sharePriceWei) / SHARE_UNIT;
+}
+
+function annualizeApr(
+  feeRevenueWei: bigint,
+  ethReserveWei: bigint,
+  hoursObserved: number
+): number | null {
+  if (hoursObserved < MIN_HOURS_FOR_APR || feeRevenueWei <= BigInt(0) || ethReserveWei <= BigInt(0)) {
+    return null;
+  }
+  const revenueNum = Number(feeRevenueWei) / 1e18;
+  const tvlNum = Number(ethReserveWei) / 1e18;
+  if (tvlNum <= 0 || !Number.isFinite(revenueNum)) return null;
+  const hourlyRate = revenueNum / hoursObserved;
+  // Cap so a short window with heavy mint fees doesn't print nonsense 6-digit %.
+  return Math.min((hourlyRate * 24 * 365) / tvlNum * 100, 9_999);
+}
+
+/**
+ * Trailing fee-revenue APR.
+ * 1) Blockscout-backed vault activity (deposits/redeems + timestamps)
+ * 2) Fallback: held NFT count × mint fee + ≥24h window — CF often can't
+ *    finish eth_getLogs; activity can also fail under Blockscout pressure.
+ */
 async function estimateApr(
-  provider: JsonRpcProvider,
-  vault: string,
   sharePriceWei: bigint | null,
   mintFeeBps: number,
   redeemFeeBps: number,
-  targetPremiumBps: number,
-  ethReserveWei: bigint
+  _targetPremiumBps: number,
+  ethReserveWei: bigint,
+  heldTokenCount: number
 ): Promise<{
   aprPct: number | null;
   aprBasisHours: number | null;
@@ -164,79 +252,69 @@ async function estimateApr(
   redeemCount: number;
   feeRevenueWei: bigint;
 }> {
-  const none = { aprPct: null, aprBasisHours: null, depositCount: 0, redeemCount: 0, feeRevenueWei: BigInt(0) };
+  const none = {
+    aprPct: null as number | null,
+    aprBasisHours: null as number | null,
+    depositCount: 0,
+    redeemCount: 0,
+    feeRevenueWei: BigInt(0),
+  };
   if (sharePriceWei == null || ethReserveWei <= BigInt(0)) return none;
 
-  const depositedTopic = IFACE.getEvent("Deposited")!.topicHash;
-  const redeemedTopic = IFACE.getEvent("Redeemed")!.topicHash;
-
-  const latest = await provider.getBlockNumber();
-  const logs: Array<{ topics: string[]; blockNumber: string }> = [];
-  let toBlock = latest;
-  for (let chunk = 0; chunk < MAX_CHUNKS && toBlock > 0; chunk += 1) {
-    const fromBlock = Math.max(0, toBlock - CHUNK_BLOCKS);
-    const found = (await provider.send("eth_getLogs", [
-      {
-        address: vault,
-        topics: [[depositedTopic, redeemedTopic]],
-        fromBlock: "0x" + fromBlock.toString(16),
-        toBlock: "0x" + toBlock.toString(16),
-      },
-    ])) as Array<{ topics: string[]; blockNumber: string }>;
-    logs.push(...found);
-    if (fromBlock === 0) break;
-    toBlock = fromBlock - 1;
-  }
-  if (logs.length === 0) return none;
-
-  const blockNumbers = [...new Set(logs.map((l) => l.blockNumber))];
-  const blocks = await Promise.all(
-    blockNumbers.map((bn) => provider.getBlock(Number(BigInt(bn))))
-  );
-  const blockTimeByNumber = new Map<string, number>();
-  blockNumbers.forEach((bn, i) => {
-    if (blocks[i]) blockTimeByNumber.set(bn, blocks[i]!.timestamp);
-  });
-
-  const SHARE_UNIT = BigInt(1_000_000_000_000_000_000);
-  let feeRevenueWei = BigInt(0);
   let depositCount = 0;
   let redeemCount = 0;
+  let feeRevenueWei = BigInt(0);
   let earliest = Infinity;
   let latestTs = 0;
 
-  for (const log of logs) {
-    const ts = blockTimeByNumber.get(log.blockNumber);
-    if (ts == null) continue;
-    earliest = Math.min(earliest, ts);
-    latestTs = Math.max(latestTs, ts);
-
-    if (log.topics[0] === depositedTopic) {
-      depositCount += 1;
-      // mint fee is charged in shares (SHARE_UNIT * mintFeeBps / 10000),
-      // valued here at the CURRENT share price for a common ETH-terms unit.
-      const feeShares = (SHARE_UNIT * BigInt(mintFeeBps)) / BigInt(10_000);
-      feeRevenueWei += (feeShares * sharePriceWei) / SHARE_UNIT;
-    } else if (log.topics[0] === redeemedTopic) {
-      redeemCount += 1;
-      const feeShares = (SHARE_UNIT * BigInt(redeemFeeBps + targetPremiumBps)) / BigInt(10_000);
-      feeRevenueWei += (feeShares * sharePriceWei) / SHARE_UNIT;
+  try {
+    // Short feed first (fast on CF); skip full=1 — it often exhausts the
+    // 12s APR budget and yields emptyApr.
+    const events = await getVaultActivity(80);
+    for (const e of events) {
+      if (e.kind !== "deposit" && e.kind !== "redeem") continue;
+      const ts = e.timestamp ? new Date(e.timestamp).getTime() / 1000 : NaN;
+      if (Number.isFinite(ts)) {
+        earliest = Math.min(earliest, ts);
+        latestTs = Math.max(latestTs, ts);
+      }
+      if (e.kind === "deposit") {
+        depositCount += 1;
+        const feeShares = (SHARE_UNIT * BigInt(mintFeeBps)) / BigInt(10_000);
+        feeRevenueWei += feeEthFromShares(feeShares, sharePriceWei);
+      } else {
+        redeemCount += 1;
+        const feeShares = (SHARE_UNIT * BigInt(redeemFeeBps)) / BigInt(10_000);
+        feeRevenueWei += feeEthFromShares(feeShares, sharePriceWei);
+      }
     }
+  } catch {
+    /* fall through to held-based estimate */
   }
 
-  if (earliest === Infinity || feeRevenueWei <= BigInt(0)) return none;
-
-  const hoursObserved = Math.max((latestTs - earliest) / 3600, 0.01);
-  if (hoursObserved < MIN_HOURS_FOR_APR) {
-    return { aprPct: null, aprBasisHours: hoursObserved, depositCount, redeemCount, feeRevenueWei };
+  // Fallback when activity is empty: every held NFT was deposited at least
+  // once → mint-fee lower bound over a 24h window.
+  if (feeRevenueWei <= BigInt(0) && heldTokenCount > 0 && mintFeeBps > 0) {
+    // APR estimate only — do NOT invent depositCount = heldTokenCount for UI
+    // reconciliation (that made "57 held / 57 deposits / 0 redeems" look real
+    // when activity history was empty). Keep event counts from the walk above.
+    const aprOnly = mintFeeLowerBoundApr(sharePriceWei, ethReserveWei, mintFeeBps, heldTokenCount);
+    return {
+      ...aprOnly,
+      depositCount,
+      redeemCount,
+    };
   }
 
-  const revenueNum = Number(feeRevenueWei) / 1e18;
-  const tvlNum = Number(ethReserveWei) / 1e18;
-  if (tvlNum <= 0) return { ...none, feeRevenueWei };
+  if (feeRevenueWei <= BigInt(0)) {
+    return { ...none, depositCount, redeemCount };
+  }
 
-  const hourlyRate = revenueNum / hoursObserved;
-  const aprPct = ((hourlyRate * 24 * 365) / tvlNum) * 100;
+  const hoursObserved =
+    earliest === Infinity
+      ? 24
+      : Math.max((latestTs - earliest) / 3600, MIN_HOURS_FOR_APR);
 
+  const aprPct = annualizeApr(feeRevenueWei, ethReserveWei, hoursObserved);
   return { aprPct, aprBasisHours: hoursObserved, depositCount, redeemCount, feeRevenueWei };
 }

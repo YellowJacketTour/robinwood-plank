@@ -7,7 +7,9 @@ import { formatUsd, weiToUsd } from "@/lib/eth-price";
 import { getRarityMap } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { useVaultLive } from "@/lib/market/useVaultLive";
+import { swrJson } from "@/lib/market/swr-fetch";
 import PlankFence from "@/components/market/PlankFence";
+import { warmArtOnce } from "@/lib/art-warm-global";
 
 type HeldToken = { tokenId: string; imageUrl: string | null };
 
@@ -29,27 +31,64 @@ export default function LivingLiquidityViz() {
     void getRarityMap().then((map) => setRarity(map));
   }, []);
 
-  // Depending on the primitive count, not the whole `stats` object — see
-  // VaultDashboard.tsx's identical fix for why: `stats` gets a new object
-  // reference on every live tick even when heldTokenCount hasn't changed,
-  // which was re-running this effect constantly and cancelling the
-  // in-flight fetch before it ever resolved (confirmed live: held images
-  // never loaded, stuck on the loading skeleton forever).
+  // Fetch held art on mount, then again when membership count changes.
+  // Do NOT gate the first fetch on stats.heldTokenCount — when SSE/stats
+  // lag, the fence sat on pulse placeholders forever even though
+  // /vault/held was healthy. Also: never accept/cache an empty token list
+  // while stats still report holdings (poisoned SWR/CDN empties).
   useEffect(() => {
-    if (heldTokenCount == null) return;
     let cancelled = false;
-    fetch("/api/market/vault/held")
-      .then((r) => (r.ok ? r.json() : { tokens: [] }))
+    const expected = heldTokenCount; // null until stats load
+    swrJson<{ tokens?: HeldToken[]; count?: number }>("/api/market/vault/held", {
+      ttlMs: 12_000,
+      swrMs: 90_000,
+      session: true,
+      isGood: (raw) => {
+        const d = raw as { tokens?: HeldToken[]; count?: number };
+        const n = d.tokens?.length ?? 0;
+        // Empty is only "good" when we positively know the vault is empty.
+        // Before stats load (expected null), never cache an empty blip.
+        if (n === 0) return expected === 0;
+        return true;
+      },
+    })
       .then((d) => {
-        if (!cancelled) setHeld(d.tokens ?? []);
+        if (cancelled) return;
+        const tokens = d.tokens ?? [];
+        if (tokens.length > 0) {
+          setHeld(tokens);
+          // Single page-level warmer (deduped with VaultDashboard).
+          warmArtOnce(
+            tokens.map((t) => ({ tokenId: t.tokenId, imageUrl: t.imageUrl })),
+            { concurrency: 4, flags: { vault: true } }
+          );
+          return;
+        }
+        // Stats say held but art payload empty — paint IDs from stats so the
+        // fence never lies "nothing held", then client backfill fills art.
+        if ((expected ?? 0) > 0 && stats?.heldTokenIds?.length) {
+          setHeld(stats.heldTokenIds.map((tokenId) => ({ tokenId, imageUrl: null })));
+          return;
+        }
+        if (expected === 0) setHeld([]);
+        // expected null + empty: leave loading skeleton (held stays null)
       })
       .catch(() => {
-        if (!cancelled) setHeld([]);
+        if (cancelled) return;
+        // Keep prior boards on error; only show empty if vault is truly empty.
+        if (expected === 0) setHeld([]);
+        else if (stats?.heldTokenIds?.length) {
+          setHeld((prev) =>
+            prev && prev.length > 0
+              ? prev
+              : stats.heldTokenIds!.map((tokenId) => ({ tokenId, imageUrl: null }))
+          );
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [heldTokenCount]);
+  }, [heldTokenCount, stats?.heldTokenIds]);
 
   const ethUsd = stats?.ethUsd ?? 0;
   const ethReserveEth = stats ? Number(formatTokenAmount(stats.ethReserveWei, 18, 4)) : 0;

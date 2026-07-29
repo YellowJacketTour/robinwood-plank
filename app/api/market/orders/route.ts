@@ -16,7 +16,11 @@ import {
 import { getOrderLiveness, filterLiveOrders, computeOrderHash } from "@/lib/market/order-status";
 import { markOrderServed } from "@/lib/market/served-orders";
 import { verifyOrderSignature } from "@/lib/market/signature";
-import { getVerifiedTraitSet } from "@/lib/market/trait-index";
+import { getVerifiedCriteriaTokenIds } from "@/lib/market/trait-index";
+import {
+  clausesToTraitLabels,
+  parseCriteriaFromBody,
+} from "@/lib/market/trait-criteria";
 import { verifyMessage } from "ethers";
 
 /** Message an offerer signs (personal_sign) to authorize deleting their own
@@ -52,12 +56,15 @@ type PostBody = {
    */
   rawOrder?: unknown;
   /**
-   * TRAIT BID: names the trait this criteria offer targets. Only the LABEL is
-   * read from the client — the token-id snapshot is taken from the server's
-   * own verified trait index, and the signed order's Merkle root must match
-   * it exactly. A client cannot smuggle an arbitrary set under a trait name.
+   * CRITERIA BID: labels only — token-id snapshot comes from the server's
+   * verified trait index (AND of traits + optional rarity tier). Merkle root
+   * on the signed order must match exactly. Accepts legacy `trait`, or
+   * `traits` / `rarityTier` / nested `criteria`.
    */
   trait?: unknown;
+  traits?: unknown;
+  rarityTier?: unknown;
+  criteria?: unknown;
 };
 
 export async function GET(req: Request) {
@@ -261,39 +268,50 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── TRAIT BID: resolve the trait label against the SERVER's verified
-    // index. The snapshot never comes from the client; the signed order's
-    // root must commit to exactly this set (checked in validateOfferOrder).
-    let traitLabel: { traitType: string; value: string } | null = null;
+    // ── CRITERIA BID: resolve labels against the SERVER's verified index.
+    // Snapshot never comes from the client; signed root must match exactly.
+    let traitLabels: Array<{ traitType: string; value: string }> | null = null;
     let traitTokenIds: string[] | null = null;
-    if (body.trait !== undefined) {
+    const hasCriteriaInput =
+      body.trait !== undefined ||
+      body.traits !== undefined ||
+      body.rarityTier !== undefined ||
+      body.criteria !== undefined;
+    if (hasCriteriaInput) {
       if (kind !== "offer") {
         return publicJson(
-          { error: "BAD_ORDER", message: "Only offers can target a trait." },
+          { error: "BAD_ORDER", message: "Only offers can target criteria." },
           400
         );
       }
-      const t = body.trait as { traitType?: unknown; value?: unknown };
-      const traitType = typeof t?.traitType === "string" ? t.traitType.trim() : "";
-      const value = typeof t?.value === "string" ? t.value.trim() : "";
-      if (!traitType || !value || traitType.length > 64 || value.length > 64) {
-        return publicJson({ error: "BAD_TRAIT", message: "Malformed trait." }, 400);
+      const parsed = parseCriteriaFromBody({
+        trait: body.trait,
+        traits: body.traits,
+        rarityTier: body.rarityTier,
+        criteria: body.criteria,
+      });
+      if (parsed.error) {
+        return publicJson({ error: "BAD_TRAIT", message: parsed.error }, 400);
       }
-      traitTokenIds = await getVerifiedTraitSet(collection, traitType, value);
-      if (!traitTokenIds) {
-        // Unknown trait, or the index has not finished its full verified
-        // scan yet. FAIL CLOSED either way — never store a trait bid whose
-        // snapshot the server cannot vouch for.
+      if (parsed.clauses.length === 0) {
+        return publicJson(
+          { error: "BAD_TRAIT", message: "Add at least one trait or rarity clause." },
+          400
+        );
+      }
+      const verified = await getVerifiedCriteriaTokenIds(collection, parsed.clauses);
+      if (!verified) {
         return publicJson(
           {
             error: "TRAIT_UNAVAILABLE",
             message:
-              "That trait isn't available for bidding yet (unknown trait, or the trait index is still building).",
+              "Those criteria aren't available for bidding yet (empty match, unknown trait, or the trait index is still building).",
           },
           503
         );
       }
-      traitLabel = { traitType, value };
+      traitTokenIds = verified.tokenIds;
+      traitLabels = clausesToTraitLabels(parsed.clauses);
     }
 
     // ── Everything below comes from the signed order, not the request body ──
@@ -370,9 +388,9 @@ export async function POST(req: Request) {
       return publicJson({ listing });
     }
 
-    // A trait-labelled request whose signed order is NOT a criteria order
+    // A criteria-labelled request whose signed order is NOT a criteria order
     // (or vice versa) must not be stored under a mismatched label.
-    if (traitLabel && !derived.criteriaRoot) {
+    if (traitLabels && !derived.criteriaRoot) {
       return publicJson(
         { error: "BAD_ORDER", message: "Trait bid is not a criteria order." },
         400
@@ -380,7 +398,7 @@ export async function POST(req: Request) {
     }
 
     const offer: Offer = {
-      id: `offer-${slug}-${derived.maker}-${derived.tokenId ?? (traitLabel ? "trait" : "any")}-${Date.now()}`,
+      id: `offer-${slug}-${derived.maker}-${derived.tokenId ?? (traitLabels ? "trait" : "any")}-${Date.now()}`,
       collectionSlug: slug,
       tokenId: derived.tokenId,
       maker: derived.maker,
@@ -389,8 +407,8 @@ export async function POST(req: Request) {
       imageUrl: derived.tokenId
         ? await resolveTokenImage(collection.contractAddress, derived.tokenId)
         : undefined,
-      ...(traitLabel && traitTokenIds
-        ? { traits: [traitLabel], criteriaTokenIds: traitTokenIds }
+      ...(traitLabels && traitTokenIds
+        ? { traits: traitLabels, criteriaTokenIds: traitTokenIds }
         : {}),
     };
     await putOffer(offer, body.rawOrder);

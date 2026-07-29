@@ -1,91 +1,219 @@
-import { JsonRpcProvider } from "ethers";
-import { NFT_CONTRACT_ADDRESS, ROBINHOOD_CHAIN_ID, ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
-import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
+import { MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } from "@/lib/constants";
+import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
+import { BLOCKSCOUT_BASE, fetchNftsHeldBy } from "@/lib/market/blockscout";
+import { resolveIpfsUrl } from "@/lib/ipfs";
+import { resolveTokenImage } from "@/lib/market/token-image";
+import { kv } from "@vercel/kv";
 
 /**
- * Which token IDs the vault CURRENTLY holds — derived the same way
- * lib/market/activity.ts derives sale history: by walking the collection's
- * own Transfer log, not by trusting an off-chain list. The vault contract
- * only exposes heldTokenCount()/isTokenHeld(id) (see
- * contracts/MarketplankVault.sol), not an enumeration, so "currently held"
- * is reconstructed as (every token ever transferred IN to the vault) minus
- * (every token since transferred OUT) — a token can cycle in and out
- * (deposit, then get bought out), so both directions matter, not just "ever
- * sent to the vault."
+ * Vault holdings via Blockscout REST (IDs + images) with KV fallback.
  */
 
-const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-const CHUNK_BLOCKS = 50_000;
-const MAX_CHUNKS = 12;
+const CACHE_MS = 45_000;
+const KV_KEY_PREFIX = "plank:market:vault-held-full";
 
-type RawLog = { topics: string[]; blockNumber: string };
+function resolveVaultAddress(vaultAddress?: string | null): string | null {
+  if (vaultAddress && /^0x[0-9a-fA-F]{40}$/.test(vaultAddress)) {
+    const ok = MARKET_VAULT_ADDRESSES.some(
+      (a) => a.toLowerCase() === vaultAddress.toLowerCase()
+    );
+    if (ok) return vaultAddress;
+  }
+  return MARKET_VAULT_ADDRESS;
+}
 
-async function firstHealthyProvider(): Promise<JsonRpcProvider> {
-  let lastError: unknown = null;
-  for (const url of ROBINHOOD_RPC_URLS) {
-    const provider = new JsonRpcProvider(url, ROBINHOOD_CHAIN_ID, {
-      staticNetwork: true,
-      batchMaxCount: 1,
-    });
-    try {
-      await provider.getBlockNumber();
-      return provider;
-    } catch (error) {
-      lastError = error;
+function kvKeyFor(vault: string): string {
+  return `${KV_KEY_PREFIX}:${vault.toLowerCase()}`;
+}
+
+export type HeldTokenRow = { tokenId: string; imageUrl: string | null };
+
+const memCaches = new Map<string, { at: number; rows: HeldTokenRow[] }>();
+
+function hasKv(): boolean {
+  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+}
+
+/** Generic unrevealed placeholder CID used for pre-reveal metadata. */
+const UNREVEALED_MARKERS = [
+  "bafybeig22ii7mvhgprof5shldqkr3w3jhyvfuijuwc3hatedmjzdkaodje",
+  "unrevealed",
+  "coming soon",
+  "comingsoon",
+];
+
+function isUnrevealedArt(raw: string | null | undefined): boolean {
+  if (!raw) return true;
+  const s = raw.toLowerCase();
+  return UNREVEALED_MARKERS.some((m) => s.includes(m));
+}
+
+function normalizeImage(raw: string | null | undefined): string | null {
+  if (!raw || typeof raw !== "string") return null;
+  if (isUnrevealedArt(raw)) return null; // force tokenURI re-resolve below
+  try {
+    return resolveIpfsUrl(raw) || raw;
+  } catch {
+    return raw;
+  }
+}
+
+async function readKv(vault: string): Promise<HeldTokenRow[] | null> {
+  if (!hasKv()) return null;
+  try {
+    let v = await kv.get<{ at: number; rows: HeldTokenRow[] } | string>(kvKeyFor(vault));
+    if (typeof v === "string") {
+      try {
+        v = JSON.parse(v) as { at: number; rows: HeldTokenRow[] };
+      } catch {
+        return null;
+      }
     }
+    return v?.rows?.length ? v.rows : null;
+  } catch {
+    return null;
   }
-  throw new Error(`No healthy Robinhood RPC: ${String(lastError)}`);
 }
 
-function topicToAddress(topic: string): string {
-  return "0x" + topic.slice(26);
+async function writeKv(vault: string, rows: HeldTokenRow[]): Promise<void> {
+  if (!hasKv()) return;
+  try {
+    await kv.set(kvKeyFor(vault), { at: Date.now(), rows }, { ex: 15 * 60 });
+  } catch {
+    /* best-effort */
+  }
 }
 
-let cache: { at: number; ids: string[] } | null = null;
-const CACHE_MS = 30_000;
+/**
+ * Re-resolve only missing / pre-reveal stubs via post-reveal metadata CID.
+ * Do NOT re-fetch every board on each request (that hung the Worker under
+ * IPFS fan-out). Blockscout post-reveal image URLs already point at the
+ * revealed art CID — the fence "looked like placeholders" was a crop issue
+ * (object-cover on 26px boards), not wrong CIDs.
+ */
+async function enrichUnrevealedArt(rows: HeldTokenRow[]): Promise<HeldTokenRow[]> {
+  const need = rows.filter((r) => !r.imageUrl || isUnrevealedArt(r.imageUrl));
+  if (need.length === 0) return rows;
+  const CONCURRENCY = 8;
+  const fixes = new Map<string, string>();
+  for (let i = 0; i < need.length; i += CONCURRENCY) {
+    const slice = need.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      slice.map(async (r) => {
+        try {
+          const img = await resolveTokenImage(NFT_CONTRACT_ADDRESS, r.tokenId);
+          if (img && !isUnrevealedArt(img)) fixes.set(r.tokenId, img);
+        } catch {
+          /* keep existing */
+        }
+      })
+    );
+  }
+  if (fixes.size === 0) return rows;
+  return rows.map((r) => (fixes.has(r.tokenId) ? { ...r, imageUrl: fixes.get(r.tokenId)! } : r));
+}
 
-export async function getVaultHeldTokenIds(): Promise<string[]> {
-  if (!MARKET_VAULT_ADDRESS) return [];
-  if (cache && Date.now() - cache.at < CACHE_MS) return cache.ids;
+/** Token instances held by the vault (Blockscout token instances endpoint). */
+async function fetchViaTokenInstances(vault: string): Promise<HeldTokenRow[]> {
+  const rows: HeldTokenRow[] = [];
+  let path = `/api/v2/tokens/${NFT_CONTRACT_ADDRESS}/instances?holder_address_hash=${vault}`;
+  for (let page = 0; page < 25; page += 1) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 15_000);
+    const res = await fetch(`${BLOCKSCOUT_BASE}${path}`, {
+      headers: { Accept: "application/json", "User-Agent": "plank.love/1.0" },
+      signal: ac.signal,
+      cache: "no-store",
+    });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`Blockscout instances HTTP ${res.status}`);
+    const data = (await res.json()) as {
+      items?: Array<{
+        id?: string;
+        image_url?: string | null;
+        media_url?: string | null;
+        metadata?: { image?: string } | null;
+      }>;
+      next_page_params?: Record<string, string | number> | null;
+    };
+    for (const it of data.items || []) {
+      if (it.id == null) continue;
+      rows.push({
+        tokenId: String(it.id),
+        imageUrl: normalizeImage(it.image_url || it.media_url || it.metadata?.image),
+      });
+    }
+    const next = data.next_page_params;
+    if (!next || Object.keys(next).length === 0) break;
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(next)) qs.set(k, String(v));
+    path = `/api/v2/tokens/${NFT_CONTRACT_ADDRESS}/instances?${qs.toString()}`;
+  }
+  return rows;
+}
 
-  const vault = MARKET_VAULT_ADDRESS.toLowerCase();
-  const provider = await firstHealthyProvider();
-  const latest = await provider.getBlockNumber();
+export async function getVaultHeldTokenIds(
+  vaultAddress?: string | null
+): Promise<string[]> {
+  const rows = await getVaultHeldTokens(vaultAddress);
+  return rows.map((r) => r.tokenId);
+}
 
-  const logs: RawLog[] = [];
-  let toBlock = latest;
-  for (let chunk = 0; chunk < MAX_CHUNKS && toBlock > 0; chunk += 1) {
-    const fromBlock = Math.max(0, toBlock - CHUNK_BLOCKS);
-    const found = (await provider.send("eth_getLogs", [
-      {
-        address: NFT_CONTRACT_ADDRESS,
-        topics: [TRANSFER_TOPIC],
-        fromBlock: "0x" + fromBlock.toString(16),
-        toBlock: "0x" + toBlock.toString(16),
-      },
-    ])) as RawLog[];
-    logs.push(...found);
-    if (fromBlock === 0) break;
-    toBlock = fromBlock - 1;
+export async function getVaultHeldTokens(
+  vaultAddress?: string | null
+): Promise<HeldTokenRow[]> {
+  const vault = resolveVaultAddress(vaultAddress);
+  if (!vault) return [];
+  const key = vault.toLowerCase();
+  const hit = memCaches.get(key);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.rows;
+
+  const errors: string[] = [];
+
+  // Path A: address NFT inventory
+  try {
+    const items = await fetchNftsHeldBy(vault);
+    const nft = NFT_CONTRACT_ADDRESS.toLowerCase();
+    const rows: HeldTokenRow[] = items
+      .filter((it) => {
+        const addr = it.token?.address_hash?.toLowerCase();
+        return !addr || addr === nft;
+      })
+      .map((it) => ({
+        tokenId: String(it.id),
+        imageUrl: normalizeImage(it.image_url || it.media_url || it.metadata?.image),
+      }));
+    if (rows.length > 0) {
+      const enriched = await enrichUnrevealedArt(rows);
+      memCaches.set(key, { at: Date.now(), rows: enriched });
+      void writeKv(vault, enriched);
+      return enriched;
+    }
+    errors.push("address/nft returned 0 items");
+  } catch (e) {
+    errors.push(e instanceof Error ? e.message : String(e));
   }
 
-  // Oldest-first replay: every transfer INTO the vault adds the token,
-  // every transfer OUT removes it. Whatever remains at the end is what the
-  // vault holds right now.
-  const held = new Set<string>();
-  const sorted = logs
-    .filter((l) => l.topics.length === 4)
-    .sort((a, b) => Number(BigInt(a.blockNumber) - BigInt(b.blockNumber)));
-
-  for (const log of sorted) {
-    const from = topicToAddress(log.topics[1]).toLowerCase();
-    const to = topicToAddress(log.topics[2]).toLowerCase();
-    const tokenId = BigInt(log.topics[3]).toString();
-    if (to === vault) held.add(tokenId);
-    if (from === vault) held.delete(tokenId);
+  // Path B: token instances filtered by holder
+  try {
+    const rows = await fetchViaTokenInstances(vault);
+    if (rows.length > 0) {
+      const enriched = await enrichUnrevealedArt(rows);
+      memCaches.set(key, { at: Date.now(), rows: enriched });
+      void writeKv(vault, enriched);
+      return enriched;
+    }
+    errors.push("token/instances returned 0 items");
+  } catch (e) {
+    errors.push(e instanceof Error ? e.message : String(e));
   }
 
-  const ids = [...held];
-  cache = { at: Date.now(), ids };
-  return ids;
+  if (hit?.rows?.length) return hit.rows;
+  const stale = await readKv(vault);
+  if (stale?.length) {
+    memCaches.set(key, { at: Date.now(), rows: stale });
+    return stale;
+  }
+
+  throw new Error(`Could not load vault holdings: ${errors.join(" | ")}`);
 }

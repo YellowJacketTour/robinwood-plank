@@ -71,7 +71,8 @@ export default function AudioPlayer() {
 
   return (
     <>
-      <audio ref={audioRef} src={TRACK_SRC} loop preload="auto" muted />
+      {/* preload=none — preload=auto can hang window "load" in wallet WebViews */}
+      <audio ref={audioRef} src={TRACK_SRC} loop preload="none" muted />
       <button
         type="button"
         onClick={toggleMute}

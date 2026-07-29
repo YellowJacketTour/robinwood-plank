@@ -1,5 +1,6 @@
 import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
 import {
+  clearCachedInventory,
   getCachedInventory,
   getCachedToken,
   hasFreshMetadata,
@@ -17,22 +18,24 @@ import type { MarketCollection } from "@/lib/market/types";
  * transaction reverts — which reads as a broken marketplace rather than
  * "you don't own that one".
  *
- * Previously did a full balanceOf + N×tokenOfOwnerByIndex RPC round trip on
- * EVERY call, including switching to My NFTs, away, and back within the
- * same minute — confirmed live, no caching at all despite nft-cache.ts
- * already having purpose-built inventory TTL machinery sitting unused here.
- * Now checks that cache first (keyed by collection+wallet, so a second
- * collection can never collide with this one) and only re-hits the chain
- * once it's actually gone stale.
+ * Cache is keyed by collection+wallet. Empty bags are NOT cached for long —
+ * a failed eth_call used to stick as "owns nothing" and hide treasury seed NFTs.
  */
 export async function getOwnedTokenIds(
   contractAddress: string,
-  owner: string
+  owner: string,
+  opts?: { force?: boolean }
 ): Promise<Set<string>> {
   const cacheKey = `${contractAddress.toLowerCase()}:${owner.toLowerCase()}`;
-  const cachedHit = getCachedInventory(cacheKey);
-  if (cachedHit?.fresh) {
-    return new Set(cachedHit.ids.map(String));
+  if (opts?.force) {
+    clearCachedInventory(cacheKey);
+  } else {
+    const cachedHit = getCachedInventory(cacheKey);
+    // Never trust a fresh empty cache — re-read chain (poisoned empty was hiding
+    // treasury NFTs after a failed deposit attempt).
+    if (cachedHit?.fresh && cachedHit.ids.length > 0) {
+      return new Set(cachedHit.ids.map(String));
+    }
   }
 
   const owned = new Set<string>();
@@ -42,7 +45,11 @@ export async function getOwnedTokenIds(
     const call = (data: string) => ethCall(contractAddress, data);
 
     const balHex = await call(`0x70a08231${pad(owner)}`); // balanceOf
-    const balance = balHex ? Number(BigInt(balHex)) : 0;
+    if (!balHex || balHex === "0x") {
+      // Transport failure — do not poison cache with empty
+      return owned;
+    }
+    const balance = Number(BigInt(balHex));
 
     if (Number.isFinite(balance) && balance > 0) {
       // Cap the walk — a whale shouldn't stall the page.
@@ -57,13 +64,12 @@ export async function getOwnedTokenIds(
         if (r && r !== "0x") owned.add(BigInt(r).toString());
       }
     }
-    // Cache even a zero-balance result — that's still a real, cacheable
-    // answer, and a whale being capped at 200 just means the CACHED set is
-    // the same capped view a fresh call would've produced anyway.
-    setCachedInventory(cacheKey, Array.from(owned, Number));
+    // Only cache non-empty OR confirmed zero balance
+    if (owned.size > 0 || balance === 0) {
+      setCachedInventory(cacheKey, Array.from(owned, Number));
+    }
   } catch {
-    // Fail open: an empty set only means we can't pre-disable buttons. Not
-    // cached — a transient RPC failure shouldn't stick as "owns nothing."
+    // Fail open: empty set, not cached
   }
   return owned;
 }
@@ -189,13 +195,14 @@ async function resolveTokenArt(
  */
 export async function getOwnedInventory(
   collections: MarketCollection[],
-  owner: string
+  owner: string,
+  opts?: { force?: boolean }
 ): Promise<OwnedInventory[]> {
   const out: OwnedInventory[] = [];
   for (const collection of collections) {
-    const ids = Array.from(await getOwnedTokenIds(collection.contractAddress, owner)).sort(
-      (a, b) => Number(a) - Number(b)
-    );
+    const ids = Array.from(
+      await getOwnedTokenIds(collection.contractAddress, owner, opts)
+    ).sort((a, b) => Number(a) - Number(b));
     const items: OwnedNft[] = [];
     const BATCH = 10;
     for (let i = 0; i < ids.length; i += BATCH) {

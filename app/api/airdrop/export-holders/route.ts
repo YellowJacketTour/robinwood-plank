@@ -1,6 +1,5 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { rateLimit } from "@/lib/security";
+import { readPublicText } from "@/lib/public-json";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -46,24 +45,9 @@ export async function GET(req: Request) {
   };
 
   const meta = files[format] || files["20lab"];
-  const filePath = path.join(
-    process.cwd(),
-    /* turbopackIgnore: true */ "public",
-    "exports",
-    meta.name
-  );
+  const body = await readPublicText(`public/exports/${meta.name}`);
 
-  try {
-    const body = await fs.readFile(filePath, "utf8");
-    return new Response(body, {
-      status: 200,
-      headers: {
-        "Content-Type": meta.type,
-        "Content-Disposition": `attachment; filename="${meta.name}"`,
-        "Cache-Control": "no-store",
-      },
-    });
-  } catch {
+  if (body == null) {
     return new Response(
       JSON.stringify({
         error: "NOT_BUILT",
@@ -76,4 +60,13 @@ export async function GET(req: Request) {
       }
     );
   }
+
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": meta.type,
+      "Content-Disposition": `attachment; filename="${meta.name}"`,
+      "Cache-Control": "no-store",
+    },
+  });
 }

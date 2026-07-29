@@ -1,57 +1,65 @@
-import { NextResponse } from "next/server";
-import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
-import { getVaultHeldTokenIds } from "@/lib/market/vault-held";
-import { resolveTokenImage } from "@/lib/market/token-image";
+import { MARKET_VAULT_ADDRESSES } from "@/lib/constants";
+import { getVaultHeldTokens } from "@/lib/market/vault-held";
+import { cachedPublicJson } from "@/lib/http-cache";
 import { publicError, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Cap how many images this route resolves per request — the vault could
- * hold hundreds of tokens; the picker only needs enough to fill a grid, not
- * the full set, and every extra id is an IPFS round trip. */
-const MAX_PREVIEWED = 60;
-
-/** This route had NO cache at all — every single call re-walked the
- * Transfer-log replay AND re-resolved up to MAX_PREVIEWED images via IPFS,
- * on top of publicJson forcing Cache-Control: no-store so the browser/CDN
- * couldn't help either. Vault membership changes rarely (deposits/redeems),
- * so a short cache here is nearly free correctness-wise and a large real
- * win for the "images load slowly on refresh" complaint. */
-let cache: { at: number; data: unknown } | null = null;
+const caches = new Map<string, { at: number; data: unknown }>();
 const CACHE_MS = 20_000;
 
-function cachedPublicJson(data: unknown): NextResponse {
-  return NextResponse.json(data, {
-    headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=120" },
-  });
+function parseVaultParam(req: Request): string | null {
+  const raw = new URL(req.url).searchParams.get("vault");
+  if (!raw || !/^0x[0-9a-fA-F]{40}$/.test(raw)) return null;
+  const hit = MARKET_VAULT_ADDRESSES.find((a) => a.toLowerCase() === raw.toLowerCase());
+  return hit ?? null;
 }
 
 /**
- * Visual token picker for Redeem — "which specific Plank am I taking out" —
- * needs real artwork, not a bare id typed blind. See lib/market/vault-held.ts
- * for how "currently held" is derived (Transfer-log replay, not a stored
- * list, since the vault contract itself only exposes count/membership).
+ * Visual token picker / fence inventory — IDs + artwork from Blockscout
+ * (Cloudflare-safe), not a multi-minute Transfer-log walk.
+ * Optional `?vault=0x…` selects primary or legacy (must be a configured vault).
  */
 export async function GET(req: Request) {
-  const limited = rateLimit(req, { key: "vault-held", limit: 60, windowMs: 60_000 });
+  const limited = rateLimit(req, { key: "vault-held", limit: 90, windowMs: 60_000 });
   if (limited) return limited;
 
-  if (cache && Date.now() - cache.at < CACHE_MS) {
-    return cachedPublicJson(cache.data);
+  const vault = parseVaultParam(req);
+  const cacheKey = (vault ?? "primary").toLowerCase();
+  const cache = caches.get(cacheKey) ?? null;
+
+  // Never serve a cached EMPTY inventory — that painted "nothing held" on
+  // the fence while the vault still had dozens of planks (CDN/SWR poison).
+  const cachedRows =
+    cache?.data &&
+    typeof cache.data === "object" &&
+    Array.isArray((cache.data as { tokens?: unknown }).tokens)
+      ? ((cache.data as { tokens: unknown[] }).tokens as unknown[])
+      : null;
+  if (cache && Date.now() - cache.at < CACHE_MS && cachedRows && cachedRows.length > 0) {
+    return cachedPublicJson(cache.data, "live", { headers: { "X-Vault-Held": "memory" } });
   }
 
   try {
-    const ids = await getVaultHeldTokenIds();
-    const previewIds = ids.slice(0, MAX_PREVIEWED);
-    const images = await Promise.all(
-      previewIds.map((id) => resolveTokenImage(NFT_CONTRACT_ADDRESS, id))
-    );
-    const tokens = previewIds.map((tokenId, i) => ({ tokenId, imageUrl: images[i] ?? null }));
-    const data = { count: ids.length, tokens };
-    cache = { at: Date.now(), data };
-    return cachedPublicJson(data);
+    const tokens = await getVaultHeldTokens(vault);
+    const data = { count: tokens.length, tokens, vault: vault ?? undefined };
+    // Only cache non-empty successes. Empty may be a Blockscout blip.
+    if (tokens.length > 0) {
+      caches.set(cacheKey, { at: Date.now(), data });
+    }
+    return cachedPublicJson(data, "live", {
+      headers: {
+        "X-Vault-Held": "fresh",
+        // Inventory must not stick empty at the edge.
+        "Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=30",
+        "CDN-Cache-Control": "public, max-age=0, s-maxage=10, stale-while-revalidate=30",
+      },
+    });
   } catch (error) {
+    if (cache?.data && cachedRows && cachedRows.length > 0) {
+      return cachedPublicJson(cache.data, "live", { headers: { "X-Vault-Held": "memory-stale" } });
+    }
     return publicError(error, "Could not read the vault's held tokens right now.");
   }
 }

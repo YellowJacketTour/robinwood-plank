@@ -56,9 +56,11 @@ export default function TreasuryBootstrap({ account }: Props) {
   const [depositSeedBusy, setDepositSeedBusy] = useState(false);
   const [depositSeedStep, setDepositSeedStep] = useState<string | null>(null);
 
-  const loadOwned = () => {
+  const loadOwned = (force = true) => {
     setOwnedLoading(true);
-    getOwnedInventory(MARKET_COLLECTIONS, account)
+    // Always force-refresh for treasury seed — empty inventory cache was hiding
+    // planks that still sit in the treasury wallet (confirmed on-chain).
+    getOwnedInventory(MARKET_COLLECTIONS, account, { force })
       .then((inv) => {
         const items = inv.flatMap((g) => g.items).map((i) => ({ tokenId: i.tokenId, imageUrl: i.imageUrl }));
         setOwnedTokens(items);
@@ -69,7 +71,16 @@ export default function TreasuryBootstrap({ account }: Props) {
 
   useEffect(() => {
     loadOwned();
-    getAvgSalePriceWei().then(setAvgPriceWei).catch(() => setAvgPriceWei(null));
+    getAvgSalePriceWei()
+      .then((p) => {
+        setAvgPriceWei(p);
+        // Sensible default if user hasn't typed ETH yet (~0.01 Ξ/plank when no sales)
+        if (p == null && !ethAmount) setEthAmount("0.02");
+      })
+      .catch(() => {
+        setAvgPriceWei(null);
+        if (!ethAmount) setEthAmount("0.02");
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account]);
 
@@ -83,8 +94,34 @@ export default function TreasuryBootstrap({ account }: Props) {
     });
   };
 
-  const ethPreviewWei =
-    avgPriceWei != null ? avgPriceWei * BigInt(selectedIds.size) : null;
+  // Auto-suggest ETH from avg sale × count when selection changes (user can edit).
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    if (avgPriceWei != null) {
+      const wei = avgPriceWei * BigInt(selectedIds.size);
+      setEthAmount(formatTokenAmount(wei, 18, 6));
+    } else if (!ethAmount || ethAmount === "0") {
+      // Fallback: 0.01 ETH per selected plank
+      setEthAmount((0.01 * selectedIds.size).toFixed(4));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIds.size, avgPriceWei]);
+
+  /** ETH wei to seed: typed field wins; else avg×n; else 0.01×n */
+  const resolveSeedEthWei = (): bigint | null => {
+    const typed = parseTokenAmount(ethAmount, 18);
+    if (typed != null && typed > BigInt(0)) return typed;
+    if (avgPriceWei != null && selectedIds.size > 0) {
+      return avgPriceWei * BigInt(selectedIds.size);
+    }
+    if (selectedIds.size > 0) {
+      // 0.01 ether per plank
+      return BigInt(selectedIds.size) * BigInt("10000000000000000");
+    }
+    return null;
+  };
+
+  const ethPreviewWei = resolveSeedEthWei();
 
   const refresh = (force = false) => {
     if (!force && cachedStatus && Date.now() - cachedAt < CACHE_TTL_MS) return;
@@ -106,17 +143,16 @@ export default function TreasuryBootstrap({ account }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account]);
 
-  if (loading) {
-    return <p className="text-center text-xs text-foreground/45">Reading vault state…</p>;
+  // Pool already live — hide bootstrap entirely (no leftover banner).
+  if (status?.open) {
+    return null;
   }
-  if (!status) {
-    return <p className="text-center text-xs text-red-300">Could not read vault state.</p>;
-  }
-  if (status.open) {
+
+  if (loading || !status) {
     return (
-      <p className="rounded-lg border border-emerald-500/30 bg-emerald-950/20 px-3 py-2.5 text-center text-xs text-emerald-300">
-        Pool is open — bootstrap is done, this panel has nothing left to do.
-      </p>
+      <div className="rounded-xl border border-gold-500/30 bg-black/20 p-4 text-sm text-foreground/70">
+        Loading seed interface (NFT picker + ETH)…
+      </div>
     );
   }
 
@@ -139,7 +175,10 @@ export default function TreasuryBootstrap({ account }: Props) {
   const depositAndSeed = async () => {
     setError(null);
     if (selectedIds.size === 0) return setError("Tap at least one NFT to seed.");
-    if (ethPreviewWei == null) return setError("Could not price the seed yet — try again shortly.");
+    const ethWei = resolveSeedEthWei();
+    if (ethWei == null || ethWei <= BigInt(0)) {
+      return setError("Enter ETH to pair (e.g. 0.02). Sales-based price was unavailable.");
+    }
     try {
       setDepositSeedBusy(true);
       const ids = Array.from(selectedIds);
@@ -147,20 +186,26 @@ export default function TreasuryBootstrap({ account }: Props) {
         setDepositSeedStep(`Depositing #${ids[i]} (${i + 1}/${ids.length})…`);
         await depositForShares(account, ids[i]);
       }
-      // Read the REAL post-deposit balance rather than trusting a computed
-      // guess — this is the exact class of mismatch that caused a real
-      // "insufficient funds" revert typing a hand-picked share number.
+      // REAL post-deposit balance (mint fee makes hand-typed shares wrong)
       setDepositSeedStep("Reading your real share balance…");
+      refresh(true);
       const fresh = await getPoolStatus();
+      cachedStatus = fresh;
+      cachedAt = Date.now();
+      setStatus(fresh);
       const realShares = fresh.treasuryShareBalance;
       if (realShares <= BigInt(0)) {
-        throw new Error("Deposits landed but no shares showed up — try refreshing before seeding.");
+        throw new Error(
+          "Deposits landed but no shares yet — wait a few seconds, then use “Seed all my unseeded shares + ETH” below."
+        );
       }
-      setDepositSeedStep("Seeding shares + ETH…");
-      const ethString = formatTokenAmount(ethPreviewWei, 18, 18);
+      setDepositSeedStep("Seeding shares + ETH into the pool…");
+      const ethString = formatTokenAmount(ethWei, 18, 18);
       await seedShares(account, realShares, ethString);
       setDepositSeedStep(null);
-      setStatusMsg(`Deposited ${ids.length} and seeded ${formatTokenAmount(realShares, 18, 4)} shares.`);
+      setStatusMsg(
+        `Deposited ${ids.length} and seeded ${formatTokenAmount(realShares, 18, 4)} shares + ${formatTokenAmount(ethWei, 18, 5)} Ξ.`
+      );
       setSelectedIds(new Set());
       loadOwned();
       refresh(true);
@@ -169,7 +214,57 @@ export default function TreasuryBootstrap({ account }: Props) {
     } finally {
       setDepositSeedBusy(false);
       setDepositSeedStep(null);
-      setTimeout(() => setStatusMsg(null), 4000);
+      setTimeout(() => setStatusMsg(null), 5000);
+    }
+  };
+
+  /** Deposit selected NFTs only (no seed) — if ETH pricing blocked you before. */
+  const depositOnly = async () => {
+    setError(null);
+    if (selectedIds.size === 0) return setError("Tap at least one NFT.");
+    try {
+      setDepositSeedBusy(true);
+      const ids = Array.from(selectedIds);
+      for (let i = 0; i < ids.length; i += 1) {
+        setDepositSeedStep(`Depositing #${ids[i]} (${i + 1}/${ids.length})…`);
+        await depositForShares(account, ids[i]);
+      }
+      setStatusMsg(`Deposited ${ids.length}. Now set ETH and seed unseeded shares.`);
+      setSelectedIds(new Set());
+      loadOwned();
+      refresh(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Deposit failed.");
+    } finally {
+      setDepositSeedBusy(false);
+      setDepositSeedStep(null);
+    }
+  };
+
+  /** Seed ALL unseeded treasury shares + typed ETH (after deposit, or re-seed). */
+  const seedUnseeded = async () => {
+    setError(null);
+    const ethWei = parseTokenAmount(ethAmount, 18);
+    if (ethWei == null || ethWei <= BigInt(0)) {
+      return setError("Enter ETH amount to seed (e.g. 0.02).");
+    }
+    try {
+      setDepositSeedBusy(true);
+      setDepositSeedStep("Reading share balance…");
+      const fresh = await getPoolStatus();
+      const realShares = fresh.treasuryShareBalance;
+      if (realShares <= BigInt(0)) {
+        throw new Error("No unseeded shares — deposit NFTs first.");
+      }
+      setDepositSeedStep("Seeding…");
+      await seedShares(account, realShares, formatTokenAmount(ethWei, 18, 18));
+      setStatusMsg(`Seeded ${formatTokenAmount(realShares, 18, 4)} shares + ETH.`);
+      refresh(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Seed failed.");
+    } finally {
+      setDepositSeedBusy(false);
+      setDepositSeedStep(null);
     }
   };
 
@@ -208,20 +303,36 @@ export default function TreasuryBootstrap({ account }: Props) {
 
       <div className="space-y-2 rounded-lg border border-gold-500/20 bg-wood-900/50 p-2.5">
         <p className="text-[0.65rem] font-bold text-foreground/60">
-          Tap the NFTs you want to deposit and seed. ETH is priced
-          automatically — {avgPriceWei != null ? `${formatTokenAmount(avgPriceWei, 18, 5)} Ξ` : "…"}{" "}
-          (avg recent sale price) × however many you tap. This deposits each
-          one, then seeds the exact shares you actually end up holding —
-          never a hand-typed number that can drift from your real balance.
+          1) Tap planks to deposit. 2) Set ETH below (editable). 3) Deposit &amp; seed.
+          {avgPriceWei != null
+            ? ` Suggested from avg sale ~${formatTokenAmount(avgPriceWei, 18, 5)} Ξ each.`
+            : " Sales avg unavailable — type ETH yourself (default ~0.01 Ξ per plank)."}
         </p>
 
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[0.6rem] text-foreground/45">
+            {ownedLoading
+              ? "Loading wallet NFTs…"
+              : ownedTokens.length > 0
+                ? `${ownedTokens.length} plank(s) in this wallet`
+                : "No planks listed — try reload"}
+          </p>
+          <button
+            type="button"
+            disabled={ownedLoading || depositSeedBusy}
+            onClick={() => loadOwned(true)}
+            className="text-[0.65rem] font-bold text-gold-300 underline disabled:opacity-40"
+          >
+            Reload NFTs from chain
+          </button>
+        </div>
         <TokenPicker
           tokens={ownedTokens}
           loading={ownedLoading}
           selected={Array.from(selectedIds)}
           onSelect={toggleOwned}
           allowManualEntry={false}
-          emptyMessage="No undeposited RobinWood tokens in this wallet right now."
+          emptyMessage="No undeposited RobinWood tokens found. They are still in your wallet if deposit never confirmed — tap Reload NFTs."
         />
         {selectedIds.size > 0 && (
           <div className="flex flex-wrap gap-1">
@@ -236,14 +347,23 @@ export default function TreasuryBootstrap({ account }: Props) {
           </div>
         )}
 
-        <div className="flex items-center justify-between rounded-lg border border-gold-500/20 bg-black/20 px-2.5 py-2">
-          <span className="text-[0.65rem] text-foreground/50">
-            {selectedIds.size} selected · ETH to pair
-          </span>
-          <span className="font-mono text-xs font-bold text-gold-300">
-            {ethPreviewWei != null ? `${formatTokenAmount(ethPreviewWei, 18, 5)} Ξ` : "—"}
-          </span>
-        </div>
+        <label className="block text-[0.65rem] font-bold text-foreground/50">
+          ETH to seed into the pool (required — edit freely)
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="e.g. 0.02"
+            value={ethAmount}
+            onChange={(e) => setEthAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+            className="mt-1 min-h-11 w-full rounded-md border border-gold-500/40 bg-wood-950 px-3 font-mono text-sm font-bold text-gold-300 outline-none focus:border-gold-400"
+          />
+        </label>
+        <p className="text-[0.6rem] text-foreground/45">
+          {selectedIds.size} selected
+          {ethPreviewWei != null
+            ? ` · will send ${formatTokenAmount(ethPreviewWei, 18, 5)} Ξ with seedShares`
+            : " · enter ETH above"}
+        </p>
 
         <button
           type="button"
@@ -253,53 +373,62 @@ export default function TreasuryBootstrap({ account }: Props) {
         >
           {depositSeedBusy
             ? depositSeedStep ?? "Working…"
-            : `Deposit ${selectedIds.size || ""} & seed`}
+            : `Deposit ${selectedIds.size || ""} & seed (shares + ETH)`}
         </button>
+
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            disabled={depositSeedBusy || selectedIds.size === 0}
+            onClick={() => void depositOnly()}
+            className="min-h-10 rounded-md border border-gold-500/35 text-[0.65rem] font-bold text-gold-200 disabled:opacity-40"
+          >
+            Deposit only (no seed)
+          </button>
+          <button
+            type="button"
+            disabled={depositSeedBusy || status.treasuryShareBalance <= BigInt(0)}
+            onClick={() => void seedUnseeded()}
+            className="min-h-10 rounded-md border border-gold-500/35 text-[0.65rem] font-bold text-gold-200 disabled:opacity-40"
+          >
+            Seed unseeded shares + ETH
+          </button>
+        </div>
 
         <button
           type="button"
           onClick={() => setManualMode((v) => !v)}
           className="text-[0.65rem] font-bold text-foreground/45 underline decoration-dotted hover:text-gold-300"
         >
-          {manualMode ? "Hide manual entry" : "Enter shares/ETH manually instead"}
+          {manualMode ? "Hide advanced share amount" : "Advanced: custom share amount"}
         </button>
 
         {manualMode && (
           <div className="space-y-2 border-t border-gold-500/15 pt-2">
             <p className="text-[0.6rem] text-foreground/45">
-              Advanced — for shares you already hold from a past deposit.
-              Check "Your unseeded shares" above first; a hand-typed round
-              number almost never matches your exact balance after fees.
+              Prefer &quot;Seed unseeded shares + ETH&quot; — it uses your exact balance after mint fees.
+              Only type shares if you know the exact wei amount.
             </p>
-            <div className="flex gap-1.5">
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="Shares to seed"
-                value={shareAmount}
-                onChange={(e) => setShareAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-                className="min-h-10 flex-1 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground outline-none focus:border-gold-400"
-              />
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="ETH to seed"
-                value={ethAmount}
-                onChange={(e) => setEthAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-                className="min-h-10 flex-1 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground outline-none focus:border-gold-400"
-              />
-            </div>
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="Exact shares (optional override)"
+              value={shareAmount}
+              onChange={(e) => setShareAmount(e.target.value.replace(/[^0-9.]/g, ""))}
+              className="min-h-10 w-full rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground outline-none focus:border-gold-400"
+            />
             <button
               type="button"
               disabled={busy}
               onClick={() => {
                 const wei = parseTokenAmount(shareAmount, 18);
                 if (wei === null || wei <= BigInt(0)) return setError("Enter a positive share amount.");
+                if (!ethAmount) return setError("Enter ETH above.");
                 return run(() => seedShares(account, wei, ethAmount), "Seeding…");
               }}
               className="min-h-10 w-full rounded-md border border-gold-500/40 text-xs font-bold text-gold-300 transition hover:border-gold-400 disabled:opacity-50"
             >
-              Seed shares + ETH manually
+              Seed custom shares + ETH
             </button>
           </div>
         )}

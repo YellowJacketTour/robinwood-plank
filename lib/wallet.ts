@@ -4,11 +4,14 @@ import {
   DRAND_BEACON_ADDRESS,
   MARKET_OFFER_CURRENCY,
   MARKET_VAULT_ADDRESS,
+  MARKET_VAULT_ADDRESSES,
+  MARKET_VAULT_LEGACY_ADDRESS,
   PERMIT2_ADDRESS,
   SEAPORT_ADDRESS,
   UNIVERSAL_ROUTER_ADDRESS,
 } from "@/lib/constants";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
+import { getPreferredWalletProvider, isWalletConnectActive } from "@/lib/wallet-connect";
 
 export type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
@@ -28,8 +31,15 @@ type InjectedWindow = Window & {
   coinbaseWalletExtension?: Eip1193Provider;
 };
 
+/**
+ * Active wallet provider: WalletConnect session if user chose QR, else injected.
+ * All sends (vault seed, swap, market) go through this.
+ */
 export function getEthereumProvider(): Eip1193Provider | null {
   if (typeof window === "undefined") return null;
+  const preferred = getPreferredWalletProvider();
+  if (preferred) return preferred;
+
   const w = window as InjectedWindow;
   const eth = w.ethereum;
   if (!eth) return w.coinbaseWalletExtension || null;
@@ -40,6 +50,23 @@ export function getEthereumProvider(): Eip1193Provider | null {
       eth.providers.find((p) => p.isCoinbaseWallet) ||
       eth.providers.find((p) => p.isBraveWallet) ||
       eth.providers.find((p) => p.isTrust) ||
+      eth.providers[0] ||
+      eth
+    );
+  }
+  return eth;
+}
+
+/** Injected-only (browser extension). Used when user explicitly picks extension. */
+export function getInjectedEthereumProvider(): Eip1193Provider | null {
+  if (typeof window === "undefined") return null;
+  const w = window as InjectedWindow;
+  const eth = w.ethereum;
+  if (!eth) return w.coinbaseWalletExtension || null;
+  if (Array.isArray(eth.providers) && eth.providers.length > 0) {
+    return (
+      eth.providers.find((p) => p.isRabby) ||
+      eth.providers.find((p) => p.isMetaMask && !p.isBraveWallet) ||
       eth.providers[0] ||
       eth
     );
@@ -58,11 +85,16 @@ export async function getConnectedAccounts(): Promise<string[]> {
   }
 }
 
-export async function connectWallet(): Promise<string> {
-  const provider = getEthereumProvider();
+/** Connect via browser extension only (MetaMask / Rabby extension, etc.). */
+export async function connectInjectedWallet(): Promise<string> {
+  const { setPreferredWalletProvider } = await import("@/lib/wallet-connect");
+  // Prefer extension path — clear any WC preference for this session
+  setPreferredWalletProvider(null);
+
+  const provider = getInjectedEthereumProvider();
   if (!provider) {
     throw new Error(
-      "No wallet found. Open in Robinhood Wallet browser, or install MetaMask / Rabby."
+      "No browser extension found. Use WalletConnect QR, or install Rabby / MetaMask."
     );
   }
   try {
@@ -71,16 +103,9 @@ export async function connectWallet(): Promise<string> {
       params: [{ eth_accounts: {} }],
     });
   } catch (err) {
-    // Code 4001 = user explicitly rejected/closed the prompt. Respect that
-    // and stop — falling through to eth_requestAccounts here immediately
-    // fires a second popup right after they closed the first one, which
-    // just looks like the prompt won't go away.
     if ((err as { code?: number })?.code === 4001) {
       throw new Error("Connection request closed.");
     }
-    // Otherwise: this wallet may not support wallet_requestPermissions at
-    // all (not every injected provider does) — fall through and let
-    // eth_requestAccounts be the real connect attempt.
   }
   const accounts = (await provider.request({
     method: "eth_requestAccounts",
@@ -89,11 +114,51 @@ export async function connectWallet(): Promise<string> {
   return accounts[0];
 }
 
+/**
+ * Default connect — still extension for backward compatibility on Trade/Mint.
+ * Market / seed UI should open the connect modal (WalletConnect first) instead.
+ */
+export async function connectWallet(): Promise<string> {
+  return connectInjectedWallet();
+}
+
+/**
+ * Normalize eth_chainId / WalletConnect chain results.
+ * Never use parseInt(decimalString, 16) — parseInt("4663", 16) === 18019.
+ */
+export function normalizeChainId(raw: unknown): number {
+  if (typeof raw === "number" && Number.isFinite(raw)) return Math.trunc(raw);
+  if (typeof raw === "bigint") return Number(raw);
+  const s = String(raw ?? "").trim();
+  if (!s) throw new Error("Wallet returned empty chain id.");
+  if (s.startsWith("0x") || s.startsWith("0X")) {
+    const n = parseInt(s, 16);
+    // Some wallets mis-encode decimal 4663 as hex 0x4663 (=18019). Treat that
+    // common Robinhood misconfig as 4663 so seed/connect still work.
+    if (n === 0x4663) return CHAIN.id;
+    return n;
+  }
+  // Decimal string (e.g. "4663") — never parse as hex
+  if (/^\d+$/.test(s)) {
+    const n = parseInt(s, 10);
+    if (n === 0x4663) return CHAIN.id; // 18019 if someone stored hex digits as decimal
+    return n;
+  }
+  return parseInt(s, 16);
+}
+
+export function isRobinhoodChainId(id: number): boolean {
+  return id === CHAIN.id || id === 0x4663; // 0x4663 misconfig → normalized away, belt-and-suspenders
+}
+
+/**
+ * Read wallet chain id. Accepts hex ("0x1237"), decimal ("4663"), and numbers.
+ */
 export async function getChainId(): Promise<number> {
   const provider = getEthereumProvider();
   if (!provider) throw new Error("No wallet found.");
-  const hex = (await provider.request({ method: "eth_chainId" })) as string;
-  return parseInt(hex, 16);
+  const raw = await provider.request({ method: "eth_chainId" });
+  return normalizeChainId(raw);
 }
 
 export async function switchToRobinhoodChain(): Promise<void> {
@@ -101,52 +166,108 @@ export async function switchToRobinhoodChain(): Promise<void> {
   if (!provider) throw new Error("No wallet found.");
   const chainIdHex = `0x${CHAIN.id.toString(16)}`;
 
-  try {
-    await provider.request({
+  const switchReq = () =>
+    provider.request({
       method: "wallet_switchEthereumChain",
       params: [{ chainId: chainIdHex }],
     });
+
+  // WalletConnect + Rabby often never resolves switch — always race a timeout.
+  const withTimeout = <T,>(p: Promise<T>, ms: number) =>
+    Promise.race([
+      p,
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error("Network switch timed out")), ms)
+      ),
+    ]);
+
+  try {
+    await withTimeout(switchReq() as Promise<unknown>, isWalletConnectActive() ? 3000 : 12_000);
   } catch (err) {
     const code = (err as { code?: number })?.code;
+    const timedOut = err instanceof Error && err.message.includes("timed out");
+    if (timedOut && isWalletConnectActive()) {
+      throw new Error(
+        `Switch Rabby to Robinhood Chain (${CHAIN.id}) in the app, then retry. Do not re-scan QR.`
+      );
+    }
     if (code === 4902 || code === -32603 || code === -32601) {
-      await provider.request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId: chainIdHex,
-            chainName: CHAIN.name,
-            nativeCurrency: {
-              name: CHAIN.nativeCurrency.name,
-              symbol: CHAIN.nativeCurrency.symbol,
-              decimals: CHAIN.nativeCurrency.decimals,
-            },
-            rpcUrls: [CHAIN.rpcUrls.default],
-            blockExplorerUrls: [CHAIN.blockExplorers.default.url],
-          },
-        ],
-      });
       try {
-        await provider.request({
-          method: "wallet_switchEthereumChain",
-          params: [{ chainId: chainIdHex }],
-        });
+        await withTimeout(
+          provider.request({
+            method: "wallet_addEthereumChain",
+            params: [
+              {
+                chainId: chainIdHex,
+                chainName: CHAIN.name,
+                nativeCurrency: {
+                  name: CHAIN.nativeCurrency.name,
+                  symbol: CHAIN.nativeCurrency.symbol,
+                  decimals: CHAIN.nativeCurrency.decimals,
+                },
+                rpcUrls: [CHAIN.rpcUrls.default],
+                blockExplorerUrls: [CHAIN.blockExplorers.default.url],
+              },
+            ],
+          }) as Promise<unknown>,
+          isWalletConnectActive() ? 4000 : 15_000
+        );
       } catch {
-        /* ok */
+        if (isWalletConnectActive()) {
+          throw new Error(
+            `Add/switch to Robinhood Chain (${CHAIN.id}) in Rabby, then retry the seed. Automatic switch is blocked over WalletConnect.`
+          );
+        }
+        throw err;
+      }
+      try {
+        await withTimeout(switchReq() as Promise<unknown>, 3000);
+      } catch {
+        /* re-check below */
       }
       return;
+    }
+    if (isWalletConnectActive()) {
+      throw new Error(
+        `Switch Rabby network to Robinhood Chain (${CHAIN.id}), then retry. Avoid scanning a new QR while already connected.`
+      );
     }
     throw err;
   }
 }
 
+/**
+ * Ensure wallet is on Robinhood (4663). Throws a clear message if not.
+ * WalletConnect: never hang forever on switch — timed out above.
+ */
 export async function ensureRobinhoodChain(): Promise<void> {
-  const id = await getChainId();
-  if (id !== CHAIN.id) {
+  let id: number;
+  try {
+    id = await getChainId();
+  } catch {
+    throw new Error("Could not read wallet network. Close modal, reconnect once.");
+  }
+  if (isRobinhoodChainId(id)) return;
+
+  try {
     await switchToRobinhoodChain();
-    const after = await getChainId();
-    if (after !== CHAIN.id) {
-      throw new Error(`Switch wallet network to ${CHAIN.name} (chain ${CHAIN.id}).`);
-    }
+  } catch {
+    const afterFail = await getChainId().catch(() => id);
+    if (isRobinhoodChainId(afterFail)) return;
+    throw new Error(
+      isWalletConnectActive()
+        ? `Rabby reports chain ${afterFail}, need Robinhood (${CHAIN.id}). Switch network in Rabby, then “I switched — continue” — do NOT scan a new QR.`
+        : `Wallet is on chain ${afterFail}. Switch the extension to Robinhood Chain (${CHAIN.id}), then connect again.`
+    );
+  }
+
+  const after = await getChainId();
+  if (!isRobinhoodChainId(after)) {
+    throw new Error(
+      isWalletConnectActive()
+        ? `Still on chain ${after}. In Rabby → Networks → Robinhood Chain (${CHAIN.id}). Then “I switched — continue” (no new QR).`
+        : `Switch wallet network to Robinhood Chain (chain ${CHAIN.id}).`
+    );
   }
 }
 
@@ -351,10 +472,10 @@ const MARKET_DESTINATIONS = new Set([
   ...MARKET_COLLECTIONS.map((c) => c.contractAddress.toLowerCase()),
 ]);
 
-/** Vault sends: the vault itself, plus collection contracts for the deposit approval. */
+/** Vault sends: any configured vault (primary + legacy), plus collection approvals. */
 function vaultDestinations(): Set<string> {
   const set = new Set(MARKET_COLLECTIONS.map((c) => c.contractAddress.toLowerCase()));
-  if (MARKET_VAULT_ADDRESS) set.add(MARKET_VAULT_ADDRESS.toLowerCase());
+  for (const v of MARKET_VAULT_ADDRESSES) set.add(v.toLowerCase());
   return set;
 }
 
@@ -384,12 +505,12 @@ export function assertSafeSwapDestination(to: string, kind: string) {
     return;
   }
   if (kind === "vault") {
-    if (!MARKET_VAULT_ADDRESS) {
+    if (!MARKET_VAULT_ADDRESS && !MARKET_VAULT_LEGACY_ADDRESS) {
       throw new Error("No liquidity vault deployed — vault transactions are disabled.");
     }
     if (!vaultDestinations().has(to.toLowerCase())) {
       throw new Error(
-        "Blocked unsafe vault target. Vault transactions only go to the configured vault or an allowlisted collection."
+        "Blocked unsafe vault target. Vault transactions only go to a configured vault (primary or legacy) or an allowlisted collection."
       );
     }
     return;
@@ -437,7 +558,7 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
 
   await ensureRobinhoodChain();
   const chainId = await getChainId();
-  if (chainId !== CHAIN.id) {
+  if (!isRobinhoodChainId(chainId)) {
     throw new Error(
       `Wrong network (chain ${chainId}). Switch to ${CHAIN.name} (${CHAIN.id}). This site never bridges to Ethereum.`
     );
@@ -500,7 +621,13 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
   // smaller floor like approvals do.
   const floor = kind === "swap" ? MIN_SWAP_GAS : MIN_APPROVE_GAS;
   if (!gasLimit || gasLimit < floor) gasLimit = floor;
-  if (gasLimit > BigInt(3_000_000)) gasLimit = BigInt(3_000_000);
+  // Cap only swaps — Seaport sweeps / vault multi-ops can legitimately
+  // estimate above 3M; capping them caused OOG after a successful sim.
+  if (kind === "swap" && gasLimit > BigInt(3_000_000)) {
+    gasLimit = BigInt(3_000_000);
+  } else if (kind !== "swap" && gasLimit > BigInt(12_000_000)) {
+    gasLimit = BigInt(12_000_000);
+  }
 
   const fees = await mergeFeeFields(
     provider,
@@ -508,6 +635,15 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
     parseQuantity(tx.maxPriorityFeePerGas),
     parseQuantity(tx.gasPrice)
   );
+
+  // Re-assert chain immediately before broadcast (TOCTOU: user can switch
+  // networks after simulation).
+  const chainIdAgain = await getChainId();
+  if (!isRobinhoodChainId(chainIdAgain)) {
+    throw new Error(
+      `Wrong network (chain ${chainIdAgain}). Switch back to ${CHAIN.name} before confirming.`
+    );
+  }
 
   const gasHex = `0x${gasLimit.toString(16)}`;
   // Only shapes that KEEP the gas floor — never bare under-gassed sends

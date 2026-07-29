@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
-import Image from "next/image";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+import CachedNftImage from "@/components/CachedNftImage";
+import { warmArtOnce } from "@/lib/art-warm-global";
 
 type HeldToken = { tokenId: string; imageUrl: string | null };
 
@@ -38,6 +39,56 @@ export default function PlankFence({
   const [drag, setDrag] = useState<DragState | null>(null);
   const [settling, setSettling] = useState<string | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  /** Client backfill for boards the held API still returned without art. */
+  const [imageOverrides, setImageOverrides] = useState<Record<string, string>>({});
+
+  // Warm boards with URLs (deduped globally with LivingLiquidityViz).
+  useEffect(() => {
+    if (!held?.length) return;
+    warmArtOnce(
+      held.map((t) => ({
+        tokenId: t.tokenId,
+        imageUrl: t.imageUrl || imageOverrides[t.tokenId],
+      })),
+      { concurrency: 3, flags: { vault: true } }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [held]);
+
+  useEffect(() => {
+    if (!held?.length) return;
+    const missing = held.filter((t) => !t.imageUrl && !imageOverrides[t.tokenId]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    const CONCURRENCY = 4;
+    (async () => {
+      for (let i = 0; i < missing.length; i += CONCURRENCY) {
+        if (cancelled) return;
+        const slice = missing.slice(i, i + CONCURRENCY);
+        await Promise.all(
+          slice.map(async (t) => {
+            try {
+              const r = await fetch(`/api/market/token?tokenId=${encodeURIComponent(t.tokenId)}`);
+              if (!r.ok) return;
+              const d = (await r.json()) as { image?: string | null };
+              if (d.image && !cancelled) {
+                setImageOverrides((prev) =>
+                  prev[t.tokenId] ? prev : { ...prev, [t.tokenId]: d.image! }
+                );
+              }
+            } catch {
+              /* keep placeholder board */
+            }
+          })
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Only re-run when membership/image list identity changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [held]);
 
   const onPointerEnter = useCallback((e: React.PointerEvent<HTMLDivElement>, tokenId: string) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -102,12 +153,13 @@ export default function PlankFence({
     <>
       <div className="flex h-full items-end gap-[3px] overflow-x-auto overflow-y-visible px-3 pb-3 pt-2">
         {held.map((t) => {
-          const r = rarity.get(t.tokenId);
+          const r = rarity.get(t.tokenId) ?? rarity.get(String(Number(t.tokenId)));
           const color = r ? tierColor(r.tier) : "rgba(212,175,90,0.5)";
           const glow = r ? tierGlow(r.tier) : "0 0 8px rgba(212,175,90,0.2)";
           const isHovered = hover?.tokenId === t.tokenId;
           const isDragging = drag?.tokenId === t.tokenId;
           const isSettling = settling === t.tokenId;
+          const artUrl = t.imageUrl || imageOverrides[t.tokenId] || null;
           const transform = isDragging
             ? `translate(${drag!.dx}px, ${drag!.dy}px) rotate(${Math.max(-18, Math.min(18, drag!.dx / 6))}deg) scale(1.08)`
             : undefined;
@@ -116,7 +168,10 @@ export default function PlankFence({
             <div
               key={t.tokenId}
               className="relative shrink-0 touch-none select-none"
-              style={{ width: 26, height: "88%" }}
+              // Tall fence posts — art fills the post (object-cover), with a
+              // thin top/bottom margin of board color. object-contain made
+              // square NFTs render as tiny centered squares on tall posts.
+              style={{ width: 28, height: "90%" }}
               onPointerEnter={(e) => onPointerEnter(e, t.tokenId)}
               onPointerLeave={() => onPointerLeave(t.tokenId)}
               onPointerDown={(e) => onPointerDown(e, t.tokenId)}
@@ -125,7 +180,7 @@ export default function PlankFence({
               onPointerCancel={onPointerUp}
             >
               <div
-                className={`relative h-full w-full cursor-grab overflow-hidden rounded-t-sm border-x border-t border-black/40 bg-wood-900 shadow-[inset_0_0_8px_rgba(0,0,0,0.5)] transition-[box-shadow,transform] duration-150 active:cursor-grabbing ${
+                className={`relative h-full w-full cursor-grab overflow-hidden rounded-t-sm border-x border-t border-black/40 bg-[#0a1f0a] shadow-[inset_0_0_8px_rgba(0,0,0,0.5)] transition-[box-shadow,transform] duration-150 active:cursor-grabbing ${
                   isSettling ? "duration-[450ms] ease-[cubic-bezier(0.34,1.56,0.64,1)]" : ""
                 }`}
                 style={{
@@ -135,8 +190,18 @@ export default function PlankFence({
                   zIndex: isDragging ? 30 : isHovered ? 20 : 1,
                 }}
               >
-                {t.imageUrl ? (
-                  <Image src={t.imageUrl} alt={`#${t.tokenId}`} fill sizes="26px" className="object-cover" unoptimized draggable={false} />
+                {artUrl ? (
+                  <div className="absolute inset-x-0 top-1 bottom-1">
+                    <CachedNftImage
+                      imageUrl={artUrl}
+                      tokenId={t.tokenId}
+                      alt={`#${t.tokenId}`}
+                      fill
+                      sizes="28px"
+                      className="object-cover object-center"
+                      vault
+                    />
+                  </div>
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-[0.5rem] text-foreground/30">
                     #{t.tokenId}

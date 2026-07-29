@@ -9,7 +9,11 @@
     "lint": "eslint",
     "test:contracts": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json hardhat test",
     "test:market": "tsx --test test/market/*.test.ts",
-    "test": "npm run test:market && npm run test:contracts"
+    "test": "npm run test:market && npm run test:contracts",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
   },
   "dependencies": {
     "@opensea/seaport-js": "^4.1.5",
@@ -17,6 +21,7 @@
     "ethers": "^6.17.0",
     "lightweight-charts": "^5.2.0",
     "next": "^16.2.12",
+    "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -29,22 +34,25 @@
     "@nomicfoundation/hardhat-ethers": "^3.1.3",
     "@nomicfoundation/hardhat-network-helpers": "^1.1.2",
     "@nomicfoundation/hardhat-toolbox": "^6.1.2",
+    "@opennextjs/cloudflare": "^1.20.2",
     "@openzeppelin/contracts": "^4.9.6",
     "@tailwindcss/postcss": "^4",
     "@types/chai": "^4.3.20",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "chai": "^4.5.0",
     "cross-env": "^10.1.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.10",
+    "eslint-config-next": "^16.2.12",
     "hardhat": "^2.29.0",
     "mocha": "^11.7.6",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",
     "tsx": "^4.23.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.115.0"
   }
 }

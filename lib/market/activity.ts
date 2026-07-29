@@ -1,12 +1,16 @@
-import { Interface, JsonRpcProvider, formatEther, getAddress } from "ethers";
-import {
-  NFT_CONTRACT_ADDRESS,
-  ROBINHOOD_CHAIN_ID,
-  ROBINHOOD_RPC_URLS,
-} from "@/lib/mint-contract";
+import { Interface, formatEther, getAddress } from "ethers";
+import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS, SEAPORT_ADDRESS } from "@/lib/constants";
 import { resolveTokenImage } from "@/lib/market/token-image";
 import { wasOrderServedByUs } from "@/lib/market/served-orders";
+import { ethBlockNumber, ethGetLogs, rpcCall } from "@/lib/market/fetch-rpc";
+import { logScanBudget } from "@/lib/market/rpc-budget";
+import {
+  fetchAddressTransactions,
+  fetchTokenTransfers,
+  fetchTxTokenTransfers,
+} from "@/lib/market/blockscout";
+import { kv } from "@vercel/kv";
 
 // Canonical Seaport 1.6 OrderFulfilled event, copied from
 // @opensea/seaport-js's own compiled artifact (src/artifacts/seaport/...),
@@ -35,9 +39,8 @@ const ORDER_FULFILLED_IFACE = new Interface([
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const ZERO = "0x0000000000000000000000000000000000000000";
 
-/** The node rejects wide ranges, so walk backwards in bounded windows. */
-const CHUNK_BLOCKS = 50_000;
-const MAX_CHUNKS = 8;
+/** The node rejects wide ranges, so walk backwards in bounded windows.
+ * On Cloudflare, logScanBudget shrinks this further to survive public RPC limits. */
 
 export type ActivityKind = "mint" | "sale" | "transfer";
 
@@ -160,23 +163,6 @@ type RawLog = {
   blockNumber: string;
 };
 
-async function firstHealthyProvider(): Promise<JsonRpcProvider> {
-  let lastError: unknown = null;
-  for (const url of ROBINHOOD_RPC_URLS) {
-    const provider = new JsonRpcProvider(url, ROBINHOOD_CHAIN_ID, {
-      staticNetwork: true,
-      batchMaxCount: 1,
-    });
-    try {
-      await provider.getBlockNumber();
-      return provider;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw new Error(`No healthy Robinhood RPC: ${String(lastError)}`);
-}
-
 // Artwork is immutable once minted — cache resolved images across calls
 // (not just within one fetchActivity run), so a token that keeps
 // reappearing across the route's 60s response-cache refreshes never gets
@@ -206,17 +192,16 @@ const attributionResolvedTxs = new Set<string>();
  * Fails closed in the sense that matters: any failure here just leaves the
  * event unattributed/unpriced rather than guessing.
  */
-async function resolveMarketplankAttribution(
-  provider: JsonRpcProvider,
-  txHash: string
-): Promise<void> {
+async function resolveMarketplankAttribution(txHash: string): Promise<void> {
   if (attributionResolvedTxs.has(txHash)) return;
   try {
-    const receipt = await provider.getTransactionReceipt(txHash);
+    const receipt = await rpcCall<{
+      logs?: Array<{ address: string; topics: string[]; data: string }>;
+    }>("eth_getTransactionReceipt", [txHash], { timeoutMs: 8_000 });
     if (!receipt) return;
     attributionResolvedTxs.add(txHash);
 
-    for (const log of receipt.logs) {
+    for (const log of receipt.logs || []) {
       if (log.address.toLowerCase() !== SEAPORT_ADDRESS.toLowerCase()) continue;
       if (log.topics[0] !== ORDER_FULFILLED_IFACE.getEvent("OrderFulfilled")!.topicHash) continue;
 
@@ -273,31 +258,471 @@ async function resolveMarketplankAttribution(
  * history without that blowup; see app/api/market/activity/route.ts for
  * the separate, longer-lived cache this variant gets.
  */
-const FULL_LINEAGE_LIMIT = 300;
+const FULL_LINEAGE_LIMIT = 800;
+const SALES_KV_KEY = "plank:market:sales-catalog-v1";
+const SALES_KV_TTL = 6 * 60 * 60;
+
+type PricedSaleKey = string; // txHash:tokenId
+
+function hasKv(): boolean {
+  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+}
+
+function isMarketplaceMethod(method: string): boolean {
+  const m = method.toLowerCase();
+  return (
+    m.includes("fulfill") ||
+    m.includes("match") ||
+    m.includes("sweep") ||
+    m.includes("buyfrom") ||
+    m.includes("buy_") ||
+    m.includes("take") ||
+    m.includes("accept") ||
+    m.includes("purchase") ||
+    m.includes("order")
+  );
+}
+
+/**
+ * Price a marketplace tx for RobinWood: native ETH (tx.value) and/or WETH
+ * ERC-20 transfers inside the same tx. Split across RobinWood NFTs moved.
+ * Works for Seaport fulfill/match AND other marketplaces (e.g. buyFromListing).
+ */
+async function priceTxForRobinWood(
+  txHash: string,
+  nativeValueWei?: string | null
+): Promise<
+  Map<PricedSaleKey, { priceWei: bigint; from: string; to: string; ts: string | null; block: number }>
+> {
+  const out = new Map<
+    PricedSaleKey,
+    { priceWei: bigint; from: string; to: string; ts: string | null; block: number }
+  >();
+  const moves = await fetchTxTokenTransfers(txHash);
+  const nft = NFT_CONTRACT_ADDRESS.toLowerCase();
+  const weth = (MARKET_OFFER_CURRENCY || "").toLowerCase();
+
+  const nftMoves = moves.filter((m) => {
+    const addr = (m.token?.address_hash || m.token?.address || "").toLowerCase();
+    return addr === nft && m.total?.token_id != null;
+  });
+  if (nftMoves.length === 0) return out;
+
+  let totalWei = BigInt(0);
+  try {
+    if (nativeValueWei) totalWei = BigInt(nativeValueWei);
+  } catch {
+    totalWei = BigInt(0);
+  }
+
+  // WETH (and any other ERC-20 consideration) — sum amounts. Prefer WETH when set.
+  let wethWei = BigInt(0);
+  let otherErc20 = BigInt(0);
+  for (const m of moves) {
+    const addr = (m.token?.address_hash || m.token?.address || "").toLowerCase();
+    const typ = (m.token?.type || "").toUpperCase();
+    if (typ === "ERC-721" || typ === "ERC-1155") continue;
+    try {
+      const amt = BigInt(m.total?.value || "0");
+      if (amt <= BigInt(0)) continue;
+      if (weth && addr === weth) wethWei += amt;
+      else if (addr && addr !== nft) otherErc20 += amt;
+    } catch {
+      /* skip */
+    }
+  }
+  // Prefer explicit payment leg: native > WETH > other ERC-20
+  if (totalWei <= BigInt(0) && wethWei > BigInt(0)) totalWei = wethWei;
+  if (totalWei <= BigInt(0) && otherErc20 > BigInt(0)) totalWei = otherErc20;
+  if (totalWei <= BigInt(0)) return out;
+
+  const per = totalWei / BigInt(nftMoves.length);
+  if (per <= BigInt(0)) return out;
+
+  for (const m of nftMoves) {
+    const tokenId = String(m.total!.token_id);
+    const key = `${txHash}:${tokenId}`;
+    out.set(key, {
+      priceWei: per,
+      from: m.from?.hash || ZERO,
+      to: m.to?.hash || ZERO,
+      ts: m.timestamp ?? null,
+      block: m.block_number ?? 0,
+    });
+    priceCache.set(key, per);
+  }
+  return out;
+}
+
+/**
+ * Build price map from:
+ *  1) Seaport address txs that touch RobinWood (fulfill/match/…)
+ *  2) Explicit sale tx hashes already seen on NFT Transfer feed
+ *
+ * CF-safe Blockscout REST only — no eth_getTransactionReceipt.
+ */
+async function buildMarketplacePriceMap(opts?: {
+  maxSeaportPages?: number;
+  maxTxDetail?: number;
+  extraTxHashes?: string[];
+}): Promise<
+  Map<PricedSaleKey, { priceWei: bigint; from: string; to: string; ts: string | null; block: number }>
+> {
+  const maxPages = opts?.maxSeaportPages ?? 12;
+  const maxDetail = opts?.maxTxDetail ?? 100;
+  const out = new Map<
+    PricedSaleKey,
+    { priceWei: bigint; from: string; to: string; ts: string | null; block: number }
+  >();
+
+  type Cand = { hash: string; value?: string; priority: number };
+  const candidates: Cand[] = [];
+  const seenHash = new Set<string>();
+
+  // Priority 0: txs already known to move THIS collection (from Transfer feed).
+  // Must be priced first — Seaport is shared with other NFTs and a value-sort
+  // would burn the detail budget on unrelated high-ETH fills.
+  for (const h of opts?.extraTxHashes ?? []) {
+    if (h && /^0x[0-9a-fA-F]{64}$/.test(h) && !seenHash.has(h.toLowerCase())) {
+      seenHash.add(h.toLowerCase());
+      candidates.push({ hash: h, priority: 0 });
+    }
+  }
+
+  // Only scan Seaport's global tx list when the NFT transfer feed didn't
+  // surface marketplace fills (cold / sparse). Otherwise we burn the Worker
+  // subrequest budget on other collections that share Seaport.
+  if (candidates.length < 8 && maxPages > 0) {
+    try {
+      const seaportTxs = await fetchAddressTransactions(SEAPORT_ADDRESS, {
+        maxPages: Math.min(maxPages, 4),
+      });
+      for (const tx of seaportTxs) {
+        if (!tx.hash) continue;
+        const method = tx.method || "";
+        const status = String(tx.status || "ok").toLowerCase();
+        if (status && status !== "ok") continue;
+        if (method && !isMarketplaceMethod(method) && BigInt(tx.value || "0") === BigInt(0)) {
+          if (!tx.value || tx.value === "0") continue;
+        }
+        if (seenHash.has(tx.hash.toLowerCase())) continue;
+        seenHash.add(tx.hash.toLowerCase());
+        candidates.push({ hash: tx.hash, value: tx.value, priority: 1 });
+      }
+    } catch {
+      /* transfer-feed hashes only */
+    }
+  }
+
+  candidates.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    const av = BigInt(a.value || "0");
+    const bv = BigInt(b.value || "0");
+    return av === bv ? 0 : av > bv ? -1 : 1;
+  });
+
+  const slice = candidates.slice(0, maxDetail);
+  const CONC = 8;
+  for (let i = 0; i < slice.length; i += CONC) {
+    const batch = slice.slice(i, i + CONC);
+    await Promise.all(
+      batch.map(async (c) => {
+        try {
+          const priced = await priceTxForRobinWood(c.hash, c.value);
+          for (const [k, v] of priced) out.set(k, v);
+        } catch {
+          /* skip */
+        }
+      })
+    );
+  }
+
+  if (hasKv() && out.size > 0) {
+    try {
+      const prev = (await kv.get<Record<string, string>>(SALES_KV_KEY)) || {};
+      const merged: Record<string, string> = { ...prev };
+      for (const [k, v] of out) merged[k] = v.priceWei.toString();
+      const keys = Object.keys(merged);
+      if (keys.length > 5_000) {
+        for (const k of keys.slice(0, keys.length - 5_000)) delete merged[k];
+      }
+      await kv.set(SALES_KV_KEY, merged, { ex: SALES_KV_TTL });
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  return out;
+}
+
+async function loadSalesKv(): Promise<Map<string, bigint>> {
+  const map = new Map<string, bigint>();
+  if (!hasKv()) return map;
+  try {
+    const prev = await kv.get<Record<string, string>>(SALES_KV_KEY);
+    if (!prev || typeof prev !== "object") return map;
+    for (const [k, v] of Object.entries(prev)) {
+      try {
+        const wei = BigInt(v);
+        if (wei > BigInt(0)) {
+          map.set(k, wei);
+          priceCache.set(k, wei);
+        }
+      } catch {
+        /* skip */
+      }
+    }
+  } catch {
+    /* skip */
+  }
+  return map;
+}
+
+/** Blockscout REST path — used first on Cloudflare where eth_ RPC is 429'd. */
+async function fetchActivityFromBlockscout(
+  limit: number,
+  opts?: { full?: boolean }
+): Promise<ActivityEvent[]> {
+  const full = Boolean(opts?.full);
+  // CF Workers ~30s wall. Deep sale prices live in KV
+  // (scripts/seed-sales-catalog.mjs). Request path only pulls a shallow
+  // Blockscout transfer window + merges the catalog.
+  const kvPrices = await loadSalesKv();
+  const kvWarm = kvPrices.size >= 8;
+  const transferPages = full ? (kvWarm ? 4 : 8) : Math.max(2, Math.ceil(limit / 50));
+
+  const transfers = await fetchTokenTransfers(NFT_CONTRACT_ADDRESS, {
+    maxPages: transferPages,
+  });
+
+  const saleHashesFromFeed = [
+    ...new Set(
+      transfers
+        .filter((t) => isMarketplaceMethod(t.method || ""))
+        .map((t) => t.transaction_hash || "")
+        .filter(Boolean)
+    ),
+  ];
+
+  // Live-price at most a few unknown recent fills — never re-scan the whole book.
+  const needLive = saleHashesFromFeed
+    .filter((h) => ![...kvPrices.keys()].some((k) => k.startsWith(h + ":")))
+    .slice(0, kvWarm ? 4 : 12);
+
+  let marketplacePrices = new Map<
+    PricedSaleKey,
+    { priceWei: bigint; from: string; to: string; ts: string | null; block: number }
+  >();
+  if (needLive.length > 0) {
+    try {
+      marketplacePrices = await buildMarketplacePriceMap({
+        maxSeaportPages: 0,
+        maxTxDetail: needLive.length,
+        extraTxHashes: needLive,
+      });
+    } catch {
+      marketplacePrices = new Map();
+    }
+  }
+
+  for (const [key, wei] of kvPrices) {
+    if (marketplacePrices.has(key)) continue;
+    const [txHash, tokenId] = key.split(":");
+    if (!txHash || !tokenId) continue;
+    marketplacePrices.set(key, {
+      priceWei: wei,
+      from: ZERO,
+      to: ZERO,
+      ts: null,
+      block: 0,
+    });
+  }
+
+  const vault = MARKET_VAULT_ADDRESS?.toLowerCase() ?? null;
+  const events: ActivityEvent[] = [];
+  const seen = new Set<string>(); // txHash:tokenId
+
+  for (const t of transfers) {
+    if (events.length >= limit) break;
+    const fromRaw = t.from?.hash || ZERO;
+    const toRaw = t.to?.hash || ZERO;
+    const from = fromRaw.toLowerCase();
+    const to = toRaw.toLowerCase();
+    const tokenId =
+      t.total?.token_id != null
+        ? String(t.total.token_id)
+        : t.total?.token_instance?.id != null
+          ? String(t.total.token_instance.id)
+          : "";
+    if (!tokenId) continue;
+
+    const txHash = t.transaction_hash || "";
+    const dedupe = `${txHash}:${tokenId}`;
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+
+    const method = (t.method || "").toLowerCase();
+    let kind: ActivityKind = "transfer";
+    let venue: ActivityEvent["venue"] = null;
+
+    const priced =
+      marketplacePrices.get(dedupe) ||
+      (priceCache.has(dedupe)
+        ? {
+            priceWei: priceCache.get(dedupe)!,
+            from: fromRaw,
+            to: toRaw,
+            ts: t.timestamp ?? null,
+            block: t.block_number ?? 0,
+          }
+        : null);
+
+    if (from === ZERO || method.includes("mint")) {
+      kind = "mint";
+      venue = null;
+    } else if (
+      vault &&
+      (from === vault || to === vault || method.includes("deposit") || method.includes("redeem"))
+    ) {
+      kind = "transfer";
+      venue = { kind: "vault", contract: MARKET_VAULT_ADDRESS! };
+    } else if (priced || isMarketplaceMethod(method)) {
+      kind = "sale";
+      // Seaport methods → seaport venue; anything else → other (still priced).
+      venue =
+        method.includes("fulfill") || method.includes("match") || method.includes("sweep")
+          ? { kind: "seaport", contract: SEAPORT_ADDRESS }
+          : { kind: "other", contract: method || "marketplace" };
+    } else if (from !== ZERO && to !== ZERO) {
+      if (method && method !== "transferfrom" && method !== "safetransferfrom") {
+        kind = "sale";
+        venue = { kind: "other", contract: method };
+      } else {
+        kind = "transfer";
+        venue = null;
+      }
+    }
+
+    const inst = t.total?.token_instance;
+    const rawImg = inst?.image_url || inst?.media_url || inst?.metadata?.image || null;
+    let imageUrl: string | null = imageCache.get(tokenId) ?? null;
+    if (!imageUrl && rawImg) {
+      try {
+        const { resolveIpfsUrl } = await import("@/lib/ipfs");
+        imageUrl = resolveIpfsUrl(rawImg);
+        if (imageUrl) imageCache.set(tokenId, imageUrl);
+      } catch {
+        imageUrl = rawImg;
+      }
+    }
+
+    const priceWei = priced?.priceWei ?? priceCache.get(dedupe) ?? null;
+
+    events.push({
+      kind,
+      tokenId,
+      from: fromRaw.startsWith("0x") ? fromRaw : ZERO,
+      to: toRaw.startsWith("0x") ? toRaw : ZERO,
+      priceWei: priceWei != null && priceWei > BigInt(0) ? priceWei.toString() : null,
+      priceEth: priceWei != null && priceWei > BigInt(0) ? formatEther(priceWei) : null,
+      txHash,
+      blockNumber: t.block_number ?? 0,
+      timestamp: t.timestamp ?? null,
+      venue,
+      imageUrl,
+    });
+  }
+
+  // Ensure every marketplace-priced RobinWood move appears even if it fell
+  // outside the recent transfer window (critical for "highest sale ever").
+  for (const [key, priced] of marketplacePrices) {
+    if (seen.has(key)) continue;
+    const [txHash, tokenId] = key.split(":");
+    if (!txHash || !tokenId) continue;
+    seen.add(key);
+    events.push({
+      kind: "sale",
+      tokenId,
+      from: priced.from,
+      to: priced.to,
+      priceWei: priced.priceWei.toString(),
+      priceEth: formatEther(priced.priceWei),
+      txHash,
+      blockNumber: priced.block,
+      timestamp: priced.ts,
+      venue: { kind: "seaport", contract: SEAPORT_ADDRESS },
+      imageUrl: imageCache.get(tokenId) ?? null,
+    });
+  }
+
+  // Sort newest first
+  events.sort((a, b) => {
+    if (a.blockNumber !== b.blockNumber) return b.blockNumber - a.blockNumber;
+    return (b.timestamp || "").localeCompare(a.timestamp || "");
+  });
+
+  // Skip RPC attribution on Cloudflare cold path — prices already correct from
+  // Blockscout WETH/native. Attribution is best-effort only when cheap.
+  if (!full) {
+    const topPriced = events
+      .filter((e) => e.kind === "sale" && e.priceWei && e.txHash)
+      .slice(0, 4)
+      .map((e) => e.txHash);
+    await Promise.all(
+      [...new Set(topPriced)].map(async (hash) => {
+        try {
+          await resolveMarketplankAttribution(hash);
+        } catch {
+          /* skip */
+        }
+      })
+    );
+    for (const e of events) {
+      if (e.kind !== "sale" || !e.txHash) continue;
+      if (attributionCache.get(`${e.txHash}:${e.tokenId}`) && e.venue) {
+        e.venue = { kind: "marketplank", contract: SEAPORT_ADDRESS };
+      }
+    }
+  }
+
+  return events.slice(0, limit);
+}
 
 export async function fetchActivity(
   limit = 40,
   opts?: { full?: boolean }
 ): Promise<ActivityEvent[]> {
   const effectiveLimit = opts?.full ? FULL_LINEAGE_LIMIT : limit;
-  const provider = await firstHealthyProvider();
-  const latest = await provider.getBlockNumber();
+
+  // Prefer Blockscout first — public eth_ RPC rate-limits Cloudflare hard.
+  try {
+    const events = await fetchActivityFromBlockscout(effectiveLimit, {
+      full: Boolean(opts?.full),
+    });
+    if (events.length > 0) return events;
+  } catch {
+    // fall through to eth_ path
+  }
+
+  const latest = await ethBlockNumber();
+  const { chunkBlocks, maxChunks } = logScanBudget();
 
   const logs: RawLog[] = [];
   let toBlock = latest;
 
-  for (let chunk = 0; chunk < MAX_CHUNKS && logs.length < effectiveLimit && toBlock > 0; chunk += 1) {
-    const fromBlock = Math.max(0, toBlock - CHUNK_BLOCKS);
-    const found = (await provider.send("eth_getLogs", [
-      {
+  for (let chunk = 0; chunk < maxChunks && logs.length < effectiveLimit && toBlock > 0; chunk += 1) {
+    const fromBlock = Math.max(0, toBlock - chunkBlocks);
+    try {
+      const found = (await ethGetLogs({
         address: NFT_CONTRACT_ADDRESS,
         topics: [TRANSFER_TOPIC],
         fromBlock: "0x" + fromBlock.toString(16),
         toBlock: "0x" + toBlock.toString(16),
-      },
-    ])) as RawLog[];
-
-    logs.push(...found);
+      })) as RawLog[];
+      logs.push(...found);
+    } catch {
+      break;
+    }
     if (fromBlock === 0) break;
     toBlock = fromBlock - 1;
   }
@@ -321,24 +746,42 @@ export async function fetchActivity(
     ...new Set(transfers.map((l) => BigInt(l.topics[3]).toString())),
   ].filter((id) => !imageCache.has(id));
 
+  // Cap enrichment fan-out on Workers to avoid RPC 429 storms.
+  const txSlice = uniqueTxs.slice(0, Math.min(uniqueTxs.length, 40));
+  const blockSlice = uniqueBlocks.slice(0, Math.min(uniqueBlocks.length, 40));
+  const imageSlice = uniqueTokenIds.slice(0, Math.min(uniqueTokenIds.length, 24));
+
   await Promise.all([
-    ...uniqueTxs.map(async (hash) => {
+    ...txSlice.map(async (hash) => {
       try {
-        const fetched = await provider.getTransaction(hash);
-        txCache.set(hash, fetched ? { to: fetched.to, value: fetched.value } : null);
+        const fetched = await rpcCall<{ to?: string; value?: string }>("eth_getTransactionByHash", [
+          hash,
+        ], { timeoutMs: 6_000 });
+        txCache.set(
+          hash,
+          fetched
+            ? { to: fetched.to ?? null, value: BigInt(fetched.value || "0x0") }
+            : null
+        );
       } catch {
         txCache.set(hash, null);
       }
     }),
-    ...uniqueBlocks.map(async (blockNumber) => {
+    ...blockSlice.map(async (blockNumber) => {
       try {
-        const block = await provider.getBlock(Number(BigInt(blockNumber)));
-        blockCache.set(blockNumber, block ? block.timestamp : null);
+        const block = await rpcCall<{ timestamp?: string }>("eth_getBlockByNumber", [
+          blockNumber,
+          false,
+        ], { timeoutMs: 6_000 });
+        blockCache.set(
+          blockNumber,
+          block?.timestamp != null ? Number(BigInt(block.timestamp)) : null
+        );
       } catch {
         blockCache.set(blockNumber, null);
       }
     }),
-    ...uniqueTokenIds.map(async (tokenId) => {
+    ...imageSlice.map(async (tokenId) => {
       const image = await resolveTokenImage(NFT_CONTRACT_ADDRESS, tokenId);
       imageCache.set(tokenId, image);
     }),
@@ -350,12 +793,12 @@ export async function fetchActivity(
   // Sweep feature) can carry MULTIPLE OrderFulfilled events in one tx, so
   // each is matched to the specific tokenId it actually delivered — never
   // just "the tx touched Seaport, so attribute the whole tx to us."
-  const seaportTxs = uniqueTxs.filter(
+  const seaportTxs = txSlice.filter(
     (hash) => txCache.get(hash)?.to?.toLowerCase() === SEAPORT_ADDRESS.toLowerCase()
   );
   await Promise.all(
-    seaportTxs.map(async (hash) => {
-      await resolveMarketplankAttribution(provider, hash);
+    seaportTxs.slice(0, 15).map(async (hash) => {
+      await resolveMarketplankAttribution(hash);
     })
   );
 

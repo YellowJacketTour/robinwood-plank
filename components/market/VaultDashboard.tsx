@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
 import { formatTokenAmount } from "@/lib/trade";
 import { formatUsd, weiToUsd } from "@/lib/eth-price";
 import { getRarityMap, tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { useVaultLive } from "@/lib/market/useVaultLive";
 import ScrollBox from "@/components/market/ScrollBox";
+import CachedNftImage from "@/components/CachedNftImage";
+import { warmArtOnce } from "@/lib/art-warm-global";
 
 type HeldToken = { tokenId: string; imageUrl: string | null };
 
@@ -40,24 +41,54 @@ export default function VaultDashboard() {
     void getRarityMap().then((map) => setRarity(map));
   }, []);
 
-  // Re-fetch held-token images only when membership actually changes — the
-  // live stream ticks every few seconds, but re-resolving IPFS images that
-  // often would be pure waste since the vault's inventory rarely turns over.
-  // Depending on the primitive count (not the whole `stats` object) matters:
-  // `stats` gets a new object reference on every tick even when the count
-  // is unchanged (ethUsd and other fields still move), which was re-running
-  // this effect every tick and cancelling the in-flight fetch before it
-  // ever resolved — a real, confirmed-live bug (held images never loaded).
+  // Fetch on mount + when held count changes. Don't gate the first load on
+  // stats.heldTokenCount. Never paint "Nothing held" from a poisoned empty
+  // cache while stats still report inventory.
   useEffect(() => {
-    if (heldTokenCount == null) return;
     let cancelled = false;
-    fetch("/api/market/vault/held")
-      .then((r) => (r.ok ? r.json() : { tokens: [] }))
+    setHeldLoading(true);
+    const expected = heldTokenCount; // null until stats load
+    import("@/lib/market/swr-fetch")
+      .then(({ swrJson }) =>
+        swrJson<{ tokens?: HeldToken[]; count?: number }>("/api/market/vault/held", {
+          ttlMs: 12_000,
+          swrMs: 90_000,
+          session: true,
+          isGood: (raw) => {
+            const d = raw as { tokens?: HeldToken[] };
+            const n = d.tokens?.length ?? 0;
+            if (n === 0) return expected === 0;
+            return true;
+          },
+        })
+      )
       .then((data) => {
-        if (!cancelled) setHeld(data.tokens ?? []);
+        if (cancelled) return;
+        const tokens = data.tokens ?? [];
+        if (tokens.length > 0) {
+          setHeld(tokens);
+          warmArtOnce(
+            tokens.map((t) => ({ tokenId: t.tokenId, imageUrl: t.imageUrl })),
+            { concurrency: 4, flags: { vault: true } }
+          );
+          return;
+        }
+        if ((expected ?? 0) > 0 && stats?.heldTokenIds?.length) {
+          setHeld(stats.heldTokenIds.map((tokenId) => ({ tokenId, imageUrl: null })));
+          return;
+        }
+        if (expected === 0) setHeld([]);
       })
       .catch(() => {
-        if (!cancelled) setHeld([]);
+        if (cancelled) return;
+        if (expected === 0) setHeld([]);
+        else if (stats?.heldTokenIds?.length) {
+          setHeld((prev) =>
+            prev.length > 0
+              ? prev
+              : stats.heldTokenIds!.map((tokenId) => ({ tokenId, imageUrl: null }))
+          );
+        }
       })
       .finally(() => {
         if (!cancelled) setHeldLoading(false);
@@ -65,7 +96,7 @@ export default function VaultDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [heldTokenCount]);
+  }, [heldTokenCount, stats?.heldTokenIds]);
 
   if (!stats) {
     return <p className="py-4 text-center text-xs text-foreground/45">Reading vault dashboard…</p>;
@@ -90,12 +121,18 @@ export default function VaultDashboard() {
         {statCell("Held", String(stats.heldTokenCount))}
         {statCell(
           "APR",
-          stats.aprPct != null ? `${stats.aprPct.toFixed(1)}%` : "—",
           stats.aprPct != null
-            ? "est."
+            ? `${stats.aprPct >= 1000 ? stats.aprPct.toFixed(0) : stats.aprPct.toFixed(1)}%`
+            : "—",
+          stats.aprPct != null
+            ? stats.aprBasisHours != null
+              ? `est. · ${stats.aprBasisHours.toFixed(1)}h fees`
+              : "est. from mint/redeem fees"
             : stats.aprBasisHours != null
-              ? `${stats.aprBasisHours.toFixed(1)}h data`
-              : "no data"
+              ? `${stats.aprBasisHours.toFixed(1)}h history`
+              : stats.depositCount > 0
+                ? "computing…"
+                : "no fee history"
         )}
       </div>
 
@@ -143,7 +180,15 @@ export default function VaultDashboard() {
                   title={r ? `${r.name} · #${t.tokenId} · Rank #${r.rank} · ${r.tier}` : `#${t.tokenId}`}
                 >
                   {t.imageUrl ? (
-                    <Image src={t.imageUrl} alt={`#${t.tokenId}`} fill sizes="80px" className="object-cover" unoptimized />
+                    <CachedNftImage
+                      imageUrl={t.imageUrl}
+                      tokenId={t.tokenId}
+                      alt={`#${t.tokenId}`}
+                      fill
+                      sizes="80px"
+                      className="object-cover"
+                      vault
+                    />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-[0.55rem] text-foreground/30">
                       #{t.tokenId}
