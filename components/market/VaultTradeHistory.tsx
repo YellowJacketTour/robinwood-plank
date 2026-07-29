@@ -5,9 +5,9 @@ import { useVaultLive, type VaultTradeKind } from "@/lib/market/useVaultLive";
 import { usePendingVaultTx } from "@/lib/market/pendingVaultTx";
 import ScrollBox from "@/components/market/ScrollBox";
 import {
-  MARKET_VAULT_ADDRESS,
-  MARKET_VAULT_LEGACY_ADDRESS,
-} from "@/lib/constants";
+  vaultColorKind,
+  VAULT_LABEL_CLASS,
+} from "@/lib/market/vault-registry";
 
 const KIND_LABEL: Record<VaultTradeKind, string> = {
   buy: "Buy shares",
@@ -27,16 +27,15 @@ function shortAddr(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
-function vaultTag(vaultAddress?: string): string {
-  if (!vaultAddress) return "";
-  const v = vaultAddress.toLowerCase();
-  if (MARKET_VAULT_LEGACY_ADDRESS && v === MARKET_VAULT_LEGACY_ADDRESS.toLowerCase()) {
-    return "V1";
-  }
-  if (MARKET_VAULT_ADDRESS && v === MARKET_VAULT_ADDRESS.toLowerCase()) {
-    return "V2";
-  }
-  return shortAddr(vaultAddress);
+function vaultTag(vaultAddress?: string): { text: string; className: string } | null {
+  if (!vaultAddress) return null;
+  const kind = vaultColorKind(vaultAddress);
+  if (kind === "v1") return { text: "V1", className: VAULT_LABEL_CLASS.v1 };
+  if (kind === "v2") return { text: "V2", className: VAULT_LABEL_CLASS.v2 };
+  return {
+    text: shortAddr(vaultAddress),
+    className: VAULT_LABEL_CLASS.unknown,
+  };
 }
 
 function pricePerShare(ethWei: string | null, sharesWei: string | null): string {
@@ -168,11 +167,17 @@ export default function VaultTradeHistory() {
                 >
                   <td className={`px-2 py-1.5 font-bold ${KIND_COLOR[e.kind]}`}>
                     {KIND_LABEL[e.kind]}
-                    {e.vaultAddress ? (
-                      <span className="ml-1 font-mono text-[0.55rem] font-normal text-foreground/35">
-                        {vaultTag(e.vaultAddress)}
-                      </span>
-                    ) : null}
+                    {(() => {
+                      const tag = vaultTag(e.vaultAddress);
+                      if (!tag) return null;
+                      return (
+                        <span
+                          className={`ml-1 inline-block rounded border px-1 py-px text-[0.55rem] font-extrabold uppercase tracking-wide ${tag.className}`}
+                        >
+                          {tag.text}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="px-2 py-1.5 font-mono text-foreground/70">
                     {e.ethWei != null

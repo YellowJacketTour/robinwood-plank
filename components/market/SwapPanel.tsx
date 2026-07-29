@@ -28,7 +28,12 @@ import {
   vaultSupportsContributeLiquidity,
   vaultSupportsRemoveLiquidity,
 } from "@/lib/market/vault";
-import { shortVault } from "@/lib/market/vault-registry";
+import {
+  shortVault,
+  vaultColorKind,
+  VAULT_LABEL_CLASS,
+  VAULT_TEXT_CLASS,
+} from "@/lib/market/vault-registry";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
@@ -964,7 +969,23 @@ export default function SwapPanel({
         <div className="min-w-0">
           <p className="truncate font-display text-base text-foreground">
             {collection?.name ?? "Collection"} ·{" "}
-            {vaultLabel ?? (isPrimaryVault ? "V2 vault" : "V1 vault")}
+            {(() => {
+              const kind = vaultColorKind(
+                vaultAddress ?? (isPrimaryVault ? "primary" : "legacy")
+              );
+              const label =
+                vaultLabel ?? (kind === "v1" ? "V1 vault" : kind === "v2" ? "V2 vault" : "Vault");
+              return (
+                <span className="inline-flex items-center gap-1.5">
+                  <span
+                    className={`rounded border px-1.5 py-0.5 text-[0.65rem] font-extrabold uppercase tracking-wide ${VAULT_LABEL_CLASS[kind]}`}
+                  >
+                    {kind === "v1" ? "V1" : kind === "v2" ? "V2" : "Vault"}
+                  </span>
+                  <span className={VAULT_TEXT_CLASS[kind]}>{label}</span>
+                </span>
+              );
+            })()}
           </p>
           <p className="text-[0.65rem] text-foreground/50">
             {activeMode.hint}

@@ -192,8 +192,13 @@ export default function VaultMigrate({ account, onConnect }: Props) {
 
       {/* Status strip */}
       <div className="grid gap-2 sm:grid-cols-2">
-        <div className="rounded-lg border border-gold-500/25 bg-black/25 px-3 py-2 text-xs">
-          <p className="font-bold uppercase tracking-wide text-foreground/45">Legacy (keep redeeming here)</p>
+        <div className="rounded-lg border border-orange-500/35 bg-orange-500/5 px-3 py-2 text-xs">
+          <p className="font-bold uppercase tracking-wide text-orange-400">
+            <span className="rounded border border-orange-400/50 bg-orange-500/15 px-1.5 py-0.5 text-[0.65rem]">
+              V1
+            </span>{" "}
+            Legacy (keep redeeming here)
+          </p>
           <a
             href={explorerAddr(legacyAddr)}
             target="_blank"
@@ -211,8 +216,11 @@ export default function VaultMigrate({ account, onConnect }: Props) {
             </p>
           )}
         </div>
-        <div className="rounded-lg border border-gold-500/25 bg-black/25 px-3 py-2 text-xs">
-          <p className="font-bold uppercase tracking-wide text-foreground/45">
+        <div className="rounded-lg border border-emerald-500/35 bg-emerald-500/5 px-3 py-2 text-xs">
+          <p className="font-bold uppercase tracking-wide text-emerald-400">
+            <span className="rounded border border-emerald-400/50 bg-emerald-500/15 px-1.5 py-0.5 text-[0.65rem]">
+              V2
+            </span>{" "}
             {v2Live ? "New vault (deposit + LP here)" : "New vault (not live yet)"}
           </p>
           {v2Live && primaryAddr ? (
