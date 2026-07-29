@@ -62,7 +62,9 @@ than forking or redeploying it.
 | Env var | Public? | Purpose |
 | --- | --- | --- |
 | `NEXT_PUBLIC_MARKET_ENABLED` | Yes | **Master gate.** `false`/unset renders only the status page. Do not flip without the audit below. |
-| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | **Server only** | Durable order-relay storage (Upstash/Vercel KV). Falls back to an ephemeral file store when unset. |
+| `DURABLE_KV_BACKEND` | **Server only** | Optional backend selector: `redis` for VPS Valkey/Redis or `upstash` for Vercel KV. |
+| `REDIS_URL` / `REDIS_PASSWORD` | **Server only** | Durable order-relay storage on a VPS Redis-compatible service such as Valkey. |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | **Server only** | Existing Upstash/Vercel KV storage and migration source. |
 | `NEXT_PUBLIC_MARKET_VAULT_ADDRESS` | Yes | Phase 2 liquidity vault. Unset until deployed **and audited**. |
 
 **Fees:** `$PLANK`/RobinWood trades are permanently **0%**. Other approved
@@ -103,6 +105,14 @@ npm run test:contracts # vault + audit regressions
 1. Import the repo.
 2. Set env vars in the dashboard (not in git).
 3. Deploy.
+
+## Deploy (InMotion VPS)
+
+The `inmotion` branch includes a standalone Next.js Docker image, private
+persistent Valkey, an Upstash-to-Valkey migration tool, reverse-proxy example,
+and guarded GitHub Actions CI/CD. Follow
+[`docs/INMOTION_DEPLOYMENT.md`](docs/INMOTION_DEPLOYMENT.md). Do not use the
+JSON-file order fallback for production.
 
 ## Notes
 

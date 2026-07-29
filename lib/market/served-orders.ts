@@ -1,6 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 
 /**
  * A durable record of Seaport order hashes WE served — the only honest basis
@@ -17,16 +20,17 @@ import { kv } from "@vercel/kv";
  * an order, and Activity cross-checks against it, never inferring from the
  * executing contract alone.
  *
- * Backend mirrors lib/market/orders-store.ts exactly: Vercel KV (a Redis SET,
- * so membership checks are O(1) and additions are naturally idempotent) when
- * configured, else a file + in-process Set for local dev.
+ * Backend mirrors lib/market/orders-store.ts exactly: Redis/Valkey or
+ * Upstash/Vercel KV (a Redis SET, so membership checks are O(1) and additions
+ * are naturally idempotent) when configured, else a file + in-process Set for
+ * local dev.
  */
 
 const KV_SET_KEY = "plank:market:served-order-hashes";
 const DATA_PATH = path.join(process.cwd(), ".data", "served-order-hashes.json");
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
 }
 
 type GlobalServed = { __plankServedOrderHashes?: Set<string> };

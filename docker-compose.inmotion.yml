@@ -1,0 +1,135 @@
+name: plank-love
+
+services:
+  app:
+    image: ${PLANK_IMAGE:-plank-love-inmotion:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DEPLOYMENT_VERSION: ${DEPLOYMENT_VERSION:-local}
+        NEXT_PUBLIC_MARKET_ENABLED: ${NEXT_PUBLIC_MARKET_ENABLED:-false}
+        NEXT_PUBLIC_MARKET_VAULT_ADDRESS: ${NEXT_PUBLIC_MARKET_VAULT_ADDRESS:-}
+        NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS: ${NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS:-}
+        NEXT_PUBLIC_MINT_START_AT: ${NEXT_PUBLIC_MINT_START_AT:-}
+        NEXT_PUBLIC_ROBINHOOD_RPC_URL: ${NEXT_PUBLIC_ROBINHOOD_RPC_URL:-}
+        NEXT_PUBLIC_RULES_RELAXED: ${NEXT_PUBLIC_RULES_RELAXED:-false}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://plank.love}
+        NEXT_PUBLIC_TRADE_OPENS_AT: ${NEXT_PUBLIC_TRADE_OPENS_AT:-}
+        NEXT_PUBLIC_TRADE_PAUSED: ${NEXT_PUBLIC_TRADE_PAUSED:-false}
+        NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID:-}
+    init: true
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DURABLE_KV_BACKEND: ${DURABLE_KV_BACKEND:-redis}
+      REDIS_URL: redis://valkey:6379
+      REDIS_PASSWORD: ${VALKEY_PASSWORD:?Set VALKEY_PASSWORD in .env.inmotion}
+      KV_REST_API_URL: ${KV_REST_API_URL:-}
+      KV_REST_API_TOKEN: ${KV_REST_API_TOKEN:-}
+      UNISWAP_API_KEY: ${UNISWAP_API_KEY:-}
+      RELAYER_PRIVATE_KEY: ${RELAYER_PRIVATE_KEY:-}
+      CRON_SECRET: ${CRON_SECRET:-}
+      RPC_URL: ${RPC_URL:-https://rpc.mainnet.chain.robinhood.com}
+      BEACON_ADDRESS: ${BEACON_ADDRESS:-0x87d584df130FED0Fe540954eD48CE2691A18D619}
+      AIRDROP_TOTAL_SUPPLY: ${AIRDROP_TOTAL_SUPPLY:-}
+      AIRDROP_POOL_TOKENS: ${AIRDROP_POOL_TOKENS:-}
+      AIRDROP_PERCENT_OF_SUPPLY: ${AIRDROP_PERCENT_OF_SUPPLY:-}
+      AIRDROP_EXTRA: ${AIRDROP_EXTRA:-}
+      GOOD_WOOD_EXTRA: ${GOOD_WOOD_EXTRA:-}
+    ports:
+      - "${PLANK_BIND_ADDRESS:-127.0.0.1}:${PLANK_APP_PORT:-3000}:3000"
+    depends_on:
+      valkey:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    volumes:
+      - next_cache:/app/.next/cache
+      - boards_data:/app/data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    networks:
+      - frontend
+      - data
+
+  valkey:
+    image: valkey/valkey:8.1-alpine
+    restart: unless-stopped
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?Set VALKEY_PASSWORD in .env.inmotion}
+    command:
+      - sh
+      - -ec
+      - >-
+        exec valkey-server
+        --appendonly yes
+        --appendfsync everysec
+        --save 900 1
+        --save 300 10
+        --requirepass "$$VALKEY_PASSWORD"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - valkey-cli --no-auth-warning -a "$$VALKEY_PASSWORD" ping | grep -q PONG
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - valkey_data:/data
+    networks:
+      - data
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  # One-time copy of existing production Upstash data into the private VPS
+  # Valkey. It is excluded from normal `up` commands by the tools profile and
+  # refuses to write unless the command explicitly includes --apply.
+  kv-migrate:
+    profiles:
+      - tools
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tools
+    environment:
+      KV_REST_API_URL: ${KV_REST_API_URL:-}
+      KV_REST_API_TOKEN: ${KV_REST_API_TOKEN:-}
+      REDIS_URL: redis://valkey:6379
+      REDIS_PASSWORD: ${VALKEY_PASSWORD:?Set VALKEY_PASSWORD in .env.inmotion}
+    command:
+      - node
+      - scripts/migrate-upstash-to-redis.mjs
+    depends_on:
+      valkey:
+        condition: service_healthy
+    networks:
+      - frontend
+      - data
+
+networks:
+  frontend:
+  data:
+    internal: true
+
+volumes:
+  valkey_data:
+  next_cache:
+  boards_data:

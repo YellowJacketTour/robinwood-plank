@@ -10,7 +10,10 @@ import {
   fetchTokenTransfers,
   fetchTxTokenTransfers,
 } from "@/lib/market/blockscout";
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 
 // Canonical Seaport 1.6 OrderFulfilled event, copied from
 // @opensea/seaport-js's own compiled artifact (src/artifacts/seaport/...),
@@ -265,7 +268,7 @@ const SALES_KV_TTL = 6 * 60 * 60;
 type PricedSaleKey = string; // txHash:tokenId
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
 }
 
 function isMarketplaceMethod(method: string): boolean {

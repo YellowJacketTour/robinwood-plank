@@ -1,4 +1,7 @@
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 import { fetchNftMetadata } from "@/lib/ipfs";
 import type { NftAttribute } from "@/lib/ipfs";
 import { fetchTokenInstances } from "@/lib/market/blockscout";
@@ -58,7 +61,7 @@ function g(): Record<string, BuildState> {
 }
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
 }
 
 function kvKey(slug: string): string {

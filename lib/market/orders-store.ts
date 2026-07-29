@@ -1,6 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 import type { Listing, Offer } from "@/lib/market/types";
 
 /**
@@ -10,10 +13,10 @@ import type { Listing, Offer } from "@/lib/market/types";
  * lib/market/signature.ts), so the server cannot forge or alter one; it can
  * only lose or serve them.
  *
- * Backend: Vercel KV when KV_REST_API_URL / KV_REST_API_TOKEN are set (the
- * durable, cross-instance-safe path). Falls back to a file + in-memory
- * globalThis cache otherwise — fine for local dev, not durable on Vercel's
- * serverless filesystem in production.
+ * Backend: Redis/Valkey via REDIS_URL, or Upstash/Vercel KV via its REST
+ * credentials (both durable, cross-instance-safe paths). Falls back to a file
+ * + in-memory globalThis cache otherwise — fine for local dev, not durable on
+ * a serverless filesystem in production.
  *
  * CONCURRENCY (audit finding 6): the old design stored the whole book under a
  * single KV key and did read-modify-write with no compare-and-set, so two
@@ -40,7 +43,7 @@ const KV_LISTINGS = "plank:market:listings";
 const KV_OFFERS = "plank:market:offers";
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
 }
 
 function emptyState(): OrdersState {
@@ -99,7 +102,7 @@ function withFileLock<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-// --- Vercel KV backend (per-field hashes) ------------------------------
+// --- Durable KV backend (per-field hashes) -----------------------------
 
 async function kvGetAll<T>(hashKey: string): Promise<Record<string, T>> {
   const all = await kv.hgetall<Record<string, T>>(hashKey);

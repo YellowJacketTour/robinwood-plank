@@ -3,7 +3,10 @@ import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import { BLOCKSCOUT_BASE, fetchNftsHeldBy } from "@/lib/market/blockscout";
 import { resolveIpfsUrl } from "@/lib/ipfs";
 import { resolveTokenImage } from "@/lib/market/token-image";
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 
 /**
  * Vault holdings via Blockscout REST (IDs + images) with KV fallback.
@@ -31,7 +34,7 @@ export type HeldTokenRow = { tokenId: string; imageUrl: string | null };
 const memCaches = new Map<string, { at: number; rows: HeldTokenRow[] }>();
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
 }
 
 /** Generic unrevealed placeholder CID used for pre-reveal metadata. */
