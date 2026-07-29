@@ -121,12 +121,22 @@ export default function VaultTradeHistory() {
             <tbody>
               {visiblePending.map((p) => (
                 <tr key={p.txHash} className="border-b border-gold-500/10 bg-gold-500/5 last:border-0">
-                  <td className={`px-2 py-1.5 font-bold ${KIND_COLOR[p.kind]}`}>{KIND_LABEL[p.kind]}</td>
+                  <td className={`px-2 py-1.5 font-bold ${KIND_COLOR[p.kind]}`}>
+                    {p.role === "settle" ? "Settle redeem" : KIND_LABEL[p.kind]}
+                  </td>
                   <td className="px-2 py-1.5 font-mono text-foreground/70">
-                    {p.ethWei != null ? `${formatTokenAmount(p.ethWei, 18, 4)} Ξ` : p.tokenId != null ? `#${p.tokenId}` : "—"}
+                    {p.ethWei != null
+                      ? `${formatTokenAmount(p.ethWei, 18, 4)} Ξ`
+                      : p.tokenId != null
+                        ? `#${p.tokenId}`
+                        : p.role === "settle"
+                          ? "→ other wallet"
+                          : "—"}
                   </td>
                   <td className="px-2 py-1.5 font-mono text-foreground/45">—</td>
-                  <td className="px-2 py-1.5 font-mono text-foreground/45">you</td>
+                  <td className="px-2 py-1.5 font-mono text-foreground/45">
+                    {p.role === "settle" ? "you (gas)" : "you"}
+                  </td>
                   <td className="px-2 py-1.5 text-right">
                     <span className="inline-flex items-center gap-1 text-amber-300">
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />

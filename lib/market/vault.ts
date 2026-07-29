@@ -9,6 +9,7 @@ import {
   waitForTransaction,
 } from "@/lib/wallet";
 import { relayDrandRound } from "@/lib/market/drand";
+import { clearPendingVaultTx } from "@/lib/market/pendingVaultTx";
 
 /**
  * Thin wrapper around contracts/MarketplankVault.sol — UNAUDITED, not
@@ -127,7 +128,14 @@ async function sendVaultTx(
   // lets the UI show a "pending" row immediately instead of only after
   // waitForTransaction resolves below.
   onSubmitted?.(hash);
-  await waitForTransaction(hash, { label: "Vault transaction" });
+  try {
+    await waitForTransaction(hash, { label: "Vault transaction" });
+  } finally {
+    // Always drop optimistic pending once the wallet tx finishes (success or
+    // fail). Dual-vault activity feed is primary-only, so settle-for-others
+    // on legacy never matched a stream hash and stuck "Pending · you" forever.
+    clearPendingVaultTx(hash);
+  }
   return hash;
 }
 

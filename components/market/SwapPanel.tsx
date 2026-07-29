@@ -228,18 +228,30 @@ function StuckRedeemRelay({
           account,
           requester,
           (txHash) =>
-            addPendingVaultTx({ txHash, kind: "redeem", ethWei: null, tokenId: null }),
+            addPendingVaultTx({
+              txHash,
+              kind: "redeem",
+              ethWei: null,
+              tokenId: null,
+              role: "settle",
+            }),
           vaultAddress
         );
         setRequester(null);
-        setStatus("Settled — NFT delivered to requester.");
+        setStatus("Settled — NFT delivered to the original redeemer (not your inventory).");
       } else {
         setStatus("Forfeiting expired unpinned request…");
         await forfeitExpiredRedeem(
           account,
           requester,
           (txHash) =>
-            addPendingVaultTx({ txHash, kind: "redeem", ethWei: null, tokenId: null }),
+            addPendingVaultTx({
+              txHash,
+              kind: "redeem",
+              ethWei: null,
+              tokenId: null,
+              role: "settle",
+            }),
           vaultAddress
         );
         setRequester(null);

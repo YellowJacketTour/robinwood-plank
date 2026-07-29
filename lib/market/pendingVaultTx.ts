@@ -8,6 +8,11 @@ export type PendingVaultTx = {
   ethWei: string | null;
   tokenId: string | null;
   submittedAt: number;
+  /**
+   * Who the optimistic row is for. Default "you".
+   * "settle" = you paid gas to claimRandomRedeemFor someone else (NFT goes to them).
+   */
+  role?: "you" | "settle";
 };
 
 /** A wallet popup can sit unsigned/unmined far longer than any normal
