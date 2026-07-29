@@ -113,8 +113,8 @@ export default function InstantVaultSwitcher({ role, onChange }: Props) {
           const isV1Card = kind === "v1";
           const title = isV1Card ? "V1 — legacy deposits" : "V2 — new Instant Swap";
           const blurb = isV1Card
-            ? "Original vault · redeem holdings · existing inventory path"
-            : "New book · Add/Remove LP when open · seed/bootstrap if closed";
+            ? "Original vault · deposit & redeem · no tracked Add/Remove LP"
+            : "New book · deposit, redeem, Add LP & Remove LP · Instant Swap";
           const badgeClass = VAULT_LABEL_CLASS[kind];
           const activeRing = isV1Card
             ? "border-orange-400 bg-orange-500/15 ring-2 ring-orange-400/40"
