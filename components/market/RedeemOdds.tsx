@@ -103,21 +103,21 @@ export default function RedeemOdds() {
 
   if (!stats && heldCount === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/25 bg-black/10 px-3 py-4 text-center text-xs text-foreground/45">
+      <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-4 text-center text-xs text-foreground/45">
         Loading vault odds…
       </p>
     );
   }
   if (heldCount === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/25 bg-black/10 px-3 py-4 text-center text-xs text-foreground/45">
+      <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-4 text-center text-xs text-foreground/45">
         Vault holds nothing to draw from right now.
       </p>
     );
   }
   if (rarity.size === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/25 bg-black/10 px-3 py-4 text-center text-xs text-foreground/45">
+      <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-4 text-center text-xs text-foreground/45">
         Loading rarity map for redeem odds…
       </p>
     );
@@ -126,7 +126,7 @@ export default function RedeemOdds() {
   const scoredHeld = heldCount - unscoredCount;
 
   return (
-    <div className="space-y-2 rounded-lg border border-gold-500/15 bg-black/20 p-3">
+    <div className="space-y-2 rounded-lg border border-gold-500/15 bg-wood-950/90 p-3">
       <div className="flex items-baseline justify-between gap-2">
         <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
           Random redeem odds
@@ -156,7 +156,7 @@ export default function RedeemOdds() {
                   </span>
                   <span className="font-mono text-foreground/70">{pct.toFixed(1)}%</span>
                 </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-wood-900/80">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-wood-900/90">
                   <div
                     className="h-full rounded-full transition-[width]"
                     style={{ width: `${Math.max(pct > 0 ? pct : 0, 0)}%`, background: color }}

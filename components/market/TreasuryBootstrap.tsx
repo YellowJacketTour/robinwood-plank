@@ -150,7 +150,7 @@ export default function TreasuryBootstrap({ account }: Props) {
 
   if (loading || !status) {
     return (
-      <div className="rounded-xl border border-gold-500/30 bg-black/20 p-4 text-sm text-foreground/70">
+      <div className="rounded-xl border border-gold-500/30 bg-wood-950/90 p-4 text-sm text-foreground/70">
         Loading seed interface (NFT picker + ETH)…
       </div>
     );
@@ -271,29 +271,29 @@ export default function TreasuryBootstrap({ account }: Props) {
   const canOpen = status.shareReserve > BigInt(0) && status.ethReserveWei > BigInt(0);
 
   return (
-    <div className="space-y-3 rounded-xl border-2 border-dashed border-gold-500/40 bg-black/20 p-3">
+    <div className="space-y-3 rounded-xl border-2 border-dashed border-gold-500/40 bg-wood-950/90 p-3">
       <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.14em] text-gold-300">
         Treasury bootstrap — only you can see this
       </p>
 
       <dl className="grid grid-cols-2 gap-2 text-center">
-        <div className="rounded-lg border border-gold-500/20 bg-black/20 py-2">
+        <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 py-2">
           <dt className="text-[0.6rem] text-foreground/45">NFTs in vault</dt>
           <dd className="font-display text-lg text-gold-300">{status.heldCount.toString()}</dd>
         </div>
-        <div className="rounded-lg border border-gold-500/20 bg-black/20 py-2">
+        <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 py-2">
           <dt className="text-[0.6rem] text-foreground/45">Your unseeded shares</dt>
           <dd className="font-display text-lg text-gold-300">
             {formatTokenAmount(status.treasuryShareBalance, 18, 2)}
           </dd>
         </div>
-        <div className="rounded-lg border border-gold-500/20 bg-black/20 py-2">
+        <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 py-2">
           <dt className="text-[0.6rem] text-foreground/45">Pool shares (seeded)</dt>
           <dd className="font-display text-lg text-gold-300">
             {formatTokenAmount(status.shareReserve, 18, 2)}
           </dd>
         </div>
-        <div className="rounded-lg border border-gold-500/20 bg-black/20 py-2">
+        <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 py-2">
           <dt className="text-[0.6rem] text-foreground/45">Pool ETH (seeded)</dt>
           <dd className="font-display text-lg text-gold-300">
             {formatTokenAmount(status.ethReserveWei, 18, 4)} Ξ
@@ -301,7 +301,7 @@ export default function TreasuryBootstrap({ account }: Props) {
         </div>
       </dl>
 
-      <div className="space-y-2 rounded-lg border border-gold-500/20 bg-wood-900/50 p-2.5">
+      <div className="space-y-2 rounded-lg border border-gold-500/20 bg-wood-900/90 p-2.5">
         <p className="text-[0.65rem] font-bold text-foreground/60">
           1) Tap planks to deposit. 2) Set ETH below (editable). 3) Deposit &amp; seed.
           {avgPriceWei != null

@@ -37,7 +37,7 @@ export default function ComingSoonGate() {
       </ul>
       <a
         href="#trade"
-        className="inline-flex min-h-11 items-center justify-center rounded-lg border border-gold-500/40 bg-wood-900/60 px-4 text-sm font-bold text-gold-300 transition hover:border-gold-400"
+        className="inline-flex min-h-11 items-center justify-center rounded-lg border border-gold-500/40 bg-wood-900/90 px-4 text-sm font-bold text-gold-300 transition hover:border-gold-400"
       >
         Trade on Uniswap instead ↗
       </a>

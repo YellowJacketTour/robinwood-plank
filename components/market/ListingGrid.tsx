@@ -50,7 +50,7 @@ export default function ListingGrid({
 
   if (listings.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/40 px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
         {emptyMessage}
       </p>
     );

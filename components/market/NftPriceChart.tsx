@@ -306,15 +306,15 @@ export default function NftPriceChart() {
         </div>
       </div>
       {points != null && points.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-gold-500/25 bg-black/10 px-3 py-10 text-center text-xs text-foreground/45">
+        <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-10 text-center text-xs text-foreground/45">
           No priced vault trades or sales yet — chart fills in as they print.
         </p>
       ) : points == null ? (
-        <p className="rounded-lg border border-dashed border-gold-500/25 bg-black/10 px-3 py-10 text-center text-xs text-foreground/45">
+        <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-10 text-center text-xs text-foreground/45">
           Loading price history…
         </p>
       ) : (
-        <div ref={containerRef} className="w-full min-h-[260px] overflow-hidden rounded-lg border border-gold-500/15 bg-black/10" />
+        <div ref={containerRef} className="w-full min-h-[260px] overflow-hidden rounded-lg border border-gold-500/15 bg-wood-950/90" />
       )}
     </div>
   );

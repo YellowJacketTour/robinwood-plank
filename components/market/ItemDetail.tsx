@@ -221,7 +221,7 @@ export default function ItemDetail({
             </div>
 
             {sendOpen && !sendDone && account && (
-              <div className="space-y-2 rounded-lg border border-gold-500/25 bg-black/20 p-2.5">
+              <div className="space-y-2 rounded-lg border border-gold-500/25 bg-wood-950/90 p-2.5">
                 <div className="flex items-center justify-between text-[0.65rem] text-foreground/50">
                   <span>Send fee</span>
                   <span className="font-mono font-bold text-gold-300">
@@ -238,7 +238,7 @@ export default function ItemDetail({
                     setSendConfirming(false);
                     setSendError(null);
                   }}
-                  className="min-h-10 w-full rounded-lg border border-gold-500/30 bg-wood-900/70 px-2.5 font-mono text-xs text-foreground outline-none focus:border-gold-400"
+                  className="min-h-10 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 font-mono text-xs text-foreground outline-none focus:border-gold-400"
                 />
                 {sendConfirming && !sendBusy && (
                   <p className="rounded-lg border border-red-500/30 bg-red-950/20 px-2 py-1.5 text-center text-[0.65rem] text-red-200">

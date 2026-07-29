@@ -132,7 +132,7 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
   return (
     <div className="space-y-3">
       {mine.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/40 px-4 py-8 text-center text-sm text-foreground/60">
+        <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
           Nothing active.
         </p>
       ) : (

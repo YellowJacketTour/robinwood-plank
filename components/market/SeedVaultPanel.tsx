@@ -80,7 +80,7 @@ export default function SeedVaultPanel({ account, onConnect }: Props) {
         </p>
       </div>
 
-      <div className="rounded-lg border border-gold-500/25 bg-black/30 px-3 py-2 font-mono text-[0.7rem] text-gold-200/90">
+      <div className="rounded-lg border border-gold-500/25 bg-wood-950/90 px-3 py-2 font-mono text-[0.7rem] text-gold-200/90">
         <a
           href={`${CHAIN.blockExplorers.default.url}/address/${primary}`}
           target="_blank"
@@ -112,7 +112,7 @@ export default function SeedVaultPanel({ account, onConnect }: Props) {
         <div className="space-y-2">
           <p className="text-sm text-foreground/70">
             Connect treasury{" "}
-            <code className="rounded bg-black/40 px-1 font-mono text-xs break-all">{treasury}</code>
+            <code className="rounded bg-wood-950/90 px-1 font-mono text-xs break-all">{treasury}</code>
           </p>
           <button
             type="button"

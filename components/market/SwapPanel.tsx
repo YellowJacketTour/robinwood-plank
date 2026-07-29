@@ -102,7 +102,7 @@ function TokenPreviewCard({ tokenId }: { tokenId: string }) {
   if (!tokenId) return null;
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5">
+    <div className="flex items-center gap-3 rounded-lg border border-gold-500/20 bg-wood-950/90 px-3 py-2.5">
       <div
         className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-wood-900"
         style={
@@ -1094,7 +1094,7 @@ export default function SwapPanel({
       {/* Header: collection art leads, same "visually dominant" rule as
           every other surface — this used to be a bare form with no branding
           or context at all. */}
-      <div className="flex items-center gap-3 border-b border-gold-500/20 bg-black/20 px-4 py-3">
+      <div className="flex items-center gap-3 border-b border-gold-500/20 bg-wood-950/90 px-4 py-3">
         <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-gold-500/30">
           <Image
             src={collection?.image ?? "/images/plank-logo.webp"}
@@ -1143,7 +1143,7 @@ export default function SwapPanel({
         {/* Existing deposits: shares live in the wallet on this vault address.
             Never strand them by switching MARKET_VAULT_ADDRESS without redeem. */}
         {account && (
-          <div className="rounded-lg border border-gold-500/25 bg-black/25 px-3 py-2 text-[0.7rem] leading-relaxed text-foreground/75">
+          <div className="rounded-lg border border-gold-500/25 bg-wood-950/90 px-3 py-2 text-[0.7rem] leading-relaxed text-foreground/75">
             <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
               <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
                 <span>
@@ -1190,7 +1190,7 @@ export default function SwapPanel({
         <StuckRedeemRelay account={account} vaultAddress={vaultAddress} />
         <PendingRedeemClaim account={account} vaultAddress={vaultAddress} />
 
-        <div className="grid grid-cols-3 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/50 p-1 sm:grid-cols-5">
+        <div className="grid grid-cols-3 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/90 p-1 sm:grid-cols-5">
           {MODES.map((m) => (
             <button
               key={m.id}
@@ -1206,7 +1206,7 @@ export default function SwapPanel({
         </div>
 
         {(mode === "buy" || mode === "sell") && (
-          <div className="rounded-lg border border-gold-500/30 bg-wood-900/70 p-2.5">
+          <div className="rounded-lg border border-gold-500/30 bg-wood-900/90 p-2.5">
             <div className="flex items-center justify-between gap-2 text-[0.6rem] font-bold uppercase tracking-wide text-foreground/45">
               <span>You pay</span>
               <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 font-normal normal-case">
@@ -1273,7 +1273,7 @@ export default function SwapPanel({
 
         {mode === "lp" && (
           <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-1 rounded-lg border border-gold-500/20 bg-black/20 p-1">
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-gold-500/20 bg-wood-950/90 p-1">
               <button
                 type="button"
                 onClick={() => {
@@ -1333,12 +1333,12 @@ export default function SwapPanel({
               )}
             </p>
             {lpCredit && (lpCredit.shareCredit > BigInt(0) || lpCredit.ethCredit > BigInt(0)) && (
-              <p className="rounded-md border border-gold-500/20 bg-black/15 px-2 py-1.5 text-[0.65rem] text-gold-200/90">
+              <p className="rounded-md border border-gold-500/20 bg-wood-950/90 px-2 py-1.5 text-[0.65rem] text-gold-200/90">
                 Your LP credit: {formatTokenAmount(lpCredit.shareCredit, 18, 4)} shares ·{" "}
                 {formatTokenAmount(lpCredit.ethCredit, 18, 5)} Ξ
               </p>
             )}
-            <div className="rounded-xl border border-gold-500/30 bg-wood-900/70 px-3 py-2.5">
+            <div className="rounded-xl border border-gold-500/30 bg-wood-900/90 px-3 py-2.5">
               <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
                 <span>{lpDirection === "remove" ? "Shares to remove" : "Shares to add"}</span>
                 <span className="flex flex-wrap items-center gap-2 font-normal normal-case">
@@ -1387,7 +1387,7 @@ export default function SwapPanel({
                 className="mt-1 w-full bg-transparent text-xl font-semibold text-foreground outline-none"
               />
             </div>
-            <div className="rounded-xl border border-gold-500/30 bg-wood-900/70 px-3 py-2.5">
+            <div className="rounded-xl border border-gold-500/30 bg-wood-900/90 px-3 py-2.5">
               <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
                 <span>
                   {lpDirection === "remove"
@@ -1510,7 +1510,7 @@ export default function SwapPanel({
         )}
 
         {(mode === "buy" || mode === "sell") && (
-          <div className="rounded-lg border border-dashed border-gold-500/25 bg-black/15 px-2.5 py-2">
+          <div className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-2.5 py-2">
             <div className="flex items-center justify-between gap-2 text-[0.6rem] font-bold uppercase tracking-wide text-foreground/45">
               <span>You receive</span>
               <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 font-normal normal-case">
@@ -1556,7 +1556,7 @@ export default function SwapPanel({
         )}
 
         {(mode === "buy" || mode === "sell") && (
-          <label className="flex items-center justify-between gap-2 rounded-lg border border-gold-500/20 bg-wood-900/50 px-2.5 py-2">
+          <label className="flex items-center justify-between gap-2 rounded-lg border border-gold-500/20 bg-wood-900/90 px-2.5 py-2">
             <span className="text-[0.7rem] text-foreground/60">Max slippage</span>
             <span className="flex items-center gap-1">
               <input
@@ -1594,7 +1594,7 @@ export default function SwapPanel({
 
         {mode === "redeem" && (
           <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/50 p-1">
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/90 p-1">
               <button
                 type="button"
                 onClick={() => setTokenId("")}
@@ -1646,7 +1646,7 @@ export default function SwapPanel({
                 className={`rounded-lg border px-2.5 py-2 text-[0.65rem] ${
                   redeemInsufficient
                     ? "border-red-500/40 bg-red-500/10 text-red-200"
-                    : "border-gold-500/20 bg-black/15 text-foreground/60"
+                    : "border-gold-500/20 bg-wood-950/90 text-foreground/60"
                 }`}
               >
                 <div className="flex items-center justify-between">

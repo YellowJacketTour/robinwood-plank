@@ -140,18 +140,18 @@ export default function VaultTradeHistory() {
       {loading ? (
         <div className="space-y-1">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-7 animate-pulse rounded bg-wood-900/60" />
+            <div key={i} className="h-7 animate-pulse rounded bg-wood-900/90" />
           ))}
         </div>
       ) : activity.length === 0 && visiblePending.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-gold-500/25 bg-black/10 px-3 py-4 text-center text-xs text-foreground/45">
+        <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-4 text-center text-xs text-foreground/45">
           No vault trades yet.
         </p>
       ) : (
         <ScrollBox
           storageKey="vault-trades"
           defaultHeight={256}
-          className="rounded-lg border border-gold-500/15 bg-black/10"
+          className="rounded-lg border border-gold-500/15 bg-wood-950/90"
         >
           <table className="w-full text-left text-[0.65rem]">
             <thead>

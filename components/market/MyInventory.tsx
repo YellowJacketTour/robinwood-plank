@@ -177,7 +177,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
   }
   if (inventory === null) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/40 px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
         Reading your planks from chain…
       </p>
     );
@@ -186,7 +186,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
   const totalOwned = inventory.reduce((n, g) => n + g.items.length, 0);
   if (totalOwned === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/40 px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
         This wallet holds no planks yet.
       </p>
     );
@@ -240,7 +240,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                       </span>
                     )}
                     {isListed && (
-                      <span className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
+                      <span className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/90 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
                         Listed
                       </span>
                     )}
@@ -253,7 +253,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                         {r.tier}
                       </span>
                     )}
-                    <span className="card-overlay legible-text absolute inset-x-1.5 bottom-1.5 flex flex-col rounded-lg bg-black/60 px-2 py-0.5 leading-tight">
+                    <span className="card-overlay legible-text absolute inset-x-1.5 bottom-1.5 flex flex-col rounded-lg bg-black/90 px-2 py-0.5 leading-tight">
                       <span className="truncate text-[0.6rem] font-bold text-foreground">
                         {r?.name ?? `#${item.tokenId}`}
                       </span>
@@ -314,7 +314,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                 value={samePrice}
                 disabled={busy}
                 onChange={(e) => setSamePrice(e.target.value.replace(/[^0-9.]/g, ""))}
-                className="mt-1 min-h-11 w-full rounded-lg border border-gold-500/30 bg-wood-900/70 px-2.5 text-foreground outline-none focus:border-gold-400"
+                className="mt-1 min-h-11 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 text-foreground outline-none focus:border-gold-400"
               />
             </label>
           ) : (
@@ -339,7 +339,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                           [key]: e.target.value.replace(/[^0-9.]/g, ""),
                         }))
                       }
-                      className="min-h-10 w-full rounded-lg border border-gold-500/30 bg-wood-900/70 px-2.5 text-sm text-foreground outline-none focus:border-gold-400"
+                      className="min-h-10 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 text-sm text-foreground outline-none focus:border-gold-400"
                     />
                   </li>
                 );
@@ -356,7 +356,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                 value={durationDays}
                 disabled={busy}
                 onChange={(e) => setDurationDays(Number(e.target.value))}
-                className="mt-1 min-h-11 w-full rounded-lg border border-gold-500/30 bg-wood-900/70 px-2.5 text-foreground"
+                className="mt-1 min-h-11 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 text-foreground"
               >
                 {DURATIONS.map((d) => (
                   <option key={d.days} value={d.days}>

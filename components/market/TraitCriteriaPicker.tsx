@@ -139,7 +139,7 @@ export default function TraitCriteriaPicker({
       {clauses.map((clause, idx) => (
         <div
           key={idx}
-          className={`flex flex-wrap items-end gap-1.5 ${dense ? "" : "rounded-md border border-gold-500/15 bg-black/20 p-2"}`}
+          className={`flex flex-wrap items-end gap-1.5 ${dense ? "" : "rounded-md border border-gold-500/15 bg-wood-950/90 p-2"}`}
         >
           {idx > 0 && (
             <span className="mb-1.5 text-[0.55rem] font-bold uppercase tracking-wide text-gold-400/70">
