@@ -4,6 +4,10 @@ import { formatTokenAmount } from "@/lib/trade";
 import { useVaultLive, type VaultTradeKind } from "@/lib/market/useVaultLive";
 import { usePendingVaultTx } from "@/lib/market/pendingVaultTx";
 import ScrollBox from "@/components/market/ScrollBox";
+import {
+  MARKET_VAULT_ADDRESS,
+  MARKET_VAULT_LEGACY_ADDRESS,
+} from "@/lib/constants";
 
 const KIND_LABEL: Record<VaultTradeKind, string> = {
   buy: "Buy shares",
@@ -21,6 +25,18 @@ const KIND_COLOR: Record<VaultTradeKind, string> = {
 
 function shortAddr(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
+}
+
+function vaultTag(vaultAddress?: string): string {
+  if (!vaultAddress) return "";
+  const v = vaultAddress.toLowerCase();
+  if (MARKET_VAULT_LEGACY_ADDRESS && v === MARKET_VAULT_LEGACY_ADDRESS.toLowerCase()) {
+    return "V1";
+  }
+  if (MARKET_VAULT_ADDRESS && v === MARKET_VAULT_ADDRESS.toLowerCase()) {
+    return "V2";
+  }
+  return shortAddr(vaultAddress);
 }
 
 function pricePerShare(ethWei: string | null, sharesWei: string | null): string {
@@ -146,8 +162,18 @@ export default function VaultTradeHistory() {
                 </tr>
               ))}
               {activity.map((e) => (
-                <tr key={e.txHash + e.kind + (e.tokenId ?? "")} className="border-b border-gold-500/10 last:border-0">
-                  <td className={`px-2 py-1.5 font-bold ${KIND_COLOR[e.kind]}`}>{KIND_LABEL[e.kind]}</td>
+                <tr
+                  key={`${e.vaultAddress || ""}:${e.txHash}:${e.kind}:${e.tokenId ?? ""}:${e.logIndex ?? ""}`}
+                  className="border-b border-gold-500/10 last:border-0"
+                >
+                  <td className={`px-2 py-1.5 font-bold ${KIND_COLOR[e.kind]}`}>
+                    {KIND_LABEL[e.kind]}
+                    {e.vaultAddress ? (
+                      <span className="ml-1 font-mono text-[0.55rem] font-normal text-foreground/35">
+                        {vaultTag(e.vaultAddress)}
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="px-2 py-1.5 font-mono text-foreground/70">
                     {e.ethWei != null
                       ? `${formatTokenAmount(e.ethWei, 18, 4)} Ξ`
