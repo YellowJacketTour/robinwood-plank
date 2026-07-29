@@ -1,17 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { MARKET_FEE_RECIPIENT, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import TreasuryBootstrap from "@/components/market/TreasuryBootstrap";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import {
   buyShares,
-  claimRandomRedeem,
   claimRandomRedeemFor,
   contributeLiquidity,
   decodeVaultError,
   depositForShares,
+  finishRandomRedeem,
   forfeitExpiredRedeem,
   getLpCredit,
   getPendingRequester,
@@ -22,7 +22,7 @@ import {
   quoteSellShares,
   redeemCostWei,
   removeLiquidity,
-  requestRandomRedeem,
+  requestAndFinishRandomRedeem,
   redeemTarget,
   sellShares,
   vaultSupportsContributeLiquidity,
@@ -335,10 +335,12 @@ function PendingRedeemClaim({
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const autoOnce = useRef(false);
 
   useEffect(() => {
     if (!account) {
       setIsPending(false);
+      autoOnce.current = false;
       return;
     }
     let cancelled = false;
@@ -366,6 +368,7 @@ function PendingRedeemClaim({
     if (!isPending) {
       setRound(null);
       setAvailable(false);
+      autoOnce.current = false;
       return;
     }
     let cancelled = false;
@@ -386,33 +389,16 @@ function PendingRedeemClaim({
     };
   }, [isPending, vaultAddress]);
 
-  if (!isPending) return null;
-
-  const claim = async () => {
+  const claim = useCallback(async () => {
     if (!account) return;
     setError(null);
     setBusy(true);
     try {
-      // If the round isn't on-chain yet, try relaying first (same wallet can
-      // do both). Without this, users saw "waiting…" forever when the GH
-      // relayer lagged and never clicked the separate global Relay banner.
-      if (!available && round != null && round > BigInt(0)) {
-        setStep("Relaying randomness…");
-        try {
-          await relayDrandRound(account, round);
-          setAvailable(true);
-        } catch (relayErr) {
-          // Round may not be published on drand yet — surface and keep polling.
-          throw relayErr;
-        }
-      }
-      setStep("Claiming NFT…");
-      await claimRandomRedeem(
-        account,
-        (txHash) =>
+      await finishRandomRedeem(account, vaultAddress, {
+        onProgress: (msg) => setStep(msg),
+        onSubmitted: (txHash) =>
           addPendingVaultTx({ txHash, kind: "redeem", ethWei: null, tokenId: null }),
-        vaultAddress
-      );
+      });
       setIsPending(false);
       setStep(null);
     } catch (e) {
@@ -421,38 +407,48 @@ function PendingRedeemClaim({
     } finally {
       setBusy(false);
     }
-  };
+  }, [account, vaultAddress]);
+
+  // If user already holds the slot (refreshed mid-flow or stepped away after
+  // step 1), automatically push relay + claim so the next redeemer is not blocked.
+  useEffect(() => {
+    if (!isPending || !account || busy || autoOnce.current) return;
+    autoOnce.current = true;
+    void claim();
+  }, [isPending, account, busy, claim]);
+
+  if (!isPending) return null;
 
   return (
     <div className="space-y-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3">
       <p className="text-xs font-bold uppercase tracking-wide text-amber-300">
-        Finish your random redeem (step 2 of 2)
+        Finishing your random redeem
       </p>
       <p className="text-xs text-foreground/70">
-        Your shares are already burned. The NFT only leaves the vault when you{" "}
-        <strong className="text-foreground/90">claim</strong>
-        {round != null ? ` (drand round ${round.toString()})` : ""}. This does not complete by
-        itself if you close the tab after step 1.
+        Shares are burned. We auto-relay randomness and claim the NFT so the vault-wide slot
+        frees for the next person
+        {round != null ? (
+          <>
+            {" "}
+            (drand round <span className="font-mono">{round.toString()}</span>)
+          </>
+        ) : null}
+        . Approve wallet prompts if they appear.
       </p>
       {available ? (
-        <p className="text-xs text-emerald-200/90">Randomness is on-chain — claim whenever ready.</p>
+        <p className="text-xs text-emerald-200/90">Randomness is on-chain — claim in progress…</p>
       ) : (
         <p className="text-xs text-foreground/55">
-          Waiting for randomness (~seconds to a few minutes). You can retry claim anytime; if the
-          round is public but not on-chain yet, the button will relay it first.
+          Waiting for / relaying randomness (~seconds). Keep this tab open.
         </p>
       )}
       <button
         type="button"
-        onClick={claim}
+        onClick={() => void claim()}
         disabled={busy}
         className="min-h-9 w-full rounded-lg bg-amber-400 text-xs font-bold uppercase text-wood-950 disabled:opacity-50"
       >
-        {busy
-          ? step ?? "Working…"
-          : available
-            ? "Claim your NFT now"
-            : "Relay + claim NFT"}
+        {busy ? step ?? "Working…" : "Retry relay + claim NFT"}
       </button>
       {error && <p className="text-xs text-red-300">{error}</p>}
     </div>
@@ -769,7 +765,7 @@ export default function SwapPanel({
       setError(decodeVaultError(e));
     } finally {
       setBusy(false);
-      setTimeout(() => setStatus(null), successLabel.startsWith("Step 1") ? 12_000 : 3_000);
+      setTimeout(() => setStatus(null), successLabel.includes("NFT") ? 8_000 : 3_000);
     }
   };
 
@@ -921,17 +917,17 @@ export default function SwapPanel({
         "Redeeming specific plank…"
       );
     }
-    // Step 1 only — NFT does not transfer until claimRandomRedeem (step 2).
+    // Full random redeem: after step-1 confirms, immediately relay + claim so
+    // the single vault-wide slot is not left for the next redeemer to free.
     return run(
       () =>
-        requestRandomRedeem(
-          account,
-          (txHash) =>
+        requestAndFinishRandomRedeem(account, vaultAddress, {
+          onProgress: (msg) => setStatus(msg),
+          onSubmitted: (txHash) =>
             addPendingVaultTx({ txHash, kind: "redeem", ethWei: null, tokenId: null }),
-          vaultAddress
-        ),
-      "Step 1/2: locking random redeem…",
-      "Step 1 done — use Claim your NFT above when ready (step 2)."
+        }),
+      "Random redeem: locking slot…",
+      "NFT claimed — redeem complete (slot free)."
     );
   };
 
@@ -1303,9 +1299,9 @@ export default function SwapPanel({
             <p className="text-[0.65rem] text-foreground/50">
               {!tokenId ? (
                 <>
-                  <strong className="text-foreground/70">Random</strong> is two wallet steps: (1)
-                  lock shares, (2) claim NFT after randomness. Only one random redeem can be in
-                  flight vault-wide.
+                  <strong className="text-foreground/70">Random</strong> locks the vault slot, then
+                  auto-relays randomness and claims so the next person is not stuck waiting. Keep
+                  this tab open and approve wallet prompts (usually 2–3 txs).
                 </>
               ) : (
                 <>
@@ -1407,7 +1403,7 @@ export default function SwapPanel({
                 : mode === "redeem"
                   ? tokenId
                     ? "Redeem this plank"
-                    : "Start random redeem (step 1/2)"
+                    : "Random redeem (auto-claim)"
                   : mode === "lp"
                     ? lpDirection === "remove"
                       ? "Remove LP"
