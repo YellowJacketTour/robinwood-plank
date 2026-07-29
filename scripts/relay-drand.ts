@@ -138,7 +138,7 @@ async function settlePendingVault(
     return;
   }
 
-  let round = 0n;
+  let round = BigInt(0);
   let available = false;
   try {
     const pend = (await vault.pendingRound()) as { round: bigint; available: boolean } | [bigint, boolean];
@@ -158,7 +158,7 @@ async function settlePendingVault(
     `vault ${vaultAddr}: pending requester ${requester} round ${round.toString()} available=${available}`
   );
 
-  if (round > 0n && !available) {
+  if (round > BigInt(0) && !available) {
     try {
       await relayRound(beacon, api, chainHash, round.toString());
       available = Boolean(await beacon.isRoundAvailable(round));
@@ -210,7 +210,7 @@ async function main() {
 
   const bal = await provider.getBalance(wallet.address);
   console.log(`relayer ${wallet.address} balance ${Number(bal) / 1e18} ETH`);
-  if (bal < 100000000000000n) {
+  if (bal < BigInt("100000000000000")) {
     // 0.0001 ETH
     console.warn("WARNING: relayer balance very low — fund gas-only wallet soon");
   }
