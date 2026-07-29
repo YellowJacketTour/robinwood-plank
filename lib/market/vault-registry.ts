@@ -36,6 +36,53 @@ export function shortVault(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
+/** UI color coding: V1 legacy = orange, V2 primary = green. */
+export type VaultColorKind = "v1" | "v2" | "unknown";
+
+export function vaultColorKind(
+  roleOrAddr?: VaultRole | string | null
+): VaultColorKind {
+  if (!roleOrAddr) return "unknown";
+  if (roleOrAddr === "legacy") return "v1";
+  if (roleOrAddr === "primary") {
+    // Primary may still be V1 if dual mode is not live yet
+    if (
+      MARKET_VAULT_ADDRESS &&
+      MARKET_VAULT_ADDRESS.toLowerCase() === MARKET_VAULT_V1_KNOWN.toLowerCase()
+    ) {
+      return "v1";
+    }
+    return "v2";
+  }
+  const a = roleOrAddr.toLowerCase();
+  if (
+    MARKET_VAULT_LEGACY_ADDRESS &&
+    a === MARKET_VAULT_LEGACY_ADDRESS.toLowerCase()
+  ) {
+    return "v1";
+  }
+  if (a === MARKET_VAULT_V1_KNOWN.toLowerCase()) return "v1";
+  if (MARKET_VAULT_ADDRESS && a === MARKET_VAULT_ADDRESS.toLowerCase()) {
+    return MARKET_VAULT_ADDRESS.toLowerCase() === MARKET_VAULT_V1_KNOWN.toLowerCase()
+      ? "v1"
+      : "v2";
+  }
+  return "unknown";
+}
+
+/** Tailwind classes for vault badges/labels. */
+export const VAULT_LABEL_CLASS: Record<VaultColorKind, string> = {
+  v1: "text-orange-400 border-orange-400/50 bg-orange-500/15",
+  v2: "text-emerald-400 border-emerald-400/50 bg-emerald-500/15",
+  unknown: "text-foreground/50 border-gold-500/25 bg-black/20",
+};
+
+export const VAULT_TEXT_CLASS: Record<VaultColorKind, string> = {
+  v1: "text-orange-400",
+  v2: "text-emerald-400",
+  unknown: "text-gold-200",
+};
+
 /** All vaults the migrate UI and Instant Swap may target. */
 export function listVaults(): VaultDescriptor[] {
   const out: VaultDescriptor[] = [];

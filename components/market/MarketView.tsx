@@ -1039,10 +1039,10 @@ export default function MarketView() {
                 vaultAddress={activeVault?.address ?? null}
                 vaultLabel={
                   vaultRole === "legacy"
-                    ? "V1 — legacy deposits"
+                    ? "legacy deposits"
                     : activeVault?.isV1
-                      ? "Primary vault"
-                      : "V2 — new Instant Swap"
+                      ? "primary vault"
+                      : "new Instant Swap"
                 }
               />
               <VaultDashboard />
