@@ -8,6 +8,7 @@ import {
   sendTransaction,
   waitForTransaction,
 } from "@/lib/wallet";
+import { relayDrandRound } from "@/lib/market/drand";
 
 /**
  * Thin wrapper around contracts/MarketplankVault.sol — UNAUDITED, not
@@ -411,6 +412,129 @@ export async function claimRandomRedeem(
     onSubmitted,
     vaultAddress
   );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * After requestRandomRedeem is confirmed, immediately push randomness and
+ * claim so the single vault-wide slot is not left for the next user to free.
+ *
+ * Flow:
+ *   1. Wait until pendingRequester is this account and round is set
+ *   2. Relay drand (permissionless) as soon as the public API has the round
+ *   3. claimRandomRedeem — NFT lands, slot frees
+ *
+ * Retries while the round is not yet published (a few seconds is normal).
+ */
+export async function finishRandomRedeem(
+  accountAddress: string,
+  vaultAddress?: string | null,
+  opts?: {
+    onProgress?: (message: string) => void;
+    onSubmitted?: (hash: string) => void;
+    /** Max wait for drand publish + claim (default ~3 min). */
+    timeoutMs?: number;
+  }
+): Promise<string> {
+  const onProgress = opts?.onProgress;
+  const timeoutMs = opts?.timeoutMs ?? 180_000;
+  const started = Date.now();
+  const me = accountAddress.toLowerCase();
+  const zero = "0x0000000000000000000000000000000000000000";
+
+  onProgress?.("Waiting for redeem slot + drand round…");
+  let round = BigInt(0);
+  let available = false;
+
+  while (Date.now() - started < timeoutMs) {
+    const who = (await getPendingRequester(vaultAddress)).toLowerCase();
+    if (who === zero) {
+      throw new Error(
+        "No pending random redeem for your wallet — request may have already settled or failed."
+      );
+    }
+    if (who !== me) {
+      throw new Error(
+        "Another wallet holds the vault redeem slot right now. Wait for them to finish, or use Settle for them if available."
+      );
+    }
+    const pend = await getPendingRound(vaultAddress);
+    round = pend.round;
+    available = pend.available;
+    if (round > BigInt(0)) break;
+    await sleep(1_500);
+  }
+  if (round <= BigInt(0)) {
+    throw new Error("Timed out waiting for the vault to pin a drand round. Try Claim again.");
+  }
+
+  // Relay until on-chain (or already available)
+  if (!available) {
+    let relayed = false;
+    while (Date.now() - started < timeoutMs) {
+      onProgress?.(
+        relayed
+          ? "Waiting for randomness to confirm on-chain…"
+          : `Relaying drand round ${round.toString()}…`
+      );
+      try {
+        await relayDrandRound(accountAddress, round);
+        relayed = true;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // Round not published yet — keep polling
+        if (/isn't published|not published|try again shortly/i.test(msg)) {
+          await sleep(2_000);
+          const again = await getPendingRound(vaultAddress);
+          available = again.available;
+          if (available) break;
+          continue;
+        }
+        // Maybe someone else already relayed
+        const again = await getPendingRound(vaultAddress);
+        if (again.available) {
+          available = true;
+          break;
+        }
+        throw e;
+      }
+      const check = await getPendingRound(vaultAddress);
+      available = check.available;
+      if (available) break;
+      await sleep(1_500);
+    }
+    if (!available) {
+      throw new Error(
+        `Timed out relaying drand round ${round.toString()}. Keep this tab open and press Claim when ready.`
+      );
+    }
+  }
+
+  onProgress?.("Claiming your NFT (frees the redeem slot)…");
+  return claimRandomRedeem(accountAddress, opts?.onSubmitted, vaultAddress);
+}
+
+/**
+ * One-shot random redeem: request + relay + claim in sequence after the
+ * user confirms each wallet prompt. Frees the vault-wide slot without
+ * waiting for the next redeemer.
+ */
+export async function requestAndFinishRandomRedeem(
+  accountAddress: string,
+  vaultAddress?: string | null,
+  opts?: {
+    onProgress?: (message: string) => void;
+    onSubmitted?: (hash: string) => void;
+    timeoutMs?: number;
+  }
+): Promise<string> {
+  opts?.onProgress?.("Step 1/2: locking random redeem…");
+  await requestRandomRedeem(accountAddress, opts?.onSubmitted, vaultAddress);
+  opts?.onProgress?.("Step 1 confirmed — pushing randomness + claim…");
+  return finishRandomRedeem(accountAddress, vaultAddress, opts);
 }
 
 /**

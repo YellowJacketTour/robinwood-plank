@@ -22,19 +22,17 @@ import {
 } from "@/lib/market/vault-registry";
 import {
   buyShares,
-  claimRandomRedeem,
   decodeVaultError,
   depositForShares,
-  getPendingRound,
+  finishRandomRedeem,
   getVaultOnChainSnapshot,
   redeemCostWei,
-  requestRandomRedeem,
+  requestAndFinishRandomRedeem,
   type VaultOnChainSnapshot,
 } from "@/lib/market/vault";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
 import { getOwnedInventory } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
-import { relayDrandRound } from "@/lib/market/drand";
 import { CHAIN } from "@/lib/constants";
 
 type Props = {
@@ -143,25 +141,11 @@ export default function VaultMigrate({ account, onConnect }: Props) {
 
   const startRandomRedeem = () =>
     run(
-      () => requestRandomRedeem(account!, undefined, legacyAddr),
-      "Step 1/2: locking random redeem on legacy…",
-      "Step 1 done — claim when ready (step 2)."
-    );
-
-  const claimRedeem = () =>
-    run(
-      async () => {
-        try {
-          const { round, available } = await getPendingRound(legacyAddr);
-          if (!available && round > BigInt(0)) {
-            await relayDrandRound(account!, round);
-          }
-        } catch {
-          /* claim may still work if already relayed */
-        }
-        return claimRandomRedeem(account!, undefined, legacyAddr);
-      },
-      "Claiming NFT from legacy…",
+      () =>
+        requestAndFinishRandomRedeem(account!, legacyAddr, {
+          onProgress: (msg) => setStatus(msg),
+        }),
+      "Random redeem on legacy (auto-claim)…",
       "NFT is in your wallet — next: deposit into the new vault."
     );
 
@@ -355,8 +339,8 @@ export default function VaultMigrate({ account, onConnect }: Props) {
 
         <Step n={3} title="Redeem on LEGACY vault (get NFT into your wallet)">
           <p className="mt-1 text-xs text-foreground/65">
-            Random redeem is two steps. Prefer random (cheaper) unless you need a specific plank (+
-            {fees.targetPremiumBps / 100}% premium).
+            Random redeem auto-relays + claims after you confirm lock (frees the slot). Prefer random
+            unless you need a specific plank (+{fees.targetPremiumBps / 100}% premium).
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <button
@@ -365,15 +349,24 @@ export default function VaultMigrate({ account, onConnect }: Props) {
               onClick={startRandomRedeem}
               className="min-h-9 rounded-lg bg-gold-500 px-3 text-xs font-bold text-wood-950 disabled:opacity-40"
             >
-              3a · Start random redeem
+              3 · Random redeem (auto-claim)
             </button>
             <button
               type="button"
               disabled={busy || !account}
-              onClick={claimRedeem}
+              onClick={() =>
+                run(
+                  () =>
+                    finishRandomRedeem(account!, legacyAddr, {
+                      onProgress: (msg) => setStatus(msg),
+                    }),
+                  "Finishing redeem (relay + claim)…",
+                  "NFT is in your wallet — next: deposit into the new vault."
+                )
+              }
               className="min-h-9 rounded-lg border border-gold-500/40 px-3 text-xs font-bold text-gold-200 disabled:opacity-40"
             >
-              3b · Claim NFT
+              Retry claim if stuck
             </button>
             <button
               type="button"
