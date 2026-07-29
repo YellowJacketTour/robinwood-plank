@@ -18,6 +18,7 @@ import {
   getPendingRequester,
   getPendingRound,
   getVaultShareBalance,
+  kickServerRandomSettle,
   quoteBuyShares,
   quoteSellShares,
   redeemCostWei,
@@ -182,19 +183,29 @@ function StuckRedeemRelay({
 
   useEffect(() => {
     let cancelled = false;
-    const check = () => {
-      Promise.all([getPendingRequester(vaultAddress), getPendingRound(vaultAddress)])
-        .then(([who, r]) => {
-          if (cancelled) return;
-          const zero = "0x0000000000000000000000000000000000000000";
-          setRequester(who && who.toLowerCase() !== zero ? who : null);
-          setRound(r.round > BigInt(0) ? r.round : null);
-          setAvailable(r.available);
-        })
-        .catch(() => {});
+    const check = async () => {
+      try {
+        // Always try sponsored settle first when anything is pending — free for users.
+        await kickServerRandomSettle(vaultAddress);
+      } catch {
+        /* ignore */
+      }
+      try {
+        const [who, r] = await Promise.all([
+          getPendingRequester(vaultAddress),
+          getPendingRound(vaultAddress),
+        ]);
+        if (cancelled) return;
+        const zero = "0x0000000000000000000000000000000000000000";
+        setRequester(who && who.toLowerCase() !== zero ? who : null);
+        setRound(r.round > BigInt(0) ? r.round : null);
+        setAvailable(r.available);
+      } catch {
+        /* */
+      }
     };
-    check();
-    const interval = setInterval(check, 6_000);
+    void check();
+    const interval = setInterval(() => void check(), 6_000);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -277,57 +288,60 @@ function StuckRedeemRelay({
       </p>
       <p className="text-xs text-foreground/70">
         {isMine ? (
-          <>Your random redeem is in flight.</>
+          <>Your random redeem is in flight — auto-finishing without extra gas from you.</>
         ) : (
           <>
             Someone else ({requester.slice(0, 6)}…{requester.slice(-4)}) holds the single vault-wide
-            random-redeem slot. New random/targeted redeems wait until it settles.
+            random-redeem slot. Background relayer is settling it (no gas from you). New redeems
+            resume once free.
           </>
         )}
         {round != null ? (
           <>
             {" "}
             Drand round <span className="font-mono text-foreground/85">{round.toString()}</span>
-            {available ? " is on-chain." : " is not on-chain yet."}
+            {available ? " is on-chain." : " waiting to publish…"}
           </>
         ) : null}
       </p>
+      {/* Manual wallet actions only as last resort if sponsor is down. */}
       {account ? (
-        <div className="flex flex-col gap-1.5 sm:flex-row">
-          {needsRelay && (
+        <details className="text-xs text-foreground/55">
+          <summary className="cursor-pointer text-sky-200/80 hover:text-sky-200">
+            Advanced: manual relay / settle (uses your gas)
+          </summary>
+          <div className="mt-2 flex flex-col gap-1.5 sm:flex-row">
+            {needsRelay && (
+              <button
+                type="button"
+                onClick={() => void run("relay")}
+                disabled={busy}
+                className="min-h-9 flex-1 rounded-lg bg-sky-400 text-xs font-bold uppercase text-wood-950 disabled:opacity-50"
+              >
+                {busy && status?.includes("Relay") ? "Relaying…" : "Relay randomness"}
+              </button>
+            )}
+            {!isMine && (
+              <button
+                type="button"
+                onClick={() => void run("settle")}
+                disabled={busy}
+                className="min-h-9 flex-1 rounded-lg border border-sky-300/50 px-2 text-xs font-bold uppercase text-sky-200 disabled:opacity-50"
+              >
+                {busy && status?.includes("Settl") ? "Settling…" : "Settle for them"}
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => void run("relay")}
+              onClick={() => void run("forfeit")}
               disabled={busy}
-              className="min-h-9 flex-1 rounded-lg bg-sky-400 text-xs font-bold uppercase text-wood-950 disabled:opacity-50"
+              className="min-h-9 flex-1 rounded-lg border border-red-400/40 px-2 text-xs font-bold uppercase text-red-200/90 disabled:opacity-50"
             >
-              {busy && status?.includes("Relay") ? "Relaying…" : "Relay randomness"}
+              Forfeit if expired
             </button>
-          )}
-          {!isMine && (
-            <button
-              type="button"
-              onClick={() => void run("settle")}
-              disabled={busy}
-              className="min-h-9 flex-1 rounded-lg border border-sky-300/50 px-2 text-xs font-bold uppercase text-sky-200 disabled:opacity-50"
-              title="Permissionless claimRandomRedeemFor — delivers NFT to the requester, frees the slot"
-            >
-              {busy && status?.includes("Settl") ? "Settling…" : "Settle for them"}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void run("forfeit")}
-            disabled={busy}
-            className="min-h-9 flex-1 rounded-lg border border-red-400/40 px-2 text-xs font-bold uppercase text-red-200/90 disabled:opacity-50"
-            title="Only works if the request expired without pinning (~24h unrelayed)"
-          >
-            Forfeit if expired
-          </button>
-        </div>
-      ) : (
-        <p className="text-xs text-foreground/50">Connect a wallet to relay or settle.</p>
-      )}
+          </div>
+        </details>
+      ) : null}
       {status && <p className="text-xs text-emerald-200/90">{status}</p>}
       {error && <p className="text-xs text-red-300">{error}</p>}
     </div>
@@ -411,6 +425,28 @@ function PendingRedeemClaim({
     setError(null);
     setBusy(true);
     try {
+      // Prefer sponsored server settle — no user gas / no second signature.
+      setStep("Server finishing redeem (no gas from you)…");
+      for (let i = 0; i < 24; i += 1) {
+        const kick = await kickServerRandomSettle(vaultAddress, account);
+        const who = (await getPendingRequester(vaultAddress)).toLowerCase();
+        const me = account.toLowerCase();
+        const zero = "0x0000000000000000000000000000000000000000";
+        if (who === zero || who !== me) {
+          setIsPending(false);
+          setStep(null);
+          return;
+        }
+        if (kick.status === "no_key") break;
+        setStep(
+          kick.status === "waiting_round"
+            ? "Waiting for randomness (~seconds)…"
+            : "Server settling…"
+        );
+        await new Promise((r) => setTimeout(r, 2_500));
+      }
+      // Fallback only if sponsor offline.
+      setStep("Auto-finish offline — claim with your wallet…");
       await finishRandomRedeem(account, vaultAddress, {
         onProgress: (msg) => setStep(msg),
         onSubmitted: (txHash) =>
@@ -427,7 +463,7 @@ function PendingRedeemClaim({
   }, [account, vaultAddress]);
 
   // If user already holds the slot (refreshed mid-flow or stepped away after
-  // step 1), automatically push relay + claim so the next redeemer is not blocked.
+  // step 1), kick server settle first — no wallet prompt.
   useEffect(() => {
     if (!isPending || !account || busy || autoOnce.current) return;
     autoOnce.current = true;
@@ -442,21 +478,21 @@ function PendingRedeemClaim({
         Finishing your random redeem
       </p>
       <p className="text-xs text-foreground/70">
-        Shares are burned. We auto-relay randomness and claim the NFT so the vault-wide slot
-        frees for the next person
+        Shares are burned. A background relayer pushes randomness and delivers your NFT{" "}
+        <strong className="text-foreground/85">without another gas fee from you</strong>
         {round != null ? (
           <>
             {" "}
             (drand round <span className="font-mono">{round.toString()}</span>)
           </>
         ) : null}
-        . Approve wallet prompts if they appear.
+        . You can leave this tab — the vault slot frees automatically.
       </p>
       {available ? (
-        <p className="text-xs text-emerald-200/90">Randomness is on-chain — claim in progress…</p>
+        <p className="text-xs text-emerald-200/90">Randomness is on-chain — completing claim…</p>
       ) : (
         <p className="text-xs text-foreground/55">
-          Waiting for / relaying randomness (~seconds). Keep this tab open.
+          Waiting for randomness (~seconds). No action needed.
         </p>
       )}
       <button
@@ -1553,7 +1589,7 @@ export default function SwapPanel({
               {!tokenId ? (
                 <>
                   <strong className="text-foreground/70">Random</strong> locks the vault slot, then
-                  auto-relays randomness and claims so the next person is not stuck waiting. Keep
+                  auto-finishes via a gas-sponsored relayer (you only sign the request). Keep
                   this tab open and approve wallet prompts (usually 2–3 txs).
                 </>
               ) : (
@@ -1656,7 +1692,7 @@ export default function SwapPanel({
                 : mode === "redeem"
                   ? tokenId
                     ? "Redeem this plank"
-                    : "Random redeem (auto-claim)"
+                    : "Random redeem (1 signature)"
                   : mode === "lp"
                     ? lpDirection === "remove"
                       ? "Remove LP"

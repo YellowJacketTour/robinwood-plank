@@ -526,9 +526,51 @@ export async function finishRandomRedeem(
 }
 
 /**
- * One-shot random redeem: request + relay + claim in sequence after the
- * user confirms each wallet prompt. Frees the vault-wide slot without
- * waiting for the next redeemer.
+ * Kick server relayer (no user gas) to relay + claimFor pending redeems.
+ * Returns true if the slot cleared for this account (or vault idle).
+ */
+export async function kickServerRandomSettle(
+  vaultAddress?: string | null,
+  forRequester?: string | null
+): Promise<{ ok: boolean; status?: string; detail?: string }> {
+  try {
+    const qs = new URLSearchParams({ public: "1" });
+    if (vaultAddress) qs.set("vault", vaultAddress);
+    if (forRequester) qs.set("for", forRequester);
+    const res = await fetch(`/api/market/vault/settle-random?${qs}`, {
+      method: "POST",
+      cache: "no-store",
+    });
+    if (!res.ok) return { ok: false, detail: `settle HTTP ${res.status}` };
+    const data = (await res.json()) as {
+      results?: Array<{ status: string; requester?: string; detail?: string }>;
+      spentGas?: boolean;
+    };
+    const me = forRequester?.toLowerCase();
+    const results = data.results ?? [];
+    if (results.some((r) => r.status === "settled" || r.status === "forfeited" || r.status === "idle")) {
+      if (!me) return { ok: true, status: results[0]?.status };
+      const mine = results.find(
+        (r) => r.requester && r.requester.toLowerCase() === me && (r.status === "settled" || r.status === "forfeited")
+      );
+      if (mine) return { ok: true, status: mine.status };
+      // Slot free for someone else / idle
+      if (results.every((r) => r.status === "idle")) return { ok: true, status: "idle" };
+    }
+    const waiting = results.find((r) => r.status === "waiting_round");
+    if (waiting) return { ok: false, status: "waiting_round", detail: waiting.detail };
+    const err = results.find((r) => r.status === "error" || r.status === "no_key");
+    return { ok: false, status: err?.status, detail: err?.detail };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * One-shot random redeem: user signs ONLY requestRandomRedeem.
+ * Relay + claimFor are sponsored by the server relayer when configured
+ * (no second wallet popup / no user gas for finish). Falls back to the
+ * user-paid finish path if the sponsor is offline.
  */
 export async function requestAndFinishRandomRedeem(
   accountAddress: string,
@@ -539,10 +581,33 @@ export async function requestAndFinishRandomRedeem(
     timeoutMs?: number;
   }
 ): Promise<string> {
-  opts?.onProgress?.("Step 1/2: locking random redeem…");
-  await requestRandomRedeem(accountAddress, opts?.onSubmitted, vaultAddress);
-  opts?.onProgress?.("Step 1 confirmed — pushing randomness + claim…");
-  return finishRandomRedeem(accountAddress, vaultAddress, opts);
+  opts?.onProgress?.("Requesting random redeem (one wallet signature)…");
+  const requestHash = await requestRandomRedeem(accountAddress, opts?.onSubmitted, vaultAddress);
+
+  const timeoutMs = opts?.timeoutMs ?? 180_000;
+  const started = Date.now();
+  opts?.onProgress?.("Server finishing for you (no extra gas)…");
+
+  while (Date.now() - started < timeoutMs) {
+    const kick = await kickServerRandomSettle(vaultAddress, accountAddress);
+    if (kick.ok && (kick.status === "settled" || kick.status === "forfeited" || kick.status === "idle")) {
+      // Confirm slot is free for us
+      const who = (await getPendingRequester(vaultAddress)).toLowerCase();
+      const me = accountAddress.toLowerCase();
+      const zero = "0x0000000000000000000000000000000000000000";
+      if (who === zero || who !== me) {
+        opts?.onProgress?.("Redeem complete — NFT delivered, slot free.");
+        return requestHash;
+      }
+    }
+    if (kick.status === "no_key") break; // fall through to user gas
+    await new Promise((r) => setTimeout(r, 2_500));
+  }
+
+  // Sponsor missing or stuck — last resort: user-paid relay+claim.
+  opts?.onProgress?.("Auto-finish busy — using your wallet to claim…");
+  await finishRandomRedeem(accountAddress, vaultAddress, opts);
+  return requestHash;
 }
 
 /**
