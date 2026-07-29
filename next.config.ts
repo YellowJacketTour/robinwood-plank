@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 /**
  * Security headers + ensure server secrets are never treated as public.
@@ -64,3 +65,6 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+
+// Enable Cloudflare bindings during `next dev`.
+initOpenNextCloudflareForDev();
