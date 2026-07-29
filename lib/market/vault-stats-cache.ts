@@ -14,8 +14,8 @@ import type { VaultStats } from "@/lib/market/vault-stats";
 const STALE_OK_MS = 5 * 60_000; // serve up to 5 min old on RPC failure
 
 /** Key includes vault address so switching V1→V2 never serves the old book. */
-function kvKey(): string {
-  const v = MARKET_VAULT_ADDRESS?.toLowerCase() ?? "none";
+function kvKey(vaultAddress?: string | null): string {
+  const v = (vaultAddress ?? MARKET_VAULT_ADDRESS)?.toLowerCase() ?? "none";
   return `plank:market:vault-stats:${v}`;
 }
 
@@ -25,10 +25,12 @@ function hasKv(): boolean {
 
 type Blob = { at: number; stats: VaultStats };
 
-export async function readVaultStatsCache(): Promise<Blob | null> {
+export async function readVaultStatsCache(
+  vaultAddress?: string | null
+): Promise<Blob | null> {
   if (!hasKv()) return null;
   try {
-    const v = await kv.get<Blob>(kvKey());
+    const v = await kv.get<Blob>(kvKey(vaultAddress));
     if (!v?.stats || typeof v.at !== "number") return null;
     return v;
   } catch {
@@ -36,12 +38,15 @@ export async function readVaultStatsCache(): Promise<Blob | null> {
   }
 }
 
-export async function writeVaultStatsCache(stats: VaultStats): Promise<void> {
+export async function writeVaultStatsCache(
+  stats: VaultStats,
+  vaultAddress?: string | null
+): Promise<void> {
   if (!hasKv()) return;
   try {
     const blob: Blob = { at: Date.now(), stats };
     // TTL slightly longer than STALE_OK so a quiet period still has a fallback
-    await kv.set(kvKey(), blob, { ex: 15 * 60 });
+    await kv.set(kvKey(vaultAddress), blob, { ex: 15 * 60 });
   } catch {
     // cache is best-effort
   }

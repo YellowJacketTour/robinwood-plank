@@ -5,12 +5,23 @@ import { formatTokenAmount } from "@/lib/trade";
 import { formatUsd, weiToUsd } from "@/lib/eth-price";
 import { getRarityMap, tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
-import { useVaultLive } from "@/lib/market/useVaultLive";
+import { useVaultBook } from "@/lib/market/useVaultBook";
+import {
+  shortVault,
+  vaultColorKind,
+  VAULT_LABEL_CLASS,
+  VAULT_TEXT_CLASS,
+} from "@/lib/market/vault-registry";
 import ScrollBox from "@/components/market/ScrollBox";
 import CachedNftImage from "@/components/CachedNftImage";
 import { warmArtOnce } from "@/lib/art-warm-global";
 
 type HeldToken = { tokenId: string; imageUrl: string | null };
+
+type Props = {
+  /** Selected Instant Swap vault — stats + inventory follow this address. */
+  vaultAddress?: string | null;
+};
 
 function statCell(label: string, value: string, sub?: string) {
   return (
@@ -29,13 +40,17 @@ function statCell(label: string, value: string, sub?: string) {
  * number here comes straight from app/api/market/vault/stats, which is
  * itself either a direct on-chain read or a replay of real Deposited/
  * Redeemed events — see lib/market/vault-stats.ts.
+ *
+ * When `vaultAddress` is set (Instant Swap dual mode), numbers + inventory
+ * track that vault only. Trades board stays dual elsewhere.
  */
-export default function VaultDashboard() {
-  const { stats } = useVaultLive();
+export default function VaultDashboard({ vaultAddress = null }: Props) {
+  const { stats } = useVaultBook(vaultAddress);
   const [held, setHeld] = useState<HeldToken[]>([]);
   const [heldLoading, setHeldLoading] = useState(true);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
   const heldTokenCount = stats?.heldTokenCount ?? null;
+  const colorKind = vaultColorKind(vaultAddress);
 
   useEffect(() => {
     void getRarityMap().then((map) => setRarity(map));
@@ -48,9 +63,13 @@ export default function VaultDashboard() {
     let cancelled = false;
     setHeldLoading(true);
     const expected = heldTokenCount; // null until stats load
+    const heldUrl = vaultAddress
+      ? `/api/market/vault/held?vault=${encodeURIComponent(vaultAddress)}`
+      : "/api/market/vault/held";
+    setHeld([]);
     import("@/lib/market/swr-fetch")
       .then(({ swrJson }) =>
-        swrJson<{ tokens?: HeldToken[]; count?: number }>("/api/market/vault/held", {
+        swrJson<{ tokens?: HeldToken[]; count?: number }>(heldUrl, {
           ttlMs: 12_000,
           swrMs: 90_000,
           session: true,
@@ -96,11 +115,14 @@ export default function VaultDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [heldTokenCount, stats?.heldTokenIds]);
+  }, [heldTokenCount, stats?.heldTokenIds, vaultAddress]);
 
   if (!stats) {
     return <p className="py-4 text-center text-xs text-foreground/45">Reading vault dashboard…</p>;
   }
+
+  const vaultBadge =
+    colorKind === "v1" ? "V1" : colorKind === "v2" ? "V2" : vaultAddress ? shortVault(vaultAddress) : null;
 
   const ethUsd = stats.ethUsd ?? 0;
   const ethAndUsd = (wei: string, ethDecimals = 4) => {
@@ -111,6 +133,21 @@ export default function VaultDashboard() {
 
   return (
     <div className="space-y-3">
+      {vaultBadge && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`rounded-md border px-1.5 py-0.5 text-[0.65rem] font-extrabold uppercase tracking-wide ${VAULT_LABEL_CLASS[colorKind]}`}
+          >
+            {vaultBadge}
+          </span>
+          <p className={`text-[0.65rem] font-bold uppercase tracking-wide ${VAULT_TEXT_CLASS[colorKind]}`}>
+            Vault book · stats & inventory
+          </p>
+          {vaultAddress && (
+            <span className="font-mono text-[0.6rem] text-foreground/40">{shortVault(vaultAddress)}</span>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {statCell("ETH liquidity", ethAndUsd(stats.ethReserveWei))}
         {statCell(

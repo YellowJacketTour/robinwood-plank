@@ -5,13 +5,21 @@ import { formatTokenAmount } from "@/lib/trade";
 import { getRarityMap, tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup, RarityTier } from "@/lib/market/rarityClient";
 import { TIER_ORDER } from "@/lib/rarity";
-import { useVaultLive } from "@/lib/market/useVaultLive";
+import { useVaultBook } from "@/lib/market/useVaultBook";
+import {
+  vaultColorKind,
+  VAULT_LABEL_CLASS,
+} from "@/lib/market/vault-registry";
 import { swrJson } from "@/lib/market/swr-fetch";
 
 type TierRow = {
   tier: RarityTier;
   count: number;
   avgPercentile: number;
+};
+
+type Props = {
+  vaultAddress?: string | null;
 };
 
 /**
@@ -24,12 +32,13 @@ type TierRow = {
  * Marketplace listing floors do NOT belong here — redeem odds are about
  * what the vault might draw, not open-market prices.
  */
-export default function RedeemOdds() {
-  const { stats } = useVaultLive();
+export default function RedeemOdds({ vaultAddress = null }: Props) {
+  const { stats } = useVaultBook(vaultAddress);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
   /** Live held list from /vault/held — more reliable than stats.heldTokenIds
    * which can be empty when the stats path times out the ID scan. */
   const [heldOverride, setHeldOverride] = useState<string[] | null>(null);
+  const colorKind = vaultColorKind(vaultAddress);
 
   useEffect(() => {
     void getRarityMap().then((map) => setRarity(map));
@@ -37,7 +46,11 @@ export default function RedeemOdds() {
 
   useEffect(() => {
     let cancelled = false;
-    swrJson<{ tokens?: { tokenId: string }[] }>("/api/market/vault/held", {
+    setHeldOverride(null);
+    const heldUrl = vaultAddress
+      ? `/api/market/vault/held?vault=${encodeURIComponent(vaultAddress)}`
+      : "/api/market/vault/held";
+    swrJson<{ tokens?: { tokenId: string }[] }>(heldUrl, {
       ttlMs: 15_000,
       swrMs: 120_000,
       session: true,
@@ -52,7 +65,7 @@ export default function RedeemOdds() {
     return () => {
       cancelled = true;
     };
-  }, [stats?.heldTokenCount]);
+  }, [stats?.heldTokenCount, vaultAddress]);
 
   const heldTokenIds =
     heldOverride && heldOverride.length > 0
@@ -125,11 +138,20 @@ export default function RedeemOdds() {
 
   const scoredHeld = heldCount - unscoredCount;
 
+  const vaultTag = colorKind === "v1" ? "V1" : colorKind === "v2" ? "V2" : null;
+
   return (
     <div className="space-y-2 rounded-lg border border-gold-500/15 bg-wood-950/90 p-3">
-      <div className="flex items-baseline justify-between gap-2">
-        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
           Random redeem odds
+          {vaultTag && (
+            <span
+              className={`rounded border px-1 py-px text-[0.55rem] font-extrabold normal-case tracking-wide ${VAULT_LABEL_CLASS[colorKind]}`}
+            >
+              {vaultTag}
+            </span>
+          )}
         </p>
         <p className="text-[0.6rem] text-foreground/40">
           1 of {heldCount} held · uniform draw

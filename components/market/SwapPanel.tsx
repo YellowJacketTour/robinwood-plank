@@ -17,7 +17,6 @@ import {
   getLpCredit,
   getPendingRequester,
   getPendingRound,
-  getVaultOnChainSnapshot,
   getVaultShareBalance,
   quoteBuyShares,
   quoteSellShares,
@@ -41,7 +40,7 @@ import type { RarityTier } from "@/lib/market/rarityClient";
 import { getOwnedInventory } from "@/lib/market/inventory";
 import TokenPicker, { type PickerToken } from "@/components/market/TokenPicker";
 import { addPendingVaultTx } from "@/lib/market/pendingVaultTx";
-import { useVaultLive } from "@/lib/market/useVaultLive";
+import { useVaultBook } from "@/lib/market/useVaultBook";
 import { relayDrandRound } from "@/lib/market/drand";
 
 type Mode = "buy" | "sell" | "deposit" | "redeem" | "lp";
@@ -488,80 +487,9 @@ export default function SwapPanel({
   const collection = MARKET_COLLECTIONS[0];
   const vaultAddress = vaultAddressProp ?? MARKET_VAULT_ADDRESS;
   const hasVault = vaultAddress !== null;
-  const isPrimaryVault =
-    !vaultAddress ||
-    !MARKET_VAULT_ADDRESS ||
-    vaultAddress.toLowerCase() === MARKET_VAULT_ADDRESS.toLowerCase();
-
-  const { stats: liveStats } = useVaultLive();
-  const [localStats, setLocalStats] = useState<{
-    poolOpen: boolean;
-    ethReserveWei: string;
-    shareReserveWei: string;
-    heldTokenCount: number;
-    mintFeeBps: number;
-    redeemFeeBps: number;
-    targetPremiumBps: number;
-  } | null>(null);
-
-  // Live SSE feed is primary-only; when on V1/legacy, poll on-chain snapshot.
-  useEffect(() => {
-    if (!vaultAddress) {
-      setLocalStats(null);
-      return;
-    }
-    if (isPrimaryVault) {
-      setLocalStats(null);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const s = await getVaultOnChainSnapshot(vaultAddress);
-        if (cancelled) return;
-        setLocalStats({
-          poolOpen: s.poolOpen,
-          ethReserveWei: s.ethReserve.toString(),
-          shareReserveWei: s.shareReserve.toString(),
-          heldTokenCount: s.held,
-          mintFeeBps: s.mintFeeBps,
-          redeemFeeBps: s.redeemFeeBps,
-          targetPremiumBps: s.targetPremiumBps,
-        });
-      } catch {
-        /* keep last */
-      }
-    };
-    void load();
-    const t = setInterval(() => void load(), 15_000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, [vaultAddress, isPrimaryVault]);
-
-  const stats = isPrimaryVault
-    ? liveStats
-    : localStats
-      ? {
-          poolOpen: localStats.poolOpen,
-          ethReserveWei: localStats.ethReserveWei,
-          shareReserveWei: localStats.shareReserveWei,
-          heldTokenCount: localStats.heldTokenCount,
-          heldTokenIds: [] as string[],
-          sharePriceWei: null as string | null,
-          mintFeeBps: localStats.mintFeeBps,
-          redeemFeeBps: localStats.redeemFeeBps,
-          targetPremiumBps: localStats.targetPremiumBps,
-          ethUsd: null as number | null,
-          aprPct: null as number | null,
-          aprBasisHours: null as number | null,
-          depositCount: 0,
-          redeemCount: 0,
-          vaultFeeRevenueWei: "0",
-          marketplaceFeeRevenueEstWei: "0",
-        }
-      : null;
+  // Per-selected-vault book (V1 or V2) — not the dual trade feed.
+  const { stats: bookStats } = useVaultBook(vaultAddress);
+  const stats = bookStats;
 
   const [mode, setMode] = useState<Mode>("buy");
   const [amount, setAmount] = useState("");
@@ -1089,12 +1017,25 @@ export default function SwapPanel({
 
   const activeMode = MODES.find((m) => m.id === mode)!;
 
+  const activeKind = vaultColorKind(vaultAddress);
+  const activeTag = activeKind === "v1" ? "V1" : activeKind === "v2" ? "V2" : "Vault";
+  const activeLabel =
+    vaultLabel ??
+    (activeKind === "v1" ? "V1 vault" : activeKind === "v2" ? "V2 vault" : "Vault");
+
   return (
-    <div className="wood-frame overflow-hidden rounded-2xl bg-wood-900/95">
+    <div className="wood-frame relative overflow-hidden rounded-2xl bg-wood-900/95">
+      {/* Corner confirmation: which vault this swap widget is bound to. */}
+      <div
+        className={`pointer-events-none absolute right-2 top-2 z-10 rounded-md border px-2 py-1 text-[0.65rem] font-extrabold uppercase tracking-wide shadow-lg ${VAULT_LABEL_CLASS[activeKind]}`}
+        title={vaultAddress ? `All actions target ${vaultAddress}` : "Vault"}
+      >
+        {activeTag} · live
+      </div>
       {/* Header: collection art leads, same "visually dominant" rule as
           every other surface — this used to be a bare form with no branding
           or context at all. */}
-      <div className="flex items-center gap-3 border-b border-gold-500/20 bg-wood-950/90 px-4 py-3">
+      <div className="flex items-center gap-3 border-b border-gold-500/20 bg-wood-950/90 px-4 py-3 pr-20">
         <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-gold-500/30">
           <Image
             src={collection?.image ?? "/images/plank-logo.webp"}
@@ -1108,23 +1049,14 @@ export default function SwapPanel({
         <div className="min-w-0">
           <p className="truncate font-display text-base text-foreground">
             {collection?.name ?? "Collection"} ·{" "}
-            {(() => {
-              const kind = vaultColorKind(
-                vaultAddress ?? (isPrimaryVault ? "primary" : "legacy")
-              );
-              const label =
-                vaultLabel ?? (kind === "v1" ? "V1 vault" : kind === "v2" ? "V2 vault" : "Vault");
-              return (
-                <span className="inline-flex items-center gap-1.5">
-                  <span
-                    className={`rounded border px-1.5 py-0.5 text-[0.65rem] font-extrabold uppercase tracking-wide ${VAULT_LABEL_CLASS[kind]}`}
-                  >
-                    {kind === "v1" ? "V1" : kind === "v2" ? "V2" : "Vault"}
-                  </span>
-                  <span className={VAULT_TEXT_CLASS[kind]}>{label}</span>
-                </span>
-              );
-            })()}
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={`rounded border px-1.5 py-0.5 text-[0.65rem] font-extrabold uppercase tracking-wide ${VAULT_LABEL_CLASS[activeKind]}`}
+              >
+                {activeTag}
+              </span>
+              <span className={VAULT_TEXT_CLASS[activeKind]}>{activeLabel}</span>
+            </span>
           </p>
           <p className="text-[0.65rem] text-foreground/50">
             {activeMode.hint}
