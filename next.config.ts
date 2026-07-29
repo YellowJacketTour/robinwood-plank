@@ -31,6 +31,12 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Minimal, traced Node runtime for the InMotion Docker image.
+  // OpenNext can still consume the normal build artifacts on its own branch.
+  output: "standalone",
+  // GitHub Actions supplies the commit SHA. This lets rolling deployments
+  // detect clients that still reference assets from the previous image.
+  deploymentId: process.env.DEPLOYMENT_VERSION?.trim() || undefined,
   poweredByHeader: false,
   async rewrites() {
     return [
@@ -71,6 +77,13 @@ const nextConfig: NextConfig = {
           { key: "Cache-Control", value: "no-store, no-cache, must-revalidate, private" },
           { key: "Pragma", value: "no-cache" },
         ],
+      },
+      // Preserve the vault EventSource stream through nginx/Passenger-style
+      // reverse proxies. The proxy still needs buffering disabled in its own
+      // vhost; this response header is the application-side half.
+      {
+        source: "/api/market/vault/stream",
+        headers: [{ key: "X-Accel-Buffering", value: "no" }],
       },
       // Later entries win over an earlier match on the same path/header —
       // carve public read-only routes out of the blanket no-store above.

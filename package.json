@@ -7,13 +7,18 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "lint:inmotion": "eslint lib/market/durable-kv.ts test/market/durable-kv.test.ts scripts/migrate-upstash-to-redis.mjs next.config.ts",
     "test:contracts": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json hardhat test",
     "test:market": "tsx --test test/market/*.test.ts",
     "test": "npm run test:market && npm run test:contracts",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "migrate:kv-to-redis": "node scripts/migrate-upstash-to-redis.mjs"
+  },
+  "engines": {
+    "node": ">=20.9.0"
   },
   "dependencies": {
     "@opensea/seaport-js": "^4.1.5",
@@ -23,7 +28,8 @@
     "next": "^16.2.12",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "redis": "^6.1.0"
   },
   "overrides": {
     "postcss": "^8.5.20",

@@ -1,5 +1,8 @@
 import { Interface } from "ethers";
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 import { MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } from "@/lib/constants";
 import vaultAbi from "@/lib/market/vault-abi.json";
 import { BLOCKSCOUT_BASE, fetchAddressLogs } from "@/lib/market/blockscout";
@@ -45,7 +48,7 @@ const KV_KEY = "plank:market:vault-activity-v3";
 const KV_TTL = 6 * 60 * 60;
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
 }
 
 function normalizeTopics(raw: unknown): string[] {

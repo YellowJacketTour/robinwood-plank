@@ -4,7 +4,10 @@ import { fetchNftMetadata } from "@/lib/ipfs";
 import { robinwoodTokenUri } from "@/lib/market/token-image";
 import { computeRaritySnapshot, emptyTierCounts, normalizeRarityTier } from "@/lib/rarity";
 import type { RarityInput, RaritySnapshot, RarityTier, TokenRarity } from "@/lib/rarity";
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 
 /**
  * Rarity snapshot for the whole collection via Blockscout metadata (CF-safe),
@@ -19,7 +22,7 @@ let cached: { snapshot: RaritySnapshot; at: number } | null = null;
 let inflight: Promise<RaritySnapshot> | null = null;
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
 }
 
 type CompactBlob = {

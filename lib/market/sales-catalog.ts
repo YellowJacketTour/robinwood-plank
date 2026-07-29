@@ -1,4 +1,7 @@
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
 import {
@@ -44,7 +47,7 @@ export type SalesCatalogBlob = {
 };
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
 }
 
 function isMarketMethod(method: string): boolean {
