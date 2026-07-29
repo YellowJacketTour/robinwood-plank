@@ -6,12 +6,23 @@ import { formatTokenAmount } from "@/lib/trade";
 import { formatUsd, weiToUsd } from "@/lib/eth-price";
 import { getRarityMap } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
-import { useVaultLive } from "@/lib/market/useVaultLive";
+import { useVaultBook } from "@/lib/market/useVaultBook";
+import {
+  shortVault,
+  vaultColorKind,
+  VAULT_LABEL_CLASS,
+  VAULT_TEXT_CLASS,
+} from "@/lib/market/vault-registry";
 import { swrJson } from "@/lib/market/swr-fetch";
 import PlankFence from "@/components/market/PlankFence";
 import { warmArtOnce } from "@/lib/art-warm-global";
 
 type HeldToken = { tokenId: string; imageUrl: string | null };
+
+type Props = {
+  /** Selected Instant Swap vault — fence + liquidity follow this book. */
+  vaultAddress?: string | null;
+};
 
 /**
  * "On The Fence" — held planks literally sitting on a fence (see
@@ -21,11 +32,12 @@ type HeldToken = { tokenId: string; imageUrl: string | null };
  * straight from /api/market/vault/stats and /api/market/vault/held, the
  * same live data VaultDashboard renders as plain numbers.
  */
-export default function LivingLiquidityViz() {
-  const { stats } = useVaultLive();
+export default function LivingLiquidityViz({ vaultAddress = null }: Props) {
+  const { stats } = useVaultBook(vaultAddress);
   const [held, setHeld] = useState<HeldToken[] | null>(null);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
   const heldTokenCount = stats?.heldTokenCount ?? null;
+  const colorKind = vaultColorKind(vaultAddress);
 
   useEffect(() => {
     void getRarityMap().then((map) => setRarity(map));
@@ -39,7 +51,11 @@ export default function LivingLiquidityViz() {
   useEffect(() => {
     let cancelled = false;
     const expected = heldTokenCount; // null until stats load
-    swrJson<{ tokens?: HeldToken[]; count?: number }>("/api/market/vault/held", {
+    setHeld(null);
+    const heldUrl = vaultAddress
+      ? `/api/market/vault/held?vault=${encodeURIComponent(vaultAddress)}`
+      : "/api/market/vault/held";
+    swrJson<{ tokens?: HeldToken[]; count?: number }>(heldUrl, {
       ttlMs: 12_000,
       swrMs: 90_000,
       session: true,
@@ -88,7 +104,7 @@ export default function LivingLiquidityViz() {
     return () => {
       cancelled = true;
     };
-  }, [heldTokenCount, stats?.heldTokenIds]);
+  }, [heldTokenCount, stats?.heldTokenIds, vaultAddress]);
 
   const ethUsd = stats?.ethUsd ?? 0;
   const ethReserveEth = stats ? Number(formatTokenAmount(stats.ethReserveWei, 18, 4)) : 0;
@@ -96,11 +112,29 @@ export default function LivingLiquidityViz() {
   const vaultFeeEth = stats ? formatTokenAmount(stats.vaultFeeRevenueWei, 18, 4) : "0";
   const marketFeeEth = stats ? formatTokenAmount(stats.marketplaceFeeRevenueEstWei, 18, 4) : "0";
 
+  const vaultTag = colorKind === "v1" ? "V1" : colorKind === "v2" ? "V2" : null;
+
   return (
     <div className="overflow-hidden rounded-lg border border-gold-500/15 bg-wood-950/90">
-      <p className="border-b border-gold-500/10 px-3 py-1.5 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
-        On The Fence
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gold-500/10 px-3 py-1.5">
+        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
+          On The Fence
+        </p>
+        {vaultTag && (
+          <span className="flex items-center gap-1.5">
+            <span
+              className={`rounded border px-1.5 py-0.5 text-[0.6rem] font-extrabold uppercase tracking-wide ${VAULT_LABEL_CLASS[colorKind]}`}
+            >
+              {vaultTag}
+            </span>
+            {vaultAddress && (
+              <span className={`font-mono text-[0.55rem] ${VAULT_TEXT_CLASS[colorKind]}`}>
+                {shortVault(vaultAddress)}
+              </span>
+            )}
+          </span>
+        )}
+      </div>
       <div className="relative grid grid-cols-1 sm:grid-cols-2">
         <div className="relative h-48 overflow-hidden border-b border-gold-500/10 bg-gradient-to-b from-wood-900/40 to-black/30 sm:h-64 sm:border-b-0 sm:border-r">
           <PlankFence held={held} rarity={rarity} />

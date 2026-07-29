@@ -1012,7 +1012,7 @@ export default function MarketView() {
         <div className={tab === "swap" ? undefined : "hidden"}>
           {visitedTabs.has("swap") && (
           <div className="space-y-3">
-            <LivingLiquidityViz />
+            <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} />
             {/* CSS multi-column masonry, not a manual 2-column split — a
                 manual split left one side visibly taller than the other
                 (a whole empty quadrant under the shorter column, the
@@ -1045,9 +1045,10 @@ export default function MarketView() {
                       : "new Instant Swap"
                 }
               />
-              <VaultDashboard />
+              <VaultDashboard vaultAddress={activeVault?.address ?? null} />
               <NftPriceChart />
-              <RedeemOdds />
+              <RedeemOdds vaultAddress={activeVault?.address ?? null} />
+              {/* Trades stay dual-vault (V1 + V2) regardless of selection */}
               <VaultTradeHistory />
               <TreasuryDashboard />
             </div>

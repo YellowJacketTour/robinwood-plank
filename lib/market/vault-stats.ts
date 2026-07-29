@@ -1,5 +1,5 @@
 import { Interface } from "ethers";
-import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
+import { MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } from "@/lib/constants";
 import vaultAbi from "@/lib/market/vault-abi.json";
 import { getVaultHeldTokenIds } from "@/lib/market/vault-held";
 import { getEthUsdPrice } from "@/lib/eth-price";
@@ -8,6 +8,16 @@ import { getVaultActivity } from "@/lib/market/vault-activity";
 import { MARKET_DEFAULT_FEE_BPS } from "@/lib/constants";
 import { withTimeout } from "@/lib/market/rpc-budget";
 import { ethCallMany } from "@/lib/market/fetch-rpc";
+
+function resolveStatsVault(vaultAddress?: string | null): string | null {
+  if (vaultAddress && /^0x[0-9a-fA-F]{40}$/.test(vaultAddress)) {
+    const hit = MARKET_VAULT_ADDRESSES.find(
+      (a) => a.toLowerCase() === vaultAddress.toLowerCase()
+    );
+    if (hit) return hit;
+  }
+  return MARKET_VAULT_ADDRESS;
+}
 
 const IFACE = new Interface(vaultAbi);
 const SHARE_UNIT = BigInt(1_000_000_000_000_000_000);
@@ -90,9 +100,11 @@ export type VaultStats = {
  * contracts/MarketplankVault.sol), so this is explicitly an ESTIMATE valued
  * at the CURRENT share price, not a guaranteed or contract-enforced return.
  */
-export async function getVaultStats(): Promise<VaultStats | null> {
-  if (!MARKET_VAULT_ADDRESS) return null;
-  const vault = MARKET_VAULT_ADDRESS;
+export async function getVaultStats(
+  vaultAddress?: string | null
+): Promise<VaultStats | null> {
+  const vault = resolveStatsVault(vaultAddress);
+  if (!vault) return null;
 
   // One batched eth_call round-trip (Workers-safe fetch) + optional USD price.
   const [coreHexes, ethUsd] = await Promise.all([
@@ -152,7 +164,7 @@ export async function getVaultStats(): Promise<VaultStats | null> {
   let marketplaceFeeRevenueEstWei = BigInt(0);
   try {
     const [held, apr, mkt] = await Promise.all([
-      withTimeout(getVaultHeldTokenIds(), 20_000, [] as string[], "vault-held"),
+      withTimeout(getVaultHeldTokenIds(vault), 20_000, [] as string[], "vault-held"),
       withTimeout(
         estimateApr(
           sharePriceWei,
@@ -160,7 +172,8 @@ export async function getVaultStats(): Promise<VaultStats | null> {
           redeemFeeBps,
           targetPremiumBps,
           ethReserveWei,
-          heldTokenCount
+          heldTokenCount,
+          vault
         ),
         8_000,
         baselineApr,
@@ -244,7 +257,8 @@ async function estimateApr(
   redeemFeeBps: number,
   _targetPremiumBps: number,
   ethReserveWei: bigint,
-  heldTokenCount: number
+  heldTokenCount: number,
+  vaultAddress?: string | null
 ): Promise<{
   aprPct: number | null;
   aprBasisHours: number | null;
@@ -266,6 +280,7 @@ async function estimateApr(
   let feeRevenueWei = BigInt(0);
   let earliest = Infinity;
   let latestTs = 0;
+  const vaultLc = vaultAddress?.toLowerCase() ?? null;
 
   try {
     // Short feed first (fast on CF); skip full=1 — it often exhausts the
@@ -273,6 +288,7 @@ async function estimateApr(
     const events = await getVaultActivity(80);
     for (const e of events) {
       if (e.kind !== "deposit" && e.kind !== "redeem") continue;
+      if (vaultLc && e.vaultAddress && e.vaultAddress.toLowerCase() !== vaultLc) continue;
       const ts = e.timestamp ? new Date(e.timestamp).getTime() / 1000 : NaN;
       if (Number.isFinite(ts)) {
         earliest = Math.min(earliest, ts);

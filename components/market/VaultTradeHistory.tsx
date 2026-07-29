@@ -127,7 +127,9 @@ export default function VaultTradeHistory() {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">Trades</p>
+        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
+          Trades <span className="font-normal normal-case text-foreground/35">(V1 + V2)</span>
+        </p>
         <span
           className={`flex items-center gap-1 text-[0.55rem] font-bold uppercase ${live ? "text-emerald-300/70" : connected ? "text-gold-300/70" : "text-foreground/30"}`}
         >
