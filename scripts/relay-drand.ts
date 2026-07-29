@@ -216,15 +216,35 @@ async function main() {
   }
 
   const tick = async () => {
-    // Always push latest published round (keeps beacon warm for near-term redeems).
-    await relayRound(beacon, api, chainHash, process.env.ROUND);
+    // Gas-saving: only act when a vault has a pending redeem. Idle = free.
+    // (Optional ROUND= forces a push for manual ops.)
+    if (process.env.ROUND) {
+      await relayRound(beacon, api, chainHash, process.env.ROUND);
+    }
 
+    if (vaults.length === 0) {
+      // No vaults configured — keep previous behavior of pushing latest.
+      await relayRound(beacon, api, chainHash, process.env.ROUND);
+      return;
+    }
+
+    let anyPending = false;
     for (const v of vaults) {
       try {
-        await settlePendingVault(wallet, beacon, api, chainHash, v);
+        const vault = new Contract(v, VAULT_ABI, wallet);
+        const who = (await vault.pendingRequester()) as string;
+        if (who && who.toLowerCase() !== ZeroAddress.toLowerCase()) {
+          anyPending = true;
+          await settlePendingVault(wallet, beacon, api, chainHash, v);
+        } else {
+          console.log(`vault ${v}: idle (no gas)`);
+        }
       } catch (err) {
         console.error(`vault ${v}: settle error — ${(err as Error).message}`);
       }
+    }
+    if (!anyPending && !process.env.ROUND) {
+      console.log("all vaults idle — skipped beacon submit (saved gas)");
     }
   };
 
