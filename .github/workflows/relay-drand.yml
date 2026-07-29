@@ -47,8 +47,8 @@ jobs:
         env:
           RELAYER_PRIVATE_KEY: ${{ secrets.RELAYER_PRIVATE_KEY }}
           RPC_URL: https://rpc.mainnet.chain.robinhood.com
-          # Matches lib/constants.ts DRAND_BEACON_ADDRESS (repo var may override via script if set).
-          BEACON_ADDRESS: 0x87d584df130FED0Fe540954eD48CE2691A18D619
+          # Matches lib/constants.ts DRAND_BEACON_ADDRESS (must be quoted — YAML hex ints).
+          BEACON_ADDRESS: "0x87d584df130FED0Fe540954eD48CE2691A18D619"
           DRAND_CHAIN_HASH: "04f1e9062b8a81f848fded9c12306733282b2727ecced50032187751166ec8c3"
           # Primary V2 + legacy V1 — keep both slots free for deposit/redeem.
           VAULT_ADDRESSES: "0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04,0xb2019Fd4cA24502e812C0C73b751Fa49979BF708"
