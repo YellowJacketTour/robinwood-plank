@@ -17,6 +17,8 @@ export type VaultTradeEvent = {
   /** Present on server payloads — used for stable client-side dedupe. */
   logIndex?: number;
   blockNumber?: number;
+  /** Primary or legacy vault that emitted this row. */
+  vaultAddress?: string;
 };
 
 export type VaultStats = {

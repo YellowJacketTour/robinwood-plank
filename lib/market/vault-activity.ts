@@ -1,6 +1,6 @@
 import { Interface } from "ethers";
 import { kv } from "@vercel/kv";
-import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
+import { MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } from "@/lib/constants";
 import vaultAbi from "@/lib/market/vault-abi.json";
 import { BLOCKSCOUT_BASE, fetchAddressLogs } from "@/lib/market/blockscout";
 import { ethBlockNumber, ethGetLogs, rpcCall } from "@/lib/market/fetch-rpc";
@@ -20,6 +20,8 @@ export type VaultTradeEvent = {
   blockNumber: number;
   logIndex: number;
   timestamp: string | null;
+  /** Which vault emitted this (primary V2 or legacy V1). */
+  vaultAddress?: string;
 };
 
 const TOPICS = {
@@ -30,7 +32,8 @@ const TOPICS = {
 };
 
 const VAULT_TOPIC_SET = new Set(Object.values(TOPICS));
-const KV_KEY = "plank:market:vault-activity-v1";
+/** v2 = dual-vault merge (primary + legacy). */
+const KV_KEY = "plank:market:vault-activity-v2";
 const KV_TTL = 6 * 60 * 60;
 
 function hasKv(): boolean {
@@ -47,14 +50,17 @@ function normalizeTopics(raw: unknown): string[] {
     });
 }
 
-function decodeLog(log: {
-  topics: string[];
-  data: string;
-  transactionHash: string;
-  blockNumber: string | number;
-  logIndex: string | number;
-  timestamp?: string | null;
-}): VaultTradeEvent | null {
+function decodeLog(
+  log: {
+    topics: string[];
+    data: string;
+    transactionHash: string;
+    blockNumber: string | number;
+    logIndex: string | number;
+    timestamp?: string | null;
+  },
+  vaultAddress?: string
+): VaultTradeEvent | null {
   const topics = normalizeTopics(log.topics);
   const topic0 = topics[0];
   if (!topic0 || !VAULT_TOPIC_SET.has(topic0)) return null;
@@ -67,6 +73,7 @@ function decodeLog(log: {
     blockNumber,
     logIndex,
     timestamp: log.timestamp ?? null,
+    ...(vaultAddress ? { vaultAddress } : {}),
   };
 
   try {
@@ -128,7 +135,7 @@ function sortNewest(events: VaultTradeEvent[]): VaultTradeEvent[] {
 }
 
 function dedupeKey(e: VaultTradeEvent): string {
-  return `${e.txHash}:${e.logIndex}:${e.kind}`;
+  return `${(e.vaultAddress || "").toLowerCase()}:${e.txHash}:${e.logIndex}:${e.kind}`;
 }
 
 function mergeEvents(...lists: VaultTradeEvent[][]): VaultTradeEvent[] {
@@ -170,21 +177,26 @@ async function writeKv(events: VaultTradeEvent[]): Promise<void> {
  * share mints. We keep paginating until we have enough *decoded* vault
  * events (or pages run out).
  */
-async function fromBlockscout(limit: number): Promise<VaultTradeEvent[]> {
-  if (!MARKET_VAULT_ADDRESS) return [];
+async function fromBlockscout(
+  vault: string,
+  limit: number
+): Promise<VaultTradeEvent[]> {
   const events: VaultTradeEvent[] = [];
   const maxPages = Math.max(20, Math.ceil(limit / 5));
   // Use shared paginate helper with higher page budget
-  const logs = await fetchAddressLogs(MARKET_VAULT_ADDRESS, { maxPages });
+  const logs = await fetchAddressLogs(vault, { maxPages });
   for (const log of logs) {
-    const ev = decodeLog({
-      topics: (log.topics || []) as string[],
-      data: log.data || "0x",
-      transactionHash: log.transaction_hash || "",
-      blockNumber: log.block_number ?? 0,
-      logIndex: log.index ?? 0,
-      timestamp: log.block_timestamp ?? null,
-    });
+    const ev = decodeLog(
+      {
+        topics: (log.topics || []) as string[],
+        data: log.data || "0x",
+        transactionHash: log.transaction_hash || "",
+        blockNumber: log.block_number ?? 0,
+        logIndex: log.index ?? 0,
+        timestamp: log.block_timestamp ?? null,
+      },
+      vault
+    );
     if (ev) events.push(ev);
   }
   return sortNewest(events).slice(0, limit);
@@ -194,11 +206,14 @@ async function fromBlockscout(limit: number): Promise<VaultTradeEvent[]> {
  * Also walk vault *transactions* (method deposit/redeem/buy/sell) and pull
  * logs from each tx — catches events when address log feed is Transfer-heavy.
  */
-async function fromBlockscoutTxMethods(limit: number): Promise<VaultTradeEvent[]> {
-  if (!MARKET_VAULT_ADDRESS) return [];
+async function fromBlockscoutTxMethods(
+  vault: string,
+  limit: number
+): Promise<VaultTradeEvent[]> {
   const events: VaultTradeEvent[] = [];
+  const vaultLc = vault.toLowerCase();
   try {
-    let path = `/api/v2/addresses/${MARKET_VAULT_ADDRESS}/transactions`;
+    let path = `/api/v2/addresses/${vault}/transactions`;
     for (let page = 0; page < 12 && events.length < limit; page += 1) {
       const res = await fetch(`${BLOCKSCOUT_BASE}${path}`, {
         headers: { Accept: "application/json", "User-Agent": "plank.love/1.0" },
@@ -219,10 +234,12 @@ async function fromBlockscoutTxMethods(limit: number): Promise<VaultTradeEvent[]
           !method.includes("redeem") &&
           !method.includes("buy") &&
           !method.includes("sell") &&
+          // claimRandomRedeemFor shows up as claim* on explorers
+          !method.includes("claim") &&
           method !== ""
         ) {
           // empty method still worth checking a few
-          if (method && !/deposit|redeem|buy|sell|mint|swap/.test(method)) continue;
+          if (method && !/deposit|redeem|buy|sell|mint|swap|claim/.test(method)) continue;
         }
         try {
           const logRes = await fetch(`${BLOCKSCOUT_BASE}/api/v2/transactions/${tx.hash}/logs`, {
@@ -243,15 +260,18 @@ async function fromBlockscoutTxMethods(limit: number): Promise<VaultTradeEvent[]
           };
           for (const log of logData.items || []) {
             const addr = (log.address?.hash || "").toLowerCase();
-            if (addr && addr !== MARKET_VAULT_ADDRESS.toLowerCase()) continue;
-            const ev = decodeLog({
-              topics: (log.topics || []) as string[],
-              data: log.data || "0x",
-              transactionHash: tx.hash,
-              blockNumber: log.block_number ?? 0,
-              logIndex: log.index ?? 0,
-              timestamp: log.block_timestamp ?? null,
-            });
+            if (addr && addr !== vaultLc) continue;
+            const ev = decodeLog(
+              {
+                topics: (log.topics || []) as string[],
+                data: log.data || "0x",
+                transactionHash: tx.hash,
+                blockNumber: log.block_number ?? 0,
+                logIndex: log.index ?? 0,
+                timestamp: log.block_timestamp ?? null,
+              },
+              vault
+            );
             if (ev) events.push(ev);
           }
         } catch {
@@ -263,7 +283,7 @@ async function fromBlockscoutTxMethods(limit: number): Promise<VaultTradeEvent[]
       if (!next || Object.keys(next).length === 0) break;
       const qs = new URLSearchParams();
       for (const [k, v] of Object.entries(next)) qs.set(k, String(v));
-      path = `/api/v2/addresses/${MARKET_VAULT_ADDRESS}/transactions?${qs}`;
+      path = `/api/v2/addresses/${vault}/transactions?${qs}`;
     }
   } catch {
     /* */
@@ -271,9 +291,11 @@ async function fromBlockscoutTxMethods(limit: number): Promise<VaultTradeEvent[]
   return sortNewest(events).slice(0, limit);
 }
 
-async function fromEthRpc(limit: number, full: boolean): Promise<VaultTradeEvent[]> {
-  if (!MARKET_VAULT_ADDRESS) return [];
-  const vault = MARKET_VAULT_ADDRESS;
+async function fromEthRpc(
+  vault: string,
+  limit: number,
+  full: boolean
+): Promise<VaultTradeEvent[]> {
   const topics = [TOPICS.Bought, TOPICS.Sold, TOPICS.Deposited, TOPICS.Redeemed];
   const latest = await ethBlockNumber();
   const { chunkBlocks, maxChunks } = logScanBudget();
@@ -333,66 +355,82 @@ async function fromEthRpc(limit: number, full: boolean): Promise<VaultTradeEvent
   const events: VaultTradeEvent[] = [];
   for (const log of trimmed) {
     const ts = blockTimeByNumber.get(log.blockNumber);
-    const ev = decodeLog({
-      topics: log.topics,
-      data: log.data,
-      transactionHash: log.transactionHash,
-      blockNumber: log.blockNumber,
-      logIndex: log.logIndex,
-      timestamp: ts == null ? null : new Date(ts * 1000).toISOString(),
-    });
+    const ev = decodeLog(
+      {
+        topics: log.topics,
+        data: log.data,
+        transactionHash: log.transactionHash,
+        blockNumber: log.blockNumber,
+        logIndex: log.logIndex,
+        timestamp: ts == null ? null : new Date(ts * 1000).toISOString(),
+      },
+      vault
+    );
     if (ev) events.push(ev);
   }
   return events;
 }
 
+async function scanVault(
+  vault: string,
+  limit: number,
+  full: boolean
+): Promise<VaultTradeEvent[]> {
+  const cap = full ? 400 : limit;
+  const parts: VaultTradeEvent[][] = [];
+  try {
+    parts.push(await fromBlockscout(vault, full ? cap : Math.min(cap, 60)));
+  } catch {
+    /* */
+  }
+  let merged = mergeEvents(...parts);
+  if (merged.length < Math.min(cap, 25) || full) {
+    try {
+      parts.push(await fromBlockscoutTxMethods(vault, full ? cap : 30));
+      merged = mergeEvents(...parts);
+    } catch {
+      /* */
+    }
+  }
+  if (merged.length < Math.min(cap, 15) || full) {
+    try {
+      parts.push(await fromEthRpc(vault, cap, full));
+      merged = mergeEvents(...parts);
+    } catch {
+      /* */
+    }
+  }
+  return merged.slice(0, cap);
+}
+
 /**
- * Vault buy/sell/deposit/redeem history. Merges Blockscout logs, method-tx
- * deep walk, eth_getLogs, and durable KV so CF never shows an empty book
- * after a partial scan.
+ * Vault buy/sell/deposit/redeem history for primary + legacy vaults.
+ * Merges Blockscout logs, method-tx deep walk, eth_getLogs, and durable KV.
  */
 export async function getVaultActivity(
   limit = 40,
   opts?: { full?: boolean }
 ): Promise<VaultTradeEvent[]> {
-  if (!MARKET_VAULT_ADDRESS) return [];
+  if (!MARKET_VAULT_ADDRESS && MARKET_VAULT_ADDRESSES.length === 0) return [];
   const full = opts?.full ?? false;
   const cap = full ? 400 : limit;
+  const vaults =
+    MARKET_VAULT_ADDRESSES.length > 0
+      ? [...MARKET_VAULT_ADDRESSES]
+      : MARKET_VAULT_ADDRESS
+        ? [MARKET_VAULT_ADDRESS]
+        : [];
 
   const kvEvents = await readKv();
-  const parts: VaultTradeEvent[][] = [kvEvents];
+  // Per-vault budget so dual mode still has room for V1 redeems.
+  const perVault = Math.max(20, Math.ceil(cap / Math.max(1, vaults.length)));
 
-  // ALWAYS merge a shallow recent Blockscout scan with KV so new
-  // deposit/redeem/buy/sell appear within one request — never freeze the
-  // ticker on a warm-but-stale KV book for hours.
-  try {
-    parts.push(await fromBlockscout(full ? cap : Math.min(cap, 60)));
-  } catch {
-    /* keep KV */
-  }
+  const scanned = await Promise.all(
+    vaults.map((v) => scanVault(v, perVault, full).catch(() => [] as VaultTradeEvent[]))
+  );
 
-  let merged = mergeEvents(...parts);
+  let merged = mergeEvents(kvEvents, ...scanned);
 
-  // Deepen only when still thin or full lineage requested.
-  if (merged.length < Math.min(cap, 25) || full) {
-    try {
-      parts.push(await fromBlockscoutTxMethods(full ? cap : 30));
-      merged = mergeEvents(...parts);
-    } catch {
-      /* */
-    }
-  }
-
-  if (merged.length < Math.min(cap, 15) || full) {
-    try {
-      parts.push(await fromEthRpc(cap, full));
-      merged = mergeEvents(...parts);
-    } catch {
-      /* */
-    }
-  }
-
-  // If live scans failed entirely, still serve KV rather than empty.
   if (merged.length === 0 && kvEvents.length > 0) {
     return kvEvents.slice(0, cap);
   }
