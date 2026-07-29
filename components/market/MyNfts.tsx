@@ -205,7 +205,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
   }
   if (inventory === null) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/40 px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
         Reading your planks from chain…
       </p>
     );
@@ -214,7 +214,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
   const totalOwned = inventory.reduce((n, g) => n + g.items.length, 0);
   if (totalOwned === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/40 px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
         This wallet holds no planks yet.
       </p>
     );
@@ -255,7 +255,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
                       setDetailItem({ collection: group.collection, tokenId: item.tokenId });
                     }}
                     aria-label={`View details for #${item.tokenId}`}
-                    className="absolute bottom-1.5 right-1.5 z-[3] flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-xs text-gold-300 backdrop-blur-sm transition hover:bg-black/90 hover:text-gold-200"
+                    className="absolute bottom-1.5 right-1.5 z-[3] flex h-6 w-6 items-center justify-center rounded-full bg-black/90 text-xs text-gold-300 transition hover:bg-black hover:text-gold-200"
                   >
                     ⓘ
                   </button>
@@ -283,7 +283,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
                       </span>
                     )}
                     {isListed && (
-                      <span className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
+                      <span className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/90 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
                         Listed
                       </span>
                     )}
@@ -296,7 +296,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
                         {r.tier}
                       </span>
                     )}
-                    <span className="card-overlay legible-text absolute bottom-1.5 left-1.5 right-8 flex flex-col rounded-lg bg-black/60 px-2 py-0.5 text-left leading-tight">
+                    <span className="card-overlay legible-text absolute bottom-1.5 left-1.5 right-8 flex flex-col rounded-lg bg-black/90 px-2 py-0.5 text-left leading-tight">
                       <span className="truncate text-[0.6rem] font-bold text-foreground">
                         {r?.name ?? `#${item.tokenId}`}
                       </span>
@@ -341,7 +341,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
                 setRecipient(e.target.value);
                 setConfirming(false);
               }}
-              className="min-h-11 w-full rounded-lg border border-gold-500/30 bg-wood-900/70 px-2.5 font-mono text-sm text-foreground outline-none focus:border-gold-400"
+              className="min-h-11 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 font-mono text-sm text-foreground outline-none focus:border-gold-400"
             />
 
             {confirming && !busy && (
@@ -351,7 +351,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
               </p>
             )}
 
-            <div className="flex items-center justify-between rounded-lg border border-gold-500/20 bg-black/20 px-2.5 py-2">
+            <div className="flex items-center justify-between rounded-lg border border-gold-500/20 bg-wood-950/90 px-2.5 py-2">
               <span className="text-[0.65rem] text-foreground/50">
                 Send fee ({selectedItems.length > 1 ? "batch, cheaper per item" : "flat"})
               </span>

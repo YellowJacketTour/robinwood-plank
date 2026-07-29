@@ -149,7 +149,7 @@ export default function SweepFloorboards({
           : "scope";
 
   return (
-    <div className="flex w-full flex-col gap-1.5 rounded-lg border border-gold-500/20 bg-black/15 px-2 py-1.5 sm:w-auto sm:min-w-[16rem]">
+    <div className="flex w-full flex-col gap-1.5 rounded-lg border border-gold-500/20 bg-wood-950/90 px-2 py-1.5 sm:w-auto sm:min-w-[16rem]">
       <div className="flex flex-wrap items-center gap-1">
         <span className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
           🧹 Sweep
@@ -181,7 +181,7 @@ export default function SweepFloorboards({
       </div>
 
       {scopeMode === "trait" && (
-        <div className="rounded-md border border-gold-500/20 bg-wood-950/60 p-2">
+        <div className="rounded-md border border-gold-500/20 bg-wood-950/90 p-2">
           <p className="mb-1.5 text-[0.6rem] font-bold uppercase tracking-wide text-gold-400/80">
             Select traits / rarity to sweep
           </p>

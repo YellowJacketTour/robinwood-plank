@@ -78,7 +78,7 @@ export default function InstantVaultSwitcher({ role, onChange }: Props) {
     const only = vaults[0];
     if (!only) return null;
     return (
-      <div className="rounded-xl border border-gold-500/25 bg-black/25 px-3 py-2 text-sm text-foreground/70">
+      <div className="rounded-xl border border-gold-500/25 bg-wood-950/90 px-3 py-2 text-sm text-foreground/70">
         Active vault: <span className="font-mono text-gold-200">{shortVault(only.address)}</span>
       </div>
     );
@@ -120,8 +120,8 @@ export default function InstantVaultSwitcher({ role, onChange }: Props) {
             ? "border-orange-400 bg-orange-500/15 ring-2 ring-orange-400/40"
             : "border-emerald-400 bg-emerald-500/15 ring-2 ring-emerald-400/40";
           const idleBorder = isV1Card
-            ? "border-orange-500/25 bg-black/20 hover:border-orange-400/50"
-            : "border-emerald-500/25 bg-black/20 hover:border-emerald-400/50";
+            ? "border-orange-500/25 bg-wood-950/90 hover:border-orange-400/50"
+            : "border-emerald-500/25 bg-wood-950/90 hover:border-emerald-400/50";
           return (
             <button
               key={v.role}

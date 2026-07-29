@@ -693,7 +693,7 @@ export default function MarketView() {
                 ))}
               </select>
             </label>
-            <dl className="space-y-1 rounded-lg border border-gold-500/20 bg-wood-900/60 px-3 py-2 text-xs">
+            <dl className="space-y-1 rounded-lg border border-gold-500/20 bg-wood-900/90 px-3 py-2 text-xs">
               <div className="flex justify-between">
                 <dt className="font-bold text-foreground">You receive (net)</dt>
                 <dd className="font-display tabular-nums text-gold-300">
@@ -741,7 +741,7 @@ export default function MarketView() {
             <p className="text-sm text-foreground">
               You are selling {COLLECTION.name} #{acceptTarget.tokenId}.
             </p>
-            <dl className="space-y-1 rounded-lg border border-gold-500/20 bg-wood-900/60 px-3 py-2 text-xs">
+            <dl className="space-y-1 rounded-lg border border-gold-500/20 bg-wood-900/90 px-3 py-2 text-xs">
               <div className="flex justify-between border-t border-gold-500/15 pt-1 first:border-t-0 first:pt-0">
                 <dt className="font-bold text-foreground">You receive (net)</dt>
                 <dd className="font-display tabular-nums text-gold-300">
@@ -946,7 +946,7 @@ export default function MarketView() {
                   return (
                     <li
                       key={o.id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gold-500/25 bg-wood-900/60 px-3 py-2"
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gold-500/25 bg-wood-900/90 px-3 py-2"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-bold text-foreground">

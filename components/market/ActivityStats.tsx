@@ -23,7 +23,7 @@ type CatalogSale = {
 
 function stat(label: string, value: string) {
   return (
-    <div className="rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5">
+    <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 px-3 py-2.5">
       <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">
         {label}
       </dt>
@@ -107,7 +107,7 @@ export default function ActivityStats({ sales }: Props) {
 
   if (priced.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-gold-500/25 bg-black/10 px-3 py-6 text-center text-xs text-foreground/45">
+      <div className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-6 text-center text-xs text-foreground/45">
         No priced sales yet — stats appear once trades settle.
       </div>
     );
@@ -169,7 +169,7 @@ export default function ActivityStats({ sales }: Props) {
         {stat("Avg price", `${formatTokenAmount(avgWei.toString(), 18, 4)} Ξ`)}
       </dl>
 
-      <div className="rounded-lg border border-gold-500/20 bg-black/20 p-3">
+      <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
         <div className="flex items-baseline justify-between gap-2">
           <p className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">
             {chartTitle}

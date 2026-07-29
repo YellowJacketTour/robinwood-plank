@@ -232,7 +232,7 @@ export default function OfferForm({
           </div>
         )}
 
-        <div className="flex min-h-12 items-center gap-2 rounded-lg border border-gold-500/30 bg-wood-900/70 px-2.5">
+        <div className="flex min-h-12 items-center gap-2 rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5">
           <input
             type="text"
             inputMode="decimal"

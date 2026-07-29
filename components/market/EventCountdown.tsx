@@ -108,7 +108,7 @@ export default function EventCountdown() {
   if (remaining?.complete) return null;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gold-500/30 bg-wood-900/70 px-3 py-2">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gold-500/30 bg-wood-900/90 px-3 py-2">
       {record ? (
         <div className="flex min-w-0 items-center gap-2">
           {record.image ? (

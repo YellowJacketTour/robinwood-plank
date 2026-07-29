@@ -52,7 +52,7 @@ export default function WalletChip({ account }: Props) {
   }, [account]);
 
   return (
-    <span className="flex min-h-9 items-center gap-2 rounded-lg border border-gold-500/30 px-2.5 text-xs">
+    <span className="data-module flex min-h-9 items-center gap-2 rounded-lg border border-gold-500/30 bg-wood-950/90 px-2.5 text-xs">
       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" aria-hidden />
       <span className="font-bold text-foreground">{shortAddress(account)}</span>
       {balance !== null && <span className="text-gold-300">{balance} Ξ</span>}

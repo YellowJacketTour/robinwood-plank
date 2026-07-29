@@ -17,7 +17,7 @@ export default function CopyCA() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-col items-stretch gap-2 rounded-xl border-2 border-gold-500/70 bg-wood-950/70 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center">
+    <div className="mx-auto flex w-full max-w-xl flex-col items-stretch gap-2 rounded-xl border-2 border-gold-500/70 bg-wood-950/90 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center">
       <span className="shrink-0 rounded-md bg-gold-500/10 px-2 py-1 text-xs font-bold uppercase tracking-widest text-gold-300">
         CA
       </span>

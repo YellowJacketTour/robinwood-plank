@@ -246,7 +246,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
 
         {phase !== "need_chain" && (
           <>
-            <div className="mt-3 rounded-lg border border-gold-500/25 bg-black/30 px-3 py-2 text-[0.75rem] text-foreground/70">
+            <div className="mt-3 rounded-lg border border-gold-500/25 bg-wood-950/90 px-3 py-2 text-[0.75rem] text-foreground/70">
               <p className="font-bold text-gold-300">Before you scan</p>
               <ol className="mt-1 list-decimal space-y-0.5 pl-4">
                 <li>
@@ -265,7 +265,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
               value={projectId}
               onChange={(e) => setProjectId(e.target.value.trim())}
               placeholder="from cloud.reown.com"
-              className="mt-1 w-full rounded-lg border border-gold-500/25 bg-black/40 px-3 py-2 font-mono text-xs text-foreground outline-none focus:border-gold-400"
+              className="mt-1 w-full rounded-lg border border-gold-500/25 bg-wood-950/90 px-3 py-2 font-mono text-xs text-foreground outline-none focus:border-gold-400"
               autoComplete="off"
             />
             <p className="mt-1 text-[0.65rem] text-foreground/40">
@@ -306,7 +306,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
             )}
 
             {qrDataUrl && (
-              <div className="mt-4 flex flex-col items-center rounded-xl border border-gold-500/30 bg-black/30 p-4">
+              <div className="mt-4 flex flex-col items-center rounded-xl border border-gold-500/30 bg-wood-950/90 p-4">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={qrDataUrl}

@@ -141,13 +141,13 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
         ? {
             title: "Pre-LP",
             body: "Wait for the timer — don't swap yet.",
-            tone: "border-gold-500/30 bg-wood-900/80 text-foreground/75",
+            tone: "border-gold-500/30 bg-wood-900/90 text-foreground/75",
           }
         : null;
 
   return (
     <div
-      className={`rounded-xl border border-gold-500/30 bg-wood-950/80 px-3 py-2.5 text-center sm:px-4 sm:py-3 ${className}`}
+      className={`rounded-xl border border-gold-500/30 bg-wood-950/90 px-3 py-2.5 text-center sm:px-4 sm:py-3 ${className}`}
       role="timer"
       aria-live="polite"
       aria-atomic="true"

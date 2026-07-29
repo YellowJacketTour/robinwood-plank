@@ -84,7 +84,7 @@ export default function ListingCard({
         />
         {isFloor && (
           <span
-            className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-gold-300"
+            className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/90 px-2 py-0.5 text-[0.6rem] font-bold text-gold-300"
             title="Floorboard — cheapest listing"
           >
             Floor
@@ -104,7 +104,7 @@ export default function ListingCard({
         )}
         {collection.trustBadges.length > 0 && (
           <span
-            className="card-overlay absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-[0.65rem] text-emerald-300"
+            className="card-overlay absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/90 text-[0.65rem] text-emerald-300"
             title={collection.trustBadges.join(", ")}
           >
             {TRUST_ICON[collection.trustBadges[0]] ?? "✓"}

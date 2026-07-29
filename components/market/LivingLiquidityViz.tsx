@@ -97,7 +97,7 @@ export default function LivingLiquidityViz() {
   const marketFeeEth = stats ? formatTokenAmount(stats.marketplaceFeeRevenueEstWei, 18, 4) : "0";
 
   return (
-    <div className="overflow-hidden rounded-lg border border-gold-500/15 bg-black/20">
+    <div className="overflow-hidden rounded-lg border border-gold-500/15 bg-wood-950/90">
       <p className="border-b border-gold-500/10 px-3 py-1.5 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
         On The Fence
       </p>

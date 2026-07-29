@@ -668,9 +668,22 @@ body .nft-modal .nft-modal-body {
 .tier-badge {
   position: relative;
   z-index: 2;
-  background: rgba(10, 6, 2, 0.88);
+  /* ≥90% opaque so tier labels stay readable on any art/holo sheen */
+  background: rgba(10, 6, 2, 0.92);
   border: 1px solid currentColor;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+
+/* Money / hash-sensitive data modules & buckets (balances, prices, CAs,
+   vault addresses, trade rows). Always ≥90% opaque so text never washes
+   out over background art, live viz, or busy market chrome. Prefer this
+   class (or Tailwind bg-wood-950/90 / bg-wood-900/90) on any panel that
+   shows wallet, amount, or address content. */
+.data-module {
+  background-color: rgba(18, 10, 4, 0.92);
+}
+.data-module-strong {
+  background-color: rgba(10, 6, 2, 0.94);
 }
 
 /* Same root cause as .tier-badge above, generalized: ANY overlay badge/

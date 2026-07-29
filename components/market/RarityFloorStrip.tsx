@@ -53,7 +53,7 @@ export default function RarityFloorStrip({
           className={`min-w-[4.75rem] shrink-0 rounded-lg border px-2.5 py-1.5 text-left transition ${
             activeTier === "all"
               ? "border-gold-400/60 bg-gold-500/15 shadow-[0_0_12px_-4px_rgba(248,217,138,0.45)]"
-              : "border-gold-500/20 bg-black/20 hover:border-gold-500/40"
+              : "border-gold-500/20 bg-wood-950/90 hover:border-gold-500/40"
           }`}
         >
           <p className="text-[0.55rem] font-bold uppercase tracking-wide text-foreground/45">All</p>
@@ -77,8 +77,8 @@ export default function RarityFloorStrip({
               onClick={() => onSelectTier(row.tier)}
               className={`min-w-[5.25rem] shrink-0 rounded-lg border px-2.5 py-1.5 text-left transition disabled:cursor-not-allowed disabled:opacity-40 ${
                 active
-                  ? "bg-black/30 shadow-[0_0_14px_-4px_var(--tier-glow)]"
-                  : "border-gold-500/15 bg-black/15 hover:border-gold-500/35"
+                  ? "bg-wood-950/90 shadow-[0_0_14px_-4px_var(--tier-glow)]"
+                  : "border-gold-500/15 bg-wood-950/90 hover:border-gold-500/35"
               }`}
               style={
                 active

@@ -542,7 +542,7 @@ export default function SwapWidget() {
         Router on {CHAIN.name} — never Ethereum L1. Keep ~{BUY_GAS_RESERVE_ETH} ETH free for gas.
       </p>
 
-      <div className="grid grid-cols-2 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/50 p-1">
+      <div className="grid grid-cols-2 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/90 p-1">
         {(["buy", "sell"] as const).map((d) => (
           <button
             key={d}
@@ -566,7 +566,7 @@ export default function SwapWidget() {
         <span className="text-[0.65rem] font-bold uppercase tracking-wider text-foreground/50">
           You pay
         </span>
-        <div className="mt-1 flex min-h-12 items-center gap-2 rounded-lg border border-gold-500/30 bg-wood-900/70 px-2.5 focus-within:border-gold-400">
+        <div className="mt-1 flex min-h-12 items-center gap-2 rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 focus-within:border-gold-400">
           <input
             type="text"
             inputMode="decimal"
@@ -601,7 +601,7 @@ export default function SwapWidget() {
         <span className="text-[0.65rem] font-bold uppercase tracking-wider text-foreground/50">
           You receive
         </span>
-        <div className="mt-1 flex min-h-12 items-center gap-2 rounded-lg border border-gold-500/20 bg-wood-900/40 px-2.5">
+        <div className="mt-1 flex min-h-12 items-center gap-2 rounded-lg border border-gold-500/20 bg-wood-900/90 px-2.5">
           <span className="min-w-0 flex-1 py-2.5 text-lg font-semibold text-foreground/90 sm:text-xl">
             {estimatedOut}
           </span>
@@ -683,7 +683,7 @@ export default function SwapWidget() {
         )}
 
         {apiReady === false && (
-          <p className="rounded-lg border border-gold-500/30 bg-wood-900/80 px-2.5 py-2 text-center text-[0.7rem] text-foreground/70">
+          <p className="rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 py-2 text-center text-[0.7rem] text-foreground/70">
             Routing offline — try again shortly, or use Uniswap directly below.
           </p>
         )}
@@ -692,7 +692,7 @@ export default function SwapWidget() {
           href={uniswapUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-lg border border-gold-500/35 bg-wood-900/60 px-2.5 py-2 text-center text-[0.7rem] font-bold text-gold-300 underline-offset-2 hover:bg-gold-500/10 hover:underline"
+          className="rounded-lg border border-gold-500/35 bg-wood-900/90 px-2.5 py-2 text-center text-[0.7rem] font-bold text-gold-300 underline-offset-2 hover:bg-gold-500/10 hover:underline"
         >
           Open this pair on Uniswap ↗
         </a>

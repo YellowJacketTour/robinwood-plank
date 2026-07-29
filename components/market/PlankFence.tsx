@@ -131,7 +131,7 @@ export default function PlankFence({
     return (
       <div className="flex h-full items-center justify-center gap-1 px-3">
         {Array.from({ length: 10 }).map((_, i) => (
-          <div key={i} className="h-4/5 w-6 animate-pulse rounded-sm bg-wood-900/70" />
+          <div key={i} className="h-4/5 w-6 animate-pulse rounded-sm bg-wood-900/90" />
         ))}
       </div>
     );
@@ -208,7 +208,7 @@ export default function PlankFence({
                   </div>
                 )}
                 {/* Wood-grain seam so it reads as a board, not just a cropped photo */}
-                <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-black/30" />
+                <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-wood-950/90" />
               </div>
             </div>
           );

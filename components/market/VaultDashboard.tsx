@@ -14,7 +14,7 @@ type HeldToken = { tokenId: string; imageUrl: string | null };
 
 function statCell(label: string, value: string, sub?: string) {
   return (
-    <div className="rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2.5">
+    <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 px-3 py-2.5">
       <dt className="text-[0.6rem] font-bold uppercase tracking-wide text-foreground/45">{label}</dt>
       <dd className="mt-0.5 font-display text-lg text-gold-300">{value}</dd>
       {sub && <p className="mt-0.5 text-[0.6rem] text-foreground/40">{sub}</p>}
@@ -137,15 +137,15 @@ export default function VaultDashboard() {
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-center">
-        <div className="rounded-lg border border-gold-500/15 bg-black/10 px-2 py-1.5">
+        <div className="rounded-lg border border-gold-500/15 bg-wood-950/90 px-2 py-1.5">
           <p className="text-[0.55rem] uppercase tracking-wide text-foreground/40">Mint fee</p>
           <p className="font-mono text-xs text-foreground/70">{(stats.mintFeeBps / 100).toFixed(2)}%</p>
         </div>
-        <div className="rounded-lg border border-gold-500/15 bg-black/10 px-2 py-1.5">
+        <div className="rounded-lg border border-gold-500/15 bg-wood-950/90 px-2 py-1.5">
           <p className="text-[0.55rem] uppercase tracking-wide text-foreground/40">Redeem fee</p>
           <p className="font-mono text-xs text-foreground/70">{(stats.redeemFeeBps / 100).toFixed(2)}%</p>
         </div>
-        <div className="rounded-lg border border-gold-500/15 bg-black/10 px-2 py-1.5">
+        <div className="rounded-lg border border-gold-500/15 bg-wood-950/90 px-2 py-1.5">
           <p className="text-[0.55rem] uppercase tracking-wide text-foreground/40">Redeem premium</p>
           <p className="font-mono text-xs text-foreground/70">{(stats.targetPremiumBps / 100).toFixed(2)}%</p>
         </div>
@@ -158,11 +158,11 @@ export default function VaultDashboard() {
         {heldLoading ? (
           <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="aspect-square animate-pulse rounded-lg bg-wood-900/70" />
+              <div key={i} className="aspect-square animate-pulse rounded-lg bg-wood-900/90" />
             ))}
           </div>
         ) : held.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-gold-500/25 bg-black/10 px-3 py-4 text-center text-xs text-foreground/45">
+          <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-4 text-center text-xs text-foreground/45">
             Nothing held right now.
           </p>
         ) : (
@@ -194,7 +194,7 @@ export default function VaultDashboard() {
                       #{t.tokenId}
                     </div>
                   )}
-                  <span className="card-overlay legible-text absolute inset-x-0 bottom-0 flex flex-col items-center bg-black/75 px-1 py-0.5 text-center leading-tight">
+                  <span className="card-overlay legible-text absolute inset-x-0 bottom-0 flex flex-col items-center bg-black/90 px-1 py-0.5 text-center leading-tight">
                     <span className="w-full truncate font-bold text-gold-300 text-[0.55rem]">
                       {r?.name ?? `#${t.tokenId}`}
                     </span>

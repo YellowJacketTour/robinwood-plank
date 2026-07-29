@@ -29,7 +29,7 @@ export default function MarketNav({ active, onChange }: Props) {
 
   return (
     <div
-      className="flex gap-1.5 overflow-x-auto rounded-lg border border-gold-500/20 bg-wood-900/50 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="flex gap-1.5 overflow-x-auto rounded-lg border border-gold-500/20 bg-wood-900/90 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       role="tablist"
       aria-label="Marketplace sections"
     >

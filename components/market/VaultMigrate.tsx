@@ -330,7 +330,7 @@ export default function VaultMigrate({ account, onConnect }: Props) {
                   inputMode="decimal"
                   value={dustEth}
                   onChange={(e) => setDustEth(e.target.value.replace(/[^0-9.]/g, ""))}
-                  className="mt-0.5 block w-28 rounded border border-gold-500/30 bg-black/30 px-2 py-1 font-mono text-sm text-foreground"
+                  className="mt-0.5 block w-28 rounded border border-gold-500/30 bg-wood-950/90 px-2 py-1 font-mono text-sm text-foreground"
                 />
               </label>
               <button
@@ -418,7 +418,7 @@ export default function VaultMigrate({ account, onConnect }: Props) {
                       type="button"
                       disabled={busy}
                       onClick={() => void depositToPrimary(id)}
-                      className="rounded-md border border-gold-500/30 bg-black/30 px-2 py-1 font-mono text-[0.7rem] text-gold-200 hover:border-gold-400 disabled:opacity-40"
+                      className="rounded-md border border-gold-500/30 bg-wood-950/90 px-2 py-1 font-mono text-[0.7rem] text-gold-200 hover:border-gold-400 disabled:opacity-40"
                     >
                       Deposit #{id}
                     </button>
@@ -438,7 +438,7 @@ export default function VaultMigrate({ account, onConnect }: Props) {
         </Step>
       </ol>
 
-      <div className="rounded-lg border border-gold-500/15 bg-black/20 px-3 py-2 text-[0.7rem] leading-relaxed text-foreground/55">
+      <div className="rounded-lg border border-gold-500/15 bg-wood-950/90 px-3 py-2 text-[0.7rem] leading-relaxed text-foreground/55">
         <strong className="text-foreground/70">Do not:</strong> send NFTs or shares to a vault by raw
         transfer · switch wallet off chain 4663 · expect pool ETH to follow you (only your NFT + new shares
         after re-deposit).{" "}
@@ -477,7 +477,7 @@ function Step({
   children: React.ReactNode;
 }) {
   return (
-    <li className="rounded-xl border border-gold-500/20 bg-black/15 px-3 py-2.5">
+    <li className="rounded-xl border border-gold-500/20 bg-wood-950/90 px-3 py-2.5">
       <p className="text-sm font-semibold text-foreground">
         <span className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-gold-500/90 text-xs font-black text-wood-950">
           {n}

@@ -16,7 +16,7 @@ export default function Footer() {
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-6 text-center">
         <p className="font-display text-xl text-gold-300">Built on Robinhood Chain. Built for $PLANK.</p>
 
-        <p className="max-w-full break-all rounded-md bg-black/30 px-4 py-2 font-mono text-xs text-foreground/80 sm:text-sm">
+        <p className="max-w-full break-all rounded-md bg-wood-950/90 px-4 py-2 font-mono text-xs text-foreground/80 sm:text-sm">
           {CONTRACT_ADDRESS}
         </p>
 
