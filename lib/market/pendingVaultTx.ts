@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 
 export type PendingVaultTx = {
   txHash: string;
-  kind: "buy" | "sell" | "deposit" | "redeem";
+  kind: "buy" | "sell" | "deposit" | "redeem" | "add_lp" | "remove_lp";
   ethWei: string | null;
+  /** Share amount for buy/sell/LP pending rows when known. */
+  sharesWei?: string | null;
   tokenId: string | null;
   submittedAt: number;
   /**

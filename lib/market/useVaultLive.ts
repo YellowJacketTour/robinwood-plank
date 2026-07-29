@@ -4,7 +4,13 @@ import { useEffect, useState } from "react";
 import { clearPendingVaultTx } from "@/lib/market/pendingVaultTx";
 import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 
-export type VaultTradeKind = "buy" | "sell" | "deposit" | "redeem";
+export type VaultTradeKind =
+  | "buy"
+  | "sell"
+  | "deposit"
+  | "redeem"
+  | "add_lp"
+  | "remove_lp";
 
 export type VaultTradeEvent = {
   kind: VaultTradeKind;

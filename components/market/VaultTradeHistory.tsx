@@ -14,6 +14,8 @@ const KIND_LABEL: Record<VaultTradeKind, string> = {
   sell: "Sell shares",
   deposit: "Deposit NFT",
   redeem: "Redeem NFT",
+  add_lp: "Add LP",
+  remove_lp: "Remove LP",
 };
 
 const KIND_COLOR: Record<VaultTradeKind, string> = {
@@ -21,7 +23,35 @@ const KIND_COLOR: Record<VaultTradeKind, string> = {
   sell: "text-red-300",
   deposit: "text-sky-300",
   redeem: "text-amber-300",
+  add_lp: "text-violet-300",
+  remove_lp: "text-fuchsia-300",
 };
+
+/** Amount cell: LP always shows shares + ETH; buy/sell prefer ETH; NFT kinds show #id. */
+function formatAmount(e: {
+  kind: VaultTradeKind;
+  ethWei: string | null;
+  sharesWei?: string | null;
+  tokenId: string | null;
+}): string {
+  if (e.kind === "add_lp" || e.kind === "remove_lp") {
+    const parts: string[] = [];
+    if (e.sharesWei != null && e.sharesWei !== "0") {
+      parts.push(`${formatTokenAmount(e.sharesWei, 18, 4)} sh`);
+    }
+    if (e.ethWei != null && e.ethWei !== "0") {
+      parts.push(`${formatTokenAmount(e.ethWei, 18, 4)} Ξ`);
+    }
+    return parts.length > 0 ? parts.join(" + ") : "—";
+  }
+  if (e.kind === "buy" || e.kind === "sell") {
+    if (e.ethWei != null) return `${formatTokenAmount(e.ethWei, 18, 4)} Ξ`;
+    if (e.sharesWei != null) return `${formatTokenAmount(e.sharesWei, 18, 4)} sh`;
+    return "—";
+  }
+  if (e.tokenId != null) return `#${e.tokenId}`;
+  return "—";
+}
 
 function shortAddr(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -58,7 +88,7 @@ function timeAgo(iso: string | null) {
 }
 
 /**
- * Vault share + NFT inventory ticker (buy/sell shares, deposit/redeem NFT).
+ * Vault share + NFT inventory ticker (buy/sell, deposit/redeem, add/remove LP).
  * NFT marketplace sales (Seaport/OpenSea) live on the Activity tab, not here.
  *
  * Rows this tab just submitted appear instantly as "Pending" (see
@@ -140,13 +170,14 @@ export default function VaultTradeHistory() {
                     {p.role === "settle" ? "Settle redeem" : KIND_LABEL[p.kind]}
                   </td>
                   <td className="px-2 py-1.5 font-mono text-foreground/70">
-                    {p.ethWei != null
-                      ? `${formatTokenAmount(p.ethWei, 18, 4)} Ξ`
-                      : p.tokenId != null
-                        ? `#${p.tokenId}`
-                        : p.role === "settle"
-                          ? "→ other wallet"
-                          : "—"}
+                    {p.role === "settle"
+                      ? "→ other wallet"
+                      : formatAmount({
+                          kind: p.kind,
+                          ethWei: p.ethWei,
+                          sharesWei: p.sharesWei ?? null,
+                          tokenId: p.tokenId,
+                        })}
                   </td>
                   <td className="px-2 py-1.5 font-mono text-foreground/45">—</td>
                   <td className="px-2 py-1.5 font-mono text-foreground/45">
@@ -180,14 +211,14 @@ export default function VaultTradeHistory() {
                     })()}
                   </td>
                   <td className="px-2 py-1.5 font-mono text-foreground/70">
-                    {e.ethWei != null
-                      ? `${formatTokenAmount(e.ethWei, 18, 4)} Ξ`
-                      : e.tokenId != null
-                        ? `#${e.tokenId}`
-                        : "—"}
+                    {formatAmount(e)}
                   </td>
                   <td className="px-2 py-1.5 font-mono text-foreground/55">
-                    {e.kind === "buy" || e.kind === "sell" ? pricePerShare(e.ethWei, e.sharesWei) : "—"}
+                    {e.kind === "buy" || e.kind === "sell"
+                      ? pricePerShare(e.ethWei, e.sharesWei)
+                      : e.kind === "add_lp" || e.kind === "remove_lp"
+                        ? pricePerShare(e.ethWei, e.sharesWei)
+                        : "—"}
                   </td>
                   <td className="px-2 py-1.5 font-mono text-foreground/45">{shortAddr(e.address)}</td>
                   <td className="px-2 py-1.5 text-right text-foreground/40">{timeAgo(e.timestamp)}</td>

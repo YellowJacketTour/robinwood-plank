@@ -1010,8 +1010,9 @@ export default function SwapPanel({
               (txHash) =>
                 addPendingVaultTx({
                   txHash,
-                  kind: "buy",
+                  kind: "remove_lp",
                   ethWei: ethWei > BigInt(0) ? ethWei.toString() : null,
+                  sharesWei: sharesWei > BigInt(0) ? sharesWei.toString() : null,
                   tokenId: null,
                 }),
               vaultAddress
@@ -1029,8 +1030,9 @@ export default function SwapPanel({
             (txHash) =>
               addPendingVaultTx({
                 txHash,
-                kind: "sell",
+                kind: "add_lp",
                 ethWei: ethWei > BigInt(0) ? ethWei.toString() : null,
+                sharesWei: sharesWei > BigInt(0) ? sharesWei.toString() : null,
                 tokenId: null,
               }),
             vaultAddress

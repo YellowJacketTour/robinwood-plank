@@ -8,7 +8,13 @@ import { logScanBudget } from "@/lib/market/rpc-budget";
 
 const IFACE = new Interface(vaultAbi);
 
-export type VaultTradeKind = "buy" | "sell" | "deposit" | "redeem";
+export type VaultTradeKind =
+  | "buy"
+  | "sell"
+  | "deposit"
+  | "redeem"
+  | "add_lp"
+  | "remove_lp";
 
 export type VaultTradeEvent = {
   kind: VaultTradeKind;
@@ -29,11 +35,13 @@ const TOPICS = {
   Sold: IFACE.getEvent("Sold")!.topicHash.toLowerCase(),
   Deposited: IFACE.getEvent("Deposited")!.topicHash.toLowerCase(),
   Redeemed: IFACE.getEvent("Redeemed")!.topicHash.toLowerCase(),
+  LiquidityContributed: IFACE.getEvent("LiquidityContributed")!.topicHash.toLowerCase(),
+  LiquidityRemoved: IFACE.getEvent("LiquidityRemoved")!.topicHash.toLowerCase(),
 };
 
 const VAULT_TOPIC_SET = new Set(Object.values(TOPICS));
-/** v2 = dual-vault merge (primary + legacy). */
-const KV_KEY = "plank:market:vault-activity-v2";
+/** v3 = dual-vault + Add/Remove LP (LiquidityContributed / LiquidityRemoved). */
+const KV_KEY = "plank:market:vault-activity-v3";
 const KV_TTL = 6 * 60 * 60;
 
 function hasKv(): boolean {
@@ -120,6 +128,28 @@ function decodeLog(
         ethWei: null,
         sharesWei: null,
         tokenId: parsed.tokenId.toString(),
+      };
+    }
+    if (topic0 === TOPICS.LiquidityContributed) {
+      const parsed = IFACE.decodeEventLog("LiquidityContributed", data, topics);
+      return {
+        ...base,
+        kind: "add_lp",
+        address: String(parsed.from),
+        ethWei: parsed.ethIn.toString(),
+        sharesWei: parsed.sharesIn.toString(),
+        tokenId: null,
+      };
+    }
+    if (topic0 === TOPICS.LiquidityRemoved) {
+      const parsed = IFACE.decodeEventLog("LiquidityRemoved", data, topics);
+      return {
+        ...base,
+        kind: "remove_lp",
+        address: String(parsed.to),
+        ethWei: parsed.ethOut.toString(),
+        sharesWei: parsed.sharesOut.toString(),
+        tokenId: null,
       };
     }
   } catch {
@@ -236,10 +266,16 @@ async function fromBlockscoutTxMethods(
           !method.includes("sell") &&
           // claimRandomRedeemFor shows up as claim* on explorers
           !method.includes("claim") &&
+          !method.includes("liquidity") &&
+          !method.includes("contribute") &&
           method !== ""
         ) {
           // empty method still worth checking a few
-          if (method && !/deposit|redeem|buy|sell|mint|swap|claim/.test(method)) continue;
+          if (
+            method &&
+            !/deposit|redeem|buy|sell|mint|swap|claim|liquidity|contribute/.test(method)
+          )
+            continue;
         }
         try {
           const logRes = await fetch(`${BLOCKSCOUT_BASE}/api/v2/transactions/${tx.hash}/logs`, {
@@ -296,7 +332,14 @@ async function fromEthRpc(
   limit: number,
   full: boolean
 ): Promise<VaultTradeEvent[]> {
-  const topics = [TOPICS.Bought, TOPICS.Sold, TOPICS.Deposited, TOPICS.Redeemed];
+  const topics = [
+    TOPICS.Bought,
+    TOPICS.Sold,
+    TOPICS.Deposited,
+    TOPICS.Redeemed,
+    TOPICS.LiquidityContributed,
+    TOPICS.LiquidityRemoved,
+  ];
   const latest = await ethBlockNumber();
   const { chunkBlocks, maxChunks } = logScanBudget();
   const chunks = full ? Math.max(maxChunks, 15) : maxChunks;
@@ -404,7 +447,7 @@ async function scanVault(
 }
 
 /**
- * Vault buy/sell/deposit/redeem history for primary + legacy vaults.
+ * Vault buy/sell/deposit/redeem/add-LP/remove-LP history for primary + legacy vaults.
  * Merges Blockscout logs, method-tx deep walk, eth_getLogs, and durable KV.
  */
 export async function getVaultActivity(
