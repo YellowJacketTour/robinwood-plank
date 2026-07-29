@@ -8,6 +8,9 @@ name: Relay drand rounds
 # redemption outcome — it can only be early, late, or redundant with someone
 # else's submission (the first valid one wins, the rest are cheap no-ops).
 #
+# After relay it also settles any stuck random-redeem slot on V1 + V2 via
+# claimRandomRedeemFor (permissionless) so deposit/redeem stay usable.
+#
 # The only secret involved is RELAYER_PRIVATE_KEY: a throwaway, gas-only
 # wallet with no special privilege over the vault. It never touches an AI
 # assistant, never touches this repo's source, and lives only in GitHub's
@@ -17,20 +20,21 @@ name: Relay drand rounds
 
 on:
   schedule:
-    # Every 10 minutes. The vault's forfeit window is ~24h, so this is a
-    # wide margin for prompt redemption resolution without wasting Actions
-    # minutes on drand's ~3s round cadence.
-    - cron: "*/10 * * * *"
+    # Every 5 minutes. GitHub may delay free-tier crons; tighter intent still
+    # beats the old 10m schedule when runners are available. Vault forfeit is
+    # ~24h; auto-claim in the app covers the happy path.
+    - cron: "*/5 * * * *"
   workflow_dispatch: {} # lets you trigger a run by hand from the Actions tab
 
 jobs:
   relay:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       # package-lock.json was generated with npm 11.6.2. Both npm 10 (bundled
       # with Node 20) and npm 11.18.0 disagree with it on optional-dependency
       # resolution and fail `npm ci` outright ("Missing: @emnapi/... from
@@ -39,10 +43,13 @@ jobs:
       # regenerated and re-verified against npm ci.
       - run: npm install -g npm@11.6.2
       - run: npm ci
-      - name: Relay latest drand round
+      - name: Relay latest drand + settle pending redeems
         env:
           RELAYER_PRIVATE_KEY: ${{ secrets.RELAYER_PRIVATE_KEY }}
           RPC_URL: https://rpc.mainnet.chain.robinhood.com
-          BEACON_ADDRESS: ${{ vars.DRAND_BEACON_ADDRESS }}
+          # Matches lib/constants.ts DRAND_BEACON_ADDRESS (repo var may override via script if set).
+          BEACON_ADDRESS: 0x87d584df130FED0Fe540954eD48CE2691A18D619
           DRAND_CHAIN_HASH: "04f1e9062b8a81f848fded9c12306733282b2727ecced50032187751166ec8c3"
+          # Primary V2 + legacy V1 — keep both slots free for deposit/redeem.
+          VAULT_ADDRESSES: "0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04,0xb2019Fd4cA24502e812C0C73b751Fa49979BF708"
         run: npx tsx scripts/relay-drand.ts

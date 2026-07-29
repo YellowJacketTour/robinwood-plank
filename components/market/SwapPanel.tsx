@@ -1304,31 +1304,32 @@ export default function SwapPanel({
               </button>
             </div>
             <p className="text-[0.7rem] text-foreground/65">
-              {lpDirection === "add" ? (
+              {lpFull === false || lpRemove === false ? (
+                <>
+                  <strong className="text-foreground/85">Full Add/Remove LP is on V2 only.</strong> This
+                  vault build (usually <span className="font-semibold text-orange-300">V1</span>) supports{" "}
+                  <strong className="text-foreground/85">Deposit</strong> and{" "}
+                  <strong className="text-foreground/85">Redeem</strong>, but not tracked LP credits. Switch
+                  the vault picker above to <span className="font-semibold text-emerald-300">V2</span> to Add
+                  LP / Remove LP. On V1 use Sell if you want ETH for shares.
+                </>
+              ) : lpDirection === "add" ? (
                 <>
                   <strong className="text-foreground/85">Deposit is not LP.</strong> After deposit, shares
                   sit in <em>your wallet</em> (see balance above).{" "}
                   <strong className="text-foreground/85">Add LP</strong> moves shares and/or ETH into the
                   pool
-                  {lpFull && lpPoolRatio
+                  {lpPoolRatio
                     ? " — enter either side and the other auto-matches the pool ratio"
                     : ""}
-                  {lpFull ? " (credits you for Remove LP)" : ""}.
-                </>
-              ) : lpRemove ? (
-                <>
-                  Pull back shares/ETH you previously added via <strong className="text-foreground/85">Add LP</strong>.
-                  Capped by your credit and live pool reserves. Existing <em>deposits</em> (wallet shares) are
-                  not LP credit — use Redeem or Sell for those.
+                  {" "}(credits you for Remove LP).
                 </>
               ) : (
                 <>
-                  <strong className="text-foreground/85">Existing deposits do not need Remove LP.</strong>{" "}
-                  If you deposited a plank, your vROBIN shares are already in your wallet — use{" "}
-                  <strong className="text-foreground/85">Redeem</strong> (NFT) or{" "}
-                  <strong className="text-foreground/85">Sell</strong> (ETH). Remove LP only undoes pool
-                  contributions after a vault upgrade that tracks LP credits. This live vault address keeps
-                  all 57+ current deposits — we will not switch contracts out from under you.
+                  Pull back shares/ETH you previously added via{" "}
+                  <strong className="text-foreground/85">Add LP</strong>. Capped by your credit and live pool
+                  reserves. Existing <em>deposits</em> (wallet shares) are not LP credit — use Redeem or Sell
+                  for those.
                 </>
               )}
             </p>
