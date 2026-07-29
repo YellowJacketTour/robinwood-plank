@@ -19,10 +19,10 @@ function ok(data: unknown) {
 }
 
 /**
- * Real vault trade history (buy/sell/deposit/redeem), replayed straight off
- * chain logs (lib/market/vault-activity.ts) — the dextools-style ticker for
- * Instant Swap, and the piece the NFT-collection-Transfer-based
- * /api/market/activity has no visibility into.
+ * Real vault trade history (buy/sell/deposit/redeem/add-LP/remove-LP),
+ * replayed straight off chain logs (lib/market/vault-activity.ts) — the
+ * dextools-style ticker for Instant Swap, and the piece the
+ * NFT-collection-Transfer-based /api/market/activity has no visibility into.
  */
 export async function GET(req: Request) {
   const limited = rateLimit(req, { key: "vault-activity", limit: 60, windowMs: 60_000 });
