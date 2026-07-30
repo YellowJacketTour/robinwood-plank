@@ -9,6 +9,26 @@
 
 export type SwapDirection = "buy" | "sell";
 
+/**
+ * Public fee metadata shape returned by lib/zerox-server.ts's
+ * getPublicSiteFee(). `bps`/`label` are what 0x actually charges (floored to
+ * an integer — 0x's swapFeeBps/feeBps params reject any decimal, confirmed
+ * live); `exactBps`/`exactLabel` are the site-wide exact fee (0.4207%) for
+ * comparison. `roundedDownFrom` is set only when the two differ, so the UI
+ * can disclose "0x charges 0.42% instead of 0.4207%" instead of silently
+ * showing the wrong number.
+ */
+export interface ZeroXPublicSiteFee {
+  percent: number;
+  bps: number;
+  exactBps: number;
+  label: string;
+  exactLabel: string;
+  recipient: string;
+  enabled: boolean;
+  roundedDownFrom?: string;
+}
+
 export interface ZeroXFeeLine {
   amount: string;
   token: string;
@@ -63,13 +83,7 @@ export interface ZeroXQuoteResponse {
   } | null;
   allowanceTarget?: string | null;
   issues?: Record<string, unknown>;
-  siteFee: {
-    percent: number;
-    bps: number;
-    label: string;
-    recipient: string;
-    enabled: boolean;
-  };
+  siteFee: ZeroXPublicSiteFee;
   /** Honest disclosure line for the UI — set whenever zeroExFee is non-null. */
   zeroExFeeDisclosure?: string;
 }
@@ -123,14 +137,37 @@ export interface ZeroXCrossChainQuoteResponse {
     value: string;
     gas?: string;
   } | null;
-  siteFee: {
-    percent: number;
-    bps: number;
-    label: string;
-    recipient: string;
-    enabled: boolean;
-  };
+  /** Pass this back to /api/zerox/crosschain/status alongside the origin tx
+   * hash once the user sends the transaction — lets the status lookup match
+   * the exact route this quote picked. Optional on 0x's side; we still
+   * capture it whenever present. */
+  quoteId?: string;
+  siteFee: ZeroXPublicSiteFee;
   zeroExFeeDisclosure?: string;
+}
+
+/**
+ * Cross-chain settlement is NON-ATOMIC — this is 0x's own documented risk,
+ * not a hypothetical: the origin-chain transaction can succeed while the
+ * bridge/destination leg fails, and any refund lands in whatever token the
+ * FAILED STEP was trading (not necessarily the original sellToken), on
+ * whichever chain that step was on — not automatically back as $PLANK, and
+ * not automatically back on the source chain. `lifecycle` mirrors 0x's own
+ * status states so the UI can show the user exactly where their funds are.
+ */
+export type ZeroXCrossChainLifecycle =
+  | "origin_tx_pending"
+  | "origin_tx_confirmed"
+  | "bridge_pending"
+  | "bridge_filled"
+  | "bridge_failed"
+  | "unknown";
+
+export interface ZeroXCrossChainStatusResponse {
+  lifecycle: ZeroXCrossChainLifecycle;
+  /** Raw status detail from 0x, for a "view on 0x" / support-ticket link —
+   * never parsed for control flow beyond the lifecycle field above. */
+  raw?: Record<string, unknown>;
 }
 
 /**
