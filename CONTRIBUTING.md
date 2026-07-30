@@ -88,6 +88,7 @@ Keep the title short and use a conventional prefix:
 - `feat:` user-visible behavior
 - `fix:` defect correction
 - `perf:` measured performance improvement
+- `design:` visual/UX changes that keep behavior and data flow intact
 - `security:` security-specific remediation
 - `ops:` deployment or operations
 - `chore:` dependencies and maintenance
