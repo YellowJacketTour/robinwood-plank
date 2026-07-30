@@ -45,7 +45,13 @@ export async function GET(req: Request) {
     return publicJson({ error: "BAD_TOKEN", message: "Unknown token." }, 404);
   }
 
-  const hit = cache.get(tokenId);
+  // Cache key must include the history flag: a history-less fetch (fence /
+  // art callers) caching {history: []} was poisoning history=1 callers
+  // (item detail, gallery modal) with an empty history for CACHE_MS.
+  const wantHistory = searchParams.get("history") === "1";
+  const cacheKey = `${tokenId}|h${wantHistory ? 1 : 0}`;
+
+  const hit = cache.get(cacheKey);
   if (hit && Date.now() - hit.at < CACHE_MS) {
     return cachedPublicJson(hit.payload, "token");
   }
@@ -74,7 +80,6 @@ export async function GET(req: Request) {
     // History is optional and expensive (collection log walk). Item detail
     // can pass history=1; fence/image callers skip it for fast art resolve.
     let history: unknown[] = [];
-    const wantHistory = new URL(req.url).searchParams.get("history") === "1";
     if (wantHistory) {
       try {
         const all = await fetchActivity(200);
@@ -96,10 +101,10 @@ export async function GET(req: Request) {
     }
 
     const payload = { tokenId, owner, image, attributes, history, rarity };
-    cache.set(tokenId, { at: Date.now(), payload });
+    cache.set(cacheKey, { at: Date.now(), payload });
     return cachedPublicJson(payload, "token");
   } catch (error) {
-    const hit2 = cache.get(tokenId);
+    const hit2 = cache.get(cacheKey);
     if (hit2) return cachedPublicJson(hit2.payload, "token");
     return publicError(error, "Could not load this item.");
   }
