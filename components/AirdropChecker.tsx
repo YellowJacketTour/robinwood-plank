@@ -443,9 +443,9 @@ export default function AirdropChecker() {
           <SectionHead
             eyebrow="Allocation · live"
             title="Airdrop"
-            lede="4.2069% pool split by NFTs held, live scan."
-            artSrc="/images/collection/plank-bobawood.png"
-            artAlt="Boba wood plank"
+            lede="4.2069% of supply split by NFTs held — paste any wallet to check its allocation."
+            center
+            className="mx-auto max-w-2xl"
           />
         </Reveal>
 

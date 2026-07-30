@@ -2,6 +2,7 @@ import Reveal from "@/components/Reveal";
 import SectionHead from "@/components/SectionHead";
 import MintPanel from "@/components/MintPanel";
 import MarketSnapshot from "@/components/MarketSnapshot";
+import MintAllocation from "@/components/MintAllocation";
 
 export default function MintInfo() {
   return (
@@ -13,7 +14,6 @@ export default function MintInfo() {
             title="The Woodpile Is Full"
             lede="Minting is closed for good — every Plank is already in a wallet. Buy or trade one on Marketplank."
             center
-            framed
             className="mx-auto max-w-2xl"
           />
         </Reveal>
@@ -24,6 +24,11 @@ export default function MintInfo() {
             <MarketSnapshot />
           </div>
         </Reveal>
+
+        {/* Supply split — part of this section per the mockup, not its own */}
+        <div className="mx-auto max-w-5xl">
+          <MintAllocation />
+        </div>
       </div>
     </section>
   );

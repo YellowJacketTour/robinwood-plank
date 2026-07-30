@@ -1,21 +1,27 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import Link from "next/link";
+import dynamic from "next/dynamic";
 import Reveal from "@/components/Reveal";
 import SectionHead from "@/components/SectionHead";
-import CopyCA from "@/components/CopyCA";
 import CountdownTimer from "@/components/trade/CountdownTimer";
-import { CHAIN, TRADE_PAUSED } from "@/lib/constants";
+import { CHAIN, SITE_FEE, TRADE_PAUSED } from "@/lib/constants";
 import { getCountdownParts } from "@/lib/trade";
 
+/** The real widget from /trade — same component, not a copy. Loaded on
+ * demand so the wallet/quote/swap stack stays out of the homepage's
+ * initial bundle. */
+const SwapWidget = dynamic(() => import("@/components/trade/SwapWidget"), {
+  ssr: false,
+  loading: () => (
+    <div className="min-h-[26rem] rounded-xl border border-line bg-panel" aria-hidden="true" />
+  ),
+});
+
 /**
- * Homepage conversion entry point. This used to expand the full SwapWidget
- * inline; it now hands off to the dedicated /trade page (which renders the
- * same widget plus live status and safety context) instead of duplicating
- * the whole wallet/quote/swap stack on the homepage bundle. Keeps the
- * homepage light while still giving visitors a one-click path to trade the
- * moment the countdown opens.
+ * Homepage trade section. Follows the approved mockup's two-column shape —
+ * swap on the left, three trust facts on the right — using the SAME
+ * SwapWidget the /trade page renders rather than a mock-up of one.
  */
 export default function Trade() {
   const [isOpen, setIsOpen] = useState(() =>
@@ -33,38 +39,54 @@ export default function Trade() {
             eyebrow={TRADE_PAUSED ? "Stand by" : "Official Uniswap · verified CA"}
             title={TRADE_PAUSED ? "Trading Paused" : "Buy & Sell $PLANK"}
             lede={
-              TRADE_PAUSED ? "Not live yet." : `${CHAIN.name} · verified contract only.`
+              TRADE_PAUSED
+                ? "Not live yet."
+                : `${CHAIN.name} · verified contract only. Trading is open — no bots, no snipe window.`
             }
-            artSrc="/images/collection/plank-insidertrader.png"
-            artAlt="Insider Trader collection plank"
             center
-            framed
-            className="mx-auto max-w-xl"
+            className="mx-auto max-w-2xl"
           />
         </Reveal>
 
-        <Reveal delayMs={40}>
-          <div className="mx-auto mt-3 max-w-md">
-            <CountdownTimer onOpenChange={onOpenChange} />
-          </div>
-        </Reveal>
-
-        {!TRADE_PAUSED && isOpen && (
-          <Reveal delayMs={55}>
-            <div className="mx-auto mt-3 max-w-xl space-y-2.5">
-              <CopyCA />
-              <Link
-                href="/trade"
-                className="flex min-h-12 w-full items-center justify-center rounded-lg bg-gold-500 px-4 text-sm font-black text-wood-950 shadow-[0_6px_18px_-6px_rgba(217,164,65,0.55)] transition hover:bg-gold-400 sm:text-base"
-              >
-                Trade $PLANK →
-              </Link>
-              <p className="text-center text-[0.65rem] text-foreground/45">
-                Opens the full trade page — live status, verified CA, and the swap widget.
-              </p>
+        {!TRADE_PAUSED && !isOpen && (
+          <Reveal delayMs={40}>
+            <div className="mx-auto mt-3 max-w-md">
+              <CountdownTimer onOpenChange={onOpenChange} />
             </div>
           </Reveal>
         )}
+
+        <Reveal delayMs={55}>
+          <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:items-start sm:mt-6 sm:gap-4">
+            {/* The real widget from /trade — same component, not a copy */}
+            <div className="min-w-0">
+              <SwapWidget />
+            </div>
+
+            {/* Trust facts */}
+            <div className="grid gap-3">
+              {[
+                {
+                  title: "Verified contract",
+                  body: "Only this on-site widget and the official Uniswap app are safe — never trust a third-party UI or an unverified deep-link.",
+                },
+                {
+                  title: `Chain ID ${CHAIN.id}`,
+                  body: `${CHAIN.name} · gas paid in ETH · Blockscout explorer for every transaction.`,
+                },
+                {
+                  title: "Full transparency",
+                  body: `Trading fee is fixed at ${SITE_FEE.label} — hard-coded server-side, never client-overridable.`,
+                },
+              ].map((f) => (
+                <div key={f.title} className="rounded-xl border border-line bg-panel p-3 sm:p-4">
+                  <strong className="block font-display text-lg text-gold-300">{f.title}</strong>
+                  <span className="mt-1 block text-sm text-cream-muted">{f.body}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Reveal>
       </div>
     </section>
   );

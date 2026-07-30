@@ -16,6 +16,17 @@ export default function Hero() {
       id="home"
       className="wood-grain-surface relative overflow-hidden px-3 pb-8 pt-14 sm:px-5 sm:pb-10 sm:pt-16"
     >
+      {/* Masthead illustration — capped, top-anchored, and washed down so
+          copy stays legible. Lives here rather than on <body> so it can
+          never bleed into the sections below (see app/globals.css). */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[url('/images/plank-head.webp')] bg-[length:min(1500px,120vw)_auto] bg-top bg-no-repeat"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(20,16,11,0.86)_0%,rgba(20,16,11,0.94)_45%,rgb(20,16,11)_100%)]"
+      />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(217,164,65,0.15),transparent_55%)]"

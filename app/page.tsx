@@ -3,7 +3,6 @@ import Hero from "@/components/Hero";
 import TrustFacts from "@/components/TrustFacts";
 import Trade from "@/components/Trade";
 import MintInfo from "@/components/MintInfo";
-import MintAllocation from "@/components/MintAllocation";
 import GalleryTeaser from "@/components/GalleryTeaser";
 import WalletLookupCard from "@/components/WalletLookupCard";
 import AirdropChecker from "@/components/AirdropChecker";
@@ -26,7 +25,6 @@ export default function Home() {
         {/* Sold-out provenance panel — collection is fully minted, every
             conversion path here routes to Marketplank. */}
         <MintInfo />
-        <MintAllocation />
         <section id="gallery" className="section-tight scroll-mt-20 px-3 sm:px-5">
           <div className="mx-auto max-w-6xl">
             <Reveal>
@@ -35,7 +33,6 @@ export default function Home() {
                 title="Gallery"
                 lede="Minted art, live rarity, trait stats — every Plank, ranked."
                 center
-                framed
                 className="mx-auto max-w-2xl"
               />
             </Reveal>
