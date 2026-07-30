@@ -1,4 +1,4 @@
-import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
+import { SERVER_RPC_URLS } from "@/lib/server/rpc-urls";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
   }
 
   let lastError: unknown = null;
-  for (const url of ROBINHOOD_RPC_URLS) {
+  for (const url of SERVER_RPC_URLS) {
     try {
       const res = await fetch(url, {
         method: "POST",
