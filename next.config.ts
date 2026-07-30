@@ -31,6 +31,10 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Dev-only: the dev server rejects cross-origin requests by default, which
+  // blocks sharing a local preview through a tunnel. Has no effect on
+  // production builds — it only widens which origins `next dev` will answer.
+  allowedDevOrigins: ["*.trycloudflare.com"],
   // Minimal, traced Node runtime for the InMotion Docker image.
   // OpenNext can still consume the normal build artifacts on its own branch.
   output: "standalone",
