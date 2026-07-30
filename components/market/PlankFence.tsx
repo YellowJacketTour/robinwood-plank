@@ -151,7 +151,7 @@ export default function PlankFence({
 
   return (
     <>
-      <div className="flex h-full items-end gap-[3px] overflow-x-auto overflow-y-visible px-3 pb-3 pt-2">
+      <div className="flex h-full items-end gap-2 overflow-x-auto overflow-y-visible px-3 pb-4 pt-3">
         {held.map((t) => {
           const r = rarity.get(t.tokenId) ?? rarity.get(String(Number(t.tokenId)));
           const color = r ? tierColor(r.tier) : "rgba(212,175,90,0.5)";
@@ -167,11 +167,7 @@ export default function PlankFence({
           return (
             <div
               key={t.tokenId}
-              className="relative shrink-0 touch-none select-none"
-              // Tall fence posts — art fills the post (object-cover), with a
-              // thin top/bottom margin of board color. object-contain made
-              // square NFTs render as tiny centered squares on tall posts.
-              style={{ width: 28, height: "90%" }}
+              className="relative h-24 w-24 shrink-0 touch-none select-none sm:h-32 sm:w-32 lg:h-36 lg:w-36"
               onPointerEnter={(e) => onPointerEnter(e, t.tokenId)}
               onPointerLeave={() => onPointerLeave(t.tokenId)}
               onPointerDown={(e) => onPointerDown(e, t.tokenId)}
@@ -180,7 +176,7 @@ export default function PlankFence({
               onPointerCancel={onPointerUp}
             >
               <div
-                className={`relative h-full w-full cursor-grab overflow-hidden rounded-t-sm border-x border-t border-black/40 bg-[#0a1f0a] shadow-[inset_0_0_8px_rgba(0,0,0,0.5)] transition-[box-shadow,transform] duration-150 active:cursor-grabbing ${
+                className={`relative h-full w-full cursor-grab overflow-hidden rounded-md border border-black/40 bg-[#0a1f0a] shadow-[inset_0_0_8px_rgba(0,0,0,0.5)] transition-[box-shadow,transform] duration-150 active:cursor-grabbing ${
                   isSettling ? "duration-[450ms] ease-[cubic-bezier(0.34,1.56,0.64,1)]" : ""
                 }`}
                 style={{
@@ -191,14 +187,14 @@ export default function PlankFence({
                 }}
               >
                 {artUrl ? (
-                  <div className="absolute inset-x-0 top-1 bottom-1">
+                  <div className="absolute inset-1">
                     <CachedNftImage
                       imageUrl={artUrl}
                       tokenId={t.tokenId}
                       alt={`#${t.tokenId}`}
                       fill
-                      sizes="28px"
-                      className="object-cover object-center"
+                      sizes="(min-width: 1024px) 144px, (min-width: 640px) 128px, 96px"
+                      className="object-contain object-center"
                       vault
                     />
                   </div>
@@ -207,8 +203,7 @@ export default function PlankFence({
                     #{t.tokenId}
                   </div>
                 )}
-                {/* Wood-grain seam so it reads as a board, not just a cropped photo */}
-                <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-wood-950/90" />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-wood-950/90" />
               </div>
             </div>
           );
