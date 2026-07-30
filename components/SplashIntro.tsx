@@ -191,18 +191,23 @@ export default function SplashIntro() {
                 className={`splash-plank h-auto drop-shadow-[0_10px_14px_rgba(0,0,0,0.5)] ${
                   reducedMotion ? "opacity-100" : ""
                 }`}
-                style={{
-                  width: `${42 + ((index * 5) % 9)}px`,
-                  animationDelay: reducedMotion ? undefined : `${index * 140}ms`,
-                }}
+                style={
+                  {
+                    width: `${42 + ((index * 5) % 9)}px`,
+                    "--drop-delay": reducedMotion ? "0ms" : `${index * 140}ms`,
+                  } as React.CSSProperties
+                }
               />
             </div>
           ))}
+          {/* The foreman: stands at the END of the fence on the same
+              baseline — centered-in-front it read as a broken ninth board
+              (owner-reported). eslint-disable-next-line @next/next/no-img-element -- decorative preloader art */}
           {/* eslint-disable-next-line @next/next/no-img-element -- decorative preloader art */}
           <img
             src="/images/plank-head.webp"
             alt=""
-            className="splash-mascot absolute bottom-2 left-1/2 h-auto w-[46px] -translate-x-1/2 drop-shadow-[0_10px_16px_rgba(0,0,0,0.55)]"
+            className="splash-mascot absolute bottom-0 left-full h-auto w-[52px] drop-shadow-[0_10px_16px_rgba(0,0,0,0.55)]"
           />
         </div>
 
@@ -231,21 +236,33 @@ export default function SplashIntro() {
       <style>{`
         .splash-plank {
           opacity: 0;
-          animation: splash-plank-drop 2600ms cubic-bezier(0.22, 1, 0.36, 1) infinite;
+          transform-origin: 50% 100%;
+          /* Drop ONCE and settle (forwards) — the old infinite loop meant a
+             board was always mid-air, breaking the fence line. After the
+             1s drop, a staggered gentle sway keeps the fence alive without
+             ever leaving the ground. */
+          animation:
+            splash-plank-drop 1000ms cubic-bezier(0.22, 1, 0.36, 1) forwards,
+            splash-plank-sway 2400ms ease-in-out infinite;
+          animation-delay: var(--drop-delay, 0ms), calc(var(--drop-delay, 0ms) + 1400ms);
         }
         @keyframes splash-plank-drop {
           0% { opacity: 0; transform: translateY(-160px) rotate(-6deg); }
-          22% { opacity: 1; }
-          30% { transform: translateY(0) rotate(0deg); }
-          34% { transform: translateY(-6px) rotate(-1deg); }
-          40%, 100% { opacity: 1; transform: translateY(0) rotate(0deg); }
+          55% { opacity: 1; transform: translateY(0) rotate(0deg); }
+          70% { transform: translateY(-5px) rotate(-1deg); }
+          85% { transform: translateY(0) rotate(0.5deg); }
+          100% { opacity: 1; transform: translateY(0) rotate(0deg); }
+        }
+        @keyframes splash-plank-sway {
+          0%, 100% { transform: rotate(0deg); }
+          50% { transform: rotate(1.1deg); }
         }
         .splash-mascot {
           animation: splash-mascot-bob 1400ms ease-in-out infinite;
         }
         @keyframes splash-mascot-bob {
-          0%, 100% { transform: translateX(-50%) rotate(-2deg); }
-          50% { transform: translateX(-50%) translateY(-6px) rotate(2deg); }
+          0%, 100% { transform: rotate(-2deg); }
+          50% { transform: translateY(-6px) rotate(2deg); }
         }
         .splash-fill {
           width: 4%;
