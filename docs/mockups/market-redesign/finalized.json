@@ -6,7 +6,16 @@
   "html_file": "docs/mockups/market-redesign/finalized.html",
   "pretext_tier": "card/grid using prepare() and layout()",
   "framework": "vanilla",
-  "iterations": 0,
+  "iterations": 1,
+  "information_contract": "DESIGN.md Marketplank parity audit",
+  "prototype_states": [
+    "connected wallet",
+    "disconnected wallet",
+    "vault action modes",
+    "criteria offer builder",
+    "activity analytics",
+    "migration and recovery"
+  ],
   "date": "2026-07-30",
   "screen": "market-redesign",
   "branch": "inmotion",
