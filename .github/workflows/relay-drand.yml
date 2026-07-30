@@ -1,58 +1,27 @@
 name: Relay drand rounds
 
-# Fast, gas-efficient random-redeem maintenance:
-#  1) HTTP settle endpoint — spends gas ONLY when a vault has pendingRequester
-#     (relay that round + claimFor). Idle minutes cost ~0 gas.
-#  2) Optional full beacon push kept as backup (same script as before).
+# GitHub-only, gas-efficient random-redeem maintenance. The gas-only relayer
+# key remains in Actions Secrets and is never copied to Passenger. The script
+# spends gas only when a vault has a pending requester; idle runs are RPC reads.
 #
 # Secrets:
-#   RELAYER_PRIVATE_KEY  — gas-only throwaway (also set on Cloudflare Worker)
-#   CRON_SECRET          — optional bearer for settle endpoint
-#   SETTLE_URL           — optional full URL; defaults to production settle path
+#   RELAYER_PRIVATE_KEY — dedicated gas-only throwaway wallet
 
 on:
   schedule:
-    # Every 2 minutes when GH runners cooperate (free tier may delay).
-    - cron: "*/2 * * * *"
+    # GitHub's shortest supported schedule interval is five minutes; queued
+    # scheduled jobs may still be delayed during periods of high load.
+    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 jobs:
-  settle:
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - name: Sponsored settle (gas only if pending)
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          SETTLE_URL: ${{ vars.SETTLE_URL }}
-        run: |
-          set -euo pipefail
-          URL="${SETTLE_URL:-https://plank.love/api/market/vault/settle-random}"
-          # Prefer bearer if secret present; public=1 path also works and is rate-limited.
-          if [ -n "${CRON_SECRET:-}" ]; then
-            curl -fsS -X POST \
-              -H "Authorization: Bearer ${CRON_SECRET}" \
-              -H "Content-Type: application/json" \
-              "$URL" | tee /tmp/settle.json
-          else
-            curl -fsS -X POST "${URL}?public=1" | tee /tmp/settle.json
-          fi
-          echo ""
-          # Fail the job only on hard errors with no idle/settled outcomes.
-          if grep -q '"status":"error"' /tmp/settle.json && ! grep -qE '"status":"(idle|settled|waiting_round|relayed|forfeited)"' /tmp/settle.json; then
-            echo "settle reported only errors"
-            exit 1
-          fi
-
-  # Keep direct on-chain relay as a secondary path if the site API is down.
   relay-direct:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: []
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
       - run: npm install -g npm@11.6.2
