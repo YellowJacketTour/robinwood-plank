@@ -6,6 +6,7 @@ import MarketBrowseLayout from "@/components/market/MarketBrowseLayout";
 import {
   MarketCollectionHero,
   MarketContent,
+  MarketDisclosure,
   MarketScaffold,
   MarketTabPanel,
   MarketTabRail,
@@ -1186,13 +1187,31 @@ export default function MarketView() {
             {/* Trades stay dual-vault (V1 + V2) regardless of selection */}
             <VaultTradeHistory />
             {dualVaultMode() && (
-              <VaultMigrate account={account} onConnect={handleConnect} />
+              <MarketDisclosure
+                eyebrow="Recovery"
+                title="Move V1 vault deposits to V2"
+                description="Optional migration, fee details, dust recovery, redeem, and re-deposit steps."
+              >
+                <VaultMigrate account={account} onConnect={handleConnect} embedded />
+              </MarketDisclosure>
             )}
             {/* Seed/bootstrap only on primary (V2) — never seed into legacy V1 */}
             {vaultRole === "primary" && (
-              <SeedVaultPanel account={account} onConnect={handleConnect} />
+              <MarketDisclosure
+                eyebrow="Operator controls"
+                title="Seed and bootstrap the V2 vault"
+                description="Treasury-only setup and liquidity controls for the primary vault."
+              >
+                <SeedVaultPanel account={account} onConnect={handleConnect} />
+              </MarketDisclosure>
             )}
-            <TreasuryDashboard />
+            <MarketDisclosure
+              eyebrow="Protocol accounting"
+              title="Treasury and fee dashboard"
+              description="Live fee balances, collection flows, and treasury status."
+            >
+              <TreasuryDashboard />
+            </MarketDisclosure>
             </div>
           </MarketTabSection>
           )}

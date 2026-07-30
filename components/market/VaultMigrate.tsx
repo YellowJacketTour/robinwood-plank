@@ -38,13 +38,14 @@ import { CHAIN } from "@/lib/constants";
 type Props = {
   account: string | null;
   onConnect: () => void;
+  embedded?: boolean;
 };
 
 function explorerAddr(addr: string) {
   return `${CHAIN.blockExplorers.default.url}/address/${addr}`;
 }
 
-export default function VaultMigrate({ account, onConnect }: Props) {
+export default function VaultMigrate({ account, onConnect, embedded = false }: Props) {
   const vaults = listVaults();
   const dual = dualVaultMode();
   const legacyAddr =
@@ -176,7 +177,13 @@ export default function VaultMigrate({ account, onConnect }: Props) {
   }, [account, status]);
 
   return (
-    <div className="wood-frame space-y-4 overflow-hidden rounded-2xl bg-wood-900/95 p-4 sm:p-5">
+    <div
+      className={
+        embedded
+          ? "space-y-4"
+          : "wood-frame space-y-4 overflow-hidden rounded-2xl bg-wood-900/95 p-4 sm:p-5"
+      }
+    >
       <div>
         <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.18em] text-gold-400/80">
           Dual vault · safe migrate

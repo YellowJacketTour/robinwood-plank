@@ -28,7 +28,7 @@ export default function MarketPage() {
         id="main-content"
         tabIndex={-1}
         data-deployment={process.env.DEPLOYMENT_VERSION || "unknown"}
-        className="flex-1 px-3 py-10 sm:px-5"
+        className="flex-1 px-3 pb-10 pt-0 sm:px-5 sm:py-6 lg:py-10"
       >
         {/* Browsing a listing grid benefits from real desktop width — the
             site-wide 64rem prose column (.site-shell) is right for the

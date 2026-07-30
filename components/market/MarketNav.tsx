@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import type { MarketTab } from "@/lib/market/types";
 import { MARKET_TABS } from "@/lib/market/navigation";
 
@@ -14,12 +14,34 @@ type Props = {
 export default function MarketNav({ active, onChange, counts }: Props) {
   const activeRef = useRef<HTMLButtonElement>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const tabListRef = useRef<HTMLDivElement>(null);
+
+  const keepTabVisible = useCallback((tab: HTMLButtonElement | null) => {
+    const tabList = tabListRef.current;
+    if (!tabList || !tab) return;
+
+    const clearance = 8;
+    const visibleLeft = tabList.scrollLeft + clearance;
+    const visibleRight = tabList.scrollLeft + tabList.clientWidth - clearance;
+    const tabLeft = tab.offsetLeft;
+    const tabRight = tabLeft + tab.offsetWidth;
+
+    if (tabLeft < visibleLeft) {
+      tabList.scrollTo({ left: Math.max(0, tabLeft - clearance), behavior: "auto" });
+    } else if (tabRight > visibleRight) {
+      tabList.scrollTo({
+        left: Math.max(0, tabRight - tabList.clientWidth + clearance),
+        behavior: "auto",
+      });
+    }
+  }, []);
 
   // A tab reached via a direct link (e.g. ?tab=swap) can land off-screen in
-  // the scroll strip with nothing visibly selected — pull it into view.
-  useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [active]);
+  // the scroll strip. Scroll only this rail, never the surrounding page.
+  useLayoutEffect(() => {
+    const frame = window.requestAnimationFrame(() => keepTabVisible(activeRef.current));
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, keepTabVisible]);
 
   const moveFocus = (index: number, key: string) => {
     let next = index;
@@ -31,12 +53,15 @@ export default function MarketNav({ active, onChange, counts }: Props) {
     const tab = MARKET_TABS[next];
     if (!tab) return;
     onChange(tab.id);
-    tabRefs.current[next]?.focus();
+    const nextTab = tabRefs.current[next];
+    nextTab?.focus();
+    window.requestAnimationFrame(() => keepTabVisible(nextTab));
   };
 
   return (
     <div
-      className="flex min-w-0 flex-1 gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      ref={tabListRef}
+      className="flex w-full min-w-0 gap-1 overflow-x-auto overflow-y-hidden p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       role="tablist"
       aria-label="Marketplace sections"
     >

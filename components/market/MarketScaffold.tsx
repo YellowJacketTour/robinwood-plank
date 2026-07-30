@@ -66,7 +66,7 @@ export function MarketTabRail({
 }) {
   return (
     <div className={styles.tabRail}>
-      {navigation}
+      <div className={styles.tabNavigation}>{navigation}</div>
       {actions && <div className={styles.tabActions}>{actions}</div>}
     </div>
   );
@@ -74,6 +74,36 @@ export function MarketTabRail({
 
 export function MarketContent({ children }: { children: ReactNode }) {
   return <div className={styles.content}>{children}</div>;
+}
+
+export function MarketDisclosure({
+  eyebrow,
+  title,
+  description,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className={styles.disclosure}>
+      <summary className={styles.disclosureSummary}>
+        <span className={styles.disclosureCopy}>
+          <span className={styles.disclosureEyebrow}>{eyebrow}</span>
+          <span className={styles.disclosureTitle}>{title}</span>
+          <span className={styles.disclosureDescription}>{description}</span>
+        </span>
+        <span className={styles.disclosureToggle} aria-hidden="true">
+          <span className={styles.disclosureClosed}>Open</span>
+          <span className={styles.disclosureOpen}>Close</span>
+          <span className={styles.disclosureChevron}>⌄</span>
+        </span>
+      </summary>
+      <div className={styles.disclosureBody}>{children}</div>
+    </details>
+  );
 }
 
 export function MarketTabSection({
