@@ -11,7 +11,6 @@ import {
   listVaults,
   shortVault,
   vaultColorKind,
-  VAULT_TEXT_CLASS,
   type VaultRole,
 } from "@/lib/market/vault-registry";
 import { getVaultOnChainSnapshot } from "@/lib/market/vault";
@@ -81,7 +80,7 @@ export default function InstantVaultSwitcher({ role, onChange, active = true }: 
     const only = vaults[0];
     if (!only) return null;
     return (
-      <div className="rounded-xl border border-gold-500/25 bg-wood-950/90 px-3 py-2 text-sm text-foreground/70">
+      <div className="rounded-[10px] border border-gold-400/20 bg-wood-950 px-3 py-2 text-sm text-foreground/70">
         Active vault: <span className="font-mono text-gold-200">{shortVault(only.address)}</span>
       </div>
     );
@@ -110,14 +109,14 @@ export default function InstantVaultSwitcher({ role, onChange, active = true }: 
               type="button"
               onClick={() => onChange(v.role)}
               aria-pressed={active}
-              className={`rounded-xl border px-3.5 py-3 text-left transition ${
+              className={`rounded-[10px] border px-3.5 py-3 text-left transition ${
                 active
-                  ? "border-emerald-400/70 bg-emerald-950/20"
-                  : "border-gold-500/20 bg-wood-950/90 hover:border-gold-500/45"
+                  ? "border-[#60d890] bg-[rgba(18,49,33,0.54)]"
+                  : "border-gold-400/20 bg-wood-950 hover:border-gold-400/45"
               }`}
             >
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                <p className={`text-sm font-extrabold ${VAULT_TEXT_CLASS[kind]}`}>{title}</p>
+                <p className="text-sm font-extrabold text-foreground">{title}</p>
                 <a
                   href={`${CHAIN.blockExplorers.default.url}/address/${v.address}`}
                   target="_blank"
@@ -129,19 +128,15 @@ export default function InstantVaultSwitcher({ role, onChange, active = true }: 
                   {shortVault(v.address)} ↗
                 </a>
               </div>
-              <p className="mt-1 text-[0.7rem] text-foreground/55">
+              <p className="mt-1 text-[0.62rem] text-foreground/55">
                 {s
                   ? `${s.open ? "Open" : "Closed"} · ${s.held} held · ${s.pool} shares · ${s.eth} Ξ liquidity`
                   : blurb}
               </p>
-              {s && <p className="mt-0.5 text-[0.62rem] text-foreground/40">{blurb}</p>}
             </button>
           );
         })}
       </div>
-      <p className="text-[0.65rem] text-foreground/40">
-        Switching vault only changes Instant Swap targets below. Listings/offers stay collection-wide.
-      </p>
     </div>
   );
 }

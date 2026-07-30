@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createChart, ColorType, LineSeries, LineStyle } from "lightweight-charts";
+import { createChart, ColorType, AreaSeries, LineStyle } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, LineData, UTCTimestamp } from "lightweight-charts";
 import { ethWeiToNumber } from "@/lib/eth-price";
 import { useVaultLive } from "@/lib/market/useVaultLive";
@@ -77,7 +77,7 @@ function saveCachedPoints(key: string, points: LineData<UTCTimestamp>[]) {
 export default function NftPriceChart({ active = true }: { active?: boolean } = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
   const [salePoints, setSalePoints] = useState<LineData<UTCTimestamp>[] | null>(() =>
     loadCachedPoints("sale-points")
   );
@@ -232,17 +232,19 @@ export default function NftPriceChart({ active = true }: { active?: boolean } = 
         fontFamily: "inherit",
       },
       grid: {
-        vertLines: { color: "rgba(212, 175, 90, 0.08)" },
-        horzLines: { color: "rgba(212, 175, 90, 0.08)" },
+        vertLines: { color: "rgba(239, 196, 99, 0.055)" },
+        horzLines: { color: "rgba(239, 196, 99, 0.055)" },
       },
-      rightPriceScale: { borderColor: "rgba(212, 175, 90, 0.15)" },
-      timeScale: { borderColor: "rgba(212, 175, 90, 0.15)", timeVisible: true },
+      rightPriceScale: { borderColor: "rgba(239, 196, 99, 0.15)" },
+      timeScale: { borderColor: "rgba(239, 196, 99, 0.15)", timeVisible: true },
       crosshair: { vertLine: { labelBackgroundColor: "#8a6a1f" }, horzLine: { labelBackgroundColor: "#8a6a1f" } },
       height: 260,
     });
-    const series = chart.addSeries(LineSeries, {
-      color: "#f4c95d",
-      lineWidth: 2,
+    const series = chart.addSeries(AreaSeries, {
+      lineColor: "#efc463",
+      topColor: "rgba(239, 196, 99, 0.25)",
+      bottomColor: "rgba(239, 196, 99, 0)",
+      lineWidth: 3,
       priceFormat: { type: "custom", formatter: (p: number) => `${p.toFixed(4)} Ξ`, minMove: 0.0001 },
       priceLineVisible: false,
       lastValueVisible: true,
@@ -285,21 +287,28 @@ export default function NftPriceChart({ active = true }: { active?: boolean } = 
   }
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
-          Price history (vault + sales)
-        </p>
-        <div className="flex gap-1">
+    // Panel frame like every sibling module — the chart floating on the
+    // page background read as unfinished next to the panelled odds card.
+    <div className="space-y-2 rounded-xl border border-gold-400/20 bg-[rgba(30,19,11,0.94)] p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
+            NFT Price Lineage
+          </p>
+          <p className="text-[0.62rem] text-foreground/45">
+            Vault share price and verified NFT sales.
+          </p>
+        </div>
+        <div className="flex gap-1 rounded-[9px] bg-wood-950 p-1">
           {RANGES.map((r) => (
             <button
               key={r}
               type="button"
               onClick={() => setRange(r)}
-              className={`rounded-md px-2 py-1 text-[0.6rem] font-bold transition ${
+              className={`rounded-md px-2 py-1 text-[0.6rem] font-black transition ${
                 range === r
-                  ? "bg-gold-500/25 text-gold-200"
-                  : "text-foreground/40 hover:bg-black/20 hover:text-foreground/60"
+                  ? "bg-gold-500 text-wood-950"
+                  : "text-[#a99c84] hover:text-gold-300"
               }`}
             >
               {r}
@@ -308,15 +317,15 @@ export default function NftPriceChart({ active = true }: { active?: boolean } = 
         </div>
       </div>
       {points != null && points.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-10 text-center text-xs text-foreground/45">
+        <p className="rounded-lg border border-gold-400/20 bg-wood-950 px-3 py-10 text-center text-xs text-foreground/45">
           No priced vault trades or sales yet — chart fills in as they print.
         </p>
       ) : points == null ? (
-        <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-10 text-center text-xs text-foreground/45">
+        <p className="rounded-lg border border-gold-400/20 bg-wood-950 px-3 py-10 text-center text-xs text-foreground/45">
           Loading price history…
         </p>
       ) : (
-        <div ref={containerRef} className="w-full min-h-[260px] overflow-hidden rounded-lg border border-gold-500/15 bg-wood-950/90" />
+        <div ref={containerRef} className="w-full min-h-[260px] overflow-hidden rounded-lg border border-gold-400/20 bg-wood-950" />
       )}
     </div>
   );

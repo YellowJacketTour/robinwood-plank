@@ -29,12 +29,7 @@ import {
   vaultSupportsContributeLiquidity,
   vaultSupportsRemoveLiquidity,
 } from "@/lib/market/vault";
-import {
-  shortVault,
-  vaultColorKind,
-  VAULT_LABEL_CLASS,
-  VAULT_TEXT_CLASS,
-} from "@/lib/market/vault-registry";
+import { shortVault, vaultColorKind } from "@/lib/market/vault-registry";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
@@ -108,7 +103,7 @@ function TokenPreviewCard({ tokenId }: { tokenId: string }) {
       <div
         className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-wood-900"
         style={
-          preview?.rarity ? { boxShadow: `0 0 0 2px ${tierColor(preview.rarity.tier as RarityTier)}` } : undefined
+          preview?.rarity ? { boxShadow: `0 0 0 1px ${tierColor(preview.rarity.tier as RarityTier)}` } : undefined
         }
       >
         {preview?.image ? (
@@ -292,7 +287,7 @@ function StuckRedeemRelay({
   };
 
   return (
-    <div className="space-y-2 rounded-lg border border-sky-400/40 bg-sky-400/10 p-3">
+    <div className="space-y-2 rounded-lg border border-gold-400/20 bg-[rgba(30,19,11,0.94)] bg-[image:linear-gradient(90deg,rgba(103,200,255,0.08),transparent)] p-3">
       <p className="text-xs font-bold uppercase tracking-wide text-sky-300">
         Vault redeem slot is busy
       </p>
@@ -491,7 +486,7 @@ function PendingRedeemClaim({
   if (!isPending) return null;
 
   return (
-    <div className="space-y-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3">
+    <div className="space-y-2 rounded-lg border border-gold-400/20 bg-[rgba(30,19,11,0.94)] bg-[image:linear-gradient(90deg,rgba(255,189,74,0.1),transparent)] p-3">
       <p className="text-xs font-bold uppercase tracking-wide text-amber-300">
         Finishing your random redeem
       </p>
@@ -855,7 +850,7 @@ export default function SwapPanel({
 
   if (!hasVault) {
     return (
-      <div className="overflow-hidden rounded-2xl border border-gold-500/25 bg-wood-900/95">
+      <div className="overflow-hidden rounded-xl border border-gold-400/20 bg-[rgba(30,19,11,0.94)]">
         <div className="relative flex flex-col items-center gap-4 px-6 py-10 text-center">
           <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-gold-500/40">
             <Image
@@ -1127,12 +1122,12 @@ export default function SwapPanel({
 
   const activeKind = vaultColorKind(vaultAddress);
   const activeTag = activeKind === "v1" ? "V1" : activeKind === "v2" ? "V2" : "Vault";
-  const activeLabel =
-    vaultLabel ??
-    (activeKind === "v1" ? "V1 vault" : activeKind === "v2" ? "V2 vault" : "Vault");
+  // Vault identity lives in the chooser cards; the tag re-appears only in the
+  // review modal as a signing safeguard. `vaultLabel` stays a prop for callers.
+  void vaultLabel;
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-gold-500/25 bg-wood-900/95">
+    <div className="relative overflow-hidden rounded-xl border border-gold-400/20 bg-[rgba(30,19,11,0.94)]">
       {reviewOpen && (
         <div
           className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4"
@@ -1140,7 +1135,7 @@ export default function SwapPanel({
           aria-modal="true"
           aria-labelledby="swap-review-title"
         >
-          <div className="wood-ledger w-full max-w-lg rounded-t-xl border border-gold-500/35 p-4 sm:rounded-xl">
+          <div className="w-full max-w-lg rounded-t-xl border border-gold-400/20 bg-[rgba(30,19,11,0.96)] p-4 sm:rounded-xl">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[0.65rem] font-black uppercase tracking-[0.14em] text-gold-300/75">
@@ -1250,7 +1245,7 @@ export default function SwapPanel({
                   setReviewOpen(false);
                   void submit();
                 }}
-                className="min-h-11 rounded-lg bg-gold-500 text-sm font-bold text-wood-950 hover:bg-gold-400"
+                className="min-h-11 rounded-lg border border-[#f3ca6f] bg-gradient-to-b from-[#f1c665] to-[#dba53f] text-sm font-black text-[#251509] shadow-[inset_0_1px_rgba(255,255,255,0.28)] hover:brightness-105"
               >
                 Confirm in wallet
               </button>
@@ -1258,91 +1253,7 @@ export default function SwapPanel({
           </div>
         </div>
       )}
-      {/* Corner confirmation: which vault this swap widget is bound to. */}
-      <div
-        className={`pointer-events-none absolute right-2 top-2 z-10 rounded-md border px-2 py-1 text-[0.65rem] font-extrabold uppercase tracking-wide shadow-lg ${VAULT_LABEL_CLASS[activeKind]}`}
-        title={vaultAddress ? `All actions target ${vaultAddress}` : "Vault"}
-      >
-        {activeTag} · live
-      </div>
-      {/* Header: collection art leads, same "visually dominant" rule as
-          every other surface — this used to be a bare form with no branding
-          or context at all. */}
-      <div className="flex items-center gap-3 border-b border-gold-500/20 bg-wood-950/90 px-4 py-3 pr-20">
-        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-gold-500/30">
-          <Image
-            src={collection?.image ?? "/images/plank-logo.webp"}
-            alt={collection?.name ?? "Collection"}
-            fill
-            sizes="40px"
-            className="object-cover"
-            unoptimized
-          />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate font-display text-base text-foreground">
-            {collection?.name ?? "Collection"} ·{" "}
-            <span className="inline-flex items-center gap-1.5">
-              <span
-                className={`rounded border px-1.5 py-0.5 text-[0.65rem] font-extrabold uppercase tracking-wide ${VAULT_LABEL_CLASS[activeKind]}`}
-              >
-                {activeTag}
-              </span>
-              <span className={VAULT_TEXT_CLASS[activeKind]}>{activeLabel}</span>
-            </span>
-          </p>
-          <p className="text-[0.65rem] text-foreground/50">
-            {activeMode.hint}
-            {vaultAddress ? (
-              <>
-                {" "}
-                ·{" "}
-                <span className="font-mono text-foreground/40">{shortVault(vaultAddress)}</span>
-              </>
-            ) : null}
-          </p>
-        </div>
-      </div>
-
       <div className="space-y-3 p-3">
-        {/* Existing deposits: shares live in the wallet on this vault address.
-            Never strand them by switching MARKET_VAULT_ADDRESS without redeem. */}
-        {account && (
-          <div className="rounded-lg border border-gold-500/25 bg-wood-950/90 px-3 py-2 text-[0.7rem] leading-relaxed text-foreground/75">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                <span>
-                  <span className="font-bold uppercase tracking-wide text-foreground/45">Your shares </span>
-                  <span className="font-mono text-gold-200">
-                    {shareBalance != null ? formatTokenAmount(shareBalance, 18, 4) : "…"}
-                  </span>
-                  <span className="text-foreground/45"> vROBIN</span>
-                </span>
-                <span>
-                  <span className="font-bold uppercase tracking-wide text-foreground/45">ETH </span>
-                  <span className="font-mono text-gold-200">
-                    {ethBalance != null ? formatTokenAmount(ethBalance, 18, 4) : "…"}
-                  </span>
-                  <span className="text-foreground/45"> Ξ</span>
-                </span>
-              </p>
-              {stats && (
-                <p className="text-foreground/45">
-                  Vault holds {stats.heldTokenCount} planks · pool{" "}
-                  {formatTokenAmount(stats.shareReserveWei, 18, 2)} sh /{" "}
-                  {formatTokenAmount(stats.ethReserveWei, 18, 4)} Ξ
-                </p>
-              )}
-            </div>
-            <p className="mt-1 text-[0.65rem] text-foreground/55">
-              Deposits already on this vault stay here. Use <strong className="text-foreground/80">Redeem</strong>{" "}
-              to get an NFT back, <strong className="text-foreground/80">Sell</strong> for ETH, or{" "}
-              <strong className="text-foreground/80">LP</strong> to deepen the pool. Your shares are not stuck
-              just because the AMM pool is smaller than total deposits.
-            </p>
-          </div>
-        )}
-
         {/* Only show bootstrap while the pool is still closed. Once open
             (stats.poolOpen), never mount it — even for the treasury wallet —
             so Instant Swap doesn't keep a bootstrap/loading chrome on screen. */}
@@ -1355,14 +1266,14 @@ export default function SwapPanel({
         <StuckRedeemRelay account={account} vaultAddress={vaultAddress} active={active} />
         <PendingRedeemClaim account={account} vaultAddress={vaultAddress} active={active} />
 
-        <div className="grid grid-cols-3 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/90 p-1 sm:grid-cols-5">
+        <div className="grid grid-cols-3 gap-1 rounded-[9px] bg-wood-950 p-1 sm:grid-cols-5">
           {MODES.map((m) => (
             <button
               key={m.id}
               type="button"
               onClick={() => setMode(m.id)}
-              className={`min-h-9 rounded-md text-xs font-bold uppercase transition-colors ${
-                mode === m.id ? "bg-gold-500 text-wood-950" : "text-foreground/65 hover:text-gold-300"
+              className={`min-h-9 rounded-lg text-[0.72rem] font-black transition-colors ${
+                mode === m.id ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
               }`}
             >
               {m.label}
@@ -1370,14 +1281,42 @@ export default function SwapPanel({
           ))}
         </div>
 
+        {/* Always-visible one-line mode explainer — same job as the mockup's
+            .callout: what this action does, in the vault's own words. */}
+        <p className="rounded-lg border border-gold-400/20 bg-[rgba(30,19,11,0.94)] bg-[image:linear-gradient(90deg,rgba(103,200,255,0.08),transparent)] px-3 py-2 text-[0.68rem] leading-[1.45] text-foreground/70">
+          {mode === "buy" ? (
+            <>
+              <strong className="text-[#67c8ff]">Buy shares:</strong> pay ETH and receive fungible
+              vault shares. To get an NFT, use Redeem.
+            </>
+          ) : mode === "sell" ? (
+            <>
+              <strong className="text-[#67c8ff]">Sell shares:</strong> receive ETH from the pool at
+              the quoted rate.
+            </>
+          ) : mode === "lp" ? (
+            <>
+              <strong className="text-[#67c8ff]">LP:</strong> add or remove pool depth (shares +
+              ETH together).
+            </>
+          ) : mode === "deposit" ? (
+            <>
+              <strong className="text-[#67c8ff]">Deposit:</strong> lock a Plank into the vault and
+              mint shares.
+            </>
+          ) : (
+            <>
+              <strong className="text-[#67c8ff]">Redeem:</strong> burn shares to pull an NFT off
+              the fence — random draw or targeted.
+            </>
+          )}
+        </p>
+
         {(mode === "buy" || mode === "sell") && (
-          <div className="rounded-lg border border-gold-500/30 bg-wood-900/90 p-2.5">
-            <div className="flex items-center justify-between gap-2 text-[0.6rem] font-bold uppercase tracking-wide text-foreground/45">
+          <div className="rounded-xl border border-gold-400/20 bg-wood-950 p-3.5">
+            <div className="flex items-center justify-between gap-2 text-[0.66rem] text-[#a99c82]">
               <span>You pay</span>
-              <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 font-normal normal-case">
-                <span className="font-bold uppercase tracking-wide text-foreground/45">
-                  {mode === "buy" ? "ETH" : "Vault share"}
-                </span>
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
                 {account && (
                   <>
                     <span className="font-mono text-foreground/70">
@@ -1395,7 +1334,7 @@ export default function SwapPanel({
                     </span>
                     <button
                       type="button"
-                      className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                      className="text-[0.68rem] font-black text-gold-400 hover:text-gold-300"
                       onClick={() => {
                         if (mode === "buy") {
                           if (ethBalance == null || ethBalance <= BigInt(0)) return;
@@ -1418,27 +1357,24 @@ export default function SwapPanel({
               </span>
             </div>
             <div className="mt-1 flex items-center gap-2">
-              <span
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-black text-wood-950"
-                style={{ backgroundColor: "#f8d98a" }}
-              >
-                {mode === "buy" ? "Ξ" : "S"}
-              </span>
               <input
                 type="text"
                 inputMode="decimal"
                 placeholder="0.0"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-                className="min-w-0 flex-1 bg-transparent py-1 text-2xl font-semibold text-foreground outline-none"
+                className="min-w-0 flex-1 bg-transparent py-1 font-display text-[1.55rem] font-normal text-foreground outline-none"
               />
+              <span className="shrink-0 rounded-full border border-gold-400/20 bg-wood-800 px-2.5 py-1.5 text-[0.7rem] font-black text-gold-300">
+                {mode === "buy" ? "ETH" : `${activeTag} shares`}
+              </span>
             </div>
           </div>
         )}
 
         {mode === "lp" && (
           <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-1 rounded-lg border border-gold-500/20 bg-wood-950/90 p-1">
+            <div className="grid grid-cols-2 gap-1 rounded-[9px] bg-wood-950 p-1">
               <button
                 type="button"
                 onClick={() => {
@@ -1447,8 +1383,8 @@ export default function SwapPanel({
                   setLpEth("");
                   setError(null);
                 }}
-                className={`min-h-8 rounded-md text-xs font-bold uppercase ${
-                  lpDirection === "add" ? "bg-gold-500 text-wood-950" : "text-foreground/65 hover:text-gold-300"
+                className={`min-h-8 rounded-lg text-[0.72rem] font-black ${
+                  lpDirection === "add" ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
                 }`}
               >
                 Add LP
@@ -1461,8 +1397,8 @@ export default function SwapPanel({
                   setLpEth("");
                   setError(null);
                 }}
-                className={`min-h-8 rounded-md text-xs font-bold uppercase ${
-                  lpDirection === "remove" ? "bg-gold-500 text-wood-950" : "text-foreground/65 hover:text-gold-300"
+                className={`min-h-8 rounded-lg text-[0.72rem] font-black ${
+                  lpDirection === "remove" ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
                 }`}
               >
                 Remove LP
@@ -1504,8 +1440,8 @@ export default function SwapPanel({
                 {formatTokenAmount(lpCredit.ethCredit, 18, 5)} Ξ
               </p>
             )}
-            <div className="rounded-xl border border-gold-500/30 bg-wood-900/90 px-3 py-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
+            <div className="rounded-xl border border-gold-400/20 bg-wood-950 px-3 py-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.66rem] text-[#a99c82]">
                 <span>{lpDirection === "remove" ? "Shares to remove" : "Shares to add"}</span>
                 <span className="flex flex-wrap items-center gap-2 font-normal normal-case">
                   {account && shareBalance != null && lpDirection === "add" && (
@@ -1520,7 +1456,7 @@ export default function SwapPanel({
                   {lpDirection === "add" && shareBalance != null && shareBalance > BigInt(0) && (
                     <button
                       type="button"
-                      className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                      className="text-[0.68rem] font-black text-gold-400 hover:text-gold-300"
                       onClick={maxLpSharesAdd}
                     >
                       Max
@@ -1529,7 +1465,7 @@ export default function SwapPanel({
                   {lpDirection === "remove" && lpCredit && lpCredit.shareCredit > BigInt(0) && (
                     <button
                       type="button"
-                      className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                      className="text-[0.68rem] font-black text-gold-400 hover:text-gold-300"
                       onClick={() => {
                         setLpEditSide("shares");
                         setAmount(formatTokenAmount(lpCredit.shareCredit, 18, 6));
@@ -1550,11 +1486,11 @@ export default function SwapPanel({
                     ? onLpSharesChange(e.target.value)
                     : setAmount(e.target.value.replace(/[^0-9.]/g, ""))
                 }
-                className="mt-1 w-full bg-transparent text-xl font-semibold text-foreground outline-none"
+                className="mt-1 w-full bg-transparent font-display text-[1.35rem] font-normal text-foreground outline-none"
               />
             </div>
-            <div className="rounded-xl border border-gold-500/30 bg-wood-900/90 px-3 py-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
+            <div className="rounded-xl border border-gold-400/20 bg-wood-950 px-3 py-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.66rem] text-[#a99c82]">
                 <span>
                   {lpDirection === "remove"
                     ? "ETH to remove"
@@ -1578,7 +1514,7 @@ export default function SwapPanel({
                     ethBalance > BigInt(0) && (
                       <button
                         type="button"
-                        className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                        className="text-[0.68rem] font-black text-gold-400 hover:text-gold-300"
                         onClick={maxLpEthAdd}
                       >
                         Max
@@ -1587,7 +1523,7 @@ export default function SwapPanel({
                   {lpDirection === "remove" && lpCredit && lpCredit.ethCredit > BigInt(0) ? (
                     <button
                       type="button"
-                      className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                      className="text-[0.68rem] font-black text-gold-400 hover:text-gold-300"
                       onClick={() => {
                         setLpEditSide("eth");
                         setLpEth(formatTokenAmount(lpCredit.ethCredit, 18, 6));
@@ -1620,7 +1556,7 @@ export default function SwapPanel({
                     ? onLpEthChange(e.target.value)
                     : setLpEth(e.target.value.replace(/[^0-9.]/g, ""))
                 }
-                className="mt-1 w-full bg-transparent text-xl font-semibold text-foreground outline-none disabled:opacity-40"
+                className="mt-1 w-full bg-transparent font-display text-[1.35rem] font-normal text-foreground outline-none disabled:opacity-40"
               />
             </div>
             {lpDirection === "add" && lpFull && lpPoolRatio && (
@@ -1676,12 +1612,19 @@ export default function SwapPanel({
         )}
 
         {(mode === "buy" || mode === "sell") && (
-          <div className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-2.5 py-2">
-            <div className="flex items-center justify-between gap-2 text-[0.6rem] font-bold uppercase tracking-wide text-foreground/45">
+          <>
+          <div
+            aria-hidden="true"
+            className="relative z-10 mx-auto -my-4 grid h-[34px] w-[34px] place-items-center rounded-full border-4 border-[rgba(30,19,11,0.94)] bg-wood-800 text-gold-300"
+          >
+            ↓
+          </div>
+          <div className="rounded-xl border border-gold-400/20 bg-wood-950 p-3.5">
+            <div className="flex items-center justify-between gap-2 text-[0.66rem] text-[#a99c82]">
               <span>You receive</span>
-              <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 font-normal normal-case">
-                <span className="font-bold uppercase tracking-wide text-foreground/45">
-                  {mode === "buy" ? "Vault share" : "ETH"}
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
+                <span className="rounded-full border border-gold-400/20 bg-wood-800 px-2.5 py-1 text-[0.62rem] font-black text-gold-300">
+                  {mode === "buy" ? `${activeTag} shares` : "ETH"}
                 </span>
                 {account && (
                   <span className="font-mono text-foreground/70">
@@ -1701,7 +1644,7 @@ export default function SwapPanel({
                 )}
               </span>
             </div>
-            <p className="mt-0.5 font-display text-lg text-gold-300">
+            <p className="mt-1 font-display text-[1.55rem] leading-tight text-foreground">
               {!amount
                 ? "—"
                 : quoting
@@ -1712,30 +1655,29 @@ export default function SwapPanel({
                       }`
                     : "Quote unavailable — try a smaller amount"}
             </p>
-            {stats?.sharePriceWei && (
-              <p className="mt-0.5 text-[0.6rem] text-foreground/45">
-                Pool mid ≈ {formatTokenAmount(stats.sharePriceWei, 18, 5)} Ξ / share · reserve{" "}
-                {formatTokenAmount(stats.ethReserveWei, 18, 4)} Ξ
-              </p>
-            )}
           </div>
-        )}
-
-        {(mode === "buy" || mode === "sell") && (
-          <label className="flex items-center justify-between gap-2 rounded-lg border border-gold-500/20 bg-wood-900/90 px-2.5 py-2">
-            <span className="text-[0.7rem] text-foreground/60">Max slippage</span>
+          {/* Quiet estimate strip — pool mid on the left, slippage on the
+              right, same rhythm as the mockup's .swap-estimate line. */}
+          <label className="flex flex-wrap items-center justify-between gap-2 px-1 text-[0.66rem] text-[#a99c82]">
+            <span>
+              {stats?.sharePriceWei
+                ? `Pool mid ≈ ${formatTokenAmount(stats.sharePriceWei, 18, 5)} Ξ/share · reserve ${formatTokenAmount(stats.ethReserveWei, 18, 4)} Ξ`
+                : "Pool mid —"}
+            </span>
             <span className="flex items-center gap-1">
+              <span>Max slippage</span>
               <input
                 type="text"
                 inputMode="decimal"
                 value={slippagePct}
                 onChange={(e) => setSlippagePct(e.target.value.replace(/[^0-9.]/g, ""))}
-                className="w-14 rounded-md border border-gold-500/30 bg-wood-950 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-gold-400"
+                className="w-12 rounded-md border border-gold-400/20 bg-wood-950 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-gold-400"
                 aria-label="Max slippage percent"
               />
               <span className="text-xs font-bold text-gold-300">%</span>
             </span>
           </label>
+          </>
         )}
 
         {mode === "deposit" && (
@@ -1760,12 +1702,12 @@ export default function SwapPanel({
 
         {mode === "redeem" && (
           <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/90 p-1">
+            <div className="grid grid-cols-2 gap-1 rounded-[9px] bg-wood-950 p-1">
               <button
                 type="button"
                 onClick={() => setTokenId("")}
-                className={`min-h-9 rounded-md text-[0.65rem] font-bold uppercase transition ${
-                  !tokenId ? "bg-gold-500 text-wood-950" : "text-foreground/60 hover:text-gold-300"
+                className={`min-h-9 rounded-lg text-[0.7rem] font-black transition ${
+                  !tokenId ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
                 }`}
               >
                 Random
@@ -1775,8 +1717,8 @@ export default function SwapPanel({
                 onClick={() => {
                   /* keep current pick if any; user selects from grid */
                 }}
-                className={`min-h-9 rounded-md text-[0.65rem] font-bold uppercase transition ${
-                  tokenId ? "bg-gold-500 text-wood-950" : "text-foreground/60 hover:text-gold-300"
+                className={`min-h-9 rounded-lg text-[0.7rem] font-black transition ${
+                  tokenId ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
                 }`}
               >
                 Specific plank
@@ -1812,7 +1754,7 @@ export default function SwapPanel({
                 className={`rounded-lg border px-2.5 py-2 text-[0.65rem] ${
                   redeemInsufficient
                     ? "border-red-500/40 bg-red-500/10 text-red-200"
-                    : "border-gold-500/20 bg-wood-950/90 text-foreground/60"
+                    : "border-gold-400/20 bg-wood-950 text-foreground/60"
                 }`}
               >
                 <div className="flex items-center justify-between">
@@ -1871,7 +1813,7 @@ export default function SwapPanel({
           <button
             type="button"
             onClick={onConnect}
-            className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
+            className="min-h-12 w-full rounded-lg border border-[#f3ca6f] bg-gradient-to-b from-[#f1c665] to-[#dba53f] text-sm font-black text-[#251509] shadow-[inset_0_1px_rgba(255,255,255,0.28)] transition hover:brightness-105"
           >
             Connect wallet
           </button>
@@ -1880,7 +1822,7 @@ export default function SwapPanel({
             type="button"
             disabled={busy || redeemInsufficient}
             onClick={openReview}
-            className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
+            className="min-h-12 w-full rounded-lg border border-[#f3ca6f] bg-gradient-to-b from-[#f1c665] to-[#dba53f] text-sm font-black text-[#251509] shadow-[inset_0_1px_rgba(255,255,255,0.28)] transition hover:brightness-105 disabled:opacity-50"
           >
             {busy
               ? (status ?? "Working…")

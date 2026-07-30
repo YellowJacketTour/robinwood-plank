@@ -1302,9 +1302,9 @@ export default function MarketView() {
         <MarketTabPanel id="swap" active={tab === "swap"}>
           {visitedTabs.has("swap") && (
           <MarketTabSection
-            eyebrow="Dual-vault liquidity"
+            eyebrow="Trade shares · redeem NFTs"
             title="Instant Swap"
-            description="Buy or sell vault shares, provide liquidity, deposit NFTs for shares, or redeem shares for a random or specific Plank."
+            description="Buy or sell vault shares instantly, provide liquidity, deposit a Plank, or redeem shares for an NFT."
           >
             <div className="space-y-3">
             {/* Dual vault: pick V1 (legacy deposits) or V2 (new book / LP) first */}
@@ -1336,8 +1336,8 @@ export default function MarketView() {
             <VaultTradeHistory />
             {dualVaultMode() && (
               <MarketDisclosure
-                eyebrow="Recovery"
-                title="Move V1 vault deposits to V2"
+                eyebrow="Migration"
+                title="Move V1 value to V2"
                 description="Optional migration, fee details, dust recovery, redeem, and re-deposit steps."
               >
                 <VaultMigrate account={account} onConnect={handleConnect} embedded active={tab === "swap"} />

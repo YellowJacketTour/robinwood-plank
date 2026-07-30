@@ -3,8 +3,8 @@
   --market-muted: #c9b58a;
   --market-gold: #e9b43f;
   --market-gold-soft: #f8d98a;
-  --market-border: rgba(217, 164, 65, 0.34);
-  --market-panel: rgba(28, 16, 8, 0.94);
+  --market-border: rgba(239, 196, 99, 0.22);
+  --market-panel: rgba(30, 19, 11, 0.94);
   --market-panel-strong: rgba(17, 10, 5, 0.97);
   position: relative;
   isolation: isolate;
