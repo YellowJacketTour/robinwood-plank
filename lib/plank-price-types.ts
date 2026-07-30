@@ -59,3 +59,56 @@ export type PlankPoolStats = {
   fetchedAt: number;
   stale?: boolean;
 };
+
+/**
+ * A single $PLANK trading venue, from DexScreener's token endpoint (which,
+ * unlike GeckoTerminal's single-pool endpoints, lists every pool for a token
+ * in one call). $PLANK trades across multiple real pools with very different
+ * depth — this is what powers the "all pools" panel and the honest aggregate
+ * stats, since any single pool's liquidity understates the token's real total.
+ */
+export type PlankPool = {
+  dexId: string;
+  /** e.g. "v2", "v3", "v4" — DexScreener's protocol-version label. */
+  version: string | null;
+  pairAddress: string;
+  quoteSymbol: string;
+  priceUsd: number | null;
+  liquidityUsd: number | null;
+  volumeUsd24h: number | null;
+  priceChangePct24h: number | null;
+  txns24h: { buys: number; sells: number } | null;
+  /** ISO timestamp; null if DexScreener didn't return a creation time. */
+  pairCreatedAt: string | null;
+  /** External DexScreener page for this exact pool. */
+  url: string;
+};
+
+export type PlankPoolsSummary = {
+  pools: PlankPool[];
+  totalLiquidityUsd: number | null;
+  totalVolumeUsd24h: number | null;
+  fetchedAt: number;
+  stale?: boolean;
+};
+
+/**
+ * lightweight-charts requires strictly increasing series timestamps.
+ * GeckoTerminal's live OHLCV feed has been observed repeating an identical
+ * row for the same time bucket back-to-back — real upstream data, not
+ * something generated here — so every candle array is deduped through this
+ * exact function before it ever reaches the server cache OR a chart series.
+ * Collapses consecutive same-time entries, keeping the later (more-settled)
+ * one. Input must already be sorted ascending by time.
+ */
+export function dedupeSortedCandles(candles: PlankCandle[]): PlankCandle[] {
+  const deduped: PlankCandle[] = [];
+  for (const candle of candles) {
+    if (deduped.length > 0 && deduped[deduped.length - 1].time === candle.time) {
+      deduped[deduped.length - 1] = candle;
+    } else {
+      deduped.push(candle);
+    }
+  }
+  return deduped;
+}

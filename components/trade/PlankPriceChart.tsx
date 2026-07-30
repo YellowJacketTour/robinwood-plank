@@ -24,14 +24,19 @@ import { PRICE_RANGES } from "@/lib/plank-price-types";
 type Denomination = "ETH" | "USD";
 const DENOMINATIONS: Denomination[] = ["ETH", "USD"];
 
-type ChartMode = "candles" | "line";
+type ChartMode = "line" | "candles";
+// Line first — it's the default. A sparse 5-day-old pool's candlesticks read
+// as spiky/amateur next to a smooth line; candles stay one tap away for
+// anyone who wants OHLC detail.
 const CHART_MODES: { id: ChartMode; label: string }[] = [
-  { id: "candles", label: "Candles" },
   { id: "line", label: "Line" },
+  { id: "candles", label: "Candles" },
 ];
 
 const UP_COLOR = "#6ee7a2";
 const DOWN_COLOR = "#fca5a5";
+const GOLD_FILL_TOP = "rgba(233, 180, 63, 0.28)";
+const GOLD_FILL_BOTTOM = "rgba(233, 180, 63, 0)";
 
 const SUBSCRIPT_DIGITS = "₀₁₂₃₄₅₆₇₈₉";
 function toSubscript(n: number): string {
@@ -138,11 +143,18 @@ function formatTooltipTime(unixSeconds: number, range: PriceRange): string {
 
 type Tooltip = { x: number; y: number; candle: PlankCandle };
 
+const FALLBACK_POOL_ADDRESS = "0x01b1BEf6fBA02c846eA5c4Ff59193988B5f86F73";
+
 /**
- * $PLANK/WETH price chart for /trade — real OHLCV from the live Uniswap v3
+ * $PLANK/WETH price chart for /trade — real OHLCV from the live Uniswap v2
  * pool (via our server-side GeckoTerminal proxy, lib/plank-price.ts), never
  * the Marketplank NFT vault. Buy vs Redeem stay separate concerns; this
  * chart only ever renders what the real pool traded.
+ *
+ * $PLANK trades across five real pools (see PlankPoolsPanel for the full
+ * list + aggregate liquidity/volume). This chart deliberately tracks only
+ * the deepest one — Uniswap v2 — as its single price reference, and says so
+ * in the subtitle below; it never implies this is "the" $PLANK price.
  */
 export default function PlankPriceChart({ active = true }: { active?: boolean } = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -153,12 +165,20 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
 
   const [range, setRange] = useState<PriceRange>("24H");
   const [denom, setDenom] = useState<Denomination>("ETH");
-  const [mode, setMode] = useState<ChartMode>("candles");
-  const [data, setData] = useState<ApiResponse | null>(null);
-  const [error, setError] = useState(false);
+  const [mode, setMode] = useState<ChartMode>("line");
+  // Per-range cache: switching ranges must never show a DIFFERENT range's
+  // candles mislabeled as the one the buttons say is active. Each range only
+  // ever updates its own slot, and a failed refetch for one range can't
+  // corrupt what's displayed for another.
+  const [dataByRange, setDataByRange] = useState<Partial<Record<PriceRange, ApiResponse>>>({});
+  const [errorRanges, setErrorRanges] = useState<Partial<Record<PriceRange, boolean>>>({});
   const [tooltip, setTooltip] = useState<Tooltip | null>(null);
+  const [switching, setSwitching] = useState(false);
 
   const [containerWidth, setContainerWidth] = useState(300);
+
+  const data = dataByRange[range] ?? null;
+  const hasErrorForRange = Boolean(errorRanges[range]) && data == null;
 
   // Ref so the crosshair handler (subscribed once, at mount) always reads
   // the latest candle lookup without needing to re-subscribe.
@@ -171,28 +191,44 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
 
   useEffect(() => {
     let cancelled = false;
+    const requestedRange = range;
 
     const load = () => {
-      fetch(`/api/trade/price-history?range=${range}`)
+      fetch(`/api/trade/price-history?range=${requestedRange}`)
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((json: ApiResponse) => {
           if (cancelled) return;
-          setData(json);
-          setError(false);
+          setDataByRange((prev) => ({ ...prev, [requestedRange]: json }));
+          setErrorRanges((prev) => ({ ...prev, [requestedRange]: false }));
         })
         .catch(() => {
-          if (!cancelled) setError(true);
+          if (!cancelled) setErrorRanges((prev) => ({ ...prev, [requestedRange]: true }));
         });
     };
 
     load();
-    const intervalMs = range === "24H" ? 60_000 : range === "7D" ? 5 * 60_000 : 10 * 60_000;
+    const intervalMs = requestedRange === "24H" ? 60_000 : requestedRange === "7D" ? 5 * 60_000 : 10 * 60_000;
     const id = active ? setInterval(load, intervalMs) : null;
     return () => {
       cancelled = true;
       if (id) clearInterval(id);
     };
   }, [range, active]);
+
+  // Brief fade while switching range/denom/mode — a hard instant swap read
+  // as jarring; this is purely a transition cue, never a loading gate. Fired
+  // directly from the button handlers below (not an effect keyed on
+  // range/denom/mode) so the setState calls stay tied to the user action
+  // that caused them, rather than cascading from a state-change effect.
+  const switchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const triggerSwitchFade = () => {
+    setSwitching(true);
+    if (switchTimeoutRef.current) clearTimeout(switchTimeoutRef.current);
+    switchTimeoutRef.current = setTimeout(() => setSwitching(false), 220);
+  };
+  useEffect(() => () => {
+    if (switchTimeoutRef.current) clearTimeout(switchTimeoutRef.current);
+  }, []);
 
   const bars = useMemo<CandlestickData<UTCTimestamp>[]>(() => {
     if (!data?.candles?.length) return [];
@@ -216,14 +252,28 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
     latest && first && first.closeUsd > 0
       ? ((latest.closeUsd - first.closeUsd) / first.closeUsd) * 100
       : null;
-  // Prefer the pool's real 24h change (independent of the selected range);
-  // fall back to the in-range change only if stats haven't loaded yet.
-  const headlineChangePct = stats?.priceChangePct.h24 ?? rangeChangePct;
+  // The change badge always matches the selected range (labeled with it),
+  // falling back to the pool's real 24h change only if this range has too
+  // few candles to compute its own (e.g. ALL with a single day so far).
+  const headlineChangePct = rangeChangePct ?? stats?.priceChangePct.h24 ?? null;
+  const trendUp = (headlineChangePct ?? 0) >= 0;
+  const trendColor = trendUp ? UP_COLOR : DOWN_COLOR;
 
-  const currentPrice =
+  const livePrice =
     denom === "ETH"
       ? stats?.priceEth ?? latest?.closeEth ?? null
       : stats?.priceUsd ?? latest?.closeUsd ?? null;
+
+  // Header price/time track the hovered point while the crosshair is over
+  // the chart, and fall back to the live price otherwise — this is the
+  // "chart feels alive" interaction: hovering visibly drives the headline.
+  const hoveredCandle = tooltip?.candle ?? null;
+  const displayPrice = hoveredCandle
+    ? denom === "ETH"
+      ? hoveredCandle.closeEth
+      : hoveredCandle.closeUsd
+    : livePrice;
+  const displayTimeLabel = hoveredCandle ? formatTooltipTime(hoveredCandle.time, range) : null;
 
   // Chart init — mounts once. Data flows in through setData() below against
   // a stable chart/series instance, same rationale as NftPriceChart.
@@ -233,15 +283,17 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
     const chart = createChart(containerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "rgba(230, 210, 170, 0.6)",
+        textColor: "rgba(230, 210, 170, 0.55)",
         fontFamily: "inherit",
       },
+      // Minimal chrome — let the line's shape carry the chart instead of a
+      // grid. Faint vertical rhythm only, no horizontal lines at all.
       grid: {
-        vertLines: { color: "rgba(239, 196, 99, 0.055)" },
-        horzLines: { color: "rgba(239, 196, 99, 0.055)" },
+        vertLines: { color: "rgba(239, 196, 99, 0.04)" },
+        horzLines: { visible: false },
       },
-      rightPriceScale: { borderColor: "rgba(239, 196, 99, 0.15)" },
-      timeScale: { borderColor: "rgba(239, 196, 99, 0.15)", timeVisible: true },
+      rightPriceScale: { borderVisible: false },
+      timeScale: { borderVisible: false, timeVisible: true },
       crosshair: {
         vertLine: { labelBackgroundColor: "#8a6a1f" },
         horzLine: { labelBackgroundColor: "#8a6a1f" },
@@ -257,18 +309,19 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
       wickDownColor: DOWN_COLOR,
       priceLineVisible: false,
       lastValueVisible: true,
+      visible: false,
     });
     candleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0.28 } });
 
     const areaSeries = chart.addSeries(AreaSeries, {
-      lineColor: "#efc463",
-      topColor: "rgba(239, 196, 99, 0.25)",
-      bottomColor: "rgba(239, 196, 99, 0)",
+      lineColor: UP_COLOR,
+      topColor: GOLD_FILL_TOP,
+      bottomColor: GOLD_FILL_BOTTOM,
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: true,
-      visible: false,
     });
+    areaSeries.priceScale().applyOptions({ scaleMargins: { top: 0.08, bottom: 0.28 } });
 
     const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
@@ -276,7 +329,7 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
       lastValueVisible: false,
       priceLineVisible: false,
     });
-    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
 
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
@@ -322,6 +375,12 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
     areaSeriesRef.current?.applyOptions({ visible: mode === "line" });
   }, [mode]);
 
+  // The line's stroke (not the gold fill) tracks the selected range's trend,
+  // same convention as the change badge next to the price.
+  useEffect(() => {
+    areaSeriesRef.current?.applyOptions({ lineColor: trendColor });
+  }, [trendColor]);
+
   useEffect(() => {
     const priceFormat =
       denom === "ETH"
@@ -337,9 +396,8 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
   }, [bars, linePoints, volumeBars, denom]);
 
   const isEmpty = data != null && data.candles.length === 0;
-  const isLoading = data == null && !error;
+  const isLoading = data == null && !hasErrorForRange;
 
-  const tooltipCandle = tooltip?.candle ?? null;
   const tooltipStyle = tooltip
     ? {
         left: Math.min(Math.max(tooltip.x + 12, 4), containerWidth - 176),
@@ -349,32 +407,43 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
 
   return (
     <div className="w-full min-w-0 space-y-2 rounded-xl border border-line bg-panel p-3">
-      <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0">
+        <p className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-cream">
+          $PLANK / ETH
+        </p>
+        <p className="truncate text-[0.62rem] text-cream-muted">
+          Uniswap v2 pool · deepest of $PLANK&apos;s 5 real pools
+        </p>
+      </div>
+
+      {/* Large price readout, the actual headline — the chart is supporting
+          visual for this, not the whole message. Tracks the hovered point
+          while the crosshair is active, live price otherwise. */}
+      <div className="flex flex-wrap items-end justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-cream">
-            $PLANK / ETH
-          </p>
-          <p className="truncate text-[0.62rem] text-cream-muted">
-            Live Uniswap v3 pool price
+          {displayPrice != null ? (
+            <p className="text-2xl font-black leading-none text-gold-300">
+              {formatTinyPrice(displayPrice, denom === "ETH" ? "Ξ" : "$")}
+            </p>
+          ) : (
+            <p className="text-2xl font-black leading-none text-cream-muted/40">···</p>
+          )}
+          <p className="mt-1 text-[0.62rem] text-cream-muted/70">
+            {displayTimeLabel ?? "Live"}
           </p>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-0.5">
-          {currentPrice != null && (
-            <span className="text-[0.78rem] font-black text-gold-300">
-              {formatTinyPrice(currentPrice, denom === "ETH" ? "Ξ" : "$")}
-            </span>
-          )}
-          {headlineChangePct != null && (
-            <span
-              className={`text-[0.66rem] font-bold ${
-                headlineChangePct >= 0 ? "text-[#6ee7a2]" : "text-[#fca5a5]"
-              }`}
-            >
-              {headlineChangePct >= 0 ? "+" : ""}
-              {headlineChangePct.toFixed(2)}% · 24H
-            </span>
-          )}
-        </div>
+        {headlineChangePct != null && (
+          <span
+            className={`shrink-0 rounded-md px-1.5 py-0.5 text-[0.7rem] font-bold ${
+              headlineChangePct >= 0
+                ? "bg-[#6ee7a2]/10 text-[#6ee7a2]"
+                : "bg-[#fca5a5]/10 text-[#fca5a5]"
+            }`}
+          >
+            {headlineChangePct >= 0 ? "+" : ""}
+            {headlineChangePct.toFixed(2)}% · {range}
+          </span>
+        )}
       </div>
 
       {data?.stale && (
@@ -383,12 +452,11 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
         </p>
       )}
 
-      {/* Stat strip — real GeckoTerminal pool stats, cached server-side.
-          Tiles render with "—" rather than disappearing when a field is
-          momentarily unavailable, so the layout never jumps on refresh. */}
+      {/* Stat strip — real GeckoTerminal pool stats for THIS pool only. See
+          PlankPoolsPanel for the token-level aggregate across all 5 pools. */}
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-        <StatTile label="24H Volume" value={formatCompactUsd(stats?.volumeUsd24h)} />
-        <StatTile label="Liquidity" value={formatCompactUsd(stats?.liquidityUsd)} />
+        <StatTile label="24H Volume (this pool)" value={formatCompactUsd(stats?.volumeUsd24h)} />
+        <StatTile label="Liquidity (this pool)" value={formatCompactUsd(stats?.liquidityUsd)} />
         <StatTile label="FDV" value={formatCompactUsd(stats?.fdvUsd)} />
         <StatTile
           label="Buys / Sells (24H)"
@@ -406,7 +474,10 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
             <button
               key={d}
               type="button"
-              onClick={() => setDenom(d)}
+              onClick={() => {
+                setDenom(d);
+                triggerSwitchFade();
+              }}
               className={`rounded-md px-2 py-1 text-[0.6rem] font-black transition ${
                 denom === d ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
               }`}
@@ -420,7 +491,10 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
             <button
               key={r}
               type="button"
-              onClick={() => setRange(r)}
+              onClick={() => {
+                setRange(r);
+                triggerSwitchFade();
+              }}
               className={`rounded-md px-2 py-1 text-[0.6rem] font-black transition ${
                 range === r ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
               }`}
@@ -434,7 +508,10 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
             <button
               key={m.id}
               type="button"
-              onClick={() => setMode(m.id)}
+              onClick={() => {
+                setMode(m.id);
+                triggerSwitchFade();
+              }}
               className={`rounded-md px-2 py-1 text-[0.6rem] font-black transition ${
                 mode === m.id ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
               }`}
@@ -452,34 +529,36 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
       <div className="relative">
         <div
           ref={containerRef}
-          className="w-full min-h-[280px] overflow-hidden rounded-lg border border-line bg-wood-950"
+          className={`w-full min-h-[280px] overflow-hidden rounded-lg border border-line bg-wood-950 transition-opacity duration-200 ${
+            switching ? "opacity-60" : "opacity-100"
+          }`}
         />
 
-        {tooltipCandle && tooltipStyle && !isLoading && !isEmpty && (
+        {tooltip && tooltipStyle && !isLoading && !isEmpty && mode === "candles" && (
           <div
             className="pointer-events-none absolute z-10 w-44 space-y-0.5 rounded-md border border-line bg-wood-950/95 p-2 text-[0.62rem] text-cream-muted shadow-lg"
             style={tooltipStyle}
           >
-            <p className="font-black text-cream">{formatTooltipTime(tooltipCandle.time, range)}</p>
+            <p className="font-black text-cream">{formatTooltipTime(tooltip.candle.time, range)}</p>
             <p>
-              O {formatTinyPrice(denom === "ETH" ? tooltipCandle.openEth : tooltipCandle.openUsd, denom === "ETH" ? "Ξ" : "$")}
+              O {formatTinyPrice(denom === "ETH" ? tooltip.candle.openEth : tooltip.candle.openUsd, denom === "ETH" ? "Ξ" : "$")}
             </p>
             <p>
-              H {formatTinyPrice(denom === "ETH" ? tooltipCandle.highEth : tooltipCandle.highUsd, denom === "ETH" ? "Ξ" : "$")}
+              H {formatTinyPrice(denom === "ETH" ? tooltip.candle.highEth : tooltip.candle.highUsd, denom === "ETH" ? "Ξ" : "$")}
             </p>
             <p>
-              L {formatTinyPrice(denom === "ETH" ? tooltipCandle.lowEth : tooltipCandle.lowUsd, denom === "ETH" ? "Ξ" : "$")}
+              L {formatTinyPrice(denom === "ETH" ? tooltip.candle.lowEth : tooltip.candle.lowUsd, denom === "ETH" ? "Ξ" : "$")}
             </p>
             <p>
-              C {formatTinyPrice(denom === "ETH" ? tooltipCandle.closeEth : tooltipCandle.closeUsd, denom === "ETH" ? "Ξ" : "$")}
+              C {formatTinyPrice(denom === "ETH" ? tooltip.candle.closeEth : tooltip.candle.closeUsd, denom === "ETH" ? "Ξ" : "$")}
             </p>
-            <p className="text-cream-muted/70">Vol {formatCompactUsd(tooltipCandle.volumeUsd)}</p>
+            <p className="text-cream-muted/70">Vol {formatCompactUsd(tooltip.candle.volumeUsd)}</p>
           </div>
         )}
 
-        {error && data == null ? (
+        {hasErrorForRange ? (
           <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-wood-950/95 px-3 text-center text-xs text-cream-muted">
-            Could not load $PLANK price history.
+            Could not load $PLANK price history for {range}.
           </div>
         ) : isLoading ? (
           <div className="absolute inset-0 flex items-end gap-1 overflow-hidden rounded-lg bg-wood-950 p-3">
@@ -493,7 +572,7 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
           </div>
         ) : isEmpty ? (
           <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-wood-950/95 px-3 text-center text-xs text-cream-muted">
-            No priced trades on the PLANK/WETH pool yet for this range.
+            No priced trades on this pool yet for {range}.
           </div>
         ) : null}
       </div>
@@ -504,7 +583,7 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
           overflows any shrink-to-fit ancestor (e.g. an mx-auto flex child)
           long before overflow-hidden ever gets a chance to clip it. */}
       <p className="break-all text-[0.6rem] text-cream-muted/70">
-        Pool {data?.pool ?? "0x3CE05Efe2e7C9c136f12a1Be695f75F807B6c69E"} · Uniswap v3, Robinhood Chain
+        Pool {data?.pool ?? FALLBACK_POOL_ADDRESS} · Uniswap v2, Robinhood Chain
         {stats?.poolCreatedAt && range === "ALL"
           ? ` · Pool live since ${new Date(stats.poolCreatedAt).toLocaleDateString(undefined, {
               month: "short",
