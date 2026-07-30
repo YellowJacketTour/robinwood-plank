@@ -15,9 +15,19 @@
  */
 
 import { durableKv as kv, hasDurableKv } from "@/lib/market/durable-kv";
-import type { PlankCandle, PlankPriceHistory, PriceRange } from "@/lib/plank-price-types";
+import type {
+  PlankCandle,
+  PlankPoolStats,
+  PlankPriceHistory,
+  PriceRange,
+} from "@/lib/plank-price-types";
 
-export type { PlankCandle, PlankPriceHistory, PriceRange } from "@/lib/plank-price-types";
+export type {
+  PlankCandle,
+  PlankPoolStats,
+  PlankPriceHistory,
+  PriceRange,
+} from "@/lib/plank-price-types";
 export { PRICE_RANGES } from "@/lib/plank-price-types";
 
 const GECKOTERMINAL_BASE = "https://api.geckoterminal.com/api/v2";
@@ -110,8 +120,22 @@ async function fetchFresh(range: PriceRange): Promise<PlankPriceHistory> {
     .filter((c): c is PlankCandle => c != null)
     .sort((a, b) => a.time - b.time);
 
+  // GeckoTerminal's OHLCV feed occasionally repeats an identical row for the
+  // same bucket back-to-back (observed on the live "hour" timeframe) — real
+  // upstream data, not something we generate, but lightweight-charts requires
+  // strictly increasing timestamps. Collapse same-time duplicates, keeping
+  // the last (most complete) row for that bucket.
+  const deduped: PlankCandle[] = [];
+  for (const candle of candles) {
+    if (deduped.length > 0 && deduped[deduped.length - 1].time === candle.time) {
+      deduped[deduped.length - 1] = candle;
+    } else {
+      deduped.push(candle);
+    }
+  }
+
   return {
-    candles,
+    candles: deduped,
     poolAddress: POOL_ADDRESS,
     network: NETWORK_ID,
     fetchedAt: Date.now(),
@@ -127,6 +151,152 @@ function cacheKey(range: PriceRange): string {
 function lastGoodKey(range: PriceRange): string {
   return `plank:price-history:last-good:v1:${range}`;
 }
+
+/** How long a fresh pool-stats fetch stays valid before refetching. Stats
+ * change faster than candles but a shared 60s cache across every viewer
+ * stays comfortably inside GeckoTerminal's free-tier rate budget. */
+const STATS_CACHE_TTL_SEC = 60;
+const STATS_CACHE_KEY = "plank:pool-stats:v1";
+const STATS_LAST_GOOD_KEY = "plank:pool-stats:last-good:v1";
+
+type PoolAttributes = {
+  base_token_price_usd?: string;
+  base_token_price_native_currency?: string;
+  fdv_usd?: string | null;
+  market_cap_usd?: string | null;
+  reserve_in_usd?: string | null;
+  pool_created_at?: string | null;
+  price_change_percentage?: {
+    h1?: string | null;
+    h6?: string | null;
+    h24?: string | null;
+  };
+  volume_usd?: { h24?: string | null };
+  transactions?: {
+    h24?: {
+      buys?: number | null;
+      sells?: number | null;
+      buyers?: number | null;
+      sellers?: number | null;
+    };
+  };
+};
+
+function toNumberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function fetchPoolStatsFresh(): Promise<PlankPoolStats> {
+  const url = `${GECKOTERMINAL_BASE}/networks/${NETWORK_ID}/pools/${POOL_ADDRESS}`;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 8_000);
+  let attrs: PoolAttributes;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json;version=20230302",
+        "User-Agent": "plank.love-price-chart/1.0",
+      },
+      signal: ac.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      throw new Error(`GeckoTerminal pool HTTP ${res.status}`);
+    }
+    const json = (await res.json()) as { data?: { attributes?: PoolAttributes } };
+    attrs = json?.data?.attributes ?? {};
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const priceUsd = toNumberOrNull(attrs.base_token_price_usd);
+  const priceEth = toNumberOrNull(attrs.base_token_price_native_currency);
+  if (priceUsd == null || priceEth == null) {
+    throw new Error("GeckoTerminal pool stats missing base token price");
+  }
+
+  const h24 = attrs.transactions?.h24;
+
+  return {
+    priceUsd,
+    priceEth,
+    fdvUsd: toNumberOrNull(attrs.fdv_usd),
+    marketCapUsd: toNumberOrNull(attrs.market_cap_usd),
+    liquidityUsd: toNumberOrNull(attrs.reserve_in_usd),
+    priceChangePct: {
+      h1: toNumberOrNull(attrs.price_change_percentage?.h1),
+      h6: toNumberOrNull(attrs.price_change_percentage?.h6),
+      h24: toNumberOrNull(attrs.price_change_percentage?.h24),
+    },
+    volumeUsd24h: toNumberOrNull(attrs.volume_usd?.h24),
+    transactions24h: h24
+      ? {
+          buys: Number(h24.buys) || 0,
+          sells: Number(h24.sells) || 0,
+          buyers: Number(h24.buyers) || 0,
+          sellers: Number(h24.sellers) || 0,
+        }
+      : null,
+    poolCreatedAt: typeof attrs.pool_created_at === "string" ? attrs.pool_created_at : null,
+    fetchedAt: Date.now(),
+  };
+}
+
+/**
+ * Server-side entry point for the pool stat strip (price/FDV/liquidity/volume/
+ * buys-sells). Same cache-then-refetch-then-last-good discipline as
+ * getPlankPriceHistory, kept as an independent cache key since stats refresh
+ * on a different cadence than candles.
+ */
+export async function getPlankPoolStats(): Promise<PlankPoolStats> {
+  const useKv = hasDurableKv();
+
+  if (useKv) {
+    try {
+      const cached = await kv.get<PlankPoolStats>(STATS_CACHE_KEY);
+      if (cached && Date.now() - cached.fetchedAt < STATS_CACHE_TTL_SEC * 1000) {
+        return cached;
+      }
+    } catch {
+      // fall through to a live fetch
+    }
+  } else {
+    const hit = memCache.get(STATS_CACHE_KEY) as { at: number; data: PlankPoolStats } | undefined;
+    if (hit && Date.now() - hit.at < STATS_CACHE_TTL_SEC * 1000) {
+      return hit.data;
+    }
+  }
+
+  try {
+    const fresh = await fetchPoolStatsFresh();
+    if (useKv) {
+      await kv.set(STATS_CACHE_KEY, fresh, { ex: STATS_CACHE_TTL_SEC * 2 }).catch(() => {});
+      await kv.set(STATS_LAST_GOOD_KEY, fresh, { ex: LAST_GOOD_TTL_SEC }).catch(() => {});
+    } else {
+      memStatsCache.set(STATS_CACHE_KEY, { at: Date.now(), data: fresh });
+      memStatsLastGood.set(STATS_CACHE_KEY, fresh);
+    }
+    return fresh;
+  } catch (err) {
+    if (useKv) {
+      try {
+        const lastGood = await kv.get<PlankPoolStats>(STATS_LAST_GOOD_KEY);
+        if (lastGood) return { ...lastGood, stale: true };
+      } catch {
+        // no durable fallback available either
+      }
+    } else {
+      const lastGood = memStatsLastGood.get(STATS_CACHE_KEY);
+      if (lastGood) return { ...lastGood, stale: true };
+    }
+    throw err;
+  }
+}
+
+const memStatsCache = new Map<string, { at: number; data: PlankPoolStats }>();
+const memStatsLastGood = new Map<string, PlankPoolStats>();
 
 /**
  * Server-side entry point: returns cached data when fresh, refetches from
