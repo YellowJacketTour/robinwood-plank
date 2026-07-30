@@ -15,7 +15,7 @@ export default function GalleryPage() {
   return (
     <>
       <Nav />
-      <main className="flex-1">
+      <main id="main-content" tabIndex={-1} className="flex-1">
         <Gallery />
       </main>
       <Footer />

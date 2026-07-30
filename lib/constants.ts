@@ -125,13 +125,13 @@ export const TOKEN = {
 } as const;
 
 /**
- * Primary nav text links. Logo → home. Trade is the gold CTA button (not listed here).
+ * Primary navigation in reading order. `emphasis` changes presentation only;
+ * every destination still comes from this single source of truth.
  */
-/** Keep nav short — Trade is the gold CTA; rest are anchors. */
 export const NAV_LINKS = [
   { href: "/market", label: "Market" },
-  { href: "#trade", label: "Trade" },
-  { href: "#mint", label: "Mint" },
+  { href: "#trade", label: "Trade", emphasis: "cta" },
+  { href: "#mint", label: "Mint", activePaths: ["/mint", "/launch"] },
   { href: "/gallery", label: "Gallery" },
   { href: "/learn", label: "Learn" },
   { href: "#airdrop", label: "Airdrop" },
