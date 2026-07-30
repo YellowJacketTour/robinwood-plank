@@ -2,6 +2,7 @@ import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import TradePageHeader from "@/components/trade/TradePageHeader";
 import PlankPriceChart from "@/components/trade/PlankPriceChart";
+import ChartErrorBoundary from "@/components/trade/ChartErrorBoundary";
 import TradeWorkbench from "@/components/trade/TradeWorkbench";
 import TradeStatusPanel from "@/components/trade/TradeStatusPanel";
 import TradeSafetyNotes from "@/components/trade/TradeSafetyNotes";
@@ -35,20 +36,31 @@ export default function TradePage() {
               thing people look for landing on a trade page. Always visible
               (not nested inside the same-chain/cross-chain toggle), so it
               omits the `active` prop and just polls continuously. */}
-          <PlankPriceChart />
+          <ChartErrorBoundary>
+            <PlankPriceChart />
+          </ChartErrorBoundary>
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start sm:gap-5">
-            <div className="min-w-0 space-y-4 sm:space-y-5">
-              <div className="mx-auto w-full max-w-xl">
+          {/* Action zone: workbench + status read as one paired unit, capped
+              narrower than the shell so the fluid workbench column lands
+              close to the rail instead of stranding it across empty space
+              (max-w-4xl minus the 320px rail leaves ~556px — almost exactly
+              the workbench's own natural width). The chart above stays full
+              width as the page's dominant visual; this row is the focused
+              action beneath it. */}
+          <div className="mx-auto w-full max-w-4xl">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start sm:gap-5">
+              <div className="min-w-0">
                 <TradeWorkbench />
               </div>
-            </div>
 
-            <div className="space-y-4 sm:space-y-5">
               <TradeStatusPanel />
-              <TradeSafetyNotes />
             </div>
           </div>
+
+          {/* Safety disclosures read as a full-width trust band beneath the
+              action zone — same content as before, given room to breathe
+              across four columns instead of stacked in a narrow rail. */}
+          <TradeSafetyNotes />
         </div>
       </main>
       <Footer />
