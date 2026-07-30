@@ -230,6 +230,7 @@ export async function POST(req: Request) {
       steps,
       fees,
       transaction: tx,
+      quoteId: typeof best.quoteId === "string" ? best.quoteId : undefined,
       siteFee: getPublicSiteFee(),
       zeroExFeeDisclosure: zeroExFeeDisclosure(fees),
     };

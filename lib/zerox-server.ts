@@ -41,6 +41,7 @@ const ALLOWED_PATHS = new Set([
   "/swap/allowance-holder/price",
   "/swap/allowance-holder/quote",
   "/cross-chain/quotes",
+  "/cross-chain/status",
 ]);
 
 /**
@@ -108,32 +109,69 @@ export function assertNoClientFeeOrRouteOverride(body: Record<string, unknown>):
 }
 
 /**
- * Immutable site fee for 0x Swap API — SAME bps as the Uniswap integration
- * (SITE_FEE from lib/constants.ts), just expressed with 0x's param names.
+ * FEE PRECISION — CONFIRMED via live 0x API calls (2026-07-30, real
+ * ZEROX_API_KEY): `swapFeeBps` (and cross-chain's `feeBps`) is INTEGER-ONLY.
+ * Every fractional value tried was rejected with the exact same validation
+ * error, including "42.0" with a trailing zero — so this is not a rounding
+ * quirk, 0x's schema simply does not accept a decimal point at all:
+ *   swapFeeBps=42.07  -> 400 INPUT_INVALID: "Must be a single number or
+ *                         comma-separated numbers (e.g., \"10\" or \"10,20\")"
+ *   swapFeeBps=42.0   -> same 400 (proves it's decimals, not precision)
+ *   swapFeeBps=42     -> 200 OK
+ *
+ * SITE_FEE.bps is 42.07 (0.4207%) — not representable. Uniswap's path gets
+ * the exact value via IntegratorFee.bips (a different, fractional-capable
+ * field, unlocked there by the x-universal-router-version: 2.1.1 header).
+ * 0x has no equivalent fractional field for either the Swap or Cross-Chain
+ * API — checked both `swapFeeBps`/`feeBps` are the only fee-size params in
+ * their schemas, no percentage/decimal alternative exists.
+ *
+ * RESOLUTION (per owner instruction): round DOWN, never charge more than
+ * advertised. Math.floor (not Math.round) so this holds even if SITE_FEE.bps
+ * ever changes to something whose fractional part is >= 0.5 — 42.07 floors
+ * to 42 either way, but the intent must survive that future edit.
+ *
+ * NET EFFECT: the 0x path currently charges 0.42% instead of Uniswap's
+ * exact 0.4207% — 0.0007 percentage points less than advertised, in the
+ * user's favor, never more.
+ */
+export const ZEROX_SWAP_FEE_BPS_INTEGER = Math.floor(SITE_FEE.bps);
+
+/**
+ * Immutable site fee for 0x Swap/Cross-Chain APIs — SAME recipient as the
+ * Uniswap integration (SITE_FEE.recipient from lib/constants.ts, imported —
+ * never a locally-hardcoded literal, so the two providers cannot drift
+ * apart), fee size floored to ZEROX_SWAP_FEE_BPS_INTEGER (see above).
  * bps=0 / enabled=false → omit fee params entirely (full output to buyer),
  * identical behavior to getIntegratorFees() in lib/uniswap-server.ts.
  */
 export function getSwapFeeParams(): { swapFeeBps: string; swapFeeRecipient: string } | null {
   if (!SITE_FEE.enabled || !SITE_FEE.bps || SITE_FEE.bps <= 0) return null;
-  // 0x's swapFeeBps is an integer-basis-points string per the API reference;
-  // SITE_FEE.bps (42.07) already IS in "1 bip = 0.01%" units like Uniswap's
-  // IntegratorFee.bips, so round to the nearest whole bip (42) — 0x's field
-  // does not document fractional bps the way Uniswap's does.
   return {
-    swapFeeBps: String(Math.round(SITE_FEE.bps)),
+    swapFeeBps: String(ZEROX_SWAP_FEE_BPS_INTEGER),
     swapFeeRecipient: SITE_FEE.recipient.toLowerCase(),
   };
 }
 
 /** Public fee metadata only (safe to send to the browser). Same shape as
- * getPublicSiteFee() in lib/uniswap-server.ts for easy side-by-side display. */
+ * getPublicSiteFee() in lib/uniswap-server.ts for easy side-by-side display,
+ * plus the exact-vs-applied bps discrepancy so the UI can disclose it
+ * honestly instead of silently showing "0.4207%" on a path that actually
+ * charges 0.42%. */
 export function getPublicSiteFee() {
   return Object.freeze({
     percent: SITE_FEE.percent,
-    bps: Math.round(SITE_FEE.bps),
-    label: SITE_FEE.label,
+    bps: ZEROX_SWAP_FEE_BPS_INTEGER,
+    exactBps: SITE_FEE.bps,
+    label: `${(ZEROX_SWAP_FEE_BPS_INTEGER / 100).toFixed(2)}%`,
+    exactLabel: SITE_FEE.label,
     recipient: SITE_FEE.recipient,
     enabled: Boolean(SITE_FEE.enabled && SITE_FEE.bps > 0),
+    /** Set only when the applied bps had to be rounded down from the exact
+     * site-wide fee because 0x's API rejects fractional bps — see
+     * ZEROX_SWAP_FEE_BPS_INTEGER's comment for the confirmed evidence. */
+    roundedDownFrom:
+      ZEROX_SWAP_FEE_BPS_INTEGER < SITE_FEE.bps ? SITE_FEE.label : undefined,
   });
 }
 
@@ -375,4 +413,62 @@ export async function zeroxFetch(
   }
 
   return res;
+}
+
+/**
+ * Recognized 0x /cross-chain/status lifecycle strings, confirmed live
+ * against the endpoint's shape (2026-07-30): a probe with a well-formed but
+ * nonexistent originTxHash returned TRANSACTION_NOT_FOUND (not a schema
+ * error), and originChain + originTxHash are the only required params
+ * (quoteId is optional). The exact set of in-flight status strings 0x
+ * returns for a REAL pending/filled transaction could not be observed
+ * without executing one on-chain — this mapping is defensive: anything not
+ * recognized here maps to "unknown" rather than being misreported as a
+ * specific (possibly wrong) lifecycle stage.
+ */
+const KNOWN_LIFECYCLE_STRINGS = new Set<string>([
+  "origin_tx_pending",
+  "origin_tx_confirmed",
+  "bridge_pending",
+  "bridge_filled",
+  "bridge_failed",
+]);
+
+export function mapCrossChainLifecycle(raw: unknown): "origin_tx_pending" | "origin_tx_confirmed" | "bridge_pending" | "bridge_filled" | "bridge_failed" | "unknown" {
+  if (!raw || typeof raw !== "object") return "unknown";
+  const r = raw as Record<string, unknown>;
+  const candidates = [r.status, r.lifecycle, r.state].filter(
+    (v): v is string => typeof v === "string"
+  );
+  for (const c of candidates) {
+    const normalized = c.trim().toLowerCase();
+    if (KNOWN_LIFECYCLE_STRINGS.has(normalized)) {
+      return normalized as
+        | "origin_tx_pending"
+        | "origin_tx_confirmed"
+        | "bridge_pending"
+        | "bridge_filled"
+        | "bridge_failed";
+    }
+  }
+  return "unknown";
+}
+
+/**
+ * GET /cross-chain/status — poll settlement of a cross-chain buy after the
+ * user has sent the origin-chain transaction. originChain + originTxHash
+ * are the only required params per a live probe; quoteId is optional and
+ * narrows the lookup to the exact quote/route that was executed.
+ */
+export async function zeroxCrossChainStatusFetch(params: {
+  originChain: number;
+  originTxHash: string;
+  quoteId?: string;
+}): Promise<Response> {
+  const query: Record<string, string> = {
+    originChain: String(params.originChain),
+    originTxHash: params.originTxHash,
+  };
+  if (params.quoteId) query.quoteId = params.quoteId;
+  return zeroxFetch("/cross-chain/status", query);
 }

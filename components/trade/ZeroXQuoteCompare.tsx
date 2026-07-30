@@ -14,7 +14,7 @@ type ZeroXQuoteBody = {
   buyAmount: string;
   minBuyAmount?: string;
   fees: { integratorFee: ZeroXFeeLine; zeroExFee: ZeroXFeeLine };
-  siteFee: { enabled: boolean; label: string };
+  siteFee: { enabled: boolean; label: string; roundedDownFrom?: string };
   zeroExFeeDisclosure?: string;
 };
 
@@ -182,6 +182,15 @@ export default function ZeroXQuoteCompare({
         <div className="flex items-start gap-1 text-[0.65rem] text-gold-300/80">
           <Info size={11} className="mt-0.5 shrink-0" />
           <span>{quote.zeroExFeeDisclosure}</span>
+        </div>
+      )}
+      {quote.siteFee?.roundedDownFrom && (
+        <div className="flex items-start gap-1 text-[0.65rem] text-foreground/40">
+          <Info size={11} className="mt-0.5 shrink-0" />
+          <span>
+            0x only accepts whole-number fees, so this path charges {quote.siteFee.label} instead of
+            our usual {quote.siteFee.roundedDownFrom} — rounded down, never up.
+          </span>
         </div>
       )}
       {!uniswapAmountOut && (
