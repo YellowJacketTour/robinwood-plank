@@ -54,10 +54,15 @@ export async function getOwnedTokenIds(
     if (Number.isFinite(balance) && balance > 0) {
       // Cap the walk — a whale shouldn't stall the page.
       const limit = Math.min(balance, 200);
-      const results = await Promise.all(
-        Array.from({ length: limit }, (_, i) =>
+      // One JSON-RPC array batch per 100 calls instead of 200 individual
+      // HTTP round-trips (the proxy forwards the raw body untouched, and
+      // its 64KB body cap fits ~100 eth_calls comfortably).
+      const results = await ethCallBatch(
+        contractAddress,
+        Array.from(
+          { length: limit },
           // tokenOfOwnerByIndex(address,uint256)
-          call(`0x2f745c59${pad(owner)}${pad(BigInt(i).toString(16))}`)
+          (_, i) => `0x2f745c59${pad(owner)}${pad(BigInt(i).toString(16))}`
         )
       );
       for (const r of results) {
@@ -111,6 +116,56 @@ async function ethCall(to: string, data: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Batched eth_call: one POST per 100 calls as a JSON-RPC 2.0 array. The
+ * same-origin proxy forwards the raw body verbatim, so batching is purely
+ * an upstream question — and if the upstream ever rejects array batches,
+ * the affected chunk falls back to the per-call path. Responses are mapped
+ * by `id` (batch replies may arrive out of order).
+ */
+async function ethCallBatch(to: string, datas: string[]): Promise<Array<string | null>> {
+  if (datas.length === 0) return [];
+  const CHUNK = 100; // ~20KB per chunk, well under the proxy's 64KB body cap
+  const results = new Array<string | null>(datas.length).fill(null);
+  for (let start = 0; start < datas.length; start += CHUNK) {
+    const chunk = datas.slice(start, start + CHUNK);
+    let batched = false;
+    try {
+      const res = await fetch("/api/rpc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          chunk.map((data, i) => ({
+            jsonrpc: "2.0",
+            id: start + i,
+            method: "eth_call",
+            params: [{ to, data }, "latest"],
+          }))
+        ),
+      });
+      const json = (await res.json()) as unknown;
+      if (Array.isArray(json)) {
+        for (const entry of json as Array<{ id?: unknown; result?: unknown }>) {
+          const idx = typeof entry?.id === "number" ? entry.id : -1;
+          if (idx >= start && idx < start + chunk.length && typeof entry.result === "string") {
+            results[idx] = entry.result;
+          }
+        }
+        batched = true;
+      }
+    } catch {
+      /* fall through to per-call */
+    }
+    if (!batched) {
+      const fallback = await Promise.all(chunk.map((data) => ethCall(to, data)));
+      fallback.forEach((r, i) => {
+        results[start + i] = r;
+      });
+    }
+  }
+  return results;
 }
 
 /** Decode a single ABI-encoded `string` return value. */

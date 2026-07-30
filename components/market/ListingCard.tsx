@@ -3,6 +3,7 @@ import type { Listing, MarketCollection } from "@/lib/market/types";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+import { withImageWidth } from "@/lib/ipfs";
 
 type Props = {
   listing: Listing;
@@ -77,7 +78,7 @@ export default function ListingCard({
         <Image
           // The token's own art, not the collection logo — a grid of identical
           // logos reads as broken. Falls back only if resolution failed.
-          src={listing.imageUrl || collection.image}
+          src={withImageWidth(listing.imageUrl, 256) || collection.image}
           alt={`${collection.name} #${listing.tokenId}`}
           fill
           sizes="(min-width: 1024px) 20vw, 50vw"

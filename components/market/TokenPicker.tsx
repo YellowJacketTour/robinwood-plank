@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { getRarityMap, tierAnimationClass, tierCardStyle, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+import { withImageWidth } from "@/lib/ipfs";
 
 export type PickerToken = {
   tokenId: string;
@@ -86,7 +87,7 @@ export default function TokenPicker({
               >
                 {t.imageUrl ? (
                   <Image
-                    src={t.imageUrl}
+                    src={withImageWidth(t.imageUrl, 256)}
                     alt={`#${t.tokenId}`}
                     fill
                     sizes="80px"

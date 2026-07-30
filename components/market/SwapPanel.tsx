@@ -44,6 +44,7 @@ import { addPendingVaultTx } from "@/lib/market/pendingVaultTx";
 import { useVaultBook } from "@/lib/market/useVaultBook";
 import { relayDrandRound } from "@/lib/market/drand";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
+import { withImageWidth } from "@/lib/ipfs";
 
 type Mode = "buy" | "sell" | "deposit" | "redeem" | "lp";
 type LpDirection = "add" | "remove";
@@ -111,7 +112,7 @@ function TokenPreviewCard({ tokenId }: { tokenId: string }) {
         }
       >
         {preview?.image ? (
-          <Image src={preview.image} alt={`#${tokenId}`} fill sizes="48px" className="object-cover" unoptimized />
+          <Image src={withImageWidth(preview.image, 256)} alt={`#${tokenId}`} fill sizes="48px" className="object-cover" unoptimized />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-[0.55rem] text-foreground/30">
             {loading ? "…" : "?"}

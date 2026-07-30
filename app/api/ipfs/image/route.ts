@@ -27,6 +27,43 @@ export const runtime = "nodejs";
  */
 const MAX_BYTES = 15 * 1024 * 1024; // sane ceiling — this collection's art is well under this
 
+/**
+ * Fixed width tiers for `?w=` — an allowlist, not a free parameter, so the
+ * immutable cache can't be exploded with arbitrary variant keys. Requests
+ * round UP to the nearest tier (a 180px grid cell asks for 256).
+ */
+const WIDTH_TIERS = [256, 512, 1024] as const;
+
+function resolveWidthTier(raw: string | null): number | null {
+  if (!raw) return null;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  for (const tier of WIDTH_TIERS) {
+    if (n <= tier) return tier;
+  }
+  return WIDTH_TIERS[WIDTH_TIERS.length - 1]!;
+}
+
+/**
+ * Downscale to `width` and re-encode as WebP. Any failure — sharp missing
+ * (e.g. the Cloudflare Worker runtime has no native binary), corrupt bytes,
+ * unsupported format — returns null and the caller serves the original
+ * bytes; a resize must never turn a working image into a 500.
+ * GIFs are excluded upstream so animation survives.
+ */
+async function tryResize(buf: ArrayBuffer, width: number): Promise<ArrayBuffer | null> {
+  try {
+    const sharp = (await import("sharp")).default;
+    const out = await sharp(Buffer.from(buf))
+      .resize({ width, withoutEnlargement: true })
+      .webp({ quality: 82 })
+      .toBuffer();
+    return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(req: Request) {
   // Same collection-scale sizing as app/api/ipfs/metadata — a Gallery cold
   // load fetches an image per visible/loaded card across ~1,500+ tokens.
@@ -38,6 +75,7 @@ export async function GET(req: Request) {
   if (!uri) {
     return publicJson({ error: "BAD_URI", message: "uri is required." }, 400);
   }
+  const widthTier = resolveWidthTier(searchParams.get("w"));
 
   // SSRF guard: only start from allowlisted public IPFS gateways. Gateways
   // often 30x-redirect to CID subdomains (e.g. bafy….ipfs.dweb.link) — those
@@ -133,6 +171,13 @@ export async function GET(req: Request) {
           lastError = new Error("Not an image payload");
           continue;
         }
+      }
+      // Width-tiered thumbnail: full-res art in a 200px grid cell was tens
+      // of MB per page. Skip GIFs (resizing drops animation) and fall back
+      // to the original bytes on any resize failure.
+      if (widthTier && (ct === "image/png" || ct === "image/jpeg" || ct === "image/webp")) {
+        const resized = await tryResize(buf, widthTier);
+        if (resized) return cachedBinary(resized, "image/webp", "immutable");
       }
       return cachedBinary(buf, ct, "immutable");
     } catch (error) {
