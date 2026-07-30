@@ -6,7 +6,6 @@ import PlankPriceChart from "@/components/trade/PlankPriceChart";
 import ChartErrorBoundary from "@/components/trade/ChartErrorBoundary";
 import PlankPoolsPanel from "@/components/trade/PlankPoolsPanel";
 import TradeActionZone from "@/components/trade/TradeActionZone";
-import TradeSafetyNotes from "@/components/trade/TradeSafetyNotes";
 import { createPageMetadata } from "@/lib/seo";
 
 /** Trade status/countdown are live state, not publish-once content — same
@@ -53,21 +52,14 @@ export default function TradePage() {
             <PlankPoolsPanel />
           </div>
 
-          {/* Action zone: workbench + status read as one paired unit, capped
-              narrower than the shell so the fluid workbench column lands
-              close to the rail instead of stranding it across empty space
-              (max-w-4xl minus the 320px rail leaves ~556px — almost exactly
-              the workbench's own natural width). The chart above stays full
-              width as the page's dominant visual; this row is the focused
-              action beneath it. */}
-          <div className="mx-auto w-full max-w-4xl">
-            <TradeActionZone />
-          </div>
-
-          {/* Safety disclosures read as a full-width trust band beneath the
-              action zone — same content as before, given room to breathe
-              across four columns instead of stacked in a narrow rail. */}
-          <TradeSafetyNotes />
+          {/* Action zone (workbench + status, capped at max-w-4xl so the
+              fluid workbench column lands close to the rail — see
+              TradeActionZone's own comment) and the safety band both live
+              inside TradeActionZone now, because both need the one piece of
+              state it owns: which TradeModeSwitch tab is active. The safety
+              band specifically can't be correct without it — "Not a bridge"
+              is only true in same-chain mode. */}
+          <TradeActionZone />
         </div>
       </main>
       <Footer />
