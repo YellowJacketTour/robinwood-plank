@@ -131,16 +131,26 @@ jobs:
           chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
 
       - name: Upload immutable release
+        env:
+          UNISWAP_API_KEY: ${{ secrets.UNISWAP_API_KEY }}
         shell: bash
         run: |
           set -euo pipefail
+          test "${#UNISWAP_API_KEY}" -ge 16
           port="${INMOTION_PORT:-2222}"
+          runtime_secret="$RUNNER_TEMP/uniswap-api-key"
+          umask 077
+          printf '%s' "$UNISWAP_API_KEY" > "$runtime_secret"
           ssh -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
-            "mkdir -p '$INMOTION_APP_DIR/incoming'"
+            "mkdir -p '$INMOTION_APP_DIR/incoming' '$INMOTION_APP_DIR/shared/runtime-secrets' && chmod 700 '$INMOTION_APP_DIR/shared/runtime-secrets'"
           scp -i "$HOME/.ssh/inmotion" -P "$port" \
             passenger-release.tgz \
             "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/incoming/${RELEASE_SHA}.tgz"
+          scp -i "$HOME/.ssh/inmotion" -P "$port" \
+            "$runtime_secret" \
+            "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.uniswap-api-key.${RELEASE_SHA}"
+          rm -f "$runtime_secret"
 
       - name: Migrate, activate, and restart Passenger
         shell: bash
@@ -160,6 +170,11 @@ jobs:
           esac
           test -x "$node_bin"
           test -f "$app_dir/shared/.env.production"
+          staged_uniswap_key="$app_dir/shared/runtime-secrets/.uniswap-api-key.$release_sha"
+          test -s "$staged_uniswap_key"
+          chmod 600 "$staged_uniswap_key"
+          mv -f "$staged_uniswap_key" "$app_dir/shared/runtime-secrets/uniswap-api-key"
+          chmod 600 "$app_dir/shared/runtime-secrets/uniswap-api-key"
           release_dir="$app_dir/releases/$release_sha"
           mkdir -p "$release_dir" "$app_dir/shared" "$app_dir/tmp" "$app_dir/logs"
           tar -xzf "$app_dir/incoming/$release_sha.tgz" -C "$release_dir"
@@ -197,9 +212,18 @@ jobs:
                    --header "Accept: application/json" \
                    "$INMOTION_HEALTH_URL/api/health"
                )" &&
+               trade_body="$(
+                 curl --fail --silent --show-error \
+                   --connect-timeout 5 --max-time 15 \
+                   --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                   --header "Accept: application/json" \
+                   --header "Cache-Control: no-cache" \
+                   "$INMOTION_HEALTH_URL/api/trade/status?deployment=$RELEASE_SHA"
+               )" &&
                [[ "$health_body" == *'"ok":true'* ]] &&
                [[ "$health_body" == *'"storage":"postgres"'* ]] &&
                [[ "$health_body" == *"\"version\":\"$RELEASE_SHA\""* ]] &&
+               [[ "$trade_body" == *'"tradingApiConfigured":true'* ]] &&
                curl --fail --silent --show-error \
                  --connect-timeout 5 --max-time 15 \
                  --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
