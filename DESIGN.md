@@ -142,6 +142,25 @@ Each product page must lead with its primary task. Analytics, education, and ope
 
 **This file's token names and hex values are checked against `app/globals.css` and must stay in sync with it.** If you change a color in `@theme`, update the frontmatter above in the same change. Do not invent a second name for an existing token — search this file and `globals.css` before adding a new color.
 
+## Approved mockups — read before redesigning a page
+
+This file defines the *system* (tokens, surfaces, rules). The mockups below define
+the *composition* of specific pages, and they are the owner-approved intent for
+those surfaces. **Before redesigning any page covered by one, open the mockup and
+build toward it — do not design from scratch.**
+
+| Surface | Mockup |
+| --- | --- |
+| Landing page (`/`) | `docs/mockups/landing-redesign/finalized.html` |
+| Marketplank (`/market`) and the dense trading surfaces | `docs/mockups/market-redesign/finalized.html` |
+
+They are static HTML — open the file directly or serve the directory. A mockup can
+be *out of date on facts* (the collection is minted out, the homepage trade section
+is now a CTA into `/trade`, `AppBackdrop` and this file's reconciliation landed
+after them). Where a mockup conflicts with current production behavior, production
+behavior wins and the deviation gets stated explicitly in review — but the mockup
+still governs layout, hierarchy, and voice. Never silently diverge from one.
+
 ## Colors
 
 The real token names in code are `gold-*`, `wood-*`, `forest-*`, `cream`/`cream-muted`, and the semantic surface tokens `border-line`, `border-line-strong`, `bg-panel`, `bg-panel-soft`, `bg-panel-strong` (all defined in the `@theme` block of `app/globals.css`, aliased in the market module as `--market-*` — see "Marketplank tab rail" below). These are the names to use in code and in review; do not refer to a "primary/surface/background/foreground" abstraction that doesn't exist in the stylesheet.
