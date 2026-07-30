@@ -61,7 +61,7 @@ export default function ListingGrid({
     // scales continuously with actual available width (2-up on a phone,
     // 10+ across on a wide desktop monitor) instead of plateauing at a
     // handful of columns and leaving the rest of a wide screen empty.
-    <ul className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5 sm:gap-3">
+    <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
       {listings.map((listing) => {
         const collection = collections.find((c) => c.slug === listing.collectionSlug);
         if (!collection) return null;

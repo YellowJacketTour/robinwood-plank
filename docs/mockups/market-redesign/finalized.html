@@ -1,0 +1,2493 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Interactive static mockup for the RobinWood Marketplank marketplace."
+    />
+    <title>Marketplank — Market Redesign Mockup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito+Sans:opsz,wght@6..12,500;6..12,600;6..12,700;6..12,800;6..12,900&family=Uncial+Antiqua&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #120d08;
+        --wood-950: #171009;
+        --wood-900: #24160c;
+        --wood-850: #302013;
+        --wood-800: #3d2817;
+        --wood-700: #5b3a1d;
+        --wood-600: #795028;
+        --cream: #fff3d1;
+        --cream-muted: #d9c9a5;
+        --gold-300: #f8da8c;
+        --gold-400: #efc463;
+        --gold-500: #dba53f;
+        --gold-600: #af761d;
+        --forest: #123121;
+        --forest-bright: #60d890;
+        --rare: #67c8ff;
+        --epic: #c797ff;
+        --legendary: #ffbd4a;
+        --danger: #f28b78;
+        --line: rgba(239, 196, 99, 0.22);
+        --line-strong: rgba(239, 196, 99, 0.48);
+        --panel: rgba(30, 19, 11, 0.94);
+        --panel-soft: rgba(41, 26, 15, 0.88);
+        --display: "Uncial Antiqua", Georgia, serif;
+        --body: "Nunito Sans", system-ui, sans-serif;
+        --radius-sm: 8px;
+        --radius-md: 12px;
+        --radius-lg: 18px;
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --space-5: 20px;
+        --space-6: 24px;
+        --space-8: 32px;
+        --shadow-panel: 0 18px 60px rgba(0, 0, 0, 0.34);
+        --shadow-gold: 0 0 0 1px rgba(239, 196, 99, 0.14), 0 10px 32px rgba(0, 0, 0, 0.38);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        background: var(--ink);
+        scroll-behavior: smooth;
+      }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+        color: var(--cream);
+        background:
+          linear-gradient(180deg, rgba(18, 13, 8, 0.86), rgba(18, 13, 8, 0.96)),
+          url("../../../public/images/plank-head.webp") top center / min(1500px, 120vw) auto no-repeat,
+          var(--ink);
+        font-family: var(--body);
+        font-weight: 700;
+      }
+
+      body::before {
+        position: fixed;
+        z-index: -1;
+        inset: 0;
+        content: "";
+        opacity: 0.17;
+        pointer-events: none;
+        background-image: repeating-linear-gradient(
+          92deg,
+          rgba(255, 255, 255, 0.045) 0,
+          rgba(255, 255, 255, 0.045) 1px,
+          transparent 1px,
+          transparent 9px
+        );
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      button,
+      a,
+      select {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      button {
+        color: inherit;
+      }
+
+      button:focus-visible,
+      a:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      [contenteditable="true"]:focus-visible {
+        outline: 3px solid var(--rare);
+        outline-offset: 3px;
+      }
+
+      .skip-link {
+        position: fixed;
+        z-index: 100;
+        top: 10px;
+        left: 10px;
+        transform: translateY(-150%);
+        border-radius: var(--radius-sm);
+        padding: 10px 14px;
+        color: var(--wood-950);
+        background: var(--gold-300);
+      }
+
+      .skip-link:focus {
+        transform: translateY(0);
+      }
+
+      .site-header {
+        position: sticky;
+        z-index: 50;
+        top: 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(18, 13, 8, 0.9);
+        backdrop-filter: blur(14px);
+      }
+
+      .header-inner,
+      .page-shell {
+        width: min(1440px, calc(100% - 32px));
+        margin: 0 auto;
+      }
+
+      .header-inner {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        min-height: 68px;
+        gap: var(--space-6);
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--gold-300);
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .brand img {
+        width: 30px;
+        height: 42px;
+        object-fit: contain;
+        filter: drop-shadow(0 4px 7px rgba(0, 0, 0, 0.5));
+      }
+
+      .brand span {
+        font-family: var(--display);
+        font-size: 1.08rem;
+      }
+
+      .primary-nav {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+
+      .primary-nav a {
+        min-height: 40px;
+        border-radius: var(--radius-sm);
+        padding: 10px 12px;
+        color: var(--cream-muted);
+        font-size: 0.75rem;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-decoration: none;
+        text-transform: uppercase;
+      }
+
+      .primary-nav a:hover,
+      .primary-nav a[aria-current="page"] {
+        color: var(--gold-300);
+        background: rgba(219, 165, 63, 0.1);
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .network-pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 38px;
+        gap: 8px;
+        border: 1px solid rgba(96, 216, 144, 0.28);
+        border-radius: 999px;
+        padding: 0 12px;
+        color: #a7e6bd;
+        background: rgba(18, 49, 33, 0.58);
+        font-size: 0.72rem;
+        white-space: nowrap;
+      }
+
+      .network-pill::before {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        content: "";
+        background: var(--forest-bright);
+        box-shadow: 0 0 10px rgba(96, 216, 144, 0.8);
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 42px;
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
+        padding: 0 15px;
+        cursor: pointer;
+        font-size: 0.8rem;
+        font-weight: 900;
+        text-decoration: none;
+        transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease;
+      }
+
+      .btn:hover {
+        transform: translateY(-1px);
+      }
+
+      .btn-primary {
+        border-color: #f3ca6f;
+        color: #251509;
+        background: linear-gradient(180deg, #f1c665, var(--gold-500));
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.28);
+      }
+
+      .btn-secondary {
+        border-color: var(--line-strong);
+        color: var(--gold-300);
+        background: rgba(26, 16, 9, 0.76);
+      }
+
+      .btn-quiet {
+        min-height: 36px;
+        border-color: var(--line);
+        padding-inline: 11px;
+        color: var(--cream-muted);
+        background: rgba(23, 16, 9, 0.72);
+        font-size: 0.72rem;
+      }
+
+      .mobile-menu {
+        display: none;
+      }
+
+      .page-shell {
+        padding-block: 34px 72px;
+      }
+
+      .collection-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+        gap: var(--space-6);
+        margin-bottom: 18px;
+      }
+
+      .collection-identity {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        gap: var(--space-4);
+      }
+
+      .collection-avatar {
+        display: grid;
+        flex: 0 0 auto;
+        width: 76px;
+        height: 76px;
+        place-items: center;
+        overflow: hidden;
+        border: 1px solid var(--line-strong);
+        border-radius: 20px;
+        background:
+          linear-gradient(145deg, rgba(239, 196, 99, 0.24), rgba(23, 16, 9, 0.8)),
+          var(--wood-900);
+        box-shadow: var(--shadow-gold);
+      }
+
+      .collection-avatar img {
+        width: 54px;
+        height: 68px;
+        object-fit: contain;
+      }
+
+      .eyebrow {
+        margin: 0 0 5px;
+        color: var(--gold-400);
+        font-size: 0.68rem;
+        font-weight: 900;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+      }
+
+      .title-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        font-family: var(--display);
+        font-weight: 400;
+      }
+
+      h1 {
+        color: var(--gold-300);
+        font-size: clamp(1.85rem, 3vw, 3.25rem);
+        line-height: 1;
+        text-shadow: 0 5px 18px rgba(0, 0, 0, 0.8);
+      }
+
+      .verified {
+        display: inline-grid;
+        width: 22px;
+        height: 22px;
+        place-items: center;
+        border-radius: 50%;
+        color: var(--wood-950);
+        background: var(--rare);
+        font-size: 0.75rem;
+      }
+
+      .collection-copy {
+        margin: 8px 0 0;
+        max-width: 700px;
+        color: var(--cream-muted);
+        font-size: 0.86rem;
+        font-weight: 600;
+      }
+
+      .collection-links {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .market-tabs-wrap {
+        position: sticky;
+        z-index: 40;
+        top: 68px;
+        margin-inline: -1px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md) var(--radius-md) 0 0;
+        background: rgba(29, 18, 10, 0.94);
+        backdrop-filter: blur(12px);
+      }
+
+      .market-tabs {
+        display: flex;
+        overflow-x: auto;
+        padding: 6px;
+        scrollbar-width: none;
+      }
+
+      .market-tabs::-webkit-scrollbar {
+        display: none;
+      }
+
+      .market-tab {
+        position: relative;
+        min-height: 46px;
+        flex: 0 0 auto;
+        border: 0;
+        border-radius: 8px;
+        padding: 0 16px;
+        cursor: pointer;
+        color: #bcae91;
+        background: transparent;
+        font-size: 0.74rem;
+        font-weight: 900;
+        letter-spacing: 0.055em;
+        text-transform: uppercase;
+      }
+
+      .market-tab:hover {
+        color: var(--cream);
+      }
+
+      .market-tab[aria-selected="true"] {
+        color: #281709;
+        background: var(--gold-500);
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.25);
+      }
+
+      .tab-count {
+        margin-left: 6px;
+        border-radius: 999px;
+        padding: 2px 6px;
+        color: inherit;
+        background: rgba(255, 255, 255, 0.12);
+        font-size: 0.62rem;
+      }
+
+      .market-frame {
+        min-height: 700px;
+        border: 1px solid var(--line);
+        border-top: 0;
+        border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+        background: rgba(18, 13, 8, 0.62);
+        box-shadow: var(--shadow-panel);
+      }
+
+      .tab-panel {
+        display: none;
+        padding: var(--space-5);
+      }
+
+      .tab-panel.is-active {
+        display: block;
+      }
+
+      .stats-strip {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 1px;
+        overflow: hidden;
+        margin-bottom: var(--space-4);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: var(--line);
+      }
+
+      .stat {
+        min-width: 0;
+        padding: 13px 16px;
+        background: var(--panel);
+      }
+
+      .stat-label {
+        display: block;
+        margin-bottom: 3px;
+        color: #a99b80;
+        font-size: 0.61rem;
+        font-weight: 900;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .stat-value {
+        color: var(--cream);
+        font-family: var(--display);
+        font-size: 1.05rem;
+        font-weight: 400;
+        white-space: nowrap;
+      }
+
+      .stat-trend {
+        margin-left: 6px;
+        color: var(--forest-bright);
+        font-family: var(--body);
+        font-size: 0.64rem;
+      }
+
+      .market-layout {
+        display: grid;
+        grid-template-columns: 248px minmax(0, 1fr);
+        align-items: start;
+        gap: var(--space-4);
+      }
+
+      .filters-panel,
+      .module,
+      .wallet-gate,
+      .activity-table,
+      .offer-row,
+      .swap-card {
+        border: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      .filters-panel {
+        position: sticky;
+        top: 136px;
+        border-radius: var(--radius-md);
+        padding: 14px;
+      }
+
+      .panel-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      .panel-heading h2,
+      .panel-heading h3 {
+        font-family: var(--body);
+        font-size: 0.8rem;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .filter-head-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .filter-close {
+        display: none;
+      }
+
+      .text-link {
+        border: 0;
+        padding: 0;
+        cursor: pointer;
+        color: var(--gold-400);
+        background: transparent;
+        font-size: 0.68rem;
+        font-weight: 900;
+      }
+
+      .filter-group {
+        padding-block: 13px;
+        border-top: 1px solid var(--line);
+      }
+
+      .filter-group:first-of-type {
+        padding-top: 0;
+        border-top: 0;
+      }
+
+      .filter-label {
+        display: block;
+        margin-bottom: 9px;
+        color: var(--cream-muted);
+        font-size: 0.68rem;
+        font-weight: 900;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .input {
+        width: 100%;
+        min-height: 42px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        padding: 0 11px;
+        color: var(--cream);
+        background: var(--wood-950);
+        font-size: 0.75rem;
+        font-weight: 700;
+      }
+
+      .input::placeholder {
+        color: #82765f;
+      }
+
+      .price-pair {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .check-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .check-row {
+        display: flex;
+        align-items: center;
+        min-height: 30px;
+        gap: 9px;
+        color: #cbbd9e;
+        font-size: 0.75rem;
+        font-weight: 700;
+      }
+
+      .check-row input {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--gold-500);
+      }
+
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      .results-area {
+        min-width: 0;
+      }
+
+      .floor-strip {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        margin-bottom: 12px;
+        padding-bottom: 2px;
+        scrollbar-width: none;
+      }
+
+      .floor-strip::-webkit-scrollbar {
+        display: none;
+      }
+
+      .floor-chip {
+        min-width: 114px;
+        min-height: 72px;
+        flex: 0 0 auto;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 9px 11px;
+        cursor: pointer;
+        text-align: left;
+        color: var(--cream);
+        background: var(--panel);
+      }
+
+      .floor-chip:hover,
+      .floor-chip.is-selected {
+        border-color: var(--gold-400);
+        background: rgba(219, 165, 63, 0.11);
+      }
+
+      .floor-chip span {
+        display: block;
+      }
+
+      .floor-tier {
+        margin-bottom: 5px;
+        color: var(--cream-muted);
+        font-size: 0.61rem;
+        font-weight: 900;
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+      }
+
+      .floor-price {
+        font-family: var(--display);
+        font-size: 0.88rem;
+      }
+
+      .floor-meta {
+        margin-top: 3px;
+        color: #9c8f74;
+        font-size: 0.6rem;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        margin-bottom: 14px;
+      }
+
+      .results-copy {
+        color: var(--cream-muted);
+        font-size: 0.76rem;
+      }
+
+      .results-copy strong {
+        color: var(--cream);
+      }
+
+      .toolbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .filter-trigger {
+        display: none;
+      }
+
+      .sort-select {
+        min-height: 40px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        padding: 0 33px 0 11px;
+        color: var(--cream-muted);
+        background: var(--wood-950);
+        font-size: 0.72rem;
+        font-weight: 800;
+      }
+
+      .listing-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .listing-card {
+        position: relative;
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: rgba(31, 20, 11, 0.97);
+        transition: transform 160ms ease, border-color 160ms ease;
+      }
+
+      .listing-card:hover {
+        z-index: 2;
+        transform: translateY(-3px);
+        border-color: var(--line-strong);
+      }
+
+      .art-wrap {
+        position: relative;
+        aspect-ratio: 1;
+        overflow: hidden;
+        background: var(--wood-850);
+      }
+
+      .art-wrap img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transition: transform 240ms ease;
+      }
+
+      .listing-card:hover .art-wrap img {
+        transform: scale(1.025);
+      }
+
+      .badge {
+        position: absolute;
+        top: 9px;
+        left: 9px;
+        border: 1px solid currentColor;
+        border-radius: 999px;
+        padding: 4px 7px;
+        color: var(--gold-300);
+        background: rgba(14, 9, 5, 0.88);
+        font-size: 0.55rem;
+        font-weight: 900;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        backdrop-filter: blur(6px);
+      }
+
+      .badge.rare {
+        color: var(--rare);
+      }
+
+      .badge.epic {
+        color: var(--epic);
+      }
+
+      .badge.legendary {
+        color: var(--legendary);
+      }
+
+      .badge.uncommon {
+        color: var(--forest-bright);
+      }
+
+      .floor-flag {
+        position: absolute;
+        right: 9px;
+        bottom: 9px;
+        border-radius: 6px;
+        padding: 4px 7px;
+        color: var(--gold-300);
+        background: rgba(14, 9, 5, 0.88);
+        font-size: 0.55rem;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+
+      .card-body {
+        padding: 12px;
+      }
+
+      .card-name {
+        overflow: hidden;
+        margin: 0 0 2px;
+        color: var(--cream);
+        font-size: 0.84rem;
+        font-weight: 900;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .card-meta {
+        margin: 0;
+        color: #9e9177;
+        font-size: 0.64rem;
+        font-weight: 700;
+      }
+
+      .card-price-row {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 13px;
+      }
+
+      .card-price-label {
+        display: block;
+        margin-bottom: 2px;
+        color: #94876f;
+        font-size: 0.55rem;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .card-price {
+        color: var(--gold-300);
+        font-family: var(--display);
+        font-size: 0.92rem;
+      }
+
+      .card-action {
+        min-height: 36px;
+        border: 1px solid var(--line-strong);
+        border-radius: 7px;
+        padding: 0 12px;
+        cursor: pointer;
+        color: #211207;
+        background: var(--gold-500);
+        font-size: 0.7rem;
+        font-weight: 900;
+      }
+
+      .sweep-dock {
+        position: sticky;
+        z-index: 10;
+        bottom: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        width: min(680px, calc(100% - 20px));
+        margin: 20px auto 0;
+        border: 1px solid var(--line-strong);
+        border-radius: 14px;
+        padding: 10px 12px 10px 16px;
+        background: rgba(24, 15, 8, 0.96);
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.52);
+        backdrop-filter: blur(14px);
+      }
+
+      .sweep-copy {
+        min-width: 0;
+      }
+
+      .sweep-copy strong,
+      .sweep-copy span {
+        display: block;
+      }
+
+      .sweep-copy strong {
+        font-size: 0.78rem;
+      }
+
+      .sweep-copy span {
+        color: #a99c82;
+        font-size: 0.63rem;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+
+      .section-head h2 {
+        color: var(--gold-300);
+        font-size: clamp(1.35rem, 2vw, 2rem);
+      }
+
+      .section-head p {
+        max-width: 680px;
+        margin: 6px 0 0;
+        color: var(--cream-muted);
+        font-size: 0.78rem;
+        font-weight: 600;
+      }
+
+      .swap-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);
+        gap: 14px;
+      }
+
+      .swap-card,
+      .module {
+        border-radius: var(--radius-md);
+        padding: 16px;
+      }
+
+      .vault-choice {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      .vault-button {
+        min-height: 72px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        cursor: pointer;
+        text-align: left;
+        color: var(--cream-muted);
+        background: var(--wood-950);
+      }
+
+      .vault-button.is-selected {
+        border-color: var(--forest-bright);
+        background: rgba(18, 49, 33, 0.54);
+      }
+
+      .vault-button strong,
+      .vault-button span {
+        display: block;
+      }
+
+      .vault-button strong {
+        color: var(--cream);
+        font-size: 0.78rem;
+      }
+
+      .vault-button span {
+        margin-top: 4px;
+        font-size: 0.62rem;
+      }
+
+      .segmented {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 14px;
+        border-radius: 9px;
+        padding: 4px;
+        background: var(--wood-950);
+      }
+
+      .segmented button {
+        min-height: 38px;
+        flex: 1;
+        border: 0;
+        border-radius: 7px;
+        cursor: pointer;
+        color: #a99c84;
+        background: transparent;
+        font-size: 0.72rem;
+        font-weight: 900;
+      }
+
+      .segmented button.is-selected {
+        color: var(--wood-950);
+        background: var(--gold-500);
+      }
+
+      .swap-input {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px;
+        background: var(--wood-950);
+      }
+
+      .swap-input-top,
+      .swap-estimate,
+      .module-row,
+      .offer-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .swap-input label {
+        color: #a99c82;
+        font-size: 0.66rem;
+      }
+
+      .swap-input input {
+        width: 70%;
+        border: 0;
+        padding: 8px 0 0;
+        color: var(--cream);
+        background: transparent;
+        font-family: var(--display);
+        font-size: 1.55rem;
+      }
+
+      .swap-input input:focus {
+        outline: 0;
+      }
+
+      .asset-pill {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 8px 10px;
+        color: var(--gold-300);
+        background: var(--wood-850);
+        font-size: 0.7rem;
+        font-weight: 900;
+      }
+
+      .swap-arrow {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        margin: -7px auto;
+        place-items: center;
+        border: 4px solid var(--panel);
+        border-radius: 50%;
+        color: var(--gold-300);
+        background: var(--wood-800);
+      }
+
+      .swap-estimate {
+        margin: 13px 2px;
+        color: #a99c82;
+        font-size: 0.66rem;
+      }
+
+      .full {
+        width: 100%;
+      }
+
+      .liquidity-visual {
+        position: relative;
+        display: grid;
+        min-height: 260px;
+        place-items: center;
+        overflow: hidden;
+        border-radius: 12px;
+        background:
+          radial-gradient(circle at center, rgba(219, 165, 63, 0.22), transparent 52%),
+          repeating-radial-gradient(circle at center, rgba(239, 196, 99, 0.13) 0 1px, transparent 1px 34px),
+          var(--wood-950);
+      }
+
+      .liquidity-visual::before,
+      .liquidity-visual::after {
+        position: absolute;
+        width: 148px;
+        height: 148px;
+        border: 1px solid rgba(239, 196, 99, 0.3);
+        border-radius: 42% 58% 52% 48%;
+        content: "";
+        animation: orbit 14s linear infinite;
+      }
+
+      .liquidity-visual::after {
+        width: 205px;
+        height: 205px;
+        animation-direction: reverse;
+        animation-duration: 20s;
+      }
+
+      .liquidity-core {
+        position: relative;
+        z-index: 1;
+        text-align: center;
+      }
+
+      .liquidity-core img {
+        width: 72px;
+        height: 96px;
+        object-fit: contain;
+        filter: drop-shadow(0 7px 14px rgba(0, 0, 0, 0.55));
+      }
+
+      .liquidity-core strong,
+      .liquidity-core span {
+        display: block;
+      }
+
+      .liquidity-core strong {
+        margin-top: 7px;
+        color: var(--gold-300);
+        font-family: var(--display);
+        font-weight: 400;
+      }
+
+      .liquidity-core span {
+        color: #a99c82;
+        font-size: 0.65rem;
+      }
+
+      @keyframes orbit {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .module-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .module-row + .module-row {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+      }
+
+      .module-row span {
+        color: #a99c82;
+        font-size: 0.68rem;
+      }
+
+      .module-row strong {
+        font-size: 0.74rem;
+      }
+
+      .offer-stack {
+        display: grid;
+        gap: 10px;
+      }
+
+      .offer-row {
+        min-height: 86px;
+        border-radius: var(--radius-md);
+        padding: 12px 14px;
+      }
+
+      .offer-main {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        gap: 12px;
+      }
+
+      .offer-thumb {
+        width: 58px;
+        height: 58px;
+        flex: 0 0 auto;
+        overflow: hidden;
+        border-radius: 9px;
+        background: var(--wood-850);
+      }
+
+      .offer-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .offer-title {
+        margin: 0;
+        font-size: 0.8rem;
+        font-weight: 900;
+      }
+
+      .offer-meta {
+        margin: 3px 0 0;
+        color: #a99c82;
+        font-size: 0.64rem;
+      }
+
+      .offer-value {
+        text-align: right;
+      }
+
+      .offer-value strong,
+      .offer-value span {
+        display: block;
+      }
+
+      .offer-value strong {
+        color: var(--forest-bright);
+        font-family: var(--display);
+        font-weight: 400;
+      }
+
+      .offer-value span {
+        color: #a99c82;
+        font-size: 0.6rem;
+      }
+
+      .activity-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .activity-table {
+        overflow: hidden;
+        border-radius: var(--radius-md);
+      }
+
+      .activity-row {
+        display: grid;
+        grid-template-columns: 88px minmax(180px, 1.2fr) minmax(120px, 0.8fr) minmax(150px, 1fr) 68px;
+        align-items: center;
+        gap: 12px;
+        min-height: 70px;
+        padding: 10px 14px;
+        border-top: 1px solid var(--line);
+        font-size: 0.7rem;
+      }
+
+      .activity-row:first-child {
+        border-top: 0;
+      }
+
+      .activity-head {
+        min-height: 40px;
+        color: #9e9279;
+        background: rgba(219, 165, 63, 0.07);
+        font-size: 0.58rem;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .event-type {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--cream);
+        font-weight: 900;
+      }
+
+      .event-type::before {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        content: "";
+        background: var(--forest-bright);
+      }
+
+      .event-type.transfer::before {
+        background: var(--rare);
+      }
+
+      .activity-item {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        gap: 9px;
+      }
+
+      .activity-item img {
+        width: 42px;
+        height: 42px;
+        border-radius: 7px;
+        object-fit: cover;
+      }
+
+      .activity-item strong,
+      .activity-item span {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .activity-item span,
+      .muted {
+        color: #9e9279;
+        font-size: 0.62rem;
+      }
+
+      .wallet-gate {
+        display: grid;
+        min-height: 420px;
+        place-items: center;
+        border-radius: var(--radius-md);
+        padding: 28px;
+        text-align: center;
+      }
+
+      .wallet-gate-inner {
+        max-width: 450px;
+      }
+
+      .wallet-mark {
+        display: grid;
+        width: 92px;
+        height: 92px;
+        margin: 0 auto 18px;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 24px;
+        background: rgba(219, 165, 63, 0.09);
+      }
+
+      .wallet-mark img {
+        width: 58px;
+        height: 76px;
+        object-fit: contain;
+      }
+
+      .wallet-gate h2 {
+        color: var(--gold-300);
+        font-size: 1.6rem;
+      }
+
+      .wallet-gate p {
+        margin: 10px auto 18px;
+        color: var(--cream-muted);
+        font-size: 0.78rem;
+        font-weight: 600;
+        line-height: 1.55;
+      }
+
+      .gate-features {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin: 18px 0 0;
+      }
+
+      .gate-feature {
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        padding: 10px 8px;
+        color: #ad9f83;
+        background: var(--wood-950);
+        font-size: 0.62rem;
+      }
+
+      .site-footer {
+        border-top: 1px solid var(--line);
+        padding: 28px 16px 40px;
+        text-align: center;
+        color: #998c73;
+        background: rgba(18, 13, 8, 0.82);
+        font-size: 0.68rem;
+      }
+
+      .site-footer strong {
+        color: var(--gold-300);
+        font-family: var(--display);
+        font-weight: 400;
+      }
+
+      [contenteditable="true"] {
+        border-radius: 4px;
+      }
+
+      [contenteditable="true"]:hover {
+        box-shadow: inset 0 -1px rgba(103, 200, 255, 0.45);
+      }
+
+      @media (max-width: 1180px) {
+        .primary-nav a:nth-last-child(-n + 2) {
+          display: none;
+        }
+
+        .listing-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 960px) {
+        .header-inner,
+        .page-shell {
+          width: min(100% - 24px, 1440px);
+        }
+
+        .primary-nav {
+          display: none;
+        }
+
+        .header-inner {
+          grid-template-columns: 1fr auto;
+        }
+
+        .header-actions {
+          justify-content: flex-end;
+        }
+
+        .network-pill {
+          display: none;
+        }
+
+        .mobile-menu {
+          display: inline-flex;
+        }
+
+        .market-layout {
+          grid-template-columns: 1fr;
+        }
+
+        .filters-panel {
+          position: fixed;
+          z-index: 80;
+          top: 0;
+          left: 0;
+          width: min(340px, 88vw);
+          height: 100dvh;
+          transform: translateX(-105%);
+          overflow: auto;
+          border-radius: 0 14px 14px 0;
+          padding: 22px;
+          transition: transform 180ms ease;
+        }
+
+        .filters-panel.is-open {
+          transform: translateX(0);
+          box-shadow: 30px 0 80px rgba(0, 0, 0, 0.65);
+        }
+
+        .filter-close {
+          display: inline-flex;
+        }
+
+        .filter-trigger {
+          display: inline-flex;
+        }
+
+        .listing-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .swap-layout {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .page-shell {
+          padding-top: 22px;
+        }
+
+        .collection-header {
+          grid-template-columns: 1fr;
+          align-items: start;
+        }
+
+        .collection-links {
+          justify-content: flex-start;
+        }
+
+        .collection-avatar {
+          width: 64px;
+          height: 64px;
+          border-radius: 17px;
+        }
+
+        .collection-avatar img {
+          width: 44px;
+          height: 56px;
+        }
+
+        .market-tabs-wrap {
+          top: 68px;
+          margin-inline: -12px;
+          border-radius: 0;
+          border-inline: 0;
+        }
+
+        .market-frame {
+          margin-inline: -12px;
+          border-inline: 0;
+          border-radius: 0;
+        }
+
+        .tab-panel {
+          padding: 14px 12px 22px;
+        }
+
+        .stats-strip {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .stat:nth-child(4),
+        .stat:nth-child(5) {
+          display: none;
+        }
+
+        .listing-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 9px;
+        }
+
+        .card-body {
+          padding: 10px;
+        }
+
+        .card-price-row {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .card-action {
+          width: 100%;
+        }
+
+        .section-head {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .module-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .activity-head {
+          display: none;
+        }
+
+        .activity-row {
+          grid-template-columns: 78px minmax(0, 1fr) auto;
+        }
+
+        .activity-row > :nth-child(3),
+        .activity-row > :nth-child(4) {
+          display: none;
+        }
+
+        .gate-features {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 520px) {
+        .header-inner {
+          min-height: 62px;
+        }
+
+        .brand span {
+          display: none;
+        }
+
+        .market-tabs-wrap {
+          top: 62px;
+        }
+
+        .collection-copy {
+          display: none;
+        }
+
+        .collection-links .btn-quiet:last-child {
+          display: none;
+        }
+
+        .toolbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .toolbar-actions {
+          width: 100%;
+        }
+
+        .sort-select {
+          min-width: 0;
+          flex: 1;
+        }
+
+        .sweep-dock {
+          bottom: 8px;
+          width: 100%;
+          border-radius: 11px;
+        }
+
+        .sweep-dock .btn {
+          padding-inline: 12px;
+          white-space: nowrap;
+        }
+
+        .vault-choice {
+          grid-template-columns: 1fr;
+        }
+
+        .offer-row {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .offer-value {
+          width: 100%;
+          text-align: left;
+        }
+      }
+
+      @media (min-width: 1440px) {
+        .header-inner,
+        .page-shell {
+          width: min(1460px, calc(100% - 48px));
+        }
+
+        .listing-grid {
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+
+      @media (prefers-color-scheme: light) {
+        :root {
+          color-scheme: dark;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#market-content">Skip to marketplace</a>
+
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="#" aria-label="RobinWood home">
+          <img src="../../../public/images/plank-logo.webp" alt="" />
+          <span>RobinWood ($PLANK)</span>
+        </a>
+
+        <nav class="primary-nav" aria-label="Main navigation">
+          <a href="#" aria-current="page">Market</a>
+          <a href="#">Trade</a>
+          <a href="#">Mint</a>
+          <a href="#">Gallery</a>
+          <a href="#">Learn</a>
+          <a href="#">Airdrop</a>
+        </nav>
+
+        <div class="header-actions">
+          <span class="network-pill">Robinhood Chain</span>
+          <button class="btn btn-primary" type="button" data-connect>Connect wallet</button>
+          <button class="btn btn-secondary mobile-menu" type="button" aria-label="Open site menu">
+            Menu
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="page-shell" id="market-content">
+      <header class="collection-header">
+        <div class="collection-identity">
+          <div class="collection-avatar" aria-hidden="true">
+            <img src="../../../public/images/plank-logo.webp" alt="" />
+          </div>
+          <div>
+            <p class="eyebrow">Robinhood Chain marketplace</p>
+            <div class="title-row">
+              <h1 contenteditable="true" data-pretext>Marketplank</h1>
+              <span class="verified" title="Verified collection" aria-label="Verified collection">✓</span>
+            </div>
+            <p class="collection-copy" contenteditable="true" data-pretext>
+              Buy, sell, bid, or swap RobinWood planks with less hunting and more planking.
+            </p>
+          </div>
+        </div>
+        <div class="collection-links" aria-label="Collection links">
+          <button class="btn btn-quiet" type="button">Contract 0x6942…2DDc</button>
+          <button class="btn btn-quiet" type="button">Collection details</button>
+        </div>
+      </header>
+
+      <div class="market-tabs-wrap">
+        <nav class="market-tabs" role="tablist" aria-label="Marketplace sections">
+          <button
+            class="market-tab"
+            id="tab-buy-sell"
+            type="button"
+            role="tab"
+            aria-selected="true"
+            aria-controls="panel-buy-sell"
+            data-tab="buy-sell"
+          >
+            Buy &amp; Sell <span class="tab-count">27</span>
+          </button>
+          <button
+            class="market-tab"
+            id="tab-swap"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="panel-swap"
+            data-tab="swap"
+          >
+            Instant Swap
+          </button>
+          <button
+            class="market-tab"
+            id="tab-offers"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="panel-offers"
+            data-tab="offers"
+          >
+            Offers <span class="tab-count">4</span>
+          </button>
+          <button
+            class="market-tab"
+            id="tab-activity"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="panel-activity"
+            data-tab="activity"
+          >
+            Activity
+          </button>
+          <button
+            class="market-tab"
+            id="tab-my-nfts"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="panel-my-nfts"
+            data-tab="my-nfts"
+          >
+            My NFTs
+          </button>
+          <button
+            class="market-tab"
+            id="tab-my-listings"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="panel-my-listings"
+            data-tab="my-listings"
+          >
+            My Listings
+          </button>
+        </nav>
+      </div>
+
+      <div class="market-frame">
+        <section
+          class="tab-panel is-active"
+          id="panel-buy-sell"
+          role="tabpanel"
+          aria-labelledby="tab-buy-sell"
+          data-panel="buy-sell"
+        >
+          <div class="stats-strip" aria-label="Collection market statistics">
+            <div class="stat">
+              <span class="stat-label">Floor price</span>
+              <span class="stat-value">0.010 Ξ</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">24h volume</span>
+              <span class="stat-value">0.042 Ξ <span class="stat-trend">+12%</span></span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Listed</span>
+              <span class="stat-value">27 / 1,542</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Best offer</span>
+              <span class="stat-value">0.008 WETH</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Highest sale</span>
+              <span class="stat-value">0.055 Ξ</span>
+            </div>
+          </div>
+
+          <div class="market-layout">
+            <aside class="filters-panel" id="filters-panel" aria-label="Listing filters">
+              <div class="panel-heading">
+                <h2>Filters</h2>
+                <div class="filter-head-actions">
+                  <button class="text-link" type="button" data-clear-filters>Clear all</button>
+                  <button class="text-link filter-close" type="button" data-filter-close>Close</button>
+                </div>
+              </div>
+
+              <div class="filter-group">
+                <label class="filter-label" for="token-search">Find a Plank</label>
+                <input class="input" id="token-search" type="search" placeholder="Name or token ID" />
+              </div>
+
+              <div class="filter-group">
+                <span class="filter-label">Price in ETH</span>
+                <div class="price-pair">
+                  <input class="input" type="text" inputmode="decimal" placeholder="Min" aria-label="Minimum price" />
+                  <input class="input" type="text" inputmode="decimal" placeholder="Max" aria-label="Maximum price" />
+                </div>
+              </div>
+
+              <div class="filter-group">
+                <span class="filter-label">Rarity</span>
+                <div class="check-list">
+                  <label class="check-row"><input type="checkbox" /> <span class="dot" style="color: var(--legendary)"></span> Legendary <span class="muted">5</span></label>
+                  <label class="check-row"><input type="checkbox" /> <span class="dot" style="color: var(--epic)"></span> Epic <span class="muted">6</span></label>
+                  <label class="check-row"><input type="checkbox" /> <span class="dot" style="color: var(--rare)"></span> Rare <span class="muted">4</span></label>
+                  <label class="check-row"><input type="checkbox" /> <span class="dot" style="color: var(--forest-bright)"></span> Uncommon <span class="muted">6</span></label>
+                  <label class="check-row"><input type="checkbox" /> <span class="dot" style="color: #c8c2b6"></span> Common <span class="muted">5</span></label>
+                </div>
+              </div>
+
+              <div class="filter-group">
+                <span class="filter-label">Listing type</span>
+                <div class="check-list">
+                  <label class="check-row"><input type="checkbox" checked /> Buy now</label>
+                  <label class="check-row"><input type="checkbox" /> Has active offer</label>
+                  <label class="check-row"><input type="checkbox" /> Floorboards only</label>
+                </div>
+              </div>
+            </aside>
+
+            <div class="results-area">
+              <div class="floor-strip" role="listbox" aria-label="Floors by rarity">
+                <button class="floor-chip is-selected" type="button" role="option" aria-selected="true">
+                  <span class="floor-tier">All planks</span>
+                  <span class="floor-price">0.010 Ξ</span>
+                  <span class="floor-meta">27 listed</span>
+                </button>
+                <button class="floor-chip" type="button" role="option" aria-selected="false">
+                  <span class="floor-tier" style="color: var(--legendary)">Legendary</span>
+                  <span class="floor-price">0.015 Ξ</span>
+                  <span class="floor-meta">+50% · 5 listed</span>
+                </button>
+                <button class="floor-chip" type="button" role="option" aria-selected="false">
+                  <span class="floor-tier" style="color: var(--epic)">Epic</span>
+                  <span class="floor-price">0.010 Ξ</span>
+                  <span class="floor-meta">Floor · 6 listed</span>
+                </button>
+                <button class="floor-chip" type="button" role="option" aria-selected="false">
+                  <span class="floor-tier" style="color: var(--rare)">Rare</span>
+                  <span class="floor-price">0.012 Ξ</span>
+                  <span class="floor-meta">+20% · 4 listed</span>
+                </button>
+                <button class="floor-chip" type="button" role="option" aria-selected="false">
+                  <span class="floor-tier" style="color: var(--forest-bright)">Uncommon</span>
+                  <span class="floor-price">0.014 Ξ</span>
+                  <span class="floor-meta">+40% · 6 listed</span>
+                </button>
+              </div>
+
+              <div class="toolbar">
+                <p class="results-copy"><strong>27 Planks</strong> on the market</p>
+                <div class="toolbar-actions">
+                  <button class="btn btn-secondary filter-trigger" type="button" data-filter-trigger aria-controls="filters-panel" aria-expanded="false">Filters</button>
+                  <button class="btn btn-secondary" type="button">Make collection offer</button>
+                  <select class="sort-select" aria-label="Sort listings">
+                    <option>Price: low to high</option>
+                    <option>Price: high to low</option>
+                    <option>Recently listed</option>
+                    <option>Rarity rank</option>
+                  </select>
+                </div>
+              </div>
+
+              <ul class="listing-grid">
+                <li class="listing-card">
+                  <div class="art-wrap">
+                    <img src="../../../public/images/collection/plank-knightwood.png" alt="KnightWood Plank #701" />
+                    <span class="badge rare">Rare</span>
+                    <span class="floor-flag">Floor</span>
+                  </div>
+                  <div class="card-body">
+                    <p class="card-name">KnightWood</p>
+                    <p class="card-meta">#701 · Rank 550</p>
+                    <div class="card-price-row">
+                      <div><span class="card-price-label">Price</span><span class="card-price">0.010 Ξ</span></div>
+                      <button class="card-action" type="button">Buy</button>
+                    </div>
+                  </div>
+                </li>
+
+                <li class="listing-card">
+                  <div class="art-wrap">
+                    <img src="../../../public/images/collection/plank-bobawood.png" alt="BobaWood Plank #544" />
+                    <span class="badge epic">Epic</span>
+                  </div>
+                  <div class="card-body">
+                    <p class="card-name">BobaWood</p>
+                    <p class="card-meta">#544 · Rank 431</p>
+                    <div class="card-price-row">
+                      <div><span class="card-price-label">Price</span><span class="card-price">0.011 Ξ</span></div>
+                      <button class="card-action" type="button">Buy</button>
+                    </div>
+                  </div>
+                </li>
+
+                <li class="listing-card">
+                  <div class="art-wrap">
+                    <img src="../../../public/images/collection/plank-insidertrader.png" alt="InsiderTrader Plank #1463" />
+                    <span class="badge uncommon">Uncommon</span>
+                  </div>
+                  <div class="card-body">
+                    <p class="card-name">InsiderTrader</p>
+                    <p class="card-meta">#1463 · Rank 310</p>
+                    <div class="card-price-row">
+                      <div><span class="card-price-label">Price</span><span class="card-price">0.012 Ξ</span></div>
+                      <button class="card-action" type="button">Buy</button>
+                    </div>
+                  </div>
+                </li>
+
+                <li class="listing-card">
+                  <div class="art-wrap">
+                    <img src="../../../public/images/collection/plank-is-this-art.png" alt="IsThisArt Plank #543" />
+                    <span class="badge legendary">Legendary</span>
+                  </div>
+                  <div class="card-body">
+                    <p class="card-name">IsThisArt</p>
+                    <p class="card-meta">#543 · Rank 87</p>
+                    <div class="card-price-row">
+                      <div><span class="card-price-label">Price</span><span class="card-price">0.015 Ξ</span></div>
+                      <button class="card-action" type="button">Buy</button>
+                    </div>
+                  </div>
+                </li>
+
+                <li class="listing-card">
+                  <div class="art-wrap">
+                    <img src="../../../public/images/collection/plank-redacted.png" alt="Redacted Plank #1534" />
+                    <span class="badge legendary">Legendary</span>
+                  </div>
+                  <div class="card-body">
+                    <p class="card-name">Redacted</p>
+                    <p class="card-meta">#1534 · Rank 39</p>
+                    <div class="card-price-row">
+                      <div><span class="card-price-label">Price</span><span class="card-price">0.017 Ξ</span></div>
+                      <button class="card-action" type="button">Buy</button>
+                    </div>
+                  </div>
+                </li>
+
+                <li class="listing-card">
+                  <div class="art-wrap">
+                    <img src="../../../public/images/collection/plank-knightwood.png" alt="KnightShift Plank #1372" />
+                    <span class="badge rare">Rare</span>
+                  </div>
+                  <div class="card-body">
+                    <p class="card-name">KnightShift</p>
+                    <p class="card-meta">#1372 · Rank 472</p>
+                    <div class="card-price-row">
+                      <div><span class="card-price-label">Price</span><span class="card-price">0.019 Ξ</span></div>
+                      <button class="card-action" type="button">Buy</button>
+                    </div>
+                  </div>
+                </li>
+
+                <li class="listing-card">
+                  <div class="art-wrap">
+                    <img src="../../../public/images/collection/plank-bobawood.png" alt="BeanieWoody Plank #525" />
+                    <span class="badge epic">Epic</span>
+                  </div>
+                  <div class="card-body">
+                    <p class="card-name">BeanieWoody</p>
+                    <p class="card-meta">#525 · Rank 208</p>
+                    <div class="card-price-row">
+                      <div><span class="card-price-label">Price</span><span class="card-price">0.025 Ξ</span></div>
+                      <button class="card-action" type="button">Buy</button>
+                    </div>
+                  </div>
+                </li>
+
+                <li class="listing-card">
+                  <div class="art-wrap">
+                    <img src="../../../public/images/collection/plank-insidertrader.png" alt="Business Casual Swag Plank #532" />
+                    <span class="badge epic">Epic</span>
+                  </div>
+                  <div class="card-body">
+                    <p class="card-name">BusinessCasualSwag</p>
+                    <p class="card-meta">#532 · Rank 87</p>
+                    <div class="card-price-row">
+                      <div><span class="card-price-label">Price</span><span class="card-price">0.030 Ξ</span></div>
+                      <button class="card-action" type="button">Buy</button>
+                    </div>
+                  </div>
+                </li>
+
+                <li class="listing-card">
+                  <div class="art-wrap">
+                    <img src="../../../public/images/collection/plank-is-this-art.png" alt="PopeWood Plank #657" />
+                    <span class="badge legendary">Legendary</span>
+                  </div>
+                  <div class="card-body">
+                    <p class="card-name">PopeWood</p>
+                    <p class="card-meta">#657 · Rank 54</p>
+                    <div class="card-price-row">
+                      <div><span class="card-price-label">Price</span><span class="card-price">0.044 Ξ</span></div>
+                      <button class="card-action" type="button">Buy</button>
+                    </div>
+                  </div>
+                </li>
+
+                <li class="listing-card">
+                  <div class="art-wrap">
+                    <img src="../../../public/images/collection/plank-redacted.png" alt="Conference Swag Plank #540" />
+                    <span class="badge rare">Rare</span>
+                  </div>
+                  <div class="card-body">
+                    <p class="card-name">ConferenceSwag</p>
+                    <p class="card-meta">#540 · Rank 31</p>
+                    <div class="card-price-row">
+                      <div><span class="card-price-label">Price</span><span class="card-price">0.100 Ξ</span></div>
+                      <button class="card-action" type="button">Buy</button>
+                    </div>
+                  </div>
+                </li>
+              </ul>
+
+              <div class="sweep-dock" aria-label="Floor sweep">
+                <div class="sweep-copy">
+                  <strong>Sweep the first 3 floorboards</strong>
+                  <span>Estimated total 0.033 Ξ · max slippage 1%</span>
+                </div>
+                <button class="btn btn-primary" type="button">Review sweep</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section
+          class="tab-panel"
+          id="panel-swap"
+          role="tabpanel"
+          aria-labelledby="tab-swap"
+          data-panel="swap"
+          hidden
+        >
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Plank in. Plank out.</p>
+              <h2 contenteditable="true" data-pretext>Instant Swap</h2>
+              <p contenteditable="true" data-pretext>
+                Trade against the vault without waiting for a buyer. Choose the current V2 book or manage a legacy V1 deposit.
+              </p>
+            </div>
+            <button class="btn btn-secondary" type="button">How the vault works</button>
+          </div>
+
+          <div class="swap-layout">
+            <div class="swap-card">
+              <div class="vault-choice" aria-label="Choose vault">
+                <button class="vault-button is-selected" type="button" data-vault>
+                  <strong>V2 · Instant Swap</strong>
+                  <span>Active · 5 planks · LP controls</span>
+                </button>
+                <button class="vault-button" type="button" data-vault>
+                  <strong>V1 · Legacy</strong>
+                  <span>43 held · deposits &amp; redemptions</span>
+                </button>
+              </div>
+
+              <div class="segmented" aria-label="Swap mode">
+                <button class="is-selected" type="button">Buy</button>
+                <button type="button">Sell</button>
+                <button type="button">Liquidity</button>
+              </div>
+
+              <div class="swap-input">
+                <div class="swap-input-top">
+                  <label for="swap-pay">You pay</label>
+                  <span class="muted">Balance —</span>
+                </div>
+                <div class="swap-input-top">
+                  <input id="swap-pay" type="text" inputmode="decimal" value="0.010" aria-label="Amount to pay" />
+                  <span class="asset-pill">ETH</span>
+                </div>
+              </div>
+
+              <div class="swap-arrow" aria-hidden="true">↓</div>
+
+              <div class="swap-input">
+                <div class="swap-input-top">
+                  <label for="swap-receive">You receive</label>
+                  <span class="muted">Random from vault</span>
+                </div>
+                <div class="swap-input-top">
+                  <input id="swap-receive" type="text" value="1 Plank" readonly aria-label="Estimated output" />
+                  <span class="asset-pill">$PLANK NFT</span>
+                </div>
+              </div>
+
+              <div class="swap-estimate">
+                <span>Vault price 0.0096 Ξ</span>
+                <span>Fee 0.0004 Ξ</span>
+              </div>
+
+              <button class="btn btn-primary full" type="button" data-connect>Connect wallet to swap</button>
+            </div>
+
+            <div>
+              <div class="module">
+                <div class="panel-heading">
+                  <h3>Living liquidity</h3>
+                  <span class="network-pill">V2 active</span>
+                </div>
+                <div class="liquidity-visual">
+                  <div class="liquidity-core">
+                    <img src="../../../public/images/plank-logo.webp" alt="" />
+                    <strong>3.85 shares</strong>
+                    <span>0.0184 Ξ + 5 Planks</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="module-grid">
+                <div class="module">
+                  <div class="panel-heading"><h3>Vault health</h3></div>
+                  <div class="module-row"><span>Planks held</span><strong>5</strong></div>
+                  <div class="module-row"><span>ETH reserve</span><strong>0.0184 Ξ</strong></div>
+                  <div class="module-row"><span>Redeem odds</span><strong>1 in 5 each</strong></div>
+                </div>
+                <div class="module">
+                  <div class="panel-heading"><h3>Your position</h3></div>
+                  <div class="module-row"><span>LP shares</span><strong>Connect</strong></div>
+                  <div class="module-row"><span>Deposited Planks</span><strong>Connect</strong></div>
+                  <div class="module-row"><span>Claimable</span><strong>—</strong></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section
+          class="tab-panel"
+          id="panel-offers"
+          role="tabpanel"
+          aria-labelledby="tab-offers"
+          data-panel="offers"
+          hidden
+        >
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Name your price</p>
+              <h2 contenteditable="true" data-pretext>Offers</h2>
+              <p contenteditable="true" data-pretext>
+                Bid on one Plank, a rarity tier, or a precise trait combo. Sellers see the net amount before accepting.
+              </p>
+            </div>
+            <button class="btn btn-primary" type="button">Make an offer</button>
+          </div>
+
+          <div class="stats-strip" aria-label="Offer statistics">
+            <div class="stat"><span class="stat-label">Top offer</span><span class="stat-value">0.008 WETH</span></div>
+            <div class="stat"><span class="stat-label">Active offers</span><span class="stat-value">4</span></div>
+            <div class="stat"><span class="stat-label">Expiring today</span><span class="stat-value">1</span></div>
+            <div class="stat"><span class="stat-label">Eligible Planks</span><span class="stat-value">132</span></div>
+            <div class="stat"><span class="stat-label">Your matches</span><span class="stat-value">Connect</span></div>
+          </div>
+
+          <div class="activity-controls">
+            <button class="btn btn-primary" type="button">All offers</button>
+            <button class="btn btn-secondary" type="button">Single Plank</button>
+            <button class="btn btn-secondary" type="button">Rarity</button>
+            <button class="btn btn-secondary" type="button">Trait combo</button>
+          </div>
+
+          <div class="offer-stack">
+            <article class="offer-row">
+              <div class="offer-main">
+                <div class="offer-thumb"><img src="../../../public/images/collection/plank-knightwood.png" alt="" /></div>
+                <div>
+                  <p class="offer-title">Any Rare Plank</p>
+                  <p class="offer-meta">132 qualify · bid by 0x73A4…ac34 · expires in 18h</p>
+                </div>
+              </div>
+              <div class="offer-value"><strong>0.008 WETH</strong><span>seller receives 0.0076</span></div>
+              <button class="btn btn-secondary" type="button" data-connect>Check my Planks</button>
+            </article>
+
+            <article class="offer-row">
+              <div class="offer-main">
+                <div class="offer-thumb"><img src="../../../public/images/collection/plank-bobawood.png" alt="" /></div>
+                <div>
+                  <p class="offer-title">Beanie + Epic</p>
+                  <p class="offer-meta">14 qualify · bid by 0xA195…4660 · expires in 2d</p>
+                </div>
+              </div>
+              <div class="offer-value"><strong>0.0065 WETH</strong><span>seller receives 0.0061</span></div>
+              <button class="btn btn-secondary" type="button" data-connect>Check my Planks</button>
+            </article>
+
+            <article class="offer-row">
+              <div class="offer-main">
+                <div class="offer-thumb"><img src="../../../public/images/collection/plank-redacted.png" alt="" /></div>
+                <div>
+                  <p class="offer-title">Redacted #1534</p>
+                  <p class="offer-meta">Single Plank · bid by 0xC4B2…2e04 · expires in 3d</p>
+                </div>
+              </div>
+              <div class="offer-value"><strong>0.005 WETH</strong><span>seller receives 0.0047</span></div>
+              <button class="btn btn-secondary" type="button" data-connect>Check ownership</button>
+            </article>
+          </div>
+        </section>
+
+        <section
+          class="tab-panel"
+          id="panel-activity"
+          role="tabpanel"
+          aria-labelledby="tab-activity"
+          data-panel="activity"
+          hidden
+        >
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">What the forest is doing</p>
+              <h2 contenteditable="true" data-pretext>Market activity</h2>
+              <p contenteditable="true" data-pretext>
+                A clearer event feed across Marketplank, vault activity, and wallet-to-wallet transfers.
+              </p>
+            </div>
+          </div>
+
+          <div class="stats-strip" aria-label="Activity statistics">
+            <div class="stat"><span class="stat-label">24h volume</span><span class="stat-value">0.042 Ξ</span></div>
+            <div class="stat"><span class="stat-label">Total volume</span><span class="stat-value">0.239 Ξ</span></div>
+            <div class="stat"><span class="stat-label">Priced sales</span><span class="stat-value">50</span></div>
+            <div class="stat"><span class="stat-label">Average price</span><span class="stat-value">0.0047 Ξ</span></div>
+            <div class="stat"><span class="stat-label">Highest sale</span><span class="stat-value">0.055 Ξ</span></div>
+          </div>
+
+          <div class="activity-controls">
+            <select class="sort-select" aria-label="Filter by event"><option>All events</option><option>Sales</option><option>Transfers</option><option>Vault actions</option></select>
+            <select class="sort-select" aria-label="Filter by platform"><option>All platforms</option><option>Marketplank</option><option>Vault</option><option>Wallet-to-wallet</option></select>
+            <select class="sort-select" aria-label="Activity period"><option>Last 24 hours</option><option>Last 7 days</option><option>All time</option></select>
+          </div>
+
+          <div class="activity-table" role="table" aria-label="Recent activity">
+            <div class="activity-row activity-head" role="row">
+              <span>Event</span><span>Item</span><span>Price</span><span>From / to</span><span>Time</span>
+            </div>
+            <div class="activity-row" role="row">
+              <span class="event-type">Sale</span>
+              <span class="activity-item"><img src="../../../public/images/collection/plank-knightwood.png" alt="" /><span><strong>KnightShiftSwag</strong><span>#1372 · Common</span></span></span>
+              <strong>0.005 Ξ</strong><span class="muted">0x19bE…5f63 → 0xc4B2…2e04</span><span class="muted">1h</span>
+            </div>
+            <div class="activity-row" role="row">
+              <span class="event-type transfer">Transfer</span>
+              <span class="activity-item"><img src="../../../public/images/collection/plank-bobawood.png" alt="" /><span><strong>CypherSwag</strong><span>#980 · Epic</span></span></span>
+              <strong>—</strong><span class="muted">Vault → 0xc4B2…2e04</span><span class="muted">2h</span>
+            </div>
+            <div class="activity-row" role="row">
+              <span class="event-type">Sale</span>
+              <span class="activity-item"><img src="../../../public/images/collection/plank-insidertrader.png" alt="" /><span><strong>GameWood</strong><span>#1452 · Uncommon</span></span></span>
+              <strong>0.014 Ξ</strong><span class="muted">0x1112…91d9 → 0x0f6C…f4ae</span><span class="muted">4h</span>
+            </div>
+            <div class="activity-row" role="row">
+              <span class="event-type transfer">Transfer</span>
+              <span class="activity-item"><img src="../../../public/images/collection/plank-is-this-art.png" alt="" /><span><strong>DYOR</strong><span>#784 · Legendary</span></span></span>
+              <strong>—</strong><span class="muted">0x892B…6013 → Vault</span><span class="muted">1d</span>
+            </div>
+          </div>
+        </section>
+
+        <section
+          class="tab-panel"
+          id="panel-my-nfts"
+          role="tabpanel"
+          aria-labelledby="tab-my-nfts"
+          data-panel="my-nfts"
+          hidden
+        >
+          <div class="wallet-gate">
+            <div class="wallet-gate-inner">
+              <div class="wallet-mark"><img src="../../../public/images/plank-logo.webp" alt="" /></div>
+              <p class="eyebrow">Your forest</p>
+              <h2 contenteditable="true" data-pretext>See the Planks in your wallet</h2>
+              <p contenteditable="true" data-pretext>
+                Connect to browse owned RobinWood NFTs, compare them with active bids, and list one without leaving Marketplank.
+              </p>
+              <button class="btn btn-primary" type="button" data-connect>Connect wallet</button>
+              <div class="gate-features" aria-label="Wallet features">
+                <div class="gate-feature">Owned Planks and rarity ranks</div>
+                <div class="gate-feature">One-click listing flow</div>
+                <div class="gate-feature">Matching offers surfaced first</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section
+          class="tab-panel"
+          id="panel-my-listings"
+          role="tabpanel"
+          aria-labelledby="tab-my-listings"
+          data-panel="my-listings"
+          hidden
+        >
+          <div class="wallet-gate">
+            <div class="wallet-gate-inner">
+              <div class="wallet-mark"><img src="../../../public/images/plank-logo.webp" alt="" /></div>
+              <p class="eyebrow">Your market desk</p>
+              <h2 contenteditable="true" data-pretext>Manage listings and offers</h2>
+              <p contenteditable="true" data-pretext>
+                Connect to update prices, cancel listings, accept matching bids, and track every open position in one place.
+              </p>
+              <button class="btn btn-primary" type="button" data-connect>Connect wallet</button>
+              <div class="gate-features" aria-label="Position features">
+                <div class="gate-feature">Active listings and expiry</div>
+                <div class="gate-feature">Incoming bids by best net value</div>
+                <div class="gate-feature">Cancel and relist actions</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <strong>Built on Robinhood Chain. Built for $PLANK.</strong>
+      <p>Static product mockup · No wallet transactions are performed.</p>
+    </footer>
+
+    <script>
+      (() => {
+        const tabs = [...document.querySelectorAll("[data-tab]")];
+        const panels = [...document.querySelectorAll("[data-panel]")];
+
+        function selectTab(id, focus = false) {
+          tabs.forEach((tab) => {
+            const selected = tab.dataset.tab === id;
+            tab.setAttribute("aria-selected", String(selected));
+            if (selected && focus) tab.focus();
+          });
+
+          panels.forEach((panel) => {
+            const selected = panel.dataset.panel === id;
+            panel.hidden = !selected;
+            panel.classList.toggle("is-active", selected);
+          });
+
+          history.replaceState(null, "", `#${id}`);
+          window.scrollTo({ top: Math.max(0, document.querySelector(".market-tabs-wrap").offsetTop - 68), behavior: "smooth" });
+        }
+
+        tabs.forEach((tab, index) => {
+          tab.addEventListener("click", () => selectTab(tab.dataset.tab));
+          tab.addEventListener("keydown", (event) => {
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            let next = index;
+            if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+            if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+            if (event.key === "Home") next = 0;
+            if (event.key === "End") next = tabs.length - 1;
+            selectTab(tabs[next].dataset.tab, true);
+          });
+        });
+
+        const requested = location.hash.replace("#", "");
+        if (tabs.some((tab) => tab.dataset.tab === requested)) selectTab(requested);
+
+        document.querySelectorAll(".floor-chip").forEach((chip) => {
+          chip.addEventListener("click", () => {
+            document.querySelectorAll(".floor-chip").forEach((item) => {
+              item.classList.toggle("is-selected", item === chip);
+              item.setAttribute("aria-selected", String(item === chip));
+            });
+          });
+        });
+
+        document.querySelectorAll("[data-vault]").forEach((button) => {
+          button.addEventListener("click", () => {
+            document.querySelectorAll("[data-vault]").forEach((item) => item.classList.toggle("is-selected", item === button));
+          });
+        });
+
+        document.querySelectorAll(".segmented button").forEach((button) => {
+          button.addEventListener("click", () => {
+            button.parentElement.querySelectorAll("button").forEach((item) => item.classList.toggle("is-selected", item === button));
+          });
+        });
+
+        const filters = document.querySelector("#filters-panel");
+        const filterTrigger = document.querySelector("[data-filter-trigger]");
+        filterTrigger?.addEventListener("click", () => {
+          const open = filters.classList.toggle("is-open");
+          filterTrigger.setAttribute("aria-expanded", String(open));
+        });
+
+        document.querySelector("[data-filter-close]")?.addEventListener("click", () => {
+          filters.classList.remove("is-open");
+          filterTrigger?.setAttribute("aria-expanded", "false");
+          filterTrigger?.focus();
+        });
+
+        document.addEventListener("keydown", (event) => {
+          if (event.key !== "Escape" || !filters.classList.contains("is-open")) return;
+          filters.classList.remove("is-open");
+          filterTrigger?.setAttribute("aria-expanded", "false");
+          filterTrigger?.focus();
+        });
+
+        document.querySelector("[data-clear-filters]")?.addEventListener("click", () => {
+          filters.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+            input.checked = false;
+          });
+          filters.querySelectorAll('input[type="text"], input[type="search"]').forEach((input) => {
+            input.value = "";
+          });
+        });
+
+        document.querySelectorAll("[data-connect]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const prior = button.textContent;
+            button.textContent = "Wallet preview only";
+            window.setTimeout(() => {
+              button.textContent = prior;
+            }, 1600);
+          });
+        });
+      })();
+    </script>
+
+    <!-- FALLBACK: vendor/pretext.js missing, using CDN -->
+    <script type="module">
+      try {
+        const { prepare, layout } = await import("https://esm.sh/@chenglou/pretext");
+        await document.fonts.ready;
+        const elements = document.querySelectorAll("[data-pretext]");
+        const prepared = new Map();
+
+        function prepareElement(element) {
+          prepared.set(element, prepare(element.textContent, getComputedStyle(element).font));
+        }
+
+        function relayout() {
+          for (const [element, handle] of prepared) {
+            const computed = getComputedStyle(element);
+            const lineHeight = Number.parseFloat(computed.lineHeight);
+            const safeLineHeight = Number.isFinite(lineHeight)
+              ? lineHeight
+              : Number.parseFloat(computed.fontSize) * 1.2;
+            const { height } = layout(handle, element.clientWidth, safeLineHeight);
+            if (height > 0) element.style.minHeight = `${height}px`;
+          }
+        }
+
+        elements.forEach((element) => {
+          prepareElement(element);
+          if (element.contentEditable === "true") {
+            new MutationObserver(() => {
+              prepareElement(element);
+              relayout();
+            }).observe(element, { characterData: true, subtree: true, childList: true });
+          }
+        });
+
+        new ResizeObserver(relayout).observe(document.body);
+        relayout();
+      } catch (error) {
+        console.info("Pretext enhancement unavailable; native responsive layout remains active.", error);
+      }
+    </script>
+  </body>
+</html>
