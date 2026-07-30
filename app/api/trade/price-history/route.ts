@@ -1,5 +1,10 @@
 import { publicError, publicJson, rateLimit } from "@/lib/security";
-import { getPlankPriceHistory, PRICE_RANGES, type PriceRange } from "@/lib/plank-price";
+import {
+  getPlankPoolStats,
+  getPlankPriceHistory,
+  PRICE_RANGES,
+  type PriceRange,
+} from "@/lib/plank-price";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -27,6 +32,10 @@ export async function GET(req: Request) {
 
   try {
     const history = await getPlankPriceHistory(range);
+    // Pool stats (volume/liquidity/buys-sells) are a distinct, independently
+    // cached upstream call — never let a stats hiccup take the candles down
+    // with it, since the chart itself doesn't need them to render.
+    const stats = await getPlankPoolStats().catch(() => null);
     return publicJson({
       range,
       pool: history.poolAddress,
@@ -34,6 +43,7 @@ export async function GET(req: Request) {
       fetchedAt: history.fetchedAt,
       stale: history.stale ?? false,
       candles: history.candles,
+      stats,
     });
   } catch (err) {
     return publicError(err, "Could not load $PLANK price history.");
