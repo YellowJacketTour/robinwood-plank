@@ -54,7 +54,7 @@ export default function ListingGrid({
 
   if (listings.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center">
+      <div className="rounded-lg border border-dashed border-line bg-panel px-4 py-8 text-center">
         <p className="text-sm text-foreground/60">{emptyMessage}</p>
         {emptyAction && <div className="mt-3 flex justify-center">{emptyAction}</div>}
       </div>

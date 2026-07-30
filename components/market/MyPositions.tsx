@@ -159,7 +159,7 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
             Listings and offers remain separate and cancellable.
           </p>
         </div>
-        <div className="grid grid-cols-2 rounded-lg border border-gold-500/20 bg-wood-950/90 p-1">
+        <div className="grid grid-cols-2 rounded-lg border border-line bg-panel-strong p-1">
           {(["Listing", "Offer"] as const).map((kind) => (
             <button
               key={kind}
@@ -179,7 +179,7 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
       </div>
 
       {visible.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
+        <p className="rounded-lg border border-dashed border-line bg-panel px-4 py-8 text-center text-sm text-foreground/60">
           No active {scope === "Listing" ? "listings" : "offers"}.
         </p>
       ) : (
@@ -188,7 +188,7 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
             {visible.map((row) => (
               <li
                 key={row.id}
-                className="flex items-center justify-between gap-3 border-t border-gold-500/15 px-3 py-2.5 first:border-t-0"
+                className="flex items-center justify-between gap-3 border-t border-line px-3 py-2.5 first:border-t-0"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-foreground">
@@ -250,7 +250,7 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
               setApprovalError(null);
               void refreshApprovals();
             }}
-            className="min-h-9 rounded-md border border-gold-500/35 px-3 text-xs font-bold text-gold-300"
+            className="min-h-9 rounded-md border border-line-strong px-3 text-xs font-bold text-gold-300"
           >
             Retry approvals
           </button>
@@ -263,7 +263,7 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
               className={`rounded-full border px-2 py-1 text-[0.62rem] ${
                 hasLiveApproval
                   ? "border-emerald-400/30 text-emerald-300"
-                  : "border-gold-500/20 text-foreground/45"
+                  : "border-line text-foreground/45"
               }`}
             >
               {hasLiveApproval ? "Active" : "Inactive"}

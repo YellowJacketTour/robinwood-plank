@@ -212,7 +212,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
   }
   if (inventory === null) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-lg border border-dashed border-line bg-panel px-4 py-8 text-center text-sm text-foreground/60">
         Reading your planks from chain…
       </p>
     );
@@ -221,7 +221,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
   const totalOwned = inventory.reduce((n, g) => n + g.items.length, 0);
   if (totalOwned === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-lg border border-dashed border-line bg-panel px-4 py-8 text-center text-sm text-foreground/60">
         This wallet holds no planks yet.
       </p>
     );
@@ -242,7 +242,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
           type="button"
           onClick={refresh}
           disabled={refreshing}
-          className="min-h-10 rounded-md border border-gold-500/30 px-3 text-xs text-gold-300 disabled:opacity-50"
+          className="min-h-10 rounded-md border border-line px-3 text-xs text-gold-300 disabled:opacity-50"
         >
           {refreshing ? "Reloading…" : "Reload"}
         </button>
@@ -338,7 +338,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
               aria-modal="true"
               aria-labelledby="listing-review-title"
             >
-              <div className="wood-ledger w-full max-w-lg rounded-t-xl border border-gold-500/35 p-4 sm:rounded-xl">
+              <div className="wood-ledger w-full max-w-lg rounded-t-xl border border-line-strong p-4 sm:rounded-xl">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-[0.65rem] font-black uppercase tracking-[0.14em] text-gold-300/75">
@@ -351,32 +351,32 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                   <button
                     type="button"
                     onClick={() => setReviewOpen(false)}
-                    className="flex h-10 w-10 items-center justify-center rounded-md border border-gold-500/25 text-foreground/65 hover:text-gold-300"
+                    className="flex h-10 w-10 items-center justify-center rounded-md border border-line text-foreground/65 hover:text-gold-300"
                     aria-label="Close review"
                   >
                     ✕
                   </button>
                 </div>
                 <dl className="mt-4 grid grid-cols-2 gap-2">
-                  <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                  <div className="rounded-lg border border-line bg-panel-strong p-3">
                     <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
                       Planks
                     </dt>
                     <dd className="mt-1 text-sm text-foreground">{selectedItems.length}</dd>
                   </div>
-                  <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                  <div className="rounded-lg border border-line bg-panel-strong p-3">
                     <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
                       Wallet signatures
                     </dt>
                     <dd className="mt-1 text-sm text-foreground">{selectedItems.length}</dd>
                   </div>
-                  <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                  <div className="rounded-lg border border-line bg-panel-strong p-3">
                     <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
                       Expires
                     </dt>
                     <dd className="mt-1 text-sm text-foreground">{durationDays} days</dd>
                   </div>
-                  <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                  <div className="rounded-lg border border-line bg-panel-strong p-3">
                     <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
                       Total ask
                     </dt>
@@ -393,7 +393,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                   <button
                     type="button"
                     onClick={() => setReviewOpen(false)}
-                    className="min-h-11 rounded-lg border border-gold-500/30 text-sm text-foreground/75 hover:text-gold-300"
+                    className="min-h-11 rounded-lg border border-line text-sm text-foreground/75 hover:text-gold-300"
                   >
                     Back
                   </button>
@@ -432,7 +432,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                   className={`min-h-9 rounded-md border px-2.5 text-xs font-bold transition ${
                     mode === m.id
                       ? "border-gold-400 bg-gold-500/15 text-gold-300"
-                      : "border-gold-500/30 text-foreground/60 hover:border-gold-400"
+                      : "border-line text-foreground/60 hover:border-gold-400"
                   }`}
                 >
                   {m.label}
@@ -453,7 +453,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                 value={samePrice}
                 disabled={busy}
                 onChange={(e) => setSamePrice(e.target.value.replace(/[^0-9.]/g, ""))}
-                className="mt-1 min-h-11 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 text-foreground outline-none focus:border-gold-400"
+                className="mt-1 min-h-11 w-full rounded-lg border border-line bg-panel px-2.5 text-foreground outline-none focus:border-gold-400"
               />
             </label>
           ) : (
@@ -478,7 +478,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                           [key]: e.target.value.replace(/[^0-9.]/g, ""),
                         }))
                       }
-                      className="min-h-10 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 text-sm text-foreground outline-none focus:border-gold-400"
+                      className="min-h-10 w-full rounded-lg border border-line bg-panel px-2.5 text-sm text-foreground outline-none focus:border-gold-400"
                     />
                   </li>
                 );
@@ -495,7 +495,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                 value={durationDays}
                 disabled={busy}
                 onChange={(e) => setDurationDays(Number(e.target.value))}
-                className="mt-1 min-h-11 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 text-foreground"
+                className="mt-1 min-h-11 w-full rounded-lg border border-line bg-panel px-2.5 text-foreground"
               >
                 {DURATIONS.map((d) => (
                   <option key={d.days} value={d.days}>
@@ -541,7 +541,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
           {statuses.map((s) => (
             <li
               key={s.key}
-              className="flex items-center justify-between gap-3 border-t border-gold-500/15 px-3 py-2 first:border-t-0"
+              className="flex items-center justify-between gap-3 border-t border-line px-3 py-2 first:border-t-0"
             >
               <span className="text-xs font-bold text-foreground">#{s.tokenId}</span>
               <span

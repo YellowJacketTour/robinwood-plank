@@ -18,7 +18,7 @@ type Props = {
 
 function statCell(label: string, value: string, sub?: string) {
   return (
-    <div className="rounded-lg border border-gold-400/20 bg-wood-950 px-3 py-2.5">
+    <div className="rounded-lg border border-line bg-wood-950 px-3 py-2.5">
       <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">
         {label}
       </dt>
@@ -76,7 +76,7 @@ export default function VaultDashboard({ vaultAddress = null, active = true }: P
             <span className="font-mono text-[0.6rem] text-foreground/40">{shortVault(vaultAddress)}</span>
           )}
         </div>
-        <span className="rounded-full border border-gold-400/20 px-2 py-0.5 text-[0.6rem] font-bold uppercase tracking-wide text-foreground/55">
+        <span className="rounded-full border border-line px-2 py-0.5 text-[0.6rem] font-bold uppercase tracking-wide text-foreground/55">
           Live snapshot
         </span>
       </div>
@@ -106,15 +106,15 @@ export default function VaultDashboard({ vaultAddress = null, active = true }: P
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-center">
-        <div className="rounded-lg border border-gold-400/20 bg-wood-950 px-2 py-1.5">
+        <div className="rounded-lg border border-line bg-wood-950 px-2 py-1.5">
           <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Mint fee</p>
           <p className="text-xs font-bold text-foreground">{(stats.mintFeeBps / 100).toFixed(2)}%</p>
         </div>
-        <div className="rounded-lg border border-gold-400/20 bg-wood-950 px-2 py-1.5">
+        <div className="rounded-lg border border-line bg-wood-950 px-2 py-1.5">
           <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Redeem fee</p>
           <p className="text-xs font-bold text-foreground">{(stats.redeemFeeBps / 100).toFixed(2)}%</p>
         </div>
-        <div className="rounded-lg border border-gold-400/20 bg-wood-950 px-2 py-1.5">
+        <div className="rounded-lg border border-line bg-wood-950 px-2 py-1.5">
           <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Redeem premium</p>
           <p className="text-xs font-bold text-foreground">{(stats.targetPremiumBps / 100).toFixed(2)}%</p>
         </div>

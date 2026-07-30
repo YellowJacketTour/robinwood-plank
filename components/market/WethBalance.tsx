@@ -48,14 +48,14 @@ export default function WethBalance({ account }: Props) {
     <button
       type="button"
       onClick={() => void refresh()}
-      className="inline-flex min-h-9 items-center rounded-full border border-red-500/30 bg-wood-950/90 px-3 text-xs text-red-200"
+      className="inline-flex min-h-9 items-center rounded-full border border-red-500/30 bg-panel-strong px-3 text-xs text-red-200"
       title="Retry WETH balance"
     >
       WETH unavailable · Retry
     </button>
   ) : (
     <span
-      className="inline-flex min-h-9 items-center rounded-full border border-gold-500/25 bg-wood-950/90 px-3 text-xs text-gold-300"
+      className="inline-flex min-h-9 items-center rounded-full border border-line bg-panel-strong px-3 text-xs text-gold-300"
       title={MARKET_OFFER_CURRENCY}
     >
       WETH balance {balance === null ? "…" : formatTokenAmount(balance, 18, 5)}

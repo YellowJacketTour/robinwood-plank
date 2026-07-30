@@ -80,7 +80,7 @@ export default function InstantVaultSwitcher({ role, onChange, active = true }: 
     const only = vaults[0];
     if (!only) return null;
     return (
-      <div className="rounded-[10px] border border-gold-400/20 bg-wood-950 px-3 py-2 text-sm text-foreground/70">
+      <div className="rounded-[10px] border border-line bg-wood-950 px-3 py-2 text-sm text-foreground/70">
         Active vault: <span className="font-mono text-gold-200">{shortVault(only.address)}</span>
       </div>
     );
@@ -112,7 +112,7 @@ export default function InstantVaultSwitcher({ role, onChange, active = true }: 
               className={`rounded-[10px] border px-3.5 py-3 text-left transition ${
                 active
                   ? "border-[#60d890] bg-[rgba(18,49,33,0.54)]"
-                  : "border-gold-400/20 bg-wood-950 hover:border-gold-400/45"
+                  : "border-line bg-wood-950 hover:border-line-strong"
               }`}
             >
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">

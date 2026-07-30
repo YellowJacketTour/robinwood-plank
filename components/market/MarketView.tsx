@@ -66,7 +66,7 @@ function PanelSkeleton({ className = "min-h-64" }: { className?: string }) {
   return (
     <div
       aria-hidden
-      className={`${className} animate-pulse rounded-xl border border-gold-500/15 bg-wood-900/60`}
+      className={`${className} animate-pulse rounded-xl border border-line bg-wood-900/60`}
     />
   );
 }
@@ -152,7 +152,7 @@ function OrderBookAlert({
       <button
         type="button"
         onClick={onRetry}
-        className="min-h-10 rounded-md border border-gold-500/40 px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+        className="min-h-10 rounded-md border border-line-strong px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
       >
         Retry order book
       </button>
@@ -800,7 +800,7 @@ export default function MarketView() {
                 <button
                   type="button"
                   onClick={() => selectTab("positions")}
-                  className="min-h-11 shrink-0 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+                  className="min-h-11 shrink-0 rounded-lg border border-line-strong px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400"
                 >
                   Sell
                 </button>
@@ -872,7 +872,7 @@ export default function MarketView() {
                     prev ? { ...prev, chosenTokenId: e.target.value } : prev
                   )
                 }
-                className="min-h-10 w-full rounded-md border border-gold-500/30 bg-wood-950 px-2 text-sm text-foreground"
+                className="min-h-10 w-full rounded-md border border-line bg-wood-950 px-2 text-sm text-foreground"
               >
                 {acceptTraitTarget.qualifyingOwned.map((id) => (
                   <option key={id} value={id}>
@@ -881,7 +881,7 @@ export default function MarketView() {
                 ))}
               </select>
             </label>
-            <dl className="space-y-1 rounded-lg border border-gold-500/20 bg-wood-900/90 px-3 py-2 text-xs">
+            <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
               <div className="flex justify-between">
                 <dt className="font-bold text-foreground">You receive (net)</dt>
                 <dd className="font-display tabular-nums text-gold-300">
@@ -929,8 +929,8 @@ export default function MarketView() {
             <p className="text-sm text-foreground">
               You are selling {COLLECTION.name} #{acceptTarget.tokenId}.
             </p>
-            <dl className="space-y-1 rounded-lg border border-gold-500/20 bg-wood-900/90 px-3 py-2 text-xs">
-              <div className="flex justify-between border-t border-gold-500/15 pt-1 first:border-t-0 first:pt-0">
+            <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
+              <div className="flex justify-between border-t border-line pt-1 first:border-t-0 first:pt-0">
                 <dt className="font-bold text-foreground">You receive (net)</dt>
                 <dd className="font-display tabular-nums text-gold-300">
                   {formatTokenAmount(acceptTarget.verifiedNetWei, 18, 6)} WETH
@@ -1070,7 +1070,7 @@ export default function MarketView() {
                           className={`min-h-10 shrink-0 rounded-lg border px-3 text-xs font-bold transition ${
                             sweepOpen
                               ? "border-gold-400 bg-gold-500/15 text-gold-200"
-                              : "border-gold-500/40 text-gold-300 hover:border-gold-400"
+                              : "border-line-strong text-gold-300 hover:border-gold-400"
                           }`}
                           title="Batch-buy the cheapest listings — scopes, presets, and confirmation"
                         >
@@ -1084,7 +1084,7 @@ export default function MarketView() {
                             const who = await requireAccount();
                             if (who) setOfferTarget({ trait: true });
                           }}
-                          className="min-h-10 shrink-0 rounded-lg border border-gold-500/40 px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+                          className="min-h-10 shrink-0 rounded-lg border border-line-strong px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
                           title="Bid on any plank matching trait, rarity, or combo"
                         >
                           Bid by criteria
@@ -1095,7 +1095,7 @@ export default function MarketView() {
                         <select
                           value={sort}
                           onChange={(e) => setSort(e.target.value as SortKey)}
-                          className="min-h-10 max-w-[12rem] rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
+                          className="min-h-10 max-w-[12rem] rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground"
                         >
                           {SORTS.map((s) => (
                             <option key={s.id} value={s.id}>
@@ -1110,7 +1110,7 @@ export default function MarketView() {
                   {COLLECTION && !loading && sweepOpen && (
                     <div
                       id="sweep-planner"
-                      className="mb-3 rounded-xl border border-gold-500/30 bg-wood-900/80 p-3"
+                      className="mb-3 rounded-xl border border-line bg-wood-900/80 p-3"
                     >
                       <SweepFloorboards
                         listings={listings}
@@ -1142,7 +1142,7 @@ export default function MarketView() {
                           <button
                             type="button"
                             onClick={() => setFilters(EMPTY_FILTERS)}
-                            className="min-h-10 rounded-md border border-gold-500/35 px-3 text-xs text-gold-300 hover:border-gold-400"
+                            className="min-h-10 rounded-md border border-line-strong px-3 text-xs text-gold-300 hover:border-gold-400"
                           >
                             Clear filters
                           </button>
@@ -1203,7 +1203,7 @@ export default function MarketView() {
                           Rarity, trait, rank, and combo orders.
                         </p>
                       </div>
-                      <span className="rounded-full border border-gold-500/25 px-2 py-1 text-[0.65rem] text-gold-300">
+                      <span className="rounded-full border border-line px-2 py-1 text-[0.65rem] text-gold-300">
                         {traitOffers.length} active
                       </span>
                     </div>
@@ -1217,7 +1217,7 @@ export default function MarketView() {
                         return (
                           <li
                             key={o.id}
-                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gold-500/25 bg-wood-900/90 px-3 py-2"
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-panel px-3 py-2"
                           >
                             <div className="min-w-0">
                               <p className="truncate text-sm font-bold text-foreground">
@@ -1410,7 +1410,7 @@ export default function MarketView() {
                 type="button"
                 onClick={() => setShowInventory((v) => !v)}
                 aria-expanded={showInventory}
-                className="min-h-10 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
+                className="min-h-10 rounded-lg border border-line-strong px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
               >
                 {showInventory ? "Hide my planks" : "List from your wallet"}
               </button>

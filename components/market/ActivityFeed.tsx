@@ -119,7 +119,7 @@ function FeedSkeleton() {
       {Array.from({ length: 5 }).map((_, index) => (
         <div
           key={index}
-          className="grid animate-pulse grid-cols-[3.5rem_minmax(0,1fr)_3rem] items-center gap-3 rounded-lg border border-gold-500/15 bg-wood-950/70 p-2"
+          className="grid animate-pulse grid-cols-[3.5rem_minmax(0,1fr)_3rem] items-center gap-3 rounded-lg border border-line bg-panel-strong p-2"
           aria-hidden="true"
         >
           <div className="h-14 w-14 rounded-lg bg-gold-500/10" />
@@ -284,7 +284,7 @@ export default function ActivityFeed({
               value={kindFilter}
               disabled={loading || failed || (events?.length ?? 0) === 0}
               onChange={(event) => setKindFilter(event.target.value as KindFilter)}
-              className="min-h-9 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground disabled:opacity-50"
+              className="min-h-9 rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground disabled:opacity-50"
             >
               <option value="all">All events</option>
               <option value="sale">Sales</option>
@@ -298,7 +298,7 @@ export default function ActivityFeed({
               <select
                 value={venueFilter}
                 onChange={(event) => setVenueFilter(event.target.value)}
-                className="min-h-9 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
+                className="min-h-9 rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground"
               >
                 <option value="all">All platforms</option>
                 {venueOptions.map(([key, label]) => (
@@ -341,24 +341,24 @@ export default function ActivityFeed({
             <button
               type="button"
               onClick={retry}
-              className="mt-4 min-h-11 rounded-md border border-gold-500/40 px-4 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+              className="mt-4 min-h-11 rounded-md border border-line-strong px-4 text-xs font-bold text-gold-300 transition hover:border-gold-400"
             >
               Retry activity
             </button>
           </div>
         ) : (events?.length ?? 0) === 0 ? (
-          <div className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/70 px-4 py-8 text-center">
+          <div className="rounded-lg border border-dashed border-line bg-panel-strong px-4 py-8 text-center">
             <p className="text-sm font-bold text-foreground/65">No activity yet.</p>
             <button
               type="button"
               onClick={retry}
-              className="mt-4 min-h-11 rounded-md border border-gold-500/40 px-4 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+              className="mt-4 min-h-11 rounded-md border border-line-strong px-4 text-xs font-bold text-gold-300 transition hover:border-gold-400"
             >
               Reload activity
             </button>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/70 px-4 py-8 text-center">
+          <div className="rounded-lg border border-dashed border-line bg-panel-strong px-4 py-8 text-center">
             <p className="text-sm font-bold text-foreground/65">
               No activity matches these filters.
             </p>

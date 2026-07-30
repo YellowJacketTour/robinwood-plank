@@ -52,7 +52,7 @@ export default function ListingCard({
     <li
       // Finalized mockup card: uniform quiet frame, rarity communicated by
       // the tier pill alone; the card lifts on hover instead of glowing.
-      className={`dense-card flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-gold-500/50 ${
+      className={`dense-card flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-line-strong ${
         isOffer ? "border-emerald-500/40" : ""
       }`}
     >
@@ -166,7 +166,7 @@ export default function ListingCard({
               <button
                 type="button"
                 onClick={() => onOffer(listing)}
-                className="min-h-11 flex-1 rounded-md border border-gold-500/40 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
+                className="min-h-11 flex-1 rounded-md border border-line-strong text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
               >
                 Offer
               </button>
@@ -175,7 +175,7 @@ export default function ListingCard({
               <button
                 type="button"
                 onClick={() => onSelect!(listing.tokenId)}
-                className="min-h-11 flex-1 rounded-md border border-gold-500/25 text-xs font-bold text-foreground/65 transition hover:border-gold-400 hover:text-gold-300"
+                className="min-h-11 flex-1 rounded-md border border-line text-xs font-bold text-foreground/65 transition hover:border-gold-400 hover:text-gold-300"
               >
                 Details
               </button>

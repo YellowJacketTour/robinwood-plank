@@ -67,7 +67,7 @@ export default function SeedVaultPanel({ account, onConnect, active = true }: Pr
   return (
     <div
       id="seed-v2"
-      className="space-y-3 scroll-mt-24 overflow-hidden rounded-2xl border border-gold-500/25 bg-wood-900/95 p-4 sm:p-5"
+      className="space-y-3 scroll-mt-24 overflow-hidden rounded-2xl border border-line bg-panel p-4 sm:p-5"
     >
       <div>
         <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.18em] text-gold-300">
@@ -83,7 +83,7 @@ export default function SeedVaultPanel({ account, onConnect, active = true }: Pr
         </p>
       </div>
 
-      <div className="rounded-lg border border-gold-500/25 bg-wood-950/90 px-3 py-2 font-mono text-[0.7rem] text-gold-200/90">
+      <div className="rounded-lg border border-line bg-panel-strong px-3 py-2 font-mono text-[0.7rem] text-gold-200/90">
         <a
           href={`${CHAIN.blockExplorers.default.url}/address/${primary}`}
           target="_blank"
@@ -115,7 +115,7 @@ export default function SeedVaultPanel({ account, onConnect, active = true }: Pr
         <div className="space-y-2">
           <p className="text-sm text-foreground/70">
             Connect treasury{" "}
-            <code className="rounded bg-wood-950/90 px-1 font-mono text-xs break-all">{treasury}</code>
+            <code className="rounded bg-panel-strong px-1 font-mono text-xs break-all">{treasury}</code>
           </p>
           <button
             type="button"

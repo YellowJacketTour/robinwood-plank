@@ -120,21 +120,21 @@ export default function RedeemOdds({ vaultAddress = null, active = true }: Props
 
   if (!stats && heldCount === 0) {
     return (
-      <p className="rounded-lg border border-gold-400/20 bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
+      <p className="rounded-lg border border-line bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
         Loading vault odds…
       </p>
     );
   }
   if (heldCount === 0) {
     return (
-      <p className="rounded-lg border border-gold-400/20 bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
+      <p className="rounded-lg border border-line bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
         Vault holds nothing to draw from right now.
       </p>
     );
   }
   if (rarity.size === 0) {
     return (
-      <p className="rounded-lg border border-gold-400/20 bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
+      <p className="rounded-lg border border-line bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
         Loading rarity map for redeem odds…
       </p>
     );
@@ -145,7 +145,7 @@ export default function RedeemOdds({ vaultAddress = null, active = true }: Props
   const vaultTag = colorKind === "v1" ? "V1" : colorKind === "v2" ? "V2" : null;
 
   return (
-    <div className="space-y-2 rounded-xl border border-gold-400/20 bg-[rgba(30,19,11,0.94)] p-3">
+    <div className="space-y-2 rounded-xl border border-line bg-panel p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="flex items-center gap-1.5 text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
           Random redeem odds
@@ -194,7 +194,7 @@ export default function RedeemOdds({ vaultAddress = null, active = true }: Props
         </div>
       )}
 
-      <div className="space-y-0.5 border-t border-gold-400/20 pt-1.5 text-[0.6rem] text-foreground/40">
+      <div className="space-y-0.5 border-t border-line pt-1.5 text-[0.6rem] text-foreground/40">
         {stats && (
           <p>
             Random cost ≈ {(1 + stats.redeemFeeBps / 10_000).toFixed(2)} shares

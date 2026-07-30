@@ -203,7 +203,7 @@ export default function OfferForm({
         className={`wood-ledger w-full space-y-3 p-4 ${
           presentation === "dialog"
             ? "max-w-md rounded-b-none sm:rounded-b-xl"
-            : "rounded-xl border border-gold-500/25"
+            : "rounded-xl border border-line"
         }`}
       >
         {reviewOpen && (
@@ -213,7 +213,7 @@ export default function OfferForm({
             aria-modal="true"
             aria-labelledby="offer-review-title"
           >
-            <div className="wood-ledger w-full max-w-lg rounded-t-xl border border-gold-500/35 p-4 sm:rounded-xl">
+            <div className="wood-ledger w-full max-w-lg rounded-t-xl border border-line-strong p-4 sm:rounded-xl">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-[0.65rem] font-black uppercase tracking-[0.14em] text-gold-300/75">
@@ -226,7 +226,7 @@ export default function OfferForm({
                 <button
                   type="button"
                   onClick={() => setReviewOpen(false)}
-                  className="flex h-10 w-10 items-center justify-center rounded-md border border-gold-500/25 text-foreground/65 hover:text-gold-300"
+                  className="flex h-10 w-10 items-center justify-center rounded-md border border-line text-foreground/65 hover:text-gold-300"
                   aria-label="Close review"
                 >
                   ✕
@@ -234,7 +234,7 @@ export default function OfferForm({
               </div>
 
               <dl className="mt-4 grid grid-cols-2 gap-2">
-                <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                <div className="rounded-lg border border-line bg-panel-strong p-3">
                   <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
                     Scope
                   </dt>
@@ -246,7 +246,7 @@ export default function OfferForm({
                         : collection.name}
                   </dd>
                 </div>
-                <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                <div className="rounded-lg border border-line bg-panel-strong p-3">
                   <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
                     Qualifying
                   </dt>
@@ -254,19 +254,19 @@ export default function OfferForm({
                     {traitMode ? `${qualifyingIds.length} Planks` : "1 exact token"}
                   </dd>
                 </div>
-                <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                <div className="rounded-lg border border-line bg-panel-strong p-3">
                   <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
                     Offer
                   </dt>
                   <dd className="mt-1 text-sm text-foreground">{priceEth} WETH</dd>
                 </div>
-                <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                <div className="rounded-lg border border-line bg-panel-strong p-3">
                   <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
                     Duration
                   </dt>
                   <dd className="mt-1 text-sm text-foreground">{days} days</dd>
                 </div>
-                <div className="col-span-2 rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                <div className="col-span-2 rounded-lg border border-line bg-panel-strong p-3">
                   <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
                     Marketplace fee / seller net
                   </dt>
@@ -285,7 +285,7 @@ export default function OfferForm({
                 <button
                   type="button"
                   onClick={() => setReviewOpen(false)}
-                  className="min-h-11 rounded-lg border border-gold-500/30 text-sm text-foreground/75 hover:text-gold-300"
+                  className="min-h-11 rounded-lg border border-line text-sm text-foreground/75 hover:text-gold-300"
                 >
                   Back
                 </button>
@@ -359,7 +359,7 @@ export default function OfferForm({
                       );
                     }
                   }}
-                  className="min-h-8 rounded-md border border-gold-500/35 px-2.5 text-[0.65rem] font-bold text-gold-300 transition hover:border-gold-400"
+                  className="min-h-8 rounded-md border border-line-strong px-2.5 text-[0.65rem] font-bold text-gold-300 transition hover:border-gold-400"
                 >
                   {m.label}
                 </button>
@@ -392,7 +392,7 @@ export default function OfferForm({
           </div>
         )}
 
-        <div className="flex min-h-12 items-center gap-2 rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5">
+        <div className="flex min-h-12 items-center gap-2 rounded-lg border border-line bg-panel px-2.5">
           <input
             type="text"
             inputMode="decimal"
@@ -412,7 +412,7 @@ export default function OfferForm({
               type="button"
               onClick={() => setDays(d)}
               className={`min-h-9 flex-1 rounded-md text-xs font-bold ${
-                days === d ? "bg-gold-500 text-wood-950" : "border border-gold-500/30 text-foreground/70"
+                days === d ? "bg-gold-500 text-wood-950" : "border border-line text-foreground/70"
               }`}
             >
               {d}d

@@ -119,11 +119,11 @@ export default function ItemDetail({
           tall content). The image panel below still gets the full
           glow+shimmer treatment. */}
       <div
-        className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-2xl border border-gold-500/30 bg-wood-950 sm:rounded-2xl"
+        className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-2xl border border-line bg-wood-950 sm:rounded-2xl"
         style={detail?.rarity ? tierCardStyle(detail.rarity.tier) : undefined}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-gold-500/15 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <div className="min-w-0 leading-tight">
             <p className="truncate font-display text-lg text-foreground">
               {detail?.rarity?.name ?? `#${tokenId}`}
@@ -147,7 +147,7 @@ export default function ItemDetail({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="min-h-9 min-w-9 rounded-lg border border-gold-500/30 text-sm text-foreground/70 transition hover:border-gold-400"
+            className="min-h-9 min-w-9 rounded-lg border border-line text-sm text-foreground/70 transition hover:border-gold-400"
           >
             ✕
           </button>
@@ -205,7 +205,7 @@ export default function ItemDetail({
                 <button
                   type="button"
                   onClick={() => onOffer(tokenId)}
-                  className="min-h-11 flex-1 rounded-lg border border-gold-500/40 text-sm font-bold text-gold-300 transition hover:border-gold-400"
+                  className="min-h-11 flex-1 rounded-lg border border-line-strong text-sm font-bold text-gold-300 transition hover:border-gold-400"
                 >
                   Offer
                 </button>
@@ -214,7 +214,7 @@ export default function ItemDetail({
                 <button
                   type="button"
                   onClick={() => setSendOpen((v) => !v)}
-                  className="min-h-11 flex-1 rounded-lg border border-gold-500/40 text-sm font-bold text-gold-300 transition hover:border-gold-400"
+                  className="min-h-11 flex-1 rounded-lg border border-line-strong text-sm font-bold text-gold-300 transition hover:border-gold-400"
                 >
                   {sendOpen ? "Cancel" : "Send"}
                 </button>
@@ -222,7 +222,7 @@ export default function ItemDetail({
             </div>
 
             {sendOpen && !sendDone && account && (
-              <div className="space-y-2 rounded-lg border border-gold-500/25 bg-wood-950/90 p-2.5">
+              <div className="space-y-2 rounded-lg border border-line bg-panel-strong p-2.5">
                 <div className="flex items-center justify-between text-[0.65rem] text-foreground/50">
                   <span>Send fee</span>
                   <span className="font-mono font-bold text-gold-300">
@@ -239,7 +239,7 @@ export default function ItemDetail({
                     setSendConfirming(false);
                     setSendError(null);
                   }}
-                  className="min-h-10 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 font-mono text-xs text-foreground outline-none focus:border-gold-400"
+                  className="min-h-10 w-full rounded-lg border border-line bg-panel px-2.5 font-mono text-xs text-foreground outline-none focus:border-gold-400"
                 />
                 {sendConfirming && !sendBusy && (
                   <p className="rounded-lg border border-red-500/30 bg-red-950/20 px-2 py-1.5 text-center text-[0.65rem] text-red-200">
@@ -308,7 +308,7 @@ export default function ItemDetail({
                   {detail.attributes.map((a, i) => (
                     <li
                       key={`${a.trait_type}-${i}`}
-                      className="rounded-lg border border-gold-500/20 px-2 py-1.5"
+                      className="rounded-lg border border-line px-2 py-1.5"
                     >
                       <p className="truncate text-[0.6rem] uppercase tracking-wide text-foreground/40">
                         {a.trait_type ?? "Trait"}
@@ -322,7 +322,7 @@ export default function ItemDetail({
           </div>
         </div>
 
-        <div className="border-t border-gold-500/15 px-4 py-3">
+        <div className="border-t border-line px-4 py-3">
           <p className="mb-1.5 text-[0.6rem] uppercase tracking-wide text-foreground/40">History</p>
           {!detail || detail.history.length === 0 ? (
             <p className="text-xs text-foreground/45">No transfers recorded.</p>

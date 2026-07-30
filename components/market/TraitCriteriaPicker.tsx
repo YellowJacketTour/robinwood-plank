@@ -110,8 +110,8 @@ export default function TraitCriteriaPicker({
   };
 
   const selectCls = dense
-    ? "min-h-8 max-w-[9rem] rounded-md border border-gold-500/30 bg-wood-950 px-1.5 text-[0.65rem] text-foreground"
-    : "min-h-10 w-full rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground";
+    ? "min-h-8 max-w-[9rem] rounded-md border border-line bg-wood-950 px-1.5 text-[0.65rem] text-foreground"
+    : "min-h-10 w-full rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground";
 
   if (loading) {
     return (
@@ -126,7 +126,7 @@ export default function TraitCriteriaPicker({
           <button
             type="button"
             onClick={onRetry}
-            className="min-h-9 rounded-md border border-gold-500/35 px-3 text-xs font-bold text-gold-300"
+            className="min-h-9 rounded-md border border-line-strong px-3 text-xs font-bold text-gold-300"
           >
             Retry criteria index
           </button>
@@ -159,7 +159,7 @@ export default function TraitCriteriaPicker({
       {clauses.map((clause, idx) => (
         <div
           key={idx}
-          className={`flex flex-wrap items-end gap-1.5 ${dense ? "" : "rounded-md border border-gold-500/15 bg-wood-950/90 p-2"}`}
+          className={`flex flex-wrap items-end gap-1.5 ${dense ? "" : "rounded-md border border-line bg-panel-strong p-2"}`}
         >
           {idx > 0 && (
             <span className="mb-1.5 text-[0.55rem] font-bold uppercase tracking-wide text-gold-400/70">
@@ -333,7 +333,7 @@ export default function TraitCriteriaPicker({
             type="button"
             onClick={() => removeClause(idx)}
             aria-label={`Remove clause ${idx + 1}`}
-            className="min-h-8 rounded-md border border-gold-500/25 px-2 text-[0.65rem] text-foreground/55 hover:border-red-400/50 hover:text-red-300"
+            className="min-h-8 rounded-md border border-line px-2 text-[0.65rem] text-foreground/55 hover:border-red-400/50 hover:text-red-300"
           >
             ✕
           </button>
@@ -348,7 +348,7 @@ export default function TraitCriteriaPicker({
             traitTypes.every((t) => usedTraitTypes.has(t))
           }
           onClick={addTraitClause}
-          className="min-h-8 rounded-md border border-gold-500/35 px-2 text-[0.65rem] font-bold text-gold-300 transition hover:border-gold-400 disabled:opacity-40"
+          className="min-h-8 rounded-md border border-line-strong px-2 text-[0.65rem] font-bold text-gold-300 transition hover:border-gold-400 disabled:opacity-40"
         >
           + Trait
         </button>
@@ -356,7 +356,7 @@ export default function TraitCriteriaPicker({
           type="button"
           disabled={hasRarity || clauses.length >= MAX_CRITERIA_CLAUSES}
           onClick={addRarityClause}
-          className="min-h-8 rounded-md border border-gold-500/35 px-2 text-[0.65rem] font-bold text-gold-300 transition hover:border-gold-400 disabled:opacity-40"
+          className="min-h-8 rounded-md border border-line-strong px-2 text-[0.65rem] font-bold text-gold-300 transition hover:border-gold-400 disabled:opacity-40"
         >
           + Rarity
         </button>
@@ -364,7 +364,7 @@ export default function TraitCriteriaPicker({
           type="button"
           disabled={!rankings || hasRank || clauses.length >= MAX_CRITERIA_CLAUSES}
           onClick={addRankClause}
-          className="min-h-8 rounded-md border border-gold-500/35 px-2 text-[0.65rem] font-bold text-gold-300 transition hover:border-gold-400 disabled:opacity-40"
+          className="min-h-8 rounded-md border border-line-strong px-2 text-[0.65rem] font-bold text-gold-300 transition hover:border-gold-400 disabled:opacity-40"
         >
           + Rank
         </button>
