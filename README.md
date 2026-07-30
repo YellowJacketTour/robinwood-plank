@@ -49,7 +49,9 @@ application, persistent marketplace data, and scheduled relayer run on the
 InMotion account. Upstash is supported only as a migration source after the
 PostgreSQL cutover.
 
-See [Architecture](ARCHITECTURE.md) for the data and trust boundaries and
+See [Architecture](ARCHITECTURE.md) for the data and trust boundaries,
+[Architecture Map](docs/ARCHITECTURE_MAP.md) for a diagrammed inventory of
+wallet state, trading data flow, routes, and feature flags, and
 [InMotion deployment](docs/INMOTION_DEPLOYMENT.md) for the operator runbook.
 
 ## Quick start
@@ -226,6 +228,7 @@ Never resolve the offer currency by symbol.
 ## Documentation
 
 - [Architecture](ARCHITECTURE.md)
+- [Architecture Map (diagrams + inventory)](docs/ARCHITECTURE_MAP.md)
 - [Complete documentation index](docs/README.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
