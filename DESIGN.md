@@ -156,7 +156,11 @@ Display type must stay sparse. Prices use tabular numerals. Small uppercase labe
 
 Depth comes from layered dark wood values, narrow gold borders, inset highlights, and restrained shadows. Financial values, wallet addresses, hashes, transaction controls, and other accuracy-sensitive content sit on surfaces at least 90% opaque.
 
+**Plank grain** is the signature surface texture: fine 1px gold-tinted board lines at 92°, 11px pitch, gold at 4–5% alpha (`.wood-grain-surface` in `app/globals.css`). It belongs on large brand surfaces — the footer, the market shell, page mastheads, mockup panels — where it reads as wood without competing with content. It never sits directly behind dense data text, and data panels (`surface-strong`) stay untextured.
+
 The Plank artwork may texture the masthead, but it must not lower text contrast. Holographic motion remains scoped to NFT art and honors reduced-motion preferences.
+
+**Plank character art.** A "plank" in this brand is the hand-drawn character — warm yellow wood, thick black ink outline, sketchy grain strokes, a face (`public/images/plank-logo.webp`, `plank-head.webp`, and the collection art in `public/images/collection/`). Any decorative or animated representation of planks — preloaders, empty states, illustrations, mockups — must use these actual character assets or match that hand-drawn outlined style exactly. Abstract geometric boards (flat rounded rectangles, gradient bars) are never a substitute for the character art.
 
 ## Shapes
 
