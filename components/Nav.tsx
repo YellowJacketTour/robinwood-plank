@@ -5,6 +5,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { CHAIN, NAV_LINKS } from "@/lib/constants";
+import { shortAddress } from "@/lib/trade";
+import { useWallet } from "@/lib/wallet-context";
 
 function navHref(href: string, pathname: string) {
   if (href.startsWith("#") && pathname !== "/") {
@@ -48,11 +50,69 @@ function NetworkContext({ compact = false }: { compact?: boolean }) {
 
 /**
  * Header wallet action (finalized mockup): the single gold control in the
- * nav. Connection itself stays owned by the market workspace — this button
- * routes there and asks MarketView to open its connect modal.
+ * nav. Reads the shared wallet context (lib/wallet-context.tsx) so it never
+ * contradicts what /trade or /market show — previously this was a static
+ * link with no wallet state at all, so it rendered "Connect wallet" even
+ * when a wallet was already connected elsewhere on the page.
  */
 function ConnectWalletAction({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname() || "/";
+  const { address, isConnected, disconnect } = useWallet();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onOutside = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onOutside);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("mousedown", onOutside);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, [menuOpen]);
+
+  if (isConnected && address) {
+    return (
+      <div ref={menuRef} className="relative shrink-0">
+        <button
+          type="button"
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-gold-500/40 bg-black/25 px-4 text-sm font-bold text-gold-300 transition-colors hover:bg-gold-500/10"
+        >
+          <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+          {shortAddress(address)}
+        </button>
+        {menuOpen && (
+          <div
+            role="menu"
+            className="absolute right-0 top-full z-10 mt-2 min-w-[10rem] rounded-lg border border-gold-500/25 bg-wood-950 py-1 shadow-2xl"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false);
+                onNavigate?.();
+                disconnect();
+              }}
+              className="block w-full px-4 py-2 text-left text-sm font-semibold text-foreground/80 hover:bg-gold-500/10 hover:text-gold-300"
+            >
+              Disconnect
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <Link
       href="/market?connect=1"
