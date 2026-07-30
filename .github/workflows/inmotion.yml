@@ -83,7 +83,7 @@ jobs:
           cp scripts/postgres-maintenance.mjs .next/standalone/scripts/postgres-maintenance.mjs
           tar -C .next/standalone -czf passenger-release.tgz .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
           name: passenger-${{ github.sha }}
@@ -110,7 +110,7 @@ jobs:
       INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL || 'https://plank.tanggang.life' }}
       RELEASE_SHA: ${{ github.sha }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: passenger-${{ github.sha }}
 
