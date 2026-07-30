@@ -3,17 +3,33 @@ version: alpha
 name: RobinWood Product System
 description: The shared visual identity and interaction foundation for RobinWood, $PLANK, and every product surface.
 colors:
-  primary: "#E9B43F"
-  on-primary: "#261105"
-  primary-soft: "#F8D98A"
-  background: "#0E0905"
-  surface: "#1C1008"
-  surface-strong: "#110A05"
-  foreground: "#FFF2CF"
-  muted: "#C9B58A"
-  success: "#6EE7A2"
-  info: "#58BDF0"
-  danger: "#FCA5A5"
+  # These names and hexes are verified against app/globals.css `@theme` and
+  # are the ONLY color vocabulary components should reference. If you find a
+  # component using a hex or a name not listed here, that's drift — fix the
+  # component or, if the value is genuinely new, add it here first.
+  gold-500: "#E9B43F"      # primary interaction / selected state / brand gold (bg-gold-500, text-gold-500)
+  gold-400: "#EEC164"      # hover state for gold-500 controls
+  gold-300: "#F8D98A"      # soft gold — display headings, prices, important values (text-gold-300)
+  gold-600: "#AF761D"      # deep gold, decorative/gradient use only
+  wood-950: "#1B120A"      # darkest wood — header/nav surface (bg-wood-950)
+  wood-900: "#2A1A0F"      # base panel wood
+  wood-850: "#302013"
+  wood-800: "#3D2513"
+  wood-700: "#5C3A1E"
+  wood-600: "#7A4D26"
+  forest-900: "#0D1F16"
+  forest-800: "#123322"
+  forest-700: "#1A4A30"
+  forest-600: "#24693F"
+  cream: "#FFF2CF"          # = --foreground; primary copy color everywhere
+  cream-muted: "#C9B58A"    # secondary copy / metadata
+  border-line: "rgba(233,180,63,0.24)"   # --color-line — default hairline border on panels
+  border-line-strong: "rgba(233,180,63,0.5)" # --color-line-strong — emphasized divider/focus border
+  bg-panel: "rgba(28,16,8,0.94)"         # --color-panel — default card/panel fill
+  bg-panel-soft: "rgba(41,26,15,0.88)"   # --color-panel-soft — lighter nested surface
+  bg-panel-strong: "rgba(17,10,5,0.97)"  # --color-panel-strong — near-opaque, for financial data
+  page-background: "#14100B"             # literal `body { background-color }`; see note below
+on-gold: "#261105"          # text/icon color placed on a gold-500/gold-400 fill
 typography:
   display-xl:
     fontFamily: Uncial Antiqua
@@ -52,65 +68,65 @@ spacing:
   2xl: 32px
 components:
   page-shell:
-    backgroundColor: "{colors.background}"
-    textColor: "{colors.foreground}"
+    backgroundColor: "{colors.page-background}"
+    textColor: "{colors.cream}"
     rounded: "{rounded.xl}"
     padding: 0px
   panel:
-    backgroundColor: "{colors.surface}"
-    textColor: "{colors.foreground}"
+    backgroundColor: "{colors.bg-panel}"
+    textColor: "{colors.cream}"
     rounded: "{rounded.lg}"
     padding: 12px
   data-panel:
-    backgroundColor: "{colors.surface-strong}"
-    textColor: "{colors.foreground}"
+    backgroundColor: "{colors.bg-panel-strong}"
+    textColor: "{colors.cream}"
     rounded: "{rounded.md}"
     padding: 12px
   button-primary:
-    backgroundColor: "{colors.primary}"
-    textColor: "{colors.on-primary}"
+    backgroundColor: "{colors.gold-500}"
+    textColor: "{on-gold}"
     typography: "{typography.label}"
     rounded: "{rounded.md}"
     padding: 12px
     height: 44px
   button-secondary:
-    backgroundColor: "{colors.surface-strong}"
-    textColor: "{colors.primary-soft}"
+    backgroundColor: "{colors.bg-panel-strong}"
+    textColor: "{colors.gold-300}"
     typography: "{typography.label}"
     rounded: "{rounded.md}"
     padding: 12px
     height: 44px
   verified-badge:
-    backgroundColor: "{colors.info}"
-    textColor: "{colors.background}"
+    backgroundColor: "#58BDF0"
+    textColor: "#07131A"
     rounded: "{rounded.pill}"
     size: 22px
   status-success:
-    backgroundColor: "{colors.surface-strong}"
-    textColor: "{colors.success}"
+    backgroundColor: "{colors.bg-panel-strong}"
+    textColor: "emerald-400 (Tailwind default, e.g. #34D399)"
     rounded: "{rounded.md}"
     padding: 8px
   status-error:
-    backgroundColor: "{colors.surface-strong}"
-    textColor: "{colors.danger}"
+    backgroundColor: "{colors.bg-panel-strong}"
+    textColor: "red/rose-400 (Tailwind default)"
     rounded: "{rounded.md}"
     padding: 8px
   metadata:
-    backgroundColor: "{colors.surface-strong}"
-    textColor: "{colors.muted}"
+    backgroundColor: "{colors.bg-panel-strong}"
+    textColor: "{colors.cream-muted}"
     typography: "{typography.label}"
     rounded: "{rounded.sm}"
     padding: 8px
   site-header:
-    backgroundColor: "{colors.surface-strong}"
-    textColor: "{colors.foreground}"
-    borderColor: "{colors.primary}"
+    backgroundColor: "{colors.wood-950}"
+    textColor: "{colors.cream}"
+    borderColor: "{colors.gold-500}"
     mobileHeight: 58px
     desktopHeight: 68px
   site-footer:
-    backgroundColor: "{colors.surface-strong}"
-    textColor: "{colors.muted}"
-    borderColor: "{colors.primary}"
+    backgroundColor: ".site-footer-surface (app/globals.css)"
+    textColor: "{colors.cream-muted}"
+    borderColor: "{colors.gold-500}"
     desktopColumns: 3
 ---
 
@@ -124,18 +140,28 @@ Visual redesigns are enhancement layers around production behavior. Decorative m
 
 Each product page must lead with its primary task. Analytics, education, and operational controls remain available, but they follow the action or evidence stream the user opened the page to use. Completeness is not permission to bury that task.
 
+**This file's token names and hex values are checked against `app/globals.css` and must stay in sync with it.** If you change a color in `@theme`, update the frontmatter above in the same change. Do not invent a second name for an existing token — search this file and `globals.css` before adding a new color.
+
 ## Colors
 
-- **Gold (`primary`)** is the main interaction and selected-state color.
-- **Soft gold (`primary-soft`)** is reserved for display headings, prices, and important values.
-- **Near-black wood (`background`, `surface`, `surface-strong`)** creates depth while guaranteeing readable financial data.
-- **Cream (`foreground`)** carries primary copy; muted parchment (`muted`) carries metadata.
+The real token names in code are `gold-*`, `wood-*`, `forest-*`, `cream`/`cream-muted`, and the semantic surface tokens `border-line`, `border-line-strong`, `bg-panel`, `bg-panel-soft`, `bg-panel-strong` (all defined in the `@theme` block of `app/globals.css`, aliased in the market module as `--market-*` — see "Marketplank tab rail" below). These are the names to use in code and in review; do not refer to a "primary/surface/background/foreground" abstraction that doesn't exist in the stylesheet.
+
+- **Gold (`gold-500`)** is the main interaction and selected-state color. `gold-400` is its hover state.
+- **Soft gold (`gold-300`)** is reserved for display headings, prices, and important values.
+- **Near-black wood (`wood-950`…`wood-600`, and the semantic `bg-panel*` tokens)** creates depth while guaranteeing readable financial data. `bg-panel-strong` (97% opaque) is the floor for any surface carrying a balance, address, hash, or price.
+- **Cream (`cream`)** carries primary copy; muted parchment (`cream-muted`) carries metadata.
 - Rarity colors continue to come from the shared rarity source in `lib/rarity.ts`; this file does not define a second rarity palette.
-- Success, information, and danger colors communicate state and never serve as decoration alone.
+- **Success, info, and danger have no dedicated custom tokens.** The codebase uses Tailwind's stock palette directly for these (`emerald-400` for success/live-status dots, `red-*`/`rose-*` for danger and destructive actions) plus one literal one-off hex, `#58BDF0`, for the verified-collection badge. Treat this as the working convention — don't add a bespoke `success`/`danger` custom token unless you also update every call site listed here.
+- **`page-background` (`#14100B`)** is the literal `body { background-color }` — it is intentionally a slightly different near-black than `wood-950` (`#1B120A`). This is a small, real inconsistency (see "Known inconsistencies" below), not a typo to silently "fix" in one file only.
+
+### Known inconsistencies (flagged, not fixed here)
+
+- `body`'s literal background color (`#14100B`) does not match any single `wood-*` token. Recommendation for the owner: either add a `page-background` custom property to `@theme` and point `body` at it, or accept `wood-950` as close enough and change the literal hex. Either is a one-line CSS change, not a documentation problem — left to the owner to decide, not changed here.
+- Success/danger/info still use ad hoc Tailwind defaults rather than named tokens. Fine as a working convention today; if a second contributor starts free-hand-picking different shades of green/red per component, that's the signal to promote these to real `@theme` tokens.
 
 ## Typography
 
-Uncial Antiqua is the storybook display face for product names, campaign moments, and major section headings. Nunito Sans is used for navigation, controls, data, tables, metadata, long-form copy, and explanatory text.
+Uncial Antiqua is the storybook display face for product names, campaign moments, and major section headings (loaded as `--font-stencil` / Tailwind's `font-display` utility in `app/layout.tsx`). Nunito Sans is used for navigation, controls, data, tables, metadata, long-form copy, and explanatory text (loaded as `--font-body` / the default sans stack).
 
 Display type must stay sparse. Prices use tabular numerals. Small uppercase labels are acceptable only when contrast and spacing keep them readable at 390 px.
 
@@ -152,15 +178,61 @@ Display type must stay sparse. Prices use tabular numerals. Small uppercase labe
 - Listing cards are two columns at 390 px, then grow fluidly to four or five columns in the normal desktop workspace.
 - Data-dependent Instant Swap modules keep balanced masonry so unequal panel heights do not create a hanging empty quadrant.
 
+## Background treatment
+
+There are two distinct page-background systems in this codebase. Use the right one — do not invent a third.
+
+### 1. Marketing background — the giant Plank character
+
+Mounted globally, once, in `app/layout.tsx` (`<PlankBackground />`), so it is technically present on every route including Trade/Market/Gallery. It paints directly on `body` in `app/globals.css`:
+
+- A darkening gradient wash (`linear-gradient(180deg, rgba(20,16,11,.55)…)`) so foreground text stays legible.
+- `plank-head.webp` at true, undistorted aspect ratio (the face/eyes/smile — never stretched).
+- `plank-legs.webp` (plain wood grain, safe to stretch) sized dynamically by `components/PlankBackground.tsx`, which measures viewport width and total page height on load/resize so the legs image exactly fills the remaining page without warping the face.
+
+This is the correct, intentional background for the homepage (`app/page.tsx`) and other marketing/story surfaces (Learn, Airdrop, Mint). It is a deliberate brand statement: the whole page is standing on/in front of Plank.
+
+### 2. App-page backdrop — the quiet wood texture
+
+`components/AppBackdrop.tsx` renders a `fixed inset-0 -z-10` div using the `.site-footer-surface` texture (solid wood base + soft directional wash + the same plank-grain hairlines as the footer) from `app/globals.css`. It is mounted at the top of `app/trade/page.tsx`, `app/market/page.tsx`, and `app/gallery/page.tsx`, immediately before `<Nav />`.
+
+Because it is `fixed` and opaque, it sits between the viewport and the marketing background described above and visually replaces the giant character on these three routes — without touching `PlankBackground` or the global `body` CSS, and without any JS (no resize listener, so it can never race `PlankBackground`'s `ResizeObserver`).
+
+**Rule: any new dense, transactional, or data-heavy page (wallet balances, order books, forms, tables) mounts `<AppBackdrop />` first, exactly like Trade/Market/Gallery do. Any new marketing/story page relies on the global `PlankBackground` and mounts nothing extra.** If you're not sure which a new page is, ask whether its primary content is prose/illustration (marketing) or live data/actions (app) — that's the test the three existing app pages were split on.
+
+Do not add a second background component, a second grain gradient recipe, or a per-page inline background style. `.site-footer-surface` is the single source of truth for the "quiet" texture; both the footer and `AppBackdrop` read it.
+
+## The `[data-market-shell]` boundary
+
+`app/globals.css` has global marketing-page rules — clamps on `p`, `dt`, `dd`, button/link font sizing, forced text-shadows — written with `!important` so marketing copy stays legible over the giant Plank art (see "Background treatment" above). Every one of those selectors is written as `:not([data-market-shell] *)`.
+
+**`data-market-shell` is an escape hatch: any element with that attribute, and everything inside it, is exempt from those global `!important` clamps.** Inside the boundary, component-level Tailwind classes are authoritative again — no fighting `!important` with more `!important`.
+
+This exists because the marketing clamps were silently repainting dense, mockup-accurate UI (forcing gold text, oversized type, forced text-shadows) inside Trade and Marketplank, which are built to their own tighter, denser typographic spec. It has broken component styling more than once when a new dense surface didn't know to opt in.
+
+**Where it's applied today:**
+- `components/market/MarketScaffold.tsx` — the root `<section>` of the entire Marketplank workspace.
+- `app/trade/page.tsx` — the root content wrapper on `/trade`.
+
+**Rule: any new dense/app-style page or panel that is fighting the marketing clamps (text going gold when it shouldn't, sizes jumping, unwanted text-shadow) should add `data-market-shell` to its outermost wrapper, the same way Trade and Market do — not add more `!important` overrides to fight the global rule.** Conversely, never add `data-market-shell` to a marketing page/section; that would silently turn off the legibility clamps needed over the character art.
+
 ## Elevation & Depth
 
-Depth comes from layered dark wood values, narrow gold borders, inset highlights, and restrained shadows. Financial values, wallet addresses, hashes, transaction controls, and other accuracy-sensitive content sit on surfaces at least 90% opaque.
+Depth comes from layered dark wood values, narrow gold borders, inset highlights, and restrained shadows. Financial values, wallet addresses, hashes, transaction controls, and other accuracy-sensitive content sit on surfaces at least 90% opaque (`bg-panel-strong` or equivalent, e.g. `.data-module`, `rgba(18,10,4,0.92)`).
 
-**Plank grain** is the signature surface texture: fine 1px gold-tinted board lines at 92°, 11px pitch, gold at 4–5% alpha (`.wood-grain-surface` in `app/globals.css`). It belongs on large brand surfaces — the footer, the market shell, page mastheads, mockup panels — where it reads as wood without competing with content. It never sits directly behind dense data text, and data panels (`surface-strong`) stay untextured.
+**Plank grain** is the signature surface texture: fine 1px gold-tinted board lines at 92°, 11px pitch, gold at 4–5% alpha (`.wood-grain-surface` in `app/globals.css`, and reused inside `.site-footer-surface`). It belongs on large brand surfaces — the footer, the market shell, page mastheads, mockup panels — where it reads as wood without competing with content. It never sits directly behind dense data text, and data panels (`bg-panel-strong`) stay untextured.
 
-The Plank artwork may texture the masthead, but it must not lower text contrast. Holographic motion remains scoped to NFT art and honors reduced-motion preferences.
+The Plank artwork may texture the masthead, but it must not lower text contrast. Holographic motion remains scoped to NFT art (`.holo-card` in `app/globals.css`, driven by `lib/holo.ts`) and honors reduced-motion preferences.
 
-**Plank character art.** A "plank" in this brand is the hand-drawn character — warm yellow wood, thick black ink outline, sketchy grain strokes, a face (`public/images/plank-logo.webp`, `plank-head.webp`, and the collection art in `public/images/collection/`). Any decorative or animated representation of planks — preloaders, empty states, illustrations, mockups — must use these actual character assets or match that hand-drawn outlined style exactly. Abstract geometric boards (flat rounded rectangles, gradient bars) are never a substitute for the character art.
+## Plank character art — brand rule
+
+**A "plank" in this brand is the hand-drawn character** — warm yellow wood, thick black ink outline, sketchy grain strokes, a face (`public/images/plank-logo.webp`, `plank-head.webp`, `plank-legs.webp`, and the collection art in `public/images/collection/`).
+
+- Any decorative or animated representation of planks — preloaders, empty states, illustrations, mockups, new marketing sections — **must use these actual character assets or match that hand-drawn outlined style exactly.**
+- **Abstract geometric boards (flat rounded rectangles, gradient bars) are never a substitute for the character art.** If a design calls for "a plank" and there's no character asset that fits, that's a signal to commission/export one, not to fake it with a `<div>` styled like a rectangle.
+- **NFT collection art is not the mascot.** Individual minted Plank NFTs (in Gallery, Marketplank cards, `ItemDetail`) are collectible art with their own per-token traits and holo treatment — they represent owned assets, not the brand character. Never present a random or user-owned NFT image as if it were the RobinWood mascot in navigation, footer, or marketing chrome; use the canonical character assets above for that role.
+
+This is a hard rule, not a style preference — it's the one visual element that makes RobinWood read as itself rather than a generic crypto template.
 
 ## Shapes
 
@@ -183,10 +255,10 @@ Avoid excessive nesting of rounded cards. A border or spacing change is preferre
 
 ### Shared header and navigation
 
-The header is a 58 px mobile / 68 px desktop sticky product rail with a translucent near-black wood surface and a narrow gold divider. It keeps the RobinWood mark legible without competing with the page masthead.
+The header (`components/Nav.tsx`) is a 58 px mobile / 68 px desktop sticky product rail (`h-[58px] lg:h-[68px]`) with a translucent near-black wood surface (`bg-wood-950/90` with backdrop blur) and a narrow gold divider (`border-gold-500/25`). It keeps the RobinWood mark legible without competing with the page masthead.
 
 - Navigation order is Market, Trade, Mint, Gallery, Learn, and Airdrop. Trade is the single gold primary action; it is not repeated as both a text link and a button.
-- The current route receives a restrained dark-gold state and `aria-current="page"`. Gold-filled controls remain reserved for the primary action.
+- The current route receives a restrained dark-gold state (`bg-gold-500/15 text-gold-300`) and `aria-current="page"`. Gold-filled controls remain reserved for the primary action.
 - The header may show the configured chain as read-only context, using a neutral chain glyph rather than a live-status dot. Wallet connection remains owned by the page workflow until the application has one shared wallet/session boundary.
 - Internal route changes use client navigation so the root layout and persistent audio player remain mounted. Home-section links retain their hash targets when followed from another route.
 - The compact menu remains in use through tablet widths; the full desktop rail begins at 1024 px so no destination is clipped. It is a full-width disclosure below the header, preserves the same order, uses 44–48 px rows, contains background scrolling, closes after selection, and supports backdrop click, Escape dismissal, breakpoint reset, first-link focus, and focus return.
@@ -194,7 +266,7 @@ The header is a 58 px mobile / 68 px desktop sticky product rail with a transluc
 
 ### Shared footer
 
-The footer is one global information surface, not a promotional card. It uses dark restrained wood grain, a thin gold top rule, and three desktop responsibilities that stack in the same reading order on mobile:
+The footer (`components/Footer.tsx`) is one global information surface, not a promotional card. It uses `.site-footer-surface` (dark restrained wood grain — the same texture `AppBackdrop` reuses), a thin gold top rule, and three desktop responsibilities that stack in the same reading order on mobile:
 
 1. Robinhood Chain / $PLANK identity plus the complete meme-coin risk statement.
 2. The full configured `$PLANK token contract`, explicitly labeled and linked to the configured explorer.
@@ -204,7 +276,7 @@ The current copyright remains below a subtle divider. The address may wrap but i
 
 ### Marketplank collection masthead
 
-Shows the real collection asset, Robinhood Chain context, Marketplank title, verification state, concise product promise, and the RobinWood NFT contract link. The contract address is always sourced from the collection configuration and opens Blockscout.
+Shows the real collection asset, Robinhood Chain context, Marketplank title, verification state, concise product promise, and the RobinWood NFT contract link. The contract address is always sourced from the collection configuration and opens Blockscout. Implemented in `components/market/MarketScaffold.tsx` / `.module.css`, whose `--market-*` custom properties (`--market-ink`, `--market-muted`, `--market-gold`, `--market-gold-soft`, `--market-border`, `--market-panel`, `--market-panel-strong`) are explicit aliases of this file's `cream`/`cream-muted`/`gold-500`/`gold-300`/`border-line`/`bg-panel`/`bg-panel-strong` tokens — never restate a hex there; alias the `@theme` token.
 
 ### Marketplank tab rail and panels
 
@@ -231,7 +303,7 @@ Retain criteria quick starts, dynamic trait/rank/combo clauses with AND semantic
 
 Rank criteria use explicit top-N thresholds against the verified collection rarity snapshot. They fail closed when that snapshot is unavailable and are re-resolved by the server before an order is published.
 
-The criteria builder remains visible when disconnected so the Offers tab keeps its working hierarchy. Wallet connection gates review and signing, not the user’s ability to understand the workflow.
+The criteria builder remains visible when disconnected so the Offers tab keeps its working hierarchy. Wallet connection gates review and signing, not the user's ability to understand the workflow.
 
 Collection-wide offers stay unavailable until their Seaport criteria resolver is implemented and verified.
 
@@ -265,6 +337,7 @@ Disconnected My NFTs and My Listings use an explanatory wallet gate. Connected v
 - Keep Buy, Offer, item detail, and wallet actions discoverable on touch devices.
 - Use the shared collection, rarity, order-validation, and vault registries.
 - Verify at 390 px, 768 px, and desktop in disconnected and connected states.
+- Mount `<AppBackdrop />` on new dense/app pages and `data-market-shell` on their root wrapper if they fight the marketing type clamps — see "Background treatment" and "The `data-market-shell` boundary" above.
 
 ### Don't
 
@@ -276,4 +349,6 @@ Disconnected My NFTs and My Listings use an explanatory wallet gate. Connected v
 - Do not rename the runtime `positions` tab ID.
 - Do not remove or unmount previously visited tabs.
 - Do not collapse migration, recovery, analytics, approval, or transaction workflows into static explanatory copy.
-- Do not broaden global typography or component overrides to achieve the market layout.
+- Do not broaden global typography or component overrides to achieve the market layout — use `data-market-shell` instead.
+- Do not invent a second background component or grain gradient; reuse `PlankBackground`/`AppBackdrop`/`.site-footer-surface`.
+- Do not represent the RobinWood brand character with an abstract shape or with NFT collection art — see "Plank character art" above.
