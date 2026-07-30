@@ -233,31 +233,38 @@ jobs:
         run: |
           set -euo pipefail
           healthy=false
+          health_body=""
+          trade_body=""
           for attempt in $(seq 1 36); do
             if health_body="$(
                  curl --fail --silent --show-error \
                    --connect-timeout 5 --max-time 15 \
                    --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
                    --header "Accept: application/json" \
-                   "$INMOTION_HEALTH_URL/api/health"
-               )" &&
+                   --header "Cache-Control: no-cache" \
+                   --header "Pragma: no-cache" \
+                   "$INMOTION_HEALTH_URL/api/health?deployment=$RELEASE_SHA&attempt=$attempt"
+                )" &&
                trade_body="$(
                  curl --fail --silent --show-error \
                    --connect-timeout 5 --max-time 15 \
                    --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
                    --header "Accept: application/json" \
                    --header "Cache-Control: no-cache" \
-                   "$INMOTION_HEALTH_URL/api/trade/status?deployment=$RELEASE_SHA"
+                   --header "Pragma: no-cache" \
+                   "$INMOTION_HEALTH_URL/api/trade/status?deployment=$RELEASE_SHA&attempt=$attempt"
                )" &&
                [[ "$health_body" == *'"ok":true'* ]] &&
                [[ "$health_body" == *'"storage":"postgres"'* ]] &&
                [[ "$health_body" == *"\"version\":\"$RELEASE_SHA\""* ]] &&
                [[ "$trade_body" == *'"tradingApiConfigured":true'* ]] &&
                curl --fail --silent --show-error \
-                 --connect-timeout 5 --max-time 15 \
-                 --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
-                 --header "Accept: text/html" \
-                 "$INMOTION_HEALTH_URL/market" >/dev/null; then
+                  --connect-timeout 5 --max-time 15 \
+                  --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                  --header "Accept: text/html" \
+                  --header "Cache-Control: no-cache" \
+                  --header "Pragma: no-cache" \
+                  "$INMOTION_HEALTH_URL/market?deployment=$RELEASE_SHA&attempt=$attempt" >/dev/null; then
               healthy=true
               break
             fi
@@ -266,6 +273,10 @@ jobs:
           if [ "$healthy" = true ]; then
             exit 0
           fi
+
+          echo "::error::Public deployment verification did not observe release $RELEASE_SHA after 36 attempts."
+          echo "Last public health response: $health_body"
+          echo "Last public trade status response: $trade_body"
 
           port="${INMOTION_PORT:-2222}"
           ssh -i "$HOME/.ssh/inmotion" -p "$port" \
