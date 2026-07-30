@@ -1,5 +1,6 @@
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
+import AppBackdrop from "@/components/AppBackdrop";
 import MarketView from "@/components/market/MarketView";
 import ComingSoonGate from "@/components/market/ComingSoonGate";
 import { MARKET_ENABLED } from "@/lib/constants";
@@ -23,6 +24,7 @@ export const metadata = createPageMetadata({
 export default function MarketPage() {
   return (
     <>
+      <AppBackdrop />
       <Nav />
       <main
         id="main-content"
