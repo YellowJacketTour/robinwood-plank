@@ -58,7 +58,13 @@ async function tryResize(buf: ArrayBuffer, width: number): Promise<ArrayBuffer |
       .resize({ width, withoutEnlargement: true })
       .webp({ quality: 82 })
       .toBuffer();
-    return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
+    // Copy into a fresh plain ArrayBuffer. Never hand out.buffer onward:
+    // depending on the runtime's Buffer pooling it can be a
+    // SharedArrayBuffer, which Response silently stringifies to the literal
+    // text "[object SharedArrayBuffer]" — served that way in production.
+    const copy = new Uint8Array(out.byteLength);
+    copy.set(out);
+    return copy.buffer;
   } catch {
     return null;
   }
