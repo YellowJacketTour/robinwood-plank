@@ -21,6 +21,7 @@ import {
   getChainId,
   isRobinhoodChainId,
 } from "@/lib/wallet";
+import { useWallet } from "@/lib/wallet-context";
 import { CHAIN } from "@/lib/constants";
 
 type Props = {
@@ -32,6 +33,11 @@ type Props = {
 type Phase = "idle" | "pairing" | "need_chain" | "done";
 
 export default function ConnectWalletModal({ open, onClose, onConnected }: Props) {
+  // Any connection made here (WalletConnect QR or injected extension) must
+  // become visible app-wide, not just to whichever caller passed
+  // onConnected — otherwise a WalletConnect-sourced connect would update
+  // e.g. SwapWidget's local state but leave the nav/other surfaces stale.
+  const { adoptAccount: walletAdoptAccount } = useWallet();
   const [projectId, setProjectId] = useState("");
   const [uri, setUri] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -83,10 +89,11 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
   const finish = useCallback(
     (addr: string) => {
       setPhase("done");
+      walletAdoptAccount(addr);
       onConnected(addr);
       onClose();
     },
-    [onConnected, onClose]
+    [walletAdoptAccount, onConnected, onClose]
   );
 
   const handleClose = useCallback(() => {

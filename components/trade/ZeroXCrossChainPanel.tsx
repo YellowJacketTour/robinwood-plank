@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, ShieldAlert, Zap } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Percent, ShieldAlert, Zap } from "lucide-react";
 import { TOKEN } from "@/lib/constants";
-import { formatDisplayAmount, parseTokenAmount, shortAddress } from "@/lib/trade";
-import { connectWallet, getConnectedAccounts } from "@/lib/wallet";
+import { formatDisplayAmount, formatTokenAmount, parseTokenAmount, shortAddress } from "@/lib/trade";
+import { useWallet } from "@/lib/wallet-context";
 import { getWalletChainId, sendCrossChainStepTx, switchToChain } from "@/lib/crosschain-wallet";
 import TokenIcon from "@/components/trade/TokenIcon";
 import ChainSelectModal, { type SourceChainOption } from "@/components/trade/ChainSelectModal";
@@ -63,6 +63,66 @@ const NATIVE_SYMBOL: Record<number, string> = {
   137: "POL",
 };
 
+/**
+ * Public read-only RPC endpoints, used ONLY to display a balance for the
+ * currently-selected source chain — never for building or sending a
+ * transaction (that always goes through the connected wallet's own
+ * provider, via lib/crosschain-wallet.ts). A direct RPC read (rather than
+ * the wallet's own eth_getBalance) is required here because the wallet's
+ * provider reports whatever chain it's CURRENTLY pointed at, which can
+ * differ from the source chain selected in this panel — the same ambiguity
+ * SwapWidget doesn't have, since it only ever targets one chain.
+ * Intentionally a local, independent copy rather than importing from
+ * lib/crosschain-wallet.ts's CHAIN_METADATA (out of scope to edit here).
+ */
+const SOURCE_CHAIN_RPC: Record<number, string> = {
+  1: "https://cloudflare-eth.com",
+  42161: "https://arb1.arbitrum.io/rpc",
+  8453: "https://mainnet.base.org",
+  10: "https://mainnet.optimism.io",
+  137: "https://polygon-rpc.com",
+};
+
+/** Conservative gas reserves per source chain for the MAX button — L1 gas
+ * costs meaningfully more than L2s, so one flat reserve (as SwapWidget uses
+ * for Robinhood Chain alone) would be wrong here. Display-only estimate:
+ * the wallet and 0x's own quote/tx simulation remain the real gate before
+ * anything is signed — this only keeps MAX from proposing an amount that
+ * obviously can't also cover gas. */
+const GAS_RESERVE_WEI: Record<number, bigint> = {
+  1: BigInt("3000000000000000"), // ~0.003 ETH — L1
+  42161: BigInt("200000000000000"), // ~0.0002 ETH — L2
+  8453: BigInt("200000000000000"),
+  10: BigInt("200000000000000"),
+  137: BigInt("100000000000000"), // ~0.0001 POL
+};
+
+/** Direct JSON-RPC balance read for the selected source chain — display
+ * only, see SOURCE_CHAIN_RPC above. Never throws; a failed/unsupported read
+ * just leaves the balance/MAX affordance hidden rather than erroring the
+ * whole panel. */
+async function fetchSourceChainBalance(chainId: number, address: string): Promise<bigint | null> {
+  const rpcUrl = SOURCE_CHAIN_RPC[chainId];
+  if (!rpcUrl) return null;
+  try {
+    const res = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "eth_getBalance",
+        params: [address, "latest"],
+      }),
+    });
+    const data = (await res.json().catch(() => null)) as { result?: string } | null;
+    if (!data?.result) return null;
+    return BigInt(data.result);
+  } catch {
+    return null;
+  }
+}
+
 /** Stop polling once we've reached a terminal state. */
 function isTerminal(l: Lifecycle): boolean {
   return l === "bridge_filled" || l === "bridge_failed";
@@ -90,7 +150,11 @@ export default function ZeroXCrossChainPanel() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [checkedStatus, setCheckedStatus] = useState(false);
 
-  const [account, setAccount] = useState<string | null>(null);
+  // Shared app-wide wallet state (lib/wallet-context.tsx) — this panel
+  // previously kept its own useState populated once via getConnectedAccounts()
+  // with NO accountsChanged listener, so a disconnect in the wallet never
+  // reflected here at all. useWallet() fixes both the sharing and that gap.
+  const { address: account, connect: walletConnect } = useWallet();
   const [sourceChainId, setSourceChainId] = useState<number | null>(null);
   const [chainModalOpen, setChainModalOpen] = useState(false);
   const [amountIn, setAmountIn] = useState("");
@@ -99,6 +163,7 @@ export default function ZeroXCrossChainPanel() {
   const [txHash, setTxHash] = useState<string | null>(null);
   const [quote, setQuote] = useState<ZeroXCrossChainQuote | null>(null);
   const [lifecycle, setLifecycle] = useState<Lifecycle | null>(null);
+  const [balance, setBalance] = useState<bigint | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,9 +180,6 @@ export default function ZeroXCrossChainPanel() {
       .finally(() => {
         if (!cancelled) setCheckedStatus(true);
       });
-    void getConnectedAccounts().then((accounts) => {
-      if (!cancelled && accounts[0]) setAccount(accounts[0]);
-    });
     return () => {
       cancelled = true;
     };
@@ -129,18 +191,45 @@ export default function ZeroXCrossChainPanel() {
   );
   const nativeSymbol = sourceChainId != null ? NATIVE_SYMBOL[sourceChainId] ?? "ETH" : "ETH";
 
+  // Balance for the "You pay" field's MAX button — re-fetches whenever the
+  // connected account or the selected source chain changes. A direct RPC
+  // read (see fetchSourceChainBalance above), not the wallet's own balance,
+  // so it stays correct regardless of which chain the wallet is currently on.
+  useEffect(() => {
+    if (!account || sourceChainId == null) {
+      setBalance(null);
+      return;
+    }
+    let cancelled = false;
+    setBalance(null);
+    void fetchSourceChainBalance(sourceChainId, account).then((b) => {
+      if (!cancelled) setBalance(b);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [account, sourceChainId]);
+
+  const handleMax = useCallback(() => {
+    if (balance === null || sourceChainId == null) return;
+    const reserve = GAS_RESERVE_WEI[sourceChainId] ?? BigInt("1000000000000000");
+    const spendable = balance > reserve ? balance - reserve : BigInt(0);
+    setAmountIn(formatTokenAmount(spendable, 18, 18));
+    setQuote(null);
+    setTxHash(null);
+  }, [balance, sourceChainId]);
+
   const handleConnect = useCallback(async () => {
     setError(null);
     try {
       setBusy(true);
-      const addr = await connectWallet();
-      setAccount(addr);
+      await walletConnect();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect wallet.");
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [walletConnect]);
 
   const handleGetQuote = useCallback(async () => {
     if (!account || !sourceChainId) return;
@@ -303,8 +392,12 @@ export default function ZeroXCrossChainPanel() {
         </button>
       ) : (
         <>
-          <div className="flex min-h-9 items-center justify-between gap-2 rounded-lg border border-forest-600/45 bg-forest-900/45 px-2.5 text-xs">
-            <span className="font-mono text-gold-300" title={account}>
+          <div className="flex min-h-9 items-center gap-2 rounded-lg border border-forest-600/45 bg-forest-900/45 px-2.5 text-xs">
+            <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+            <span className="font-bold uppercase tracking-wide text-[0.62rem] text-foreground/50">
+              Connected wallet
+            </span>
+            <span className="ml-auto font-mono text-gold-300" title={account}>
               {shortAddress(account)}
             </span>
           </div>
@@ -340,9 +433,24 @@ export default function ZeroXCrossChainPanel() {
               </button>
             </div>
             {source && (
-              <p className="mt-1 text-right text-[0.65rem] text-foreground/45">
-                Native {nativeSymbol} on {source.name}
-              </p>
+              <div className="mt-1 flex items-center justify-between gap-2 text-[0.65rem] text-foreground/45">
+                <span>Native {nativeSymbol} on {source.name}</span>
+                <span className="flex shrink-0 items-center gap-1.5">
+                  {balance !== null && (
+                    <span>
+                      Balance: {formatDisplayAmount(balance, 18)} {nativeSymbol}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleMax}
+                    disabled={balance === null}
+                    className="font-bold text-gold-300 hover:text-gold-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    MAX
+                  </button>
+                </span>
+              </div>
             )}
           </label>
 
@@ -393,19 +501,29 @@ export default function ZeroXCrossChainPanel() {
                     {TOKEN.symbol}
                   </div>
                 )}
-                {(quote.route || quote.provider) && (
+                {/* Provider alone ("0x") isn't useful on its own — the user
+                    already knows they're using 0x, it's labeled above this
+                    block. Only render this row, labeled, when there's an
+                    actual route to show; never a bare unlabeled token. */}
+                {quote.route && (
                   <div className="truncate font-mono text-foreground/60">
-                    {[quote.provider, quote.route].filter(Boolean).join(" · ")}
+                    Route: {[quote.provider, quote.route].filter(Boolean).join(" · ")}
                   </div>
                 )}
               </div>
 
-              <details className="group rounded-lg border border-gold-500/15 bg-wood-950/40 px-2.5 py-1.5 text-[0.7rem] text-foreground/60">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-bold uppercase tracking-wide text-foreground/50">
-                  <span>Fees</span>
-                  <ChevronRight size={13} className="shrink-0 transition-transform group-open:rotate-90" />
+              {/* Same border/radius/padding language as CrossChainDisclaimer
+                  above this panel, and the risk callout right below — one
+                  visual "risk & fees" family, not three unrelated cards. */}
+              <details className="group rounded-lg border border-gold-500/20 bg-wood-950/40 px-3 py-2 text-[0.7rem] text-foreground/70">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-bold uppercase tracking-wide text-gold-300">
+                  <span className="flex items-center gap-1.5">
+                    <Percent size={13} className="shrink-0 text-gold-400" />
+                    Fees
+                  </span>
+                  <ChevronRight size={14} className="shrink-0 text-foreground/50 transition-transform group-open:rotate-90" />
                 </summary>
-                <div className="mt-1.5 space-y-1">
+                <div className="mt-2 space-y-1.5">
                   {status.siteFee?.enabled && (
                     <p>plank.love fee: {status.siteFee.exactLabel || status.siteFee.label}</p>
                   )}
@@ -415,7 +533,7 @@ export default function ZeroXCrossChainPanel() {
               </details>
 
               {!txHash && (
-                <div className="flex items-start gap-1.5 rounded-md border border-red-500/30 bg-red-950/20 px-2.5 py-2 text-[0.68rem] leading-snug text-red-100/90">
+                <div className="flex items-start gap-1.5 rounded-lg border border-red-500/30 bg-red-950/20 px-3 py-2 text-[0.68rem] leading-snug text-red-100/90">
                   <ShieldAlert size={13} className="mt-0.5 shrink-0" />
                   <span>
                     Cross-chain settlement is NOT atomic: this is two chains and a bridge, not a
