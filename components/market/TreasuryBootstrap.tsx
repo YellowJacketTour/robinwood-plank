@@ -271,7 +271,7 @@ export default function TreasuryBootstrap({ account }: Props) {
   const canOpen = status.shareReserve > BigInt(0) && status.ethReserveWei > BigInt(0);
 
   return (
-    <div className="space-y-3 rounded-xl border-2 border-dashed border-gold-500/40 bg-wood-950/90 p-3">
+    <div className="space-y-3 rounded-xl border border-gold-400/20 bg-wood-950/90 p-3">
       <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.14em] text-gold-300">
         Treasury bootstrap — only you can see this
       </p>

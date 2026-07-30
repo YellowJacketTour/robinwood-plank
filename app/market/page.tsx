@@ -30,11 +30,11 @@ export default function MarketPage() {
         data-deployment={process.env.DEPLOYMENT_VERSION || "unknown"}
         className="flex-1 px-3 pb-10 pt-0 sm:px-5 sm:py-6 lg:py-10"
       >
-        {/* Browsing a listing grid benefits from real desktop width — the
-            site-wide 64rem prose column (.site-shell) is right for the
-            marketing/coming-soon state but starves the grid on wide
-            monitors once the market is live. */}
-        <div className={MARKET_ENABLED ? "mx-auto w-full max-w-[1800px]" : "site-shell"}>
+        {/* Finalized mockup shell: min(1440px, 100% - 32px). Wider than the
+            site's 64rem prose column so the grid gets desktop room, but
+            capped — at ultrawide widths an uncapped workspace inflated every
+            panel far past the approved composition. */}
+        <div className={MARKET_ENABLED ? "mx-auto w-full max-w-[1440px]" : "site-shell"}>
           {MARKET_ENABLED ? <MarketView /> : <ComingSoonGate />}
         </div>
       </main>

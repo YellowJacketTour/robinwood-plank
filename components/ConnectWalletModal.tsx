@@ -246,7 +246,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
 
         {phase !== "need_chain" && (
           <>
-            <div className="mt-3 rounded-lg border border-gold-500/25 bg-wood-950/90 px-3 py-2 text-[0.75rem] text-foreground/70">
+            <div className="mt-3 rounded-lg border border-gold-500/20 bg-wood-950/90 px-3 py-2 text-[0.75rem] text-foreground/70">
               <p className="font-bold text-gold-300">Before you scan</p>
               <ol className="mt-1 list-decimal space-y-0.5 pl-4">
                 <li>
@@ -258,27 +258,35 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
               </ol>
             </div>
 
-            <label className="mt-4 block text-[0.65rem] font-bold uppercase tracking-wide text-foreground/45">
-              WalletConnect Project ID
-            </label>
-            <input
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value.trim())}
-              placeholder="from cloud.reown.com"
-              className="mt-1 w-full rounded-lg border border-gold-500/25 bg-wood-950/90 px-3 py-2 font-mono text-xs text-foreground outline-none focus:border-gold-400"
-              autoComplete="off"
-            />
-            <p className="mt-1 text-[0.65rem] text-foreground/40">
-              Free:{" "}
-              <a
-                href="https://cloud.reown.com"
-                target="_blank"
-                rel="noreferrer"
-                className="text-gold-300 underline"
-              >
-                cloud.reown.com
-              </a>
-            </p>
+            {/* Config plumbing, not user UI: the project id ships with the
+                build (NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID). Ask only when
+                no id is configured anywhere — without one, WalletConnect
+                cannot pair at all. */}
+            {!getWalletConnectProjectId() && (
+              <>
+                <label className="mt-4 block text-[0.65rem] font-bold uppercase tracking-wide text-foreground/45">
+                  WalletConnect Project ID
+                </label>
+                <input
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value.trim())}
+                  placeholder="from cloud.reown.com"
+                  className="mt-1 w-full rounded-lg border border-gold-500/20 bg-wood-950/90 px-3 py-2 font-mono text-xs text-foreground outline-none focus:border-gold-400"
+                  autoComplete="off"
+                />
+                <p className="mt-1 text-[0.65rem] text-foreground/40">
+                  Free:{" "}
+                  <a
+                    href="https://cloud.reown.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-gold-300 underline"
+                  >
+                    cloud.reown.com
+                  </a>
+                </p>
+              </>
+            )}
 
             <button
               type="button"
@@ -317,18 +325,15 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
                 />
                 <p className="mt-2 text-center text-xs text-foreground/60">{status}</p>
                 {uri && (
-                  <>
-                    <p className="mt-2 max-h-14 w-full overflow-auto break-all font-mono text-[0.6rem] text-foreground/40">
-                      {uri}
-                    </p>
-                    <button
-                      type="button"
-                      className="mt-2 text-xs font-bold text-gold-300 underline"
-                      onClick={() => void navigator.clipboard.writeText(uri)}
-                    >
-                      Copy connection URI
-                    </button>
-                  </>
+                  // The raw wc: URI is noise on screen — the copy button
+                  // covers the deep-link use case without the text dump.
+                  <button
+                    type="button"
+                    className="mt-2 text-xs font-bold text-gold-300 underline"
+                    onClick={() => void navigator.clipboard.writeText(uri)}
+                  >
+                    Copy connection URI
+                  </button>
                 )}
               </div>
             )}
