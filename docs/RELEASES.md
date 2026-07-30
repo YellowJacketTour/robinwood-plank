@@ -2,6 +2,10 @@
 
 This policy applies to the canonical `inmotion` branch.
 
+This document is the branch/versioning policy. For a dated record of what
+actually shipped in a given window, see the dated release-notes files, e.g.
+[Release notes — 2026-07-30](RELEASE_NOTES-2026-07-30.md).
+
 ## Branches
 
 | Branch | Purpose |
