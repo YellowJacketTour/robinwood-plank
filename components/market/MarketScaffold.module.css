@@ -13,6 +13,14 @@
   border: 1px solid var(--market-border);
   border-radius: 1rem;
   background:
+    /* Plank grain — shared brand texture (see .wood-grain-surface). */
+    repeating-linear-gradient(
+      92deg,
+      rgba(233, 180, 63, 0.04) 0,
+      rgba(233, 180, 63, 0.04) 1px,
+      transparent 1px,
+      transparent 11px
+    ),
     linear-gradient(180deg, rgba(14, 9, 4, 0.72), rgba(10, 6, 3, 0.96) 22rem),
     url("/images/plank-head.webp") top right / min(72rem, 100%) auto no-repeat,
     #0e0905;
