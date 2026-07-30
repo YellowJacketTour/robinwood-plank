@@ -1,4 +1,5 @@
 import Reveal from "@/components/Reveal";
+import SectionHead from "@/components/SectionHead";
 
 const FUNDING_FLOW = [
   {
@@ -26,38 +27,39 @@ export default function Distribution() {
     <section id="tokenomics" className="section-tight px-3 sm:px-5">
       <div className="mx-auto max-w-5xl">
         <Reveal>
-          <h2 className="section-title text-center text-4xl text-gold-300 sm:text-5xl">
-            Mint Proceeds
-          </h2>
-          <p className="lede mx-auto mt-3 max-w-2xl text-center text-foreground/70">
-            Simple. Fixed. Public.
-          </p>
+          <SectionHead
+            eyebrow="Fixed. Public."
+            title="Mint Proceeds"
+            lede="Simple, transparent flow from every mint to on-chain liquidity."
+            center
+            className="mx-auto max-w-2xl"
+          />
         </Reveal>
 
-        <div className="mt-8 grid gap-4 sm:mt-12 sm:gap-6 md:grid-cols-3">
+        <div className="mt-5 grid gap-3 sm:mt-6 sm:gap-4 md:grid-cols-3">
           {FUNDING_FLOW.map((item, index) => (
             <Reveal key={item.title} delayMs={index * 100}>
-              <article className="wood-frame h-full rounded-2xl bg-wood-900/90 p-5 sm:p-6">
+              <article className="wood-grain-surface h-full rounded-xl border border-line bg-panel p-4 sm:p-5">
                 <div className="flex items-center justify-between gap-4">
                   <span
                     aria-hidden="true"
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-gold-500 font-display text-xl text-wood-950"
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-gold-500 font-display text-lg text-wood-950"
                   >
                     {item.step}
                   </span>
-                  <span className="text-right text-sm font-extrabold uppercase tracking-wide text-gold-300">
+                  <span className="text-right text-[0.68rem] font-extrabold uppercase tracking-[0.12em] text-gold-300">
                     {item.value}
                   </span>
                 </div>
-                <h3 className="mt-5 font-display text-xl text-foreground sm:mt-6 sm:text-2xl">{item.title}</h3>
-                <p className="mt-2 text-base leading-6 text-foreground sm:mt-3 sm:text-lg sm:leading-7">{item.description}</p>
+                <h3 className="mt-4 font-display text-lg text-cream sm:text-xl">{item.title}</h3>
+                <p className="mt-1 text-sm text-cream-muted">{item.description}</p>
               </article>
             </Reveal>
           ))}
         </div>
 
         <Reveal delayMs={320}>
-          <p className="lede mx-auto mt-6 max-w-3xl text-center text-xs text-foreground/65 sm:mt-8 sm:text-sm">
+          <p className="mx-auto mt-4 max-w-3xl text-center text-[0.8rem] text-cream-muted sm:mt-5">
             Developer ETH is separate from mint proceeds.
           </p>
         </Reveal>
