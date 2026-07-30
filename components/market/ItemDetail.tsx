@@ -7,6 +7,7 @@ import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/ma
 import type { RarityTier } from "@/lib/market/rarityClient";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import { sendNft, validateRecipient } from "@/lib/market/transfer";
+import { withImageWidth } from "@/lib/ipfs";
 import { quoteSendFee, type SendFeeQuote } from "@/lib/market/send-fee";
 
 type TokenDetail = {
@@ -164,7 +165,7 @@ export default function ItemDetail({
             }
           >
             <Image
-              src={detail?.image || listing?.imageUrl || collection.image}
+              src={withImageWidth(detail?.image || listing?.imageUrl, 1024) || collection.image}
               alt={`${collection.name} #${tokenId}`}
               fill
               sizes="(min-width: 640px) 40vw, 100vw"

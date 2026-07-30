@@ -16,6 +16,7 @@ import ActivityStats from "@/components/market/ActivityStats";
 import ScrollBox from "@/components/market/ScrollBox";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import { invalidateSwr, swrJson } from "@/lib/market/swr-fetch";
+import { withImageWidth } from "@/lib/ipfs";
 
 type Venue = { kind: "marketplank" | "seaport" | "vault" | "other"; contract: string } | null;
 
@@ -414,7 +415,7 @@ export default function ActivityFeed({
                     >
                       {event.imageUrl ? (
                         <Image
-                          src={event.imageUrl}
+                          src={withImageWidth(event.imageUrl, 256)}
                           alt={`#${event.tokenId}`}
                           fill
                           sizes="56px"

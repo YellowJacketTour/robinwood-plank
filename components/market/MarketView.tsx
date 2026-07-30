@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import MarketNav from "@/components/market/MarketNav";
 import MarketBrowseLayout from "@/components/market/MarketBrowseLayout";
 import {
@@ -691,29 +691,56 @@ export default function MarketView() {
     }
   }, [acceptTarget, account, accepting, refresh]);
 
-  const visibleListings = applyFilters(listings, filters, rarityMap);
+  // Derived book data is memoized on its actual inputs: this component
+  // re-renders on every countdown tick and poll update, and the BigInt
+  // filter/sort/floor passes were re-running each time.
+  const visibleListings = useMemo(
+    () => applyFilters(listings, filters, rarityMap),
+    [listings, filters, rarityMap]
+  );
+  const sortedVisibleListings = useMemo(
+    () => sortListings(visibleListings, sort),
+    [visibleListings, sort]
+  );
   // Listed count per tier for the filter rail's rarity rows (mockup parity).
-  const tierListedCounts: Partial<Record<string, number>> = {};
-  for (const l of listings) {
-    const t = l.tokenId ? rarityMap.get(l.tokenId)?.tier : undefined;
-    if (t) tierListedCounts[t] = (tierListedCounts[t] ?? 0) + 1;
-  }
+  const tierListedCounts = useMemo(() => {
+    const counts: Partial<Record<string, number>> = {};
+    for (const l of listings) {
+      const t = l.tokenId ? rarityMap.get(l.tokenId)?.tier : undefined;
+      if (t) counts[t] = (counts[t] ?? 0) + 1;
+    }
+    return counts;
+  }, [listings, rarityMap]);
   // TRAIT bids (criteria orders with a committed snapshot) render as their own
   // rows — they have no single tokenId, so a token-card grid can't show them.
-  const traitOffers = offers.filter(
-    (o) => ((o as unknown as Offer).criteriaTokenIds?.length ?? 0) > 0
-  ) as unknown as Array<WithOrder<Offer>>;
-  const tokenOffers = offers.filter(
-    (o) => !((o as unknown as Offer).criteriaTokenIds?.length ?? 0)
+  const traitOffers = useMemo(
+    () =>
+      offers.filter(
+        (o) => ((o as unknown as Offer).criteriaTokenIds?.length ?? 0) > 0
+      ) as unknown as Array<WithOrder<Offer>>,
+    [offers]
+  );
+  const tokenOffers = useMemo(
+    () => offers.filter((o) => !((o as unknown as Offer).criteriaTokenIds?.length ?? 0)),
+    [offers]
+  );
+  // Offers invert the price sort — "low to high" means best (highest) bid
+  // first on the offers tab, mirroring the original inline call.
+  const sortedTokenOffers = useMemo(
+    () => sortListings(tokenOffers, sort === "price-asc" ? "price-desc" : sort),
+    [tokenOffers, sort]
   );
   // Floor = cheapest live listing; every card at that exact price gets the badge.
-  const floorPriceWei =
-    listings.length > 0
-      ? listings.reduce(
-          (min, l) => (BigInt(l.priceWei) < BigInt(min) ? l.priceWei : min),
-          listings[0].priceWei
-        )
-      : undefined;
+  const floorPriceWei = useMemo(
+    () =>
+      listings.length > 0
+        ? listings.reduce(
+            (min, l) => (BigInt(l.priceWei) < BigInt(min) ? l.priceWei : min),
+            listings[0].priceWei
+          )
+        : undefined,
+    [listings]
+  );
   const detailListing = detailTokenId
     ? listings.find((l) => l.tokenId === detailTokenId)
     : undefined;
@@ -1083,7 +1110,7 @@ export default function MarketView() {
                     <ListingSkeleton />
                   ) : (
                     <ListingGrid
-                      listings={sortListings(visibleListings, sort)}
+                      listings={sortedVisibleListings}
                       collections={MARKET_COLLECTIONS}
                       onBuy={handleBuy}
                       onOffer={handleOffer}
@@ -1220,10 +1247,7 @@ export default function MarketView() {
                     <ListingSkeleton />
                   ) : (
                     <ListingGrid
-                      listings={sortListings(
-                        tokenOffers,
-                        sort === "price-asc" ? "price-desc" : sort
-                      )}
+                      listings={sortedTokenOffers}
                       collections={MARKET_COLLECTIONS}
                       onBuy={handleAcceptOffer}
                       onSelect={openDetail}

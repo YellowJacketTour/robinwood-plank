@@ -16,6 +16,7 @@ import {
 } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import type { MarketCollection } from "@/lib/market/types";
+import { withImageWidth } from "@/lib/ipfs";
 
 type Props = {
   account: string;
@@ -351,7 +352,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
                     } ${isSelected ? "ring-2 ring-inset ring-gold-400" : ""} ${isListed ? "cursor-not-allowed opacity-50" : "cursor-pointer focus-visible:ring-2 focus-visible:ring-gold-400/60"}`}
                   >
                     <Image
-                      src={item.imageUrl || group.collection.image}
+                      src={withImageWidth(item.imageUrl, 256) || group.collection.image}
                       alt={`${group.collection.name} #${item.tokenId}`}
                       fill
                       sizes="(min-width: 1024px) 20vw, 50vw"
