@@ -58,7 +58,10 @@ import {
 
 export type { GalleryNft };
 
-const POLL_MS = 25_000;
+// Supply is fixed (RobinWood is fully minted) and owner TTL is 10 minutes
+// (TTL_OWNER_MS in nft-cache.ts) — no need to re-check totalSupply() every
+// 25s anymore now that metadata comes from the one-shot collection dataset.
+const POLL_MS = 90_000;
 const META_CONCURRENCY = 6;
 const PAGE_SIZE = 24;
 /** First paint: stage this many cards immediately (newest first). */
@@ -732,6 +735,76 @@ export default function Gallery() {
     [makePlaceholder, recountLoaded, upsertItems],
   );
 
+  /**
+   * Cold-start fast path: RobinWood is a fixed, fully-minted, immutable
+   * collection, so instead of walking tokenURI + IPFS metadata per token
+   * (what hydrateToken below does), pull the whole precomputed dataset in
+   * ONE request and prime the same nft-cache the rest of the gallery reads
+   * from. Ownership is intentionally NOT in this dataset — it stays on the
+   * existing lazy path (hydrateToken's owner-only branch, modal open, owner
+   * search), since only supply/metadata is static here.
+   */
+  const primeFromCollectionIndex = useCallback(async () => {
+    try {
+      const res = await fetch("/api/market/collection-index", {
+        cache: "force-cache",
+      });
+      if (!res.ok || !aliveRef.current) return;
+      const data = (await res.json()) as {
+        totalSupply?: number;
+        entries?: Array<{
+          tokenId: number;
+          tokenUri: string;
+          name: string;
+          description: string;
+          imageUri: string;
+          attributes: NftAttribute[];
+        }>;
+      };
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      if (!entries.length || !aliveRef.current) return;
+
+      for (const entry of entries) {
+        // Already fresh (e.g. a poll or prior session beat this here) —
+        // don't clobber a possibly-newer cached owner/tokenUri pairing.
+        if (hasFreshMetadata(entry.tokenId)) continue;
+        // Dataset entry itself is incomplete (rare: first-ever cold build
+        // before the backing trait/image scans finished) — let the normal
+        // chain+IPFS hydrate path fill this one in as before.
+        if (!entry.imageUri && entry.attributes.length === 0) continue;
+        putTokenMetadata(entry.tokenId, {
+          tokenUri: entry.tokenUri,
+          name: entry.name,
+          description: entry.description,
+          imageUri: entry.imageUri,
+          attributes: entry.attributes,
+        });
+      }
+
+      const supply = data.totalSupply || entries.length;
+      if (supply > knownMaxRef.current) knownMaxRef.current = supply;
+      setTotalMinted((prev) => Math.max(prev, supply));
+
+      const painted: GalleryNft[] = [];
+      for (let id = supply; id >= 1; id -= 1) {
+        const rec = getCachedToken(id);
+        if (rec && hasFreshMetadata(id)) {
+          painted.push(recordToGalleryNft(rec, true));
+          loadedIdsRef.current.add(id);
+        } else {
+          painted.push(makePlaceholder(id));
+        }
+      }
+      if (!aliveRef.current) return;
+      upsertItems(painted);
+      recountLoaded();
+      setStatus(`Live gallery · ${supply.toLocaleString()} minted · dataset loaded`);
+    } catch {
+      // Dataset endpoint unavailable — fall straight back to the existing
+      // chain+IPFS per-token walk (syncMinted/hydrateToken), unchanged.
+    }
+  }, [makePlaceholder, recountLoaded, upsertItems]);
+
   const syncMinted = useCallback(
     async (mode: "full" | "poll" = "full") => {
       try {
@@ -875,7 +948,13 @@ export default function Gallery() {
       );
     }
 
-    void syncMinted("full");
+    // Dataset first (single request, primes the immutable metadata for the
+    // whole fixed collection), THEN the chain walk — which will now see
+    // hasFreshMetadata() true for every primed token and skip straight to
+    // its cheap owner-only branch instead of re-fetching tokenURI + IPFS.
+    void primeFromCollectionIndex().finally(() => {
+      void syncMinted("full");
+    });
     const stopPoll = startVisibleInterval(() => void syncMinted("poll"), POLL_MS);
 
     return () => {
@@ -1159,7 +1238,31 @@ export default function Gallery() {
           ) : (
             <>
               <div className="max-h-[min(70dvh,760px)] overflow-y-auto overscroll-contain p-2 sm:p-3">
-                {totalMinted === 0 && (
+                {totalMinted === 0 && status.startsWith("Connecting") && (
+                  // Cold, no-cache visit: the dataset request is still in
+                  // flight. Same card frame as a loaded grid (dense-card +
+                  // the identical pulse treatment makePlaceholder cards
+                  // already use below) so this reads as "loading", not a
+                  // different design.
+                  <ul
+                    className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2 sm:gap-2.5"
+                    aria-hidden="true"
+                  >
+                    {Array.from({ length: INITIAL_STAGE }, (_, i) => (
+                      <li key={i} className="dense-card overflow-hidden p-0">
+                        <div className="flex aspect-square w-full animate-pulse items-center justify-center bg-wood-950/80 text-xl">
+                          🪵
+                        </div>
+                        <div className="space-y-1.5 p-2">
+                          <div className="h-3 w-3/4 animate-pulse rounded bg-wood-900" />
+                          <div className="h-2 w-1/2 animate-pulse rounded bg-wood-900" />
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {totalMinted === 0 && !status.startsWith("Connecting") && (
                   <p className="py-12 text-center text-sm text-foreground/60">
                     Waiting for the first mint…
                   </p>
