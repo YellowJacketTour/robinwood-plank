@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "lint:inmotion": "eslint app/api/health/route.ts lib/postgres.ts lib/public-json.ts lib/boards-store.ts lib/market/durable-kv.ts lib/market/orders-store.ts lib/market/served-orders.ts test/market/durable-kv.test.ts scripts/migrate-postgres.mjs scripts/migrate-upstash-to-postgres.mjs scripts/postgres-maintenance.mjs scripts/verify-postgres-storage.ts deploy/inmotion/passenger.cjs next.config.ts",
+    "lint:inmotion": "eslint app/api/health/route.ts lib/postgres.ts lib/public-json.ts lib/boards-store.ts lib/market/durable-kv.ts lib/market/orders-store.ts lib/market/served-orders.ts test/market/durable-kv.test.ts test/market/upstash-migration.test.ts scripts/lib/*.mjs scripts/migrate-postgres.mjs scripts/migrate-upstash-to-postgres.mjs scripts/backup-postgres.mjs scripts/snapshot-vault-state.mjs scripts/postgres-maintenance.mjs scripts/verify-postgres-storage.ts deploy/inmotion/passenger.cjs next.config.ts",
     "test:contracts": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json hardhat test",
     "test:market": "tsx --test test/market/*.test.ts",
     "test:postgres": "tsx scripts/verify-postgres-storage.ts",

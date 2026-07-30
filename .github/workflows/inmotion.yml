@@ -8,7 +8,21 @@ on:
   push:
     branches:
       - inmotion
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Deploy, inspect Upstash, or perform the confirmed PostgreSQL cutover.
+        required: true
+        type: choice
+        default: deploy
+        options:
+          - deploy
+          - inventory
+          - cutover
+      confirmation:
+        description: For cutover, enter REPLACE_INMOTION_MARKET_DATA
+        required: false
+        type: string
 
 concurrency:
   group: inmotion-passenger-${{ github.ref }}
@@ -19,6 +33,9 @@ permissions:
 
 jobs:
   build:
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      inputs.operation == 'deploy'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -81,6 +98,10 @@ jobs:
           mkdir -p .next/standalone/scripts
           cp scripts/migrate-postgres.mjs .next/standalone/scripts/migrate-postgres.mjs
           cp scripts/postgres-maintenance.mjs .next/standalone/scripts/postgres-maintenance.mjs
+          cp scripts/migrate-upstash-to-postgres.mjs .next/standalone/scripts/migrate-upstash-to-postgres.mjs
+          cp scripts/backup-postgres.mjs .next/standalone/scripts/backup-postgres.mjs
+          cp scripts/snapshot-vault-state.mjs .next/standalone/scripts/snapshot-vault-state.mjs
+          cp -R scripts/lib .next/standalone/scripts/lib
           tar -C .next/standalone -czf passenger-release.tgz .
 
       - uses: actions/upload-artifact@v7
@@ -95,7 +116,8 @@ jobs:
     needs: build
     if: >-
       vars.INMOTION_DEPLOY_ENABLED == 'true' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: inmotion-staging
@@ -256,3 +278,148 @@ jobs:
           fi
           REMOTE
           exit 1
+
+  market-data:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.operation == 'inventory' || inputs.operation == 'cutover')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+      UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+      OPERATION: ${{ inputs.operation }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Validate requested operation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$OPERATION" = "inventory" || test "$OPERATION" = "cutover"
+          if [ "$OPERATION" = "cutover" ]; then
+            test "$CONFIRMATION" = "REPLACE_INMOTION_MARKET_DATA"
+          fi
+          test -n "$UPSTASH_REDIS_REST_URL"
+          test -n "$UPSTASH_REDIS_REST_TOKEN"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Stage read-only source credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          normalize_secret() {
+            local value="${1//$'\r'/}"
+            local name="$2"
+            if [[ "$value" == "$name="* ]]; then
+              value="${value#*=}"
+            fi
+            if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+              value="${value:1:${#value}-2}"
+            fi
+            if [[ "$value" == \'*\' && "$value" == *\' ]]; then
+              value="${value:1:${#value}-2}"
+            fi
+            if [[ "$value" == *$'\n'* ]]; then
+              echo "Invalid multi-line $name secret." >&2
+              return 1
+            fi
+            printf '%s' "$value"
+          }
+          upstash_url="$(normalize_secret "$UPSTASH_REDIS_REST_URL" UPSTASH_REDIS_REST_URL)"
+          upstash_token="$(normalize_secret "$UPSTASH_REDIS_REST_TOKEN" UPSTASH_REDIS_REST_TOKEN)"
+          if [[ "$upstash_url" =~ https://[A-Za-z0-9.-]+\.upstash\.io/? ]]; then
+            upstash_url="${BASH_REMATCH[0]}"
+          elif [[ "$upstash_url" =~ [A-Za-z0-9.-]+\.upstash\.io ]]; then
+            upstash_url="https://${BASH_REMATCH[0]}"
+          fi
+          case "$upstash_url" in
+            https://*.upstash.io|https://*.upstash.io/) ;;
+            *) echo "Invalid Upstash REST URL." >&2; exit 1 ;;
+          esac
+          test "${#upstash_token}" -ge 20
+          source_env="$RUNNER_TEMP/upstash-source.env"
+          printf 'UPSTASH_REDIS_REST_URL=%s\n' "$upstash_url" > "$source_env"
+          printf 'UPSTASH_REDIS_REST_TOKEN=%s\n' "$upstash_token" >> "$source_env"
+          port="${INMOTION_PORT:-2222}"
+          remote_env="$INMOTION_APP_DIR/shared/runtime-secrets/.upstash-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.env"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            "mkdir -p '$INMOTION_APP_DIR/shared/runtime-secrets' && chmod 700 '$INMOTION_APP_DIR/shared/runtime-secrets'"
+          scp -i "$HOME/.ssh/inmotion" -P "$port" \
+            "$source_env" "${INMOTION_USER}@${INMOTION_HOST}:${remote_env}"
+          rm -f "$source_env"
+          echo "REMOTE_SOURCE_ENV=$remote_env" >> "$GITHUB_ENV"
+
+      - name: Inventory or perform cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- \
+              "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "$REMOTE_SOURCE_ENV" \
+              "$OPERATION" "$CONFIRMATION" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          source_env="$3"
+          operation="$4"
+          confirmation="${5-}"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected app directory." >&2; exit 1 ;;
+          esac
+          cleanup() { rm -f "$source_env"; }
+          trap cleanup EXIT
+          test -x "$node_bin"
+          test -s "$source_env"
+          chmod 600 "$source_env"
+          test -f "$app_dir/shared/.env.production"
+          test -f "$app_dir/current/scripts/migrate-upstash-to-postgres.mjs"
+          test -f "$app_dir/current/scripts/snapshot-vault-state.mjs"
+
+          "$node_bin" "$app_dir/current/scripts/snapshot-vault-state.mjs"
+
+          if [ "$operation" = "cutover" ]; then
+            test "$confirmation" = "REPLACE_INMOTION_MARKET_DATA"
+            INMOTION_APP_DIR="$app_dir" \
+            PLANK_BACKUP_DIR="$app_dir/shared/backups" \
+              "$node_bin" \
+                --env-file="$app_dir/shared/.env.production" \
+                "$app_dir/current/scripts/backup-postgres.mjs"
+            "$node_bin" \
+              --env-file="$app_dir/shared/.env.production" \
+              --env-file="$source_env" \
+              "$app_dir/current/scripts/migrate-upstash-to-postgres.mjs" \
+              --apply --replace \
+              --confirm=REPLACE_INMOTION_MARKET_DATA
+          else
+            "$node_bin" \
+              --env-file="$app_dir/shared/.env.production" \
+              --env-file="$source_env" \
+              "$app_dir/current/scripts/migrate-upstash-to-postgres.mjs"
+          fi
+
+          "$node_bin" "$app_dir/current/scripts/snapshot-vault-state.mjs"
+          REMOTE

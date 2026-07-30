@@ -249,22 +249,49 @@ The workflow builds on GitHub, not the shared server.
 Open Seaport orders are off-chain. If the current site has live listings or
 offers, obtain the existing Upstash credentials before cutover.
 
-Inventory without writing:
+The source credential is a read-only Upstash REST token stored in GitHub
+Actions as `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. It is
+staged on the server only for the duration of a manually dispatched migration
+job and removed on exit. The importer does not use the deprecated Vercel KV
+client.
 
-```bash
-node --env-file=.env.production scripts/migrate-upstash-to-postgres.mjs
-```
+Use **Actions → InMotion Passenger CI/CD → Run workflow** with
+`operation=inventory` to enumerate key types, counts, TTLs, the projected SQL
+row counts, and the current destination counts without writing.
 
-During an approved write freeze:
+The cutover path is intentionally stricter than the local command:
+
+1. Freeze `POST` and `DELETE` traffic to the old market API.
+2. Dispatch `operation=cutover` with confirmation
+   `REPLACE_INMOTION_MARKET_DATA`.
+3. The workflow records live v1/v2 chain state, creates a mode-`600`
+   `pg_dump` under `shared/backups`, atomically replaces only marketplace
+   rows, reconciles every destination count, and records live chain state
+   again.
+4. Move DNS only after reconciliation and public smoke checks pass.
+
+Local inventory without writing:
 
 ```bash
 node --env-file=.env.production \
-  scripts/migrate-upstash-to-postgres.mjs --apply
+  --env-file=.env.upstash-readonly \
+  scripts/migrate-upstash-to-postgres.mjs
+```
+
+During an approved write freeze, after a verified backup:
+
+```bash
+node --env-file=.env.production \
+  --env-file=.env.upstash-readonly \
+  scripts/migrate-upstash-to-postgres.mjs \
+  --apply --replace --confirm=REPLACE_INMOTION_MARKET_DATA
 ```
 
 The importer maps listings and offers into indexed SQL rows, imports served
-order hashes, and copies expiring cache keys. Existing destination rows are
-not overwritten unless `--overwrite` is explicitly supplied.
+order hashes, and copies cache/index keys. It refuses unsupported Redis types
+and refuses expiring hashes/sets because the PostgreSQL compatibility schema
+cannot preserve those TTLs. The cutover transaction either reconciles and
+commits in full or rolls back in full.
 
 ## 11. Maintenance and backups
 
