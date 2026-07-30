@@ -189,6 +189,7 @@ jobs:
             "${INMOTION_USER}@${INMOTION_HOST}" \
             bash -s -- "$INMOTION_APP_DIR" "$RELEASE_SHA" "$INMOTION_NODE_BIN" <<'REMOTE'
           set -euo pipefail
+          trap 'status=$?; echo "Remote activation failed at line $LINENO (exit $status)" >&2; exit "$status"' ERR
           app_dir="$1"
           release_sha="$2"
           node_bin="$3"
