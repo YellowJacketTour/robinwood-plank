@@ -1,22 +1,20 @@
-import type { Metadata } from "next";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import MarketView from "@/components/market/MarketView";
 import ComingSoonGate from "@/components/market/ComingSoonGate";
-import { MARKET_ENABLED, SITE_URL } from "@/lib/constants";
+import { MARKET_ENABLED } from "@/lib/constants";
+import { createPageMetadata } from "@/lib/seo";
 
 /** Short ISR so dual-vault Instant Swap UI is not stuck behind year-long HTML cache. */
 export const revalidate = 30;
 
-export const metadata: Metadata = {
-  title: "Marketplank — RobinWood NFT Marketplace",
-  description: "List, buy, sell, and make offers on RobinWood — and eventually any Robinhood Chain collection.",
-  openGraph: {
-    title: "Marketplank",
-    description: "The RobinWood NFT marketplace on Robinhood Chain.",
-    url: `${SITE_URL}/market`,
-  },
-};
+export const metadata = createPageMetadata({
+  title: "Marketplank NFT Marketplace",
+  description:
+    "Browse, list, buy, sell, make offers, and use Instant Swap for RobinWood NFTs on Robinhood Chain.",
+  path: "/market",
+  keywords: ["Marketplank", "RobinWood marketplace", "Robinhood Chain NFT marketplace"],
+});
 
 export default function MarketPage() {
   return (

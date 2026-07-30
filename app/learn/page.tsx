@@ -1,19 +1,15 @@
-import type { Metadata } from "next";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import LearnGuide from "@/components/learn/LearnGuide";
-import { SITE_URL } from "@/lib/constants";
+import { createPageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Learn — RobinWood, Marketplank, Vault & Platforms",
+export const metadata = createPageMetadata({
+  title: "Learn",
   description:
-    "Tutorial-level guide to plank.love: mint, market, Instant Swap vault math, LP, Seaport, Robinhood Chain, and how every system fits together. Written for humans and AI readers.",
-  openGraph: {
-    title: "Learn RobinWood & Marketplank",
-    description: "Complete logical progression through every facet of plank.love and its dependencies.",
-    url: `${SITE_URL}/learn`,
-  },
-};
+    "Learn how RobinWood minting, $PLANK trading, Marketplank, Seaport orders, Instant Swap vaults, and Robinhood Chain fit together.",
+  path: "/learn",
+  keywords: ["RobinWood guide", "Marketplank guide", "Robinhood Chain tutorial"],
+});
 
 export default function LearnPage() {
   return (
