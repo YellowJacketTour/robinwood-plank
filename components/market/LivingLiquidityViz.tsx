@@ -142,49 +142,81 @@ export default function LivingLiquidityViz({ vaultAddress = null, active = true 
           </span>
         )}
       </div>
-      <div className="relative grid grid-cols-1 sm:grid-cols-2">
-        <div className="relative h-48 overflow-hidden border-b border-line bg-gradient-to-b from-wood-900/40 to-black/30 sm:h-64 sm:border-b-0 sm:border-r">
-          <PlankFence held={held} rarity={rarity} />
-          <span className="pointer-events-none absolute bottom-1.5 left-2 text-[0.55rem] font-bold uppercase tracking-wide text-foreground/35">
-            {held ? `${held.length} held` : "…"}
-          </span>
+      <div className="p-3">
+        {/* Finalized mockup .liquidity-visual: one centered radial-rings
+            scene with the fence caption — not a thumbnail carousel. Held
+            planks are drawn ON the fence line inside the rings, so the
+            lore (and the held art) survives inside the approved shape. */}
+        <div
+          className="liquidity-visual relative grid min-h-[260px] place-items-center overflow-hidden rounded-xl"
+          style={{
+            background:
+              "radial-gradient(circle at center, rgba(219,165,63,0.22), transparent 52%)," +
+              "repeating-radial-gradient(circle at center, rgba(239,196,99,0.13) 0 1px, transparent 1px 34px)," +
+              "#1b120a",
+          }}
+        >
+          <div className="pointer-events-none z-10 flex flex-col items-center gap-1.5 text-center">
+            <div
+              className="animate-liquidity-pulse relative overflow-hidden rounded-full bg-gold-400/20"
+              style={{
+                width: 64 + reserveScale * 40,
+                height: 64 + reserveScale * 40,
+                border: "1px solid rgba(239,196,99,0.3)",
+              }}
+            >
+              <Image
+                src="/images/plank-logo.webp"
+                alt=""
+                fill
+                sizes="104px"
+                className="object-contain p-3 opacity-90"
+                unoptimized
+              />
+            </div>
+            <p className="font-display text-base text-gold-300">
+              {held ? `${held.length} Planks in the fence` : "…"}
+            </p>
+            <p className="text-[0.62rem] text-foreground/50">
+              {stats
+                ? `${formatTokenAmount(stats.shareReserveWei, 18, 2)} shares · ${formatTokenAmount(stats.ethReserveWei, 18, 4)} Ξ${
+                    ethUsd > 0 ? ` · ≈ ${formatUsd(weiToUsd(stats.ethReserveWei, ethUsd))}` : ""
+                  }`
+                : "reading vault…"}
+            </p>
+          </div>
+          {/* The fence itself — held planks along the bottom of the scene. */}
+          <div className="absolute inset-x-0 bottom-0 h-16">
+            <PlankFence held={held} rarity={rarity} />
+          </div>
         </div>
 
-        <div className="relative flex h-48 flex-col items-center justify-center gap-3 overflow-hidden bg-gradient-to-bl from-gold-900/10 to-transparent px-3 sm:h-64">
-          <div
-            className="animate-liquidity-pulse relative overflow-hidden rounded-full bg-gold-400/20"
-            style={{
-              width: 70 + reserveScale * 60,
-              height: 70 + reserveScale * 60,
-              border: "1px solid rgba(239,196,99,0.3)",
-            }}
-          >
-            <Image
-              src="/images/plank-logo.webp"
-              alt=""
-              fill
-              sizes="130px"
-              className="object-contain p-3.5 opacity-90"
-              unoptimized
-            />
+        <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+            <p className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Vault fee revenue</p>
+            <p className="mt-0.5 text-xs font-bold text-foreground">{vaultFeeEth} Ξ</p>
           </div>
-          <div className="text-center">
-            <p className="font-display text-base text-gold-300">
-              {stats ? formatTokenAmount(stats.ethReserveWei, 18, 4) : "…"} Ξ
-            </p>
-            <p className="text-[0.6rem] text-foreground/45">
-              liquidity{ethUsd > 0 && stats ? ` · ${formatUsd(weiToUsd(stats.ethReserveWei, ethUsd))}` : ""}
-            </p>
+          <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+            <p className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Est. market fees</p>
+            <p className="mt-0.5 text-xs font-bold text-foreground">{marketFeeEth} Ξ</p>
           </div>
-          <div className="flex gap-2 text-center">
-            <div className="rounded-lg border border-line bg-wood-950 px-2 py-1">
-              <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Vault fees</p>
-              <p className="text-[0.65rem] font-bold text-foreground">{vaultFeeEth} Ξ</p>
-            </div>
-            <div className="rounded-lg border border-line bg-wood-950 px-2 py-1">
-              <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Market fees est.</p>
-              <p className="text-[0.65rem] font-bold text-foreground">{marketFeeEth} Ξ</p>
-            </div>
+          <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+            <p className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Vault</p>
+            <p className="mt-0.5 truncate text-xs font-bold text-foreground">
+              {vaultAddress ? (
+                <a
+                  href={`https://robinhoodchain.blockscout.com/address/${vaultAddress}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:text-gold-300"
+                  title={vaultAddress}
+                >
+                  {shortVault(vaultAddress)} ↗
+                </a>
+              ) : (
+                "—"
+              )}
+            </p>
           </div>
         </div>
       </div>

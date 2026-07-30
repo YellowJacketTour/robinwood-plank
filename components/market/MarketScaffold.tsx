@@ -10,7 +10,14 @@ type ScaffoldProps = {
 };
 
 export function MarketScaffold({ children }: ScaffoldProps) {
-  return <section className={styles.root}>{children}</section>;
+  // data-market-shell: the boundary the global marketing-page clamps in
+  // app/globals.css exclude themselves from — inside here, component-level
+  // Tailwind styles are authoritative (mockup parity depends on it).
+  return (
+    <section data-market-shell className={styles.root}>
+      {children}
+    </section>
+  );
 }
 
 export function MarketCollectionHero({ collection }: { collection: MarketCollection }) {
