@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import { ArrowRight } from "lucide-react";
 import { shortAddress } from "@/lib/trade";
 import {
   getRarityMap,
@@ -39,6 +40,15 @@ const KIND_STYLE: Record<ActivityEvent["kind"], string> = {
   transfer: "text-foreground/50",
 };
 
+/** True for a real 0x-prefixed 20-byte contract address, false for the
+ * occasional bare method name ("multicall", "transferfrom") a venue's
+ * `contract` field can carry when the Blockscout feed had no cleaner
+ * signal — those must never be treated as a linkable address or a dropdown
+ * option, or the "All platforms" filter fills up with raw method fragments. */
+function isAddress(value: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(value);
+}
+
 /**
  * Human label for a venue. "Marketplank" is only ever shown when the fill's
  * on-chain orderHash positively matched an order this relay actually served
@@ -55,7 +65,7 @@ function venueLabel(venue: Venue): string {
   if (venue.kind === "marketplank") return "Marketplank";
   if (venue.kind === "seaport") return "Seaport (other)";
   if (venue.kind === "vault") return "Vault";
-  return shortAddress(venue.contract);
+  return isAddress(venue.contract) ? shortAddress(venue.contract) : "Other contract";
 }
 
 function ago(iso: string | null): string {
@@ -72,6 +82,13 @@ const EXPLORER_TX = "https://robinhoodchain.blockscout.com/tx/";
 const EXPLORER_ADDRESS = "https://robinhoodchain.blockscout.com/address/";
 
 type KindFilter = "all" | ActivityEvent["kind"];
+
+const VENUE_KIND_LABELS: Record<"marketplank" | "seaport" | "vault" | "other", string> = {
+  marketplank: "Marketplank",
+  seaport: "Seaport (other)",
+  vault: "Vault",
+  other: "Other contracts",
+};
 
 function VenueValue({ venue }: { venue: Venue }) {
   if (!venue) return <>wallet-to-wallet</>;
@@ -95,6 +112,18 @@ function VenueValue({ venue }: { venue: Venue }) {
       </span>
     );
   }
+  const title =
+    venue.kind === "seaport"
+      ? "Went through the Seaport protocol, but not an order we served — likely another Seaport-based frontend, a pre-launch fill, or a script. Not attributed to any specific brand without evidence."
+      : "Executed via a contract we don't recognize — some other marketplace, router, or script on this chain.";
+
+  // Only link out when the venue actually carries a real contract address —
+  // some "other" fills only ever resolved a bare method name, and linking
+  // that to the block explorer would 404.
+  if (!isAddress(venue.contract)) {
+    return <span title={title}>{venueLabel(venue)}</span>;
+  }
+
   return (
     <a
       href={`${EXPLORER_ADDRESS}${venue.contract}`}
@@ -102,11 +131,7 @@ function VenueValue({ venue }: { venue: Venue }) {
       rel="noopener noreferrer"
       onClick={(event) => event.stopPropagation()}
       className="hover:underline"
-      title={
-        venue.kind === "seaport"
-          ? "Went through the Seaport protocol, but not an order we served — likely another Seaport-based frontend, a pre-launch fill, or a script. Not attributed to any specific brand without evidence."
-          : "Executed via a contract we don't recognize — some other marketplace, router, or script on this chain."
-      }
+      title={title}
     >
       {venueLabel(venue)}
     </a>
@@ -229,17 +254,20 @@ export default function ActivityFeed({
     setVenueFilter("all");
   };
 
-  // Options are derived from what's actually IN the feed — never a
-  // hardcoded guess at which venues might show up.
+  // Named venues only, never raw contract addresses or method fragments —
+  // one collapsed "Other contracts" option covers every venue.kind === "other"
+  // event instead of listing each distinct address/method it happened to
+  // carry. Options are still derived from what's actually IN the feed, just
+  // grouped by kind rather than by raw contract text.
   const venueOptions = useMemo(() => {
     if (!events) return [];
-    const seen = new Map<string, string>();
+    const present = new Set<string>();
     for (const e of events) {
-      if (!e.venue) continue;
-      const key = e.venue.kind === "marketplank" ? "marketplank" : e.venue.contract.toLowerCase();
-      if (!seen.has(key)) seen.set(key, venueLabel(e.venue));
+      if (e.venue) present.add(e.venue.kind);
     }
-    return [...seen.entries()];
+    return (["marketplank", "seaport", "vault", "other"] as const)
+      .filter((kind) => present.has(kind))
+      .map((kind) => [kind, VENUE_KIND_LABELS[kind]] as const);
   }, [events]);
 
   const filtered = useMemo(() => {
@@ -247,7 +275,7 @@ export default function ActivityFeed({
     return events.filter((e) => {
       if (kindFilter !== "all" && e.kind !== kindFilter) return false;
       if (venueFilter !== "all") {
-        const key = e.venue ? (e.venue.kind === "marketplank" ? "marketplank" : e.venue.contract.toLowerCase()) : "none";
+        const key = e.venue ? e.venue.kind : "none";
         if (key !== venueFilter) return false;
       }
       return true;
@@ -319,7 +347,7 @@ export default function ActivityFeed({
         </div>
 
         <div
-          className="hidden grid-cols-[3.5rem_minmax(10rem,1fr)_6.5rem_8rem_10rem_2.5rem] gap-3 px-2 text-[0.58rem] font-black uppercase tracking-wider text-foreground/35 xl:grid"
+          className="hidden grid-cols-[3.5rem_minmax(10rem,1fr)_6.5rem_8rem_10rem_2.5rem] gap-3 rounded-lg bg-[rgba(219,165,63,0.07)] px-2 py-1.5 text-[0.58rem] font-black uppercase tracking-wider text-foreground/45 xl:grid"
           aria-hidden="true"
         >
           <span>Art</span>
@@ -472,8 +500,10 @@ export default function ActivityFeed({
                       <VenueValue venue={event.venue} />
                     </span>
 
-                    <span className="hidden whitespace-nowrap font-mono text-[0.6rem] text-foreground/40 xl:inline">
-                      {shortAddress(event.from)} → {shortAddress(event.to)}
+                    <span className="hidden items-center gap-1 whitespace-nowrap font-mono text-[0.6rem] text-foreground/40 xl:inline-flex">
+                      {shortAddress(event.from)}
+                      <ArrowRight size={12} strokeWidth={2.5} className="shrink-0" />
+                      {shortAddress(event.to)}
                     </span>
 
                     <span className="whitespace-nowrap text-right text-[0.65rem] text-foreground/40 xl:text-left">

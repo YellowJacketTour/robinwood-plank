@@ -11,16 +11,11 @@ import {
   type PricingMode,
   type SelectedItem,
 } from "@/lib/market/bulk-list";
+import { Check, X } from "lucide-react";
 import { getOwnedInventory, type OwnedInventory } from "@/lib/market/inventory";
 import { buildListing } from "@/lib/market/seaport";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
-import {
-  getRarityMap,
-  tierAnimationClass,
-  tierCardStyle,
-  tierColor,
-  tierGlow,
-} from "@/lib/market/rarityClient";
+import { getRarityMap, tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import type { MarketCollection } from "@/lib/market/types";
 import { withImageWidth } from "@/lib/ipfs";
@@ -198,7 +193,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
 
   if (loadError && inventory === null) {
     return (
-      <div className="rounded-lg border border-dashed border-red-500/30 px-4 py-6 text-center" role="alert">
+      <div className="rounded-xl border border-red-500/30 bg-panel px-4 py-6 text-center" role="alert">
         <p className="text-sm text-red-300">{loadError}</p>
         <button
           type="button"
@@ -212,7 +207,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
   }
   if (inventory === null) {
     return (
-      <p className="rounded-lg border border-dashed border-line bg-panel px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-xl border border-line bg-panel px-4 py-8 text-center text-sm text-cream-muted">
         Reading your planks from chain…
       </p>
     );
@@ -221,7 +216,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
   const totalOwned = inventory.reduce((n, g) => n + g.items.length, 0);
   if (totalOwned === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-line bg-panel px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-xl border border-line bg-panel px-4 py-8 text-center text-sm text-cream-muted">
         This wallet holds no planks yet.
       </p>
     );
@@ -233,8 +228,9 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
+          <p className="text-[0.6rem] font-black uppercase tracking-[0.14em] text-gold-300/75">Your market desk</p>
           <h3 className="font-display text-xl text-gold-300">List from your wallet</h3>
-          <p className="text-xs text-foreground/55">
+          <p className="text-xs text-cream-muted">
             {totalOwned} owned · {selectedItems.length} selected
           </p>
         </div>
@@ -242,13 +238,13 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
           type="button"
           onClick={refresh}
           disabled={refreshing}
-          className="min-h-10 rounded-md border border-line px-3 text-xs text-gold-300 disabled:opacity-50"
+          className="min-h-10 rounded-md border border-line px-3 text-xs font-bold text-gold-300 disabled:opacity-50"
         >
           {refreshing ? "Reloading…" : "Reload"}
         </button>
       </div>
       {loadError && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-950/20 px-3 py-2 text-xs text-red-200" role="alert">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-950/20 px-3 py-2 text-xs text-red-200" role="alert">
           <span>{loadError}</span>
           <button type="button" onClick={refresh} className="min-h-9 underline">
             Retry
@@ -257,8 +253,8 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
       )}
       {groups.map((group) => (
         <section key={group.collection.slug} className="space-y-2">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-foreground/50">
-            {group.collection.name} · {group.items.length} owned
+          <h3 className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
+            {group.collection.name} <span className="text-cream-muted">· {group.items.length} owned</span>
           </h3>
           <ul className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2">
             {group.items.map((item) => {
@@ -269,20 +265,17 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
               return (
                 <li
                   key={key}
-                  className={`dense-card overflow-hidden p-0 ${r ? tierAnimationClass(r.tier) : ""}`}
-                  style={r ? { boxShadow: tierGlow(r.tier), ...tierCardStyle(r.tier) } : undefined}
+                  className={`dense-card flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-line-strong ${
+                    isSelected ? "ring-2 ring-gold-400" : ""
+                  }`}
                 >
-                  {/* holo-card scoped to the artwork button only, not the
-                      whole tile — inherits --holo-intensity from the <li>. */}
                   <button
                     type="button"
                     disabled={isListed || busy}
                     aria-pressed={isSelected}
                     aria-label={`${isSelected ? "Deselect" : "Select"} #${item.tokenId}`}
                     onClick={() => toggle(group.collection, item.tokenId)}
-                    className={`relative block aspect-square w-full bg-wood-900 outline-none transition ${
-                      r ? "holo-card" : ""
-                    } ${isSelected ? "ring-2 ring-inset ring-gold-400" : ""} ${isListed ? "cursor-not-allowed opacity-50" : "cursor-pointer focus-visible:ring-2 focus-visible:ring-gold-400/60"}`}
+                    className={`relative block aspect-square w-full bg-wood-900 outline-none transition ${isListed ? "cursor-not-allowed opacity-50" : "cursor-pointer focus-visible:ring-2 focus-visible:ring-gold-400/60"}`}
                   >
                     <Image
                       src={withImageWidth(item.imageUrl, 256) || group.collection.image}
@@ -294,12 +287,12 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                     />
                     {/* Same badge/overlay pattern as ListingCard's Floor badge. */}
                     {isSelected && (
-                      <span className="card-overlay absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold-500 text-[0.7rem] font-bold text-wood-950">
-                        ✓
+                      <span className="card-overlay absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold-500 text-wood-950">
+                        <Check size={12} strokeWidth={3} />
                       </span>
                     )}
                     {isListed && (
-                      <span className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/90 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
+                      <span className="card-overlay absolute left-1.5 top-1.5 rounded-full bg-black/90 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
                         Listed
                       </span>
                     )}
@@ -312,16 +305,16 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                         {r.tier}
                       </span>
                     )}
-                    <span className="card-overlay legible-text absolute inset-x-1.5 bottom-1.5 flex flex-col rounded-lg bg-black/90 px-2 py-0.5 leading-tight">
-                      <span className="truncate text-[0.6rem] font-bold text-foreground">
-                        {r?.name ?? `#${item.tokenId}`}
-                      </span>
-                      <span className="truncate text-[0.5rem] text-foreground/60">
-                        #{item.tokenId}
-                        {r ? ` · R${r.rank} · ${r.tier}` : ""}
-                      </span>
-                    </span>
                   </button>
+                  <div className="flex flex-1 flex-col gap-0.5 p-2 leading-tight">
+                    <span className="truncate text-[0.6rem] font-bold text-foreground">
+                      {r?.name ?? `#${item.tokenId}`}
+                    </span>
+                    <span className="truncate text-[0.55rem] text-cream-muted">
+                      #{item.tokenId}
+                      {r ? ` · R${r.rank}` : ""}
+                    </span>
+                  </div>
                 </li>
               );
             })}
@@ -330,7 +323,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
       ))}
 
       {selectedItems.length > 0 && (
-        <div className="wood-ledger space-y-3 p-3">
+        <div className="rounded-xl border border-line bg-panel-strong space-y-3 p-3">
           {reviewOpen && (
             <div
               className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 sm:items-center sm:p-4"
@@ -338,7 +331,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
               aria-modal="true"
               aria-labelledby="listing-review-title"
             >
-              <div className="wood-ledger w-full max-w-lg rounded-t-xl border border-line-strong p-4 sm:rounded-xl">
+              <div className="w-full max-w-lg rounded-t-xl border border-line-strong bg-panel-strong p-4 sm:rounded-xl">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-[0.65rem] font-black uppercase tracking-[0.14em] text-gold-300/75">
@@ -354,33 +347,33 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                     className="flex h-10 w-10 items-center justify-center rounded-md border border-line text-foreground/65 hover:text-gold-300"
                     aria-label="Close review"
                   >
-                    ✕
+                    <X size={14} strokeWidth={2.5} />
                   </button>
                 </div>
                 <dl className="mt-4 grid grid-cols-2 gap-2">
-                  <div className="rounded-lg border border-line bg-panel-strong p-3">
-                    <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                  <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                    <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                       Planks
                     </dt>
-                    <dd className="mt-1 text-sm text-foreground">{selectedItems.length}</dd>
+                    <dd className="mt-1 text-xs font-bold text-foreground">{selectedItems.length}</dd>
                   </div>
-                  <div className="rounded-lg border border-line bg-panel-strong p-3">
-                    <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                  <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                    <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                       Wallet signatures
                     </dt>
-                    <dd className="mt-1 text-sm text-foreground">{selectedItems.length}</dd>
+                    <dd className="mt-1 text-xs font-bold text-foreground">{selectedItems.length}</dd>
                   </div>
-                  <div className="rounded-lg border border-line bg-panel-strong p-3">
-                    <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                  <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                    <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                       Expires
                     </dt>
-                    <dd className="mt-1 text-sm text-foreground">{durationDays} days</dd>
+                    <dd className="mt-1 text-xs font-bold text-foreground">{durationDays} days</dd>
                   </div>
-                  <div className="rounded-lg border border-line bg-panel-strong p-3">
-                    <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                  <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                    <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                       Total ask
                     </dt>
-                    <dd className="mt-1 text-sm text-foreground">{totalPreview ?? "—"} ETH</dd>
+                    <dd className="mt-1 text-xs font-bold text-foreground">{totalPreview ?? "—"} ETH</dd>
                   </div>
                 </dl>
                 <p className="mt-3 text-xs leading-5 text-foreground/55">

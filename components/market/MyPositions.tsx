@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import {
   cancelOrder,
   getMarketApprovals,
@@ -154,12 +155,13 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
       )}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
+          <p className="text-[0.6rem] font-black uppercase tracking-[0.14em] text-gold-300/75">Your market desk</p>
           <h3 className="font-display text-xl text-gold-300">Open positions</h3>
-          <p className="text-xs text-foreground/55">
+          <p className="text-xs text-cream-muted">
             Listings and offers remain separate and cancellable.
           </p>
         </div>
-        <div className="grid grid-cols-2 rounded-lg border border-line bg-panel-strong p-1">
+        <div className="grid grid-cols-2 rounded-lg border border-line bg-wood-950 p-1">
           {(["Listing", "Offer"] as const).map((kind) => (
             <button
               key={kind}
@@ -179,50 +181,63 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
       </div>
 
       {visible.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line bg-panel px-4 py-8 text-center text-sm text-foreground/60">
+        <p className="rounded-xl border border-line bg-panel px-4 py-8 text-center text-sm text-cream-muted">
           No active {scope === "Listing" ? "listings" : "offers"}.
         </p>
       ) : (
-        <div className="wood-ledger overflow-hidden">
+        <div className="overflow-hidden rounded-xl border border-line">
+          <div className="hidden bg-[rgba(219,165,63,0.07)] px-3 py-2 text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted sm:flex sm:items-center sm:justify-between sm:gap-3">
+            <span>Position</span>
+            <span>Price / Expiry</span>
+          </div>
           <ul>
             {visible.map((row) => (
               <li
                 key={row.id}
-                className="flex items-center justify-between gap-3 border-t border-line px-3 py-2.5 first:border-t-0"
+                className="flex items-center justify-between gap-3 border-t border-line bg-panel px-3 py-2.5 first:border-t-0"
               >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-foreground">
-                    {row.kind} ·{" "}
-                    {row.tokenId
-                      ? `#${row.tokenId}`
-                      : row.traits?.length
-                        ? row.traits
-                            .map((trait) => `${trait.traitType}: ${trait.value}`)
-                            .join(" AND ")
-                        : `${row.criteriaTokenIds?.length ?? 0} qualifying Planks`}
-                  </p>
-                  <p className="text-[0.65rem] text-foreground/50">
-                    {/* Listings settle in native ETH; bids are WETH-denominated
-                        because Seaport cannot pull ETH from an offerer. Labelling
-                        both "Ξ" would misstate what actually moves. */}
-                    {formatTokenAmount(row.priceWei, 18, 4)}{" "}
-                    {row.kind === "Offer" ? "WETH" : "Ξ"} · expires{" "}
-                    {new Date(row.expiresAt).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    })}
-                    {!row.tokenId && row.criteriaTokenIds
-                      ? ` · ${row.criteriaTokenIds.length} qualify`
-                      : ""}
-                  </p>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{
+                      background: row.kind === "Listing" ? "var(--gold-400, #efc463)" : "#60d890",
+                    }}
+                    aria-hidden
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-foreground">
+                      {row.kind} ·{" "}
+                      {row.tokenId
+                        ? `#${row.tokenId}`
+                        : row.traits?.length
+                          ? row.traits
+                              .map((trait) => `${trait.traitType}: ${trait.value}`)
+                              .join(" AND ")
+                          : `${row.criteriaTokenIds?.length ?? 0} qualifying Planks`}
+                    </p>
+                    <p className="text-[0.65rem] text-cream-muted">
+                      {/* Listings settle in native ETH; bids are WETH-denominated
+                          because Seaport cannot pull ETH from an offerer. Labelling
+                          both "Ξ" would misstate what actually moves. */}
+                      {formatTokenAmount(row.priceWei, 18, 4)}{" "}
+                      {row.kind === "Offer" ? "WETH" : "Ξ"} · expires{" "}
+                      {new Date(row.expiresAt).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                      {!row.tokenId && row.criteriaTokenIds
+                        ? ` · ${row.criteriaTokenIds.length} qualify`
+                        : ""}
+                    </p>
+                  </div>
                 </div>
                 <button
                   type="button"
                   disabled={busyId === row.id}
                   onClick={() => cancel(row)}
-                  className="min-h-9 shrink-0 rounded-md border border-red-500/30 px-3 text-xs font-bold text-red-300 transition hover:border-red-400 disabled:opacity-50"
+                  className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border border-red-500/30 px-3 text-xs font-bold text-red-300 transition hover:border-red-400 disabled:opacity-50"
                 >
-                  {busyId === row.id ? "…" : "Cancel"}
+                  {busyId === row.id ? <Loader2 size={13} strokeWidth={2.5} className="animate-spin" /> : "Cancel"}
                 </button>
               </li>
             ))}
@@ -234,12 +249,12 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
           approval that was granted while creating it, so surface + revoke
           them here (audit 2026-07-27). */}
       {approvalLoading ? (
-        <div className="wood-ledger p-3 text-xs text-foreground/50">
+        <div className="rounded-xl border border-line bg-panel p-3 text-xs text-cream-muted">
           Reading marketplace approvals…
         </div>
       ) : approvalError ? (
         <div
-          className="wood-ledger flex flex-wrap items-center justify-between gap-3 p-3"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel p-3"
           role="alert"
         >
           <p className="text-xs text-red-300">{approvalError}</p>
@@ -256,28 +271,35 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
           </button>
         </div>
       ) : approvals && COLLECTION ? (
-        <div className="wood-ledger space-y-2 p-3">
+        <div className="rounded-xl border border-line bg-panel space-y-2 p-3">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-bold text-foreground">Marketplace approvals</p>
+            <p className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
+              Marketplace approvals
+            </p>
             <span
-              className={`rounded-full border px-2 py-1 text-[0.62rem] ${
+              className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-[0.62rem] font-bold ${
                 hasLiveApproval
                   ? "border-emerald-400/30 text-emerald-300"
                   : "border-line text-foreground/45"
               }`}
             >
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ background: hasLiveApproval ? "#60d890" : "currentColor" }}
+                aria-hidden
+              />
               {hasLiveApproval ? "Active" : "Inactive"}
             </span>
           </div>
           {mine.length === 0 && (
-            <p className="text-[0.65rem] text-foreground/50">
+            <p className="text-[0.65rem] text-cream-muted">
               You have no active orders, but the marketplace still holds these
               permissions from earlier ones. Revoking them costs a little gas
               and takes nothing else.
             </p>
           )}
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[0.7rem] text-foreground/70">
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-wood-950 px-3 py-2">
+            <p className="text-xs text-foreground/70">
               {COLLECTION.name}:{" "}
               {approvals.collectionApprovedForAll
                 ? "transfer approval for the whole collection"
@@ -288,14 +310,14 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
                 type="button"
                 disabled={revoking !== null}
                 onClick={() => revoke("nft")}
-                className="min-h-9 shrink-0 rounded-md border border-red-500/30 px-3 text-xs font-bold text-red-300 transition hover:border-red-400 disabled:opacity-50"
+                className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border border-red-500/30 px-3 text-xs font-bold text-red-300 transition hover:border-red-400 disabled:opacity-50"
               >
-                {revoking === "nft" ? "…" : "Revoke"}
+                {revoking === "nft" ? <Loader2 size={13} strokeWidth={2.5} className="animate-spin" /> : "Revoke"}
               </button>
             )}
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[0.7rem] text-foreground/70">
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-wood-950 px-3 py-2">
+            <p className="text-xs text-foreground/70">
               WETH allowance: {formatTokenAmount(approvals.wethAllowance.toString(), 18, 4)}
             </p>
             {approvals.wethAllowance > BigInt(0) && (
@@ -303,15 +325,15 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
                 type="button"
                 disabled={revoking !== null}
                 onClick={() => revoke("weth")}
-                className="min-h-9 shrink-0 rounded-md border border-red-500/30 px-3 text-xs font-bold text-red-300 transition hover:border-red-400 disabled:opacity-50"
+                className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border border-red-500/30 px-3 text-xs font-bold text-red-300 transition hover:border-red-400 disabled:opacity-50"
               >
-                {revoking === "weth" ? "…" : "Revoke"}
+                {revoking === "weth" ? <Loader2 size={13} strokeWidth={2.5} className="animate-spin" /> : "Revoke"}
               </button>
             )}
           </div>
         </div>
       ) : (
-        <div className="wood-ledger p-3 text-xs text-foreground/50" role="status">
+        <div className="rounded-xl border border-line bg-panel p-3 text-xs text-cream-muted" role="status">
           Marketplace approvals are unavailable.
         </div>
       )}

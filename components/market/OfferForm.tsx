@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { buildOffer } from "@/lib/market/seaport";
 import { fetchTraitIndex } from "@/lib/market/traits";
 import type { TraitIndexResponse } from "@/lib/market/traits";
@@ -229,16 +230,16 @@ export default function OfferForm({
                   className="flex h-10 w-10 items-center justify-center rounded-md border border-line text-foreground/65 hover:text-gold-300"
                   aria-label="Close review"
                 >
-                  ✕
+                  <X size={14} strokeWidth={2.5} />
                 </button>
               </div>
 
               <dl className="mt-4 grid grid-cols-2 gap-2">
-                <div className="rounded-lg border border-line bg-panel-strong p-3">
-                  <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                  <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                     Scope
                   </dt>
-                  <dd className="mt-1 text-sm text-foreground">
+                  <dd className="mt-1 text-xs font-bold text-foreground">
                     {traitMode
                       ? formatCriteriaLabel(clauses)
                       : tokenId
@@ -246,31 +247,31 @@ export default function OfferForm({
                         : collection.name}
                   </dd>
                 </div>
-                <div className="rounded-lg border border-line bg-panel-strong p-3">
-                  <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                  <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                     Qualifying
                   </dt>
-                  <dd className="mt-1 text-sm text-foreground">
+                  <dd className="mt-1 text-xs font-bold text-foreground">
                     {traitMode ? `${qualifyingIds.length} Planks` : "1 exact token"}
                   </dd>
                 </div>
-                <div className="rounded-lg border border-line bg-panel-strong p-3">
-                  <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                  <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                     Offer
                   </dt>
-                  <dd className="mt-1 text-sm text-foreground">{priceEth} WETH</dd>
+                  <dd className="mt-1 text-xs font-bold text-foreground">{priceEth} WETH</dd>
                 </div>
-                <div className="rounded-lg border border-line bg-panel-strong p-3">
-                  <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                  <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                     Duration
                   </dt>
-                  <dd className="mt-1 text-sm text-foreground">{days} days</dd>
+                  <dd className="mt-1 text-xs font-bold text-foreground">{days} days</dd>
                 </div>
-                <div className="col-span-2 rounded-lg border border-line bg-panel-strong p-3">
-                  <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                <div className="col-span-2 rounded-lg border border-line bg-wood-950 px-3 py-2">
+                  <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                     Marketplace fee / seller net
                   </dt>
-                  <dd className="mt-1 text-sm text-foreground">
+                  <dd className="mt-1 text-xs font-bold text-foreground">
                     {(collection.feeBps / 100).toFixed(2)}% fee · seller net verified from
                     the signed order before acceptance
                   </dd>
@@ -320,7 +321,7 @@ export default function OfferForm({
               aria-label="Close"
               className="flex h-8 w-8 items-center justify-center rounded-full text-foreground/60 hover:text-gold-300"
             >
-              ✕
+              <X size={14} strokeWidth={2.5} />
             </button>
           )}
         </div>
