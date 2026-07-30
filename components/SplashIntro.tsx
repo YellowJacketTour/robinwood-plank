@@ -18,18 +18,21 @@ const REDUCED_MOTION_MIN_MS = 450;
 
 const TOTAL_SUPPLY = 1542;
 
-/** Real hand-drawn plank character art only — every "plank" here is one of
- * the actual collection assets or the logo mascot (DESIGN.md "Plank
- * character art": abstract geometric boards are never a substitute). */
+/** The plank CHARACTER only — the plain hand-drawn smiley plank (owner
+ * direction: never the NFT collection art here; its colored square
+ * backgrounds read as tiles, not planks, mid-animation). Variety comes
+ * from per-board size/rotation in the keyframed drop, not from different
+ * artwork. DESIGN.md "Plank character art" still applies: this IS the
+ * character asset, not an abstract board. */
 const FENCE_PLANKS = [
   "/images/plank-logo.webp",
-  "/images/collection/plank-knightwood.png",
-  "/images/collection/plank-bobawood.png",
-  "/images/collection/plank-insidertrader.png",
-  "/images/collection/plank-is-this-art.png",
-  "/images/collection/plank-redacted.png",
   "/images/plank-logo.webp",
-  "/images/collection/plank-knightwood.png",
+  "/images/plank-logo.webp",
+  "/images/plank-logo.webp",
+  "/images/plank-logo.webp",
+  "/images/plank-logo.webp",
+  "/images/plank-logo.webp",
+  "/images/plank-logo.webp",
 ];
 
 /**
@@ -159,19 +162,30 @@ export default function SplashIntro() {
 
         <div className="relative flex h-[148px] w-[min(360px,82vw)] items-end justify-center" aria-hidden="true">
           {FENCE_PLANKS.map((src, index) => (
-            // eslint-disable-next-line @next/next/no-img-element -- decorative preloader art, no need for next/image optimization
-            <img
+            // Wrapper carries the per-board jitter (the drop keyframe owns
+            // the img's own transform); deterministic by index so the fence
+            // reads hand-built, not stamped.
+            <div
               key={index}
-              src={src}
-              alt=""
-              className={`splash-plank absolute bottom-0 h-auto w-[46px] drop-shadow-[0_10px_14px_rgba(0,0,0,0.5)] ${
-                reducedMotion ? "opacity-100" : ""
-              }`}
+              className="absolute bottom-0"
               style={{
                 left: `${index * 46}px`,
-                animationDelay: reducedMotion ? undefined : `${index * 140}ms`,
+                transform: `rotate(${((index % 2 ? 1 : -1) * (2 + ((index * 3) % 3))) / 2}deg)`,
               }}
-            />
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element -- decorative preloader art, no need for next/image optimization */}
+              <img
+                src={src}
+                alt=""
+                className={`splash-plank h-auto drop-shadow-[0_10px_14px_rgba(0,0,0,0.5)] ${
+                  reducedMotion ? "opacity-100" : ""
+                }`}
+                style={{
+                  width: `${42 + ((index * 5) % 9)}px`,
+                  animationDelay: reducedMotion ? undefined : `${index * 140}ms`,
+                }}
+              />
+            </div>
           ))}
           {/* eslint-disable-next-line @next/next/no-img-element -- decorative preloader art */}
           <img
