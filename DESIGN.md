@@ -201,21 +201,23 @@ Display type must stay sparse. Prices use tabular numerals. Small uppercase labe
 
 There are two distinct page-background systems in this codebase. Use the right one — do not invent a third.
 
-### 1. Marketing background — the giant Plank character
+### 1. Marketing background — the Plank masthead
 
-Mounted globally, once, in `app/layout.tsx` (`<PlankBackground />`), so it is technically present on every route including Trade/Market/Gallery. It paints directly on `body` in `app/globals.css`:
+Mounted globally, once, in `app/layout.tsx` (`<PlankBackground />`, now a no-op placeholder — see below), so it is technically present on every route including Trade/Market/Gallery. It paints directly on `body` in `app/globals.css`, pure CSS, no JS:
 
-- A darkening gradient wash (`linear-gradient(180deg, rgba(20,16,11,.55)…)`) so foreground text stays legible.
-- `plank-head.webp` at true, undistorted aspect ratio (the face/eyes/smile — never stretched).
-- `plank-legs.webp` (plain wood grain, safe to stretch) sized dynamically by `components/PlankBackground.tsx`, which measures viewport width and total page height on load/resize so the legs image exactly fills the remaining page without warping the face.
+- A strong darkening gradient wash (`linear-gradient(180deg, rgba(20,16,11,.88) 0%, rgba(20,16,11,.95) 40%, rgba(20,16,11,.97) 100%)`) so foreground text stays legible for the entire scroll length, not just near the top.
+- `plank-head.webp` at true, undistorted aspect ratio, capped at `min(1500px, 120vw)` wide, anchored top-center, never repeated, never stretched.
+- Nothing below that — the page's own `background-color` (`#14100b`) fills the rest of the page. There is no `plank-legs.webp` layer and nothing dynamically sized.
 
-This is the correct, intentional background for the homepage (`app/page.tsx`) and other marketing/story surfaces (Learn, Airdrop, Mint). It is a deliberate brand statement: the whole page is standing on/in front of Plank.
+This is mockup-derived (`docs/mockups/landing-redesign/finalized.html`, the owner-approved intent for this page — see "Approved mockups" above) and intentionally corrects an earlier version of this rule that does not appear in that mockup: a JS-driven variant (`components/PlankBackground.tsx`, formerly using a `ResizeObserver` to measure viewport width and total page height) stretched `plank-legs.webp` to cover the entire scroll height. That stretch was a later, unreviewed elaboration recorded here as fact rather than checked against the approved design — it produced a wall of bright, uninterrupted yellow-and-black art past the hero that the owner flagged as looking strange. The capped-head-only treatment is the correct one; do not reintroduce a full-page stretched character or bring back the `ResizeObserver` sizing logic.
+
+This is the correct, intentional background for the homepage (`app/page.tsx`) and other marketing/story surfaces (Learn, Airdrop, Mint). It is a deliberate brand statement — the page opens standing in front of Plank's face — scoped to the masthead, not a full-page skin.
 
 ### 2. App-page backdrop — the quiet wood texture
 
 `components/AppBackdrop.tsx` renders a `fixed inset-0 -z-10` div using the `.site-footer-surface` texture (solid wood base + soft directional wash + the same plank-grain hairlines as the footer) from `app/globals.css`. It is mounted at the top of `app/trade/page.tsx`, `app/market/page.tsx`, and `app/gallery/page.tsx`, immediately before `<Nav />`.
 
-Because it is `fixed` and opaque, it sits between the viewport and the marketing background described above and visually replaces the giant character on these three routes — without touching `PlankBackground` or the global `body` CSS, and without any JS (no resize listener, so it can never race `PlankBackground`'s `ResizeObserver`).
+Because it is `fixed` and opaque, it sits between the viewport and the marketing background described above and visually replaces it on these three routes — without touching `PlankBackground` or the global `body` CSS. Both this and the corrected marketing background above are now pure CSS with no JS sizing logic at all.
 
 **Rule: any new dense, transactional, or data-heavy page (wallet balances, order books, forms, tables) mounts `<AppBackdrop />` first, exactly like Trade/Market/Gallery do. Any new marketing/story page relies on the global `PlankBackground` and mounts nothing extra.** If you're not sure which a new page is, ask whether its primary content is prose/illustration (marketing) or live data/actions (app) — that's the test the three existing app pages were split on.
 
