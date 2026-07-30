@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Search, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, Globe, Search, ShieldCheck, X } from "lucide-react";
 import { NATIVE_TOKEN_ADDRESS } from "@/lib/constants";
+import { shortAddress } from "@/lib/trade";
 import TokenIcon from "@/components/trade/TokenIcon";
 
 /** Mirror of SwapWidget's CounterTokenEntry — the list itself always comes
@@ -59,6 +60,41 @@ function pushRecent(address: string) {
   } catch {
     /* localStorage unavailable (private mode) — recents just won't persist */
   }
+}
+
+function clearRecents() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(RECENTS_KEY);
+  } catch {
+    /* nothing to clear */
+  }
+}
+
+/** The handful of tokens people reach for without typing — one tap, no
+ * scrolling. Fixed order regardless of the server list's own ordering. */
+const QUICK_PICK_SYMBOLS = ["ETH", "USDG", "WETH"];
+
+/** Small uppercase label shared by every section — matches DESIGN.md's
+ * `label` typography (Nunito Sans, 900 weight, wide tracking). */
+function SectionLabel({
+  icon,
+  children,
+  action,
+}: {
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 px-2 pb-1.5 pt-3 first:pt-1">
+      <span className="flex items-center gap-1.5 text-[0.6875rem] font-black uppercase tracking-[0.1em] text-cream-muted">
+        {icon}
+        {children}
+      </span>
+      {action}
+    </div>
+  );
 }
 
 /**
@@ -192,6 +228,14 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
     return eth ? [eth, ...rest] : rest;
   }, [tokens]);
 
+  const quickPicks = useMemo(
+    () =>
+      QUICK_PICK_SYMBOLS.map((sym) => tokens.find((t) => t.symbol === sym)).filter(
+        (t): t is CounterTokenEntry => Boolean(t)
+      ),
+    [tokens]
+  );
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return ordered;
@@ -272,29 +316,63 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
                 setHighlight(0);
               }}
               onKeyDown={onKeyDown}
-              placeholder="Search name or symbol"
+              placeholder="Search name, symbol, or paste an address"
               className="min-w-0 flex-1 bg-transparent text-sm text-cream outline-none placeholder:text-cream-muted/60"
               aria-label="Search tokens"
             />
           </div>
         </div>
 
-        {recentEntries.length > 0 && !query && (
-          <div className="flex flex-wrap gap-1.5 border-b border-line px-4 py-3">
-            <span className="w-full text-[0.62rem] font-bold uppercase tracking-wide text-cream-muted">
-              Recent
-            </span>
-            {recentEntries.map((t) => (
-              <button
-                key={t.address}
-                type="button"
-                onClick={() => pick(t)}
-                className="flex items-center gap-1.5 rounded-full border border-line py-1 pl-1 pr-2.5 text-xs font-bold text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
-              >
-                <TokenIcon symbol={t.symbol} logoURI={t.logoURI} size={16} />
-                {t.symbol}
-              </button>
-            ))}
+        {!query && (quickPicks.length > 0 || recentEntries.length > 0) && (
+          <div className="space-y-2.5 border-b border-line px-4 py-3">
+            {quickPicks.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {quickPicks.map((t) => (
+                  <button
+                    key={t.address}
+                    type="button"
+                    onClick={() => pick(t)}
+                    className="flex items-center gap-1.5 rounded-full border border-line py-1 pl-1 pr-2.5 text-xs font-bold text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                  >
+                    <TokenIcon symbol={t.symbol} logoURI={t.logoURI} size={18} />
+                    {t.symbol}
+                  </button>
+                ))}
+              </div>
+            )}
+            {recentEntries.length > 0 && (
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-[0.62rem] font-black uppercase tracking-[0.1em] text-cream-muted">
+                    <Clock size={12} />
+                    Recent
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearRecents();
+                      setRecents([]);
+                    }}
+                    className="text-[0.62rem] font-bold uppercase tracking-wide text-cream-muted underline decoration-dotted hover:text-gold-300"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {recentEntries.map((t) => (
+                    <button
+                      key={t.address}
+                      type="button"
+                      onClick={() => pick(t)}
+                      className="flex items-center gap-1.5 rounded-full border border-line py-1 pl-1 pr-2.5 text-xs font-bold text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                    >
+                      <TokenIcon symbol={t.symbol} logoURI={t.logoURI} size={16} />
+                      {t.symbol}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -349,8 +427,12 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
                 </p>
               )}
 
+              {filtered.length > 0 && (
+                <SectionLabel icon={<ShieldCheck size={12} />}>Verified tokens</SectionLabel>
+              )}
               {filtered.map((t, i) => {
                 const isSelected = t.address.toLowerCase() === selected.address.toLowerCase();
+                const isNative = t.address.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase();
                 return (
                   <button
                     key={t.address}
@@ -362,33 +444,32 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
                     onClick={() => pick(t)}
                     onMouseEnter={() => setHighlight(i)}
                     aria-pressed={isSelected}
-                    className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-3 text-left transition-colors ${
+                    className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
                       i === highlight
                         ? "border-line-strong bg-gold-500/15"
                         : "border-transparent hover:border-line-strong hover:bg-gold-500/10"
                     }`}
                   >
-                    <span className="flex min-w-0 items-center gap-2.5">
-                      <TokenIcon symbol={t.symbol} logoURI={t.logoURI} size={28} />
+                    <span className="flex min-w-0 items-center gap-3">
+                      <TokenIcon symbol={t.symbol} logoURI={t.logoURI} size={34} />
                       <span className="min-w-0">
-                        <span className="block truncate text-sm font-bold text-cream">{t.symbol}</span>
-                        <span className="block truncate text-[0.7rem] text-cream-muted">{t.name}</span>
+                        <span className="block truncate text-sm font-bold text-cream">{t.name}</span>
+                        <span className="flex items-center gap-1.5 truncate text-[0.7rem] text-cream-muted">
+                          <span className="font-bold">{t.symbol}</span>
+                          {!isNative && <span className="truncate">{shortAddress(t.address)}</span>}
+                        </span>
                       </span>
                     </span>
                     {isSelected && (
-                      <span className="shrink-0 rounded-full bg-gold-500/15 px-2 py-0.5 text-[0.62rem] font-bold text-gold-300">
-                        Selected
-                      </span>
+                      <Check size={18} className="shrink-0 text-gold-300" aria-label="Selected" />
                     )}
                   </button>
                 );
               })}
 
               {query.trim().length >= 2 && (chainSearchLoading || chainResults.length > 0) && (
-                <div className="mt-1">
-                  <p className="px-2 pb-1 pt-2 text-[0.62rem] font-bold uppercase tracking-wide text-cream-muted">
-                    More on-chain — unverified
-                  </p>
+                <div>
+                  <SectionLabel icon={<Globe size={12} />}>More on-chain — unverified</SectionLabel>
                   {chainSearchLoading && chainResults.length === 0 && (
                     <p className="px-2 py-3 text-center text-xs text-cream-muted">
                       Searching Robinhood Chain…
@@ -403,14 +484,17 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
                       // the address) — never trusts this row's fields for a
                       // quote, and still requires the explicit confirm step.
                       onClick={() => setQuery(t.address)}
-                      className="flex w-full items-center gap-2.5 rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors hover:border-amber-500/40 hover:bg-amber-950/20"
+                      className="flex w-full items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors hover:border-amber-500/40 hover:bg-amber-950/20"
                     >
-                      <TokenIcon symbol={t.symbol} logoURI={t.logoURI} size={26} />
+                      <TokenIcon symbol={t.symbol} logoURI={t.logoURI} size={30} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-bold text-cream">{t.symbol}</span>
-                        <span className="block truncate text-[0.68rem] text-cream-muted">{t.name}</span>
+                        <span className="block truncate text-sm font-bold text-cream">{t.name}</span>
+                        <span className="flex items-center gap-1.5 truncate text-[0.7rem] text-cream-muted">
+                          <span className="font-bold">{t.symbol}</span>
+                          <span className="truncate">{shortAddress(t.address)}</span>
+                        </span>
                       </span>
-                      <AlertTriangle size={13} className="shrink-0 text-amber-300" aria-hidden="true" />
+                      <AlertTriangle size={14} className="shrink-0 text-amber-300" aria-hidden="true" />
                     </button>
                   ))}
                 </div>
