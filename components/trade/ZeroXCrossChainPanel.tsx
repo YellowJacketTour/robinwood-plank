@@ -1,20 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Loader2, ShieldAlert, Zap } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, ShieldAlert, Zap } from "lucide-react";
 import { TOKEN } from "@/lib/constants";
 import { formatDisplayAmount, parseTokenAmount, shortAddress } from "@/lib/trade";
 import { connectWallet, getConnectedAccounts } from "@/lib/wallet";
 import { getWalletChainId, sendCrossChainStepTx, switchToChain } from "@/lib/crosschain-wallet";
-
-type SourceChainOption = { chainId: number; name: string };
+import TokenIcon from "@/components/trade/TokenIcon";
+import ChainSelectModal, { type SourceChainOption } from "@/components/trade/ChainSelectModal";
 
 type StatusResponse = {
   enabled: boolean;
   crossChainEnabled?: boolean;
   configured?: boolean;
   sourceChains?: SourceChainOption[];
-  siteFee?: { enabled: boolean; label: string };
+  siteFee?: { enabled: boolean; label: string; exactLabel?: string };
   disclosure?: string;
 };
 
@@ -26,6 +26,9 @@ type ZeroXCrossChainQuote = {
   zeroExFeeDisclosure?: string;
   transaction: { chainType: string; to: string; data: string; value: string; gas?: string } | null;
   quoteId?: string;
+  /** Only rendered if the API actually returns these — never fabricated. */
+  route?: string;
+  provider?: string;
 };
 
 type Lifecycle =
@@ -49,6 +52,17 @@ const LIFECYCLE_LABEL: Record<Lifecycle, string> = {
   unknown: "Checking settlement status…",
 };
 
+/** Display-only source-chain native symbol — mirrors lib/crosschain-wallet.ts's
+ * CHAIN_METADATA. Never used for tx-building (that stays server/wallet-side),
+ * purely so the "You pay" field can show "0.05 ETH" instead of a bare number. */
+const NATIVE_SYMBOL: Record<number, string> = {
+  1: "ETH",
+  42161: "ETH",
+  8453: "ETH",
+  10: "ETH",
+  137: "POL",
+};
+
 /** Stop polling once we've reached a terminal state. */
 function isTerminal(l: Lifecycle): boolean {
   return l === "bridge_filled" || l === "bridge_failed";
@@ -62,6 +76,10 @@ function isTerminal(l: Lifecycle): boolean {
  * transaction from the user's wallet instead of a multi-step plan across two
  * chains and two signatures.
  *
+ * Anatomy deliberately mirrors SwapWidget.tsx — a "You pay" field (amount +
+ * chain pill) and a "You receive" field (PLANK, with icon) — so this reads as
+ * the same product as the same-chain widget instead of a bolted-on form.
+ *
  * Drop-in: renders nothing when /api/zerox/status reports crossChainEnabled
  * off or the server unconfigured, so it's safe to mount unconditionally
  * (e.g. next to CrossChainPanel.tsx on app/trade/page.tsx) without a
@@ -74,6 +92,7 @@ export default function ZeroXCrossChainPanel() {
 
   const [account, setAccount] = useState<string | null>(null);
   const [sourceChainId, setSourceChainId] = useState<number | null>(null);
+  const [chainModalOpen, setChainModalOpen] = useState(false);
   const [amountIn, setAmountIn] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,6 +127,7 @@ export default function ZeroXCrossChainPanel() {
     () => status?.sourceChains?.find((c) => c.chainId === sourceChainId) ?? null,
     [status, sourceChainId]
   );
+  const nativeSymbol = sourceChainId != null ? NATIVE_SYMBOL[sourceChainId] ?? "ETH" : "ETH";
 
   const handleConnect = useCallback(async () => {
     setError(null);
@@ -219,6 +239,29 @@ export default function ZeroXCrossChainPanel() {
     };
   }, [txHash, sourceChainId, quote?.quoteId]);
 
+  // Rate: "1 native = X PLANK". Both sides are 18-decimal, so decimals
+  // cancel — no scaling factors needed the way SwapWidget's cross-token rate
+  // needs. Full BigInt precision, only the final string goes through
+  // formatDisplayAmount.
+  const rate = useMemo(() => {
+    if (!quote?.buyAmount) return null;
+    const inRaw = parseTokenAmount(amountIn, 18);
+    if (!inRaw || inRaw <= BigInt(0)) return null;
+    let outRaw: bigint;
+    try {
+      outRaw = BigInt(quote.buyAmount);
+    } catch {
+      return null;
+    }
+    if (outRaw <= BigInt(0)) return null;
+    const PRECISION_DIGITS = 24;
+    const precision = BigInt(10) ** BigInt(PRECISION_DIGITS);
+    return formatDisplayAmount((outRaw * precision) / inRaw, PRECISION_DIGITS);
+  }, [quote, amountIn]);
+
+  const btnBase =
+    "min-h-11 w-full rounded-lg px-3 py-2.5 text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:text-base";
+
   if (!checkedStatus || !status?.crossChainEnabled) return null;
 
   if (!status.configured) {
@@ -231,8 +274,20 @@ export default function ZeroXCrossChainPanel() {
   }
 
   return (
-    <div className="flex flex-col gap-2.5 rounded-lg border border-gold-500/20 bg-wood-950/40 px-3 py-2.5 text-xs">
-      <div className="flex items-center gap-1.5 font-bold uppercase tracking-wide text-foreground/70">
+    <div className="flex flex-col gap-2.5">
+      <ChainSelectModal
+        open={chainModalOpen}
+        onClose={() => setChainModalOpen(false)}
+        chains={status.sourceChains ?? []}
+        selected={source}
+        onSelect={(c) => {
+          setSourceChainId(c.chainId);
+          setQuote(null);
+          setTxHash(null);
+        }}
+      />
+
+      <div className="flex items-center gap-1.5 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
         <Zap size={13} className="shrink-0 text-gold-400" />
         Buy $PLANK from another chain — one step (0x)
       </div>
@@ -242,68 +297,126 @@ export default function ZeroXCrossChainPanel() {
           type="button"
           onClick={handleConnect}
           disabled={busy}
-          className="rounded-lg border border-gold-500/30 bg-wood-900/60 px-3 py-2 font-bold text-foreground/80 disabled:opacity-50"
+          className={`${btnBase} bg-gold-500 text-wood-950 hover:bg-gold-400`}
         >
-          Connect wallet
+          {busy ? "Connecting…" : "Connect wallet"}
         </button>
       ) : (
         <>
-          <div className="text-foreground/50">Connected: {shortAddress(account)}</div>
+          <div className="flex min-h-9 items-center justify-between gap-2 rounded-lg border border-forest-600/45 bg-forest-900/45 px-2.5 text-xs">
+            <span className="font-mono text-gold-300" title={account}>
+              {shortAddress(account)}
+            </span>
+          </div>
 
-          <select
-            value={sourceChainId ?? ""}
-            onChange={(e) => {
-              setSourceChainId(Number(e.target.value));
-              setQuote(null);
-              setTxHash(null);
-            }}
-            className="rounded-lg border border-gold-500/20 bg-wood-950/60 px-2 py-1.5 text-foreground/80"
-          >
-            {status.sourceChains?.map((c) => (
-              <option key={c.chainId} value={c.chainId}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <label className="block">
+            <span className="text-[0.65rem] font-bold uppercase tracking-wider text-foreground/50">
+              You pay
+            </span>
+            <div className="mt-1 flex min-h-12 items-center gap-2 rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 focus-within:border-gold-400">
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0.0"
+                value={amountIn}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^0-9.]/g, "");
+                  setAmountIn(v);
+                  setQuote(null);
+                  setTxHash(null);
+                }}
+                className="min-w-0 flex-1 bg-transparent py-2.5 text-lg font-semibold text-foreground outline-none placeholder:text-foreground/30 sm:text-xl"
+                aria-label={`Amount of native token to pay, on ${source?.name ?? "the selected chain"}`}
+              />
+              <button
+                type="button"
+                onClick={() => setChainModalOpen(true)}
+                aria-label="Change source chain"
+                className="flex shrink-0 items-center gap-1.5 rounded-full bg-gold-500/15 py-1.5 pl-1.5 pr-2.5 text-xs font-bold text-gold-300 transition-colors hover:bg-gold-500/25 sm:text-sm"
+              >
+                <TokenIcon symbol={source?.name ?? "?"} size={18} />
+                {source?.name ?? "Select chain"}
+                <ChevronDown size={14} />
+              </button>
+            </div>
+            {source && (
+              <p className="mt-1 text-right text-[0.65rem] text-foreground/45">
+                Native {nativeSymbol} on {source.name}
+              </p>
+            )}
+          </label>
 
-          <input
-            value={amountIn}
-            onChange={(e) => {
-              setAmountIn(e.target.value);
-              setQuote(null);
-              setTxHash(null);
-            }}
-            placeholder={`Amount of ${source?.name ?? ""} native token`}
-            inputMode="decimal"
-            className="rounded-lg border border-gold-500/20 bg-wood-950/60 px-2 py-1.5 text-foreground/80"
-          />
+          <div className="flex justify-center">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full border border-gold-500/40 bg-wood-900 text-gold-300">
+              ↓
+            </span>
+          </div>
+
+          <div>
+            <span className="text-[0.65rem] font-bold uppercase tracking-wider text-foreground/50">
+              You receive
+            </span>
+            <div className="mt-1 flex min-h-12 items-center gap-2 rounded-lg border border-gold-500/20 bg-wood-900/90 px-2.5">
+              <span className="min-w-0 flex-1 py-2.5 text-lg font-semibold text-foreground/90 sm:text-xl">
+                {quote ? `~${formatDisplayAmount(quote.buyAmount, TOKEN.decimals)}` : "—"}
+              </span>
+              <span className="flex shrink-0 items-center gap-1.5 rounded-md bg-forest-800/60 px-2 py-1 text-xs font-bold text-gold-300 sm:text-sm">
+                <TokenIcon symbol={TOKEN.symbol} size={18} />
+                {TOKEN.symbol}
+              </span>
+            </div>
+          </div>
 
           {!quote ? (
             <button
               type="button"
               onClick={handleGetQuote}
-              disabled={busy || !amountIn}
-              className="rounded-lg border border-gold-500/30 bg-wood-900/60 px-3 py-2 font-bold text-foreground/80 disabled:opacity-50"
+              disabled={busy || !amountIn || !source}
+              className={`${btnBase} border border-gold-500/55 bg-wood-900 text-gold-300 hover:border-gold-400`}
             >
-              {busy ? <Loader2 size={14} className="mx-auto animate-spin" /> : "Get 0x quote"}
+              {busy ? <Loader2 size={16} className="mx-auto animate-spin" /> : "Get 0x quote"}
             </button>
           ) : (
-            <div className="flex flex-col gap-1.5 rounded-lg border border-gold-500/20 bg-wood-950/40 px-2.5 py-2">
-              <div className="flex items-center gap-1 text-foreground/80">
-                <ArrowRight size={12} className="shrink-0 text-gold-400" />
-                <span>~{formatDisplayAmount(quote.buyAmount, TOKEN.decimals)} PLANK</span>
+            <>
+              <div className="flex flex-col gap-1.5 rounded-lg border border-gold-500/15 bg-wood-950/60 px-2.5 py-2 text-[0.7rem] text-foreground/70">
+                {rate && (
+                  <div className="font-semibold text-foreground/80">
+                    1 {nativeSymbol} = {rate} {TOKEN.symbol}
+                  </div>
+                )}
+                {typeof quote.estimatedTimeSeconds === "number" && (
+                  <div>Est. settlement: ~{Math.max(1, Math.round(quote.estimatedTimeSeconds))}s</div>
+                )}
+                {quote.minBuyAmount && (
+                  <div>
+                    Minimum received (worst case): {formatDisplayAmount(quote.minBuyAmount, TOKEN.decimals)}{" "}
+                    {TOKEN.symbol}
+                  </div>
+                )}
+                {(quote.route || quote.provider) && (
+                  <div className="truncate font-mono text-foreground/60">
+                    {[quote.provider, quote.route].filter(Boolean).join(" · ")}
+                  </div>
+                )}
               </div>
-              {typeof quote.estimatedTimeSeconds === "number" && (
-                <div className="text-foreground/50">
-                  Est. settlement: ~{Math.max(1, Math.round(quote.estimatedTimeSeconds))}s
+
+              <details className="group rounded-lg border border-gold-500/15 bg-wood-950/40 px-2.5 py-1.5 text-[0.7rem] text-foreground/60">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-bold uppercase tracking-wide text-foreground/50">
+                  <span>Fees</span>
+                  <ChevronRight size={13} className="shrink-0 transition-transform group-open:rotate-90" />
+                </summary>
+                <div className="mt-1.5 space-y-1">
+                  {status.siteFee?.enabled && (
+                    <p>plank.love fee: {status.siteFee.exactLabel || status.siteFee.label}</p>
+                  )}
+                  {quote.zeroExFeeDisclosure && <p>{quote.zeroExFeeDisclosure}</p>}
+                  {status.disclosure && <p className="text-foreground/50">{status.disclosure}</p>}
                 </div>
-              )}
-              {quote.zeroExFeeDisclosure && (
-                <div className="text-[0.65rem] text-gold-300/80">{quote.zeroExFeeDisclosure}</div>
-              )}
+              </details>
+
               {!txHash && (
-                <div className="flex items-start gap-1.5 rounded-md border border-red-500/20 bg-red-950/20 px-2 py-1.5 text-[0.65rem] text-red-200/80">
-                  <ShieldAlert size={12} className="mt-0.5 shrink-0" />
+                <div className="flex items-start gap-1.5 rounded-md border border-red-500/30 bg-red-950/20 px-2.5 py-2 text-[0.68rem] leading-snug text-red-100/90">
+                  <ShieldAlert size={13} className="mt-0.5 shrink-0" />
                   <span>
                     Cross-chain settlement is NOT atomic: this is two chains and a bridge, not a
                     single-chain swap. If the bridge leg fails after your {source?.name} transaction
@@ -313,19 +426,20 @@ export default function ZeroXCrossChainPanel() {
                   </span>
                 </div>
               )}
+
               <button
                 type="button"
                 onClick={handleSend}
                 disabled={busy || !quote.transaction || Boolean(txHash)}
-                className="mt-1 rounded-lg border border-forest-500/40 bg-forest-900/40 px-3 py-2 font-bold text-forest-200 disabled:opacity-50"
+                className={`${btnBase} bg-gold-500 text-wood-950 shadow-[0_6px_16px_-4px_rgba(217,164,65,0.45)] hover:bg-gold-400`}
               >
-                {busy ? <Loader2 size={14} className="mx-auto animate-spin" /> : `Send on ${source?.name}`}
+                {busy ? "Confirm in wallet…" : `Send on ${source?.name}`}
               </button>
-            </div>
+            </>
           )}
 
           {txHash && (
-            <div className="flex flex-col gap-1 rounded-lg border border-gold-500/20 bg-wood-950/40 px-2.5 py-2">
+            <div className="flex flex-col gap-1 rounded-lg border border-gold-500/20 bg-wood-950/40 px-2.5 py-2 text-xs">
               <div className="text-forest-300">Submitted: {shortAddress(txHash, 6)}</div>
               <div
                 className={
@@ -351,7 +465,11 @@ export default function ZeroXCrossChainPanel() {
         </>
       )}
 
-      {error && <div className="text-red-300">{error}</div>}
+      {error && (
+        <p className="text-xs text-red-300" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
