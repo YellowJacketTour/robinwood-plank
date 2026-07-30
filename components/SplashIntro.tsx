@@ -2,7 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const SEEN_KEY = "plank-intro-seen";
+/**
+ * Versioned key + refresh window. v2: the "Nailing the planks" intro must
+ * actually be seen — the old color-ball splash set the unversioned key, so
+ * every returning visitor was permanently opted out of the new intro
+ * (owner-reported: "local and production is not showing the intro").
+ * Policy: play on first visit and again after REPLAY_AFTER_MS away — the
+ * workshop entrance, not a once-in-a-lifetime event.
+ */
+const SEEN_KEY = "plank-intro-seen-v2";
+const REPLAY_AFTER_MS = 12 * 60 * 60 * 1000; // 12h
 /** Minimum time the preloader stays up even on an instant cached load — a
  * single-frame flash would just read as a glitch, and this is also long
  * enough for the "Nailing the planks" beat to land. */
@@ -58,7 +67,7 @@ export default function SplashIntro() {
     setTimeout(() => {
       setPhase("hidden");
       try {
-        localStorage.setItem(SEEN_KEY, "1");
+        localStorage.setItem(SEEN_KEY, String(Date.now()));
       } catch {
         // nothing to do — worst case it plays again next visit
       }
@@ -76,7 +85,9 @@ export default function SplashIntro() {
   useEffect(() => {
     let seen = true;
     try {
-      seen = localStorage.getItem(SEEN_KEY) === "1";
+      const at = Number(localStorage.getItem(SEEN_KEY) ?? 0);
+      // Legacy "1" parses NaN → replay once, then stores a timestamp.
+      seen = Number.isFinite(at) && at > 0 && Date.now() - at < REPLAY_AFTER_MS;
     } catch {
       // localStorage unavailable (private mode, etc.) — just skip rather
       // than risk it replaying forever.
@@ -93,7 +104,7 @@ export default function SplashIntro() {
       (/Android/i.test(ua) && /Version\/4\.0/i.test(ua));
     if (isWalletWebView) {
       try {
-        localStorage.setItem(SEEN_KEY, "1");
+        localStorage.setItem(SEEN_KEY, String(Date.now()));
       } catch {
         /* ignore */
       }
