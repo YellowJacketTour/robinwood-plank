@@ -57,7 +57,7 @@ export default function FilterBar({
             type="button"
             onClick={() => onChange(EMPTY_FILTERS)}
             disabled={!dirty}
-            className="min-h-9 rounded-md border border-gold-500/30 px-3 text-xs text-gold-300 transition disabled:cursor-not-allowed disabled:opacity-35"
+            className="min-h-9 rounded-md border border-line px-3 text-xs text-gold-300 transition disabled:cursor-not-allowed disabled:opacity-35"
           >
             Clear all
           </button>
@@ -76,7 +76,7 @@ export default function FilterBar({
             value={filters.query}
             onChange={(e) => onChange({ ...filters, query: e.target.value })}
             placeholder="Token ID"
-            className="min-h-11 w-full rounded-md border border-gold-500/30 bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
+            className="min-h-11 w-full rounded-md border border-line bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
           />
         </div>
 
@@ -92,7 +92,7 @@ export default function FilterBar({
               onChange={(e) => onChange({ ...filters, minEth: e.target.value })}
               placeholder="Min"
               aria-label="Minimum price in ETH"
-              className="min-h-11 min-w-0 rounded-md border border-gold-500/30 bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
+              className="min-h-11 min-w-0 rounded-md border border-line bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
             />
             <input
               type="text"
@@ -101,7 +101,7 @@ export default function FilterBar({
               onChange={(e) => onChange({ ...filters, maxEth: e.target.value })}
               placeholder="Max"
               aria-label="Maximum price in ETH"
-              className="min-h-11 min-w-0 rounded-md border border-gold-500/30 bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
+              className="min-h-11 min-w-0 rounded-md border border-line bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
             />
           </div>
         </fieldset>
@@ -169,7 +169,7 @@ export default function FilterBar({
         onChange={(e) => onChange({ ...filters, query: e.target.value })}
         placeholder="Token ID"
         aria-label="Search by token ID"
-        className="min-h-9 min-w-0 flex-1 rounded-md border border-gold-500/30 bg-wood-950 px-2.5 text-xs text-foreground placeholder:text-foreground/30 sm:max-w-[10rem]"
+        className="min-h-9 min-w-0 flex-1 rounded-md border border-line bg-wood-950 px-2.5 text-xs text-foreground placeholder:text-foreground/30 sm:max-w-[10rem]"
       />
       <input
         type="text"
@@ -178,7 +178,7 @@ export default function FilterBar({
         onChange={(e) => onChange({ ...filters, minEth: e.target.value })}
         placeholder="Min Ξ"
         aria-label="Minimum price in ETH"
-        className="min-h-9 w-[4.5rem] rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground placeholder:text-foreground/30"
+        className="min-h-9 w-[4.5rem] rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground placeholder:text-foreground/30"
       />
       <input
         type="text"
@@ -187,7 +187,7 @@ export default function FilterBar({
         onChange={(e) => onChange({ ...filters, maxEth: e.target.value })}
         placeholder="Max Ξ"
         aria-label="Maximum price in ETH"
-        className="min-h-9 w-[4.5rem] rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground placeholder:text-foreground/30"
+        className="min-h-9 w-[4.5rem] rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground placeholder:text-foreground/30"
       />
       {rarityAvailable && (
         <label className="flex items-center gap-1.5">
@@ -202,7 +202,7 @@ export default function FilterBar({
                 tiers: tier === "all" ? [] : [tier],
               });
             }}
-            className="min-h-9 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
+            className="min-h-9 rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground"
           >
             <option value="all">Any rarity</option>
             {TIER_ORDER.map((t) => (
@@ -217,7 +217,7 @@ export default function FilterBar({
         <button
           type="button"
           onClick={() => onChange(EMPTY_FILTERS)}
-          className="min-h-9 rounded-md border border-gold-500/30 px-2.5 text-xs text-foreground/60 transition hover:border-gold-400"
+          className="min-h-9 rounded-md border border-line px-2.5 text-xs text-foreground/60 transition hover:border-gold-400"
         >
           Clear
         </button>

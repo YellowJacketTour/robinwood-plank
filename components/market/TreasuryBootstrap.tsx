@@ -150,7 +150,7 @@ export default function TreasuryBootstrap({ account }: Props) {
 
   if (loading || !status) {
     return (
-      <div className="rounded-xl border border-gold-500/30 bg-wood-950/90 p-4 text-sm text-foreground/70">
+      <div className="rounded-xl border border-line bg-panel-strong p-4 text-sm text-foreground/70">
         Loading seed interface (NFT picker + ETH)…
       </div>
     );
@@ -271,29 +271,29 @@ export default function TreasuryBootstrap({ account }: Props) {
   const canOpen = status.shareReserve > BigInt(0) && status.ethReserveWei > BigInt(0);
 
   return (
-    <div className="space-y-3 rounded-xl border border-gold-400/20 bg-wood-950/90 p-3">
+    <div className="space-y-3 rounded-xl border border-line bg-panel-strong p-3">
       <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.14em] text-gold-300">
         Treasury bootstrap — only you can see this
       </p>
 
       <dl className="grid grid-cols-2 gap-2 text-center">
-        <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 py-2">
+        <div className="rounded-lg border border-line bg-panel-strong py-2">
           <dt className="text-[0.6rem] text-foreground/45">NFTs in vault</dt>
           <dd className="font-display text-lg text-gold-300">{status.heldCount.toString()}</dd>
         </div>
-        <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 py-2">
+        <div className="rounded-lg border border-line bg-panel-strong py-2">
           <dt className="text-[0.6rem] text-foreground/45">Your unseeded shares</dt>
           <dd className="font-display text-lg text-gold-300">
             {formatTokenAmount(status.treasuryShareBalance, 18, 2)}
           </dd>
         </div>
-        <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 py-2">
+        <div className="rounded-lg border border-line bg-panel-strong py-2">
           <dt className="text-[0.6rem] text-foreground/45">Pool shares (seeded)</dt>
           <dd className="font-display text-lg text-gold-300">
             {formatTokenAmount(status.shareReserve, 18, 2)}
           </dd>
         </div>
-        <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 py-2">
+        <div className="rounded-lg border border-line bg-panel-strong py-2">
           <dt className="text-[0.6rem] text-foreground/45">Pool ETH (seeded)</dt>
           <dd className="font-display text-lg text-gold-300">
             {formatTokenAmount(status.ethReserveWei, 18, 4)} Ξ
@@ -301,7 +301,7 @@ export default function TreasuryBootstrap({ account }: Props) {
         </div>
       </dl>
 
-      <div className="space-y-2 rounded-lg border border-gold-500/20 bg-wood-900/90 p-2.5">
+      <div className="space-y-2 rounded-lg border border-line bg-panel p-2.5">
         <p className="text-[0.65rem] font-bold text-foreground/60">
           1) Tap planks to deposit. 2) Set ETH below (editable). 3) Deposit &amp; seed.
           {avgPriceWei != null
@@ -339,7 +339,7 @@ export default function TreasuryBootstrap({ account }: Props) {
             {Array.from(selectedIds).map((id) => (
               <span
                 key={id}
-                className="rounded-full border border-gold-400/50 bg-gold-500/15 px-2 py-0.5 text-[0.65rem] font-bold text-gold-300"
+                className="rounded-full border border-line-strong bg-gold-500/15 px-2 py-0.5 text-[0.65rem] font-bold text-gold-300"
               >
                 #{id}
               </span>
@@ -355,7 +355,7 @@ export default function TreasuryBootstrap({ account }: Props) {
             placeholder="e.g. 0.02"
             value={ethAmount}
             onChange={(e) => setEthAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-            className="mt-1 min-h-11 w-full rounded-md border border-gold-500/40 bg-wood-950 px-3 font-mono text-sm font-bold text-gold-300 outline-none focus:border-gold-400"
+            className="mt-1 min-h-11 w-full rounded-md border border-line-strong bg-wood-950 px-3 font-mono text-sm font-bold text-gold-300 outline-none focus:border-gold-400"
           />
         </label>
         <p className="text-[0.6rem] text-foreground/45">
@@ -381,7 +381,7 @@ export default function TreasuryBootstrap({ account }: Props) {
             type="button"
             disabled={depositSeedBusy || selectedIds.size === 0}
             onClick={() => void depositOnly()}
-            className="min-h-10 rounded-md border border-gold-500/35 text-[0.65rem] font-bold text-gold-200 disabled:opacity-40"
+            className="min-h-10 rounded-md border border-line-strong text-[0.65rem] font-bold text-gold-200 disabled:opacity-40"
           >
             Deposit only (no seed)
           </button>
@@ -389,7 +389,7 @@ export default function TreasuryBootstrap({ account }: Props) {
             type="button"
             disabled={depositSeedBusy || status.treasuryShareBalance <= BigInt(0)}
             onClick={() => void seedUnseeded()}
-            className="min-h-10 rounded-md border border-gold-500/35 text-[0.65rem] font-bold text-gold-200 disabled:opacity-40"
+            className="min-h-10 rounded-md border border-line-strong text-[0.65rem] font-bold text-gold-200 disabled:opacity-40"
           >
             Seed unseeded shares + ETH
           </button>
@@ -404,7 +404,7 @@ export default function TreasuryBootstrap({ account }: Props) {
         </button>
 
         {manualMode && (
-          <div className="space-y-2 border-t border-gold-500/15 pt-2">
+          <div className="space-y-2 border-t border-line pt-2">
             <p className="text-[0.6rem] text-foreground/45">
               Prefer &quot;Seed unseeded shares + ETH&quot; — it uses your exact balance after mint fees.
               Only type shares if you know the exact wei amount.
@@ -415,7 +415,7 @@ export default function TreasuryBootstrap({ account }: Props) {
               placeholder="Exact shares (optional override)"
               value={shareAmount}
               onChange={(e) => setShareAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-              className="min-h-10 w-full rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground outline-none focus:border-gold-400"
+              className="min-h-10 w-full rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground outline-none focus:border-gold-400"
             />
             <button
               type="button"
@@ -426,7 +426,7 @@ export default function TreasuryBootstrap({ account }: Props) {
                 if (!ethAmount) return setError("Enter ETH above.");
                 return run(() => seedShares(account, wei, ethAmount), "Seeding…");
               }}
-              className="min-h-10 w-full rounded-md border border-gold-500/40 text-xs font-bold text-gold-300 transition hover:border-gold-400 disabled:opacity-50"
+              className="min-h-10 w-full rounded-md border border-line-strong text-xs font-bold text-gold-300 transition hover:border-gold-400 disabled:opacity-50"
             >
               Seed custom shares + ETH
             </button>

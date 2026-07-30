@@ -56,7 +56,7 @@ export default function TokenPicker({
     return (
       <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
         {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="aspect-square animate-pulse rounded-lg bg-wood-900/90" />
+          <div key={i} className="aspect-square animate-pulse rounded-lg bg-panel" />
         ))}
       </div>
     );
@@ -65,7 +65,7 @@ export default function TokenPicker({
   return (
     <div className="space-y-2">
       {tokens.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-6 text-center text-xs text-foreground/45">
+        <p className="rounded-lg border border-dashed border-line bg-panel-strong px-3 py-6 text-center text-xs text-foreground/45">
           {emptyMessage}
         </p>
       ) : (
@@ -133,7 +133,7 @@ export default function TokenPicker({
                 setManualValue(v);
                 if (v) onSelect(v);
               }}
-              className="min-h-9 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 text-xs text-foreground outline-none focus:border-gold-400"
+              className="min-h-9 w-full rounded-lg border border-line bg-panel px-2.5 text-xs text-foreground outline-none focus:border-gold-400"
             />
           ) : (
             <button

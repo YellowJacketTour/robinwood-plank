@@ -23,7 +23,7 @@ export default function ComingSoonGate() {
               className={`flex h-7 w-7 items-center justify-center rounded-full border text-sm font-bold ${
                 s.done
                   ? "border-emerald-500 bg-emerald-500 text-wood-950"
-                  : "border-gold-500/40 text-gold-300/50"
+                  : "border-line-strong text-gold-300/50"
               }`}
               aria-hidden="true"
             >
@@ -37,7 +37,7 @@ export default function ComingSoonGate() {
       </ul>
       <a
         href="#trade"
-        className="inline-flex min-h-11 items-center justify-center rounded-lg border border-gold-500/40 bg-wood-900/90 px-4 text-sm font-bold text-gold-300 transition hover:border-gold-400"
+        className="inline-flex min-h-11 items-center justify-center rounded-lg border border-line-strong bg-panel px-4 text-sm font-bold text-gold-300 transition hover:border-gold-400"
       >
         Trade on Uniswap instead ↗
       </a>

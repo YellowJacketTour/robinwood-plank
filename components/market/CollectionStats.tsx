@@ -82,11 +82,11 @@ export default function CollectionStats({
   ];
 
   return (
-    <dl className="flex gap-px overflow-x-auto rounded-lg border border-gold-500/20 bg-gold-500/20 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-5 sm:overflow-hidden">
+    <dl className="flex gap-px overflow-x-auto rounded-lg border border-line bg-gold-500/20 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-5 sm:overflow-hidden">
       {stats.map((s) => (
         <div
           key={s.label}
-          className="min-w-[7rem] flex-1 bg-wood-900/90 px-3 py-2 text-center sm:min-w-0"
+          className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0"
         >
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">
             {s.label}

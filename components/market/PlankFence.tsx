@@ -131,7 +131,7 @@ export default function PlankFence({
     return (
       <div className="flex h-full items-center justify-center gap-1 px-3">
         {Array.from({ length: 10 }).map((_, i) => (
-          <div key={i} className="h-4/5 w-6 animate-pulse rounded-sm bg-wood-900/90" />
+          <div key={i} className="h-4/5 w-6 animate-pulse rounded-sm bg-panel" />
         ))}
       </div>
     );
@@ -203,7 +203,7 @@ export default function PlankFence({
                     #{t.tokenId}
                   </div>
                 )}
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-wood-950/90" />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-panel-strong" />
               </div>
             </div>
           );

@@ -99,7 +99,7 @@ function TokenPreviewCard({ tokenId }: { tokenId: string }) {
   if (!tokenId) return null;
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-gold-500/20 bg-wood-950/90 px-3 py-2.5">
+    <div className="flex items-center gap-3 rounded-lg border border-line bg-panel-strong px-3 py-2.5">
       <div
         className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-wood-900"
         style={
@@ -287,7 +287,7 @@ function StuckRedeemRelay({
   };
 
   return (
-    <div className="space-y-2 rounded-lg border border-gold-400/20 bg-[rgba(30,19,11,0.94)] bg-[image:linear-gradient(90deg,rgba(103,200,255,0.08),transparent)] p-3">
+    <div className="space-y-2 rounded-lg border border-line bg-panel bg-[image:linear-gradient(90deg,rgba(103,200,255,0.08),transparent)] p-3">
       <p className="text-xs font-bold uppercase tracking-wide text-sky-300">
         Vault redeem slot is busy
       </p>
@@ -486,7 +486,7 @@ function PendingRedeemClaim({
   if (!isPending) return null;
 
   return (
-    <div className="space-y-2 rounded-lg border border-gold-400/20 bg-[rgba(30,19,11,0.94)] bg-[image:linear-gradient(90deg,rgba(255,189,74,0.1),transparent)] p-3">
+    <div className="space-y-2 rounded-lg border border-line bg-panel bg-[image:linear-gradient(90deg,rgba(255,189,74,0.1),transparent)] p-3">
       <p className="text-xs font-bold uppercase tracking-wide text-amber-300">
         Finishing your random redeem
       </p>
@@ -850,9 +850,9 @@ export default function SwapPanel({
 
   if (!hasVault) {
     return (
-      <div className="overflow-hidden rounded-xl border border-gold-400/20 bg-[rgba(30,19,11,0.94)]">
+      <div className="overflow-hidden rounded-xl border border-line bg-panel">
         <div className="relative flex flex-col items-center gap-4 px-6 py-10 text-center">
-          <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-gold-500/40">
+          <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-line-strong">
             <Image
               src={collection?.image ?? "/images/plank-logo.webp"}
               alt={collection?.name ?? "Collection"}
@@ -1127,7 +1127,7 @@ export default function SwapPanel({
   void vaultLabel;
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-gold-400/20 bg-[rgba(30,19,11,0.94)]">
+    <div className="relative overflow-hidden rounded-xl border border-line bg-panel">
       {reviewOpen && (
         <div
           className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4"
@@ -1135,7 +1135,7 @@ export default function SwapPanel({
           aria-modal="true"
           aria-labelledby="swap-review-title"
         >
-          <div className="w-full max-w-lg rounded-t-xl border border-gold-400/20 bg-[rgba(30,19,11,0.96)] p-4 sm:rounded-xl">
+          <div className="w-full max-w-lg rounded-t-xl border border-line bg-panel p-4 sm:rounded-xl">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[0.65rem] font-black uppercase tracking-[0.14em] text-gold-300/75">
@@ -1148,7 +1148,7 @@ export default function SwapPanel({
               <button
                 type="button"
                 onClick={() => setReviewOpen(false)}
-                className="flex h-10 w-10 items-center justify-center rounded-md border border-gold-500/25 text-foreground/65 hover:text-gold-300"
+                className="flex h-10 w-10 items-center justify-center rounded-md border border-line text-foreground/65 hover:text-gold-300"
                 aria-label="Close review"
               >
                 ✕
@@ -1156,19 +1156,19 @@ export default function SwapPanel({
             </div>
 
             <dl className="mt-4 grid grid-cols-2 gap-2">
-              <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+              <div className="rounded-lg border border-line bg-panel-strong p-3">
                 <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">Vault</dt>
                 <dd className="mt-1 text-sm text-foreground" title={vaultAddress ?? undefined}>
                   {activeTag} · {vaultAddress ? shortVault(vaultAddress) : "Unavailable"}
                 </dd>
               </div>
-              <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+              <div className="rounded-lg border border-line bg-panel-strong p-3">
                 <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">Action</dt>
                 <dd className="mt-1 text-sm capitalize text-foreground">
                   {mode === "lp" ? `${lpDirection} liquidity` : activeMode.label}
                 </dd>
               </div>
-              <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+              <div className="rounded-lg border border-line bg-panel-strong p-3">
                 <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
                   {mode === "deposit" || mode === "redeem" ? "Selection" : "Input"}
                 </dt>
@@ -1186,7 +1186,7 @@ export default function SwapPanel({
                             : "Random Plank"}
                 </dd>
               </div>
-              <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+              <div className="rounded-lg border border-line bg-panel-strong p-3">
                 <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
                   {mode === "buy" || mode === "sell" ? "Expected output" : "Fee / protection"}
                 </dt>
@@ -1207,7 +1207,7 @@ export default function SwapPanel({
             </dl>
 
             {(mode === "buy" || mode === "sell") && (
-              <div className="mt-3 rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2 text-xs text-foreground/65">
+              <div className="mt-3 rounded-lg border border-line bg-black/20 px-3 py-2 text-xs text-foreground/65">
                 <p>
                   Minimum at the current quote:{" "}
                   <strong className="text-foreground">
@@ -1235,7 +1235,7 @@ export default function SwapPanel({
               <button
                 type="button"
                 onClick={() => setReviewOpen(false)}
-                className="min-h-11 rounded-lg border border-gold-500/30 text-sm text-foreground/75 hover:text-gold-300"
+                className="min-h-11 rounded-lg border border-line text-sm text-foreground/75 hover:text-gold-300"
               >
                 Back
               </button>
@@ -1283,7 +1283,7 @@ export default function SwapPanel({
 
         {/* Always-visible one-line mode explainer — same job as the mockup's
             .callout: what this action does, in the vault's own words. */}
-        <p className="rounded-lg border border-gold-400/20 bg-[rgba(30,19,11,0.94)] bg-[image:linear-gradient(90deg,rgba(103,200,255,0.08),transparent)] px-3 py-2 text-[0.68rem] leading-[1.45] text-foreground/70">
+        <p className="rounded-lg border border-line bg-panel bg-[image:linear-gradient(90deg,rgba(103,200,255,0.08),transparent)] px-3 py-2 text-[0.68rem] leading-[1.45] text-foreground/70">
           {mode === "buy" ? (
             <>
               <strong className="text-[#67c8ff]">Buy shares:</strong> pay ETH and receive fungible
@@ -1313,7 +1313,7 @@ export default function SwapPanel({
         </p>
 
         {(mode === "buy" || mode === "sell") && (
-          <div className="rounded-xl border border-gold-400/20 bg-wood-950 p-3.5">
+          <div className="rounded-xl border border-line bg-wood-950 p-3.5">
             <div className="flex items-center justify-between gap-2 text-[0.66rem] text-[#a99c82]">
               <span>You pay</span>
               <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
@@ -1365,7 +1365,7 @@ export default function SwapPanel({
                 onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
                 className="min-w-0 flex-1 bg-transparent py-1 font-display text-[1.55rem] font-normal text-foreground outline-none"
               />
-              <span className="shrink-0 rounded-full border border-gold-400/20 bg-wood-800 px-2.5 py-1.5 text-[0.7rem] font-black text-gold-300">
+              <span className="shrink-0 rounded-full border border-line bg-wood-800 px-2.5 py-1.5 text-[0.7rem] font-black text-gold-300">
                 {mode === "buy" ? "ETH" : `${activeTag} shares`}
               </span>
             </div>
@@ -1435,12 +1435,12 @@ export default function SwapPanel({
               )}
             </p>
             {lpCredit && (lpCredit.shareCredit > BigInt(0) || lpCredit.ethCredit > BigInt(0)) && (
-              <p className="rounded-md border border-gold-500/20 bg-wood-950/90 px-2 py-1.5 text-[0.65rem] text-gold-200/90">
+              <p className="rounded-md border border-line bg-panel-strong px-2 py-1.5 text-[0.65rem] text-gold-200/90">
                 Your LP credit: {formatTokenAmount(lpCredit.shareCredit, 18, 4)} shares ·{" "}
                 {formatTokenAmount(lpCredit.ethCredit, 18, 5)} Ξ
               </p>
             )}
-            <div className="rounded-xl border border-gold-400/20 bg-wood-950 px-3 py-2.5">
+            <div className="rounded-xl border border-line bg-wood-950 px-3 py-2.5">
               <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.66rem] text-[#a99c82]">
                 <span>{lpDirection === "remove" ? "Shares to remove" : "Shares to add"}</span>
                 <span className="flex flex-wrap items-center gap-2 font-normal normal-case">
@@ -1489,7 +1489,7 @@ export default function SwapPanel({
                 className="mt-1 w-full bg-transparent font-display text-[1.35rem] font-normal text-foreground outline-none"
               />
             </div>
-            <div className="rounded-xl border border-gold-400/20 bg-wood-950 px-3 py-2.5">
+            <div className="rounded-xl border border-line bg-wood-950 px-3 py-2.5">
               <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.66rem] text-[#a99c82]">
                 <span>
                   {lpDirection === "remove"
@@ -1619,11 +1619,11 @@ export default function SwapPanel({
           >
             ↓
           </div>
-          <div className="rounded-xl border border-gold-400/20 bg-wood-950 p-3.5">
+          <div className="rounded-xl border border-line bg-wood-950 p-3.5">
             <div className="flex items-center justify-between gap-2 text-[0.66rem] text-[#a99c82]">
               <span>You receive</span>
               <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
-                <span className="rounded-full border border-gold-400/20 bg-wood-800 px-2.5 py-1 text-[0.62rem] font-black text-gold-300">
+                <span className="rounded-full border border-line bg-wood-800 px-2.5 py-1 text-[0.62rem] font-black text-gold-300">
                   {mode === "buy" ? `${activeTag} shares` : "ETH"}
                 </span>
                 {account && (
@@ -1671,7 +1671,7 @@ export default function SwapPanel({
                 inputMode="decimal"
                 value={slippagePct}
                 onChange={(e) => setSlippagePct(e.target.value.replace(/[^0-9.]/g, ""))}
-                className="w-12 rounded-md border border-gold-400/20 bg-wood-950 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-gold-400"
+                className="w-12 rounded-md border border-line bg-wood-950 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-gold-400"
                 aria-label="Max slippage percent"
               />
               <span className="text-xs font-bold text-gold-300">%</span>
@@ -1754,7 +1754,7 @@ export default function SwapPanel({
                 className={`rounded-lg border px-2.5 py-2 text-[0.65rem] ${
                   redeemInsufficient
                     ? "border-red-500/40 bg-red-500/10 text-red-200"
-                    : "border-gold-400/20 bg-wood-950 text-foreground/60"
+                    : "border-line bg-wood-950 text-foreground/60"
                 }`}
               >
                 <div className="flex items-center justify-between">

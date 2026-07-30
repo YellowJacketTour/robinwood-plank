@@ -73,7 +73,7 @@ export default function BuyConfirm({
           </div>
         </div>
 
-        <dl className="space-y-1 rounded-lg border border-gold-500/20 bg-wood-900/90 px-3 py-2 text-xs">
+        <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
           <div className="flex justify-between">
             <dt className="text-foreground/60">Price</dt>
             <dd className="tabular-nums text-foreground">
@@ -88,7 +88,7 @@ export default function BuyConfirm({
                 : "None"}
             </dd>
           </div>
-          <div className="flex justify-between border-t border-gold-500/15 pt-1">
+          <div className="flex justify-between border-t border-line pt-1">
             <dt className="font-bold text-foreground">You pay</dt>
             <dd className="font-display tabular-nums text-gold-300">
               {formatTokenAmount(verifiedPriceWei, 18, 6)} Ξ

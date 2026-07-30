@@ -117,8 +117,8 @@ export default function LivingLiquidityViz({ vaultAddress = null, active = true 
   const vaultTag = colorKind === "v1" ? "V1" : colorKind === "v2" ? "V2" : null;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-gold-400/20 bg-[rgba(30,19,11,0.94)]">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gold-400/20 px-3 py-2">
+    <div className="overflow-hidden rounded-xl border border-line bg-panel">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
         <div>
           <p className="text-[0.58rem] font-black uppercase tracking-[0.14em] text-gold-400">
             Living liquidity
@@ -143,7 +143,7 @@ export default function LivingLiquidityViz({ vaultAddress = null, active = true 
         )}
       </div>
       <div className="relative grid grid-cols-1 sm:grid-cols-2">
-        <div className="relative h-48 overflow-hidden border-b border-gold-400/20 bg-gradient-to-b from-wood-900/40 to-black/30 sm:h-64 sm:border-b-0 sm:border-r">
+        <div className="relative h-48 overflow-hidden border-b border-line bg-gradient-to-b from-wood-900/40 to-black/30 sm:h-64 sm:border-b-0 sm:border-r">
           <PlankFence held={held} rarity={rarity} />
           <span className="pointer-events-none absolute bottom-1.5 left-2 text-[0.55rem] font-bold uppercase tracking-wide text-foreground/35">
             {held ? `${held.length} held` : "…"}
@@ -177,11 +177,11 @@ export default function LivingLiquidityViz({ vaultAddress = null, active = true 
             </p>
           </div>
           <div className="flex gap-2 text-center">
-            <div className="rounded-lg border border-gold-400/20 bg-wood-950 px-2 py-1">
+            <div className="rounded-lg border border-line bg-wood-950 px-2 py-1">
               <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Vault fees</p>
               <p className="text-[0.65rem] font-bold text-foreground">{vaultFeeEth} Ξ</p>
             </div>
-            <div className="rounded-lg border border-gold-400/20 bg-wood-950 px-2 py-1">
+            <div className="rounded-lg border border-line bg-wood-950 px-2 py-1">
               <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Market fees est.</p>
               <p className="text-[0.65rem] font-bold text-foreground">{marketFeeEth} Ξ</p>
             </div>

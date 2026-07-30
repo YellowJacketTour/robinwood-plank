@@ -39,7 +39,7 @@ const RANGE_MS: Record<Exclude<Range, "ALL">, number> = {
 
 function stat(label: string, value: string, pending = false) {
   return (
-    <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 px-3 py-2.5">
+    <div className="rounded-lg border border-line bg-panel-strong px-3 py-2.5">
       <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">
         {label}
       </dt>
@@ -280,7 +280,7 @@ export default function ActivityStats({
         )}
       </dl>
 
-      <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+      <div className="rounded-lg border border-line bg-panel-strong p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-[0.65rem] font-bold uppercase tracking-wider text-foreground/55">

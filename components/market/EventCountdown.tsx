@@ -110,15 +110,15 @@ export default function EventCountdown() {
   if (remaining?.complete) return null;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gold-500/30 bg-wood-900/90 px-3 py-2">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-panel px-3 py-2">
       {record ? (
         <div className="flex min-w-0 items-center gap-2.5">
           {record.image ? (
-            <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-md border border-gold-500/40">
+            <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-md border border-line-strong">
               <Image src={record.image} alt={`#${record.tokenId}`} fill sizes="36px" className="object-cover" unoptimized />
             </div>
           ) : (
-            <div className="h-9 w-9 shrink-0 rounded-md border border-gold-500/40 bg-wood-900" />
+            <div className="h-9 w-9 shrink-0 rounded-md border border-line-strong bg-wood-900" />
           )}
           <div className="min-w-0 leading-tight">
             <p className="truncate text-[0.72rem] font-bold text-gold-300">

@@ -289,7 +289,7 @@ export default function NftPriceChart({ active = true }: { active?: boolean } = 
   return (
     // Panel frame like every sibling module — the chart floating on the
     // page background read as unfinished next to the panelled odds card.
-    <div className="space-y-2 rounded-xl border border-gold-400/20 bg-[rgba(30,19,11,0.94)] p-3">
+    <div className="space-y-2 rounded-xl border border-line bg-panel p-3">
       <div className="flex items-center justify-between gap-2">
         <div>
           <p className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
@@ -317,15 +317,15 @@ export default function NftPriceChart({ active = true }: { active?: boolean } = 
         </div>
       </div>
       {points != null && points.length === 0 ? (
-        <p className="rounded-lg border border-gold-400/20 bg-wood-950 px-3 py-10 text-center text-xs text-foreground/45">
+        <p className="rounded-lg border border-line bg-wood-950 px-3 py-10 text-center text-xs text-foreground/45">
           No priced vault trades or sales yet — chart fills in as they print.
         </p>
       ) : points == null ? (
-        <p className="rounded-lg border border-gold-400/20 bg-wood-950 px-3 py-10 text-center text-xs text-foreground/45">
+        <p className="rounded-lg border border-line bg-wood-950 px-3 py-10 text-center text-xs text-foreground/45">
           Loading price history…
         </p>
       ) : (
-        <div ref={containerRef} className="w-full min-h-[260px] overflow-hidden rounded-lg border border-gold-400/20 bg-wood-950" />
+        <div ref={containerRef} className="w-full min-h-[260px] overflow-hidden rounded-lg border border-line bg-wood-950" />
       )}
     </div>
   );

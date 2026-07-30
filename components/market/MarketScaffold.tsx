@@ -164,7 +164,7 @@ export function MarketWalletGate({
   onConnect: () => void;
 }) {
   return (
-    <div className="mx-auto max-w-lg rounded-xl border border-gold-500/30 bg-wood-900/90 px-5 py-10 text-center">
+    <div className="mx-auto max-w-lg rounded-xl border border-line bg-panel px-5 py-10 text-center">
       <p className={styles.sectionEyebrow}>Wallet workspace</p>
       <h2 className={`${styles.sectionTitle} mt-1`}>{title}</h2>
       <p className={`${styles.sectionDescription} mx-auto`}>{description}</p>

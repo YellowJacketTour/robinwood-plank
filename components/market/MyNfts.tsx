@@ -261,7 +261,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
   }
   if (inventory === null) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-lg border border-dashed border-line bg-panel px-4 py-8 text-center text-sm text-foreground/60">
         Reading your planks from chain…
       </p>
     );
@@ -270,7 +270,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
   const totalOwned = inventory.reduce((n, g) => n + g.items.length, 0);
   if (totalOwned === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-lg border border-dashed border-line bg-panel px-4 py-8 text-center text-sm text-foreground/60">
         This wallet holds no planks yet.
       </p>
     );
@@ -295,7 +295,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
           type="button"
           onClick={refresh}
           disabled={refreshing}
-          className="min-h-10 rounded-md border border-gold-500/30 px-3 text-xs text-gold-300 disabled:opacity-50"
+          className="min-h-10 rounded-md border border-line px-3 text-xs text-gold-300 disabled:opacity-50"
         >
           {refreshing ? "Reloading…" : "Reload"}
         </button>
@@ -396,7 +396,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
       ))}
 
       {selectedItems.length > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-gold-500/30 bg-wood-950/95 p-3 backdrop-blur sm:sticky sm:rounded-xl sm:border">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-panel-strong p-3 backdrop-blur sm:sticky sm:rounded-xl sm:border">
           <div className="mx-auto max-w-2xl space-y-2.5">
             <div className="flex items-center justify-between">
               <p className="text-sm font-bold text-foreground">
@@ -427,7 +427,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
                 setAckRecipient(false);
                 setAckPermanent(false);
               }}
-              className="min-h-11 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 font-mono text-sm text-foreground outline-none focus:border-gold-400"
+              className="min-h-11 w-full rounded-lg border border-line bg-panel px-2.5 font-mono text-sm text-foreground outline-none focus:border-gold-400"
             />
 
             {confirming && !busy && (
@@ -460,7 +460,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
               </div>
             )}
 
-            <div className="flex items-center justify-between rounded-lg border border-gold-500/20 bg-wood-950/90 px-2.5 py-2">
+            <div className="flex items-center justify-between rounded-lg border border-line bg-panel-strong px-2.5 py-2">
               <span className="text-[0.65rem] text-foreground/50">
                 Send fee ({selectedItems.length > 1 ? "batch, cheaper per item" : "flat"})
               </span>
@@ -519,7 +519,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
           {statuses.map((s) => (
             <li
               key={s.key}
-              className="flex items-center justify-between gap-3 border-t border-gold-500/15 px-3 py-2 first:border-t-0"
+              className="flex items-center justify-between gap-3 border-t border-line px-3 py-2 first:border-t-0"
             >
               <span className="text-xs font-bold text-foreground">
                 #{s.key.split(":")[1]}

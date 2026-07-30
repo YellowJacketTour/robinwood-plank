@@ -127,13 +127,13 @@ export default function VaultTradeHistory() {
         : "Reconnecting…";
 
   return (
-    <div className="space-y-1.5 rounded-xl border border-gold-400/20 bg-[rgba(30,19,11,0.94)] p-3">
+    <div className="space-y-1.5 rounded-xl border border-line bg-panel p-3">
       <div className="flex items-center justify-between">
         <p className="text-[0.72rem] font-black text-foreground">
           Live V1 + V2 vault trades
         </p>
         <span
-          className={`flex items-center gap-1 rounded-full border border-gold-400/20 px-2 py-0.5 text-[0.55rem] font-bold uppercase ${live ? "text-emerald-300/70" : connected ? "text-gold-300/70" : "text-foreground/30"}`}
+          className={`flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[0.55rem] font-bold uppercase ${live ? "text-emerald-300/70" : connected ? "text-gold-300/70" : "text-foreground/30"}`}
         >
           <span
             className={`h-1.5 w-1.5 rounded-full ${live ? "animate-pulse bg-emerald-400" : connected ? "animate-pulse bg-gold-400" : "bg-foreground/30"}`}
@@ -144,22 +144,22 @@ export default function VaultTradeHistory() {
       {loading ? (
         <div className="space-y-1">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-7 animate-pulse rounded bg-wood-900/90" />
+            <div key={i} className="h-7 animate-pulse rounded bg-panel" />
           ))}
         </div>
       ) : activity.length === 0 && visiblePending.length === 0 ? (
-        <p className="rounded-lg border border-gold-400/20 bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
+        <p className="rounded-lg border border-line bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
           No vault trades yet.
         </p>
       ) : (
         <ScrollBox
           storageKey="vault-trades"
           defaultHeight={256}
-          className="rounded-lg border border-gold-400/20 bg-wood-950"
+          className="rounded-lg border border-line bg-wood-950"
         >
           <table className="w-full text-left text-[0.65rem]">
             <thead>
-              <tr className="border-b border-gold-400/20 bg-[rgba(219,165,63,0.07)] text-[0.58rem] uppercase tracking-[0.08em] text-[#9e9279]">
+              <tr className="border-b border-line bg-[rgba(219,165,63,0.07)] text-[0.58rem] uppercase tracking-[0.08em] text-[#9e9279]">
                 <th className="px-2 py-2 font-black">Kind</th>
                 <th className="px-2 py-2 font-black">Amount</th>
                 <th className="px-2 py-2 font-black">Price/share</th>
@@ -169,7 +169,7 @@ export default function VaultTradeHistory() {
             </thead>
             <tbody>
               {visiblePending.map((p) => (
-                <tr key={p.txHash} className="border-b border-gold-400/15 bg-gold-500/5 last:border-0">
+                <tr key={p.txHash} className="border-b border-line bg-gold-500/5 last:border-0">
                   <td className="px-2 py-1.5 font-bold text-foreground">
                     <span
                       className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${KIND_DOT[p.kind]}`}
@@ -201,7 +201,7 @@ export default function VaultTradeHistory() {
               {activity.map((e) => (
                 <tr
                   key={`${e.vaultAddress || ""}:${e.txHash}:${e.kind}:${e.tokenId ?? ""}:${e.logIndex ?? ""}`}
-                  className="border-b border-gold-400/15 last:border-0"
+                  className="border-b border-line last:border-0"
                 >
                   <td className="px-2 py-1.5 font-bold text-foreground">
                     <span
