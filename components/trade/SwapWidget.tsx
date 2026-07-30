@@ -900,6 +900,7 @@ export default function SwapWidget() {
         tokens={counters}
         selected={counter}
         onSelect={setCounter}
+        account={account}
         title={direction === "buy" ? "Select token to pay with" : "Select token to receive"}
       />
       <p className="rounded-lg border border-amber-500/35 bg-amber-950/40 px-2.5 py-1.5 text-[0.65rem] leading-snug text-amber-100/90 sm:text-[0.7rem]">
