@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import dynamic from "next/dynamic";
 import Reveal from "@/components/Reveal";
 import SectionHead from "@/components/SectionHead";
+import CopyCA from "@/components/CopyCA";
 import CountdownTimer from "@/components/trade/CountdownTimer";
 import { CHAIN, SITE_FEE, TRADE_PAUSED } from "@/lib/constants";
 import { getCountdownParts } from "@/lib/trade";
@@ -57,14 +58,16 @@ export default function Trade() {
         )}
 
         <Reveal delayMs={55}>
-          <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:items-start sm:mt-6 sm:gap-4">
+          <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:items-stretch sm:mt-6 sm:gap-4">
             {/* The real widget from /trade — same component, not a copy */}
             <div className="min-w-0">
               <SwapWidget />
             </div>
 
-            {/* Trust facts */}
-            <div className="grid gap-3">
+            {/* Trust facts — stretched to the widget's height, with the
+                verified contract strip closing the column so the space
+                beside the widget stays useful rather than empty. */}
+            <div className="flex min-w-0 flex-col gap-3">
               {[
                 {
                   title: "Verified contract",
@@ -78,12 +81,20 @@ export default function Trade() {
                   title: "Full transparency",
                   body: `Trading fee is fixed at ${SITE_FEE.label} — hard-coded server-side, never client-overridable.`,
                 },
+                {
+                  title: "Routed for best price",
+                  body: "Every quote compares Uniswap v2, v3 and v4 liquidity on Robinhood Chain and routes through whichever path pays out most — multi-hop included.",
+                },
               ].map((f) => (
-                <div key={f.title} className="rounded-xl border border-line bg-panel p-3 sm:p-4">
+                <div
+                  key={f.title}
+                  className="flex flex-1 flex-col justify-center rounded-xl border border-line bg-panel p-3 sm:p-4"
+                >
                   <strong className="block font-display text-lg text-gold-300">{f.title}</strong>
                   <span className="mt-1 block text-sm text-cream-muted">{f.body}</span>
                 </div>
               ))}
+              <CopyCA />
             </div>
           </div>
         </Reveal>
