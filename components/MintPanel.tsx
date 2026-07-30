@@ -168,38 +168,38 @@ export default function MintPanel() {
         </a>
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs sm:grid-cols-3 sm:gap-x-5 sm:text-sm">
-        <div>
-          <dt className="text-foreground/55">Total supply</dt>
-          <dd className="mt-1 font-bold text-foreground">
+      <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <div className="rounded-lg border border-line bg-panel-strong px-3 py-2">
+          <dt className="text-[0.62rem] font-extrabold uppercase tracking-[0.12em] text-cream-muted">Total supply</dt>
+          <dd className="mt-0.5 font-display text-base text-cream">
             {totalSupply.toLocaleString()} / {TOTAL_SUPPLY.toLocaleString()}
           </dd>
         </div>
-        <div>
-          <dt className="text-foreground/55">Original price</dt>
-          <dd className="mt-1 font-bold text-foreground">{priceEth} ETH</dd>
+        <div className="rounded-lg border border-line bg-panel-strong px-3 py-2">
+          <dt className="text-[0.62rem] font-extrabold uppercase tracking-[0.12em] text-cream-muted">Original price</dt>
+          <dd className="mt-0.5 font-display text-base text-cream">{priceEth} ETH</dd>
         </div>
-        <div>
-          <dt className="text-foreground/55">Community</dt>
-          <dd className="mt-1 font-bold text-foreground">
+        <div className="rounded-lg border border-line bg-panel-strong px-3 py-2">
+          <dt className="text-[0.62rem] font-extrabold uppercase tracking-[0.12em] text-cream-muted">Community</dt>
+          <dd className="mt-0.5 font-display text-base text-cream">
             {community.toLocaleString()} / {COMMUNITY_SUPPLY.toLocaleString()}
           </dd>
         </div>
-        <div>
-          <dt className="text-foreground/55">Free / Wood List</dt>
-          <dd className="mt-1 font-bold text-foreground">
+        <div className="rounded-lg border border-line bg-panel-strong px-3 py-2">
+          <dt className="text-[0.62rem] font-extrabold uppercase tracking-[0.12em] text-cream-muted">Free / Wood List</dt>
+          <dd className="mt-0.5 font-display text-base text-cream">
             {free != null && allowlist != null ? `${free} / ${allowlist}` : "642 / 135"}
           </dd>
         </div>
-        <div>
-          <dt className="text-foreground/55">Paid &amp; reserve</dt>
-          <dd className="mt-1 font-bold text-foreground">
+        <div className="rounded-lg border border-line bg-panel-strong px-3 py-2">
+          <dt className="text-[0.62rem] font-extrabold uppercase tracking-[0.12em] text-cream-muted">Paid &amp; reserve</dt>
+          <dd className="mt-0.5 font-display text-base text-cream">
             {paid != null ? paidAndReserve.toLocaleString() : (TOTAL_SUPPLY - COMMUNITY_SUPPLY).toLocaleString()}
           </dd>
         </div>
-        <div>
-          <dt className="text-foreground/55">Max / wallet was</dt>
-          <dd className="mt-1 font-bold text-foreground">{MAX_PER_WALLET_WAS}</dd>
+        <div className="rounded-lg border border-line bg-panel-strong px-3 py-2">
+          <dt className="text-[0.62rem] font-extrabold uppercase tracking-[0.12em] text-cream-muted">Max / wallet was</dt>
+          <dd className="mt-0.5 font-display text-base text-cream">{MAX_PER_WALLET_WAS}</dd>
         </div>
       </dl>
 

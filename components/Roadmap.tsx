@@ -68,10 +68,10 @@ export default function Roadmap() {
         <ol className="relative mt-10 grid grid-cols-1 gap-4 sm:mt-14 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 xl:grid-cols-5">
           {PHASES.map((p, i) => (
             <Reveal key={p.phase} delayMs={i * 120}>
-              <li className="relative flex flex-col items-center rounded-2xl border border-gold-500/20 bg-wood-900/85 p-5 text-center sm:p-6">
+              <li className="relative flex aspect-square flex-col items-center justify-center rounded-2xl border border-gold-500/20 bg-wood-900/85 p-4 text-center">
                 <div className="relative">
                   <div
-                    className={`relative z-10 flex h-14 w-14 items-center justify-center rounded-full border-2 bg-wood-950 text-2xl sm:h-16 sm:w-16 sm:text-3xl ${
+                    className={`relative z-10 flex h-12 w-12 items-center justify-center rounded-full border-2 bg-wood-950 text-xl ${
                       p.status === "current"
                         ? "animate-flicker border-orange-500 ring-4 ring-orange-500/60 ring-offset-2 ring-offset-wood-900"
                         : "border-gold-500"
