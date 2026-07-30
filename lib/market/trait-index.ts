@@ -7,6 +7,7 @@ import type { NftAttribute } from "@/lib/ipfs";
 import { fetchTokenInstances } from "@/lib/market/blockscout";
 import { robinwoodTokenUri } from "@/lib/market/token-image";
 import type { MarketCollection } from "@/lib/market/types";
+import { getRaritySnapshot } from "@/lib/market/rarity-snapshot";
 import {
   resolveCriteriaTokenIds,
   type CriteriaClause,
@@ -324,7 +325,19 @@ export async function getVerifiedCriteriaTokenIds(
 ): Promise<{ tokenIds: string[] } | null> {
   const { index, complete } = await getTraitIndex(collection);
   if (!index || !complete || clauses.length === 0) return null;
-  const tokenIds = resolveCriteriaTokenIds(index.traits, clauses);
+  let rankings: Record<string, number> | null = null;
+  if (clauses.some((clause) => clause.kind === "rank")) {
+    try {
+      const rarity = await getRaritySnapshot();
+      rankings = {};
+      for (const [tokenId, item] of rarity.byTokenId) {
+        rankings[String(tokenId)] = item.rank;
+      }
+    } catch {
+      return null;
+    }
+  }
+  const tokenIds = resolveCriteriaTokenIds(index.traits, clauses, rankings);
   if (tokenIds.length === 0) return null;
   return { tokenIds };
 }

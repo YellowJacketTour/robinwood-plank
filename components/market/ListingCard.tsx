@@ -158,6 +158,15 @@ export default function ListingCard({
             </button>
           )}
         </div>
+        {selectable && (
+          <button
+            type="button"
+            onClick={() => onSelect!(listing.tokenId)}
+            className="min-h-9 w-full rounded-md border border-gold-500/25 text-xs font-bold text-foreground/65 transition hover:border-gold-400 hover:text-gold-300"
+          >
+            Details
+          </button>
+        )}
       </div>
     </li>
   );

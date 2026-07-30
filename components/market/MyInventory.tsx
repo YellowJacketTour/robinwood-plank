@@ -57,6 +57,7 @@ const STATE_LABEL: Record<BulkItemStatus["state"], string> = {
  */
 export default function MyInventory({ account, collections, alreadyListed, onListed }: Props) {
   const [inventory, setInventory] = useState<OwnedInventory[] | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Map<string, SelectedItem>>(new Map());
   const [mode, setMode] = useState<PricingMode>("same");
@@ -65,22 +66,38 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
   const [durationDays, setDurationDays] = useState(7);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [statuses, setStatuses] = useState<BulkItemStatus[] | null>(null);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
 
-  useEffect(() => {
-    let cancelled = false;
-    setInventory(null);
+  const refresh = useCallback(() => {
+    setRefreshing(true);
     setLoadError(null);
     void getOwnedInventory(collections, account)
-      .then((inv) => {
-        if (!cancelled) setInventory(inv);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadError("Could not load your planks — try again.");
-      });
+      .then(setInventory)
+      .catch(() => setLoadError("Could not load your planks — try again."))
+      .finally(() => setRefreshing(false));
+  }, [account, collections]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const frame = window.requestAnimationFrame(() => {
+      setRefreshing(true);
+      setLoadError(null);
+      void getOwnedInventory(collections, account)
+        .then((nextInventory) => {
+          if (!cancelled) setInventory(nextInventory);
+        })
+        .catch(() => {
+          if (!cancelled) setLoadError("Could not load your planks — try again.");
+        })
+        .finally(() => {
+          if (!cancelled) setRefreshing(false);
+        });
+    });
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(frame);
     };
   }, [account, collections]);
 
@@ -168,11 +185,28 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
     return formatTokenAmount(sum, 18, 6);
   }, [mode, samePrice, perItemPrices, selectedItems]);
 
-  if (loadError) {
+  const openReview = () => {
+    setError(null);
+    const priced = resolveBulkPrices(mode, samePrice, perItemPrices, selectedItems);
+    if (!priced.ok) {
+      setError(priced.error);
+      return;
+    }
+    setReviewOpen(true);
+  };
+
+  if (loadError && inventory === null) {
     return (
-      <p className="rounded-lg border border-dashed border-red-500/30 px-4 py-6 text-center text-sm text-red-300" role="alert">
-        {loadError}
-      </p>
+      <div className="rounded-lg border border-dashed border-red-500/30 px-4 py-6 text-center" role="alert">
+        <p className="text-sm text-red-300">{loadError}</p>
+        <button
+          type="button"
+          onClick={refresh}
+          className="mt-3 min-h-10 rounded-md border border-red-500/35 px-3 text-xs text-red-200"
+        >
+          Retry inventory
+        </button>
+      </div>
     );
   }
   if (inventory === null) {
@@ -196,6 +230,30 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h3 className="font-display text-xl text-gold-300">List from your wallet</h3>
+          <p className="text-xs text-foreground/55">
+            {totalOwned} owned · {selectedItems.length} selected
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={refresh}
+          disabled={refreshing}
+          className="min-h-10 rounded-md border border-gold-500/30 px-3 text-xs text-gold-300 disabled:opacity-50"
+        >
+          {refreshing ? "Reloading…" : "Reload"}
+        </button>
+      </div>
+      {loadError && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-950/20 px-3 py-2 text-xs text-red-200" role="alert">
+          <span>{loadError}</span>
+          <button type="button" onClick={refresh} className="min-h-9 underline">
+            Retry
+          </button>
+        </div>
+      )}
       {groups.map((group) => (
         <section key={group.collection.slug} className="space-y-2">
           <h3 className="text-xs font-bold uppercase tracking-wider text-foreground/50">
@@ -272,6 +330,86 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
 
       {selectedItems.length > 0 && (
         <div className="wood-ledger space-y-3 p-3">
+          {reviewOpen && (
+            <div
+              className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 sm:items-center sm:p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="listing-review-title"
+            >
+              <div className="wood-ledger w-full max-w-lg rounded-t-xl border border-gold-500/35 p-4 sm:rounded-xl">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[0.65rem] font-black uppercase tracking-[0.14em] text-gold-300/75">
+                      Verify before signing
+                    </p>
+                    <h3 id="listing-review-title" className="mt-1 font-display text-2xl text-gold-300">
+                      Review listings
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReviewOpen(false)}
+                    className="flex h-10 w-10 items-center justify-center rounded-md border border-gold-500/25 text-foreground/65 hover:text-gold-300"
+                    aria-label="Close review"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <dl className="mt-4 grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                    <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                      Planks
+                    </dt>
+                    <dd className="mt-1 text-sm text-foreground">{selectedItems.length}</dd>
+                  </div>
+                  <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                    <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                      Wallet signatures
+                    </dt>
+                    <dd className="mt-1 text-sm text-foreground">{selectedItems.length}</dd>
+                  </div>
+                  <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                    <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                      Expires
+                    </dt>
+                    <dd className="mt-1 text-sm text-foreground">{durationDays} days</dd>
+                  </div>
+                  <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                    <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                      Total ask
+                    </dt>
+                    <dd className="mt-1 text-sm text-foreground">{totalPreview ?? "—"} ETH</dd>
+                  </div>
+                </dl>
+                <p className="mt-3 text-xs leading-5 text-foreground/55">
+                  Each Plank creates one independently cancellable order. Price, expiry,
+                  approval, and payload are checked before signing; the server verifies current
+                  ownership before publication. Stale or partial failures remain selected for
+                  retry.
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setReviewOpen(false)}
+                    className="min-h-11 rounded-lg border border-gold-500/30 text-sm text-foreground/75 hover:text-gold-300"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReviewOpen(false);
+                      void submit();
+                    }}
+                    className="min-h-11 rounded-lg bg-gold-500 text-sm font-bold text-wood-950 hover:bg-gold-400"
+                  >
+                    Continue to wallet
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <p className="text-sm font-bold text-foreground">
               List {selectedItems.length} plank{selectedItems.length > 1 ? "s" : ""}
@@ -381,12 +519,12 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
           <button
             type="button"
             disabled={busy}
-            onClick={() => void submit()}
+            onClick={openReview}
             className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy
               ? "Listing…"
-              : `List ${selectedItems.length} for sale`}
+              : `Review ${selectedItems.length} listing${selectedItems.length > 1 ? "s" : ""}`}
           </button>
 
           {error && (

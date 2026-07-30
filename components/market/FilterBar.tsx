@@ -13,6 +13,8 @@ export type MarketFilters = {
   /** "all" or one of the site's shared rarity tiers (lib/rarity.ts) — the
    * SAME six-tier scale shown everywhere else, never a second scheme. */
   tier: RarityTier | "all";
+  /** Desktop/mobile sidebar can combine tiers with OR semantics. */
+  tiers?: RarityTier[];
 };
 
 export const EMPTY_FILTERS: MarketFilters = { query: "", minEth: "", maxEth: "", tier: "all" };
@@ -35,7 +37,11 @@ export default function FilterBar({
   orientation = "inline",
 }: Props) {
   const dirty =
-    filters.query !== "" || filters.minEth !== "" || filters.maxEth !== "" || filters.tier !== "all";
+    filters.query !== "" ||
+    filters.minEth !== "" ||
+    filters.maxEth !== "" ||
+    filters.tier !== "all" ||
+    Boolean(filters.tiers?.length);
 
   if (orientation === "sidebar") {
     return (
@@ -96,11 +102,31 @@ export default function FilterBar({
                   className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-xs text-foreground/75 hover:bg-gold-500/10"
                 >
                   <input
-                    type="radio"
-                    name="market-rarity"
+                    type="checkbox"
                     value={tier}
-                    checked={filters.tier === tier}
-                    onChange={() => onChange({ ...filters, tier })}
+                    checked={
+                      tier === "all"
+                        ? !filters.tiers?.length && filters.tier === "all"
+                        : (filters.tiers ?? (filters.tier === "all" ? [] : [filters.tier])).includes(
+                            tier
+                          )
+                    }
+                    onChange={() => {
+                      if (tier === "all") {
+                        onChange({ ...filters, tier: "all", tiers: [] });
+                        return;
+                      }
+                      const current =
+                        filters.tiers ?? (filters.tier === "all" ? [] : [filters.tier]);
+                      const next = current.includes(tier)
+                        ? current.filter((selected) => selected !== tier)
+                        : [...current, tier];
+                      onChange({
+                        ...filters,
+                        tiers: next,
+                        tier: next.length === 1 ? next[0]! : "all",
+                      });
+                    }}
                     className="accent-[#d9a441]"
                   />
                   <span>{tier === "all" ? "All rarities" : tier}</span>
@@ -160,7 +186,14 @@ export default function FilterBar({
           <span className="sr-only">Filter by rarity tier</span>
           <select
             value={filters.tier}
-            onChange={(e) => onChange({ ...filters, tier: e.target.value as MarketFilters["tier"] })}
+            onChange={(e) => {
+              const tier = e.target.value as MarketFilters["tier"];
+              onChange({
+                ...filters,
+                tier,
+                tiers: tier === "all" ? [] : [tier],
+              });
+            }}
             className="min-h-9 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
           >
             <option value="all">Any rarity</option>
@@ -215,11 +248,17 @@ export function applyFilters<T extends { tokenId?: string; priceWei: string }>(
     }
     if (min !== null && price < min) return false;
     if (max !== null && price > max) return false;
-    if (filters.tier !== "all") {
+    const selectedTiers =
+      filters.tiers && filters.tiers.length > 0
+        ? filters.tiers
+        : filters.tier === "all"
+          ? []
+          : [filters.tier];
+    if (selectedTiers.length > 0) {
       // A collection-wide item (no tokenId) has no rarity to match — excluded
       // under any specific tier filter, same as it would be under a search.
       const r = item.tokenId ? rarityMap?.get(item.tokenId) : undefined;
-      if (!r || r.tier !== filters.tier) return false;
+      if (!r || !selectedTiers.includes(r.tier)) return false;
     }
     return true;
   });

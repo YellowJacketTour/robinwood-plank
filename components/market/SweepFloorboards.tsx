@@ -55,41 +55,47 @@ export default function SweepFloorboards({
 
   // Keep sweep scope in lockstep with rarity floor chips when user taps a tier.
   useEffect(() => {
-    if (tierScope === "all") {
-      if (scopeMode === "tier") setScopeMode("floor");
-    } else {
-      setScopeMode("tier");
-    }
+    const frame = window.requestAnimationFrame(() => {
+      if (tierScope === "all") {
+        if (scopeMode === "tier") setScopeMode("floor");
+      } else {
+        setScopeMode("tier");
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [tierScope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (scopeMode !== "trait") return;
     let cancelled = false;
-    setTraitLoading(true);
-    setTraitError(null);
-    fetchTraitIndex(collection)
-      .then((idx) => {
-        if (cancelled) return;
-        setTraitIndex(idx);
-        if (idx.complete && idx.traits) {
-          setClauses((prev) => {
-            if (prev.length > 0) return prev;
-            const first = defaultFirstClause(idx.traits!);
-            return first ? [first] : [];
-          });
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setTraitIndex(null);
-          setTraitError(e instanceof Error ? e.message : "Could not load traits.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setTraitLoading(false);
-      });
+    const frame = window.requestAnimationFrame(() => {
+      setTraitLoading(true);
+      setTraitError(null);
+      fetchTraitIndex(collection)
+        .then((idx) => {
+          if (cancelled) return;
+          setTraitIndex(idx);
+          if (idx.complete && idx.traits) {
+            setClauses((prev) => {
+              if (prev.length > 0) return prev;
+              const first = defaultFirstClause(idx.traits!);
+              return first ? [first] : [];
+            });
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) {
+            setTraitIndex(null);
+            setTraitError(e instanceof Error ? e.message : "Could not load traits.");
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setTraitLoading(false);
+        });
+    });
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(frame);
     };
   }, [scopeMode, collection]);
 
@@ -107,7 +113,9 @@ export default function SweepFloorboards({
     }
     // Multi-clause trait / rarity criteria
     if (clauses.length === 0 || !traitIndex?.traits) return new Set<string>();
-    return new Set(resolveCriteriaTokenIds(traitIndex.traits, clauses));
+    return new Set(
+      resolveCriteriaTokenIds(traitIndex.traits, clauses, traitIndex.rankings)
+    );
   }, [scopeMode, tierScope, listings, rarity, clauses, traitIndex]);
 
   const plan = useMemo(
@@ -187,6 +195,7 @@ export default function SweepFloorboards({
           </p>
           <TraitCriteriaPicker
             traits={traitIndex?.traits ?? null}
+            rankings={traitIndex?.rankings}
             complete={Boolean(traitIndex?.complete && traitIndex.traits)}
             building={traitIndex?.building}
             scanned={traitIndex?.scanned}

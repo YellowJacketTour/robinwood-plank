@@ -538,6 +538,7 @@ export default function SwapPanel({
   /** Max slippage, percent. Converted to bps; vault trades REFUSE min-out of 0. */
   const [slippagePct, setSlippagePct] = useState("1");
   const [busy, setBusy] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lpFull, setLpFull] = useState<boolean | null>(null);
@@ -899,6 +900,10 @@ export default function SwapPanel({
     if (!Number.isFinite(pct) || pct < 0 || pct >= 100) return null;
     return Math.round(pct * 100);
   })();
+  const minimumOutputPreview =
+    quote !== null && slippageBps !== null
+      ? (quote * BigInt(10_000 - slippageBps)) / BigInt(10_000)
+      : null;
 
   const submit = () => {
     if (!account) return; // run() reconnects, but every path below needs it typed
@@ -1053,6 +1058,54 @@ export default function SwapPanel({
 
   const activeMode = MODES.find((m) => m.id === mode)!;
 
+  const openReview = () => {
+    setError(null);
+    if (!account) {
+      onConnect();
+      return;
+    }
+    if ((mode === "buy" || mode === "sell") && slippageBps === null) {
+      setError("Enter a slippage between 0 and 99%.");
+      return;
+    }
+    if (mode === "buy" || mode === "sell") {
+      const wei = parseTokenAmount(amount, 18);
+      if (wei === null || wei <= BigInt(0)) {
+        setError(mode === "buy" ? "Enter an ETH amount." : "Enter a share amount.");
+        return;
+      }
+    }
+    if (mode === "lp") {
+      const sharesWei = parseTokenAmount(amount, 18) ?? BigInt(0);
+      const ethWei = parseTokenAmount(lpEth, 18) ?? BigInt(0);
+      if (sharesWei <= BigInt(0) && ethWei <= BigInt(0)) {
+        setError(
+          lpDirection === "remove"
+            ? "Enter shares and/or ETH to remove from the pool."
+            : "Enter shares and/or ETH to add to the pool."
+        );
+        return;
+      }
+      if (lpDirection === "remove" && lpRemove === false) {
+        setError(
+          "Remove LP needs the vault upgrade (removeLiquidity). Until then use Sell to trade shares for ETH."
+        );
+        return;
+      }
+    }
+    if (mode === "deposit" && !tokenId) {
+      setError("Choose a Plank to deposit.");
+      return;
+    }
+    if (mode === "redeem" && redeemInsufficient) {
+      setError(
+        `You need ${formatTokenAmount(redeemCostForMode, 18, 4)} shares to redeem${tokenId ? " that specific plank" : ""}.`
+      );
+      return;
+    }
+    setReviewOpen(true);
+  };
+
   const activeKind = vaultColorKind(vaultAddress);
   const activeTag = activeKind === "v1" ? "V1" : activeKind === "v2" ? "V2" : "Vault";
   const activeLabel =
@@ -1061,6 +1114,131 @@ export default function SwapPanel({
 
   return (
     <div className="wood-frame relative overflow-hidden rounded-2xl bg-wood-900/95">
+      {reviewOpen && (
+        <div
+          className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="swap-review-title"
+        >
+          <div className="wood-ledger w-full max-w-lg rounded-t-xl border border-gold-500/35 p-4 sm:rounded-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[0.65rem] font-black uppercase tracking-[0.14em] text-gold-300/75">
+                  Verify before signing
+                </p>
+                <h3 id="swap-review-title" className="mt-1 font-display text-2xl text-gold-300">
+                  Review {mode === "lp" ? `${lpDirection} liquidity` : activeMode.label.toLowerCase()}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReviewOpen(false)}
+                className="flex h-10 w-10 items-center justify-center rounded-md border border-gold-500/25 text-foreground/65 hover:text-gold-300"
+                aria-label="Close review"
+              >
+                ✕
+              </button>
+            </div>
+
+            <dl className="mt-4 grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">Vault</dt>
+                <dd className="mt-1 text-sm text-foreground" title={vaultAddress ?? undefined}>
+                  {activeTag} · {vaultAddress ? shortVault(vaultAddress) : "Unavailable"}
+                </dd>
+              </div>
+              <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">Action</dt>
+                <dd className="mt-1 text-sm capitalize text-foreground">
+                  {mode === "lp" ? `${lpDirection} liquidity` : activeMode.label}
+                </dd>
+              </div>
+              <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                  {mode === "deposit" || mode === "redeem" ? "Selection" : "Input"}
+                </dt>
+                <dd className="mt-1 text-sm text-foreground">
+                  {mode === "buy"
+                    ? `${amount} ETH`
+                    : mode === "sell"
+                      ? `${amount} shares`
+                      : mode === "lp"
+                        ? `${amount || "0"} shares + ${lpEth || "0"} ETH`
+                        : mode === "deposit"
+                          ? `Plank #${tokenId}`
+                          : tokenId
+                            ? `Specific Plank #${tokenId}`
+                            : "Random Plank"}
+                </dd>
+              </div>
+              <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                  {mode === "buy" || mode === "sell" ? "Expected output" : "Fee / protection"}
+                </dt>
+                <dd className="mt-1 text-sm text-foreground">
+                  {mode === "buy" || mode === "sell"
+                    ? quote !== null
+                      ? `${formatTokenAmount(quote, 18, mode === "buy" ? 4 : 6)} ${
+                          mode === "buy" ? "shares" : "ETH"
+                        }`
+                      : "Quote will be rechecked"
+                    : mode === "redeem" && stats
+                      ? `${formatTokenAmount(redeemCostForMode, 18, 4)} shares`
+                      : mode === "deposit" && stats
+                        ? `${stats.mintFeeBps / 100}% mint fee`
+                        : "Live vault checks"}
+                </dd>
+              </div>
+            </dl>
+
+            {(mode === "buy" || mode === "sell") && (
+              <div className="mt-3 rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2 text-xs text-foreground/65">
+                <p>
+                  Minimum at the current quote:{" "}
+                  <strong className="text-foreground">
+                    {minimumOutputPreview !== null
+                      ? `${formatTokenAmount(
+                          minimumOutputPreview,
+                          18,
+                          mode === "buy" ? 4 : 6
+                        )} ${mode === "buy" ? "shares" : "ETH"}`
+                      : "waiting for quote"}
+                  </strong>
+                </p>
+                <p className="mt-1">
+                  Maximum slippage: {slippagePct}%. The quote and enforced minimum are
+                  recomputed immediately before the transaction is built.
+                </p>
+              </div>
+            )}
+            <p className="mt-3 text-xs leading-5 text-foreground/55">
+              Your wallet shows the final destination and gas estimate. No transaction is sent
+              until you confirm there.
+            </p>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setReviewOpen(false)}
+                className="min-h-11 rounded-lg border border-gold-500/30 text-sm text-foreground/75 hover:text-gold-300"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setReviewOpen(false);
+                  void submit();
+                }}
+                className="min-h-11 rounded-lg bg-gold-500 text-sm font-bold text-wood-950 hover:bg-gold-400"
+              >
+                Confirm in wallet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Corner confirmation: which vault this swap widget is bound to. */}
       <div
         className={`pointer-events-none absolute right-2 top-2 z-10 rounded-md border px-2 py-1 text-[0.65rem] font-extrabold uppercase tracking-wide shadow-lg ${VAULT_LABEL_CLASS[activeKind]}`}
@@ -1682,7 +1860,7 @@ export default function SwapPanel({
           <button
             type="button"
             disabled={busy || redeemInsufficient}
-            onClick={submit}
+            onClick={openReview}
             className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
           >
             {busy
@@ -1691,13 +1869,17 @@ export default function SwapPanel({
                 ? "Not enough shares"
                 : mode === "redeem"
                   ? tokenId
-                    ? "Redeem this plank"
-                    : "Random redeem (1 signature)"
+                    ? "Review specific redeem"
+                    : "Review random redeem"
                   : mode === "lp"
                     ? lpDirection === "remove"
-                      ? "Remove LP"
-                      : "Add LP"
-                    : activeMode.label}
+                      ? "Review LP removal"
+                      : "Review liquidity"
+                    : mode === "buy"
+                      ? "Review share purchase"
+                      : mode === "sell"
+                        ? "Review share sale"
+                        : "Review deposit"}
           </button>
         )}
 

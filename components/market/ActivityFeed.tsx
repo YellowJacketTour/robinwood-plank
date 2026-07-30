@@ -15,7 +15,7 @@ import CollectionStats from "@/components/market/CollectionStats";
 import ActivityStats from "@/components/market/ActivityStats";
 import ScrollBox from "@/components/market/ScrollBox";
 import type { Listing, MarketCollection } from "@/lib/market/types";
-import { swrJson } from "@/lib/market/swr-fetch";
+import { invalidateSwr, swrJson } from "@/lib/market/swr-fetch";
 
 type Venue = { kind: "marketplank" | "seaport" | "vault" | "other"; contract: string } | null;
 
@@ -72,6 +72,67 @@ const EXPLORER_ADDRESS = "https://robinhoodchain.blockscout.com/address/";
 
 type KindFilter = "all" | ActivityEvent["kind"];
 
+function VenueValue({ venue }: { venue: Venue }) {
+  if (!venue) return <>wallet-to-wallet</>;
+  if (venue.kind === "marketplank") {
+    return (
+      <span
+        className="text-emerald-300"
+        title="This fill's on-chain order hash matched an order we actually served — not just a guess from the contract address."
+      >
+        Marketplank
+      </span>
+    );
+  }
+  if (venue.kind === "vault") {
+    return (
+      <span
+        className="text-sky-300"
+        title="Moved through the liquidity vault — a deposit or redeem, not a marketplace sale. See the Liquidity pool trades table below for its real numbers."
+      >
+        Vault
+      </span>
+    );
+  }
+  return (
+    <a
+      href={`${EXPLORER_ADDRESS}${venue.contract}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(event) => event.stopPropagation()}
+      className="hover:underline"
+      title={
+        venue.kind === "seaport"
+          ? "Went through the Seaport protocol, but not an order we served — likely another Seaport-based frontend, a pre-launch fill, or a script. Not attributed to any specific brand without evidence."
+          : "Executed via a contract we don't recognize — some other marketplace, router, or script on this chain."
+      }
+    >
+      {venueLabel(venue)}
+    </a>
+  );
+}
+
+function FeedSkeleton() {
+  return (
+    <div className="space-y-1.5" aria-label="Loading market activity" role="status">
+      {Array.from({ length: 5 }).map((_, index) => (
+        <div
+          key={index}
+          className="grid animate-pulse grid-cols-[3.5rem_minmax(0,1fr)_3rem] items-center gap-3 rounded-lg border border-gold-500/15 bg-wood-950/70 p-2"
+          aria-hidden="true"
+        >
+          <div className="h-14 w-14 rounded-lg bg-gold-500/10" />
+          <div className="space-y-2">
+            <div className="h-3 w-2/3 rounded bg-gold-500/10" />
+            <div className="h-2.5 w-1/2 rounded bg-foreground/10" />
+          </div>
+          <div className="h-3 rounded bg-foreground/10" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 type Props = {
   /** Opens the shared item detail modal — same one the marketplace grid uses. */
   onSelectToken?: (tokenId: string) => void;
@@ -99,6 +160,7 @@ export default function ActivityFeed({
   const [events, setEvents] = useState<ActivityEvent[] | null>(cachedEvents);
   const [fullEvents, setFullEvents] = useState<ActivityEvent[] | null>(cachedFullEvents);
   const [failed, setFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [venueFilter, setVenueFilter] = useState<string>("all");
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
@@ -115,10 +177,15 @@ export default function ActivityFeed({
       .then((data) => {
         const next = data.events ?? [];
         cachedEvents = next;
-        if (!cancelled) setEvents(next);
+        if (!cancelled) {
+          setEvents(next);
+          setFailed(false);
+        }
       })
       .catch(() => {
-        if (!cancelled && !cachedEvents) setFailed(true);
+        if (!cancelled && (!cachedEvents || cachedEvents.length === 0)) {
+          setFailed(true);
+        }
       });
     void getRarityMap().then((map) => {
       if (!cancelled) setRarity(map);
@@ -126,7 +193,7 @@ export default function ActivityFeed({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -146,7 +213,20 @@ export default function ActivityFeed({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
+
+  const retry = () => {
+    invalidateSwr("/api/market/activity");
+    invalidateSwr("/api/market/sales-history");
+    invalidateSwr("/api/market/sales-stats");
+    setFailed(false);
+    setReloadKey((value) => value + 1);
+  };
+
+  const clearFilters = () => {
+    setKindFilter("all");
+    setVenueFilter("all");
+  };
 
   // Options are derived from what's actually IN the feed — never a
   // hardcoded guess at which venues might show up.
@@ -173,212 +253,246 @@ export default function ActivityFeed({
     });
   }, [events, kindFilter, venueFilter]);
 
-  if (failed) {
-    return <p className="py-6 text-center text-xs text-foreground/45">Activity unavailable.</p>;
-  }
-  if (events === null) {
-    return <p className="py-6 text-center text-xs text-foreground/45">Loading…</p>;
-  }
-  if (events.length === 0) {
-    return <p className="py-6 text-center text-xs text-foreground/45">No activity yet.</p>;
-  }
-
   // Stats prefer the deeper full=1 lineage (300 events, same source
   // EventCountdown's "highest sale ever" uses) over the capped 40-row recent
   // feed — the 40-cap mixes in mints/transfers/vault moves alongside sales,
   // so real sales fall out of that window fast and volume/avg/history
   // undercounted. Falls back to the recent feed's own sales until the
   // full-lineage fetch resolves, rather than showing nothing.
-  const sales = (fullEvents ?? events).filter((e) => e.kind === "sale");
+  const sales = (fullEvents ?? events ?? []).filter((e) => e.kind === "sale");
+
+  const loading = events === null && !failed;
+  const hasFilters = kindFilter !== "all" || venueFilter !== "all";
 
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-start xl:grid-cols-[minmax(0,1fr)_320px]">
-    <div className="min-w-0 space-y-2">
-      {collection && (
-        <CollectionStats
-          collection={collection}
-          listings={listings ?? []}
-          offers={offers ?? []}
-          totalSupply={totalSupply}
-        />
-      )}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <label className="flex items-center gap-1.5">
-          <span className="sr-only">Filter by event type</span>
-          <select
-            value={kindFilter}
-            onChange={(e) => setKindFilter(e.target.value as KindFilter)}
-            className="min-h-9 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
-          >
-            <option value="all">All events</option>
-            <option value="sale">Sales</option>
-            <option value="mint">Mints</option>
-            <option value="transfer">Transfers</option>
-          </select>
-        </label>
-        {venueOptions.length > 0 && (
+      <div className="min-w-0 space-y-2">
+        {collection && (
+          <CollectionStats
+            collection={collection}
+            listings={listings ?? []}
+            offers={offers ?? []}
+            totalSupply={totalSupply}
+          />
+        )}
+
+        <div className="flex flex-wrap items-center gap-1.5">
           <label className="flex items-center gap-1.5">
-            <span className="sr-only">Filter by platform</span>
+            <span className="sr-only">Filter by event type</span>
             <select
-              value={venueFilter}
-              onChange={(e) => setVenueFilter(e.target.value)}
-              className="min-h-9 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
+              value={kindFilter}
+              disabled={loading || failed || (events?.length ?? 0) === 0}
+              onChange={(event) => setKindFilter(event.target.value as KindFilter)}
+              className="min-h-9 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground disabled:opacity-50"
             >
-              <option value="all">All platforms</option>
-              {venueOptions.map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
+              <option value="all">All events</option>
+              <option value="sale">Sales</option>
+              <option value="mint">Mints</option>
+              <option value="transfer">Transfers</option>
             </select>
           </label>
+          {venueOptions.length > 0 && (
+            <label className="flex items-center gap-1.5">
+              <span className="sr-only">Filter by platform</span>
+              <select
+                value={venueFilter}
+                onChange={(event) => setVenueFilter(event.target.value)}
+                className="min-h-9 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
+              >
+                <option value="all">All platforms</option>
+                {venueOptions.map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <span className="ml-auto whitespace-nowrap text-[0.65rem] text-foreground/45">
+            {loading
+              ? "Loading events…"
+              : failed
+                ? "Feed unavailable"
+                : `${filtered.length} of ${events?.length ?? 0}`}
+          </span>
+        </div>
+
+        <div
+          className="hidden grid-cols-[3.5rem_minmax(10rem,1fr)_6.5rem_8rem_10rem_2.5rem] gap-3 px-2 text-[0.58rem] font-black uppercase tracking-wider text-foreground/35 xl:grid"
+          aria-hidden="true"
+        >
+          <span>Art</span>
+          <span>Event / item</span>
+          <span>Price</span>
+          <span>Platform</span>
+          <span>From / to</span>
+          <span>When</span>
+        </div>
+
+        {loading ? (
+          <FeedSkeleton />
+        ) : failed ? (
+          <div className="rounded-lg border border-red-500/25 bg-red-950/15 px-4 py-8 text-center">
+            <p className="text-sm font-bold text-red-200">Activity unavailable.</p>
+            <p className="mt-1 text-xs text-foreground/50">
+              The last good market statistics stay visible while the feed reconnects.
+            </p>
+            <button
+              type="button"
+              onClick={retry}
+              className="mt-4 min-h-11 rounded-md border border-gold-500/40 px-4 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+            >
+              Retry activity
+            </button>
+          </div>
+        ) : (events?.length ?? 0) === 0 ? (
+          <div className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/70 px-4 py-8 text-center">
+            <p className="text-sm font-bold text-foreground/65">No activity yet.</p>
+            <button
+              type="button"
+              onClick={retry}
+              className="mt-4 min-h-11 rounded-md border border-gold-500/40 px-4 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+            >
+              Reload activity
+            </button>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/70 px-4 py-8 text-center">
+            <p className="text-sm font-bold text-foreground/65">
+              No activity matches these filters.
+            </p>
+            {hasFilters && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="mt-4 min-h-11 rounded-md bg-gold-500 px-4 text-xs font-bold text-wood-950 transition hover:bg-gold-400"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+        ) : (
+          <ScrollBox storageKey="activity-feed" defaultHeight={420} maxHeight={1000}>
+            <ul className="space-y-1.5">
+              {filtered.map((event) => {
+                const eventRarity = rarity.get(event.tokenId);
+                const selectable = Boolean(onSelectToken);
+                return (
+                  <li
+                    key={`${event.txHash}-${event.tokenId}`}
+                    className={`dense-card grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 p-2 xl:grid-cols-[3.5rem_minmax(10rem,1fr)_6.5rem_8rem_10rem_2.5rem] ${
+                      selectable ? "cursor-pointer" : ""
+                    } ${eventRarity ? tierAnimationClass(eventRarity.tier) : ""}`}
+                    style={eventRarity ? tierCardStyle(eventRarity.tier) : undefined}
+                    role={selectable ? "button" : undefined}
+                    tabIndex={selectable ? 0 : undefined}
+                    aria-label={selectable ? `View #${event.tokenId}` : undefined}
+                    onClick={selectable ? () => onSelectToken!(event.tokenId) : undefined}
+                    onKeyDown={
+                      selectable
+                        ? (keyboardEvent) => {
+                            if (
+                              keyboardEvent.key === "Enter" ||
+                              keyboardEvent.key === " "
+                            ) {
+                              keyboardEvent.preventDefault();
+                              onSelectToken!(event.tokenId);
+                            }
+                          }
+                        : undefined
+                    }
+                  >
+                    <div
+                      className={`relative row-span-2 h-14 w-14 overflow-hidden rounded-lg bg-wood-900 xl:row-span-1 ${
+                        eventRarity ? "holo-card" : ""
+                      }`}
+                      style={
+                        eventRarity
+                          ? { boxShadow: tierGlow(eventRarity.tier) }
+                          : undefined
+                      }
+                    >
+                      {event.imageUrl ? (
+                        <Image
+                          src={event.imageUrl}
+                          alt={`#${event.tokenId}`}
+                          fill
+                          sizes="56px"
+                          className="object-cover"
+                          unoptimized
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-[0.6rem] text-foreground/30">
+                          #{event.tokenId}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <a
+                          href={`${EXPLORER_TX}${event.txHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(clickEvent) => clickEvent.stopPropagation()}
+                          className={`shrink-0 text-xs font-bold capitalize hover:underline ${KIND_STYLE[event.kind]}`}
+                        >
+                          {event.kind}
+                        </a>
+                        <span className="truncate text-xs font-bold text-foreground">
+                          {eventRarity?.name ?? `#${event.tokenId}`}
+                        </span>
+                        {eventRarity && (
+                          <span
+                            className="tier-badge hidden rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide sm:inline"
+                            style={{ color: tierColor(eventRarity.tier) }}
+                          >
+                            {eventRarity.tier}
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-mono text-[0.6rem] text-foreground/40">
+                        #{event.tokenId}
+                        {eventRarity
+                          ? ` · R${eventRarity.rank} · ${eventRarity.tier}`
+                          : ""}
+                      </span>
+                    </div>
+
+                    <strong className="whitespace-nowrap text-right text-xs text-gold-300 xl:text-left">
+                      {event.priceEth
+                        ? `${Number(event.priceEth).toFixed(4)} Ξ`
+                        : event.kind === "sale"
+                          ? "Unavailable"
+                          : "—"}
+                    </strong>
+
+                    <span className="min-w-0 truncate text-[0.65rem] text-foreground/50">
+                      <VenueValue venue={event.venue} />
+                    </span>
+
+                    <span className="hidden whitespace-nowrap font-mono text-[0.6rem] text-foreground/40 xl:inline">
+                      {shortAddress(event.from)} → {shortAddress(event.to)}
+                    </span>
+
+                    <span className="whitespace-nowrap text-right text-[0.65rem] text-foreground/40 xl:text-left">
+                      {ago(event.timestamp)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </ScrollBox>
         )}
-        <span className="ml-auto whitespace-nowrap text-[0.65rem] text-foreground/45">
-          {filtered.length} of {events.length}
-        </span>
       </div>
 
-      {filtered.length === 0 ? (
-        <p className="py-6 text-center text-xs text-foreground/45">No matches.</p>
-      ) : (
-        <ScrollBox storageKey="activity-feed" defaultHeight={420} maxHeight={1000}>
-        <ul className="space-y-1.5">
-          {filtered.map((e) => {
-            const r = rarity.get(e.tokenId);
-            const selectable = Boolean(onSelectToken);
-            return (
-              <li
-                key={`${e.txHash}-${e.tokenId}`}
-                className={`dense-card flex items-center gap-3 p-2 ${selectable ? "cursor-pointer" : ""} ${
-                  r ? tierAnimationClass(r.tier) : ""
-                }`}
-                style={r ? tierCardStyle(r.tier) : undefined}
-                role={selectable ? "button" : undefined}
-                tabIndex={selectable ? 0 : undefined}
-                aria-label={selectable ? `View #${e.tokenId}` : undefined}
-                onClick={selectable ? () => onSelectToken!(e.tokenId) : undefined}
-                onKeyDown={
-                  selectable
-                    ? (ev) => {
-                        if (ev.key === "Enter" || ev.key === " ") {
-                          ev.preventDefault();
-                          onSelectToken!(e.tokenId);
-                        }
-                      }
-                    : undefined
-                }
-              >
-                {/* Artwork leads every row — the site's own "visually
-                    dominant, text supplemental" rule applied to the feed. A
-                    tier-colored ring reuses the exact same rarity math and
-                    palette as the Gallery page, never a second color system. */}
-                <div
-                  className={`relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-wood-900 ${
-                    r ? "holo-card" : ""
-                  }`}
-                  style={r ? { boxShadow: tierGlow(r.tier) } : undefined}
-                >
-                  {e.imageUrl ? (
-                    <Image
-                      src={e.imageUrl}
-                      alt={`#${e.tokenId}`}
-                      fill
-                      sizes="56px"
-                      className="object-cover"
-                      unoptimized
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[0.6rem] text-foreground/30">
-                      #{e.tokenId}
-                    </div>
-                  )}
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <a
-                      href={`${EXPLORER_TX}${e.txHash}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(ev) => ev.stopPropagation()}
-                      className={`text-xs font-bold capitalize hover:underline ${KIND_STYLE[e.kind]}`}
-                    >
-                      {e.kind}
-                    </a>
-                    <span className="truncate text-xs font-bold text-foreground">{r?.name ?? `#${e.tokenId}`}</span>
-                    {r && (
-                      <span
-                        className="tier-badge rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide"
-                        style={{ color: tierColor(r.tier) }}
-                      >
-                        {r.tier}
-                      </span>
-                    )}
-                    <span className="whitespace-nowrap text-xs font-bold text-gold-300">
-                      {e.priceEth
-                        ? `${Number(e.priceEth).toFixed(4)} Ξ`
-                        : e.kind === "sale"
-                          ? "price unavailable"
-                          : ""}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.65rem] text-foreground/50">
-                    <span className="font-mono text-foreground/40">
-                      #{e.tokenId}
-                      {r ? ` · R${r.rank}` : ""}
-                    </span>
-                    <span>
-                      {e.venue ? (
-                        e.venue.kind === "marketplank" ? (
-                          <span className="text-emerald-300" title="This fill's on-chain order hash matched an order we actually served — not just a guess from the contract address.">
-                            Marketplank
-                          </span>
-                        ) : e.venue.kind === "vault" ? (
-                          <span className="text-sky-300" title="Moved through the liquidity vault — a deposit or redeem, not a marketplace sale. See the Liquidity pool trades table below for its real numbers.">
-                            Vault
-                          </span>
-                        ) : (
-                          <a
-                            href={`${EXPLORER_ADDRESS}${e.venue.contract}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(ev) => ev.stopPropagation()}
-                            className="hover:underline"
-                            title={
-                              e.venue.kind === "seaport"
-                                ? "Went through the Seaport protocol, but not an order we served — likely another Seaport-based frontend, a pre-launch fill, or a script. Not attributed to any specific brand without evidence."
-                                : "Executed via a contract we don't recognize — some other marketplace, router, or script on this chain."
-                            }
-                          >
-                            {venueLabel(e.venue)}
-                          </a>
-                        )
-                      ) : (
-                        "wallet-to-wallet"
-                      )}
-                    </span>
-                    <span className="hidden sm:inline">
-                      {shortAddress(e.from)} → {shortAddress(e.to)}
-                    </span>
-                  </div>
-                </div>
-
-                <span className="shrink-0 whitespace-nowrap text-[0.65rem] text-foreground/40">
-                  {ago(e.timestamp)}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-        </ScrollBox>
-      )}
-    </div>
-
-      {/* Desktop-only sidebar — on a phone this content would just push the
-          list below the fold, so it only renders at lg+ where there's
-          otherwise dead space next to a comfortably-narrow activity list. */}
-      <div className="hidden lg:block lg:sticky lg:top-4">
-        <ActivityStats sales={sales} />
+      <div className="lg:sticky lg:top-4">
+        <ActivityStats
+          sales={sales}
+          loading={loading}
+          unavailable={failed}
+          reloadKey={reloadKey}
+        />
       </div>
     </div>
   );

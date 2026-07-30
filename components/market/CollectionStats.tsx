@@ -59,7 +59,12 @@ export default function CollectionStats({
 
   const stats: { label: string; value: string }[] = [
     { label: "Floor", value: floorWei === null ? "—" : `${formatTokenAmount(floorWei, 18, 4)} Ξ` },
-    { label: "Listed", value: String(listings.length) },
+    {
+      label: "Listed",
+      value: totalSupply
+        ? `${listings.length.toLocaleString()} / ${totalSupply.toLocaleString()}`
+        : String(listings.length),
+    },
     { label: "Items", value: totalSupply ? totalSupply.toLocaleString() : "—" },
     {
       label: "Best offer",
@@ -76,7 +81,7 @@ export default function CollectionStats({
       {stats.map((s) => (
         <div
           key={s.label}
-          className="min-w-[7.6rem] flex-1 bg-wood-900/90 px-3 py-2 text-center sm:min-w-0"
+          className="min-w-[7rem] flex-1 bg-wood-900/90 px-3 py-2 text-center sm:min-w-0"
         >
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">
             {s.label}

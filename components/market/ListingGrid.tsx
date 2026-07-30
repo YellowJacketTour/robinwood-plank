@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import ListingCard from "@/components/market/ListingCard";
 import { getRarityMap } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
@@ -19,6 +20,8 @@ type Props = {
   /** Opens the item detail view. Omit to leave cards inert. */
   onSelect?: (tokenId: string) => void;
   emptyMessage?: string;
+  /** Optional real recovery action for an empty result, such as clearing filters. */
+  emptyAction?: ReactNode;
   /** Listings at exactly this price get the "Floor" badge. */
   floorPriceWei?: string;
 };
@@ -33,6 +36,7 @@ export default function ListingGrid({
   ownedTokenIds,
   onSelect,
   emptyMessage = "No listings yet.",
+  emptyAction,
   floorPriceWei,
 }: Props) {
   // One shared fetch (module-cached) for every card in every grid on the
@@ -50,9 +54,10 @@ export default function ListingGrid({
 
   if (listings.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
-        {emptyMessage}
-      </p>
+      <div className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center">
+        <p className="text-sm text-foreground/60">{emptyMessage}</p>
+        {emptyAction && <div className="mt-3 flex justify-center">{emptyAction}</div>}
+      </div>
     );
   }
 

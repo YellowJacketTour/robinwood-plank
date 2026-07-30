@@ -10,12 +10,12 @@ import {
 } from "@/lib/market/seaport";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { formatTokenAmount } from "@/lib/trade";
-import type { Listing } from "@/lib/market/types";
+import type { Listing, Offer } from "@/lib/market/types";
 
 type Props = {
   account: string;
   listings: Array<Listing & { rawOrder: unknown }>;
-  offers: Array<Listing & { rawOrder: unknown }>;
+  offers: Array<Offer & { rawOrder: unknown }>;
   onChanged: () => void;
 };
 
@@ -23,6 +23,8 @@ type Row = {
   id: string;
   kind: "Listing" | "Offer";
   tokenId?: string;
+  traits?: Array<{ traitType: string; value: string }>;
+  criteriaTokenIds?: string[];
   priceWei: string;
   expiresAt: string;
   rawOrder: unknown;
@@ -32,9 +34,12 @@ const COLLECTION = MARKET_COLLECTIONS[0];
 
 /** Desktop: table. Mobile: the same rows stacked as cards — SPEC.md §4. */
 export default function MyPositions({ account, listings, offers, onChanged }: Props) {
+  const [scope, setScope] = useState<"Listing" | "Offer">("Listing");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [approvals, setApprovals] = useState<MarketApprovals | null>(null);
+  const [approvalLoading, setApprovalLoading] = useState(true);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<"nft" | "weth" | null>(null);
 
   const mine: Row[] = [
@@ -54,6 +59,8 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
         id: o.id,
         kind: "Offer" as const,
         tokenId: o.tokenId,
+        traits: o.traits,
+        criteriaTokenIds: o.criteriaTokenIds,
         priceWei: o.priceWei,
         expiresAt: o.expiresAt,
         rawOrder: o.rawOrder,
@@ -63,15 +70,21 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
   const refreshApprovals = useCallback(async () => {
     if (!COLLECTION) return;
     try {
-      setApprovals(await getMarketApprovals(account, COLLECTION.contractAddress));
+      const next = await getMarketApprovals(account, COLLECTION.contractAddress);
+      setApprovals(next);
+      setApprovalError(null);
     } catch {
-      // Read-only nicety; a failed read just hides the panel.
-      setApprovals(null);
+      setApprovalError("Could not read marketplace approvals.");
+    } finally {
+      setApprovalLoading(false);
     }
   }, [account]);
 
   useEffect(() => {
-    void refreshApprovals();
+    const frame = window.requestAnimationFrame(() => {
+      void refreshApprovals();
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [refreshApprovals]);
 
   const cancel = useCallback(
@@ -128,29 +141,65 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
   const hasLiveApproval =
     approvals !== null &&
     (approvals.collectionApprovedForAll || approvals.wethAllowance > BigInt(0));
+  const visible = mine.filter((row) => row.kind === scope);
+  const listingCount = mine.filter((row) => row.kind === "Listing").length;
+  const offerCount = mine.length - listingCount;
 
   return (
     <div className="space-y-3">
-      {mine.length === 0 ? (
+      {error && (
+        <p className="px-3 text-center text-xs text-red-300" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h3 className="font-display text-xl text-gold-300">Open positions</h3>
+          <p className="text-xs text-foreground/55">
+            Listings and offers remain separate and cancellable.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 rounded-lg border border-gold-500/20 bg-wood-950/90 p-1">
+          {(["Listing", "Offer"] as const).map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              onClick={() => setScope(kind)}
+              className={`min-h-9 rounded-md px-3 text-xs font-bold ${
+                scope === kind
+                  ? "bg-gold-500 text-wood-950"
+                  : "text-foreground/65 hover:text-gold-300"
+              }`}
+            >
+              {kind === "Listing" ? "Listings" : "Offers"}{" "}
+              <span aria-hidden>{kind === "Listing" ? listingCount : offerCount}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {visible.length === 0 ? (
         <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
-          Nothing active.
+          No active {scope === "Listing" ? "listings" : "offers"}.
         </p>
       ) : (
         <div className="wood-ledger overflow-hidden">
-          {error && (
-            <p className="px-3 pt-2 text-center text-xs text-red-300" role="alert">
-              {error}
-            </p>
-          )}
           <ul>
-            {mine.map((row) => (
+            {visible.map((row) => (
               <li
                 key={row.id}
                 className="flex items-center justify-between gap-3 border-t border-gold-500/15 px-3 py-2.5 first:border-t-0"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-foreground">
-                    {row.kind} · {row.tokenId ? `#${row.tokenId}` : "any"}
+                    {row.kind} ·{" "}
+                    {row.tokenId
+                      ? `#${row.tokenId}`
+                      : row.traits?.length
+                        ? row.traits
+                            .map((trait) => `${trait.traitType}: ${trait.value}`)
+                            .join(" AND ")
+                        : `${row.criteriaTokenIds?.length ?? 0} qualifying Planks`}
                   </p>
                   <p className="text-[0.65rem] text-foreground/50">
                     {/* Listings settle in native ETH; bids are WETH-denominated
@@ -162,6 +211,9 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
                       month: "short",
                       day: "numeric",
                     })}
+                    {!row.tokenId && row.criteriaTokenIds
+                      ? ` · ${row.criteriaTokenIds.length} qualify`
+                      : ""}
                   </p>
                 </div>
                 <button
@@ -181,9 +233,42 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
       {/* Live marketplace approvals — cancelling an order does NOT undo the
           approval that was granted while creating it, so surface + revoke
           them here (audit 2026-07-27). */}
-      {hasLiveApproval && approvals && COLLECTION && (
+      {approvalLoading ? (
+        <div className="wood-ledger p-3 text-xs text-foreground/50">
+          Reading marketplace approvals…
+        </div>
+      ) : approvalError ? (
+        <div
+          className="wood-ledger flex flex-wrap items-center justify-between gap-3 p-3"
+          role="alert"
+        >
+          <p className="text-xs text-red-300">{approvalError}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setApprovalLoading(true);
+              setApprovalError(null);
+              void refreshApprovals();
+            }}
+            className="min-h-9 rounded-md border border-gold-500/35 px-3 text-xs font-bold text-gold-300"
+          >
+            Retry approvals
+          </button>
+        </div>
+      ) : approvals && COLLECTION ? (
         <div className="wood-ledger space-y-2 p-3">
-          <p className="text-xs font-bold text-foreground">Marketplace approvals</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs font-bold text-foreground">Marketplace approvals</p>
+            <span
+              className={`rounded-full border px-2 py-1 text-[0.62rem] ${
+                hasLiveApproval
+                  ? "border-emerald-400/30 text-emerald-300"
+                  : "border-gold-500/20 text-foreground/45"
+              }`}
+            >
+              {hasLiveApproval ? "Active" : "Inactive"}
+            </span>
+          </div>
           {mine.length === 0 && (
             <p className="text-[0.65rem] text-foreground/50">
               You have no active orders, but the marketplace still holds these
@@ -191,11 +276,14 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
               and takes nothing else.
             </p>
           )}
-          {approvals.collectionApprovedForAll && (
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[0.7rem] text-foreground/70">
-                {COLLECTION.name}: transfer approval for the whole collection
-              </p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[0.7rem] text-foreground/70">
+              {COLLECTION.name}:{" "}
+              {approvals.collectionApprovedForAll
+                ? "transfer approval for the whole collection"
+                : "not approved"}
+            </p>
+            {approvals.collectionApprovedForAll && (
               <button
                 type="button"
                 disabled={revoking !== null}
@@ -204,13 +292,13 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
               >
                 {revoking === "nft" ? "…" : "Revoke"}
               </button>
-            </div>
-          )}
-          {approvals.wethAllowance > BigInt(0) && (
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[0.7rem] text-foreground/70">
-                WETH allowance: {formatTokenAmount(approvals.wethAllowance.toString(), 18, 4)}
-              </p>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[0.7rem] text-foreground/70">
+              WETH allowance: {formatTokenAmount(approvals.wethAllowance.toString(), 18, 4)}
+            </p>
+            {approvals.wethAllowance > BigInt(0) && (
               <button
                 type="button"
                 disabled={revoking !== null}
@@ -219,8 +307,12 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
               >
                 {revoking === "weth" ? "…" : "Revoke"}
               </button>
-            </div>
-          )}
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="wood-ledger p-3 text-xs text-foreground/50" role="status">
+          Marketplace approvals are unavailable.
         </div>
       )}
     </div>
