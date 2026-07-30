@@ -18,10 +18,12 @@
 }
 
 /* Marketplank is a dense trading workspace. Undo the marketing-page type
-   clamps only inside this boundary so data rows and controls remain usable. */
+   clamps only inside this boundary so data rows and controls remain usable.
+   No text shadows — the finalized mockup renders flat type on solid wood
+   surfaces; shadows made every label read blurry at data density. */
 .root :global(:where(p, button, dt, dd, li, span, label, input, select)) {
   line-height: 1.35 !important;
-  text-shadow: 0 1px 2px rgba(8, 4, 1, 0.92) !important;
+  text-shadow: none !important;
 }
 
 .root :global(p) {

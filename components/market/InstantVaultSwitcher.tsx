@@ -11,7 +11,6 @@ import {
   listVaults,
   shortVault,
   vaultColorKind,
-  VAULT_LABEL_CLASS,
   VAULT_TEXT_CLASS,
   type VaultRole,
 } from "@/lib/market/vault-registry";
@@ -88,91 +87,58 @@ export default function InstantVaultSwitcher({ role, onChange, active = true }: 
     );
   }
 
-  return (
-    <div className="wood-frame space-y-3 rounded-2xl border-2 border-gold-400/40 bg-wood-900/95 p-4">
-      <div>
-        <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.16em] text-gold-300">
-          Choose vault
-        </p>
-        <h3 className="mt-0.5 font-display text-lg text-gold-200">
-          <span className={VAULT_TEXT_CLASS.v1}>V1</span>
-          <span className="text-foreground/40"> legacy · </span>
-          <span className={VAULT_TEXT_CLASS.v2}>V2</span>
-          <span className="text-foreground/40"> new book</span>
-        </h3>
-        <p className="mt-1 text-xs text-foreground/60">
-          Use{" "}
-          <strong className={VAULT_TEXT_CLASS.v1}>V1 (orange)</strong> for deposits already on the
-          original vault. Use{" "}
-          <strong className={VAULT_TEXT_CLASS.v2}>V2 (green)</strong> for the new pool (deposit, LP,
-          Instant Swap).
-        </p>
-      </div>
+  // Finalized mockup: two compact vault cards, primary (V2) first, no
+  // instructional panel around them — each card carries its own identity,
+  // explorer link, and live meta line. Active card gets the emerald frame.
+  const ordered = [...vaults].sort((a) => (a.role === "primary" ? -1 : 1));
 
+  return (
+    <div className="space-y-2">
       <div className="grid gap-2 sm:grid-cols-2">
-        {vaults.map((v) => {
+        {ordered.map((v) => {
           const active = role === v.role;
           const s = snap[v.role];
           const kind = vaultColorKind(v.role === "legacy" ? "legacy" : "primary");
           const isV1Card = kind === "v1";
-          const title = isV1Card ? "V1 — legacy deposits" : "V2 — new Instant Swap";
+          const title = isV1Card ? "V1 — Legacy vault" : "V2 — Primary vault";
           const blurb = isV1Card
-            ? "Original vault · deposit & redeem · no tracked Add/Remove LP"
-            : "New book · deposit, redeem, Add LP & Remove LP · Instant Swap";
-          const badgeClass = VAULT_LABEL_CLASS[kind];
-          const activeRing = isV1Card
-            ? "border-orange-400 bg-orange-500/15 ring-2 ring-orange-400/40"
-            : "border-emerald-400 bg-emerald-500/15 ring-2 ring-emerald-400/40";
-          const idleBorder = isV1Card
-            ? "border-orange-500/25 bg-wood-950/90 hover:border-orange-400/50"
-            : "border-emerald-500/25 bg-wood-950/90 hover:border-emerald-400/50";
+            ? "Original vault · deposit & redeem · limited LP controls"
+            : "New book · deposit, redeem, Add & Remove LP · Instant Swap";
           return (
             <button
               key={v.role}
               type="button"
               onClick={() => onChange(v.role)}
-              className={`rounded-xl border px-3 py-3 text-left transition ${
-                active ? activeRing : idleBorder
+              aria-pressed={active}
+              className={`rounded-xl border px-3.5 py-3 text-left transition ${
+                active
+                  ? "border-emerald-400/70 bg-emerald-950/20"
+                  : "border-gold-500/20 bg-wood-950/90 hover:border-gold-500/45"
               }`}
             >
-              <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className={`rounded-md border px-1.5 py-0.5 text-[0.65rem] font-extrabold uppercase tracking-wide ${badgeClass}`}
-                >
-                  {isV1Card ? "V1" : "V2"}
-                </span>
-                <p className={`text-sm font-bold ${VAULT_TEXT_CLASS[kind]}`}>
-                  {title}
-                  {active ? " · active" : ""}
-                </p>
-              </div>
-              <p className="mt-0.5 font-mono text-[0.65rem] text-foreground/50">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <p className={`text-sm font-extrabold ${VAULT_TEXT_CLASS[kind]}`}>{title}</p>
                 <a
                   href={`${CHAIN.blockExplorers.default.url}/address/${v.address}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="underline"
+                  className="font-mono text-[0.65rem] text-foreground/45 underline hover:text-gold-300"
                   onClick={(e) => e.stopPropagation()}
+                  title={v.address}
                 >
-                  {shortVault(v.address)}
+                  {shortVault(v.address)} ↗
                 </a>
+              </div>
+              <p className="mt-1 text-[0.7rem] text-foreground/55">
+                {s
+                  ? `${s.open ? "Open" : "Closed"} · ${s.held} held · ${s.pool} shares · ${s.eth} Ξ liquidity`
+                  : blurb}
               </p>
-              <p className="mt-1 text-[0.7rem] text-foreground/55">{blurb}</p>
-              {s && (
-                <p
-                  className={`mt-2 font-mono text-[0.65rem] ${
-                    isV1Card ? "text-orange-300/80" : "text-emerald-300/80"
-                  }`}
-                >
-                  held {s.held} · pool {s.pool} sh · {s.eth} Ξ ·{" "}
-                  {s.open ? "open" : "closed"}
-                </p>
-              )}
+              {s && <p className="mt-0.5 text-[0.62rem] text-foreground/40">{blurb}</p>}
             </button>
           );
         })}
       </div>
-
       <p className="text-[0.65rem] text-foreground/40">
         Switching vault only changes Instant Swap targets below. Listings/offers stay collection-wide.
       </p>
