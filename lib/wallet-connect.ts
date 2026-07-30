@@ -32,6 +32,22 @@ let wcProvider: WcProvider | null = null;
 let preferredProvider: Eip1193Provider | null = null;
 /** Bumped on every new connect / cancel so stale connects abort. */
 let connectGeneration = 0;
+/**
+ * Set by lib/wallet-reown.ts's connect surface when AppKit hands back a
+ * relay (WalletConnect) session rather than an injected one. This file's
+ * own connectWithWalletConnect() flow never touches this flag — it keeps
+ * using the wcProvider identity check below, unchanged. The flag exists so
+ * isWalletConnectActive() stays a true "is the active session a relay
+ * session" signal regardless of which connector layer produced it, since
+ * ensureRobinhoodChain() (lib/wallet.ts) keys its 3s-vs-12s switch timeout
+ * off this function and must not silently regress when the Reown path is
+ * flagged on.
+ */
+let externalRelaySessionActive = false;
+
+export function setExternalWalletConnectActive(active: boolean): void {
+  externalRelaySessionActive = active;
+}
 
 function loadBundle(): Promise<BundleMod> {
   if (typeof window === "undefined") {
@@ -52,9 +68,14 @@ export function setPreferredWalletProvider(p: Eip1193Provider | null) {
   preferredProvider = p;
 }
 
-/** True when the active session is WalletConnect (not a browser extension). */
+/** True when the active session is WalletConnect (not a browser extension).
+ * Checks this module's own legacy bundle-backed session OR the externally
+ * reported Reown/AppKit relay session (see externalRelaySessionActive above). */
 export function isWalletConnectActive(): boolean {
-  return Boolean(preferredProvider && wcProvider && preferredProvider === wcProvider);
+  return (
+    Boolean(preferredProvider && wcProvider && preferredProvider === wcProvider) ||
+    externalRelaySessionActive
+  );
 }
 
 export function getWalletConnectProjectId(): string {
