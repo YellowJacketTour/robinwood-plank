@@ -19,31 +19,10 @@
   box-shadow: 0 30px 80px -44px rgba(0, 0, 0, 0.95);
 }
 
-/* Marketplank is a dense trading workspace. Undo the marketing-page type
-   clamps only inside this boundary so data rows and controls remain usable.
-   No text shadows — the finalized mockup renders flat type on solid wood
-   surfaces; shadows made every label read blurry at data density. */
-.root :global(:where(p, button, dt, dd, li, span, label, input, select)) {
-  line-height: 1.35 !important;
-  text-shadow: none !important;
-}
-
-.root :global(p) {
-  font-size: inherit !important;
-}
-
-.root :global(button) {
-  font-size: inherit !important;
-}
-
-.root :global(dt) {
-  font-size: inherit !important;
-}
-
-.root :global(dd) {
-  font-size: inherit !important;
-}
-
+/* The marketing-page type clamps in app/globals.css exclude
+   [data-market-shell] entirely, so inside this boundary component-level
+   Tailwind styles are authoritative — no counter-!important needed. The
+   mockup's flat type and dense sizing come straight from the components. */
 .root :global(input),
 .root :global(select) {
   color-scheme: dark;

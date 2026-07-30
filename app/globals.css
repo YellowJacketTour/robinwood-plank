@@ -78,8 +78,12 @@ body {
   font-weight: 700;
 }
 
-/* Strong, warm typography that stays readable over every part of the Plank art. */
-body :where(h1, h2, h3, h4, p, a, button, dt, dd, li, code, strong, span, td, th, label) {
+/* Strong, warm typography that stays readable over every part of the Plank
+   art. These marketing-page clamps NEVER apply inside the market surface
+   ([data-market-shell]) — there, component styles are authoritative; the
+   !important overrides were silently repainting the mockup-accurate market
+   type gold and oversized. */
+body :where(h1, h2, h3, h4, p, a, button, dt, dd, li, code, strong, span, td, th, label):not([data-market-shell] *) {
   text-shadow:
     -1px -1px 0 #1a0b03,
     1px -1px 0 #1a0b03,
@@ -89,24 +93,24 @@ body :where(h1, h2, h3, h4, p, a, button, dt, dd, li, code, strong, span, td, th
     0 0 14px rgba(20, 8, 2, 0.82);
 }
 
-body p {
+body p:not([data-market-shell] *) {
   font-size: clamp(1rem, 1.35vw, 1.2rem) !important;
   line-height: 1.55 !important;
 }
 
-body dt {
+body dt:not([data-market-shell] *) {
   color: #e9c987 !important;
   font-size: 1rem !important;
   font-weight: 800;
 }
 
-body dd {
+body dd:not([data-market-shell] *) {
   color: #fff2cf !important;
   font-size: 1.15rem !important;
   font-weight: 900;
 }
 
-body [class*="text-foreground/"] {
+body [class*="text-foreground/"]:not([data-market-shell] *) {
   color: #f8e7c2 !important;
 }
 
@@ -122,14 +126,14 @@ body :where(.bg-forest-900\/70, .bg-forest-900\/75) {
   background-color: rgba(30, 18, 8, 0.95) !important;
 }
 
-button,
-a.rounded-lg,
-a.rounded-md {
+button:not([data-market-shell] *),
+a.rounded-lg:not([data-market-shell] *),
+a.rounded-md:not([data-market-shell] *) {
   font-size: 1rem !important;
   font-weight: 900 !important;
 }
 
-body :where(.bg-gold-500, .bg-gold-400) {
+body :where(.bg-gold-500, .bg-gold-400):not([data-market-shell] *) {
   color: #261105 !important;
   text-shadow:
     0 1px 0 rgba(255, 242, 207, 0.8),
