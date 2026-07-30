@@ -23,17 +23,15 @@ import {
 import { formatUsd, weiToUsd } from "@/lib/eth-price";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
 import {
-  connectWallet,
   ensureRobinhoodChain,
   getChainId,
-  getConnectedAccounts,
-  getEthereumProvider,
   getErc20Balance,
   getNativeBalance,
   sendTransaction,
   signTypedData,
   waitForTransaction,
 } from "@/lib/wallet";
+import { useWallet } from "@/lib/wallet-context";
 import dynamic from "next/dynamic";
 import TokenSelectModal from "@/components/trade/TokenSelectModal";
 import TokenIcon from "@/components/trade/TokenIcon";
@@ -132,9 +130,13 @@ type TxFields = {
  * a receipt. See lib/wallet.ts for the enforcement, this file is UI only.
  */
 export default function SwapWidget() {
+  // Wallet connection is shared app-wide (lib/wallet-context.tsx) so this
+  // widget never contradicts the nav or the cross-chain panel — previously
+  // this was its own useState populated via getConnectedAccounts(), the
+  // owner-reported bug's root cause.
+  const { address: account, chainId: walletChainId, connect: walletConnect, adoptAccount: walletAdoptAccount } = useWallet();
   const [direction, setDirection] = useState<Direction>("buy");
   const [amountIn, setAmountIn] = useState("");
-  const [account, setAccount] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -221,45 +223,38 @@ export default function SwapWidget() {
       .catch(() => {
         if (!cancelled) setApiReady(false);
       });
-    void getConnectedAccounts().then((accounts) => {
-      if (!cancelled && accounts[0]) setAccount(accounts[0]);
-    });
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // The context already owns the single accountsChanged/chainChanged
+  // subscription; this widget just reacts to the values it exposes —
+  // mirrors the existing "reset on counter change" effect below.
   useEffect(() => {
-    const provider = getEthereumProvider();
-    if (!provider?.on) return;
-    const onAccounts = (...args: unknown[]) => {
-      const accounts = args[0] as string[] | undefined;
-      setAccount(accounts?.[0] ?? null);
-      setQuote(null);
-    };
-    const onChain = () => {
-      setQuote(null);
-      setStatus(null);
-    };
-    provider.on("accountsChanged", onAccounts);
-    provider.on("chainChanged", onChain);
-    return () => {
-      provider.removeListener?.("accountsChanged", onAccounts);
-      provider.removeListener?.("chainChanged", onChain);
-    };
-  }, []);
+    setQuote(null);
+  }, [account]);
+
+  useEffect(() => {
+    setQuote(null);
+    setStatus(null);
+  }, [walletChainId]);
 
   const [connectOpen, setConnectOpen] = useState(false);
 
-  /** Post-connect bookkeeping shared by both connect paths. */
-  const adoptAccount = useCallback((addr: string) => {
-    setAccount(addr);
-    // An indicative (wallet-less) quote can't be executed — clear it so
-    // the user re-quotes as themselves.
-    setQuote((q) => (q?.indicative ? null : q));
-    setStatus(null);
-    setError(null);
-  }, []);
+  /** Post-connect bookkeeping shared by both connect paths (injected via
+   * handleConnect below, and WalletConnect via ConnectWalletModal). */
+  const adoptAccount = useCallback(
+    (addr: string) => {
+      walletAdoptAccount(addr);
+      // An indicative (wallet-less) quote can't be executed — clear it so
+      // the user re-quotes as themselves.
+      setQuote((q) => (q?.indicative ? null : q));
+      setStatus(null);
+      setError(null);
+    },
+    [walletAdoptAccount]
+  );
 
   const handleConnect = useCallback(async () => {
     setError(null);
@@ -275,15 +270,14 @@ export default function SwapWidget() {
     try {
       setBusy(true);
       setStatus("Connecting…");
-      const addr = await connectWallet();
-      await ensureRobinhoodChain();
+      const addr = await walletConnect();
       adoptAccount(addr);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect wallet.");
     } finally {
       setBusy(false);
     }
-  }, [adoptAccount]);
+  }, [walletConnect, adoptAccount]);
 
   const flipDirection = () => {
     setDirection((d) => (d === "buy" ? "sell" : "buy"));
