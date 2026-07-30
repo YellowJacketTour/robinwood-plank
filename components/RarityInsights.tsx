@@ -105,11 +105,11 @@ function Kpi({
   hint?: string;
 }) {
   return (
-    <div className="min-w-0 rounded-xl border border-gold-500/25 bg-black/30 px-3 py-2.5">
-      <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.14em] text-gold-300/80">
+    <div className="min-w-0 rounded-lg border border-line bg-wood-950 px-3 py-2.5">
+      <p className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
         {label}
       </p>
-      <p className="mt-0.5 truncate text-xl font-black text-foreground">{value}</p>
+      <p className="mt-1 truncate text-xl font-black text-foreground">{value}</p>
       {hint && <p className="mt-0.5 truncate text-xs text-foreground/50">{hint}</p>}
     </div>
   );
@@ -178,9 +178,9 @@ function Thumb({
     <button
       type="button"
       onClick={onClick}
-      className="group flex w-full flex-col overflow-hidden rounded-lg border border-gold-500/25 bg-wood-950/70 text-left transition-transform hover:-translate-y-0.5"
+      className="dense-card group flex w-full flex-col overflow-hidden p-0 text-left transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-line-strong"
     >
-      <div className="relative aspect-square w-full bg-wood-950">
+      <div className="relative aspect-square w-full bg-wood-900">
         <NftImage
           imageUri={imageUri}
           alt={name}
@@ -188,12 +188,8 @@ function Thumb({
         />
         {badge && (
           <span
-            className="absolute left-1 top-1 rounded px-1.5 py-0.5 text-[0.6rem] font-black"
-            style={{
-              color: badgeColor || "#f8d98a",
-              background: "rgba(0,0,0,0.75)",
-              border: `1px solid ${(badgeColor || "#f8d98a")}55`,
-            }}
+            className="tier-badge card-overlay absolute left-1 top-1 rounded-full px-1.5 py-0.5 text-[0.55rem] font-black uppercase tracking-wide"
+            style={{ color: badgeColor || "#f8d98a" }}
           >
             {badge}
           </span>
@@ -226,11 +222,11 @@ function Chip({
       style={
         active
           ? {
-              background: color || "#d9a441",
-              color: "#1a0b03",
+              background: color || "#e9b43f",
+              color: "#261105",
             }
           : {
-              border: `1px solid ${color ? `${color}66` : "rgba(217,164,65,0.4)"}`,
+              border: `1px solid ${color ? `${color}66` : "var(--color-line-strong)"}`,
               color: color || "#f8d98a",
               background: "transparent",
             }
@@ -413,7 +409,7 @@ export default function RarityInsights({
 
   if (scoredCount === 0 && withArtCount === 0) {
     return (
-      <div className="rounded-xl border border-gold-500/20 bg-black/20 px-4 py-10 text-center">
+      <div className="rounded-xl border border-line bg-panel px-4 py-10 text-center">
         <p className="text-sm text-foreground/65">
           Waiting on the <strong className="text-gold-300">Grid</strong> to load art —
           check back here shortly.
@@ -453,7 +449,7 @@ export default function RarityInsights({
       </div>
 
       {/* Compact controls */}
-      <div className="flex flex-col gap-2 rounded-xl border border-gold-500/25 bg-black/25 p-3">
+      <div className="flex flex-col gap-2 rounded-xl border border-line bg-panel p-3">
         <div className="flex flex-wrap items-center gap-2">
           {(
             [
@@ -469,7 +465,7 @@ export default function RarityInsights({
               className={`min-h-9 rounded-lg px-3 py-1.5 text-xs font-extrabold sm:text-sm ${
                 view === id
                   ? "bg-gold-500 text-wood-950"
-                  : "border border-gold-500/40 text-gold-300"
+                  : "border border-line-strong text-gold-300 hover:border-gold-400"
               }`}
             >
               {label}
@@ -481,7 +477,7 @@ export default function RarityInsights({
             className={`min-h-9 rounded-lg px-3 py-1.5 text-xs font-extrabold sm:text-sm ${
               active || filtersOpen
                 ? "bg-gold-500/90 text-wood-950"
-                : "border border-gold-500/40 text-gold-300"
+                : "border border-line-strong text-gold-300 hover:border-gold-400"
             }`}
           >
             Filters{active ? ` · on` : ""}
@@ -490,7 +486,7 @@ export default function RarityInsights({
             <button
               type="button"
               onClick={() => setFilters(emptyFilters())}
-              className="min-h-9 rounded-lg border border-gold-500/35 px-3 py-1.5 text-xs font-extrabold text-gold-300"
+              className="min-h-9 rounded-lg border border-line-strong px-3 py-1.5 text-xs font-bold text-gold-300 transition hover:border-gold-400"
             >
               Clear
             </button>
@@ -558,7 +554,7 @@ export default function RarityInsights({
         </div>
 
         {filtersOpen && (
-          <div className="grid gap-3 border-t border-gold-500/15 pt-3 sm:grid-cols-2">
+          <div className="grid gap-3 border-t border-line pt-3 sm:grid-cols-2">
             <label className="block text-xs font-bold text-foreground/70">
               Search
               <input
@@ -568,7 +564,7 @@ export default function RarityInsights({
                   setFilters((f) => ({ ...f, search: e.target.value }))
                 }
                 placeholder="Base, id, family…"
-                className="mt-1 min-h-10 w-full rounded-lg border border-gold-500/40 bg-wood-950 px-3 py-2 text-sm font-bold outline-none focus:border-gold-300"
+                className="mt-1 min-h-10 w-full rounded-lg border border-line-strong bg-wood-950 px-3 py-2 text-sm font-bold outline-none focus:border-gold-300"
               />
             </label>
             <div>
@@ -645,8 +641,8 @@ export default function RarityInsights({
       {/* ─── DISCOVER ─── */}
       {view === "discover" && (
         <div className="space-y-4">
-          <section className="rounded-xl border border-gold-500/25 bg-black/25 p-3 sm:p-4">
-            <h3 className="font-display text-lg text-gold-300">What stands out</h3>
+          <section className="rounded-xl border border-line bg-panel p-3 sm:p-4">
+            <h3 className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">What stands out</h3>
             <ul className="mt-2 space-y-1.5">
               {takeaways.map((line) => (
                 <li
@@ -660,10 +656,10 @@ export default function RarityInsights({
             </ul>
           </section>
 
-          <section className="rounded-xl border border-gold-500/25 bg-black/25 p-3 sm:p-4">
+          <section className="rounded-xl border border-line bg-panel p-3 sm:p-4">
             <div className="mb-3 flex items-end justify-between gap-2">
               <div>
-                <h3 className="font-display text-lg text-gold-300">Rarest right now</h3>
+                <h3 className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">Rarest right now</h3>
               </div>
               <span className="text-[0.65rem] font-bold text-foreground/45">
                 {active ? "filtered cut" : "full sample"}
@@ -702,8 +698,8 @@ export default function RarityInsights({
           </section>
 
           {holoTokens.length > 0 && (
-            <section className="rounded-xl border border-cyan-400/25 bg-black/25 p-3 sm:p-4">
-              <h3 className="mb-3 font-display text-lg text-cyan-300">Holographic planks</h3>
+            <section className="rounded-xl border border-cyan-400/30 bg-panel p-3 sm:p-4">
+              <h3 className="mb-3 text-[0.76rem] font-black uppercase tracking-[0.06em] text-cyan-300">Holographic planks</h3>
               <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
                 {holoTokens.map((t) => (
                   <li key={t.tokenId}>
@@ -722,8 +718,8 @@ export default function RarityInsights({
           )}
 
           <div className="grid gap-3 lg:grid-cols-2">
-            <section className="rounded-xl border border-gold-500/25 bg-black/25 p-3 sm:p-4">
-              <h3 className="mb-3 font-display text-lg text-gold-300">
+            <section className="rounded-xl border border-line bg-panel p-3 sm:p-4">
+              <h3 className="mb-3 text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
                 Background grades
               </h3>
               <HBars
@@ -737,8 +733,8 @@ export default function RarityInsights({
                 }
               />
             </section>
-            <section className="rounded-xl border border-gold-500/25 bg-black/25 p-3 sm:p-4">
-              <h3 className="mb-3 font-display text-lg text-gold-300">
+            <section className="rounded-xl border border-line bg-panel p-3 sm:p-4">
+              <h3 className="mb-3 text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
                 Meme families
               </h3>
               <HBars
@@ -754,8 +750,8 @@ export default function RarityInsights({
             </section>
           </div>
 
-          <section className="rounded-xl border border-gold-500/25 bg-black/25 p-3 sm:p-4">
-            <h3 className="mb-3 font-display text-lg text-gold-300">
+          <section className="rounded-xl border border-line bg-panel p-3 sm:p-4">
+            <h3 className="mb-3 text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
               Power bases (avg score)
             </h3>
             <div className="space-y-2">
@@ -769,7 +765,7 @@ export default function RarityInsights({
                       bases: new Set([row.key]),
                     }))
                   }
-                  className="flex w-full items-center gap-3 rounded-lg border border-gold-500/15 bg-black/20 px-2 py-2 text-left hover:border-gold-500/40"
+                  className="flex w-full items-center gap-3 rounded-lg border border-line bg-wood-950 px-2 py-2 text-left transition hover:border-line-strong"
                 >
                   <span className="w-5 shrink-0 font-mono text-xs text-foreground/40">
                     {i + 1}
@@ -793,8 +789,8 @@ export default function RarityInsights({
       {/* ─── ART BOARD ─── */}
       {view === "art" && (
         <div className="space-y-4">
-          <section className="rounded-xl border border-gold-500/25 bg-black/25 p-3 sm:p-4">
-            <h3 className="mb-1 font-display text-lg text-gold-300">
+          <section className="rounded-xl border border-line bg-panel p-3 sm:p-4">
+            <h3 className="mb-1 text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
               Base art roster
             </h3>
             <p className="mb-3 text-xs text-foreground/50">Tap to filter</p>
@@ -810,7 +806,7 @@ export default function RarityInsights({
                       }));
                       if (row.sample) onSelectToken?.(row.sample.tokenId);
                     }}
-                    className="group flex w-full flex-col overflow-hidden rounded-lg border border-gold-500/25 bg-wood-950/70 text-left"
+                    className="dense-card group flex w-full flex-col overflow-hidden p-0 text-left transition-colors hover:border-line-strong"
                   >
                     <div className="relative aspect-square w-full bg-wood-950">
                       <NftImage
@@ -831,9 +827,9 @@ export default function RarityInsights({
             </ul>
           </section>
 
-          <section className="rounded-xl border border-gold-500/25 bg-black/25 p-3 sm:p-4">
+          <section className="rounded-xl border border-line bg-panel p-3 sm:p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h3 className="font-display text-lg text-gold-300">
+              <h3 className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
                 Filtered woodpile
               </h3>
               <span className="text-xs font-bold text-foreground/50">
@@ -876,8 +872,8 @@ export default function RarityInsights({
       {/* ─── TRAIT MIX ─── */}
       {view === "traits" && (
         <div className="grid gap-3 lg:grid-cols-2">
-          <section className="rounded-xl border border-gold-500/25 bg-black/25 p-3 sm:p-4">
-            <h3 className="mb-3 font-display text-lg text-gold-300">Base share</h3>
+          <section className="rounded-xl border border-line bg-panel p-3 sm:p-4">
+            <h3 className="mb-3 text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">Base share</h3>
             <HBars
               slices={baseSlices}
               max={14}
@@ -889,8 +885,8 @@ export default function RarityInsights({
               }
             />
           </section>
-          <section className="rounded-xl border border-gold-500/25 bg-black/25 p-3 sm:p-4">
-            <h3 className="mb-3 font-display text-lg text-gold-300">
+          <section className="rounded-xl border border-line bg-panel p-3 sm:p-4">
+            <h3 className="mb-3 text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
               Background share
             </h3>
             <HBars
@@ -904,13 +900,13 @@ export default function RarityInsights({
               }
             />
           </section>
-          <section className="rounded-xl border border-gold-500/25 bg-black/25 p-3 sm:p-4">
-            <h3 className="mb-3 font-display text-lg text-gold-300">
+          <section className="rounded-xl border border-line bg-panel p-3 sm:p-4">
+            <h3 className="mb-3 text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
               Holographic
             </h3>
             <HBars slices={holoSlices} max={4} />
             {lift.byBase.slice(0, 5).length > 0 && (
-              <div className="mt-4 border-t border-gold-500/15 pt-3">
+              <div className="mt-4 border-t border-line pt-3">
                 <p className="mb-2 text-[0.65rem] font-extrabold uppercase tracking-wide text-cyan-300/90">
                   Holo lift by base
                 </p>
@@ -930,8 +926,8 @@ export default function RarityInsights({
               </div>
             )}
           </section>
-          <section className="rounded-xl border border-gold-500/25 bg-black/25 p-3 sm:p-4">
-            <h3 className="mb-3 font-display text-lg text-gold-300">
+          <section className="rounded-xl border border-line bg-panel p-3 sm:p-4">
+            <h3 className="mb-3 text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
               Meme family
             </h3>
             <HBars

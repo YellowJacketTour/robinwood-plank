@@ -10,8 +10,10 @@ import {
   type FormEvent,
 } from "react";
 import { Contract } from "ethers";
+import Link from "next/link";
 import Reveal from "@/components/Reveal";
 import NftImage from "@/components/NftImage";
+import { getConnectedAccounts } from "@/lib/wallet";
 import {
   fetchNftMetadata,
   type NftAttribute,
@@ -32,12 +34,10 @@ import {
 import {
   computeRaritySnapshot,
   formatRank,
-  tierAnimationClass,
-  tierCardStyle,
   tierColor,
-  tierGlow,
   type TokenRarity,
 } from "@/lib/rarity";
+import { Search, X, LayoutGrid, BarChart3, ExternalLink } from "lucide-react";
 import type { GalleryNft } from "@/lib/gallery-types";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
 import RarityInsights from "@/components/RarityInsights";
@@ -147,6 +147,7 @@ function GalleryDetailModal({
 }) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [account, setAccount] = useState<string | null>(null);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -162,8 +163,25 @@ function GalleryDetailModal({
     };
   }, [onClose]);
 
+  // One-shot read at modal open — enough to decide "owner" vs. "browsing"
+  // actions without building wallet state machinery into the gallery.
+  useEffect(() => {
+    let alive = true;
+    void getConnectedAccounts().then((accounts) => {
+      if (alive && accounts[0]) setAccount(accounts[0]);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const isOwner = Boolean(
+    account && nft.owner && account.toLowerCase() === nft.owner.toLowerCase(),
+  );
+
   return (
     <div
+      data-market-shell
       className="fixed inset-0 z-[80] flex items-end justify-center bg-black/85 p-0 sm:items-center sm:p-4"
       role="presentation"
       onClick={onClose}
@@ -172,12 +190,12 @@ function GalleryDetailModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="nft-modal wood-frame relative flex max-h-[min(92dvh,880px)] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-wood-900 sm:rounded-2xl"
+        className="relative flex max-h-[min(92dvh,880px)] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl border border-line-strong bg-panel-strong shadow-panel sm:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex shrink-0 items-start gap-3 border-b border-gold-500/25 px-4 py-3 sm:px-5">
+        <div className="flex shrink-0 items-start gap-3 border-b border-line px-4 py-3 sm:px-5">
           <div className="min-w-0 flex-1">
-            <p className="text-[0.7rem] font-extrabold uppercase tracking-[0.16em] text-gold-300">
+            <p className="text-[0.6rem] font-black uppercase tracking-[0.14em] text-gold-300">
               Gallery · Minted
               {rarity && (
                 <span className="ml-2" style={{ color: tierColor(rarity.tier) }}>
@@ -185,7 +203,7 @@ function GalleryDetailModal({
                 </span>
               )}
             </p>
-            <h3 id={titleId} className="nft-modal-title mt-1 font-display text-foreground">
+            <h3 id={titleId} className="mt-1 font-display text-lg text-cream sm:text-xl">
               {displayName(nft)}
             </h3>
           </div>
@@ -193,14 +211,14 @@ function GalleryDetailModal({
             ref={closeRef}
             type="button"
             onClick={onClose}
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-gold-500/40 text-2xl leading-none text-gold-300"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line text-gold-300 transition hover:border-line-strong"
             aria-label="Close"
           >
-            ×
+            <X size={16} strokeWidth={2.5} />
           </button>
         </div>
 
-        <div className="nft-modal-body min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <div className="grid sm:grid-cols-2">
             <div className="relative mx-auto aspect-square w-full max-w-[360px] bg-wood-950 sm:max-w-none">
               <NftImage
@@ -212,29 +230,29 @@ function GalleryDetailModal({
             </div>
             <div className="min-w-0 space-y-4 p-4 sm:p-5">
               <dl className="grid grid-cols-2 gap-2">
-                <div className="rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2">
-                  <dt className="uppercase tracking-wide text-foreground/55">Token</dt>
-                  <dd className="mt-0.5 font-mono">#{nft.tokenId}</dd>
+                <div className="rounded-lg border border-line bg-wood-950 px-3 py-2.5">
+                  <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Token</dt>
+                  <dd className="mt-1 text-xs font-bold text-foreground">#{nft.tokenId}</dd>
                 </div>
-                <div className="rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2">
-                  <dt className="uppercase tracking-wide text-foreground/55">Owner</dt>
-                  <dd className="mt-0.5 font-mono text-sm" title={nft.owner || undefined}>
+                <div className="rounded-lg border border-line bg-wood-950 px-3 py-2.5">
+                  <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Owner</dt>
+                  <dd className="mt-1 text-xs font-bold text-foreground" title={nft.owner || undefined}>
                     {nft.owner ? shortOwner(nft.owner) : "—"}
                   </dd>
                 </div>
                 {rarity && (
                   <>
-                    <div className="rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2">
-                      <dt className="uppercase tracking-wide text-foreground/55">Rank</dt>
-                      <dd className="mt-0.5 font-mono" style={{ color: tierColor(rarity.tier) }}>
+                    <div className="rounded-lg border border-line bg-wood-950 px-3 py-2.5">
+                      <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Rank</dt>
+                      <dd className="mt-1 text-xs font-bold" style={{ color: tierColor(rarity.tier) }}>
                         {formatRank(rarity.rank)} · {rarity.tier}
                       </dd>
                     </div>
-                    <div className="rounded-lg border border-gold-500/20 bg-black/20 px-3 py-2">
-                      <dt className="uppercase tracking-wide text-foreground/55">
+                    <div className="rounded-lg border border-line bg-wood-950 px-3 py-2.5">
+                      <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                         Exclusivity
                       </dt>
-                      <dd className="mt-0.5 font-mono">
+                      <dd className="mt-1 text-xs font-bold text-foreground">
                         {rarity.normalizedScore.toFixed(1)}
                         <span className="text-foreground/45"> · outranks %</span>
                       </dd>
@@ -244,14 +262,14 @@ function GalleryDetailModal({
               </dl>
               {rarity && rarity.traits.length > 0 && (
                 <div>
-                  <h4 className="mb-1.5 text-xs font-extrabold uppercase tracking-[0.12em] text-gold-300">
+                  <h4 className="mb-1.5 text-[0.7rem] font-black uppercase tracking-[0.1em] text-foreground">
                     Trait rarity
                   </h4>
                   <ul className="space-y-1.5">
                     {rarity.traits.map((row) => (
                       <li
                         key={`${row.trait}-${row.value}`}
-                        className="min-w-0 rounded-lg border border-gold-500/20 bg-black/25 px-2.5 py-2"
+                        className="min-w-0 rounded-lg border border-line bg-wood-950 px-2.5 py-2"
                       >
                         <div className="flex items-center justify-between gap-2 text-[0.7rem]">
                           <span className="min-w-0 truncate font-bold text-gold-300/90">
@@ -279,12 +297,12 @@ function GalleryDetailModal({
                   {nft.attributes.map((attribute, index) => (
                     <li
                       key={`${attribute.trait_type}-${index}`}
-                      className="min-w-0 rounded-lg border border-gold-500/25 bg-black/30 px-3 py-2.5"
+                      className="min-w-0 rounded-lg border border-line bg-wood-950 px-3 py-2.5"
                     >
-                      <p className="nft-modal-trait-label font-extrabold uppercase text-gold-300/85">
+                      <p className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                         {attribute.trait_type || "Trait"}
                       </p>
-                      <p className="nft-modal-trait-value mt-1 font-black text-foreground">
+                      <p className="mt-1 text-xs font-bold text-foreground">
                         {String(attribute.value ?? "—")}
                       </p>
                     </li>
@@ -295,19 +313,46 @@ function GalleryDetailModal({
           </div>
         </div>
 
-        <div className="flex shrink-0 flex-col gap-2 border-t border-gold-500/25 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:px-5">
+        <div className="flex shrink-0 flex-col gap-2 border-t border-line px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:flex-wrap sm:px-5">
+          {/* Market hand-off only — the gallery never re-implements Offer,
+              List, or Send; it just routes to /market with the right deep
+              link so ItemDetail (item view) or My Listings (positions tab)
+              picks up the verified flow. */}
+          {isOwner ? (
+            <>
+              <Link
+                href="/market?tab=positions"
+                className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-gold-500 px-4 py-3 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
+              >
+                List for sale
+              </Link>
+              <Link
+                href={`/market?item=${nft.tokenId}`}
+                className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg border border-line-strong px-4 py-3 text-sm font-bold text-gold-300 transition hover:border-gold-400"
+              >
+                Send
+              </Link>
+            </>
+          ) : (
+            <Link
+              href={`/market?item=${nft.tokenId}`}
+              className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-gold-500 px-4 py-3 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
+            >
+              Make offer
+            </Link>
+          )}
           <a
             href={`${ROBINHOOD_EXPLORER_URL}/token/${NFT_CONTRACT_ADDRESS}/instance/${nft.tokenId}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-gold-500 px-4 py-3 font-extrabold text-wood-950"
+            className="inline-flex min-h-12 flex-1 items-center justify-center gap-1.5 rounded-lg border border-line-strong px-4 py-3 text-sm font-bold text-gold-300 transition hover:border-gold-400"
           >
-            View on explorer ↗
+            View on explorer <ExternalLink size={14} strokeWidth={2.5} />
           </a>
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg border border-gold-500/40 px-4 py-3 font-extrabold text-gold-300"
+            className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg border border-line-strong px-4 py-3 text-sm font-bold text-gold-300 transition hover:border-gold-400"
           >
             Close
           </button>
@@ -858,10 +903,10 @@ export default function Gallery() {
 
   return (
     <section id="gallery" className="scroll-mt-20 px-3 py-10 sm:px-5 sm:py-12">
-      {/* Widened from max-w-6xl (1152px): the grid below is a browsing
-          surface, not a prose column — on a wide desktop monitor a narrow
-          cap just leaves the screen half-empty either side. */}
-      <div className="mx-auto max-w-[1800px]">
+      {/* Capped to match the market mockup shell standard (1440px) — was
+          max-w-6xl, then widened to 1800px for the grid; 1440px keeps the
+          browsing surface roomy without the wide-monitor gutters. */}
+      <div className="mx-auto max-w-[1440px]">
         <div className="mb-4 flex flex-col gap-3 sm:mb-5 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
             <p className="text-[0.7rem] font-extrabold uppercase tracking-[0.18em] text-gold-300">
@@ -881,28 +926,29 @@ export default function Gallery() {
           <div className="flex shrink-0 gap-1.5">
             {(
               [
-                ["gallery", "Grid"],
-                ["insights", "Insights"],
+                ["gallery", "Grid", LayoutGrid],
+                ["insights", "Insights", BarChart3],
               ] as const
-            ).map(([id, label]) => (
+            ).map(([id, label, Icon]) => (
               <button
                 key={id}
                 type="button"
                 onClick={() => setPanel(id)}
-                className={`min-h-10 rounded-lg px-4 py-2 text-sm font-extrabold ${
+                className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-bold transition ${
                   panel === id
                     ? "bg-gold-500 text-wood-950"
-                    : "border border-gold-500/40 text-gold-300"
+                    : "border border-line-strong text-gold-300 hover:border-gold-400"
                 }`}
               >
+                <Icon size={14} strokeWidth={2.5} />
                 {label}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="wood-frame overflow-hidden rounded-xl bg-wood-900/95">
-          <div className="border-b border-gold-500/20 p-3 sm:p-3.5">
+        <div data-market-shell className="overflow-hidden rounded-xl border border-line bg-panel shadow-panel">
+          <div className="border-b border-line p-3 sm:p-3.5">
             <form
               onSubmit={onSearchSubmit}
               className="flex flex-col gap-2 sm:flex-row sm:items-center"
@@ -911,17 +957,25 @@ export default function Gallery() {
               <label htmlFor="gallery-search" className="sr-only">
                 Search gallery
               </label>
-              <input
-                id="gallery-search"
-                type="search"
-                value={query}
-                onChange={(event) => onSearchChange(event.target.value)}
-                placeholder="Filter: holo, rare, 0x…, vanity, #id"
-                autoComplete="off"
-                spellCheck={false}
-                enterKeyHint="search"
-                className="min-h-11 min-w-0 flex-1 rounded-lg border border-gold-500/45 bg-wood-950 px-3 py-2.5 text-sm font-bold text-foreground outline-none placeholder:text-foreground/40 focus:border-gold-300 sm:text-base"
-              />
+              <div className="relative min-w-0 flex-1">
+                <Search
+                  size={14}
+                  strokeWidth={2.5}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-cream-muted"
+                  aria-hidden="true"
+                />
+                <input
+                  id="gallery-search"
+                  type="search"
+                  value={query}
+                  onChange={(event) => onSearchChange(event.target.value)}
+                  placeholder="Filter: holo, rare, 0x…, vanity, #id"
+                  autoComplete="off"
+                  spellCheck={false}
+                  enterKeyHint="search"
+                  className="min-h-11 w-full rounded-lg border border-line-strong bg-wood-950 py-2.5 pl-9 pr-3 text-sm font-bold text-foreground outline-none placeholder:text-foreground/40 focus:border-gold-300 sm:text-base"
+                />
+              </div>
               <div className="flex gap-1.5">
                 {(
                   [
@@ -937,10 +991,10 @@ export default function Gallery() {
                       setVisibleCount(PAGE_SIZE);
                       setPanel("gallery");
                     }}
-                    className={`min-h-11 flex-1 rounded-lg px-3 py-2 text-xs font-extrabold sm:flex-none sm:text-sm ${
+                    className={`min-h-11 flex-1 rounded-lg px-3 py-2 text-xs font-bold sm:flex-none sm:text-sm ${
                       sortMode === id
                         ? "bg-gold-500 text-wood-950"
-                        : "border border-gold-500/40 text-gold-300"
+                        : "border border-line-strong text-gold-300 hover:border-gold-400"
                     }`}
                   >
                     {label}
@@ -950,8 +1004,9 @@ export default function Gallery() {
                   <button
                     type="button"
                     onClick={() => onSearchChange("")}
-                    className="min-h-11 rounded-lg border border-gold-500/40 px-3 py-2 text-xs font-extrabold text-gold-300 sm:text-sm"
+                    className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-line-strong px-3 py-2 text-xs font-bold text-gold-300 sm:text-sm"
                   >
+                    <X size={12} strokeWidth={2.5} />
                     Clear
                   </button>
                 )}
@@ -967,20 +1022,21 @@ export default function Gallery() {
                   : status}
               </p>
               <div className="flex flex-wrap items-center gap-2 font-bold">
-                <span className="rounded-full border border-gold-500/30 px-2 py-0.5 text-gold-300">
+                <span className="rounded-full border border-line px-2 py-0.5 text-gold-300">
                   {totalMinted.toLocaleString()} minted
                 </span>
-                <span className="rounded-full border border-gold-500/30 px-2 py-0.5 text-gold-300">
+                <span className="rounded-full border border-line px-2 py-0.5 text-gold-300">
                   {rarity.scoredCount.toLocaleString()} scored
                 </span>
                 {insightFilterIds && (
                   <button
                     type="button"
                     onClick={() => setInsightFilterIds(null)}
-                    className="rounded-full border border-cyan-400/40 px-2 py-0.5 text-cyan-300"
+                    className="inline-flex items-center gap-1 rounded-full border border-cyan-400/40 px-2 py-0.5 text-cyan-300"
                     title="Clear Insights dissect filters"
                   >
-                    cut {insightFilterIds.length.toLocaleString()} ✕
+                    cut {insightFilterIds.length.toLocaleString()}
+                    <X size={10} strokeWidth={2.5} />
                   </button>
                 )}
                 {metadataStillLoading && (
@@ -1033,26 +1089,16 @@ export default function Gallery() {
                           key={nft.tokenId}
                           className="[content-visibility:auto] [contain-intrinsic-size:auto_200px]"
                         >
+                          {/* Finalized mockup card: uniform quiet frame — rarity
+                              communicated by the tier pill alone, no glow/holo/
+                              animated border. Card lifts on hover instead. */}
                           <button
                             type="button"
                             onClick={() => setSelected(nft)}
-                            className={`group flex h-full w-full flex-col overflow-hidden rounded-lg border border-gold-500/25 bg-wood-950/70 text-left transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-400 ${
-                              tokenRarity ? tierAnimationClass(tokenRarity.tier) : ""
-                            }`}
-                            style={tokenRarity ? tierCardStyle(tokenRarity.tier) : undefined}
+                            className="dense-card group flex h-full w-full flex-col overflow-hidden p-0 text-left transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-line-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-400"
                             aria-label={`Open ${displayName(nft)}`}
                           >
-                            {/* holo-card lives on the artwork only, not the
-                                whole button — the glimmer should track the
-                                image, not spill onto the name/tier text
-                                below it. --holo-intensity is still inherited
-                                from the outer element's style above. */}
-                            <div
-                              className={`relative aspect-square w-full overflow-hidden bg-wood-950 ${
-                                tokenRarity ? "holo-card" : ""
-                              }`}
-                              style={tokenRarity ? { boxShadow: tierGlow(tokenRarity.tier) } : undefined}
-                            >
+                            <div className="relative aspect-square w-full overflow-hidden bg-wood-900">
                               {!nft.loaded && !nft.imageUri ? (
                                 <div className="flex h-full w-full animate-pulse items-center justify-center bg-wood-950/80 text-xl">
                                   🪵
@@ -1070,12 +1116,9 @@ export default function Gallery() {
                               </span>
                               {tokenRarity && (
                                 <span
-                                  className="card-overlay absolute bottom-1.5 right-1.5 rounded px-1.5 py-0.5 text-[0.6rem] font-black"
-                                  style={{
-                                    color: tierColor(tokenRarity.tier),
-                                    background: "rgba(0,0,0,0.75)",
-                                    border: `1px solid ${tierColor(tokenRarity.tier)}55`,
-                                  }}
+                                  className="tier-badge card-overlay absolute bottom-1.5 right-1.5 rounded-full px-1.5 py-0.5 text-[0.55rem] font-black uppercase tracking-wide"
+                                  style={{ color: tierColor(tokenRarity.tier) }}
+                                  title={`Rank ${formatRank(tokenRarity.rank)}`}
                                 >
                                   {formatRank(tokenRarity.rank)}
                                 </span>
@@ -1083,7 +1126,7 @@ export default function Gallery() {
                             </div>
                             <div className="space-y-0.5 p-2">
                               <p
-                                className="line-clamp-1 text-xs font-black text-foreground sm:text-sm"
+                                className="line-clamp-1 text-xs font-bold text-foreground sm:text-sm"
                                 title={displayName(nft)}
                               >
                                 {displayName(nft)}
@@ -1127,7 +1170,7 @@ export default function Gallery() {
               </div>
 
               {filtered.length > PAGE_SIZE && (
-                <div className="flex flex-col gap-2 border-t border-gold-500/20 bg-black/25 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                <div className="flex flex-col gap-2 border-t border-line bg-panel-strong px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                   <p className="text-xs text-foreground/60 sm:text-sm">
                     {Math.min(visibleCount, filtered.length)} / {filtered.length.toLocaleString()}
                   </p>
@@ -1141,14 +1184,14 @@ export default function Gallery() {
                               Math.min(filtered.length, count + PAGE_SIZE),
                             )
                           }
-                          className="min-h-10 rounded-lg bg-gold-500 px-3 py-2 text-xs font-extrabold text-wood-950 sm:text-sm"
+                          className="min-h-10 rounded-lg bg-gold-500 px-3 py-2 text-xs font-bold text-wood-950 transition hover:bg-gold-400 sm:text-sm"
                         >
                           +{Math.min(PAGE_SIZE, remaining)} more
                         </button>
                         <button
                           type="button"
                           onClick={() => setVisibleCount(filtered.length)}
-                          className="min-h-10 rounded-lg border border-gold-500/40 px-3 py-2 text-xs font-extrabold text-gold-300 sm:text-sm"
+                          className="min-h-10 rounded-lg border border-line-strong px-3 py-2 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
                         >
                           All
                         </button>
@@ -1157,7 +1200,7 @@ export default function Gallery() {
                       <button
                         type="button"
                         onClick={() => setVisibleCount(PAGE_SIZE)}
-                        className="min-h-10 rounded-lg border border-gold-500/40 px-3 py-2 text-xs font-extrabold text-gold-300 sm:col-span-2 sm:text-sm"
+                        className="min-h-10 rounded-lg border border-line-strong px-3 py-2 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:col-span-2 sm:text-sm"
                       >
                         Collapse
                       </button>
