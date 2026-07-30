@@ -1,6 +1,7 @@
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import TradePageHeader from "@/components/trade/TradePageHeader";
+import PlankPriceChart from "@/components/trade/PlankPriceChart";
 import TradeWorkbench from "@/components/trade/TradeWorkbench";
 import TradeStatusPanel from "@/components/trade/TradeStatusPanel";
 import TradeSafetyNotes from "@/components/trade/TradeSafetyNotes";
@@ -30,6 +31,12 @@ export default function TradePage() {
         <div data-market-shell className="mx-auto w-full max-w-[1440px] space-y-4 sm:space-y-6">
           <TradePageHeader />
 
+          {/* Price context leads, ahead of the workbench — it's the first
+              thing people look for landing on a trade page. Always visible
+              (not nested inside the same-chain/cross-chain toggle), so it
+              omits the `active` prop and just polls continuously. */}
+          <PlankPriceChart />
+
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start sm:gap-5">
             <div className="min-w-0 space-y-4 sm:space-y-5">
               <div className="mx-auto w-full max-w-xl">
@@ -42,9 +49,6 @@ export default function TradePage() {
               <TradeSafetyNotes />
             </div>
           </div>
-
-          {/* $PLANK/ETH price chart mounts here (full shell width, below the
-              workbench) once it lands — see task "plank price chart". */}
         </div>
       </main>
       <Footer />
