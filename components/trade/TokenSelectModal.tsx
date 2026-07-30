@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Check, Clock, Globe, Search, ShieldCheck, X } from "lucide-react";
+import { AlertTriangle, Check, Clock, Copy, Globe, Search, ShieldCheck, X } from "lucide-react";
 import { NATIVE_TOKEN_ADDRESS } from "@/lib/constants";
-import { shortAddress } from "@/lib/trade";
+import { formatDisplayAmount, shortAddress } from "@/lib/trade";
 import TokenIcon from "@/components/trade/TokenIcon";
 
 /** Mirror of SwapWidget's CounterTokenEntry — the list itself always comes
@@ -35,6 +35,9 @@ type Props = {
   selected: CounterTokenEntry;
   onSelect: (token: CounterTokenEntry) => void;
   title: string;
+  /** Connected wallet, if any. Balances only ever appear when this is set —
+   * no wallet, no balance column, per the owner's explicit condition. */
+  account?: string | null;
 };
 
 const RECENTS_KEY = "plank:swap:recentCounters";
@@ -71,6 +74,101 @@ function clearRecents() {
   }
 }
 
+type BalanceTarget = { address: string; decimals: number; isNative: boolean };
+
+/**
+ * Batched balance lookup — same shape as lib/market/inventory.ts's
+ * ethCallBatch (one JSON-RPC array POST per 100 calls through the
+ * same-origin /api/rpc proxy, falling back to sequential per-call requests
+ * if the upstream ever rejects an array batch), generalized to call
+ * different token contracts instead of the same one repeatedly, plus a
+ * native ETH leg via eth_getBalance. A balance nicety never blocks token
+ * selection: every failure here just leaves that row without a balance.
+ */
+async function fetchBalancesBatch(
+  owner: string,
+  targets: BalanceTarget[]
+): Promise<Map<string, bigint>> {
+  const out = new Map<string, bigint>();
+  if (targets.length === 0) return out;
+  const pad = owner.replace(/^0x/, "").toLowerCase().padStart(64, "0");
+  const CHUNK = 100; // ~20KB per chunk, well under the /api/rpc proxy's body cap
+
+  const callOne = async (t: BalanceTarget): Promise<string | null> => {
+    try {
+      const res = await fetch("/api/rpc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          t.isNative
+            ? { jsonrpc: "2.0", id: 1, method: "eth_getBalance", params: [owner, "latest"] }
+            : {
+                jsonrpc: "2.0",
+                id: 1,
+                method: "eth_call",
+                params: [{ to: t.address, data: `0x70a08231${pad}` }, "latest"],
+              }
+        ),
+      });
+      const json = (await res.json()) as { result?: string };
+      return json.result ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  for (let start = 0; start < targets.length; start += CHUNK) {
+    const chunk = targets.slice(start, start + CHUNK);
+    let batched = false;
+    try {
+      const res = await fetch("/api/rpc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          chunk.map((t, i) =>
+            t.isNative
+              ? { jsonrpc: "2.0", id: start + i, method: "eth_getBalance", params: [owner, "latest"] }
+              : {
+                  jsonrpc: "2.0",
+                  id: start + i,
+                  method: "eth_call",
+                  params: [{ to: t.address, data: `0x70a08231${pad}` }, "latest"],
+                }
+          )
+        ),
+      });
+      const json = (await res.json()) as unknown;
+      if (Array.isArray(json)) {
+        for (const entry of json as Array<{ id?: unknown; result?: unknown }>) {
+          const idx = typeof entry?.id === "number" ? entry.id - start : -1;
+          if (idx >= 0 && idx < chunk.length && typeof entry.result === "string") {
+            try {
+              out.set(chunk[idx].address.toLowerCase(), BigInt(entry.result));
+            } catch {
+              /* malformed hex — leave this row balance-less */
+            }
+          }
+        }
+        batched = true;
+      }
+    } catch {
+      /* fall through to per-call */
+    }
+    if (!batched) {
+      const results = await Promise.all(chunk.map(callOne));
+      results.forEach((hex, i) => {
+        if (!hex) return;
+        try {
+          out.set(chunk[i].address.toLowerCase(), BigInt(hex));
+        } catch {
+          /* malformed hex — leave this row balance-less */
+        }
+      });
+    }
+  }
+  return out;
+}
+
 /** The handful of tokens people reach for without typing — one tap, no
  * scrolling. Fixed order regardless of the server list's own ordering. */
 const QUICK_PICK_SYMBOLS = ["ETH", "USDG", "WETH"];
@@ -103,7 +201,15 @@ function SectionLabel({
  * The token list itself is server-validated (/api/uniswap/tokens); this
  * component only filters and remembers what the user picked.
  */
-export default function TokenSelectModal({ open, onClose, tokens, selected, onSelect, title }: Props) {
+export default function TokenSelectModal({
+  open,
+  onClose,
+  tokens,
+  selected,
+  onSelect,
+  title,
+  account,
+}: Props) {
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
   const [recents, setRecents] = useState<string[]>([]);
@@ -112,6 +218,11 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
   const [importLoading, setImportLoading] = useState(false);
   const [chainResults, setChainResults] = useState<ChainSearchResult[]>([]);
   const [chainSearchLoading, setChainSearchLoading] = useState(false);
+  // address (lowercase) -> raw base-unit balance. Only populated when a
+  // wallet is connected; a missing entry just means "no balance shown",
+  // never an error surfaced to the user.
+  const [balances, setBalances] = useState<Map<string, bigint>>(new Map());
+  const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   // Rendered via a portal straight onto <body> — the widget sits inside the
   // homepage's ".reveal" section, which sets a (identity) transform once
   // visible. Any non-"none" transform on an ancestor creates a new
@@ -119,7 +230,7 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
   // inside that box instead of covering the viewport. Portaling escapes it.
   const [mounted, setMounted] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   useEffect(() => {
     setMounted(true);
@@ -250,10 +361,67 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
     [recents, tokens]
   );
 
+  // Balances only for rows actually rendered right now — the curated/verified
+  // list, quick picks, recents, and whatever chain-search results are on
+  // screen — never the whole chain-search universe. Deduped by address so a
+  // token appearing in more than one section (e.g. a quick pick that's also
+  // in the verified list) costs one RPC call, not several.
+  const balanceKey = useMemo(() => {
+    const addrs = new Set<string>();
+    for (const t of [...filtered, ...quickPicks, ...recentEntries, ...chainResults]) {
+      addrs.add(t.address.toLowerCase());
+    }
+    return Array.from(addrs).sort().join(",");
+  }, [filtered, quickPicks, recentEntries, chainResults]);
+
   useEffect(() => {
-    const t = filtered[highlight];
+    if (!account || !balanceKey) {
+      setBalances(new Map());
+      return;
+    }
+    const allByAddress = new Map<string, CounterTokenEntry>();
+    for (const t of [...filtered, ...quickPicks, ...recentEntries, ...chainResults]) {
+      allByAddress.set(t.address.toLowerCase(), t);
+    }
+    const targets: BalanceTarget[] = balanceKey.split(",").map((addr) => {
+      const entry = allByAddress.get(addr);
+      return {
+        address: addr,
+        decimals: entry?.decimals ?? 18,
+        isNative: addr === NATIVE_TOKEN_ADDRESS.toLowerCase(),
+      };
+    });
+    let cancelled = false;
+    // Fire-and-forget: rows already rendered with whatever `balances` holds
+    // (nothing, on first pass) — this only ever fills the slot in later,
+    // never blocks or delays showing/selecting a token.
+    void fetchBalancesBatch(account, targets).then((result) => {
+      if (!cancelled) setBalances(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- balanceKey is the real dependency; filtered/quickPicks/etc feed only into targets built from it
+  }, [account, balanceKey]);
+
+  // Held tokens float to the top of the verified section when a wallet is
+  // connected — but only within that section. The unverified discovery
+  // section never gets reordered by balance, and never moves above verified.
+  const displayed = useMemo(() => {
+    if (!account) return filtered;
+    const nativeAddr = NATIVE_TOKEN_ADDRESS.toLowerCase();
+    const nativeEntry = filtered.find((t) => t.address.toLowerCase() === nativeAddr);
+    const rest = filtered.filter((t) => t.address.toLowerCase() !== nativeAddr);
+    const held = rest.filter((t) => (balances.get(t.address.toLowerCase()) ?? BigInt(0)) > BigInt(0));
+    const heldSet = new Set(held.map((t) => t.address.toLowerCase()));
+    const unheld = rest.filter((t) => !heldSet.has(t.address.toLowerCase()));
+    return nativeEntry ? [nativeEntry, ...held, ...unheld] : [...held, ...unheld];
+  }, [filtered, account, balances]);
+
+  useEffect(() => {
+    const t = displayed[highlight];
     if (t) itemRefs.current.get(t.address)?.scrollIntoView({ block: "nearest" });
-  }, [highlight, filtered]);
+  }, [highlight, displayed]);
 
   if (!open || !mounted) return null;
 
@@ -263,19 +431,27 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
     onClose();
   };
 
+  const copyAddress = (address: string) => {
+    if (typeof navigator === "undefined" || !navigator.clipboard) return;
+    void navigator.clipboard.writeText(address).then(() => {
+      setCopiedAddress(address);
+      window.setTimeout(() => setCopiedAddress((cur) => (cur === address ? null : cur)), 1500);
+    });
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
       onClose();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      setHighlight((h) => Math.min(h + 1, filtered.length - 1));
+      setHighlight((h) => Math.min(h + 1, displayed.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setHighlight((h) => Math.max(h - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      const t = filtered[highlight];
+      const t = displayed[highlight];
       if (t) pick(t);
     }
   };
@@ -397,8 +573,23 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
                   <div className="flex items-center gap-2.5">
                     <TokenIcon symbol={importResult.symbol} logoURI={importResult.logoURI} size={28} />
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-cream">{importResult.symbol}</p>
-                      <p className="truncate text-[0.7rem] text-cream-muted">{importResult.name}</p>
+                      <p className="truncate text-sm font-bold text-cream">{importResult.name}</p>
+                      <p className="flex items-center gap-1.5 truncate text-[0.7rem] text-cream-muted">
+                        <span className="font-bold">{importResult.symbol}</span>
+                        <button
+                          type="button"
+                          onClick={() => copyAddress(importResult.address)}
+                          title="Copy contract address"
+                          className="flex shrink-0 items-center gap-1 truncate hover:text-gold-300"
+                        >
+                          {shortAddress(importResult.address)}
+                          {copiedAddress === importResult.address ? (
+                            <Check size={11} className="shrink-0 text-gold-300" />
+                          ) : (
+                            <Copy size={11} className="shrink-0" />
+                          )}
+                        </button>
+                      </p>
                     </div>
                   </div>
                   <p className="flex items-start gap-1.5 text-[0.68rem] leading-snug text-amber-200/90">
@@ -421,30 +612,38 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
             </div>
           ) : (
             <>
-              {filtered.length === 0 && chainResults.length === 0 && !chainSearchLoading && (
+              {displayed.length === 0 && chainResults.length === 0 && !chainSearchLoading && (
                 <p className="px-2 py-6 text-center text-xs text-cream-muted">
                   No tokens match &ldquo;{query}&rdquo; anywhere on chain.
                 </p>
               )}
 
-              {filtered.length > 0 && (
+              {displayed.length > 0 && (
                 <SectionLabel icon={<ShieldCheck size={12} />}>Verified tokens</SectionLabel>
               )}
-              {filtered.map((t, i) => {
+              {displayed.map((t, i) => {
                 const isSelected = t.address.toLowerCase() === selected.address.toLowerCase();
                 const isNative = t.address.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase();
+                const bal = balances.get(t.address.toLowerCase());
                 return (
-                  <button
+                  <div
                     key={t.address}
                     ref={(el) => {
                       if (el) itemRefs.current.set(t.address, el);
                       else itemRefs.current.delete(t.address);
                     }}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => pick(t)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        pick(t);
+                      }
+                    }}
                     onMouseEnter={() => setHighlight(i)}
                     aria-pressed={isSelected}
-                    className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
+                    className={`flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
                       i === highlight
                         ? "border-line-strong bg-gold-500/15"
                         : "border-transparent hover:border-line-strong hover:bg-gold-500/10"
@@ -456,14 +655,36 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
                         <span className="block truncate text-sm font-bold text-cream">{t.name}</span>
                         <span className="flex items-center gap-1.5 truncate text-[0.7rem] text-cream-muted">
                           <span className="font-bold">{t.symbol}</span>
-                          {!isNative && <span className="truncate">{shortAddress(t.address)}</span>}
+                          {!isNative && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                copyAddress(t.address);
+                              }}
+                              title="Copy contract address"
+                              className="flex shrink-0 items-center gap-1 truncate hover:text-gold-300"
+                            >
+                              {shortAddress(t.address)}
+                              {copiedAddress === t.address ? (
+                                <Check size={11} className="shrink-0 text-gold-300" />
+                              ) : (
+                                <Copy size={11} className="shrink-0" />
+                              )}
+                            </button>
+                          )}
                         </span>
                       </span>
                     </span>
-                    {isSelected && (
-                      <Check size={18} className="shrink-0 text-gold-300" aria-label="Selected" />
-                    )}
-                  </button>
+                    <span className="flex shrink-0 items-center gap-2">
+                      {bal != null && bal > BigInt(0) && (
+                        <span className="text-xs font-bold text-cream">
+                          {formatDisplayAmount(bal, t.decimals)}
+                        </span>
+                      )}
+                      {isSelected && <Check size={18} className="text-gold-300" aria-label="Selected" />}
+                    </span>
+                  </div>
                 );
               })}
 
@@ -475,28 +696,58 @@ export default function TokenSelectModal({ open, onClose, tokens, selected, onSe
                       Searching Robinhood Chain…
                     </p>
                   )}
-                  {chainResults.map((t) => (
-                    <button
-                      key={t.address}
-                      type="button"
-                      // Clicking a discovery result re-runs the SAME on-chain
-                      // check the paste-an-address flow uses (by handing it
-                      // the address) — never trusts this row's fields for a
-                      // quote, and still requires the explicit confirm step.
-                      onClick={() => setQuery(t.address)}
-                      className="flex w-full items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors hover:border-amber-500/40 hover:bg-amber-950/20"
-                    >
-                      <TokenIcon symbol={t.symbol} logoURI={t.logoURI} size={30} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-bold text-cream">{t.name}</span>
-                        <span className="flex items-center gap-1.5 truncate text-[0.7rem] text-cream-muted">
-                          <span className="font-bold">{t.symbol}</span>
-                          <span className="truncate">{shortAddress(t.address)}</span>
+                  {chainResults.map((t) => {
+                    const bal = balances.get(t.address.toLowerCase());
+                    return (
+                      <div
+                        key={t.address}
+                        role="button"
+                        tabIndex={0}
+                        // Clicking a discovery result re-runs the SAME on-chain
+                        // check the paste-an-address flow uses (by handing it
+                        // the address) — never trusts this row's fields for a
+                        // quote, and still requires the explicit confirm step.
+                        onClick={() => setQuery(t.address)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setQuery(t.address);
+                          }
+                        }}
+                        className="flex w-full cursor-pointer items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 text-left transition-colors hover:border-amber-500/40 hover:bg-amber-950/20"
+                      >
+                        <TokenIcon symbol={t.symbol} logoURI={t.logoURI} size={30} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-bold text-cream">{t.name}</span>
+                          <span className="flex items-center gap-1.5 truncate text-[0.7rem] text-cream-muted">
+                            <span className="font-bold">{t.symbol}</span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                copyAddress(t.address);
+                              }}
+                              title="Copy contract address"
+                              className="flex shrink-0 items-center gap-1 truncate hover:text-gold-300"
+                            >
+                              {shortAddress(t.address)}
+                              {copiedAddress === t.address ? (
+                                <Check size={11} className="shrink-0 text-gold-300" />
+                              ) : (
+                                <Copy size={11} className="shrink-0" />
+                              )}
+                            </button>
+                          </span>
                         </span>
-                      </span>
-                      <AlertTriangle size={14} className="shrink-0 text-amber-300" aria-hidden="true" />
-                    </button>
-                  ))}
+                        {bal != null && bal > BigInt(0) && (
+                          <span className="shrink-0 text-xs font-bold text-cream">
+                            {formatDisplayAmount(bal, t.decimals)}
+                          </span>
+                        )}
+                        <AlertTriangle size={14} className="shrink-0 text-amber-300" aria-hidden="true" />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </>
