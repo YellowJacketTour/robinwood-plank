@@ -8,8 +8,10 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 FROM dependencies AS tools
-COPY scripts/migrate-upstash-to-redis.mjs ./scripts/migrate-upstash-to-redis.mjs
-CMD ["node", "scripts/migrate-upstash-to-redis.mjs"]
+COPY scripts/migrate-postgres.mjs ./scripts/migrate-postgres.mjs
+COPY scripts/migrate-upstash-to-postgres.mjs ./scripts/migrate-upstash-to-postgres.mjs
+COPY deploy/inmotion/postgres ./deploy/inmotion/postgres
+CMD ["node", "scripts/migrate-postgres.mjs"]
 
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
@@ -48,10 +50,12 @@ RUN npm run build
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 
+ARG DEPLOYMENT_VERSION=local
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
+ENV DEPLOYMENT_VERSION=$DEPLOYMENT_VERSION
 
 RUN groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs nextjs \
@@ -67,6 +71,6 @@ USER nextjs
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/trade/status').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 
 CMD ["node", "server.js"]

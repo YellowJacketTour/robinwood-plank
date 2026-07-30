@@ -7,15 +7,19 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "lint:inmotion": "eslint lib/market/durable-kv.ts test/market/durable-kv.test.ts scripts/migrate-upstash-to-redis.mjs next.config.ts",
+    "lint:inmotion": "eslint app/api/health/route.ts lib/postgres.ts lib/public-json.ts lib/boards-store.ts lib/market/durable-kv.ts lib/market/orders-store.ts lib/market/served-orders.ts test/market/durable-kv.test.ts scripts/migrate-postgres.mjs scripts/migrate-upstash-to-postgres.mjs scripts/postgres-maintenance.mjs scripts/verify-postgres-storage.ts deploy/inmotion/passenger.cjs next.config.ts",
     "test:contracts": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json hardhat test",
     "test:market": "tsx --test test/market/*.test.ts",
+    "test:postgres": "tsx scripts/verify-postgres-storage.ts",
     "test": "npm run test:market && npm run test:contracts",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
-    "migrate:kv-to-redis": "node scripts/migrate-upstash-to-redis.mjs"
+    "db:migrate": "node scripts/migrate-postgres.mjs",
+    "db:maintenance": "node scripts/postgres-maintenance.mjs",
+    "migrate:kv-to-redis": "node scripts/migrate-upstash-to-redis.mjs",
+    "migrate:kv-to-postgres": "node scripts/migrate-upstash-to-postgres.mjs"
   },
   "engines": {
     "node": ">=20.9.0"
@@ -26,6 +30,7 @@
     "ethers": "^6.17.0",
     "lightweight-charts": "^5.2.0",
     "next": "^16.2.12",
+    "pg": "^8.22.0",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -46,6 +51,7 @@
     "@types/chai": "^4.3.20",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20",
+    "@types/pg": "^8.20.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",

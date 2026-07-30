@@ -15,6 +15,11 @@ import type {
   NiceLedgerEntry,
   WidgetSession,
 } from "@/lib/boards-types";
+import { durableKvBackend } from "@/lib/market/durable-kv";
+import {
+  postgresQuery,
+  withPostgresTransaction,
+} from "@/lib/postgres";
 import { readPublicJson } from "@/lib/public-json";
 
 type GlobalBoards = {
@@ -52,6 +57,34 @@ function recomputeTotalEth(state: BoardsState): void {
   state.totalEthSpentWei = total.toString();
 }
 
+function normalizeState(parsed: Partial<BoardsState> | null): BoardsState {
+  const source = parsed ?? emptyState();
+  const badBoards: BoardsState["badBoards"] = {};
+  for (const [key, value] of Object.entries(source.badBoards || {})) {
+    badBoards[key] = {
+      ...value,
+      ethSpentWei: value.ethSpentWei || "0",
+      txHashes: value.txHashes || [],
+      sources: value.sources || [],
+    };
+  }
+  const state: BoardsState = {
+    ...emptyState(),
+    ...source,
+    widgetSessions: source.widgetSessions || {},
+    badBoards,
+    cooldowns: source.cooldowns || {},
+    scanNotes: source.scanNotes || [],
+    totalEthSpentWei: source.totalEthSpentWei || "0",
+  };
+  recomputeTotalEth(state);
+  return state;
+}
+
+function usesPostgres(): boolean {
+  return durableKvBackend() === "postgres";
+}
+
 /** Serverless / edge-like: no durable local disk (Vercel, Cloudflare, Lambda). */
 function isEphemeralRuntime(): boolean {
   return Boolean(
@@ -68,31 +101,19 @@ const TMP_PATH = isEphemeralRuntime()
   : path.join(process.cwd(), "data", "boards-state.json");
 
 async function ensureLoaded(): Promise<BoardsState> {
+  if (usesPostgres()) {
+    const result = await postgresQuery<{ state: BoardsState }>(
+      "SELECT state FROM boards_state WHERE singleton_id = 1"
+    );
+    return normalizeState(result.rows[0]?.state ?? null);
+  }
+
   const glob = g();
   if (glob.__plankBoardsState) return glob.__plankBoardsState;
 
   try {
     const raw = await fs.readFile(TMP_PATH, "utf8");
-    const parsed = JSON.parse(raw) as BoardsState;
-    const badBoards: BoardsState["badBoards"] = {};
-    for (const [k, v] of Object.entries(parsed.badBoards || {})) {
-      badBoards[k] = {
-        ...v,
-        ethSpentWei: v.ethSpentWei || "0",
-        txHashes: v.txHashes || [],
-        sources: v.sources || [],
-      };
-    }
-    glob.__plankBoardsState = {
-      ...emptyState(),
-      ...parsed,
-      widgetSessions: parsed.widgetSessions || {},
-      badBoards,
-      cooldowns: parsed.cooldowns || {},
-      scanNotes: parsed.scanNotes || [],
-      totalEthSpentWei: parsed.totalEthSpentWei || "0",
-    };
-    recomputeTotalEth(glob.__plankBoardsState);
+    glob.__plankBoardsState = normalizeState(JSON.parse(raw) as BoardsState);
   } catch {
     // Cloudflare has no durable /tmp across isolates — in-memory is fine
     glob.__plankBoardsState = emptyState();
@@ -100,7 +121,7 @@ async function ensureLoaded(): Promise<BoardsState> {
   return glob.__plankBoardsState;
 }
 
-async function persist(state: BoardsState): Promise<void> {
+async function persistLocal(state: BoardsState): Promise<void> {
   state.updatedAt = new Date().toISOString();
   g().__plankBoardsState = state;
   try {
@@ -111,6 +132,42 @@ async function persist(state: BoardsState): Promise<void> {
   } catch {
     // /tmp or data write failed — memory still holds state for this instance
   }
+}
+
+async function mutateState<T>(
+  mutate: (state: BoardsState) => T | Promise<T>
+): Promise<T> {
+  if (usesPostgres()) {
+    return withPostgresTransaction(async (client) => {
+      await client.query(
+        `INSERT INTO boards_state (singleton_id, state)
+         VALUES (1, $1::jsonb)
+         ON CONFLICT (singleton_id) DO NOTHING`,
+        [JSON.stringify(emptyState())]
+      );
+      const locked = await client.query<{ state: BoardsState }>(
+        `SELECT state
+           FROM boards_state
+          WHERE singleton_id = 1
+          FOR UPDATE`
+      );
+      const state = normalizeState(locked.rows[0]?.state ?? null);
+      const result = await mutate(state);
+      state.updatedAt = new Date().toISOString();
+      await client.query(
+        `UPDATE boards_state
+            SET state = $1::jsonb, updated_at = NOW()
+          WHERE singleton_id = 1`,
+        [JSON.stringify(state)]
+      );
+      return result;
+    });
+  }
+
+  const state = await ensureLoaded();
+  const result = await mutate(state);
+  await persistLocal(state);
+  return result;
 }
 
 /** Load Good Wood: Wood List proofs + optional airdrop list. */
@@ -187,28 +244,28 @@ export async function recordWidgetActivity(
   address: string,
   kind: "quote" | "swap"
 ): Promise<WidgetSession> {
-  const state = await ensureLoaded();
   const a = normalizeAddress(address);
-  const now = new Date();
-  const prev = state.widgetSessions[a];
-  const session: WidgetSession = prev
-    ? {
-        ...prev,
-        lastSeenAt: now.toISOString(),
-        quoteCount: prev.quoteCount + (kind === "quote" ? 1 : 0),
-        swapCount: prev.swapCount + (kind === "swap" ? 1 : 0),
-      }
-    : {
-        address: a,
-        firstSeenAt: now.toISOString(),
-        lastSeenAt: now.toISOString(),
-        quoteCount: kind === "quote" ? 1 : 0,
-        swapCount: kind === "swap" ? 1 : 0,
-      };
-  state.widgetSessions[a] = session;
-  touchCooldown(state, a, now);
-  await persist(state);
-  return session;
+  return mutateState((state) => {
+    const now = new Date();
+    const prev = state.widgetSessions[a];
+    const session: WidgetSession = prev
+      ? {
+          ...prev,
+          lastSeenAt: now.toISOString(),
+          quoteCount: prev.quoteCount + (kind === "quote" ? 1 : 0),
+          swapCount: prev.swapCount + (kind === "swap" ? 1 : 0),
+        }
+      : {
+          address: a,
+          firstSeenAt: now.toISOString(),
+          lastSeenAt: now.toISOString(),
+          quoteCount: kind === "quote" ? 1 : 0,
+          swapCount: kind === "swap" ? 1 : 0,
+        };
+    state.widgetSessions[a] = session;
+    touchCooldown(state, a, now);
+    return session;
+  });
 }
 
 export async function wasWidgetVerified(address: string): Promise<boolean> {
@@ -254,65 +311,66 @@ export async function markBadBoard(opts: {
     return null;
   }
 
-  const state = await ensureLoaded();
   const a = normalizeAddress(opts.address);
   if (!/^0x[a-f0-9]{40}$/.test(a)) return null;
 
-  // plank.love widget buyers (server quote/swap session) never go on Bad Boards
-  // once the widget is open. During pure death trap, widget cannot buy anyway.
-  if (mode === "off_widget" || mode === "manual") {
-    if (await wasWidgetVerified(a)) {
-      return null;
-    }
-  }
-
   const at = opts.at ?? new Date();
   const good = await isGoodWood(a);
-  const prev = state.badBoards[a];
-  const txHashes = prev?.txHashes ? [...prev.txHashes] : [];
-  const isNewTx = Boolean(opts.txHash && !txHashes.includes(opts.txHash));
-  if (opts.txHash && isNewTx) {
-    txHashes.push(opts.txHash);
-    if (txHashes.length > 40) txHashes.shift();
-  }
-  const sources = prev?.sources ? [...prev.sources] : [];
-  if (!sources.includes(opts.source)) sources.push(opts.source);
-
-  let ethSpentWei = BigInt(prev?.ethSpentWei || "0");
-  if (isNewTx && opts.ethSpentWeiDelta != null) {
-    try {
-      const delta =
-        typeof opts.ethSpentWeiDelta === "bigint"
-          ? opts.ethSpentWeiDelta
-          : BigInt(opts.ethSpentWeiDelta || "0");
-      if (delta > BigInt(0)) ethSpentWei += delta;
-    } catch {
-      // ignore bad delta
+  return mutateState((state) => {
+    // Check inside the write transaction so another Passenger worker cannot
+    // register a widget session between this decision and the update.
+    if (
+      (mode === "off_widget" || mode === "manual") &&
+      state.widgetSessions[a]
+    ) {
+      return null;
     }
-  }
 
-  const venue: BadVenue =
-    opts.venue ||
-    prev?.venue ||
-    (isSniperCaptureActive(atMs) ? "death_trap" : "off_site");
+    const prev = state.badBoards[a];
+    const txHashes = prev?.txHashes ? [...prev.txHashes] : [];
+    const isNewTx = Boolean(opts.txHash && !txHashes.includes(opts.txHash));
+    if (opts.txHash && isNewTx) {
+      txHashes.push(opts.txHash);
+      if (txHashes.length > 40) txHashes.shift();
+    }
+    const sources = prev?.sources ? [...prev.sources] : [];
+    if (!sources.includes(opts.source)) sources.push(opts.source);
 
-  const entry: BadBoardEntry = {
-    address: a,
-    firstSeenAt: prev?.firstSeenAt ?? at.toISOString(),
-    lastSeenAt: at.toISOString(),
-    reason: opts.reason,
-    wasGoodWood: good || Boolean(prev?.wasGoodWood),
-    sources,
-    txHashes,
-    ethSpentWei: ethSpentWei.toString(),
-    venue,
-    venueLabel: venueLabelFor(venue),
-  };
-  state.badBoards[a] = entry;
-  recomputeTotalEth(state);
-  touchCooldown(state, a, at);
-  await persist(state);
-  return entry;
+    let ethSpentWei = BigInt(prev?.ethSpentWei || "0");
+    if (isNewTx && opts.ethSpentWeiDelta != null) {
+      try {
+        const delta =
+          typeof opts.ethSpentWeiDelta === "bigint"
+            ? opts.ethSpentWeiDelta
+            : BigInt(opts.ethSpentWeiDelta || "0");
+        if (delta > BigInt(0)) ethSpentWei += delta;
+      } catch {
+        // ignore bad delta
+      }
+    }
+
+    const venue: BadVenue =
+      opts.venue ||
+      prev?.venue ||
+      (isSniperCaptureActive(atMs) ? "death_trap" : "off_site");
+
+    const entry: BadBoardEntry = {
+      address: a,
+      firstSeenAt: prev?.firstSeenAt ?? at.toISOString(),
+      lastSeenAt: at.toISOString(),
+      reason: opts.reason,
+      wasGoodWood: good || Boolean(prev?.wasGoodWood),
+      sources,
+      txHashes,
+      ethSpentWei: ethSpentWei.toString(),
+      venue,
+      venueLabel: venueLabelFor(venue),
+    };
+    state.badBoards[a] = entry;
+    recomputeTotalEth(state);
+    touchCooldown(state, a, at);
+    return entry;
+  });
 }
 
 export async function getBoardsState(): Promise<BoardsState> {
@@ -320,11 +378,11 @@ export async function getBoardsState(): Promise<BoardsState> {
 }
 
 export async function setScanCursor(block: number, notes: string[]): Promise<void> {
-  const state = await ensureLoaded();
-  state.lastScannedBlock = block;
-  state.lastScanAt = new Date().toISOString();
-  state.scanNotes = notes.slice(0, 20);
-  await persist(state);
+  await mutateState((state) => {
+    state.lastScannedBlock = block;
+    state.lastScanAt = new Date().toISOString();
+    state.scanNotes = notes.slice(0, 20);
+  });
 }
 
 /** Age of last successful chain scan (uses lastScanAt — not widget ping noise). */
@@ -345,6 +403,18 @@ export async function getCooldown(address: string): Promise<{
   remainingMs: number;
 } | null> {
   const state = await ensureLoaded();
+  return cooldownFromState(state, address);
+}
+
+function cooldownFromState(
+  state: BoardsState,
+  address: string
+): {
+  active: boolean;
+  startedAt: string | null;
+  endsAt: string | null;
+  remainingMs: number;
+} {
   const a = normalizeAddress(address);
   const cd = state.cooldowns[a];
   if (!cd) {
@@ -371,7 +441,7 @@ export async function classifyWallet(address: string): Promise<{
   const good = await isGoodWood(a);
   const bad = state.badBoards[a] || null;
   const widgetVerified = Boolean(state.widgetSessions[a]);
-  const cooldown = await getCooldown(a);
+  const cooldown = cooldownFromState(state, a);
 
   let side: "good_wood" | "bad_boards" | "neutral" | "fallen" = "neutral";
   if (bad && bad.wasGoodWood) side = "fallen";
