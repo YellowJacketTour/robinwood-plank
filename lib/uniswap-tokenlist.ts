@@ -47,6 +47,34 @@ export const PLANK_TOKEN: CounterToken = {
   decimals: TOKEN.decimals,
 };
 
+/**
+ * Chain-core money tokens the official stock-focused list omits entirely —
+ * users pay with these (they even appear as hops in our own quote routes),
+ * so their absence made the selector look broken ("No tokens match USDG"
+ * while the route line showed USDG). Hand-pinned because Blockscout is full
+ * of same-symbol impostors ("United States Dump Coin" etc.):
+ * - USDG cross-checked against the address the Uniswap app itself displays
+ *   for Robinhood Chain (0x5fc5…d168, Global Dollar, 6 decimals);
+ * - WETH cross-checked against the WETH hop in live Trading API quote
+ *   routes (0x0Bd7…AD73).
+ * No canonical USDC/USDT exists on this chain as of 2026-07-30 — every
+ * Blockscout match is a low-holder lookalike, deliberately NOT listed.
+ */
+const CORE_COUNTERS: CounterToken[] = [
+  {
+    address: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+    symbol: "USDG",
+    name: "Global Dollar",
+    decimals: 6,
+  },
+  {
+    address: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+    symbol: "WETH",
+    name: "Wrapped Ether",
+    decimals: 18,
+  },
+];
+
 type ListedToken = {
   chainId?: number;
   address?: string;
@@ -93,19 +121,29 @@ async function fetchChainTokens(): Promise<CounterToken[]> {
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
 }
 
-/** Native ETH first, then the official chain tokens. Never includes PLANK. */
+/** Core money tokens first (deduped against the fetched list), then the
+ * official chain tokens. The core set survives upstream-list outages — it
+ * must never disappear just because tokens.uniswap.org is down. */
+function withCore(tokens: CounterToken[]): CounterToken[] {
+  const seen = new Set(tokens.map((t) => t.address.toLowerCase()));
+  const core = CORE_COUNTERS.filter((t) => !seen.has(t.address.toLowerCase()));
+  return [NATIVE_COUNTER, ...core, ...tokens];
+}
+
+/** Native ETH + core money tokens first, then the official chain tokens.
+ * Never includes PLANK. */
 export async function getCounterTokens(): Promise<CounterToken[]> {
   if (cache && Date.now() - cache.at < TTL_MS) {
-    return [NATIVE_COUNTER, ...cache.tokens];
+    return withCore(cache.tokens);
   }
   try {
     const tokens = await fetchChainTokens();
     cache = { at: Date.now(), tokens };
-    return [NATIVE_COUNTER, ...tokens];
+    return withCore(tokens);
   } catch {
-    // Stale-if-error, else ETH-only (the widget's pre-feature behavior).
-    if (cache) return [NATIVE_COUNTER, ...cache.tokens];
-    return [NATIVE_COUNTER];
+    // Stale-if-error, else ETH+core-only (pre-feature behavior plus core).
+    if (cache) return withCore(cache.tokens);
+    return withCore([]);
   }
 }
 
