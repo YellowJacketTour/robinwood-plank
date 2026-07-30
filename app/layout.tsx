@@ -7,6 +7,7 @@ import HoloField from "@/lib/holo";
 import SplashIntro from "@/components/SplashIntro";
 import ArtServiceWorker from "@/components/ArtServiceWorker";
 import { rootMetadata } from "@/lib/seo";
+import { WalletProvider } from "@/lib/wallet-context";
 
 const stencil = Uncial_Antiqua({
   variable: "--font-stencil",
@@ -38,12 +39,14 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${stencil.variable} ${body.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
-        <SplashIntro />
-        <ArtServiceWorker />
-        <PlankBackground />
-        <AudioPlayer />
-        <HoloField />
-        {children}
+        <WalletProvider>
+          <SplashIntro />
+          <ArtServiceWorker />
+          <PlankBackground />
+          <AudioPlayer />
+          <HoloField />
+          {children}
+        </WalletProvider>
       </body>
     </html>
   );
