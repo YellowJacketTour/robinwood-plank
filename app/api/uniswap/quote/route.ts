@@ -1,4 +1,5 @@
 import { CHAIN, CONTRACT_ADDRESS, PERMIT2_ADDRESS } from "@/lib/constants";
+import { INDICATIVE_SWAPPER } from "@/lib/uniswap-types";
 import { isSniperCaptureActive } from "@/lib/boards";
 import { classifyWallet, recordWidgetActivity } from "@/lib/boards-store";
 import {
@@ -45,7 +46,7 @@ export async function POST(req: Request) {
 
     const direction: SwapDirection = body.direction === "sell" ? "sell" : "buy";
     const amount = typeof body.amount === "string" ? body.amount.trim() : "";
-    const swapper = typeof body.swapper === "string" ? body.swapper.trim() : "";
+    const requestedSwapper = typeof body.swapper === "string" ? body.swapper.trim() : "";
     const slippageTolerance =
       typeof body.slippageTolerance === "number" &&
       body.slippageTolerance > 0 &&
@@ -56,12 +57,19 @@ export async function POST(req: Request) {
     if (!amount || !/^\d+$/.test(amount) || amount === "0") {
       throw new TradeApiError(400, "BAD_AMOUNT", "amount must be a positive integer in base units.");
     }
-    if (!swapper || !/^0x[a-fA-F0-9]{40}$/.test(swapper)) {
+    // Price quotes don't need a wallet: an omitted swapper produces an
+    // INDICATIVE quote priced against the burn address. A present-but-
+    // malformed swapper is still rejected — silent substitution there
+    // would price against a different account than the one that executes.
+    if (requestedSwapper && !/^0x[a-fA-F0-9]{40}$/.test(requestedSwapper)) {
       throw new TradeApiError(400, "BAD_SWAPPER", "swapper must be a valid wallet address.");
     }
+    const indicative = !requestedSwapper;
+    const swapper = indicative ? INDICATIVE_SWAPPER : requestedSwapper;
 
-    // Only block Bad Boards during active death trap (not free community trade)
-    if (isSniperCaptureActive()) {
+    // Only block Bad Boards during active death trap (not free community
+    // trade). Indicative quotes skip this — there is no wallet to classify.
+    if (!indicative && isSniperCaptureActive()) {
       const board = await classifyWallet(swapper);
       if (board.side === "bad_boards" || board.side === "fallen") {
         throw new TradeApiError(
@@ -180,6 +188,19 @@ export async function POST(req: Request) {
           "Quote approval target is not Permit2 or the $PLANK contract. Blocked for safety."
         );
       }
+    }
+
+    if (indicative) {
+      // Price-only quote: no widget-activity credit, no board classification
+      // (there is no real wallet), and the client must re-quote with the
+      // connected wallet before executing.
+      return publicJson(
+        attachPublicFeeMeta({
+          ...data,
+          amountOut,
+          indicative: true,
+        })
+      );
     }
 
     // Official widget path — keep this wallet off Bad Boards auto-list

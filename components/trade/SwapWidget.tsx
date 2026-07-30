@@ -48,6 +48,8 @@ type QuoteState = {
   maxPriorityFeePerGas?: string;
   gasUseEstimate?: string;
   approvalNeeded?: boolean;
+  /** Priced without a wallet — display only, never executable. */
+  indicative?: boolean;
 };
 
 type TxFields = {
@@ -141,6 +143,9 @@ export default function SwapWidget() {
       const addr = await connectWallet();
       await ensureRobinhoodChain();
       setAccount(addr);
+      // An indicative (wallet-less) quote can't be executed — clear it so
+      // the user re-quotes as themselves.
+      setQuote((q) => (q?.indicative ? null : q));
       setStatus(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect wallet.");
@@ -169,15 +174,15 @@ export default function SwapWidget() {
       setError("Enter a valid amount.");
       return;
     }
-    if (!account) {
-      setError("Connect your wallet first.");
-      return;
-    }
 
     try {
       setBusy(true);
       setStatus("Quoting…");
-      await ensureRobinhoodChain();
+      // Price quotes work without a wallet (indicative — priced against a
+      // placeholder server-side). Only touch the wallet/chain when one is
+      // actually connected; prompting here made quoting look broken to
+      // anyone who hadn't connected yet.
+      if (account) await ensureRobinhoodChain();
 
       const res = await fetch("/api/uniswap/quote", {
         method: "POST",
@@ -185,7 +190,7 @@ export default function SwapWidget() {
         body: JSON.stringify({
           direction,
           amount: raw.toString(),
-          swapper: account,
+          swapper: account || undefined,
           slippageTolerance: slippage,
         }),
       });
@@ -230,9 +235,14 @@ export default function SwapWidget() {
               ? String(qInner.gasUseEstimate)
               : undefined,
         approvalNeeded: Boolean(data.isTokenApprovalApplicable),
+        indicative: Boolean(data.indicative),
       });
       setStatus(
-        data.isTokenApprovalApplicable ? "Quote ready — approve then swap." : "Quote ready."
+        data.indicative
+          ? "Price quote ready — connect a wallet to swap."
+          : data.isTokenApprovalApplicable
+            ? "Quote ready — approve then swap."
+            : "Quote ready."
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Quote failed.");
@@ -243,6 +253,13 @@ export default function SwapWidget() {
 
   const executeSwap = useCallback(async () => {
     if (!quote || !account) return;
+    if (quote.indicative) {
+      // Belt-and-braces: indicative quotes are cleared on connect, but an
+      // executable payload must never be built from a placeholder-swapper
+      // quote.
+      setError("Re-fetch the quote with your wallet connected.");
+      return;
+    }
     setError(null);
     setTxHash(null);
 
@@ -663,13 +680,16 @@ export default function SwapWidget() {
           <>
             <button
               type="button"
-              disabled={busy || !account || !amountIn}
+              disabled={busy || !amountIn}
               onClick={fetchQuote}
               className={`${btnBase} border border-gold-500/55 bg-wood-900 text-gold-300 hover:border-gold-400`}
             >
               {busy && !quote ? "Quoting…" : "Get quote"}
             </button>
-            {quote && (
+            {/* Swap only renders for an executable quote — an indicative
+                (wallet-less) price shows the Connect button above instead
+                of a Swap that would silently no-op. */}
+            {quote && account && !quote.indicative && (
               <button
                 type="button"
                 disabled={busy}
