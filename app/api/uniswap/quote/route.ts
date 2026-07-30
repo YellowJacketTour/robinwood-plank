@@ -126,16 +126,10 @@ export async function POST(req: Request) {
       tokenOut,
       tokenInChainId: CHAIN.id,
       tokenOutChainId: CHAIN.id,
-      // EXACT_INPUT only. Per current Uniswap Trading API docs, integratorFees
-      // is realized on the OUTPUT token for EXACT_INPUT quotes (and would move
-      // to the input token for EXACT_OUTPUT — but UniswapX Dutch orders are
-      // structurally EXACT_INPUT only, and switching buys to EXACT_OUTPUT
-      // would change the "you pay" UX to "you receive"). So: selling PLANK
-      // always nets the fee in the counter token (ETH/USDG/etc — matches the
-      // "sell → fee in ETH" preference for free); buying PLANK always nets
-      // the fee in PLANK (the output), on both CLASSIC and gasless paths —
-      // there is no integratorFees mechanism that puts a buy's fee on the
-      // ETH/input side without a separate EXACT_OUTPUT quote flow.
+      // EXACT_INPUT only — this is what pins integratorFees to the output
+      // token for every quote here (sells fee in ETH/USDG, buys fee in
+      // PLANK). See the FEE-LEG CONSTRAINT block on getIntegratorFees in
+      // lib/uniswap-server.ts before changing this.
       type: "EXACT_INPUT",
       amount,
       swapper: swapper.toLowerCase(),

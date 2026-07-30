@@ -86,6 +86,36 @@ export function isTradingApiConfigured(): boolean {
  * Immutable site fee for Uniswap Trading API.
  * Spec: QuoteRequest.integratorFees: IntegratorFee[] with fields { bips, recipient }.
  * (Not "bps" / not singular "integratorFee" — those are invalid per OpenAPI.)
+ *
+ * ============================================================================
+ * FEE-LEG CONSTRAINT — READ BEFORE "FIXING" THIS (verified against current
+ * Uniswap Trading API docs 2026-07-30, Phase B gasless checkpoint):
+ *
+ * integratorFees is realized on the OUTPUT token of the quote, never the
+ * input — and this is NOT configurable per-request. It is a direct function
+ * of the quote's `type`:
+ *   - EXACT_INPUT  → fee is subtracted from the OUTPUT amount.
+ *   - EXACT_OUTPUT → fee is added to the INPUT amount instead.
+ * There is no third "pick a side" parameter. We only ever send EXACT_INPUT
+ * (see app/api/uniswap/quote/route.ts) — partly because that's the natural
+ * "I want to spend X" UX, and partly because UniswapX Dutch orders are
+ * structurally EXACT_INPUT only (fixed input amount, decaying output over
+ * the auction window — an "exact output, decaying input" order doesn't
+ * exist in the protocol). This applies identically to the gasless (/order)
+ * and CLASSIC (/swap) paths.
+ *
+ * Net effect, and it is NOT a bug: selling PLANK nets our fee in the counter
+ * token (ETH/USDG/etc) for free — that's the "sell → fee in ETH" preference,
+ * satisfied automatically. Buying PLANK nets the fee in PLANK, the output —
+ * always, unavoidably, identical to how CLASSIC has always worked. Getting a
+ * buy's fee onto the ETH/input side would require a SEPARATE EXACT_OUTPUT
+ * quote flow (client specifies "PLANK received" instead of "ETH spent" — a
+ * different UX), which does not exist in this codebase and is out of scope
+ * for Phase B. Do not attempt to route around this with a "feeSide" param
+ * or similar — Uniswap does not expose one. Do not claim in UI copy which
+ * asset the fee lands in; the "Fee 0.4207%" line is the only fee copy that
+ * is always true for both directions.
+ * ============================================================================
  */
 export function getIntegratorFees(): ReadonlyArray<
   Readonly<{ bips: number; recipient: string }>
@@ -371,13 +401,16 @@ export async function assertOrderIntegrity(quote: Record<string, unknown>): Prom
 
   // orderInfo carries the actual UniswapX order fields (reactor, swapper,
   // input, outputs[]) in the JSON quote response — this is what gets ABI-
-  // encoded and signed client-side. Every field here must match what we
-  // expect, or a tampered quote object could get a user to sign an order
-  // that settles somewhere other than the real UniswapX reactor.
+  // encoded and signed client-side. A signed order is an irrevocable
+  // authorization (the reactor can pull `input` via Permit2 the instant a
+  // filler submits it on-chain), so every field here must match what we
+  // expect BEFORE the client is asked to sign — this is the equivalent of
+  // assertQuoteIntegrity for an order instead of a swap tx, and it's the
+  // load-bearing check of this whole phase.
   const orderInfo = (quote.orderInfo ?? quote.order) as
     | {
         reactor?: string;
-        outputs?: Array<{ token?: string; recipient?: string }>;
+        outputs?: Array<{ token?: string; recipient?: string; startAmount?: string; amount?: string }>;
         input?: { token?: string };
       }
     | undefined;
@@ -386,8 +419,12 @@ export async function assertOrderIntegrity(quote: Record<string, unknown>): Prom
     throw new TradeApiError(400, "ORDER_SHAPE", "Quote is missing UniswapX order data.");
   }
 
+  // Reactor must be present AND correct — a missing reactor is just as
+  // suspicious as a wrong one (fail closed, don't treat "absent" as "trust
+  // it"), since this is exactly the field that would redirect a "gasless
+  // swap" into an arbitrary contract instead of the real UniswapX settlement.
   if (
-    typeof orderInfo.reactor === "string" &&
+    typeof orderInfo.reactor !== "string" ||
     orderInfo.reactor.toLowerCase() !== UNISWAPX_REACTOR_ADDRESS.toLowerCase()
   ) {
     throw new TradeApiError(
@@ -397,23 +434,105 @@ export async function assertOrderIntegrity(quote: Record<string, unknown>): Prom
     );
   }
 
+  // orderInfo.input must be the SAME token validateQuoteCore already checked
+  // above — a mismatch here means orderInfo was tampered independently of
+  // the top-level quote.input/output fields.
+  const topLevelTokenIn =
+    (typeof (quote.input as { token?: string } | undefined)?.token === "string" &&
+      (quote.input as { token?: string }).token) ||
+    (typeof quote.tokenIn === "string" ? quote.tokenIn : null);
+  if (
+    typeof orderInfo.input?.token === "string" &&
+    topLevelTokenIn &&
+    orderInfo.input.token.toLowerCase() !== topLevelTokenIn.toLowerCase()
+  ) {
+    throw new TradeApiError(
+      400,
+      "ORDER_PAIR_MISMATCH",
+      "Order input token does not match the quoted pair. Blocked for safety."
+    );
+  }
+
   // Every output recipient must be either the swapper themselves or our fee
   // treasury — never an arbitrary third address slipped into the order.
-  if (Array.isArray(orderInfo.outputs)) {
-    const swapper =
-      typeof quote.swapper === "string" ? quote.swapper.toLowerCase() : null;
+  // Additionally, when SITE_FEE is on, the fee output's own share of the
+  // total must be within tolerance of SITE_FEE.bps — this is what "bips
+  // present and correct" means in practice for a Dutch order (there is no
+  // separate integratorFees echo field to compare against; the fee is only
+  // visible as one of these output entries).
+  if (Array.isArray(orderInfo.outputs) && orderInfo.outputs.length > 0) {
+    const swapper = typeof quote.swapper === "string" ? quote.swapper.toLowerCase() : null;
     const feeRecipient = SITE_FEE.recipient.toLowerCase();
+    let swapperTotal = BigInt(0);
+    let feeTotal = BigInt(0);
+    let sawUnknownRecipient = false;
+
     for (const out of orderInfo.outputs) {
       if (!out || typeof out !== "object") continue;
       const recipient = typeof out.recipient === "string" ? out.recipient.toLowerCase() : null;
-      if (recipient && recipient !== feeRecipient && recipient !== swapper) {
-        throw new TradeApiError(
-          400,
-          "BAD_ORDER_RECIPIENT",
-          "Order output recipient is not the swapper or plank.love treasury. Blocked for safety."
-        );
+      const amountRaw = out.startAmount ?? out.amount;
+      let amount = BigInt(0);
+      try {
+        if (typeof amountRaw === "string" && amountRaw) amount = BigInt(amountRaw);
+      } catch {
+        /* non-numeric amount — treated as 0 below, recipient check still applies */
+      }
+
+      if (recipient === feeRecipient) {
+        feeTotal += amount;
+      } else if (recipient === swapper) {
+        swapperTotal += amount;
+      } else if (recipient) {
+        sawUnknownRecipient = true;
       }
     }
+
+    if (sawUnknownRecipient) {
+      throw new TradeApiError(
+        400,
+        "BAD_ORDER_RECIPIENT",
+        "Order output recipient is not the swapper or plank.love treasury. Blocked for safety."
+      );
+    }
+
+    const total = swapperTotal + feeTotal;
+    if (SITE_FEE.enabled && SITE_FEE.bps > 0) {
+      if (feeTotal <= BigInt(0)) {
+        throw new TradeApiError(
+          400,
+          "ORDER_FEE_MISSING",
+          "Order has no fee output to plank.love treasury. Blocked for safety."
+        );
+      }
+      if (total > BigInt(0)) {
+        // bips = feeTotal / total * 10000, compared against SITE_FEE.bps with
+        // a small relative tolerance for integer rounding in the order build.
+        const actualBps = (Number(feeTotal) / Number(total)) * 10000;
+        const expectedBps = SITE_FEE.bps;
+        const tolerance = Math.max(expectedBps * 0.1, 1); // 10% relative, floor 1 bip
+        if (Math.abs(actualBps - expectedBps) > tolerance) {
+          throw new TradeApiError(
+            400,
+            "ORDER_FEE_MISMATCH",
+            `Order fee share (${actualBps.toFixed(2)} bips) does not match plank.love's ${expectedBps} bips. Blocked for safety.`
+          );
+        }
+      }
+    } else if (feeTotal > BigInt(0)) {
+      // Site fee is off — an order that still routes value to our treasury
+      // is exactly as wrong as one that routes it somewhere unexpected.
+      throw new TradeApiError(
+        400,
+        "ORDER_FEE_UNEXPECTED",
+        "Order includes a fee output while site fee is disabled. Blocked for safety."
+      );
+    }
+  } else if (SITE_FEE.enabled && SITE_FEE.bps > 0) {
+    throw new TradeApiError(
+      400,
+      "ORDER_FEE_MISSING",
+      "Order has no outputs at all — cannot verify the fee. Blocked for safety."
+    );
   }
 }
 
