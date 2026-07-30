@@ -161,6 +161,7 @@ jobs:
       - name: Upload immutable release
         env:
           UNISWAP_API_KEY: ${{ secrets.UNISWAP_API_KEY }}
+          RPC_URL: ${{ secrets.RPC_URL }}
         shell: bash
         run: |
           set -euo pipefail
@@ -179,6 +180,18 @@ jobs:
             "$runtime_secret" \
             "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.uniswap-api-key.${RELEASE_SHA}"
           rm -f "$runtime_secret"
+          # Private RPC provider (Alchemy) — optional secret; staged like the
+          # Uniswap key (file over scp, never argv) and upserted into the
+          # runtime env during activation. Absent secret = keep whatever the
+          # server env already has (public-RPC fallback keeps working).
+          if [ -n "${RPC_URL:-}" ]; then
+            rpc_secret="$RUNNER_TEMP/rpc-url"
+            printf '%s' "$RPC_URL" > "$rpc_secret"
+            scp -i "$HOME/.ssh/inmotion" -P "$port" \
+              "$rpc_secret" \
+              "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.rpc-url.${RELEASE_SHA}"
+            rm -f "$rpc_secret"
+          fi
 
       - name: Migrate, activate, and restart Passenger
         shell: bash
@@ -204,6 +217,18 @@ jobs:
           chmod 600 "$staged_uniswap_key"
           mv -f "$staged_uniswap_key" "$app_dir/shared/runtime-secrets/uniswap-api-key"
           chmod 600 "$app_dir/shared/runtime-secrets/uniswap-api-key"
+          # Optional staged RPC_URL: upsert into the runtime env (replace any
+          # existing RPC_URL line, then append the staged value). Idempotent;
+          # skipped entirely when no file was staged for this release.
+          staged_rpc_url="$app_dir/shared/runtime-secrets/.rpc-url.$release_sha"
+          if [ -s "$staged_rpc_url" ]; then
+            env_file="$app_dir/shared/.env.production"
+            grep -v '^RPC_URL=' "$env_file" > "$env_file.next" || true
+            printf 'RPC_URL=%s\n' "$(cat "$staged_rpc_url")" >> "$env_file.next"
+            chmod 600 "$env_file.next"
+            mv -f "$env_file.next" "$env_file"
+            rm -f "$staged_rpc_url"
+          fi
           release_dir="$app_dir/releases/$release_sha"
           mkdir -p "$release_dir" "$app_dir/shared" "$app_dir/tmp" "$app_dir/logs"
           tar -xzf "$app_dir/incoming/$release_sha.tgz" -C "$release_dir"
