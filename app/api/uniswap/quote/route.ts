@@ -3,13 +3,15 @@ import { INDICATIVE_SWAPPER } from "@/lib/uniswap-types";
 import { isSniperCaptureActive } from "@/lib/boards";
 import { classifyWallet, recordWidgetActivity } from "@/lib/boards-store";
 import {
-  AMM_PROTOCOLS,
   assertAllowedPair,
   assertNoClientFeeOrRouteOverride,
   assertTradeOpen,
   attachPublicFeeMeta,
+  chooseProtocols,
   extractAmountOut,
   getIntegratorFees,
+  isDutchRouting,
+  isGaslessEnabled,
   resolveTokens,
   TradeApiError,
   uniswapFetch,
@@ -32,6 +34,10 @@ type Body = {
   swapper?: unknown;
   slippageTolerance?: unknown;
   counterToken?: unknown;
+  /** Opt-in only: request a UniswapX (gasless) route when available. Ignored
+   * entirely unless GASLESS_SWAPS_ENABLED is on server-side — this cannot
+   * unlock anything by itself. */
+  gasless?: unknown;
 };
 
 export async function POST(req: Request) {
@@ -90,13 +96,13 @@ export async function POST(req: Request) {
       if (!/^0x[a-fA-F0-9]{40}$/.test(counterRaw)) {
         throw new TradeApiError(400, "BAD_TOKEN", "counterToken must be a token address.");
       }
-      const { getCounterToken } = await import("@/lib/uniswap-tokenlist");
-      const entry = await getCounterToken(counterRaw);
+      const { resolveCounterToken } = await import("@/lib/uniswap-tokenlist");
+      const entry = await resolveCounterToken(counterRaw);
       if (!entry) {
         throw new TradeApiError(
           400,
           "BAD_TOKEN",
-          "That token is not on the allowed list for $PLANK trading."
+          "That token is not on the allowed list, and does not look like a valid ERC-20 on this chain."
         );
       }
       counter = { address: entry.address, decimals: entry.decimals };
@@ -108,20 +114,35 @@ export async function POST(req: Request) {
     // Spec-accurate fee payload (empty array when site fee disabled — full output to buyer)
     const integratorFees = getIntegratorFees();
 
+    // Gasless opt-in: client asks, server decides. isGaslessEnabled() is the
+    // real gate — a client sending gasless:true when the flag is off just
+    // gets ordinary AMM protocols back, same as omitting it.
+    const wantsGasless = body.gasless === true;
+    const protocols = chooseProtocols(wantsGasless);
+
     // Checksum-safe lower swapper; BEST_PRICE for execution quality vs Uniswap UI
     const quoteBody: Record<string, unknown> = {
       tokenIn,
       tokenOut,
       tokenInChainId: CHAIN.id,
       tokenOutChainId: CHAIN.id,
+      // EXACT_INPUT only. Per current Uniswap Trading API docs, integratorFees
+      // is realized on the OUTPUT token for EXACT_INPUT quotes (and would move
+      // to the input token for EXACT_OUTPUT — but UniswapX Dutch orders are
+      // structurally EXACT_INPUT only, and switching buys to EXACT_OUTPUT
+      // would change the "you pay" UX to "you receive"). So: selling PLANK
+      // always nets the fee in the counter token (ETH/USDG/etc — matches the
+      // "sell → fee in ETH" preference for free); buying PLANK always nets
+      // the fee in PLANK (the output), on both CLASSIC and gasless paths —
+      // there is no integratorFees mechanism that puts a buy's fee on the
+      // ETH/input side without a separate EXACT_OUTPUT quote flow.
       type: "EXACT_INPUT",
       amount,
       swapper: swapper.toLowerCase(),
       slippageTolerance,
       // Auto permit amount helps sell path match Uniswap.app
       permitAmount: "EXACT",
-      // AMM only → CLASSIC quotes → /swap (not UniswapX /order)
-      protocols: [...AMM_PROTOCOLS],
+      protocols: [...protocols],
       routingPreference: "BEST_PRICE",
     };
     // Only attach fee field when non-empty — some API builds mishandle empty/zero fees
@@ -179,11 +200,16 @@ export async function POST(req: Request) {
     }
 
     const routing = typeof data.routing === "string" ? data.routing : "";
-    if (routing && !["CLASSIC", "WRAP", "UNWRAP"].includes(routing)) {
+    const routingOk =
+      ["CLASSIC", "WRAP", "UNWRAP"].includes(routing) ||
+      (wantsGasless && isGaslessEnabled() && isDutchRouting(routing));
+    if (routing && !routingOk) {
       throw new TradeApiError(
         502,
         "BAD_ROUTING",
-        `Unexpected routing "${routing}". Retry — official widget requires AMM (CLASSIC).`
+        `Unexpected routing "${routing}". Retry — official widget requires AMM (CLASSIC)${
+          isGaslessEnabled() ? " or UniswapX" : ""
+        }.`
       );
     }
 
