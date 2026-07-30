@@ -66,6 +66,7 @@ feat:      MINOR candidate
 fix:       PATCH candidate
 security:  PATCH or MINOR depending on user impact
 perf:      PATCH unless behavior changes
+design:    PATCH unless it changes information architecture or a workflow
 ops:       PATCH when release behavior changes
 docs:      usually no version by itself
 chore:     usually PATCH only when shipped behavior changes

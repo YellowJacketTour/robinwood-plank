@@ -117,6 +117,22 @@ from Upstash:
 Application APIs may cache or index this information for speed. A cache is not
 proof of ownership or settlement.
 
+### RPC provider chain
+
+`lib/server/rpc-urls.ts` builds the ordered RPC list used by every
+server-side chain read: the private `RPC_URL` provider (e.g. a keyed Alchemy
+endpoint) first, then the public Robinhood Chain fallbacks from
+`ROBINHOOD_RPC_URLS`. The public endpoint is rate-limited and not
+recommended for production, which was the source of intermittent 502/429s
+during order verification.
+
+Consumers are the `/api/rpc` proxy, the vault `fetch-rpc` path, and the
+order-signature verifier, which walks every provider in the list on each
+retry pass instead of hammering a single URL. `RPC_URL` is never
+`NEXT_PUBLIC_`, so it cannot reach the browser; clients only ever call the
+same-origin `/api/rpc` proxy, and the separate client-shared
+`ROBINHOOD_RPC_URLS` list is unaffected.
+
 ### Durable KV adapters
 
 `lib/market/durable-kv.ts` exposes the small KV surface used by marketplace
@@ -231,6 +247,7 @@ must therefore be backward-compatible with the immediately previous release.
 | Secret | Storage | Consumer |
 | --- | --- | --- |
 | PostgreSQL password | `shared/.env.production`, mode `600` | Passenger and maintenance scripts |
+| `RPC_URL` (private RPC provider) | `shared/.env.production`, mode `600`; not `NEXT_PUBLIC_` | `/api/rpc` proxy, vault `fetch-rpc`, order-signature verifier |
 | Uniswap API key | GitHub Actions secret, installed mode `600` | Passenger launcher |
 | Relayer private key | GitHub Actions secret, provisioned once to `relayer.env` | cPanel cron only |
 | Deployment SSH key | GitHub Actions secret | CI SSH/SCP only |

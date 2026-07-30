@@ -13,9 +13,12 @@ As verified on 2026-07-30:
   `/home/CPANEL_USER/plank.tanggang.life`;
 - the standalone drand relayer is packaged with every release;
 - `plank.love` still serves the earlier Cloudflare Worker and has not completed
-  the InMotion hostname cutover; and
+  the InMotion hostname cutover;
 - GitHub's scheduled drand workflow remains an active fallback until the
-  24-hour InMotion verification gate disables it.
+  24-hour InMotion verification gate disables it; and
+- production's `shared/.env.production` still needs `RPC_URL` appended (a
+  private provider endpoint, e.g. Alchemy) — without it, server-side chain
+  reads fall back to the public Robinhood Chain RPC, which is rate-limited.
 
 The target public hostname is `plank.love`. The application directory does not
 need to move when the hostname changes.
@@ -518,6 +521,8 @@ Before moving public traffic:
 - Boards state remains consistent across repeated Passenger requests.
 - IPFS image and metadata proxies work.
 - The Uniswap API key is not present in browser assets or responses.
+- `RPC_URL` is set to a private provider endpoint in `shared/.env.production`
+  so server-side chain reads do not depend on the rate-limited public RPC.
 - V1 and V2 vault stats, held inventory, activity, and SSE update.
 - Random redemption is idle or settled with no actionable request.
 - Passenger logs show no restart loop or database-pool errors.

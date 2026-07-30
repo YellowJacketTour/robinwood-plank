@@ -140,7 +140,8 @@ one requires a new build and deploy.
 | `PGPOOL_MAX`, `PGSSLMODE` | Passenger pool limit and PostgreSQL TLS mode. |
 | `UNISWAP_API_KEY` | Quote/swap credential installed by CI as a mode-`600` runtime secret. |
 | `CRON_SECRET` | Authorizes the legacy HTTP settlement endpoint, if retained. |
-| `RPC_URL`, `BEACON_ADDRESS` | Server settlement and operator-script chain configuration. |
+| `RPC_URL` | Private RPC provider (e.g. a keyed Alchemy endpoint) tried first for every server-side chain read — the `/api/rpc` proxy, the vault `fetch-rpc` path, and the order-signature verifier — before falling back to the public Robinhood Chain RPC, which is rate-limited and not recommended for production. |
+| `BEACON_ADDRESS` | Server settlement and operator-script chain configuration. |
 
 `RELAYER_PRIVATE_KEY` must not be placed in Passenger's `.env.production`.
 The provisioning workflow installs it in a separate mode-`600` file read only
