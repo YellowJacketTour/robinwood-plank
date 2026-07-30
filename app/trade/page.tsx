@@ -42,6 +42,9 @@ export default function TradePage() {
               <TradeSafetyNotes />
             </div>
           </div>
+
+          {/* $PLANK/ETH price chart mounts here (full shell width, below the
+              workbench) once it lands — see task "plank price chart". */}
         </div>
       </main>
       <Footer />
