@@ -109,6 +109,13 @@
         color: inherit;
       }
 
+      button:disabled,
+      input:disabled,
+      select:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
       button:focus-visible,
       a:focus-visible,
       input:focus-visible,
@@ -869,7 +876,7 @@
         position: sticky;
         z-index: 10;
         bottom: 16px;
-        display: flex;
+        display: none;
         align-items: center;
         justify-content: space-between;
         gap: 16px;
@@ -881,6 +888,10 @@
         background: rgba(24, 15, 8, 0.96);
         box-shadow: 0 16px 40px rgba(0, 0, 0, 0.52);
         backdrop-filter: blur(14px);
+      }
+
+      .sweep-dock.is-active {
+        display: flex;
       }
 
       .sweep-copy {
@@ -1379,6 +1390,570 @@
         font-weight: 400;
       }
 
+      .event-banner,
+      .prototype-bar,
+      .callout,
+      .chart-card,
+      .detail-card,
+      .flow-card,
+      .inventory-card,
+      .position-card {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: var(--panel);
+      }
+
+      .event-banner {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 12px;
+        padding: 11px 14px;
+        background:
+          linear-gradient(90deg, rgba(219, 165, 63, 0.14), transparent 52%),
+          var(--panel);
+      }
+
+      .event-banner img {
+        width: 54px;
+        height: 54px;
+        border-radius: 9px;
+        object-fit: cover;
+      }
+
+      .event-banner strong,
+      .event-banner span {
+        display: block;
+      }
+
+      .event-banner strong {
+        color: var(--gold-300);
+        font-size: 0.78rem;
+      }
+
+      .event-banner span {
+        margin-top: 2px;
+        color: var(--cream-muted);
+        font-size: 0.64rem;
+      }
+
+      .event-countdown {
+        text-align: right;
+      }
+
+      .event-countdown strong {
+        font-family: var(--display);
+        font-size: 1rem;
+        font-weight: 400;
+      }
+
+      .prototype-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+        padding: 10px 12px;
+        color: var(--cream-muted);
+        font-size: 0.68rem;
+      }
+
+      .prototype-bar strong {
+        color: var(--cream);
+      }
+
+      .prototype-actions,
+      .inline-actions,
+      .period-tabs,
+      .mode-tabs,
+      .scope-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .mode-tabs,
+      .scope-tabs,
+      .period-tabs {
+        border-radius: 9px;
+        padding: 4px;
+        background: var(--wood-950);
+      }
+
+      .mode-tabs button,
+      .scope-tabs button,
+      .period-tabs button {
+        min-height: 36px;
+        border: 0;
+        border-radius: 7px;
+        padding: 0 12px;
+        cursor: pointer;
+        color: #a99c84;
+        background: transparent;
+        font-size: 0.67rem;
+        font-weight: 900;
+      }
+
+      .mode-tabs button.is-selected,
+      .scope-tabs button.is-selected,
+      .period-tabs button.is-selected {
+        color: var(--wood-950);
+        background: var(--gold-500);
+      }
+
+      .workbench-grid,
+      .analytics-layout,
+      .wallet-workspace,
+      .offer-layout {
+        display: grid;
+        align-items: start;
+        gap: 14px;
+      }
+
+      .workbench-grid {
+        grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.1fr);
+      }
+
+      .analytics-layout {
+        grid-template-columns: minmax(0, 1fr) 310px;
+      }
+
+      .wallet-workspace {
+        grid-template-columns: minmax(0, 1fr) 320px;
+      }
+
+      .offer-layout {
+        grid-template-columns: 360px minmax(0, 1fr);
+      }
+
+      .detail-stack,
+      .flow-stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .detail-card,
+      .flow-card,
+      .chart-card,
+      .position-card {
+        padding: 14px;
+      }
+
+      .detail-card h3,
+      .flow-card h3,
+      .chart-card h3,
+      .position-card h3 {
+        font-family: var(--body);
+        font-size: 0.76rem;
+        font-weight: 900;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .detail-card > p,
+      .flow-card > p,
+      .chart-card > p {
+        margin: 5px 0 12px;
+        color: var(--cream-muted);
+        font-size: 0.66rem;
+        font-weight: 600;
+      }
+
+      .data-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .data-cell {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px;
+        background: var(--wood-950);
+      }
+
+      .data-cell span,
+      .data-cell strong {
+        display: block;
+      }
+
+      .data-cell span {
+        color: #9e9279;
+        font-size: 0.57rem;
+        font-weight: 900;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .data-cell strong {
+        overflow: hidden;
+        margin-top: 4px;
+        color: var(--cream);
+        font-size: 0.7rem;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .callout {
+        padding: 11px 12px;
+        color: var(--cream-muted);
+        background:
+          linear-gradient(90deg, rgba(103, 200, 255, 0.08), transparent),
+          var(--panel);
+        font-size: 0.66rem;
+        line-height: 1.45;
+      }
+
+      .callout strong {
+        color: var(--rare);
+      }
+
+      .callout.warning {
+        background:
+          linear-gradient(90deg, rgba(242, 139, 120, 0.1), transparent),
+          var(--panel);
+      }
+
+      .callout.warning strong {
+        color: var(--danger);
+      }
+
+      .mode-panel[hidden],
+      .wallet-state[hidden] {
+        display: none;
+      }
+
+      .mode-panel {
+        display: grid;
+        gap: 12px;
+      }
+
+      .chart-head,
+      .subsection-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+
+      .chart-head p,
+      .subsection-head p {
+        margin: 3px 0 0;
+      }
+
+      .chart-wrap {
+        position: relative;
+        min-height: 220px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background:
+          linear-gradient(rgba(239, 196, 99, 0.055) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(239, 196, 99, 0.055) 1px, transparent 1px),
+          var(--wood-950);
+        background-size: 100% 25%, 12.5% 100%;
+      }
+
+      .chart-wrap svg {
+        position: absolute;
+        inset: 12px;
+        width: calc(100% - 24px);
+        height: calc(100% - 24px);
+        overflow: visible;
+      }
+
+      .chart-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-top: 9px;
+        color: #9e9279;
+        font-size: 0.6rem;
+      }
+
+      .chart-legend span::before {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: 6px;
+        border-radius: 50%;
+        content: "";
+        background: var(--gold-400);
+      }
+
+      .chart-legend .legend-sale::before {
+        background: var(--forest-bright);
+      }
+
+      details.disclosure {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: var(--panel);
+      }
+
+      details.disclosure + details.disclosure {
+        margin-top: 10px;
+      }
+
+      details.disclosure summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 48px;
+        gap: 12px;
+        padding: 10px 13px;
+        cursor: pointer;
+        color: var(--cream);
+        font-size: 0.72rem;
+        font-weight: 900;
+        list-style: none;
+      }
+
+      details.disclosure summary::-webkit-details-marker {
+        display: none;
+      }
+
+      details.disclosure summary::after {
+        color: var(--gold-400);
+        content: "+";
+        font-size: 1rem;
+      }
+
+      details.disclosure[open] summary::after {
+        content: "−";
+      }
+
+      .disclosure-body {
+        padding: 0 13px 13px;
+      }
+
+      .step-list {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .step-list li {
+        display: grid;
+        grid-template-columns: 24px minmax(0, 1fr);
+        gap: 9px;
+        color: var(--cream-muted);
+        font-size: 0.66rem;
+        line-height: 1.4;
+      }
+
+      .step-list b {
+        display: grid;
+        width: 22px;
+        height: 22px;
+        place-items: center;
+        border-radius: 50%;
+        color: var(--wood-950);
+        background: var(--gold-500);
+        font-size: 0.62rem;
+      }
+
+      .inventory-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .inventory-card {
+        overflow: hidden;
+      }
+
+      .inventory-card img {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+      }
+
+      .inventory-card-body {
+        padding: 10px;
+      }
+
+      .inventory-card-body strong,
+      .inventory-card-body span {
+        display: block;
+      }
+
+      .inventory-card-body strong {
+        font-size: 0.72rem;
+      }
+
+      .inventory-card-body span {
+        margin-top: 2px;
+        color: #9e9279;
+        font-size: 0.6rem;
+      }
+
+      .inventory-card .inline-actions {
+        margin-top: 8px;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0 8px;
+        color: var(--cream-muted);
+        background: var(--wood-950);
+        font-size: 0.58rem;
+        font-weight: 900;
+      }
+
+      .status-pill.live {
+        border-color: rgba(96, 216, 144, 0.3);
+        color: var(--forest-bright);
+      }
+
+      .activity-summary {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .activity-summary .data-cell strong {
+        color: var(--gold-300);
+        font-family: var(--display);
+        font-size: 0.92rem;
+        font-weight: 400;
+      }
+
+      .ledger-row {
+        display: grid;
+        grid-template-columns: 80px minmax(120px, 1fr) minmax(100px, 0.8fr) minmax(110px, 0.8fr) 80px;
+        align-items: center;
+        gap: 10px;
+        min-height: 54px;
+        padding: 8px 11px;
+        border-top: 1px solid var(--line);
+        font-size: 0.65rem;
+      }
+
+      .ledger-row:first-child {
+        border-top: 0;
+      }
+
+      .ledger-row.head {
+        min-height: 34px;
+        color: #9e9279;
+        background: rgba(219, 165, 63, 0.07);
+        font-size: 0.56rem;
+        font-weight: 900;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .field-stack {
+        display: grid;
+        gap: 9px;
+      }
+
+      .field-stack label {
+        display: grid;
+        gap: 5px;
+        color: var(--cream-muted);
+        font-size: 0.62rem;
+        font-weight: 900;
+      }
+
+      .criteria-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto;
+        gap: 8px;
+      }
+
+      .criteria-row .input {
+        min-width: 0;
+      }
+
+      .position-card + .position-card {
+        margin-top: 10px;
+      }
+
+      .position-main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .position-main p {
+        margin: 3px 0 0;
+        color: #9e9279;
+        font-size: 0.62rem;
+      }
+
+      .activity-row {
+        grid-template-columns: 82px minmax(180px, 1.2fr) minmax(90px, 0.6fr) minmax(105px, 0.7fr) minmax(150px, 1fr) 68px;
+      }
+
+      .event-type.mint::before {
+        background: var(--legendary);
+      }
+
+      .tx-link {
+        color: var(--rare);
+        text-decoration: none;
+      }
+
+      .card-context,
+      .card-utilities {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
+
+      .card-context {
+        margin-top: 7px;
+        color: #9e9177;
+        font-size: 0.58rem;
+      }
+
+      .card-utilities {
+        margin-top: 9px;
+      }
+
+      .card-utilities .btn {
+        min-height: 34px;
+        flex: 1;
+        padding-inline: 8px;
+        font-size: 0.62rem;
+      }
+
+      .sweep-builder {
+        margin-top: 14px;
+      }
+
+      .sweep-builder .disclosure-body {
+        display: grid;
+        gap: 12px;
+      }
+
+      .sweep-presets {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .sweep-presets .btn {
+        min-width: 44px;
+        min-height: 36px;
+        padding-inline: 10px;
+      }
+
       [contenteditable="true"] {
         border-radius: 4px;
       }
@@ -1461,9 +2036,44 @@
         .swap-layout {
           grid-template-columns: 1fr;
         }
+
+        .workbench-grid,
+        .analytics-layout,
+        .wallet-workspace,
+        .offer-layout {
+          grid-template-columns: 1fr;
+        }
+
       }
 
       @media (max-width: 760px) {
+        .btn,
+        .input,
+        .sort-select,
+        .card-action,
+        .card-utilities .btn,
+        .mode-tabs button,
+        .scope-tabs button,
+        .period-tabs button,
+        .swap-input input {
+          min-height: 44px;
+        }
+
+        .mode-tabs button,
+        .scope-tabs button,
+        .period-tabs button {
+          min-width: 44px;
+        }
+
+        .check-row {
+          min-height: 44px;
+        }
+
+        .text-link {
+          min-width: 44px;
+          min-height: 44px;
+        }
+
         .page-shell {
           padding-top: 22px;
         }
@@ -1495,6 +2105,17 @@
           border-inline: 0;
         }
 
+        .market-tabs-wrap::after {
+          position: absolute;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          width: 34px;
+          content: "";
+          pointer-events: none;
+          background: linear-gradient(90deg, transparent, rgba(29, 18, 10, 0.96));
+        }
+
         .market-frame {
           margin-inline: -12px;
           border-inline: 0;
@@ -1506,12 +2127,11 @@
         }
 
         .stats-strip {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
-        .stat:nth-child(4),
-        .stat:nth-child(5) {
-          display: none;
+        .stats-strip .stat:last-child {
+          grid-column: 1 / -1;
         }
 
         .listing-grid {
@@ -1546,16 +2166,54 @@
         }
 
         .activity-row {
-          grid-template-columns: 78px minmax(0, 1fr) auto;
+          grid-template-columns: 76px minmax(0, 1fr) auto;
+          align-items: start;
         }
 
-        .activity-row > :nth-child(3),
-        .activity-row > :nth-child(4) {
-          display: none;
+        .activity-row > :nth-child(3) {
+          grid-column: 3;
+          grid-row: 1;
+        }
+
+        .activity-row > :nth-child(4),
+        .activity-row > :nth-child(5) {
+          grid-column: 2 / -1;
+        }
+
+        .activity-row > :nth-child(6) {
+          grid-column: 3;
+          grid-row: 2;
+          text-align: right;
         }
 
         .gate-features {
           grid-template-columns: 1fr;
+        }
+
+        .inventory-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .data-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .ledger-row {
+          grid-template-columns: 72px minmax(0, 1fr) auto;
+        }
+
+        .ledger-row > :nth-child(4),
+        .ledger-row > :nth-child(5) {
+          display: none;
+        }
+
+        .event-banner {
+          grid-template-columns: auto minmax(0, 1fr);
+        }
+
+        .event-countdown {
+          grid-column: 2;
+          text-align: left;
         }
       }
 
@@ -1586,18 +2244,22 @@
         }
 
         .toolbar-actions {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
           width: 100%;
         }
 
-        .sort-select {
+        .toolbar-actions .sort-select {
+          width: 100%;
+          grid-column: 1 / -1;
           min-width: 0;
-          flex: 1;
         }
 
         .sweep-dock {
           bottom: 8px;
           width: 100%;
           border-radius: 11px;
+          padding-bottom: max(10px, env(safe-area-inset-bottom));
         }
 
         .sweep-dock .btn {
@@ -1617,6 +2279,27 @@
         .offer-value {
           width: 100%;
           text-align: left;
+        }
+
+        .criteria-row,
+        .position-main {
+          grid-template-columns: 1fr;
+        }
+
+        .prototype-bar,
+        .chart-head,
+        .subsection-head {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .activity-controls .sort-select {
+          width: 100%;
+          flex: 1 1 100%;
+        }
+
+        .filters-panel {
+          width: min(96vw, 430px);
         }
       }
 
@@ -1696,8 +2379,14 @@
           </div>
         </div>
         <div class="collection-links" aria-label="Collection links">
-          <button class="btn btn-quiet" type="button">Contract 0x6942…2DDc</button>
-          <button class="btn btn-quiet" type="button">Collection details</button>
+          <a
+            class="btn btn-quiet"
+            href="https://robinhoodchain.blockscout.com/address/0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156"
+            target="_blank"
+            rel="noreferrer"
+          >
+            NFT contract 0x327c…b156 ↗
+          </a>
         </div>
       </header>
 
@@ -1760,12 +2449,12 @@
           </button>
           <button
             class="market-tab"
-            id="tab-my-listings"
+            id="tab-positions"
             type="button"
             role="tab"
             aria-selected="false"
-            aria-controls="panel-my-listings"
-            data-tab="my-listings"
+            aria-controls="panel-positions"
+            data-tab="positions"
           >
             My Listings
           </button>
@@ -1780,14 +2469,26 @@
           aria-labelledby="tab-buy-sell"
           data-panel="buy-sell"
         >
+          <div class="event-banner" aria-label="Highest sale event">
+            <img src="../../../public/images/collection/plank-redacted.png" alt="Redacted Plank" />
+            <div>
+              <strong>Record sale: Redacted #1534 · 0.055 ETH</strong>
+              <span>Bought by 0xC4B2…2e04 on Marketplank · 0 royalty paid · verified order</span>
+            </div>
+            <div class="event-countdown">
+              <span>Event closes in</span>
+              <strong>02d 14h 22m</strong>
+            </div>
+          </div>
+
           <div class="stats-strip" aria-label="Collection market statistics">
             <div class="stat">
               <span class="stat-label">Floor price</span>
               <span class="stat-value">0.010 Ξ</span>
             </div>
             <div class="stat">
-              <span class="stat-label">24h volume</span>
-              <span class="stat-value">0.042 Ξ <span class="stat-trend">+12%</span></span>
+              <span class="stat-label">Items</span>
+              <span class="stat-value">1,542</span>
             </div>
             <div class="stat">
               <span class="stat-label">Listed</span>
@@ -1814,8 +2515,8 @@
               </div>
 
               <div class="filter-group">
-                <label class="filter-label" for="token-search">Find a Plank</label>
-                <input class="input" id="token-search" type="search" placeholder="Name or token ID" />
+                <label class="filter-label" for="token-search">Token ID</label>
+                <input class="input" id="token-search" type="search" inputmode="numeric" placeholder="e.g. 701" />
               </div>
 
               <div class="filter-group">
@@ -1837,14 +2538,6 @@
                 </div>
               </div>
 
-              <div class="filter-group">
-                <span class="filter-label">Listing type</span>
-                <div class="check-list">
-                  <label class="check-row"><input type="checkbox" checked /> Buy now</label>
-                  <label class="check-row"><input type="checkbox" /> Has active offer</label>
-                  <label class="check-row"><input type="checkbox" /> Floorboards only</label>
-                </div>
-              </div>
             </aside>
 
             <div class="results-area">
@@ -1874,18 +2567,24 @@
                   <span class="floor-price">0.014 Ξ</span>
                   <span class="floor-meta">+40% · 6 listed</span>
                 </button>
+                <button class="floor-chip" type="button" role="option" aria-selected="false">
+                  <span class="floor-tier" style="color: #c8c2b6">Common</span>
+                  <span class="floor-price">0.010 Ξ</span>
+                  <span class="floor-meta">Floor · 5 listed</span>
+                </button>
               </div>
 
               <div class="toolbar">
                 <p class="results-copy"><strong>27 Planks</strong> on the market</p>
                 <div class="toolbar-actions">
                   <button class="btn btn-secondary filter-trigger" type="button" data-filter-trigger aria-controls="filters-panel" aria-expanded="false">Filters</button>
-                  <button class="btn btn-secondary" type="button">Make collection offer</button>
+                  <button class="btn btn-secondary" type="button" data-sweep-toggle aria-pressed="false">Sweep floorboards</button>
+                  <button class="btn btn-secondary" type="button" data-jump-tab="offers">Bid by criteria</button>
                   <select class="sort-select" aria-label="Sort listings">
                     <option>Price: low to high</option>
                     <option>Price: high to low</option>
                     <option>Recently listed</option>
-                    <option>Rarity rank</option>
+                    <option>Token ID</option>
                   </select>
                 </div>
               </div>
@@ -2043,13 +2742,54 @@
                 </li>
               </ul>
 
-              <div class="sweep-dock" aria-label="Floor sweep">
+              <div class="sweep-dock" aria-label="Floor sweep" data-sweep-dock>
                 <div class="sweep-copy">
                   <strong>Sweep the first 3 floorboards</strong>
                   <span>Estimated total 0.033 Ξ · max slippage 1%</span>
                 </div>
                 <button class="btn btn-primary" type="button">Review sweep</button>
               </div>
+
+              <details class="disclosure sweep-builder">
+                <summary>Floor sweep planner · scopes, presets, and confirmation</summary>
+                <div class="disclosure-body">
+                  <div class="scope-tabs" aria-label="Sweep scope">
+                    <button class="is-selected" type="button">All listings</button>
+                    <button type="button">Selected rarity</button>
+                    <button type="button">Trait combo</button>
+                  </div>
+                  <div class="sweep-presets" aria-label="Sweep quantity">
+                    <button class="btn btn-primary" type="button">3</button>
+                    <button class="btn btn-secondary" type="button">5</button>
+                    <button class="btn btn-secondary" type="button">10</button>
+                    <button class="btn btn-secondary" type="button">20</button>
+                    <input class="input" style="width: 88px" type="text" inputmode="numeric" value="3" aria-label="Custom sweep quantity" />
+                  </div>
+                  <div class="data-grid">
+                    <div class="data-cell"><span>Selected</span><strong>3 Planks</strong></div>
+                    <div class="data-cell"><span>Verified total</span><strong>0.033 ETH</strong></div>
+                    <div class="data-cell"><span>Gas reserve</span><strong>0.002 ETH</strong></div>
+                  </div>
+                  <div class="callout">
+                    <strong>Execution guarantee:</strong> the review step lists every token, seller, and signed price. Invalid or filled orders are skipped and never charged.
+                  </div>
+                  <button class="btn btn-primary" type="button">Review 3 verified orders</button>
+                </div>
+              </details>
+
+              <details class="disclosure">
+                <summary>Buy, Offer, and item-detail states retained</summary>
+                <div class="disclosure-body">
+                  <div class="data-grid">
+                    <div class="data-cell"><span>Buy confirmation</span><strong>Seller · signed price · fee · total · gas</strong></div>
+                    <div class="data-cell"><span>Item detail</span><strong>Owner · traits · rarity · transfer history</strong></div>
+                    <div class="data-cell"><span>Owner tools</span><strong>Send · permanent confirmation · fee quote</strong></div>
+                  </div>
+                  <p class="callout" style="margin: 10px 0 0">
+                    Cards expose Buy, Offer, and Details on touch. Loading, no listings, and no filter matches remain explicit grid states.
+                  </p>
+                </div>
+              </details>
             </div>
           </div>
         </section>
@@ -2064,97 +2804,196 @@
         >
           <div class="section-head">
             <div>
-              <p class="eyebrow">Plank in. Plank out.</p>
+              <p class="eyebrow">Trade shares · redeem NFTs</p>
               <h2 contenteditable="true" data-pretext>Instant Swap</h2>
               <p contenteditable="true" data-pretext>
-                Trade against the vault without waiting for a buyer. Choose the current V2 book or manage a legacy V1 deposit.
+                Buy or sell vault shares instantly, provide liquidity, deposit a Plank, or redeem shares for an NFT.
               </p>
             </div>
-            <button class="btn btn-secondary" type="button">How the vault works</button>
+            <span class="status-pill live">● Live vault data</span>
           </div>
 
-          <div class="swap-layout">
+          <div class="prototype-bar">
+            <span><strong>Prototype data:</strong> representative values show the full information hierarchy; implementation remains live and wallet-derived.</span>
+            <div class="prototype-actions">
+              <span class="status-pill">Wallet 0xC4B2…2e04</span>
+              <span class="status-pill">0.126 ETH · 2.84 shares</span>
+            </div>
+          </div>
+
+          <div class="vault-choice" aria-label="Choose vault">
+            <button class="vault-button is-selected" type="button" data-vault>
+              <strong>V2 · Primary vault ↗</strong>
+              <span>Open · 5 held · 3.85 shares · 0.0184 ETH liquidity</span>
+            </button>
+            <button class="vault-button" type="button" data-vault>
+              <strong>V1 · Legacy vault ↗</strong>
+              <span>Open · 43 held · migration available · limited LP controls</span>
+            </button>
+          </div>
+
+          <div class="workbench-grid">
             <div class="swap-card">
-              <div class="vault-choice" aria-label="Choose vault">
-                <button class="vault-button is-selected" type="button" data-vault>
-                  <strong>V2 · Instant Swap</strong>
-                  <span>Active · 5 planks · LP controls</span>
-                </button>
-                <button class="vault-button" type="button" data-vault>
-                  <strong>V1 · Legacy</strong>
-                  <span>43 held · deposits &amp; redemptions</span>
-                </button>
+              <div class="mode-tabs" aria-label="Vault action" data-mode-group="swap">
+                <button class="is-selected" type="button" data-mode="buy">Buy</button>
+                <button type="button" data-mode="sell">Sell</button>
+                <button type="button" data-mode="lp">LP</button>
+                <button type="button" data-mode="deposit">Deposit</button>
+                <button type="button" data-mode="redeem">Redeem</button>
               </div>
 
-              <div class="segmented" aria-label="Swap mode">
-                <button class="is-selected" type="button">Buy</button>
-                <button type="button">Sell</button>
-                <button type="button">Liquidity</button>
-              </div>
-
-              <div class="swap-input">
-                <div class="swap-input-top">
-                  <label for="swap-pay">You pay</label>
-                  <span class="muted">Balance —</span>
+              <div class="mode-panel" data-mode-panel="buy">
+                <div class="callout"><strong>Buy shares:</strong> pay ETH and receive fungible vault shares. To get an NFT, use Redeem.</div>
+                <div class="swap-input">
+                  <div class="swap-input-top"><label for="swap-pay">You pay</label><button class="text-link" type="button">Max · 0.126 ETH</button></div>
+                  <div class="swap-input-top"><input id="swap-pay" type="text" inputmode="decimal" value="0.010" aria-label="ETH to spend" /><span class="asset-pill">ETH</span></div>
                 </div>
-                <div class="swap-input-top">
-                  <input id="swap-pay" type="text" inputmode="decimal" value="0.010" aria-label="Amount to pay" />
-                  <span class="asset-pill">ETH</span>
+                <div class="swap-arrow" aria-hidden="true">↓</div>
+                <div class="swap-input">
+                  <div class="swap-input-top"><label for="swap-receive">You receive</label><span class="muted">Quoted output</span></div>
+                  <div class="swap-input-top"><input id="swap-receive" type="text" value="0.98" readonly aria-label="Estimated vault shares" /><span class="asset-pill">V2 shares</span></div>
                 </div>
+                <div class="swap-estimate"><span>Pool mid 0.0099 ETH/share</span><span>Min 0.97 · 1% slippage</span></div>
+                <button class="btn btn-primary full" type="button">Review share purchase</button>
               </div>
 
-              <div class="swap-arrow" aria-hidden="true">↓</div>
-
-              <div class="swap-input">
-                <div class="swap-input-top">
-                  <label for="swap-receive">You receive</label>
-                  <span class="muted">Random from vault</span>
+              <div class="mode-panel" data-mode-panel="sell" hidden>
+                <div class="callout"><strong>Sell shares:</strong> return vault shares to receive ETH from the pool reserve.</div>
+                <div class="swap-input">
+                  <div class="swap-input-top"><label>Shares to sell</label><button class="text-link" type="button">Max · 2.84</button></div>
+                  <div class="swap-input-top"><input type="text" value="1.00" aria-label="Shares to sell" /><span class="asset-pill">V2 shares</span></div>
                 </div>
-                <div class="swap-input-top">
-                  <input id="swap-receive" type="text" value="1 Plank" readonly aria-label="Estimated output" />
-                  <span class="asset-pill">$PLANK NFT</span>
+                <div class="swap-arrow" aria-hidden="true">↓</div>
+                <div class="swap-input">
+                  <div class="swap-input-top"><label>Estimated output</label><span class="muted">After pool fee</span></div>
+                  <div class="swap-input-top"><input type="text" value="0.0094" readonly aria-label="Estimated ETH output" /><span class="asset-pill">ETH</span></div>
                 </div>
+                <div class="swap-estimate"><span>Reserve 0.0184 ETH</span><span>Min 0.0093 · 1% slippage</span></div>
+                <button class="btn btn-primary full" type="button">Review share sale</button>
               </div>
 
-              <div class="swap-estimate">
-                <span>Vault price 0.0096 Ξ</span>
-                <span>Fee 0.0004 Ξ</span>
+              <div class="mode-panel" data-mode-panel="lp" hidden>
+                <div class="scope-tabs" data-mode-group="lp"><button class="is-selected" type="button" data-mode="add">Add</button><button type="button" data-mode="remove">Remove</button></div>
+                <div class="callout">Add ETH and shares at the live pool ratio. V1 only supports its legacy liquidity path; V2 supports add and remove.</div>
+                <div class="swap-input"><div class="swap-input-top"><label>ETH side</label><button class="text-link" type="button">Max</button></div><div class="swap-input-top"><input type="text" value="0.010" /><span class="asset-pill">ETH</span></div></div>
+                <div class="swap-input"><div class="swap-input-top"><label>Share side</label><span class="muted">Ratio matched</span></div><div class="swap-input-top"><input type="text" value="1.04" /><span class="asset-pill">V2 shares</span></div></div>
+                <div class="data-grid"><div class="data-cell"><span>LP credit</span><strong>0.101 LP</strong></div><div class="data-cell"><span>Pool share</span><strong>12.4%</strong></div><div class="data-cell"><span>Current LP</span><strong>0.000 LP</strong></div></div>
+                <button class="btn btn-primary full" type="button">Review liquidity</button>
               </div>
 
-              <button class="btn btn-primary full" type="button" data-connect>Connect wallet to swap</button>
+              <div class="mode-panel" data-mode-panel="deposit" hidden>
+                <div class="callout"><strong>Deposit an NFT:</strong> choose an owned, unlisted Plank and mint vault shares at the current deposit rate.</div>
+                <div class="inventory-grid">
+                  <article class="inventory-card"><img src="../../../public/images/collection/plank-knightwood.png" alt="KnightWood #701" /><div class="inventory-card-body"><strong>KnightWood #701</strong><span>Rare · Rank 550</span><button class="btn btn-secondary full" type="button">Select</button></div></article>
+                  <article class="inventory-card"><img src="../../../public/images/collection/plank-bobawood.png" alt="BobaWood #544" /><div class="inventory-card-body"><strong>BobaWood #544</strong><span>Epic · Rank 431</span><button class="btn btn-secondary full" type="button">Select</button></div></article>
+                </div>
+                <div class="swap-estimate"><span>Mint rate 1.00 share</span><span>Deposit fee 0%</span></div>
+                <button class="btn btn-primary full" type="button">Deposit selected Plank</button>
+              </div>
+
+              <div class="mode-panel" data-mode-panel="redeem" hidden>
+                <div class="scope-tabs" aria-label="Redeem type"><button class="is-selected" type="button">Random</button><button type="button">Specific NFT</button></div>
+                <div class="callout"><strong>Redeem an NFT:</strong> burn vault shares for a random held Plank or pay a premium to target one.</div>
+                <div class="swap-input"><div class="swap-input-top"><label>Redemption cost</label><span class="muted">Balance 2.84 shares</span></div><div class="swap-input-top"><input type="text" value="1.00" readonly /><span class="asset-pill">V2 shares</span></div></div>
+                <div class="data-grid"><div class="data-cell"><span>Random cost</span><strong>1.00 share</strong></div><div class="data-cell"><span>Specific premium</span><strong>+0.10 share</strong></div><div class="data-cell"><span>Inventory</span><strong>5 Planks</strong></div></div>
+                <button class="btn btn-primary full" type="button">Review random redeem</button>
+                <p class="callout warning"><strong>Insufficient shares?</strong> Buy the shortfall or sell your current shares instead. You will never be routed into an unrelated NFT purchase.</p>
+              </div>
             </div>
 
-            <div>
+            <div class="detail-stack">
               <div class="module">
-                <div class="panel-heading">
-                  <h3>Living liquidity</h3>
-                  <span class="network-pill">V2 active</span>
-                </div>
+                <div class="panel-heading"><h3>Living liquidity</h3><span class="status-pill live">V2 open</span></div>
                 <div class="liquidity-visual">
-                  <div class="liquidity-core">
-                    <img src="../../../public/images/plank-logo.webp" alt="" />
-                    <strong>3.85 shares</strong>
-                    <span>0.0184 Ξ + 5 Planks</span>
-                  </div>
+                  <div class="liquidity-core"><img src="../../../public/images/plank-logo.webp" alt="" /><strong>5 Planks in the fence</strong><span>3.85 shares · 0.0184 ETH · ≈ $61.24</span></div>
                 </div>
+                <div class="data-grid" style="margin-top: 10px"><div class="data-cell"><span>Vault fee revenue</span><strong>0.0031 ETH</strong></div><div class="data-cell"><span>Est. market fees</span><strong>0 ETH</strong></div><div class="data-cell"><span>Vault</span><strong>0x81a2…0f91 ↗</strong></div></div>
               </div>
 
-              <div class="module-grid">
-                <div class="module">
-                  <div class="panel-heading"><h3>Vault health</h3></div>
-                  <div class="module-row"><span>Planks held</span><strong>5</strong></div>
-                  <div class="module-row"><span>ETH reserve</span><strong>0.0184 Ξ</strong></div>
-                  <div class="module-row"><span>Redeem odds</span><strong>1 in 5 each</strong></div>
-                </div>
-                <div class="module">
-                  <div class="panel-heading"><h3>Your position</h3></div>
-                  <div class="module-row"><span>LP shares</span><strong>Connect</strong></div>
-                  <div class="module-row"><span>Deposited Planks</span><strong>Connect</strong></div>
-                  <div class="module-row"><span>Claimable</span><strong>—</strong></div>
+              <div class="module">
+                <div class="panel-heading"><h3>Vault dashboard</h3><span class="status-pill">Live snapshot</span></div>
+                <div class="data-grid">
+                  <div class="data-cell"><span>ETH liquidity</span><strong>0.0184 ETH</strong></div>
+                  <div class="data-cell"><span>Share liquidity</span><strong>3.85</strong></div>
+                  <div class="data-cell"><span>Share price</span><strong>0.0099 ETH</strong></div>
+                  <div class="data-cell"><span>NFTs held</span><strong>5</strong></div>
+                  <div class="data-cell"><span>APR basis</span><strong>Fees / TVL</strong></div>
+                  <div class="data-cell"><span>Mint / random / target</span><strong>0% · 0% · 10%</strong></div>
                 </div>
               </div>
             </div>
           </div>
+
+          <div class="module-grid">
+            <div class="chart-card">
+              <div class="chart-head"><div><h3>NFT price lineage</h3><p>Vault share price and verified NFT sales.</p></div><div class="period-tabs"><button type="button">24H</button><button class="is-selected" type="button">7D</button><button type="button">ALL</button></div></div>
+              <div class="chart-wrap" aria-label="Seven day NFT and vault price chart">
+                <svg viewBox="0 0 600 190" role="img" aria-label="Vault price line with verified sale dots">
+                  <defs><linearGradient id="vaultFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#efc463" stop-opacity=".25"/><stop offset="1" stop-color="#efc463" stop-opacity="0"/></linearGradient></defs>
+                  <path d="M10 146 C70 135 90 98 150 108 S240 118 290 72 S390 90 445 52 S525 70 590 34 L590 180 L10 180 Z" fill="url(#vaultFill)"/>
+                  <path d="M10 146 C70 135 90 98 150 108 S240 118 290 72 S390 90 445 52 S525 70 590 34" fill="none" stroke="#efc463" stroke-width="3"/>
+                  <g fill="#60d890" stroke="#120d08" stroke-width="3"><circle cx="95" cy="122" r="6"/><circle cx="215" cy="94" r="6"/><circle cx="356" cy="105" r="6"/><circle cx="502" cy="58" r="6"/></g>
+                </svg>
+              </div>
+              <div class="chart-legend"><span>Vault share price</span><span class="legend-sale">Verified NFT sale</span></div>
+            </div>
+
+            <div class="chart-card">
+              <div class="chart-head"><div><h3>Redeem odds</h3><p>Scored inventory only; unscored tokens are disclosed separately.</p></div><span class="status-pill">5 total</span></div>
+              <div class="data-grid">
+                <div class="data-cell"><span>Legendary</span><strong>1 · 20%</strong></div>
+                <div class="data-cell"><span>Epic</span><strong>1 · 20%</strong></div>
+                <div class="data-cell"><span>Rare</span><strong>1 · 20%</strong></div>
+                <div class="data-cell"><span>Uncommon</span><strong>1 · 20%</strong></div>
+                <div class="data-cell"><span>Common</span><strong>1 · 20%</strong></div>
+                <div class="data-cell"><span>Random cost</span><strong>1.00 share</strong></div>
+              </div>
+              <div class="callout" style="margin-top: 10px">Odds use a denominator of 5 held, scored NFTs. Any token without resolved rarity appears as <strong>Unscored</strong>, never silently folded into Common.</div>
+            </div>
+          </div>
+
+          <details class="disclosure" open>
+            <summary>Live V1 + V2 vault trades <span class="status-pill live">Live · updating</span></summary>
+            <div class="disclosure-body">
+              <div class="activity-table" aria-label="Live vault trades">
+                <div class="ledger-row head"><span>Vault</span><span>Trade</span><span>Amount</span><span>Price / share</span><span>Time</span></div>
+                <div class="ledger-row"><span class="status-pill live">V2</span><strong>Buy shares</strong><span>0.86 shares</span><span>0.0098 ETH</span><span class="muted">18s</span></div>
+                <div class="ledger-row"><span class="status-pill">V1</span><strong>Random redeem</strong><span>1 NFT</span><span>1.00 share</span><span class="muted">2m</span></div>
+                <div class="ledger-row"><span class="status-pill live">V2</span><strong>Pending deposit</strong><span>Token #701</span><span>—</span><span class="muted">Pending</span></div>
+              </div>
+            </div>
+          </details>
+
+          <details class="disclosure">
+            <summary>Pending random-redeem recovery</summary>
+            <div class="disclosure-body">
+              <div class="callout warning"><strong>Busy global request slot:</strong> the original requester can recover from this device or a fresh session without losing the claim.</div>
+              <div class="inline-actions" style="margin-top: 10px"><button class="btn btn-primary" type="button">Sponsored relay &amp; settle</button><button class="btn btn-secondary" type="button">Retry status</button><button class="btn btn-secondary" type="button">Advanced manual relay</button></div>
+              <p class="muted">Recovery states include waiting for randomness, relay available, settle for original requester, expired request, claim, and forfeit guidance.</p>
+            </div>
+          </details>
+
+          <details class="disclosure">
+            <summary>Move V1 value to V2 · actionable migration</summary>
+            <div class="disclosure-body">
+              <div class="data-grid" style="margin-bottom: 12px"><div class="data-cell"><span>V1 balance</span><strong>1.08 shares ↗</strong></div><div class="data-cell"><span>V2 balance</span><strong>2.84 shares ↗</strong></div><div class="data-cell"><span>Wallet network</span><strong>Robinhood Chain</strong></div></div>
+              <ol class="step-list">
+                <li><b>1</b><span>Buy any small V1 share shortfall (“dust”) needed to complete a random redemption.</span></li>
+                <li><b>2</b><span>Redeem a random V1 NFT. If randomness is pending, use the recovery controls above, then refresh balances.</span></li>
+                <li><b>3</b><span>Deposit the recovered NFT into V2 to mint V2 shares.</span></li>
+                <li><b>4</b><span>Add V2 liquidity or keep the V2 shares. Review the fee/friction estimate before signing.</span></li>
+                <li><b>5</b><span>Use raw transfer only as an advanced fallback; wrong-chain transfers are not recoverable from this interface.</span></li>
+              </ol>
+              <button class="btn btn-primary" style="margin-top: 12px" type="button">Start migration preflight</button>
+            </div>
+          </details>
+
+          <details class="disclosure">
+            <summary>Seed vault and treasury controls · shown only when authorized</summary>
+            <div class="disclosure-body">
+              <p class="callout">When V2 is closed or unseeded, operators see the seed ratio, treasury balances, allowance status, bootstrap transaction, and recovery states. Regular wallets see a closed-pool explanation without operator controls.</p>
+            </div>
+          </details>
         </section>
 
         <section
@@ -2170,64 +3009,77 @@
               <p class="eyebrow">Name your price</p>
               <h2 contenteditable="true" data-pretext>Offers</h2>
               <p contenteditable="true" data-pretext>
-                Bid on one Plank, a rarity tier, or a precise trait combo. Sellers see the net amount before accepting.
+                Bid on one Plank, a rarity tier, or a precise trait combo. Criteria clauses use AND logic and sellers verify net proceeds before accepting.
               </p>
             </div>
-            <button class="btn btn-primary" type="button">Make an offer</button>
+            <span class="status-pill">WETH balance 0.024</span>
           </div>
 
-          <div class="stats-strip" aria-label="Offer statistics">
-            <div class="stat"><span class="stat-label">Top offer</span><span class="stat-value">0.008 WETH</span></div>
-            <div class="stat"><span class="stat-label">Active offers</span><span class="stat-value">4</span></div>
-            <div class="stat"><span class="stat-label">Expiring today</span><span class="stat-value">1</span></div>
-            <div class="stat"><span class="stat-label">Eligible Planks</span><span class="stat-value">132</span></div>
-            <div class="stat"><span class="stat-label">Your matches</span><span class="stat-value">Connect</span></div>
-          </div>
-
-          <div class="activity-controls">
-            <button class="btn btn-primary" type="button">All offers</button>
-            <button class="btn btn-secondary" type="button">Single Plank</button>
-            <button class="btn btn-secondary" type="button">Rarity</button>
-            <button class="btn btn-secondary" type="button">Trait combo</button>
-          </div>
-
-          <div class="offer-stack">
-            <article class="offer-row">
-              <div class="offer-main">
-                <div class="offer-thumb"><img src="../../../public/images/collection/plank-knightwood.png" alt="" /></div>
-                <div>
-                  <p class="offer-title">Any Rare Plank</p>
-                  <p class="offer-meta">132 qualify · bid by 0x73A4…ac34 · expires in 18h</p>
-                </div>
+          <div class="offer-layout">
+            <aside class="flow-card">
+              <div class="subsection-head"><div><h3>Build a criteria bid</h3><p>Start with rarity, trait, or a precise combo.</p></div><span class="status-pill">AND logic</span></div>
+              <div class="scope-tabs" aria-label="Criteria quick start"><button class="is-selected" type="button">Rarity</button><button type="button">Trait</button><button type="button">Combo</button></div>
+              <div class="field-stack" style="margin-top: 12px">
+                <div class="criteria-row"><select class="input" aria-label="Criteria type"><option>Rarity</option><option>Trait</option><option>Rank</option></select><select class="input" aria-label="Criteria value"><option>Rare</option><option>Epic</option><option>Legendary</option></select><button class="btn btn-quiet" type="button">×</button></div>
+                <div class="criteria-row"><select class="input" aria-label="Trait type"><option>Head</option><option>Body</option><option>Eyes</option></select><select class="input" aria-label="Trait value"><option>Beanie</option><option>Crown</option></select><button class="btn btn-quiet" type="button">×</button></div>
+                <button class="btn btn-secondary" type="button">+ Add AND clause</button>
+                <div class="data-grid"><div class="data-cell"><span>Qualifying</span><strong>14 Planks</strong></div><div class="data-cell"><span>Criteria floor</span><strong>0.010 ETH</strong></div><div class="data-cell"><span>Index</span><strong>Complete</strong></div></div>
+                <label>Offer amount<input class="input" type="text" inputmode="decimal" value="0.008" /></label>
+                <label>Duration<select class="input"><option>24 hours</option><option>3 days</option><option>7 days</option></select></label>
+                <div class="callout"><strong>Seller net:</strong> 0.008 WETH. RobinWood has a 0% market fee; the signed order is rechecked before acceptance.</div>
+                <button class="btn btn-primary full" type="button">Review &amp; sign criteria bid</button>
               </div>
-              <div class="offer-value"><strong>0.008 WETH</strong><span>seller receives 0.0076</span></div>
-              <button class="btn btn-secondary" type="button" data-connect>Check my Planks</button>
-            </article>
+            </aside>
 
-            <article class="offer-row">
-              <div class="offer-main">
-                <div class="offer-thumb"><img src="../../../public/images/collection/plank-bobawood.png" alt="" /></div>
-                <div>
-                  <p class="offer-title">Beanie + Epic</p>
-                  <p class="offer-meta">14 qualify · bid by 0xA195…4660 · expires in 2d</p>
+            <div class="flow-stack">
+              <section>
+                <div class="subsection-head"><div><h3>Offers you can accept</h3><p>Owned matches sorted by verified seller net.</p></div><span class="status-pill live">2 matches</span></div>
+                <div class="offer-stack">
+                  <article class="offer-row">
+                    <div class="offer-main"><div class="offer-thumb"><img src="../../../public/images/collection/plank-knightwood.png" alt="" /></div><div><p class="offer-title">Any Rare Plank</p><p class="offer-meta">132 qualify · maker 0x73A4…ac34 · expires in 18h</p></div></div>
+                    <div class="offer-value"><strong>0.008 WETH</strong><span>verified net 0.008</span></div>
+                    <button class="btn btn-primary" type="button">Choose token &amp; accept</button>
+                  </article>
+                  <article class="offer-row">
+                    <div class="offer-main"><div class="offer-thumb"><img src="../../../public/images/collection/plank-bobawood.png" alt="" /></div><div><p class="offer-title">Beanie AND Epic</p><p class="offer-meta">14 qualify · maker 0xA195…4660 · expires in 2d</p></div></div>
+                    <div class="offer-value"><strong>0.0065 WETH</strong><span>verified net 0.0065</span></div>
+                    <button class="btn btn-secondary" type="button">Choose token</button>
+                  </article>
                 </div>
-              </div>
-              <div class="offer-value"><strong>0.0065 WETH</strong><span>seller receives 0.0061</span></div>
-              <button class="btn btn-secondary" type="button" data-connect>Check my Planks</button>
-            </article>
+              </section>
 
-            <article class="offer-row">
-              <div class="offer-main">
-                <div class="offer-thumb"><img src="../../../public/images/collection/plank-redacted.png" alt="" /></div>
-                <div>
-                  <p class="offer-title">Redacted #1534</p>
-                  <p class="offer-meta">Single Plank · bid by 0xC4B2…2e04 · expires in 3d</p>
+              <section>
+                <div class="subsection-head"><div><h3>Open criteria bids</h3><p>Rarity, trait, rank, and combo orders.</p></div><span class="status-pill">4 active</span></div>
+                <div class="activity-table">
+                  <div class="ledger-row head"><span>Type</span><span>Criteria</span><span>Population</span><span>Offer</span><span>Expiry</span></div>
+                  <div class="ledger-row"><span class="status-pill">Rarity</span><strong>Rare</strong><span>132 qualify</span><span>0.008 WETH</span><span>18h</span></div>
+                  <div class="ledger-row"><span class="status-pill">Combo</span><strong>Beanie AND Epic</strong><span>14 qualify</span><span>0.0065 WETH</span><span>2d</span></div>
+                  <div class="ledger-row"><span class="status-pill">Trait</span><strong>Eyes: Laser</strong><span>31 qualify</span><span>0.0058 WETH</span><span>5d</span></div>
                 </div>
-              </div>
-              <div class="offer-value"><strong>0.005 WETH</strong><span>seller receives 0.0047</span></div>
-              <button class="btn btn-secondary" type="button" data-connect>Check ownership</button>
-            </article>
+              </section>
+
+              <section>
+                <div class="subsection-head"><div><h3>Single-token offers</h3><p>Offers tied to one exact token ID.</p></div><span class="status-pill">1 active</span></div>
+                <article class="offer-row">
+                  <div class="offer-main"><div class="offer-thumb"><img src="../../../public/images/collection/plank-redacted.png" alt="" /></div><div><p class="offer-title">Redacted #1534</p><p class="offer-meta">Maker 0xC4B2…2e04 · verified token order · expires in 3d</p></div></div>
+                  <div class="offer-value"><strong>0.005 WETH</strong><span>not owned by this wallet</span></div>
+                  <button class="btn btn-secondary" type="button" disabled>Not eligible</button>
+                </article>
+              </section>
+            </div>
           </div>
+
+          <details class="disclosure" style="margin-top: 12px">
+            <summary>Builder and acceptance recovery states</summary>
+            <div class="disclosure-body">
+              <div class="data-grid">
+                <div class="data-cell"><span>Criteria index</span><strong>Building · unavailable · retry</strong></div>
+                <div class="data-cell"><span>Signing</span><strong>Connect · approve WETH · rejected · pending</strong></div>
+                <div class="data-cell"><span>Acceptance</span><strong>Choose owned token · proof check · verified net</strong></div>
+              </div>
+              <p class="callout warning" style="margin-top: 10px"><strong>Collection-wide bids remain unavailable</strong> until the Seaport criteria resolver path is implemented and verified.</p>
+            </div>
+          </details>
         </section>
 
         <section
@@ -2243,50 +3095,94 @@
               <p class="eyebrow">What the forest is doing</p>
               <h2 contenteditable="true" data-pretext>Market activity</h2>
               <p contenteditable="true" data-pretext>
-                A clearer event feed across Marketplank, vault activity, and wallet-to-wallet transfers.
+                Evidence-linked NFT sales, mints, and transfers, with vault share trades kept in their own live ledger.
               </p>
             </div>
-          </div>
-
-          <div class="stats-strip" aria-label="Activity statistics">
-            <div class="stat"><span class="stat-label">24h volume</span><span class="stat-value">0.042 Ξ</span></div>
-            <div class="stat"><span class="stat-label">Total volume</span><span class="stat-value">0.239 Ξ</span></div>
-            <div class="stat"><span class="stat-label">Priced sales</span><span class="stat-value">50</span></div>
-            <div class="stat"><span class="stat-label">Average price</span><span class="stat-value">0.0047 Ξ</span></div>
-            <div class="stat"><span class="stat-label">Highest sale</span><span class="stat-value">0.055 Ξ</span></div>
+            <span class="status-pill live">52 events indexed</span>
           </div>
 
           <div class="activity-controls">
-            <select class="sort-select" aria-label="Filter by event"><option>All events</option><option>Sales</option><option>Transfers</option><option>Vault actions</option></select>
-            <select class="sort-select" aria-label="Filter by platform"><option>All platforms</option><option>Marketplank</option><option>Vault</option><option>Wallet-to-wallet</option></select>
-            <select class="sort-select" aria-label="Activity period"><option>Last 24 hours</option><option>Last 7 days</option><option>All time</option></select>
+            <select class="sort-select" aria-label="Filter by event" data-activity-filter>
+              <option value="all">All events</option><option value="sale">Sales</option><option value="mint">Mints</option><option value="transfer">Transfers</option>
+            </select>
+            <select class="sort-select" aria-label="Filter by platform">
+              <option>All verified venues</option><option>Marketplank</option><option>Seaport (other)</option><option>Vault</option><option>Unknown contract</option>
+            </select>
+            <span class="status-pill" data-activity-count>5 events shown</span>
           </div>
 
-          <div class="activity-table" role="table" aria-label="Recent activity">
-            <div class="activity-row activity-head" role="row">
-              <span>Event</span><span>Item</span><span>Price</span><span>From / to</span><span>Time</span>
+          <div class="analytics-layout">
+            <div>
+              <div class="activity-table" role="table" aria-label="Recent NFT activity">
+                <div class="activity-row activity-head" role="row">
+                  <span>Event</span><span>Item</span><span>Price</span><span>Venue</span><span>From / to</span><span>Time</span>
+                </div>
+                <button class="activity-row" type="button" role="row" data-activity-kind="sale" style="width: 100%; color: inherit; text-align: left; background: transparent; border-inline: 0; border-bottom: 0">
+                  <span class="event-type">Sale ↗</span>
+                  <span class="activity-item"><img src="../../../public/images/collection/plank-knightwood.png" alt="" /><span><strong>KnightShiftSwag</strong><span>#1372 · Common · Rank 887</span></span></span>
+                  <strong>0.005 ETH</strong><span class="muted">Marketplank ✓</span><span class="muted">0x19bE…5f63 → 0xc4B2…2e04</span><span class="muted">1h</span>
+                </button>
+                <button class="activity-row" type="button" role="row" data-activity-kind="mint" style="width: 100%; color: inherit; text-align: left; background: transparent; border-inline: 0; border-bottom: 0">
+                  <span class="event-type mint">Mint ↗</span>
+                  <span class="activity-item"><img src="../../../public/images/collection/plank-redacted.png" alt="" /><span><strong>Redacted</strong><span>#1534 · Legendary · Rank 39</span></span></span>
+                  <strong>Price unavailable</strong><span class="muted">NFT contract</span><span class="muted">0x0000…0000 → 0xC4B2…2e04</span><span class="muted">2h</span>
+                </button>
+                <button class="activity-row" type="button" role="row" data-activity-kind="transfer" style="width: 100%; color: inherit; text-align: left; background: transparent; border-inline: 0; border-bottom: 0">
+                  <span class="event-type transfer">Transfer ↗</span>
+                  <span class="activity-item"><img src="../../../public/images/collection/plank-bobawood.png" alt="" /><span><strong>CypherSwag</strong><span>#980 · Epic · Rank 204</span></span></span>
+                  <strong>—</strong><span class="muted">Vault</span><span class="muted">V2 vault → 0xc4B2…2e04</span><span class="muted">2h</span>
+                </button>
+                <button class="activity-row" type="button" role="row" data-activity-kind="sale" style="width: 100%; color: inherit; text-align: left; background: transparent; border-inline: 0; border-bottom: 0">
+                  <span class="event-type">Sale ↗</span>
+                  <span class="activity-item"><img src="../../../public/images/collection/plank-insidertrader.png" alt="" /><span><strong>GameWood</strong><span>#1452 · Uncommon · Rank 310</span></span></span>
+                  <strong>0.014 ETH</strong><span class="muted">Seaport (other)</span><span class="muted">0x1112…91d9 → 0x0f6C…f4ae</span><span class="muted">4h</span>
+                </button>
+                <button class="activity-row" type="button" role="row" data-activity-kind="transfer" style="width: 100%; color: inherit; text-align: left; background: transparent; border-inline: 0; border-bottom: 0">
+                  <span class="event-type transfer">Transfer ↗</span>
+                  <span class="activity-item"><img src="../../../public/images/collection/plank-is-this-art.png" alt="" /><span><strong>DYOR</strong><span>#784 · Legendary · Rank 87</span></span></span>
+                  <strong>—</strong><span class="muted">Unknown contract</span><span class="muted">0x892B…6013 → 0xA11c…5E20</span><span class="muted">1d</span>
+                </button>
+              </div>
+              <p class="callout" style="margin-top: 10px">Each row opens item detail and links its transaction to Blockscout. Marketplank attribution appears only when the served order hash proves it; other venues stay evidence-labeled.</p>
             </div>
-            <div class="activity-row" role="row">
-              <span class="event-type">Sale</span>
-              <span class="activity-item"><img src="../../../public/images/collection/plank-knightwood.png" alt="" /><span><strong>KnightShiftSwag</strong><span>#1372 · Common</span></span></span>
-              <strong>0.005 Ξ</strong><span class="muted">0x19bE…5f63 → 0xc4B2…2e04</span><span class="muted">1h</span>
-            </div>
-            <div class="activity-row" role="row">
-              <span class="event-type transfer">Transfer</span>
-              <span class="activity-item"><img src="../../../public/images/collection/plank-bobawood.png" alt="" /><span><strong>CypherSwag</strong><span>#980 · Epic</span></span></span>
-              <strong>—</strong><span class="muted">Vault → 0xc4B2…2e04</span><span class="muted">2h</span>
-            </div>
-            <div class="activity-row" role="row">
-              <span class="event-type">Sale</span>
-              <span class="activity-item"><img src="../../../public/images/collection/plank-insidertrader.png" alt="" /><span><strong>GameWood</strong><span>#1452 · Uncommon</span></span></span>
-              <strong>0.014 Ξ</strong><span class="muted">0x1112…91d9 → 0x0f6C…f4ae</span><span class="muted">4h</span>
-            </div>
-            <div class="activity-row" role="row">
-              <span class="event-type transfer">Transfer</span>
-              <span class="activity-item"><img src="../../../public/images/collection/plank-is-this-art.png" alt="" /><span><strong>DYOR</strong><span>#784 · Legendary</span></span></span>
-              <strong>—</strong><span class="muted">0x892B…6013 → Vault</span><span class="muted">1d</span>
-            </div>
+
+            <aside>
+              <div class="activity-summary" aria-label="Activity statistics">
+                <div class="data-cell"><span>24h volume</span><strong>0.042 ETH</strong></div>
+                <div class="data-cell"><span>Total volume</span><strong>0.239 ETH</strong></div>
+                <div class="data-cell"><span>Priced sales</span><strong>50</strong></div>
+                <div class="data-cell"><span>Average price</span><strong>0.0047 ETH</strong></div>
+              </div>
+              <div class="chart-card">
+                <div class="chart-head"><div><h3>Sales price</h3><p>Verified priced sales over time.</p></div><div class="period-tabs"><button type="button">24H</button><button class="is-selected" type="button">7D</button><button type="button">ALL</button></div></div>
+                <div class="chart-wrap" style="min-height: 250px" aria-label="Sales price chart">
+                  <svg viewBox="0 0 300 220" role="img" aria-label="Seven day verified sales price chart">
+                    <path d="M12 182 C48 154 72 172 98 124 S150 152 178 95 S226 112 288 40" fill="none" stroke="#60d890" stroke-width="3"/>
+                    <g fill="#efc463" stroke="#120d08" stroke-width="3"><circle cx="28" cy="170" r="6"/><circle cx="96" cy="127" r="6"/><circle cx="152" cy="139" r="6"/><circle cx="210" cy="104" r="6"/><circle cx="278" cy="48" r="6"/></g>
+                  </svg>
+                </div>
+                <div class="chart-legend"><span class="legend-sale">Sale price</span></div>
+              </div>
+            </aside>
           </div>
+
+          <details class="disclosure" open style="margin-top: 12px">
+            <summary>Live V1 + V2 vault trade ledger <span class="status-pill live">Live</span></summary>
+            <div class="disclosure-body">
+              <div class="activity-table">
+                <div class="ledger-row head"><span>Vault</span><span>Kind</span><span>Amount</span><span>Price / share</span><span>Time</span></div>
+                <div class="ledger-row"><span class="status-pill live">V2</span><strong>Buy shares</strong><span>0.86 shares</span><span>0.0098 ETH</span><span>18s</span></div>
+                <div class="ledger-row"><span class="status-pill">V1</span><strong>Random redeem</strong><span>1 NFT</span><span>1.00 share</span><span>2m</span></div>
+                <div class="ledger-row"><span class="status-pill live">V2</span><strong>Pending deposit</strong><span>Token #701</span><span>—</span><span>Pending</span></div>
+              </div>
+              <p class="muted">Production states: Live, Updating, Reconnecting, pending row, no trades, and unavailable.</p>
+            </div>
+          </details>
+
+          <details class="disclosure">
+            <summary>Feed loading, unavailable, and empty states</summary>
+            <div class="disclosure-body"><div class="data-grid"><div class="data-cell"><span>Initial load</span><strong>Skeleton rows + chart</strong></div><div class="data-cell"><span>Unavailable</span><strong>Retry without hiding stats</strong></div><div class="data-cell"><span>No matches</span><strong>Clear filters</strong></div></div></div>
+          </details>
         </section>
 
         <section
@@ -2297,19 +3193,68 @@
           data-panel="my-nfts"
           hidden
         >
-          <div class="wallet-gate">
+          <div class="prototype-bar">
+            <span><strong>Connected preview:</strong> owned inventory and the complete Send workflow.</span>
+            <div class="prototype-actions"><span class="status-pill live">0xC4B2…2e04</span><button class="btn btn-quiet" type="button" data-wallet-state="my-nfts">Show disconnected state</button></div>
+          </div>
+
+          <div class="wallet-state" data-wallet-connected="my-nfts">
+            <div class="section-head">
+              <div><p class="eyebrow">Your forest</p><h2>Owned Planks</h2><p>3 RobinWood NFTs · grouped by collection · select unlisted items to send.</p></div>
+              <div class="inline-actions"><button class="btn btn-secondary" type="button">Reload</button><span class="status-pill">1 selected</span></div>
+            </div>
+
+            <div class="wallet-workspace">
+              <div>
+                <div class="subsection-head"><div><h3>RobinWood</h3><p>3 owned · 1 currently listed</p></div><span class="status-pill">3 items</span></div>
+                <div class="inventory-grid">
+                  <article class="inventory-card">
+                    <img src="../../../public/images/collection/plank-knightwood.png" alt="KnightWood #701" />
+                    <div class="inventory-card-body"><strong>KnightWood #701</strong><span>Rare · Rank 550</span><div class="inline-actions"><button class="btn btn-primary" type="button">Selected ✓</button><button class="btn btn-secondary" type="button">Details</button></div></div>
+                  </article>
+                  <article class="inventory-card">
+                    <img src="../../../public/images/collection/plank-bobawood.png" alt="BobaWood #544" />
+                    <div class="inventory-card-body"><strong>BobaWood #544</strong><span>Epic · Rank 431</span><div class="inline-actions"><button class="btn btn-secondary" type="button">Select</button><button class="btn btn-secondary" type="button">Details</button></div></div>
+                  </article>
+                  <article class="inventory-card">
+                    <img src="../../../public/images/collection/plank-redacted.png" alt="Redacted #1534" />
+                    <div class="inventory-card-body"><strong>Redacted #1534</strong><span>Legendary · Rank 39 · Listed</span><div class="inline-actions"><button class="btn btn-secondary" type="button" disabled>Listed</button><button class="btn btn-secondary" type="button">Details</button></div></div>
+                  </article>
+                </div>
+              </div>
+
+              <aside class="flow-card">
+                <div class="subsection-head"><div><h3>Send selected Planks</h3><p>Permanent wallet-to-wallet transfer.</p></div><span class="status-pill">1 NFT</span></div>
+                <div class="field-stack">
+                  <label>Recipient address<input class="input" type="text" value="0x8a12…907e" /></label>
+                  <div class="data-grid"><div class="data-cell"><span>Estimated fee</span><strong>0.00018 ETH</strong></div><div class="data-cell"><span>Batch savings</span><strong>— single send</strong></div><div class="data-cell"><span>Signatures</span><strong>1 required</strong></div></div>
+                  <label class="check-row"><input type="checkbox" /> I understand this transfer is permanent.</label>
+                  <label class="check-row"><input type="checkbox" /> Confirm recipient 0x8a12…907e again.</label>
+                  <button class="btn btn-primary full" type="button">Review permanent send</button>
+                </div>
+                <div class="callout" style="margin-top: 10px">Batch sends show multiple-signature requirements, per-item progress, partial failures, and a retry-safe inventory refresh.</div>
+              </aside>
+            </div>
+
+            <details class="disclosure" style="margin-top: 12px">
+              <summary>Inventory loading, error, empty, and transfer progress states</summary>
+              <div class="disclosure-body"><div class="data-grid"><div class="data-cell"><span>Inventory</span><strong>Loading · error · empty wallet</strong></div><div class="data-cell"><span>Validation</span><strong>Invalid recipient · listed protection</strong></div><div class="data-cell"><span>Progress</span><strong>Signing · sent · failed per token</strong></div></div></div>
+            </details>
+          </div>
+
+          <div class="wallet-gate wallet-state" data-wallet-disconnected="my-nfts" hidden>
             <div class="wallet-gate-inner">
               <div class="wallet-mark"><img src="../../../public/images/plank-logo.webp" alt="" /></div>
               <p class="eyebrow">Your forest</p>
               <h2 contenteditable="true" data-pretext>See the Planks in your wallet</h2>
               <p contenteditable="true" data-pretext>
-                Connect to browse owned RobinWood NFTs, compare them with active bids, and list one without leaving Marketplank.
+                Connect to browse owned RobinWood NFTs, inspect rarity and history, and send one or many with a verified fee quote.
               </p>
               <button class="btn btn-primary" type="button" data-connect>Connect wallet</button>
               <div class="gate-features" aria-label="Wallet features">
                 <div class="gate-feature">Owned Planks and rarity ranks</div>
-                <div class="gate-feature">One-click listing flow</div>
-                <div class="gate-feature">Matching offers surfaced first</div>
+                <div class="gate-feature">Item details and transfer history</div>
+                <div class="gate-feature">Safe single and batch sends</div>
               </div>
             </div>
           </div>
@@ -2317,19 +3262,73 @@
 
         <section
           class="tab-panel"
-          id="panel-my-listings"
+          id="panel-positions"
           role="tabpanel"
-          aria-labelledby="tab-my-listings"
-          data-panel="my-listings"
+          aria-labelledby="tab-positions"
+          data-panel="positions"
           hidden
         >
-          <div class="wallet-gate">
+          <div class="prototype-bar">
+            <span><strong>Connected preview:</strong> list inventory, accept bids, cancel positions, and manage approvals.</span>
+            <div class="prototype-actions"><span class="status-pill live">0xC4B2…2e04</span><button class="btn btn-quiet" type="button" data-wallet-state="positions">Show disconnected state</button></div>
+          </div>
+
+          <div class="wallet-state" data-wallet-connected="positions">
+            <div class="section-head"><div><p class="eyebrow">Your market desk</p><h2>My Listings</h2><p>Manage listings and offers. Price changes use a verified cancel-and-relist flow.</p></div><button class="btn btn-primary" type="button">List from your wallet</button></div>
+
+            <section class="flow-card" style="margin-bottom: 12px">
+              <div class="subsection-head"><div><h3>Incoming bids you can accept</h3><p>Best verified net value first.</p></div><span class="status-pill live">2 matches</span></div>
+              <div class="offer-stack">
+                <article class="offer-row"><div class="offer-main"><div class="offer-thumb"><img src="../../../public/images/collection/plank-knightwood.png" alt="" /></div><div><p class="offer-title">Any Rare Plank</p><p class="offer-meta">KnightWood #701 qualifies · maker 0x73A4…ac34 · 18h</p></div></div><div class="offer-value"><strong>0.008 WETH</strong><span>verified net 0.008</span></div><button class="btn btn-primary" type="button">Accept</button></article>
+              </div>
+            </section>
+
+            <div class="wallet-workspace">
+              <div>
+                <div class="subsection-head"><div><h3>Open positions</h3><p>Listings and offers remain separate and cancellable.</p></div><div class="scope-tabs"><button class="is-selected" type="button">Listings</button><button type="button">Offers</button></div></div>
+                <article class="position-card"><div class="position-main"><div><h3>KnightWood #701</h3><p>Fixed-price listing · expires in 2d · verified order</p></div><strong>0.012 ETH</strong><button class="btn btn-secondary" type="button">Cancel</button></div></article>
+                <article class="position-card"><div class="position-main"><div><h3>Rare AND Beanie</h3><p>Criteria offer · expires in 5d · 14 qualify</p></div><strong>0.0065 WETH</strong><button class="btn btn-secondary" type="button">Cancel</button></div></article>
+                <div class="callout" style="margin-top: 10px">Empty, loading, cancellation pending, wallet rejection, partial refresh, and unavailable order-service states stay explicit.</div>
+              </div>
+
+              <aside class="flow-stack">
+                <details class="disclosure" open>
+                  <summary>List from inventory</summary>
+                  <div class="disclosure-body">
+                    <div class="field-stack">
+                      <div class="inventory-card"><div class="inventory-card-body"><strong>BobaWood #544 · Epic</strong><span>Unlisted · selected</span></div></div>
+                      <div class="scope-tabs"><button class="is-selected" type="button">Same price</button><button type="button">Per-item</button></div>
+                      <label>Price per item<input class="input" type="text" inputmode="decimal" value="0.014" /></label>
+                      <label>Expiry<select class="input"><option>3 days</option><option>7 days</option><option>30 days</option></select></label>
+                      <div class="data-grid"><div class="data-cell"><span>Total ask</span><strong>0.014 ETH</strong></div><div class="data-cell"><span>Signatures</span><strong>1 order</strong></div><div class="data-cell"><span>Protection</span><strong>Listed NFTs disabled</strong></div></div>
+                      <button class="btn btn-primary full" type="button">Review listing</button>
+                    </div>
+                  </div>
+                </details>
+
+                <details class="disclosure" open>
+                  <summary>Marketplace approvals</summary>
+                  <div class="disclosure-body">
+                    <div class="module-row"><span>NFT collection approval</span><strong>Active</strong></div><div class="module-row"><span>WETH allowance</span><strong>0.024 WETH</strong></div>
+                    <div class="inline-actions" style="margin-top: 10px"><button class="btn btn-secondary" type="button">Revoke NFT approval</button><button class="btn btn-secondary" type="button">Revoke WETH</button></div>
+                  </div>
+                </details>
+              </aside>
+            </div>
+
+            <details class="disclosure" style="margin-top: 12px">
+              <summary>Bulk listing progress and partial-failure states</summary>
+              <div class="disclosure-body"><div class="data-grid"><div class="data-cell"><span>#544</span><strong>Signed · listed</strong></div><div class="data-cell"><span>#701</span><strong>Rejected · unchanged</strong></div><div class="data-cell"><span>Refresh</span><strong>Retry-safe reconciliation</strong></div></div></div>
+            </details>
+          </div>
+
+          <div class="wallet-gate wallet-state" data-wallet-disconnected="positions" hidden>
             <div class="wallet-gate-inner">
               <div class="wallet-mark"><img src="../../../public/images/plank-logo.webp" alt="" /></div>
               <p class="eyebrow">Your market desk</p>
               <h2 contenteditable="true" data-pretext>Manage listings and offers</h2>
               <p contenteditable="true" data-pretext>
-                Connect to update prices, cancel listings, accept matching bids, and track every open position in one place.
+                Connect to cancel and relist, accept matching bids, create listings, and track every open position in one place.
               </p>
               <button class="btn btn-primary" type="button" data-connect>Connect wallet</button>
               <div class="gate-features" aria-label="Position features">
@@ -2357,6 +3356,7 @@
           tabs.forEach((tab) => {
             const selected = tab.dataset.tab === id;
             tab.setAttribute("aria-selected", String(selected));
+            tab.tabIndex = selected ? 0 : -1;
             if (selected && focus) tab.focus();
           });
 
@@ -2366,7 +3366,7 @@
             panel.classList.toggle("is-active", selected);
           });
 
-          history.replaceState(null, "", `#${id}`);
+          if (location.hash !== `#${id}`) history.pushState(null, "", `#${id}`);
           window.scrollTo({ top: Math.max(0, document.querySelector(".market-tabs-wrap").offsetTop - 68), behavior: "smooth" });
         }
 
@@ -2384,8 +3384,26 @@
           });
         });
 
-        const requested = location.hash.replace("#", "");
+        const requested = location.hash.replace("#", "") === "my-listings" ? "positions" : location.hash.replace("#", "");
         if (tabs.some((tab) => tab.dataset.tab === requested)) selectTab(requested);
+        else selectTab("buy-sell");
+
+        window.addEventListener("hashchange", () => {
+          const id = location.hash.replace("#", "") === "my-listings" ? "positions" : location.hash.replace("#", "");
+          if (tabs.some((tab) => tab.dataset.tab === id)) selectTab(id);
+        });
+
+        document.querySelectorAll("[data-jump-tab]").forEach((button) => {
+          button.addEventListener("click", () => selectTab(button.dataset.jumpTab, true));
+        });
+
+        const sweepToggle = document.querySelector("[data-sweep-toggle]");
+        const sweepDock = document.querySelector("[data-sweep-dock]");
+        sweepToggle?.addEventListener("click", () => {
+          const active = sweepDock.classList.toggle("is-active");
+          sweepToggle.setAttribute("aria-pressed", String(active));
+          sweepToggle.textContent = active ? "Exit sweep" : "Sweep floorboards";
+        });
 
         document.querySelectorAll(".floor-chip").forEach((chip) => {
           chip.addEventListener("click", () => {
@@ -2402,9 +3420,22 @@
           });
         });
 
-        document.querySelectorAll(".segmented button").forEach((button) => {
+        document.querySelectorAll(".segmented button, .scope-tabs button, .period-tabs button").forEach((button) => {
           button.addEventListener("click", () => {
             button.parentElement.querySelectorAll("button").forEach((item) => item.classList.toggle("is-selected", item === button));
+          });
+        });
+
+        document.querySelectorAll("[data-mode-group]").forEach((group) => {
+          group.querySelectorAll("[data-mode]").forEach((button) => {
+            button.addEventListener("click", () => {
+              const owner = group.closest(".swap-card");
+              if (!owner || group.dataset.modeGroup !== "swap") return;
+              group.querySelectorAll("[data-mode]").forEach((item) => item.classList.toggle("is-selected", item === button));
+              owner.querySelectorAll("[data-mode-panel]").forEach((panel) => {
+                panel.hidden = panel.dataset.modePanel !== button.dataset.mode;
+              });
+            });
           });
         });
 
@@ -2445,6 +3476,44 @@
               button.textContent = prior;
             }, 1600);
           });
+        });
+
+        document.querySelectorAll("[data-wallet-state]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const key = button.dataset.walletState;
+            const connected = document.querySelector(`[data-wallet-connected="${key}"]`);
+            const disconnected = document.querySelector(`[data-wallet-disconnected="${key}"]`);
+            const showDisconnected = !connected.hidden;
+            connected.hidden = showDisconnected;
+            disconnected.hidden = !showDisconnected;
+            button.textContent = showDisconnected ? "Show connected state" : "Show disconnected state";
+          });
+        });
+
+        const activityFilter = document.querySelector("[data-activity-filter]");
+        activityFilter?.addEventListener("change", () => {
+          const rows = [...document.querySelectorAll("[data-activity-kind]")];
+          let visible = 0;
+          rows.forEach((row) => {
+            const show = activityFilter.value === "all" || row.dataset.activityKind === activityFilter.value;
+            row.hidden = !show;
+            if (show) visible += 1;
+          });
+          const count = document.querySelector("[data-activity-count]");
+          if (count) count.textContent = `${visible} event${visible === 1 ? "" : "s"} shown`;
+        });
+
+        const makers = ["0x73A4…ac34", "0xA195…4660", "0x9D12…18f1", "0x88a0…71d2"];
+        document.querySelectorAll(".listing-card").forEach((card, index) => {
+          const body = card.querySelector(".card-body");
+          if (!body || body.querySelector(".card-utilities")) return;
+          const context = document.createElement("div");
+          context.className = "card-context";
+          context.innerHTML = `<span>Maker ${makers[index % makers.length]}</span><span>Verified ✓</span>`;
+          const utilities = document.createElement("div");
+          utilities.className = "card-utilities";
+          utilities.innerHTML = '<button class="btn btn-secondary" type="button">Offer</button><button class="btn btn-secondary" type="button">Details</button>';
+          body.append(context, utilities);
         });
       })();
     </script>
