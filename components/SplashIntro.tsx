@@ -1,17 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 
 /**
- * Versioned key + refresh window. v2: the "Nailing the planks" intro must
- * actually be seen — the old color-ball splash set the unversioned key, so
- * every returning visitor was permanently opted out of the new intro
- * (owner-reported: "local and production is not showing the intro").
- * Policy: play on first visit and again after REPLAY_AFTER_MS away — the
- * workshop entrance, not a once-in-a-lifetime event.
+ * Owner direction (2026-07-30): the "Nailing the planks" intro must play on
+ * EVERY visit to the homepage, not just the first — it's the workshop
+ * entrance, always in front of the door, not a once-in-a-lifetime unlock.
+ * There is deliberately no localStorage "seen" gate anymore (the old v2 key
+ * previously played once per ~12h); this component is mounted globally in
+ * app/layout.tsx (not owned here), so the homepage-only scoping happens via
+ * `usePathname()` below instead of at the mount site.
  */
-const SEEN_KEY = "plank-intro-seen-v2";
-const REPLAY_AFTER_MS = 12 * 60 * 60 * 1000; // 12h
 /** Minimum time the preloader stays up even on an instant cached load — a
  * single-frame flash would just read as a glitch, and this is also long
  * enough for the "Nailing the planks" beat to land. */
@@ -45,15 +45,17 @@ const FENCE_PLANKS = [
 ];
 
 /**
- * First-visit-only branded loading intro: eight plank boards drop into a
- * fence in a staggered sequence under the mascot, with a gold progress bar
- * and "Nailing the planks" headline (ports docs/mockups/landing-redesign's
+ * Homepage-only branded loading intro: eight plank boards drop into a fence
+ * in a staggered sequence under the mascot, with a gold progress bar and
+ * "Nailing the planks" headline (ports docs/mockups/landing-redesign's
  * finalized preloader). Dismisses once the page has actually loaded AND at
  * least MIN_MS has elapsed — not a fixed timer, so a slow connection never
- * gets cut short and a fast one never just flashes once. Shown once ever per
- * browser (localStorage-gated), same as the previous color-cycling splash.
+ * gets cut short and a fast one never just flashes once. Plays on every visit
+ * to "/" (no seen-gate), and never on any other route.
  */
 export default function SplashIntro() {
+  const pathname = usePathname();
+  const isHome = pathname === "/";
   const [phase, setPhase] = useState<"hidden" | "playing" | "leaving">("hidden");
   const [reducedMotion, setReducedMotion] = useState(false);
   const pageLoadedRef = useRef(false);
@@ -66,11 +68,6 @@ export default function SplashIntro() {
     setPhase("leaving");
     setTimeout(() => {
       setPhase("hidden");
-      try {
-        localStorage.setItem(SEEN_KEY, String(Date.now()));
-      } catch {
-        // nothing to do — worst case it plays again next visit
-      }
     }, FADE_OUT_MS);
   };
   const dismissRef = useRef(dismiss);
@@ -83,16 +80,17 @@ export default function SplashIntro() {
   tryFinishRef.current = tryFinish;
 
   useEffect(() => {
-    let seen = true;
-    try {
-      const at = Number(localStorage.getItem(SEEN_KEY) ?? 0);
-      // Legacy "1" parses NaN → replay once, then stores a timestamp.
-      seen = Number.isFinite(at) && at > 0 && Date.now() - at < REPLAY_AFTER_MS;
-    } catch {
-      // localStorage unavailable (private mode, etc.) — just skip rather
-      // than risk it replaying forever.
+    // Homepage only — every other route (Trade, Market, Gallery, Learn,
+    // Airdrop) never shows this, on any visit. Reset the dismiss guard so
+    // navigating home → away → home again (client nav keeps this component
+    // mounted, per DESIGN.md's "root layout stays mounted" rule) replays it.
+    if (!isHome) {
+      dismissedRef.current = false;
+      pageLoadedRef.current = false;
+      minTimeElapsedRef.current = false;
+      setPhase("hidden");
+      return;
     }
-    if (seen) return;
 
     // Wallet in-app browsers (Rabby / MetaMask / etc.) and low-power mobile
     // often never fire a clean window "load" (audio/fonts hang) — a
@@ -102,20 +100,16 @@ export default function SplashIntro() {
     const isWalletWebView =
       /Rabby|MetaMask|Coinbase|Trust|Rainbow|WebView|wv\)/i.test(ua) ||
       (/Android/i.test(ua) && /Version\/4\.0/i.test(ua));
-    if (isWalletWebView) {
-      try {
-        localStorage.setItem(SEEN_KEY, String(Date.now()));
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
+    if (isWalletWebView) return;
 
     const reduceMotion =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     setReducedMotion(reduceMotion);
 
+    dismissedRef.current = false;
+    pageLoadedRef.current = false;
+    minTimeElapsedRef.current = false;
     setPhase("playing");
 
     const minMs = reduceMotion ? REDUCED_MOTION_MIN_MS : MIN_MS;
@@ -144,7 +138,8 @@ export default function SplashIntro() {
       window.clearTimeout(maxWait);
       window.removeEventListener("load", onLoad);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHome]);
 
   if (phase === "hidden") return null;
 
@@ -165,6 +160,19 @@ export default function SplashIntro() {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(219,165,63,0.16),transparent_60%)]"
       />
+
+      {/* Now that this plays on every homepage visit (not just the first),
+          a returning visitor who already knows the beat needs a fast way
+          past it — 44px touch target, keyboard-reachable, doesn't shortcut
+          MIN_MS for a first-time viewer since it's an explicit opt-out. */}
+      <button
+        type="button"
+        onClick={dismiss}
+        className="absolute right-4 top-4 z-[2] flex min-h-11 items-center gap-1.5 rounded-full border border-gold-500/35 bg-black/25 px-4 text-xs font-bold text-cream-muted transition hover:border-gold-400 hover:text-gold-300 sm:right-6 sm:top-6"
+      >
+        Skip
+        <span aria-hidden="true">→</span>
+      </button>
 
       <div className="relative z-[1] flex flex-col items-center gap-5 px-5 text-center">
         <p className="text-[0.68rem] font-black uppercase tracking-[0.24em] text-gold-300/90">

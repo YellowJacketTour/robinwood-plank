@@ -10,6 +10,16 @@ type Props = {
   artAlt?: string;
   /** Center the title/art group as a unit on desktop instead of left-aligning it */
   center?: boolean;
+  /**
+   * Wraps the head in the same masthead-panel treatment /trade uses
+   * (TradePageHeader): wood-grain-surface + bg-panel-soft + border-line-strong
+   * + a soft radial gold wash, so the headline reads as a deliberate card
+   * placed in front of the giant Plank character instead of bare text
+   * floating on it (DESIGN.md "Background treatment" — the character stays,
+   * this just frames what sits over it). Opt-in so existing bare usages
+   * (e.g. TrustFacts) are unaffected.
+   */
+  framed?: boolean;
   children?: ReactNode;
   className?: string;
 };
@@ -24,14 +34,15 @@ export default function SectionHead({
   artSrc,
   artAlt = "",
   center = false,
+  framed = false,
   children,
   className = "",
 }: Props) {
-  return (
+  const content = (
     <div
       className={`flex flex-col items-center gap-2 sm:gap-2.5 ${
         artSrc ? `sm:flex-row sm:items-center sm:gap-4 ${center ? "sm:justify-center" : "sm:justify-start"}` : ""
-      } ${className}`}
+      } ${framed ? "" : className}`}
     >
       <div
         className={`min-w-0 ${
@@ -66,6 +77,20 @@ export default function SectionHead({
           />
         </div>
       )}
+    </div>
+  );
+
+  if (!framed) return content;
+
+  return (
+    <div
+      className={`wood-grain-surface relative overflow-hidden rounded-xl border border-line-strong bg-panel-soft px-4 py-6 sm:px-8 sm:py-8 ${className}`}
+    >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(233,180,63,0.16),transparent_60%)]"
+      />
+      <div className="relative">{content}</div>
     </div>
   );
 }

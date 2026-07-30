@@ -10,6 +10,8 @@ import AirdropChecker from "@/components/AirdropChecker";
 import Distribution from "@/components/Distribution";
 import Roadmap from "@/components/Roadmap";
 import Footer from "@/components/Footer";
+import Reveal from "@/components/Reveal";
+import SectionHead from "@/components/SectionHead";
 
 export default function Home() {
   return (
@@ -25,21 +27,24 @@ export default function Home() {
             conversion path here routes to Marketplank. */}
         <MintInfo />
         <MintAllocation />
-        <section id="gallery" className="scroll-mt-20 px-3 py-10 sm:px-5 sm:py-12">
+        <section id="gallery" className="section-tight scroll-mt-20 px-3 sm:px-5">
           <div className="mx-auto max-w-6xl">
-            <div className="mb-4 text-center">
-              <p className="lede text-[0.68rem] font-black uppercase tracking-[0.24em] text-gold-300/90">
-                Live rarity · revealed only
-              </p>
-              <h2 className="section-title mt-1 text-gold-300">Gallery</h2>
-              <p className="lede mx-auto mt-1 max-w-xl text-sm text-foreground/70 sm:text-base">
-                Minted art, live rarity, trait stats — every Plank, ranked.
-              </p>
-            </div>
-            <div className="grid gap-4 lg:grid-cols-[1.35fr_1fr]">
-              <GalleryTeaser />
-              <WalletLookupCard />
-            </div>
+            <Reveal>
+              <SectionHead
+                eyebrow="Live rarity · revealed only"
+                title="Gallery"
+                lede="Minted art, live rarity, trait stats — every Plank, ranked."
+                center
+                framed
+                className="mx-auto max-w-2xl"
+              />
+            </Reveal>
+            <Reveal delayMs={60}>
+              <div className="mt-6 grid gap-4 lg:grid-cols-[1.35fr_1fr]">
+                <GalleryTeaser />
+                <WalletLookupCard />
+              </div>
+            </Reveal>
           </div>
         </section>
         <AirdropChecker />
