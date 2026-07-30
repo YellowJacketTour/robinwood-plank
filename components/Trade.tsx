@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import Reveal from "@/components/Reveal";
 import SectionHead from "@/components/SectionHead";
 import CopyCA from "@/components/CopyCA";
@@ -81,10 +82,6 @@ export default function Trade() {
                   title: "Full transparency",
                   body: `Trading fee is fixed at ${SITE_FEE.label} — hard-coded server-side, never client-overridable.`,
                 },
-                {
-                  title: "Routed for best price",
-                  body: "Every quote compares Uniswap v2, v3 and v4 liquidity on Robinhood Chain and routes through whichever path pays out most — multi-hop included.",
-                },
               ].map((f) => (
                 <div
                   key={f.title}
@@ -94,6 +91,20 @@ export default function Trade() {
                   <span className="mt-1 block text-sm text-cream-muted">{f.body}</span>
                 </div>
               ))}
+
+              <Link
+                href="/trade"
+                className="group flex flex-1 flex-col justify-center rounded-xl border border-line-strong bg-panel p-3 transition-colors hover:border-gold-500/60 sm:p-4"
+              >
+                <strong className="block font-display text-lg text-gold-300">
+                  More on the trade page →
+                </strong>
+                <span className="mt-1 block text-sm text-cream-muted">
+                  Live $PLANK price chart, every pool and its depth, and buying in from another
+                  chain in one transaction.
+                </span>
+              </Link>
+
               <CopyCA />
             </div>
           </div>
