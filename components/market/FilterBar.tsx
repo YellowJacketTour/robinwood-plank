@@ -24,11 +24,107 @@ type Props = {
   resultCount: number;
   /** Omit to hide the tier filter entirely (e.g. rarity data not loaded yet). */
   rarityAvailable?: boolean;
+  orientation?: "inline" | "sidebar";
 };
 
-export default function FilterBar({ filters, onChange, resultCount, rarityAvailable }: Props) {
+export default function FilterBar({
+  filters,
+  onChange,
+  resultCount,
+  rarityAvailable,
+  orientation = "inline",
+}: Props) {
   const dirty =
     filters.query !== "" || filters.minEth !== "" || filters.maxEth !== "" || filters.tier !== "all";
+
+  if (orientation === "sidebar") {
+    return (
+      <div className="space-y-5">
+        <div>
+          <label
+            htmlFor="market-token-filter"
+            className="mb-2 block text-[0.62rem] font-black uppercase tracking-wider text-gold-300"
+          >
+            Find a plank
+          </label>
+          <input
+            id="market-token-filter"
+            type="search"
+            inputMode="numeric"
+            value={filters.query}
+            onChange={(e) => onChange({ ...filters, query: e.target.value })}
+            placeholder="Token ID"
+            className="min-h-11 w-full rounded-md border border-gold-500/30 bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
+          />
+        </div>
+
+        <fieldset>
+          <legend className="mb-2 text-[0.62rem] font-black uppercase tracking-wider text-gold-300">
+            Price in ETH
+          </legend>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={filters.minEth}
+              onChange={(e) => onChange({ ...filters, minEth: e.target.value })}
+              placeholder="Min"
+              aria-label="Minimum price in ETH"
+              className="min-h-11 min-w-0 rounded-md border border-gold-500/30 bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
+            />
+            <input
+              type="text"
+              inputMode="decimal"
+              value={filters.maxEth}
+              onChange={(e) => onChange({ ...filters, maxEth: e.target.value })}
+              placeholder="Max"
+              aria-label="Maximum price in ETH"
+              className="min-h-11 min-w-0 rounded-md border border-gold-500/30 bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
+            />
+          </div>
+        </fieldset>
+
+        {rarityAvailable && (
+          <fieldset>
+            <legend className="mb-2 text-[0.62rem] font-black uppercase tracking-wider text-gold-300">
+              Rarity
+            </legend>
+            <div className="space-y-1">
+              {(["all", ...TIER_ORDER] as Array<MarketFilters["tier"]>).map((tier) => (
+                <label
+                  key={tier}
+                  className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-xs text-foreground/75 hover:bg-gold-500/10"
+                >
+                  <input
+                    type="radio"
+                    name="market-rarity"
+                    value={tier}
+                    checked={filters.tier === tier}
+                    onChange={() => onChange({ ...filters, tier })}
+                    className="accent-[#d9a441]"
+                  />
+                  <span>{tier === "all" ? "All rarities" : tier}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
+
+        <div className="flex items-center justify-between gap-2 border-t border-gold-500/20 pt-4">
+          <span className="text-[0.68rem] text-foreground/55">{resultCount} items</span>
+          {dirty && (
+            <button
+              type="button"
+              onClick={() => onChange(EMPTY_FILTERS)}
+              className="min-h-9 rounded-md border border-gold-500/30 px-3 text-xs text-gold-300"
+            >
+              Clear all
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-1 flex-wrap items-center gap-1.5">

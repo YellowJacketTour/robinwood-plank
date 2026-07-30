@@ -1,9 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Reveal from "@/components/Reveal";
-import SectionHead from "@/components/SectionHead";
 import MarketNav from "@/components/market/MarketNav";
+import MarketBrowseLayout from "@/components/market/MarketBrowseLayout";
+import {
+  MarketCollectionHero,
+  MarketContent,
+  MarketScaffold,
+  MarketTabPanel,
+  MarketTabRail,
+  MarketTabSection,
+  MarketWalletGate,
+} from "@/components/market/MarketScaffold";
 import ListingGrid from "@/components/market/ListingGrid";
 import OfferForm from "@/components/market/OfferForm";
 import SwapPanel from "@/components/market/SwapPanel";
@@ -42,6 +50,7 @@ import type { RarityLookup } from "@/lib/market/rarityClient";
 import { prefetchJson } from "@/lib/market/swr-fetch";
 import { getOwnedTokenIds } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
+import { MARKET_TABS } from "@/lib/market/navigation";
 import {
   assertAcceptableOffer,
   assertAcceptableTraitOffer,
@@ -62,10 +71,8 @@ const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModal
 
 const COLLECTION = MARKET_COLLECTIONS[0];
 
-const VALID_TABS: MarketTab[] = ["buy-sell", "offers", "activity", "swap", "my-nfts", "positions"];
-
 function isTab(value: string | null): value is MarketTab {
-  return value !== null && (VALID_TABS as string[]).includes(value);
+  return value !== null && MARKET_TABS.some((tab) => tab.id === value);
 }
 
 /**
@@ -256,7 +263,7 @@ export default function MarketView() {
     const STAGGER_MS = 6_000;
     const timer = window.setInterval(() => {
       setVisitedTabs((prev) => {
-        const next = VALID_TABS.find((t) => !prev.has(t));
+        const next = MARKET_TABS.map((marketTab) => marketTab.id).find((id) => !prev.has(id));
         if (!next) {
           window.clearInterval(timer);
           return prev;
@@ -304,6 +311,8 @@ export default function MarketView() {
   // Which planks this wallet holds — decides which incoming bids it can fill.
   useEffect(() => {
     if (!account || !COLLECTION) {
+      // Disconnecting invalidates the wallet-scoped ownership snapshot.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOwnedTokenIds(undefined);
       return;
     }
@@ -581,50 +590,52 @@ export default function MarketView() {
     : undefined;
 
   return (
-    <div className="space-y-5">
+    <MarketScaffold>
       <ConnectWalletModal
         open={connectOpen}
         onClose={() => setConnectOpen(false)}
         onConnected={(addr) => void onWalletConnected(addr)}
       />
-      <Reveal>
-        <SectionHead eyebrow="Robinhood Chain" title="Marketplank" />
-      </Reveal>
+      {COLLECTION && <MarketCollectionHero collection={COLLECTION} />}
+      <MarketTabRail
+        navigation={
+          <MarketNav
+            active={tab}
+            onChange={selectTab}
+            counts={{ "buy-sell": listings.length, offers: offers.length }}
+          />
+        }
+        actions={
+          <>
+            {account && <WalletChip account={account} />}
+            {tab === "buy-sell" &&
+              (account ? (
+                // Routes to "My Listings" (MyInventory) rather than opening a
+                // duplicate typed-token form. One picker, not two.
+                <button
+                  type="button"
+                  onClick={() => selectTab("positions")}
+                  className="min-h-10 shrink-0 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+                >
+                  Sell
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleConnect}
+                  className="min-h-10 shrink-0 rounded-lg bg-gold-500 px-3.5 text-xs font-bold text-wood-950 transition hover:bg-gold-400"
+                >
+                  Connect
+                </button>
+              ))}
+          </>
+        }
+      />
+      {/* Collection-wide "Offer any" remains intentionally absent: its
+          fulfillment resolver is not wired. The working criteria bid flow
+          stays available in Buy & Sell and Offers. */}
 
-      <Reveal delayMs={40}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <MarketNav active={tab} onChange={selectTab} />
-          {account && <WalletChip account={account} />}
-          {tab === "buy-sell" &&
-            (account ? (
-              // Routes to "My Listings" (MyInventory) rather than opening a
-              // form that asks for a typed token ID — that form duplicated,
-              // less visually, what tap-to-select inventory browsing already
-              // does. One picker, not two.
-              <button
-                type="button"
-                onClick={() => selectTab("positions")}
-                className="min-h-10 shrink-0 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
-              >
-                Sell
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleConnect}
-                className="min-h-10 shrink-0 rounded-lg bg-gold-500 px-3.5 text-xs font-bold text-wood-950 transition hover:bg-gold-400 sm:text-sm"
-              >
-                Connect
-              </button>
-            ))}
-          {/* "Offer any" (collection-wide bid) removed — FAIL CLOSED, audit
-              2026-07-27: the criteria order it produced was unfillable (no
-              considerationCriteria resolver was ever supplied at fulfillment),
-              so it only minted dead bids backed by a live WETH approval.
-              Re-enable only after the resolver path is wired and verified. */}
-        </div>
-      </Reveal>
-
+      <MarketContent>
       {(status || error) && (
         <p
           className={`text-center text-xs ${error ? "text-red-300" : "text-forest-600"}`}
@@ -702,7 +713,7 @@ export default function MarketView() {
               </div>
             </dl>
             <p className="text-center text-[0.6rem] text-foreground/40">
-              Amount and qualifying set verified against the buyer's signed order in this
+              Amount and qualifying set verified against the buyer&apos;s signed order in this
               browser. Plus network gas.
             </p>
             <button
@@ -750,7 +761,7 @@ export default function MarketView() {
               </div>
             </dl>
             <p className="text-center text-[0.6rem] text-foreground/40">
-              Amount verified against the buyer's signed order in this browser. Plus network gas.
+              Amount verified against the buyer&apos;s signed order in this browser. Plus network gas.
             </p>
             <button
               type="button"
@@ -809,113 +820,135 @@ export default function MarketView() {
           unmounting on switch — a tab you've already opened snaps back
           instantly (its data, images, and any live connections are still
           there) instead of re-fetching and re-rendering from scratch.
-          Reveal's fade still plays via its own `key`; hidden tabs are just
-          display:none, not removed from the tree. */}
-      <Reveal delayMs={70}>
-        <div className={tab === "buy-sell" ? undefined : "hidden"}>
+          Hidden tabs are display:none, not removed from the tree. */}
+      <div>
+        <MarketTabPanel id="buy-sell" active={tab === "buy-sell"}>
           {visitedTabs.has("buy-sell") && (
-          <div className="space-y-3">
-            <EventCountdown />
-            {COLLECTION && (
-              <CollectionStats
-                collection={COLLECTION}
-                listings={listings}
-                offers={offers}
-                totalSupply={TOTAL_SUPPLY}
-              />
-            )}
-            {!loading && rarityMap.size > 0 && listings.length > 0 && (
-              <RarityFloorStrip
-                listings={listings}
-                rarity={rarityMap}
-                activeTier={filters.tier}
-                onSelectTier={(tier) => {
-                  setFilters((f) => ({ ...f, tier }));
-                }}
-              />
-            )}
-            {account && !loading && (
-              <IncomingBids
-                dense
-                offers={offers as unknown as Array<WithOrder<Offer>>}
-                ownedTokenIds={ownedTokenIds}
-                onAcceptToken={(o) => void handleAcceptOffer(o as unknown as Listing)}
-                onAcceptCriteria={(o) => void handleAcceptTraitOffer(o as WithOrder<Offer>)}
-              />
-            )}
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start">
-              <FilterBar
-                filters={filters}
-                onChange={setFilters}
-                resultCount={loading ? 0 : visibleListings.length}
-                rarityAvailable={rarityMap.size > 0}
-              />
-              {COLLECTION && !loading && (
-                <SweepFloorboards
-                  listings={listings}
-                  collection={COLLECTION}
-                  account={account}
-                  rarity={rarityMap}
-                  tierScope={filters.tier}
-                  onSweep={(plan) => void handleSweep(plan)}
-                />
-              )}
-              {COLLECTION && !loading && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const who = await requireAccount();
-                    if (who) setOfferTarget({ trait: true });
-                  }}
-                  className="min-h-9 shrink-0 rounded-lg border border-gold-500/40 px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
-                  title="Bid on any plank matching trait, rarity, or combo"
+            <MarketTabSection
+              eyebrow="Live order book"
+              title="Explore floorboards"
+              description="Search every live listing, compare rarity floors, make a criteria bid, or sweep several planks in one verified flow."
+              labelled={false}
+            >
+              <div className="space-y-3">
+                <EventCountdown />
+                {COLLECTION && (
+                  <CollectionStats
+                    collection={COLLECTION}
+                    listings={listings}
+                    offers={offers}
+                    totalSupply={TOTAL_SUPPLY}
+                  />
+                )}
+                {account && !loading && (
+                  <IncomingBids
+                    dense
+                    offers={offers as unknown as Array<WithOrder<Offer>>}
+                    ownedTokenIds={ownedTokenIds}
+                    onAcceptToken={(o) => void handleAcceptOffer(o as unknown as Listing)}
+                    onAcceptCriteria={(o) => void handleAcceptTraitOffer(o as WithOrder<Offer>)}
+                  />
+                )}
+                <MarketBrowseLayout
+                  summary={
+                    loading
+                      ? "Loading live listings…"
+                      : `${visibleListings.length} ${visibleListings.length === 1 ? "Plank" : "Planks"} on the market`
+                  }
+                  filters={
+                    <FilterBar
+                      filters={filters}
+                      onChange={setFilters}
+                      resultCount={loading ? 0 : visibleListings.length}
+                      rarityAvailable={rarityMap.size > 0}
+                      orientation="sidebar"
+                    />
+                  }
+                  lead={
+                    !loading && rarityMap.size > 0 && listings.length > 0 ? (
+                      <RarityFloorStrip
+                        listings={listings}
+                        rarity={rarityMap}
+                        activeTier={filters.tier}
+                        onSelectTier={(tier) => {
+                          setFilters((f) => ({ ...f, tier }));
+                        }}
+                      />
+                    ) : undefined
+                  }
+                  toolbar={
+                    <>
+                      {COLLECTION && !loading && (
+                        <SweepFloorboards
+                          listings={listings}
+                          collection={COLLECTION}
+                          account={account}
+                          rarity={rarityMap}
+                          tierScope={filters.tier}
+                          onSweep={(plan) => void handleSweep(plan)}
+                        />
+                      )}
+                      {COLLECTION && !loading && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const who = await requireAccount();
+                            if (who) setOfferTarget({ trait: true });
+                          }}
+                          className="min-h-10 shrink-0 rounded-lg border border-gold-500/40 px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+                          title="Bid on any plank matching trait, rarity, or combo"
+                        >
+                          Bid on trait / rarity
+                        </button>
+                      )}
+                      <label className="flex items-center gap-1.5">
+                        <span className="sr-only">Sort listings</span>
+                        <select
+                          value={sort}
+                          onChange={(e) => setSort(e.target.value as SortKey)}
+                          className="min-h-10 max-w-[12rem] rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
+                        >
+                          {SORTS.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
+                  }
                 >
-                  Bid on trait / rarity
-                </button>
-              )}
-              <label className="flex items-center gap-1.5">
-                <span className="sr-only">Sort listings</span>
-                <select
-                  value={sort}
-                  onChange={(e) => setSort(e.target.value as SortKey)}
-                  className="min-h-9 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
-                >
-                  {SORTS.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            {loading ? (
-              <ListingSkeleton />
-            ) : (
-              <ListingGrid
-                listings={sortListings(visibleListings, sort)}
-                collections={MARKET_COLLECTIONS}
-                onBuy={handleBuy}
-                onOffer={handleOffer}
-                onSelect={openDetail}
-                floorPriceWei={floorPriceWei}
-                emptyMessage={
-                  listings.length === 0
-                    ? "No listings yet — be the first to sell."
-                    : "No matches."
-                }
-              />
-            )}
-          </div>
+                  {loading ? (
+                    <ListingSkeleton />
+                  ) : (
+                    <ListingGrid
+                      listings={sortListings(visibleListings, sort)}
+                      collections={MARKET_COLLECTIONS}
+                      onBuy={handleBuy}
+                      onOffer={handleOffer}
+                      onSelect={openDetail}
+                      floorPriceWei={floorPriceWei}
+                      emptyMessage={
+                        listings.length === 0
+                          ? "No listings yet — be the first to sell."
+                          : "No matches."
+                      }
+                    />
+                  )}
+                </MarketBrowseLayout>
+              </div>
+            </MarketTabSection>
           )}
-        </div>
-        <div className={tab === "offers" ? undefined : "hidden"}>
+        </MarketTabPanel>
+        <MarketTabPanel id="offers" active={tab === "offers"}>
           {visitedTabs.has("offers") && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="min-w-0 flex-1 rounded-lg border border-dashed border-emerald-500/30 bg-forest-900/50 px-3 py-2 text-center text-[0.7rem] text-foreground/70">
-                Bids from buyers — trait, rarity, combo, or single plank. Accepting one sells them
-                your matching plank.
-              </p>
+          <MarketTabSection
+            eyebrow="Buyer demand"
+            title="Offers"
+            description="Bids from buyers can target a trait, rarity, AND-combination, or single Plank. Accepting one sells the buyer a qualifying Plank you own."
+          >
+            <div className="space-y-3">
+              <div className="flex justify-end">
               <button
                 type="button"
                 onClick={async () => {
@@ -926,7 +959,7 @@ export default function MarketView() {
               >
                 Bid on trait / rarity / combo
               </button>
-            </div>
+              </div>
             {account && !loading && (
               <IncomingBids
                 offers={offers as unknown as Array<WithOrder<Offer>>}
@@ -991,28 +1024,39 @@ export default function MarketView() {
                 emptyMessage={traitOffers.length > 0 ? "No single-token offers." : "No offers yet."}
               />
             )}
-          </div>
+            </div>
+          </MarketTabSection>
           )}
-        </div>
-        <div className={tab === "activity" ? undefined : "hidden"}>
+        </MarketTabPanel>
+        <MarketTabPanel id="activity" active={tab === "activity"}>
           {visitedTabs.has("activity") && (
-          <div className="space-y-3">
-            <EventCountdown />
-            <ActivityFeed
-              onSelectToken={openDetail}
-              collection={COLLECTION}
-              listings={listings}
-              offers={offers}
-              totalSupply={TOTAL_SUPPLY}
-            />
-            <VaultTradeHistory />
-          </div>
+          <MarketTabSection
+            eyebrow="On-chain record"
+            title="Activity"
+            description="Follow collection sales, mints, transfers, venue attribution, price history, and live V1/V2 liquidity-pool trades."
+          >
+            <div className="space-y-3">
+              <EventCountdown />
+              <ActivityFeed
+                onSelectToken={openDetail}
+                collection={COLLECTION}
+                listings={listings}
+                offers={offers}
+                totalSupply={TOTAL_SUPPLY}
+              />
+              <VaultTradeHistory />
+            </div>
+          </MarketTabSection>
           )}
-        </div>
-        <div className={tab === "swap" ? undefined : "hidden"}>
+        </MarketTabPanel>
+        <MarketTabPanel id="swap" active={tab === "swap"}>
           {visitedTabs.has("swap") && (
-          <div className="space-y-3">
-            <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} />
+          <MarketTabSection
+            eyebrow="Dual-vault liquidity"
+            title="Instant Swap"
+            description="Buy or sell vault shares, provide liquidity, deposit NFTs for shares, or redeem shares for a random or specific Plank."
+          >
+            <div className="space-y-3">
             {/* CSS multi-column masonry, not a manual 2-column split — a
                 manual split left one side visibly taller than the other
                 (a whole empty quadrant under the shorter column, the
@@ -1025,6 +1069,7 @@ export default function MarketView() {
                 across the column break. */}
             {/* Dual vault: pick V1 (legacy deposits) or V2 (new book / LP) first */}
             <InstantVaultSwitcher role={vaultRole} onChange={setVaultRole} />
+            <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} />
             {/* Seed/bootstrap only on primary (V2) — never seed into legacy V1 */}
             {vaultRole === "primary" && (
               <SeedVaultPanel account={account} onConnect={handleConnect} />
@@ -1052,35 +1097,45 @@ export default function MarketView() {
               <VaultTradeHistory />
               <TreasuryDashboard />
             </div>
-          </div>
+            </div>
+          </MarketTabSection>
           )}
-        </div>
-        <div className={tab === "my-nfts" ? undefined : "hidden"}>
+        </MarketTabPanel>
+        <MarketTabPanel id="my-nfts" active={tab === "my-nfts"}>
           {visitedTabs.has("my-nfts") && (account ? (
-            <MyNfts
-              account={account}
-              collections={MARKET_COLLECTIONS}
-              alreadyListed={
-                new Set(
-                  listings
-                    .filter((l) => l.maker.toLowerCase() === account.toLowerCase())
-                    .map((l) => `${l.collectionSlug}:${l.tokenId}`)
-                )
-              }
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={handleConnect}
-              className="mx-auto flex min-h-11 items-center justify-center rounded-lg bg-gold-500 px-5 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
+            <MarketTabSection
+              eyebrow="Wallet inventory"
+              title="My NFTs"
+              description="Review every Plank in your wallet, inspect rarity and listing state, or select several for a verified transfer."
             >
-              Connect wallet
-            </button>
+              <MyNfts
+                account={account}
+                collections={MARKET_COLLECTIONS}
+                alreadyListed={
+                  new Set(
+                    listings
+                      .filter((l) => l.maker.toLowerCase() === account.toLowerCase())
+                      .map((l) => `${l.collectionSlug}:${l.tokenId}`)
+                  )
+                }
+              />
+            </MarketTabSection>
+          ) : (
+            <MarketWalletGate
+              title="See your Planks"
+              description="Connect to load your collection, inspect rarity and listing status, and access the multi-select send workflow."
+              onConnect={handleConnect}
+            />
           ))}
-        </div>
-        <div className={tab === "positions" ? undefined : "hidden"}>
+        </MarketTabPanel>
+        <MarketTabPanel id="positions" active={tab === "positions"}>
           {visitedTabs.has("positions") && (account ? (
-            <div className="space-y-3">
+            <MarketTabSection
+              eyebrow="Seller workspace"
+              title="My Listings"
+              description="List Planks from your wallet, accept matching bids, cancel active orders, and manage marketplace approvals."
+            >
+              <div className="space-y-3">
               <IncomingBids
                 offers={offers as unknown as Array<WithOrder<Offer>>}
                 ownedTokenIds={ownedTokenIds}
@@ -1110,18 +1165,18 @@ export default function MarketView() {
                 />
               )}
               <MyPositions account={account} listings={listings} offers={offers} onChanged={refresh} />
-            </div>
+              </div>
+            </MarketTabSection>
           ) : (
-            <button
-              type="button"
-              onClick={handleConnect}
-              className="mx-auto flex min-h-11 items-center justify-center rounded-lg bg-gold-500 px-5 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
-            >
-              Connect wallet
-            </button>
+            <MarketWalletGate
+              title="Manage your listings"
+              description="Connect to list Planks, review active listings and offers, accept matching bids, cancel orders, and revoke approvals."
+              onConnect={handleConnect}
+            />
           ))}
-        </div>
-      </Reveal>
-    </div>
+        </MarketTabPanel>
+      </div>
+      </MarketContent>
+    </MarketScaffold>
   );
 }
