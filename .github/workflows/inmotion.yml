@@ -162,6 +162,7 @@ jobs:
         env:
           UNISWAP_API_KEY: ${{ secrets.UNISWAP_API_KEY }}
           RPC_URL: ${{ secrets.RPC_URL }}
+          ZEROX_API_KEY: ${{ secrets.ZEROX_API_KEY }}
         shell: bash
         run: |
           set -euo pipefail
@@ -191,6 +192,17 @@ jobs:
               "$rpc_secret" \
               "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.rpc-url.${RELEASE_SHA}"
             rm -f "$rpc_secret"
+          fi
+          # 0x aggregator key — optional secret, staged exactly like RPC_URL
+          # (file over scp, never argv). Absent secret = 0x features stay
+          # disabled server-side; the Uniswap path is unaffected.
+          if [ -n "${ZEROX_API_KEY:-}" ]; then
+            zerox_secret="$RUNNER_TEMP/zerox-api-key"
+            printf '%s' "$ZEROX_API_KEY" > "$zerox_secret"
+            scp -i "$HOME/.ssh/inmotion" -P "$port" \
+              "$zerox_secret" \
+              "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.zerox-api-key.${RELEASE_SHA}"
+            rm -f "$zerox_secret"
           fi
 
       - name: Migrate, activate, and restart Passenger
@@ -228,6 +240,16 @@ jobs:
             chmod 600 "$env_file.next"
             mv -f "$env_file.next" "$env_file"
             rm -f "$staged_rpc_url"
+          fi
+          # Same upsert for the optional 0x key.
+          staged_zerox_key="$app_dir/shared/runtime-secrets/.zerox-api-key.$release_sha"
+          if [ -s "$staged_zerox_key" ]; then
+            env_file="$app_dir/shared/.env.production"
+            grep -v '^ZEROX_API_KEY=' "$env_file" > "$env_file.next" || true
+            printf 'ZEROX_API_KEY=%s\n' "$(cat "$staged_zerox_key")" >> "$env_file.next"
+            chmod 600 "$env_file.next"
+            mv -f "$env_file.next" "$env_file"
+            rm -f "$staged_zerox_key"
           fi
           release_dir="$app_dir/releases/$release_sha"
           mkdir -p "$release_dir" "$app_dir/shared" "$app_dir/tmp" "$app_dir/logs"
