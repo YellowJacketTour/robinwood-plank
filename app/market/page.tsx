@@ -20,7 +20,7 @@ export default function MarketPage() {
   return (
     <>
       <Nav />
-      <main className="flex-1 px-3 py-10 sm:px-5">
+      <main id="main-content" tabIndex={-1} className="flex-1 px-3 py-10 sm:px-5">
         {/* Browsing a listing grid benefits from real desktop width — the
             site-wide 64rem prose column (.site-shell) is right for the
             marketing/coming-soon state but starves the grid on wide

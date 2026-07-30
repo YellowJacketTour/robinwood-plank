@@ -101,6 +101,17 @@ components:
     typography: "{typography.label}"
     rounded: "{rounded.sm}"
     padding: 8px
+  site-header:
+    backgroundColor: "{colors.surface-strong}"
+    textColor: "{colors.foreground}"
+    borderColor: "{colors.primary}"
+    mobileHeight: 58px
+    desktopHeight: 68px
+  site-footer:
+    backgroundColor: "{colors.surface-strong}"
+    textColor: "{colors.muted}"
+    borderColor: "{colors.primary}"
+    desktopColumns: 3
 ---
 
 ## Overview
@@ -110,6 +121,8 @@ RobinWood is a hand-drawn woodland product world, not a generic crypto template.
 This file is the site-wide source of truth for the landing page, Trade, Mint, Gallery, Learn, Airdrop, Marketplank, and future RobinWood experiences. Marketplank is the first surface implemented against it; its more detailed information contract below is intentionally additive, not the boundary of the system.
 
 Visual redesigns are enhancement layers around production behavior. Decorative mockup content must never replace live data, an executable workflow, a safety disclosure, or a recovery state.
+
+Each product page must lead with its primary task. Analytics, education, and operational controls remain available, but they follow the action or evidence stream the user opened the page to use. Completeness is not permission to bury that task.
 
 ## Colors
 
@@ -161,7 +174,29 @@ Avoid excessive nesting of rounded cards. A border or spacing change is preferre
 - Cards use artwork or meaningful data as their focal point. Decorative empty chrome is avoided.
 - Wallet gates explain what connection unlocks before asking the user to connect.
 - Loading, empty, error, disabled, pending, success, and recovery states are first-class component variants across the site.
+- Transactional actions use a review-first pattern: the review summarizes the exact scope, inputs, current quote or proceeds, relevant fee, expiry, and safety limit before the wallet prompt. Copy distinguishes pre-sign checks from server-side publication checks.
 - Contract, transaction, and external source links are visibly external and use configured values rather than copied strings.
+
+### Shared header and navigation
+
+The header is a 58 px mobile / 68 px desktop sticky product rail with a translucent near-black wood surface and a narrow gold divider. It keeps the RobinWood mark legible without competing with the page masthead.
+
+- Navigation order is Market, Trade, Mint, Gallery, Learn, and Airdrop. Trade is the single gold primary action; it is not repeated as both a text link and a button.
+- The current route receives a restrained dark-gold state and `aria-current="page"`. Gold-filled controls remain reserved for the primary action.
+- The header may show the configured chain as read-only context, using a neutral chain glyph rather than a live-status dot. Wallet connection remains owned by the page workflow until the application has one shared wallet/session boundary.
+- Internal route changes use client navigation so the root layout and persistent audio player remain mounted. Home-section links retain their hash targets when followed from another route.
+- The compact menu remains in use through tablet widths; the full desktop rail begins at 1024 px so no destination is clipped. It is a full-width disclosure below the header, preserves the same order, uses 44–48 px rows, contains background scrolling, closes after selection, and supports backdrop click, Escape dismissal, breakpoint reset, first-link focus, and focus return.
+- Every page with the shared header provides `#main-content` for the keyboard skip link.
+
+### Shared footer
+
+The footer is one global information surface, not a promotional card. It uses dark restrained wood grain, a thin gold top rule, and three desktop responsibilities that stack in the same reading order on mobile:
+
+1. Robinhood Chain / $PLANK identity plus the complete meme-coin risk statement.
+2. The full configured `$PLANK token contract`, explicitly labeled and linked to the configured explorer.
+3. Learn, Market, Gallery, and the accessible external Twitter / X destination.
+
+The current copyright remains below a subtle divider. The address may wrap but is never truncated, footer links meet the 44 px touch target, and internal destinations use client navigation.
 
 ### Marketplank collection masthead
 
@@ -182,7 +217,7 @@ Tabs retain `?tab=` deep links, `?item=` item links, browser Back/Forward behavi
 
 ### Marketplank Buy & Sell information contract
 
-Retain the highest-sale event strip; Floor, Listed, Items, Best offer, and Highest sale; every rarity floor including Common; incoming matching bids; token ID, price, and rarity filters; result count; all four sorts; criteria bids; every sweep scope/preset/confirmation; loading and empty states; item detail; and verified Buy, Offer, and acceptance confirmations.
+Retain the highest-sale event strip; Floor, Listed, Items, Best offer, and Highest sale; every rarity floor including Common; incoming matching bids; token ID, price, and multi-select rarity filters; result count; all four sorts; criteria bids; every sweep scope/preset/confirmation; loading and empty states; item detail; and verified Buy, Offer, and acceptance confirmations. Multiple selected rarity tiers use OR semantics; price and token filters continue to combine with them using AND semantics.
 
 Cards retain NFT art, name, token ID, rank, rarity, maker, price, floor badge, trust badge, Buy, Offer, and keyboard/touch item-detail entry.
 
@@ -190,17 +225,25 @@ Cards retain NFT art, name, token ID, rank, rarity, maker, price, floor badge, t
 
 Retain criteria quick starts, dynamic trait/rank/combo clauses with AND semantics, qualifying population and floor, WETH amount, duration, fee, signing state, incoming bids a wallet can accept, criteria rows, single-token offers, ownership-based disabled states, verified net proceeds, token choice for criteria acceptance, and all empty states.
 
+Rank criteria use explicit top-N thresholds against the verified collection rarity snapshot. They fail closed when that snapshot is unavailable and are re-resolved by the server before an order is published.
+
+The criteria builder remains visible when disconnected so the Offers tab keeps its working hierarchy. Wallet connection gates review and signing, not the user’s ability to understand the workflow.
+
 Collection-wide offers stay unavailable until their Seaport criteria resolver is implemented and verified.
 
 ### Marketplank Activity information contract
 
 Retain Sales, Mints, and Transfers; evidence-based venue filters and attribution; artwork, token, rarity/rank, price, parties, time, and explorer links; filtered count; collection statistics; 24-hour and total volume analytics; average and priced-sale counts; sales chart; and the separate live V1/V2 vault trade ledger.
 
+On desktop, the event feed leads and analytics form a supporting rail. On mobile, the feed remains ahead of the chart so current evidence is not pushed below multiple summary surfaces. The sales chart exposes 24H, 7D, and ALL ranges.
+
 ### Marketplank Instant Swap information contract
 
 Retain both V1 and V2 vault identities and explorer links, Living Liquidity, Seed Vault, actionable V1-to-V2 migration, Buy, Sell, LP, Deposit, and Redeem modes, wallet balances, quotes and slippage, NFT pickers, random and targeted redemption, pending-request recovery, vault dashboard, NFT price chart, redeem odds, dual-vault trade history, and treasury controls.
 
 Buy means ETH to vault shares. NFTs are acquired through Redeem. Copy may never blur those two actions.
+
+Vault selection is followed immediately by the actionable Swap workbench. Living Liquidity supports it beside the workbench on desktop and follows it on mobile; charts, ledgers, migration, recovery, seed, and treasury modules come afterward. Buy and Sell reviews show both the current expected output and the minimum implied by the selected slippage, while making clear that the enforced value is recomputed at submission.
 
 ### Marketplank wallet workspaces
 

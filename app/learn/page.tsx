@@ -15,7 +15,7 @@ export default function LearnPage() {
   return (
     <>
       <Nav />
-      <main className="flex-1 px-3 py-10 sm:px-5">
+      <main id="main-content" tabIndex={-1} className="flex-1 px-3 py-10 sm:px-5">
         <div className="mx-auto w-full max-w-3xl lg:max-w-4xl">
           <LearnGuide />
         </div>
