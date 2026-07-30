@@ -27,6 +27,11 @@ export type CounterToken = {
    * tokens.uniswap.org), so the client always has a letter-avatar fallback
    * and never fabricates artwork for a token that doesn't have one. */
   logoURI?: string;
+  /** True only for a token resolved via validateArbitraryCounterToken —
+   * on-chain ERC20 metadata, never curated/reviewed. The client must show a
+   * warning before it's selectable; never set for anything in the curated
+   * list or CORE_COUNTERS. */
+  unverified?: boolean;
 };
 
 const TOKEN_LIST_URL = "https://tokens.uniswap.org";
@@ -153,4 +158,124 @@ export async function getCounterToken(address: string): Promise<CounterToken | n
   if (a === NATIVE_TOKEN_ADDRESS.toLowerCase()) return NATIVE_COUNTER;
   const all = await getCounterTokens();
   return all.find((t) => t.address.toLowerCase() === a) ?? null;
+}
+
+/**
+ * On-chain ERC20 validation for a token NOT on the curated list — "import by
+ * address". Reads symbol()/name()/decimals()/totalSupply() directly via RPC
+ * (lib/market/fetch-rpc's ethCall, the same server-side JSON-RPC helper the
+ * vault dashboard uses) and rejects anything that doesn't look like a real,
+ * callable ERC20. Never touches an off-chain registry — the contract itself
+ * is the only source of truth, so there's nothing here to spoof by naming a
+ * token "AAPL". Result is cached (address -> token-or-null) so repeat quotes
+ * for the same import don't re-hit RPC every time.
+ */
+const SYMBOL_SELECTOR = "0x95d89b41";
+const NAME_SELECTOR = "0x06fdde03";
+const DECIMALS_SELECTOR = "0x313ce567";
+const TOTAL_SUPPLY_SELECTOR = "0x18160ddd";
+const UNVERIFIED_TTL_MS = 6 * 60 * 60 * 1000; // 6h — ERC20 metadata never changes; just bounds memory
+
+const unverifiedCache = new Map<string, { at: number; token: CounterToken | null }>();
+
+/** Decode a single dynamic `string` ABI return (offset + length + utf8 bytes). */
+function decodeAbiString(hex: string): string | null {
+  try {
+    const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
+    if (clean.length < 128) return null;
+    const len = parseInt(clean.slice(64, 128), 16);
+    if (!Number.isFinite(len) || len < 0 || len > 256) return null;
+    const dataHex = clean.slice(128, 128 + len * 2);
+    if (dataHex.length !== len * 2) return null;
+    const str = Buffer.from(dataHex, "hex").toString("utf8").replace(/\0/g, "").trim();
+    return str || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Legacy (pre-ERC20-string-standard) tokens return symbol/name as bytes32. */
+function decodeBytes32String(hex: string): string | null {
+  try {
+    const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
+    if (clean.length < 64) return null;
+    const str = Buffer.from(clean.slice(0, 64), "hex").toString("utf8").replace(/\0/g, "").trim();
+    return str || null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeUint(hex: string): number | null {
+  try {
+    const n = Number(BigInt(hex));
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function validateArbitraryCounterToken(rawAddress: string): Promise<CounterToken | null> {
+  if (!/^0x[a-fA-F0-9]{40}$/.test(rawAddress)) return null;
+  const key = rawAddress.toLowerCase();
+  if (key === NATIVE_TOKEN_ADDRESS.toLowerCase() || key === CONTRACT_ADDRESS.toLowerCase()) return null;
+
+  const cached = unverifiedCache.get(key);
+  if (cached && Date.now() - cached.at < UNVERIFIED_TTL_MS) return cached.token;
+
+  const reject = (): null => {
+    unverifiedCache.set(key, { at: Date.now(), token: null });
+    return null;
+  };
+
+  try {
+    const { ethCall } = await import("@/lib/market/fetch-rpc");
+    const [symbolHex, nameHex, decimalsHex, supplyHex] = await Promise.all([
+      ethCall(rawAddress, SYMBOL_SELECTOR).catch(() => null),
+      ethCall(rawAddress, NAME_SELECTOR).catch(() => null),
+      ethCall(rawAddress, DECIMALS_SELECTOR).catch(() => null),
+      ethCall(rawAddress, TOTAL_SUPPLY_SELECTOR).catch(() => null),
+    ]);
+
+    // decimals() and totalSupply() are the two calls every real ERC20 must
+    // answer with a real number — missing/malformed on either means this
+    // isn't a callable ERC20 on this chain (wrong address, EOA, non-token
+    // contract, etc).
+    if (!decimalsHex || !supplyHex) return reject();
+    const decimals = decodeUint(decimalsHex);
+    if (decimals == null || decimals < 0 || decimals > 36) return reject();
+    if (decodeUint(supplyHex) == null) return reject();
+
+    const symbol =
+      (symbolHex && (decodeAbiString(symbolHex) || decodeBytes32String(symbolHex))) || null;
+    if (!symbol) return reject(); // no readable symbol — reject rather than show a blank token
+    const name =
+      (nameHex && (decodeAbiString(nameHex) || decodeBytes32String(nameHex))) || symbol;
+
+    const token: CounterToken = {
+      address: rawAddress,
+      symbol,
+      name,
+      decimals,
+      unverified: true,
+    };
+    unverifiedCache.set(key, { at: Date.now(), token });
+    return token;
+  } catch {
+    return reject();
+  }
+}
+
+/**
+ * The single entry point every server route should use to resolve a counter
+ * token: curated list first (fast, no RPC), falling back to live on-chain
+ * ERC20 validation for anything else. A token can only ever enter a quote
+ * after passing one of these two checks — this is what lets
+ * assertAllowedPair accept an imported address without weakening the
+ * PLANK-must-be-one-side rule or any other guard.
+ */
+export async function resolveCounterToken(address: string): Promise<CounterToken | null> {
+  const curated = await getCounterToken(address);
+  if (curated) return curated;
+  return validateArbitraryCounterToken(address);
 }

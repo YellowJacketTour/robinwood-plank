@@ -57,8 +57,8 @@ export async function POST(req: Request) {
       NATIVE_TOKEN_ADDRESS.toLowerCase(),
     ]);
     if (!core.has(t)) {
-      const { getCounterToken } = await import("@/lib/uniswap-tokenlist");
-      if (!(await getCounterToken(token))) {
+      const { resolveCounterToken } = await import("@/lib/uniswap-tokenlist");
+      if (!(await resolveCounterToken(token))) {
         throw new TradeApiError(400, "BAD_TOKEN", "That token is not on the allowed trading list.");
       }
     }
