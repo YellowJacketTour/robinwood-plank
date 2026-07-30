@@ -445,6 +445,22 @@ export default function MarketView() {
     setConnectOpen(true);
   }, []);
 
+  // Header "Connect wallet" hand-off: the nav button routes to
+  // /market?connect=1 (or fires this event when already here) — connection
+  // itself stays owned by this workspace, per DESIGN.md.
+  useEffect(() => {
+    const openConnect = () => handleConnect();
+    window.addEventListener("plank:connect-wallet", openConnect);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("connect") === "1") {
+      params.delete("connect");
+      const query = params.toString();
+      window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
+      handleConnect();
+    }
+    return () => window.removeEventListener("plank:connect-wallet", openConnect);
+  }, [handleConnect]);
+
   const onWalletConnected = useCallback(async (addr: string) => {
     try {
       await ensureRobinhoodChain();

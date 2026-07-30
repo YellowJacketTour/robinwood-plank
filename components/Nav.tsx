@@ -31,27 +31,43 @@ function isActive(link: (typeof NAV_LINKS)[number], pathname: string) {
   );
 }
 
+/** Finalized-mockup chain chip: rounded pill, live green dot, plain case. */
 function NetworkContext({ compact = false }: { compact?: boolean }) {
   return (
     <div
-      className={`flex items-center gap-2 rounded-md border border-gold-500/25 bg-black/20 px-3 text-xs uppercase tracking-[0.14em] text-foreground/65 ${
+      className={`flex items-center gap-2 rounded-full border border-gold-500/20 bg-black/25 px-3.5 text-xs font-bold text-foreground/70 ${
         compact ? "min-h-10" : "min-h-11"
       }`}
       aria-label={`Network: ${CHAIN.name}`}
     >
-      <svg
-        width="12"
-        height="12"
-        viewBox="0 0 12 12"
-        fill="none"
-        aria-hidden="true"
-        className="shrink-0 text-gold-400"
-      >
-        <path d="M6 1.25 10.4 3.7v4.6L6 10.75 1.6 8.3V3.7L6 1.25Z" stroke="currentColor" />
-        <path d="m3.9 4.85 2.1 1.2 2.1-1.2M6 6.05v2.4" stroke="currentColor" />
-      </svg>
+      <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
       {CHAIN.name}
     </div>
+  );
+}
+
+/**
+ * Header wallet action (finalized mockup): the single gold control in the
+ * nav. Connection itself stays owned by the market workspace — this button
+ * routes there and asks MarketView to open its connect modal.
+ */
+function ConnectWalletAction({ onNavigate }: { onNavigate?: () => void }) {
+  const pathname = usePathname() || "/";
+  return (
+    <Link
+      href="/market?connect=1"
+      onClick={(e) => {
+        onNavigate?.();
+        if (pathname === "/market") {
+          // Already on the market — just open the modal, no navigation.
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent("plank:connect-wallet"));
+        }
+      }}
+      className="inline-flex min-h-11 shrink-0 items-center rounded-lg bg-gold-500 px-4 text-sm font-bold text-wood-950 transition-colors hover:bg-gold-400"
+    >
+      Connect wallet
+    </Link>
   );
 }
 
@@ -154,14 +170,12 @@ export default function Nav() {
               {NAV_LINKS.map((link) => {
                 const href = navHref(link.href, pathname);
                 const active = isActive(link, pathname);
-                const emphasized = "emphasis" in link && link.emphasis === "cta";
-                const className = emphasized
-                  ? "inline-flex min-h-11 items-center rounded-md bg-gold-500 px-3 text-sm font-bold text-wood-950 transition-colors hover:bg-gold-400 lg:px-4"
-                  : `inline-flex min-h-11 items-center rounded-md border px-2 text-xs font-semibold uppercase tracking-wide transition-colors hover:bg-gold-500/10 hover:text-gold-300 lg:px-3 lg:text-sm ${
-                      active
-                        ? "border-gold-500/35 bg-gold-500/10 text-gold-300"
-                        : "border-transparent text-foreground/75"
-                    }`;
+                // Finalized mockup: flat text links, the active route as a
+                // quiet dark-gold pill, no borders. The header's single gold
+                // action is Connect wallet on the right.
+                const className = `inline-flex min-h-11 items-center rounded-md px-2 text-xs font-semibold uppercase tracking-wide transition-colors hover:bg-gold-500/10 hover:text-gold-300 lg:px-3 lg:text-sm ${
+                  active ? "bg-gold-500/15 text-gold-300" : "text-foreground/75"
+                }`;
 
                 return (
                   <li key={link.href}>
@@ -186,6 +200,7 @@ export default function Nav() {
             <div className="hidden xl:block">
               <NetworkContext compact />
             </div>
+            <ConnectWalletAction />
           </div>
 
           <button
@@ -234,19 +249,17 @@ export default function Nav() {
             aria-label="Primary navigation"
             className="fixed inset-x-0 top-[58px] z-50 max-h-[calc(100dvh-58px)] overflow-y-auto border-y border-gold-500/25 bg-wood-950 px-4 pb-5 shadow-2xl lg:hidden"
           >
-            <div className="mt-4">
+            <div className="mt-4 flex items-center justify-between gap-3">
               <NetworkContext />
+              <ConnectWalletAction onNavigate={() => closeMenu()} />
             </div>
             <ul className="mt-3 flex flex-col gap-1">
               {NAV_LINKS.map((link) => {
                 const href = navHref(link.href, pathname);
                 const active = isActive(link, pathname);
-                const emphasized = "emphasis" in link && link.emphasis === "cta";
-                const className = emphasized
-                  ? "my-2 flex min-h-12 items-center justify-center rounded-md bg-gold-500 px-3 py-2 text-center text-base font-bold text-wood-950 transition-colors hover:bg-gold-400"
-                  : `flex min-h-12 items-center rounded-md px-3 py-2 text-base font-semibold uppercase tracking-wide transition-colors hover:bg-wood-900 hover:text-gold-300 ${
-                      active ? "bg-gold-500/10 text-gold-300" : "text-foreground/80"
-                    }`;
+                const className = `flex min-h-12 items-center rounded-md px-3 py-2 text-base font-semibold uppercase tracking-wide transition-colors hover:bg-wood-900 hover:text-gold-300 ${
+                  active ? "bg-gold-500/10 text-gold-300" : "text-foreground/80"
+                }`;
 
                 return (
                   <li key={link.href}>
