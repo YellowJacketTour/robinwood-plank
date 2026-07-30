@@ -151,7 +151,9 @@ export default function PlankFence({
 
   return (
     <>
-      <div className="flex h-full items-end gap-2 overflow-x-auto overflow-y-visible px-3 pb-4 pt-3">
+      {/* Boards sit ON the fence line inside the rings scene — sized to the
+          strip, centered, never scrolled or cropped. */}
+      <div className="flex h-full items-end justify-center gap-1.5 overflow-hidden px-3 pb-1.5">
         {held.map((t) => {
           const r = rarity.get(t.tokenId) ?? rarity.get(String(Number(t.tokenId)));
           const color = r ? tierColor(r.tier) : "rgba(212,175,90,0.5)";
@@ -167,7 +169,7 @@ export default function PlankFence({
           return (
             <div
               key={t.tokenId}
-              className="relative h-24 w-24 shrink-0 touch-none select-none sm:h-32 sm:w-32 lg:h-36 lg:w-36"
+              className="relative h-12 w-9 shrink-0 touch-none select-none sm:h-[3.25rem] sm:w-10"
               onPointerEnter={(e) => onPointerEnter(e, t.tokenId)}
               onPointerLeave={() => onPointerLeave(t.tokenId)}
               onPointerDown={(e) => onPointerDown(e, t.tokenId)}
@@ -180,7 +182,10 @@ export default function PlankFence({
                   isSettling ? "duration-[450ms] ease-[cubic-bezier(0.34,1.56,0.64,1)]" : ""
                 }`}
                 style={{
-                  boxShadow: isHovered || isDragging ? `0 0 16px 3px ${color}, ${glow}` : glow,
+                  // Quiet at rest (finalized design: no ambient tier glows);
+                  // the tier color appears only on hover/drag, where it's
+                  // functional feedback.
+                  boxShadow: isHovered || isDragging ? `0 0 12px 2px ${color}` : undefined,
                   borderColor: isHovered ? color : undefined,
                   transform,
                   zIndex: isDragging ? 30 : isHovered ? 20 : 1,
