@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import CopyCA from "@/components/CopyCA";
 import CountdownTimer from "@/components/trade/CountdownTimer";
-import SwapWidget from "@/components/trade/SwapWidget";
+import TradeModeSwitch from "@/components/trade/TradeModeSwitch";
 import { TRADE_PAUSED } from "@/lib/constants";
 import { getCountdownParts } from "@/lib/trade";
 
@@ -24,7 +24,7 @@ export default function TradeWorkbench() {
       {!TRADE_PAUSED && isOpen ? (
         <>
           <CopyCA />
-          <SwapWidget />
+          <TradeModeSwitch />
         </>
       ) : (
         !TRADE_PAUSED && (
