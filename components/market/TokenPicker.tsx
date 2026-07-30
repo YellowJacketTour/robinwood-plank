@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { getRarityMap, tierAnimationClass, tierCardStyle, tierGlow } from "@/lib/market/rarityClient";
+import { Check } from "lucide-react";
+import { getRarityMap, tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { withImageWidth } from "@/lib/ipfs";
 
@@ -65,7 +66,7 @@ export default function TokenPicker({
   return (
     <div className="space-y-2">
       {tokens.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line bg-panel-strong px-3 py-6 text-center text-xs text-foreground/45">
+        <p className="rounded-xl border border-line bg-panel-strong px-3 py-6 text-center text-xs text-cream-muted">
           {emptyMessage}
         </p>
       ) : (
@@ -80,10 +81,9 @@ export default function TokenPicker({
                 onClick={() => onSelect(t.tokenId)}
                 aria-pressed={isSelected}
                 aria-label={`Select #${t.tokenId}`}
-                className={`group relative aspect-square overflow-hidden rounded-lg bg-wood-900 transition ${
-                  r ? `${tierAnimationClass(r.tier)} holo-card` : ""
-                } ${isSelected ? "ring-2 ring-gold-300" : ""}`}
-                style={r && !isSelected ? { boxShadow: tierGlow(r.tier), ...tierCardStyle(r.tier) } : undefined}
+                className={`dense-card group relative aspect-square overflow-hidden bg-wood-900 p-0 transition ${
+                  isSelected ? "ring-2 ring-gold-400" : "hover:border-line-strong"
+                }`}
               >
                 {t.imageUrl ? (
                   <Image
@@ -99,18 +99,26 @@ export default function TokenPicker({
                     #{t.tokenId}
                   </div>
                 )}
-                <span className="absolute inset-x-0 bottom-0 flex flex-col items-center bg-black/90 px-1 py-0.5 text-center leading-tight">
+                {r && (
+                  <span
+                    className="tier-badge absolute left-1 top-1 rounded-full px-1.5 py-0.5 text-[0.5rem] font-black uppercase tracking-wide"
+                    style={{ color: tierColor(r.tier) }}
+                  >
+                    {r.tier}
+                  </span>
+                )}
+                <span className="card-overlay absolute inset-x-0 bottom-0 flex flex-col items-center bg-black/90 px-1 py-0.5 text-center leading-tight">
                   <span className="w-full truncate font-bold text-gold-300 text-[0.55rem]">
                     {r?.name ?? `#${t.tokenId}`}
                   </span>
                   <span className="w-full truncate font-mono text-[0.45rem] text-foreground/50">
                     #{t.tokenId}
-                    {r ? ` · R${r.rank} · ${r.tier}` : ""}
+                    {r ? ` · R${r.rank}` : ""}
                   </span>
                 </span>
                 {isSelected && (
-                  <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold-400 text-[0.6rem] font-black text-wood-950">
-                    ✓
+                  <span className="card-overlay absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold-400 text-wood-950">
+                    <Check size={10} strokeWidth={3} />
                   </span>
                 )}
               </button>

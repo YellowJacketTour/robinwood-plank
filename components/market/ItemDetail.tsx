@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import { X } from "lucide-react";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
-import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
+import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import { sendNft, validateRecipient } from "@/lib/market/transfer";
@@ -84,7 +85,7 @@ export default function ItemDetail({
   // to clear here when the token changes.
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/market/token?tokenId=${encodeURIComponent(tokenId)}`)
+    fetch(`/api/market/token?tokenId=${encodeURIComponent(tokenId)}&history=1`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
       .then((d) => {
         if (!cancelled) setDetail(d);
@@ -113,14 +114,8 @@ export default function ItemDetail({
       aria-label={`${collection.name} #${tokenId}`}
       onClick={onClose}
     >
-      {/* Whole-modal tint + border, but NOT tierAnimationClass here — that
-          class's shimmer relies on `overflow: hidden`, which would fight
-          this container's own overflow-y-auto (the modal needs to scroll on
-          tall content). The image panel below still gets the full
-          glow+shimmer treatment. */}
       <div
         className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-2xl border border-line bg-wood-950 sm:rounded-2xl"
-        style={detail?.rarity ? tierCardStyle(detail.rarity.tier) : undefined}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
@@ -128,7 +123,7 @@ export default function ItemDetail({
             <p className="truncate font-display text-lg text-foreground">
               {detail?.rarity?.name ?? `#${tokenId}`}
             </p>
-            <p className="text-[0.65rem] text-foreground/45">
+            <p className="text-[0.65rem] text-cream-muted">
               #{tokenId}
               {detail?.rarity && (
                 <>
@@ -147,23 +142,14 @@ export default function ItemDetail({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="min-h-9 min-w-9 rounded-lg border border-line text-sm text-foreground/70 transition hover:border-gold-400"
+            className="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-line text-foreground/70 transition hover:border-gold-400"
           >
-            ✕
+            <X size={14} strokeWidth={2.5} />
           </button>
         </div>
 
         <div className="grid gap-4 p-4 sm:grid-cols-2">
-          <div
-            className={`relative aspect-square w-full overflow-hidden rounded-xl bg-wood-900 ${
-              detail?.rarity ? `${tierAnimationClass(detail.rarity.tier)} holo-card` : ""
-            }`}
-            style={
-              detail?.rarity
-                ? { boxShadow: tierGlow(detail.rarity.tier), ...tierCardStyle(detail.rarity.tier) }
-                : undefined
-            }
-          >
+          <div className="relative aspect-square w-full overflow-hidden rounded-xl border border-line bg-wood-900">
             <Image
               src={withImageWidth(detail?.image || listing?.imageUrl, 1024) || collection.image}
               alt={`${collection.name} #${tokenId}`}
@@ -172,19 +158,27 @@ export default function ItemDetail({
               className="object-cover"
               unoptimized
             />
+            {detail?.rarity && (
+              <span
+                className="tier-badge absolute left-2 top-2 rounded-full px-2 py-1 text-[0.55rem] font-black uppercase tracking-wide"
+                style={{ color: tierColor(detail.rarity.tier) }}
+              >
+                {detail.rarity.tier}
+              </span>
+            )}
           </div>
 
           <div className="space-y-3">
-            <div>
-              <p className="text-[0.6rem] uppercase tracking-wide text-foreground/40">Owner</p>
-              <p className="text-sm text-foreground">
+            <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+              <p className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Owner</p>
+              <p className="mt-1 text-xs font-bold text-foreground">
                 {failed ? "—" : detail ? shortAddress(detail.owner) : "…"}
               </p>
             </div>
 
             {listing && (
-              <div>
-                <p className="text-[0.6rem] uppercase tracking-wide text-foreground/40">Price</p>
+              <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                <p className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Price</p>
                 <p className="font-display text-2xl text-gold-300">
                   {formatTokenAmount(listing.priceWei, 18, 4)} Ξ
                 </p>
@@ -294,23 +288,23 @@ export default function ItemDetail({
             )}
 
             <div>
-              <p className="mb-1.5 text-[0.6rem] uppercase tracking-wide text-foreground/40">
+              <p className="mb-1.5 text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
                 Traits
               </p>
               {failed ? (
-                <p className="text-xs text-foreground/45">Unavailable.</p>
+                <p className="text-xs text-cream-muted">Unavailable.</p>
               ) : !detail ? (
-                <p className="text-xs text-foreground/45">Loading…</p>
+                <p className="text-xs text-cream-muted">Loading…</p>
               ) : detail.attributes.length === 0 ? (
-                <p className="text-xs text-foreground/45">None.</p>
+                <p className="text-xs text-cream-muted">None.</p>
               ) : (
                 <ul className="grid grid-cols-2 gap-1.5">
                   {detail.attributes.map((a, i) => (
                     <li
                       key={`${a.trait_type}-${i}`}
-                      className="rounded-lg border border-line px-2 py-1.5"
+                      className="rounded-lg border border-line bg-wood-950 px-2 py-1.5"
                     >
-                      <p className="truncate text-[0.6rem] uppercase tracking-wide text-foreground/40">
+                      <p className="truncate text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                         {a.trait_type ?? "Trait"}
                       </p>
                       <p className="truncate text-xs font-bold text-foreground">{String(a.value)}</p>
@@ -323,9 +317,9 @@ export default function ItemDetail({
         </div>
 
         <div className="border-t border-line px-4 py-3">
-          <p className="mb-1.5 text-[0.6rem] uppercase tracking-wide text-foreground/40">History</p>
+          <p className="mb-1.5 text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">History</p>
           {!detail || detail.history.length === 0 ? (
-            <p className="text-xs text-foreground/45">No transfers recorded.</p>
+            <p className="text-xs text-cream-muted">No transfers recorded.</p>
           ) : (
             <ul className="space-y-1">
               {detail.history.map((h) => (
@@ -338,8 +332,15 @@ export default function ItemDetail({
                   >
                     {h.kind}
                   </a>
-                  <span className="truncate text-foreground/45">
+                  <span className="truncate text-cream-muted">
                     {shortAddress(h.from)} → {shortAddress(h.to)}
+                  </span>
+                  <span className="shrink-0 text-right text-gold-300">
+                    {h.priceEth
+                      ? `${Number(h.priceEth).toFixed(4)} Ξ`
+                      : h.kind === "sale"
+                        ? "Unavailable"
+                        : "—"}
                   </span>
                   <span className="shrink-0 text-foreground/40">
                     {h.timestamp ? new Date(h.timestamp).toLocaleDateString() : "—"}

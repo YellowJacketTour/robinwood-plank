@@ -39,8 +39,8 @@ const RANGE_MS: Record<Exclude<Range, "ALL">, number> = {
 
 function stat(label: string, value: string, pending = false) {
   return (
-    <div className="rounded-lg border border-line bg-panel-strong px-3 py-2.5">
-      <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">
+    <div className="rounded-lg border border-line bg-wood-950 px-3 py-2.5">
+      <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
         {label}
       </dt>
       <dd
@@ -280,27 +280,27 @@ export default function ActivityStats({
         )}
       </dl>
 
-      <div className="rounded-lg border border-line bg-panel-strong p-3">
+      <div className="rounded-xl border border-line bg-panel p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-[0.65rem] font-bold uppercase tracking-wider text-foreground/55">
+            <p className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
               Sales price
             </p>
             <p className="text-[0.58rem] text-foreground/40">
               Verified priced sales over time
             </p>
           </div>
-          <div className="flex gap-1" aria-label="Sales chart range">
+          <div className="flex gap-1 rounded-[9px] bg-wood-950 p-1" aria-label="Sales chart range">
             {RANGES.map((option) => (
               <button
                 key={option}
                 type="button"
                 onClick={() => setRange(option)}
                 aria-pressed={range === option}
-                className={`min-h-8 rounded-md px-2 text-[0.6rem] font-bold transition ${
+                className={`min-h-8 rounded-md px-2 text-[0.6rem] font-black transition ${
                   range === option
-                    ? "bg-gold-500/25 text-gold-200"
-                    : "text-foreground/40 hover:bg-black/20 hover:text-foreground/60"
+                    ? "bg-gold-500 text-wood-950"
+                    : "text-[#a99c84] hover:text-gold-300"
                 }`}
               >
                 {option}
