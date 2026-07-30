@@ -130,7 +130,7 @@ export const TOKEN = {
  */
 export const NAV_LINKS = [
   { href: "/market", label: "Market" },
-  { href: "#trade", label: "Trade", emphasis: "cta" },
+  { href: "/trade", label: "Trade", emphasis: "cta" },
   { href: "#mint", label: "Mint", activePaths: ["/mint", "/launch"] },
   { href: "/gallery", label: "Gallery" },
   { href: "/learn", label: "Learn" },
