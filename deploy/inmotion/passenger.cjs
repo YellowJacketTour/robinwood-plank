@@ -15,6 +15,29 @@ if (fs.existsSync(envFile)) {
   process.loadEnvFile(envFile);
 }
 
+// GitHub Actions installs this server-only credential separately from the
+// release artifact and .env.production. A cPanel-provided environment value
+// still wins when present.
+if (!process.env.UNISWAP_API_KEY?.trim()) {
+  const uniswapKeyFile = path.join(
+    appRoot,
+    "shared",
+    "runtime-secrets",
+    "uniswap-api-key"
+  );
+  if (fs.existsSync(uniswapKeyFile)) {
+    const mode = fs.statSync(uniswapKeyFile).mode & 0o777;
+    if ((mode & 0o077) !== 0) {
+      throw new Error("Uniswap runtime secret must not be group/world accessible.");
+    }
+    const key = fs.readFileSync(uniswapKeyFile, "utf8").trim();
+    if (key.length < 16) {
+      throw new Error("Uniswap runtime secret is empty or invalid.");
+    }
+    process.env.UNISWAP_API_KEY = key;
+  }
+}
+
 process.env.NODE_ENV = "production";
 process.env.DEPLOYMENT_VERSION ||= path.basename(releaseRoot);
 process.chdir(releaseRoot);

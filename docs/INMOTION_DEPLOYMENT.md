@@ -200,6 +200,8 @@ Environment secrets:
 - `INMOTION_USER`
 - `INMOTION_SSH_KEY`
 - `INMOTION_HOST_KEY`
+- `UNISWAP_API_KEY` — uploaded separately from every release and installed at
+  `shared/runtime-secrets/uniswap-api-key` with mode `600`
 
 Repository variables:
 
@@ -211,8 +213,12 @@ Repository variables:
 - `INMOTION_HEALTH_URL=https://plank.tanggang.life`
 - Every `NEXT_PUBLIC_*` value from `.env.inmotion.example`
 
-The PostgreSQL password, relayer private key, Uniswap API key, and cron secret
-remain only in the server's `.env.production`.
+The PostgreSQL password remains only in the server's `.env.production`.
+`RELAYER_PRIVATE_KEY` remains a repository Actions secret used by the direct
+GitHub drand relay and is never copied to Passenger. `UNISWAP_API_KEY` is
+managed in GitHub Actions and installed as a server-only runtime secret during
+deployment; it is never included in the repository, release archive, or
+`.env.production`.
 
 ## 9. CI/CD behavior
 
@@ -228,11 +234,13 @@ A push to `inmotion` packages `.next/standalone`. When
 `INMOTION_DEPLOY_ENABLED` is exactly `true`, the deploy job:
 
 1. Uploads an immutable release named by commit SHA.
-2. Runs pending PostgreSQL migrations with server-side credentials.
-3. Atomically changes the `current` release symlink.
-4. Touches `tmp/restart.txt` so Passenger reloads.
-5. Checks PostgreSQL through `/api/health` and renders `/market`.
-6. Restores the previous release automatically if health checks fail.
+2. Installs the GitHub-managed Uniswap key as a mode-`600` runtime secret.
+3. Runs pending PostgreSQL migrations with server-side credentials.
+4. Atomically changes the `current` release symlink.
+5. Touches `tmp/restart.txt` so Passenger reloads.
+6. Checks PostgreSQL, confirms the live trade API loaded its key, and renders
+   `/market`.
+7. Restores the previous release automatically if health checks fail.
 
 The workflow builds on GitHub, not the shared server.
 
