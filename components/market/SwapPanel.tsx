@@ -855,9 +855,9 @@ export default function SwapPanel({
 
   if (!hasVault) {
     return (
-      <div className="wood-frame overflow-hidden rounded-2xl bg-wood-900/95">
+      <div className="overflow-hidden rounded-2xl border border-gold-500/25 bg-wood-900/95">
         <div className="relative flex flex-col items-center gap-4 px-6 py-10 text-center">
-          <div className="relative h-20 w-20 overflow-hidden rounded-2xl border-2 border-gold-500/40 shadow-[0_0_24px_-4px_rgba(248,217,138,0.5)]">
+          <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-gold-500/40">
             <Image
               src={collection?.image ?? "/images/plank-logo.webp"}
               alt={collection?.name ?? "Collection"}
@@ -1132,7 +1132,7 @@ export default function SwapPanel({
     (activeKind === "v1" ? "V1 vault" : activeKind === "v2" ? "V2 vault" : "Vault");
 
   return (
-    <div className="wood-frame relative overflow-hidden rounded-2xl bg-wood-900/95">
+    <div className="relative overflow-hidden rounded-2xl border border-gold-500/25 bg-wood-900/95">
       {reviewOpen && (
         <div
           className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4"

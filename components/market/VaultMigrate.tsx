@@ -184,7 +184,7 @@ export default function VaultMigrate({ account, onConnect, embedded = false, act
       className={
         embedded
           ? "space-y-4"
-          : "wood-frame space-y-4 overflow-hidden rounded-2xl bg-wood-900/95 p-4 sm:p-5"
+          : "space-y-4 overflow-hidden rounded-2xl border border-gold-500/25 bg-wood-900/95 p-4 sm:p-5"
       }
     >
       <div>

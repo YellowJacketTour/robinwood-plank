@@ -67,7 +67,7 @@ export default function SeedVaultPanel({ account, onConnect, active = true }: Pr
   return (
     <div
       id="seed-v2"
-      className="wood-frame space-y-3 scroll-mt-24 overflow-hidden rounded-2xl border-2 border-gold-400/50 bg-wood-900/95 p-4 sm:p-5"
+      className="space-y-3 scroll-mt-24 overflow-hidden rounded-2xl border border-gold-500/25 bg-wood-900/95 p-4 sm:p-5"
     >
       <div>
         <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.18em] text-gold-300">
