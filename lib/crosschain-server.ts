@@ -1,3 +1,43 @@
+/**
+ * STATUS (decision recorded 2026-07-30): this Uniswap-based cross-chain
+ * module is a documented, verified FALLBACK — not the shipping path. 0x's
+ * Cross-Chain API (lib/zerox-server.ts, app/api/zerox/**) is what ships,
+ * because the comparison was one-sided:
+ *
+ * - 0x: ONE signed transaction, source token -> $PLANK directly (no
+ *   separate "swap the bridged ETH" step), ~4s estimated fill, and our
+ *   integrator fee is actually earned.
+ * - This module: two steps (bridge, then a separate same-chain swap), and
+ *   — empirically confirmed, not assumed — Uniswap's BRIDGE routing
+ *   silently ignores the integratorFees field entirely. Proof: the exact
+ *   same 0.1 ETH mainnet -> Robinhood-Chain-native quote, requested once
+ *   with integratorFees attached and once without, returned a
+ *   byte-for-byte identical output.amount (99956661296552660) both times.
+ *   So this path only ever earns fee in its second, hand-off step — never
+ *   on the cross-chain leg itself.
+ *
+ * Separately, and why this module doesn't even attempt CHAINED (bridge +
+ * destination swap in one Uniswap quote): as of 2026-07-30, Uniswap's
+ * /quote returns "No quotes available" for any source-chain -> $PLANK
+ * CHAINED request, and this is NOT $PLANK-specific — the identical request
+ * for ETH -> USDG on Robinhood Chain fails the same way. Uniswap's CHAINED
+ * router simply hasn't indexed this destination chain's newer pairs yet,
+ * with no public ETA. The dormant CHAINED/BRIDGE quote+plan scaffolding in
+ * this file (assertCrossChainDestination, assertPlanStepsSane, and
+ * app/api/crosschain/{quote,plan,plan/submit}) is kept as-is against the
+ * chance that changes upstream — it needs no code changes to start
+ * working, just re-verification against a live quote.
+ *
+ * KNOWN GAP, if this module is ever revived and its flag enabled: unlike
+ * the same-chain SwapWidget, which pins every swap's tx.to to the one
+ * known Universal Router address, the bridge-leg transaction here targets
+ * a different Across-related contract per source chain, and those
+ * addresses are not individually enumerated/pinned anywhere in this
+ * codebase (see the SECURITY NOTE in lib/crosschain-wallet.ts and the
+ * RESIDUAL RISK comment in app/api/crosschain/bridge/swap/route.ts for the
+ * specifics). Close that gap before ever flipping
+ * NEXT_PUBLIC_CROSSCHAIN_ENABLED to true in production.
+ */
 import { CONTRACT_ADDRESS } from "@/lib/constants";
 import { getApiKey, getIntegratorFees, TradeApiError } from "@/lib/uniswap-server";
 import {
