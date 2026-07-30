@@ -77,19 +77,19 @@ export default function Hero() {
         <div className="grid w-full max-w-lg grid-cols-2 gap-2 sm:flex sm:max-w-none sm:justify-center">
           <a
             href="#trade"
-            className="col-span-2 rounded-lg bg-gold-500 px-5 py-3 text-center text-sm font-bold text-wood-950 sm:col-span-1 sm:min-w-[11rem] sm:py-2.5"
+            className="col-span-2 flex min-h-12 items-center justify-center rounded-lg bg-gold-500 px-5 text-center text-sm font-bold text-wood-950 sm:col-span-1 sm:min-w-[11rem]"
           >
             Trade $PLANK →
           </a>
           <a
             href="/market"
-            className="rounded-lg border border-gold-500/60 bg-wood-950/80 px-4 py-2.5 text-center text-sm font-bold text-gold-300 sm:min-w-[9rem]"
+            className="flex min-h-12 items-center justify-center rounded-lg border border-gold-500/60 bg-wood-950/80 px-4 text-center text-sm font-bold text-gold-300 sm:min-w-[9rem]"
           >
             Buy on the Market
           </a>
           <a
             href="/market?tab=swap"
-            className="rounded-lg border border-line px-4 py-2.5 text-center text-sm font-bold text-cream-muted sm:min-w-[9rem]"
+            className="flex min-h-12 items-center justify-center rounded-lg border border-line px-4 text-center text-sm font-bold text-cream-muted sm:min-w-[9rem]"
           >
             Instant Swap
           </a>

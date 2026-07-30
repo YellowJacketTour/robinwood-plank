@@ -38,6 +38,7 @@ export default function Trade() {
             artSrc="/images/collection/plank-insidertrader.png"
             artAlt="Insider Trader collection plank"
             center
+            framed
             className="mx-auto max-w-xl"
           />
         </Reveal>
