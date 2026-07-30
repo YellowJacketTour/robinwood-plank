@@ -17,7 +17,7 @@ import {
 } from "@/lib/nft-cache";
 import { computeRaritySnapshot, formatRank, tierColor } from "@/lib/rarity";
 
-const PREVIEW_COUNT = 5;
+const PREVIEW_COUNT = 10;
 
 type PreviewNft = {
   tokenId: number;
