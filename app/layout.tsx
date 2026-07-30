@@ -1,12 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import { Uncial_Antiqua, Nunito_Sans } from "next/font/google";
 import "./globals.css";
-import { SITE_URL } from "@/lib/constants";
 import PlankBackground from "@/components/PlankBackground";
 import AudioPlayer from "@/components/AudioPlayer";
 import HoloField from "@/lib/holo";
 import SplashIntro from "@/components/SplashIntro";
 import ArtServiceWorker from "@/components/ArtServiceWorker";
+import { rootMetadata } from "@/lib/seo";
 
 const stencil = Uncial_Antiqua({
   variable: "--font-stencil",
@@ -19,39 +19,7 @@ const body = Nunito_Sans({
   subsets: ["latin"],
 });
 
-const title = "RobinWood ($PLANK) — Robinhood Chain Mint & Trade";
-const description = "Mint RobinWood, trade $PLANK on Uniswap. Robinhood Chain.";
-
-export const metadata: Metadata = {
-  metadataBase: new URL(SITE_URL),
-  title,
-  description,
-  keywords: ["RobinWood", "PLANK", "Robinhood Chain", "meme coin", "NFT mint", "crypto"],
-  openGraph: {
-    title,
-    description,
-    url: SITE_URL,
-    siteName: "RobinWood ($PLANK)",
-    type: "website",
-    images: [
-      {
-        url: "https://plank.love/plank-social.jpg",
-        width: 1280,
-        height: 719,
-        alt: "RobinWood Plank check",
-      },
-    ],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title,
-    description,
-    images: ["https://plank.love/plank-social.jpg"],
-  },
-  icons: {
-    icon: "/favicon.ico",
-  },
-};
+export const metadata: Metadata = rootMetadata;
 
 export const viewport: Viewport = {
   themeColor: "#14100b",
