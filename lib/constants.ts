@@ -85,6 +85,33 @@ export const RULES_RELAXED =
   process.env.NEXT_PUBLIC_RULES_RELAXED?.trim().toLowerCase() === "true";
 
 /**
+ * Phase B: gasless swaps via UniswapX (Dutch auction, filler pays gas).
+ * UniswapX is live on Robinhood Chain (chain 4663) via the DutchV3OrderReactor
+ * — confirmed against current Uniswap Trading API docs 2026-07-30.
+ *
+ * HARD OFF by default. Same on/off-without-deploy pattern as TRADE_PAUSED /
+ * MARKET_ENABLED: this is read identically on the server (gates whether
+ * /api/uniswap/quote will ever include UNISWAPX_V3 in `protocols`, and
+ * whether /api/uniswap/order accepts submissions at all) and on the client
+ * (gates whether the gasless toggle renders). The server check is what
+ * actually matters for safety — the client flag only controls whether the
+ * UI offers the option.
+ */
+export const GASLESS_SWAPS_ENABLED =
+  process.env.NEXT_PUBLIC_GASLESS_ENABLED?.trim().toLowerCase() === "true";
+
+/**
+ * UniswapX DutchV3OrderReactor on Robinhood Chain — the only contract that
+ * may appear as the `reactor` on an order our server will let a client sign.
+ * A tampered/substituted reactor address is exactly the shape of attack that
+ * would redirect a "gasless swap" into an arbitrary contract instead of the
+ * real UniswapX settlement flow.
+ * @see https://developers.uniswap.org/docs/trading/swapping-api/supported-chains
+ */
+export const UNISWAPX_REACTOR_ADDRESS =
+  "0x000000007A1C8e570011eEDF86A2A35593013cBA" as const;
+
+/**
  * plank.love integrator fee on in-widget Uniswap swaps (Trading API path only).
  *
  * Target meme rate was 0.42069%. Uniswap Trading API IntegratorFee.bips allows
@@ -292,6 +319,7 @@ export const EXPORTED_ADDRESS_CONSTANTS: Readonly<Record<string, string>> =
     CONTRACT_ADDRESS,
     NATIVE_TOKEN_ADDRESS,
     UNIVERSAL_ROUTER_ADDRESS,
+    UNISWAPX_REACTOR_ADDRESS,
     PERMIT2_ADDRESS,
     "SITE_FEE.recipient": SITE_FEE.recipient,
     SEAPORT_ADDRESS,

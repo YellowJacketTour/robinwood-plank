@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import {
   BUY_GAS_RESERVE_ETH,
   BUY_GAS_RESERVE_WEI,
   CHAIN,
   CONTRACT_ADDRESS,
+  GASLESS_SWAPS_ENABLED,
   NATIVE_TOKEN_ADDRESS,
   SITE_FEE,
   TOKEN,
@@ -36,6 +37,17 @@ import {
 import dynamic from "next/dynamic";
 import TokenSelectModal from "@/components/trade/TokenSelectModal";
 import TokenIcon from "@/components/trade/TokenIcon";
+import GaslessToggle from "@/components/trade/GaslessToggle";
+import OrderStatus from "@/components/trade/OrderStatus";
+
+/** Routing values that mean "this is a UniswapX order — use /api/uniswap/order,
+ * not /api/uniswap/swap". Mirrors lib/uniswap-server.ts's DUTCH_ROUTINGS
+ * (kept as a small local copy — this file is client-only and must not import
+ * the server module, which pulls in DB-backed lib/boards-store etc). */
+const DUTCH_ROUTINGS = new Set(["DUTCH_V2", "DUTCH_V3", "LIMIT_ORDER", "PRIORITY"]);
+function isDutchRouting(routing: string): boolean {
+  return DUTCH_ROUTINGS.has(routing);
+}
 
 /** Same connect surface the market uses (WalletConnect QR + extension) —
  * loaded on demand; the WC runtime itself only loads on "Show QR". */
@@ -65,6 +77,10 @@ type CounterTokenEntry = {
   name: string;
   decimals: number;
   logoURI?: string;
+  /** True for a token imported by address (on-chain ERC20 metadata only,
+   * never curated) — the pill stays flagged after selection, not just in
+   * the picker, so the warning doesn't disappear once the modal closes. */
+  unverified?: boolean;
 };
 
 const NATIVE_COUNTER_ENTRY: CounterTokenEntry = {
@@ -91,6 +107,9 @@ type QuoteState = {
   approvalNeeded?: boolean;
   /** Priced without a wallet — display only, never executable. */
   indicative?: boolean;
+  /** Present only for UniswapX/Dutch quotes — the order the client signs
+   * as-is and relays to /api/uniswap/order. */
+  encodedOrder?: string;
 };
 
 type TxFields = {
@@ -123,6 +142,11 @@ export default function SwapWidget() {
   const [txHash, setTxHash] = useState<string | null>(null);
   const [apiReady, setApiReady] = useState<boolean | null>(null);
   const [slippage, setSlippage] = useState(2.5);
+  // Phase B: opt-in gasless (UniswapX) routing. Only meaningful when the
+  // server has GASLESS_SWAPS_ENABLED on — otherwise the quote route just
+  // ignores this and returns the same CLASSIC quote as always.
+  const [gaslessOpted, setGaslessOpted] = useState(false);
+  const [orderHash, setOrderHash] = useState<string | null>(null);
 
   /** The non-PLANK side of the pair. Server-validated allowlist: native
    * ETH + the official Uniswap token list for this chain (tokenized
@@ -266,6 +290,7 @@ export default function SwapWidget() {
     setAmountIn("");
     setQuote(null);
     setTxHash(null);
+    setOrderHash(null);
     setError(null);
     setStatus(null);
   };
@@ -274,6 +299,7 @@ export default function SwapWidget() {
     setError(null);
     setStatus(null);
     setTxHash(null);
+    setOrderHash(null);
     setQuote(null);
 
     const raw = parseTokenAmount(amountIn, inputDecimals);
@@ -300,6 +326,7 @@ export default function SwapWidget() {
           swapper: account || undefined,
           slippageTolerance: slippage,
           counterToken: counterIsNative ? undefined : counter.address,
+          ...(GASLESS_SWAPS_ENABLED && gaslessOpted ? { gasless: true } : {}),
         }),
       });
       const data = await res.json();
@@ -328,6 +355,7 @@ export default function SwapWidget() {
             ? (data.permitTransaction as Record<string, string>)
             : null,
         routing: (data.routing as string) || "CLASSIC",
+        encodedOrder: typeof qInner.encodedOrder === "string" ? qInner.encodedOrder : undefined,
         amountOut,
         fetchedAt: Date.now(),
         maxFeePerGas:
@@ -357,7 +385,7 @@ export default function SwapWidget() {
     } finally {
       setBusy(false);
     }
-  }, [amountIn, inputDecimals, account, direction, slippage, counter, counterIsNative]);
+  }, [amountIn, inputDecimals, account, direction, slippage, counter, counterIsNative, gaslessOpted]);
 
   // Uniswap-interface behavior: typing auto-quotes (debounced) — no button
   // press needed for a price. Any change to the inputs re-quotes; clearing
@@ -372,7 +400,7 @@ export default function SwapWidget() {
     }
     const timer = window.setTimeout(() => void fetchQuoteRef.current(), 600);
     return () => window.clearTimeout(timer);
-  }, [amountIn, inputDecimals, direction, slippage, counter, account]);
+  }, [amountIn, inputDecimals, direction, slippage, counter, account, gaslessOpted]);
 
   // Quote freshness: while a quote is showing, the amount is still valid, and
   // the tab is visible, silently re-quote once it crosses QUOTE_TTL_MS. Pauses
@@ -448,6 +476,7 @@ export default function SwapWidget() {
               ? (qData.permitTransaction as Record<string, string>)
               : null,
           routing: (qData.routing as string) || "CLASSIC",
+          encodedOrder: typeof qInner.encodedOrder === "string" ? qInner.encodedOrder : undefined,
           amountOut,
           fetchedAt: Date.now(),
           maxFeePerGas:
@@ -475,6 +504,7 @@ export default function SwapWidget() {
             // buy with a non-native counter (AAPL, USDG, …) would build a
             // swap for the wrong pair entirely.
             counterToken: counterIsNative ? undefined : counter.address,
+            ...(GASLESS_SWAPS_ENABLED && gaslessOpted ? { gasless: true } : {}),
           }),
         });
         const qData = (await qRes.json()) as Record<string, unknown>;
@@ -600,6 +630,46 @@ export default function SwapWidget() {
         );
       }
 
+      // Gasless (UniswapX) path: no swap tx to build or send. The order is
+      // already fully formed by /api/uniswap/quote (encodedOrder); the
+      // signature above is over that same order, so submitting it is just a
+      // relay — a filler broadcasts the actual fill. OrderStatus (rendered
+      // below) takes over from here and polls until Filled/Expired/etc.
+      if (isDutchRouting(active.routing)) {
+        if (!active.encodedOrder) {
+          throw new Error("Gasless order missing encoded order data. Get a fresh quote and retry.");
+        }
+        if (!signature) {
+          throw new Error("Gasless order requires a signature. Get a fresh quote and retry.");
+        }
+        setStatus("Submitting gasless order…");
+        const orderRes = await fetch("/api/uniswap/order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            quote: active.quote,
+            encodedOrder: active.encodedOrder,
+            signature,
+            swapper: account,
+          }),
+        });
+        const orderData = await orderRes.json();
+        if (!orderRes.ok) {
+          throw new Error(orderData.message || orderData.error || "Gasless order submission failed.");
+        }
+        if (!orderData.orderHash) {
+          throw new Error("Order submitted but no order hash returned — cannot track status.");
+        }
+        setOrderHash(orderData.orderHash);
+        setStatus("Order submitted — a filler settles it, no gas from you.");
+        void fetch("/api/boards/ping", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ address: account, kind: "swap" }),
+        });
+        return;
+      }
+
       setStatus("Building swap…");
       const res = await fetch("/api/uniswap/swap", {
         method: "POST",
@@ -707,7 +777,7 @@ export default function SwapWidget() {
     } finally {
       setBusy(false);
     }
-  }, [quote, account, amountIn, inputDecimals, direction, slippage, counter, counterIsNative]);
+  }, [quote, account, amountIn, inputDecimals, direction, slippage, counter, counterIsNative, gaslessOpted]);
 
   const estimatedOut = useMemo(() => {
     if (!quote?.amountOut) return "—";
@@ -837,6 +907,16 @@ export default function SwapWidget() {
         Router on {CHAIN.name} — never Ethereum L1. Keep ~{BUY_GAS_RESERVE_ETH} ETH free for gas.
       </p>
 
+      {counter.unverified && (
+        <p className="flex items-start gap-1.5 rounded-lg border border-amber-500/40 bg-amber-950/30 px-2.5 py-1.5 text-[0.65rem] leading-snug text-amber-100/90 sm:text-[0.7rem]">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-300" />
+          <span>
+            <strong className="text-amber-200">Unverified token — {counter.symbol}:</strong> imported
+            by address, not on the curated list. Trade at your own risk.
+          </span>
+        </p>
+      )}
+
       <div className="grid grid-cols-2 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/90 p-1">
         {(["buy", "sell"] as const).map((d) => (
           <button
@@ -884,6 +964,9 @@ export default function SwapWidget() {
             >
               <TokenIcon symbol={counter.symbol} logoURI={counter.logoURI} size={18} />
               {counter.symbol}
+              {counter.unverified && (
+                <AlertTriangle size={12} className="text-amber-300" aria-label="Unverified token" />
+              )}
               <ChevronDown size={14} />
             </button>
           ) : (
@@ -925,6 +1008,9 @@ export default function SwapWidget() {
             >
               <TokenIcon symbol={counter.symbol} logoURI={counter.logoURI} size={18} />
               {counter.symbol}
+              {counter.unverified && (
+                <AlertTriangle size={12} className="text-amber-300" aria-label="Unverified token" />
+              )}
               <ChevronDown size={14} />
             </button>
           ) : (
@@ -1017,6 +1103,18 @@ export default function SwapWidget() {
         </details>
       )}
 
+      {GASLESS_SWAPS_ENABLED && (
+        <GaslessToggle
+          checked={gaslessOpted}
+          disabled={busy}
+          onChange={(next) => {
+            setGaslessOpted(next);
+            setQuote(null);
+            setOrderHash(null);
+          }}
+        />
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2 text-[0.7rem] text-foreground/55 sm:text-xs">
         <label className="flex items-center gap-1.5">
           <span className="font-bold uppercase tracking-wide">Slip</span>
@@ -1106,6 +1204,27 @@ export default function SwapWidget() {
           Open this pair on Uniswap ↗
         </a>
       </div>
+
+      {orderHash && account && (
+        <OrderStatus
+          orderHash={orderHash}
+          swapper={account}
+          onFilled={() => {
+            setStatus("Order filled — no gas paid.");
+            setQuote(null);
+            setAmountIn("");
+          }}
+          onTerminal={(finalStatus) => {
+            if (finalStatus !== "Filled") {
+              setError(
+                finalStatus === "Expired"
+                  ? "Order expired without a fill — no funds moved. Get a fresh quote."
+                  : `Order ended: ${finalStatus}. No funds moved unless filled.`
+              );
+            }
+          }}
+        />
+      )}
 
       {(status || error || txHash) && (
         <div className="space-y-1 text-center text-xs">

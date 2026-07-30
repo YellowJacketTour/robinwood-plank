@@ -1,19 +1,56 @@
 import {
   CHAIN,
   CONTRACT_ADDRESS,
+  GASLESS_SWAPS_ENABLED,
   NATIVE_TOKEN_ADDRESS,
   SITE_FEE,
   TOKEN,
+  UNISWAPX_REACTOR_ADDRESS,
 } from "@/lib/constants";
 import { isTradeOpen } from "@/lib/trade";
 
 const TRADE_API = "https://trade-api.gateway.uniswap.org/v1";
 
-/** Paths we are allowed to call on Uniswap — no open proxy. */
-const ALLOWED_PATHS = new Set(["/quote", "/swap", "/check_approval"]);
+/** POST paths we are allowed to call on Uniswap — no open proxy. */
+const ALLOWED_PATHS = new Set(["/quote", "/swap", "/check_approval", "/order"]);
+
+/** GET paths we are allowed to call on Uniswap. */
+const ALLOWED_GET_PATHS = new Set(["/orders"]);
 
 /** Force AMM routes only so /swap works (no UniswapX /order path). */
 export const AMM_PROTOCOLS = ["V2", "V3", "V4"] as const;
+
+/**
+ * AMM + UniswapX. Only used when GASLESS_SWAPS_ENABLED is on and the caller
+ * opted in — UNISWAPX_V3 is the variant confirmed live on Robinhood Chain
+ * (chain 4663) per Uniswap's supported-chains docs. AMM protocols stay in
+ * the list too so a CLASSIC quote is always available as a fallback when no
+ * UniswapX route exists (routingPreference: BEST_PRICE picks the better one).
+ */
+export const GASLESS_PROTOCOLS = ["V2", "V3", "V4", "UNISWAPX_V3"] as const;
+
+/** Routing values that mean "this is a UniswapX order — use /order, not /swap". */
+const DUTCH_ROUTINGS = new Set(["DUTCH_V2", "DUTCH_V3", "LIMIT_ORDER", "PRIORITY"]);
+
+export function isDutchRouting(routing: unknown): boolean {
+  return typeof routing === "string" && DUTCH_ROUTINGS.has(routing);
+}
+
+/** Server truth for whether gasless/UniswapX is switchable on at all right now. */
+export function isGaslessEnabled(): boolean {
+  return GASLESS_SWAPS_ENABLED;
+}
+
+/**
+ * Choose the /quote `protocols` list. Gasless only applies when the flag is
+ * on AND the caller explicitly opted in for this quote — CLASSIC stays the
+ * default for everyone else, unchanged from pre-Phase-B behavior.
+ */
+export function chooseProtocols(
+  wantsGasless: boolean
+): typeof AMM_PROTOCOLS | typeof GASLESS_PROTOCOLS {
+  return GASLESS_SWAPS_ENABLED && wantsGasless ? GASLESS_PROTOCOLS : AMM_PROTOCOLS;
+}
 
 export type SwapDirection = "buy" | "sell";
 
@@ -132,12 +169,14 @@ export async function assertAllowedPair(tokenIn: string, tokenOut: string, chain
   if (!counter || a === b) {
     throw new TradeApiError(400, "BAD_PAIR", "This widget only trades official $PLANK pairs.");
   }
-  const { getCounterToken } = await import("@/lib/uniswap-tokenlist");
-  if (!(await getCounterToken(counter))) {
+  // Curated list first; anything else must pass live on-chain ERC20
+  // validation (import-by-address) — either way, the token is now allowed.
+  const { resolveCounterToken } = await import("@/lib/uniswap-tokenlist");
+  if (!(await resolveCounterToken(counter))) {
     throw new TradeApiError(
       400,
       "BAD_PAIR",
-      "That token is not on the allowed list for $PLANK trading."
+      "That token is not on the allowed list, and does not look like a valid ERC-20 on this chain."
     );
   }
 }
@@ -192,10 +231,12 @@ function isPlank(addr: string) {
 }
 
 /**
- * Before building a swap tx, ensure the quote still targets our pair + fee wallet
- * (mitigates client tampering of the quote object between /quote and /swap).
+ * Pair + chain + fee checks shared by both the CLASSIC (/swap) and UniswapX
+ * (/order) paths — everything EXCEPT the routing-value check, which differs
+ * per caller (assertQuoteIntegrity requires CLASSIC/WRAP/UNWRAP,
+ * assertOrderIntegrity requires a Dutch/UniswapX routing).
  */
-export async function assertQuoteIntegrity(quote: Record<string, unknown>): Promise<void> {
+async function validateQuoteCore(quote: Record<string, unknown>): Promise<void> {
   const input = quote.input as { token?: string } | undefined;
   const output = quote.output as { token?: string; recipient?: string } | undefined;
 
@@ -218,8 +259,8 @@ export async function assertQuoteIntegrity(quote: Record<string, unknown>): Prom
       throw new TradeApiError(400, "QUOTE_PAIR", "Quote is not for an official $PLANK pair.");
     }
     if (!isNative(counter)) {
-      const { getCounterToken } = await import("@/lib/uniswap-tokenlist");
-      if (!(await getCounterToken(counter))) {
+      const { resolveCounterToken } = await import("@/lib/uniswap-tokenlist");
+      if (!(await resolveCounterToken(counter))) {
         throw new TradeApiError(400, "QUOTE_PAIR", "Quote counter token is not on the allowed list.");
       }
     }
@@ -247,17 +288,6 @@ export async function assertQuoteIntegrity(quote: Record<string, unknown>): Prom
         );
       }
     }
-  }
-
-  // Classic swaps only — UniswapX needs /order, not /swap
-  const routing = typeof quote.routing === "string" ? quote.routing : null;
-  // routing may live on the outer response; also reject Dutch-style encodedOrder-only quotes without classic fields
-  if (routing && !["CLASSIC", "WRAP", "UNWRAP"].includes(routing)) {
-    throw new TradeApiError(
-      400,
-      "BAD_ROUTING",
-      `Unsupported routing "${routing}". Official widget uses Uniswap AMM only.`
-    );
   }
 
   const feeRecipient = SITE_FEE.recipient.toLowerCase();
@@ -292,6 +322,97 @@ export async function assertQuoteIntegrity(quote: Record<string, unknown>): Prom
         "QUOTE_FEE",
         "Quote fee routing does not match plank.love treasury."
       );
+    }
+  }
+}
+
+/**
+ * Before building a swap tx, ensure the quote still targets our pair + fee wallet
+ * (mitigates client tampering of the quote object between /quote and /swap).
+ * CLASSIC/WRAP/UNWRAP only — a Dutch/UniswapX quote here means the client is
+ * calling the wrong endpoint (it belongs on /api/uniswap/order instead).
+ */
+export async function assertQuoteIntegrity(quote: Record<string, unknown>): Promise<void> {
+  await validateQuoteCore(quote);
+  const routing = typeof quote.routing === "string" ? quote.routing : null;
+  if (routing && !["CLASSIC", "WRAP", "UNWRAP"].includes(routing)) {
+    throw new TradeApiError(
+      400,
+      "BAD_ROUTING",
+      `Unsupported routing "${routing}" for /swap. UniswapX quotes go through /order.`
+    );
+  }
+}
+
+/**
+ * Order-path equivalent of assertQuoteIntegrity: validates the SAME quote
+ * object (pair / chain / fee) plus the Dutch-order-specific fields the
+ * client is about to sign — before we let /api/uniswap/order forward the
+ * signed order to Uniswap. This is what "an order payload must be validated
+ * the same way a quote is" means in practice: same core checks, plus a check
+ * that the order's reactor/outputs weren't tampered with between /quote and
+ * signing.
+ */
+export async function assertOrderIntegrity(quote: Record<string, unknown>): Promise<void> {
+  await validateQuoteCore(quote);
+
+  const routing = typeof quote.routing === "string" ? quote.routing : null;
+  if (!isDutchRouting(routing)) {
+    throw new TradeApiError(
+      400,
+      "BAD_ROUTING",
+      `Routing "${routing}" is not a UniswapX order. Use /api/uniswap/swap instead.`
+    );
+  }
+
+  if (!GASLESS_SWAPS_ENABLED) {
+    throw new TradeApiError(403, "GASLESS_DISABLED", "Gasless swaps are not enabled.");
+  }
+
+  // orderInfo carries the actual UniswapX order fields (reactor, swapper,
+  // input, outputs[]) in the JSON quote response — this is what gets ABI-
+  // encoded and signed client-side. Every field here must match what we
+  // expect, or a tampered quote object could get a user to sign an order
+  // that settles somewhere other than the real UniswapX reactor.
+  const orderInfo = (quote.orderInfo ?? quote.order) as
+    | {
+        reactor?: string;
+        outputs?: Array<{ token?: string; recipient?: string }>;
+        input?: { token?: string };
+      }
+    | undefined;
+
+  if (!orderInfo || typeof orderInfo !== "object") {
+    throw new TradeApiError(400, "ORDER_SHAPE", "Quote is missing UniswapX order data.");
+  }
+
+  if (
+    typeof orderInfo.reactor === "string" &&
+    orderInfo.reactor.toLowerCase() !== UNISWAPX_REACTOR_ADDRESS.toLowerCase()
+  ) {
+    throw new TradeApiError(
+      400,
+      "BAD_REACTOR",
+      "Order reactor is not the known UniswapX reactor on Robinhood Chain. Blocked for safety."
+    );
+  }
+
+  // Every output recipient must be either the swapper themselves or our fee
+  // treasury — never an arbitrary third address slipped into the order.
+  if (Array.isArray(orderInfo.outputs)) {
+    const swapper =
+      typeof quote.swapper === "string" ? quote.swapper.toLowerCase() : null;
+    const feeRecipient = SITE_FEE.recipient.toLowerCase();
+    for (const out of orderInfo.outputs) {
+      if (!out || typeof out !== "object") continue;
+      const recipient = typeof out.recipient === "string" ? out.recipient.toLowerCase() : null;
+      if (recipient && recipient !== feeRecipient && recipient !== swapper) {
+        throw new TradeApiError(
+          400,
+          "BAD_ORDER_RECIPIENT",
+          "Order output recipient is not the swapper or plank.love treasury. Blocked for safety."
+        );
+      }
     }
   }
 }
@@ -346,6 +467,45 @@ export async function uniswapFetch(path: string, body: unknown): Promise<Respons
 function scrubOutboundBody(body: unknown): unknown {
   if (!body || typeof body !== "object") return body;
   return JSON.parse(JSON.stringify(body));
+}
+
+/**
+ * GET-only counterpart to uniswapFetch, for order-status polling
+ * (/orders?orderHash=...&swapper=...). Same allowlist discipline: no open
+ * proxy, server-only API key, no caching of order state.
+ */
+export async function uniswapGetFetch(
+  path: string,
+  params: Record<string, string>
+): Promise<Response> {
+  if (!ALLOWED_GET_PATHS.has(path)) {
+    throw new TradeApiError(500, "BAD_PATH", "Internal routing error.");
+  }
+
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new TradeApiError(
+      503,
+      "NO_API_KEY",
+      "Uniswap Trading API key is not configured on the server."
+    );
+  }
+
+  const qs = new URLSearchParams(params).toString();
+  const res = await fetch(`${TRADE_API}${path}?${qs}`, {
+    method: "GET",
+    headers: {
+      "x-api-key": apiKey,
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    console.error(`[uniswap] GET ${path} → ${res.status}`);
+  }
+
+  return res;
 }
 
 export function attachPublicFeeMeta<T extends Record<string, unknown>>(data: T): T & {
