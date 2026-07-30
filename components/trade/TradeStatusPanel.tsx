@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Globe2, Percent, Route, ShieldCheck } from "lucide-react";
 import { CHAIN, CONTRACT_ADDRESS } from "@/lib/constants";
 import { explorerTokenUrl, shortAddress } from "@/lib/trade";
 
@@ -55,7 +56,7 @@ export default function TradeStatusPanel() {
         : "border-gold-500/35 bg-gold-500/10 text-gold-300";
 
   return (
-    <div className="space-y-2.5 rounded-xl border border-line bg-panel p-3">
+    <div className="space-y-3 rounded-xl border border-line bg-panel p-3.5">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[0.7rem] font-black uppercase tracking-[0.08em] text-cream">
           Trade status
@@ -79,38 +80,42 @@ export default function TradeStatusPanel() {
           rules server-side.
         </p>
       ) : (
-        <dl className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
-          <div className="rounded-lg border border-line bg-panel-strong px-2.5 py-2">
-            <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-cream-muted">
+        <dl className="space-y-1.5 text-xs">
+          <div className="flex items-center gap-2.5 rounded-lg border border-line bg-panel-strong px-2.5 py-2">
+            <Globe2 className="h-3.5 w-3.5 shrink-0 text-gold-400/80" aria-hidden="true" />
+            <dt className="min-w-0 flex-1 text-[0.65rem] font-bold uppercase tracking-wider text-cream-muted">
               Network
             </dt>
-            <dd className="mt-0.5 font-semibold text-cream">{CHAIN.name}</dd>
+            <dd className="shrink-0 font-semibold text-cream">{CHAIN.name}</dd>
           </div>
-          <div className="rounded-lg border border-line bg-panel-strong px-2.5 py-2">
-            <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-cream-muted">
+          <div className="flex items-center gap-2.5 rounded-lg border border-line bg-panel-strong px-2.5 py-2">
+            <Percent className="h-3.5 w-3.5 shrink-0 text-gold-400/80" aria-hidden="true" />
+            <dt className="min-w-0 flex-1 text-[0.65rem] font-bold uppercase tracking-wider text-cream-muted">
               Site fee
             </dt>
-            <dd className="mt-0.5 font-semibold text-cream">
+            <dd className="shrink-0 font-semibold text-cream">
               {status ? (status.siteFee.enabled ? status.siteFee.label : "None") : "—"}
             </dd>
           </div>
-          <div className="rounded-lg border border-line bg-panel-strong px-2.5 py-2">
-            <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-cream-muted">
-              Routing engine
+          <div className="flex items-center gap-2.5 rounded-lg border border-line bg-panel-strong px-2.5 py-2">
+            <Route className="h-3.5 w-3.5 shrink-0 text-gold-400/80" aria-hidden="true" />
+            <dt className="min-w-0 flex-1 text-[0.65rem] font-bold uppercase tracking-wider text-cream-muted">
+              Routing
             </dt>
-            <dd className="mt-0.5 font-semibold text-cream">
+            <dd className="shrink-0 text-right font-semibold text-cream">
               {status
                 ? status.tradingApiConfigured
                   ? "Uniswap Trading API"
-                  : "Offline — use Uniswap directly"
+                  : "Offline — use Uniswap"
                 : "—"}
             </dd>
           </div>
-          <div className="rounded-lg border border-line bg-panel-strong px-2.5 py-2">
-            <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-cream-muted">
+          <div className="flex items-center gap-2.5 rounded-lg border border-line bg-panel-strong px-2.5 py-2">
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-gold-400/80" aria-hidden="true" />
+            <dt className="min-w-0 flex-1 text-[0.65rem] font-bold uppercase tracking-wider text-cream-muted">
               Contract
             </dt>
-            <dd className="mt-0.5">
+            <dd className="shrink-0">
               <a
                 href={explorerTokenUrl()}
                 target="_blank"
