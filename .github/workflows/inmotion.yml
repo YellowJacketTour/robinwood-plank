@@ -1,4 +1,4 @@
-name: InMotion CI/CD
+name: InMotion Passenger CI/CD
 
 on:
   pull_request:
@@ -11,130 +11,109 @@ on:
   workflow_dispatch: {}
 
 concurrency:
-  group: inmotion-${{ github.ref }}
+  group: inmotion-passenger-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
-  verify:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: plank
+          POSTGRES_USER: plankapp
+          POSTGRES_PASSWORD: github-actions-postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U plankapp -d plank"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
-      NEXT_PUBLIC_MARKET_ENABLED: "true"
-      NEXT_PUBLIC_MARKET_VAULT_ADDRESS: "0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04"
-      NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS: "0xb2019Fd4cA24502e812C0C73b751Fa49979BF708"
-      NEXT_PUBLIC_RULES_RELAXED: "true"
-      NEXT_PUBLIC_TRADE_PAUSED: "false"
       DEPLOYMENT_VERSION: ${{ github.sha }}
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGDATABASE: plank
+      PGUSER: plankapp
+      PGPASSWORD: github-actions-postgres
+      PGPOOL_MAX: 4
+      NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://plank.tanggang.life' }}
+      NEXT_PUBLIC_MARKET_ENABLED: ${{ vars.NEXT_PUBLIC_MARKET_ENABLED || 'true' }}
+      NEXT_PUBLIC_MARKET_VAULT_ADDRESS: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_ADDRESS || '0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04' }}
+      NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS || '0xb2019Fd4cA24502e812C0C73b751Fa49979BF708' }}
+      NEXT_PUBLIC_MINT_START_AT: ${{ vars.NEXT_PUBLIC_MINT_START_AT }}
+      NEXT_PUBLIC_ROBINHOOD_RPC_URL: ${{ vars.NEXT_PUBLIC_ROBINHOOD_RPC_URL || 'https://rpc.mainnet.chain.robinhood.com' }}
+      NEXT_PUBLIC_RULES_RELAXED: ${{ vars.NEXT_PUBLIC_RULES_RELAXED || 'true' }}
+      NEXT_PUBLIC_TRADE_OPENS_AT: ${{ vars.NEXT_PUBLIC_TRADE_OPENS_AT || '2026-07-25T21:20:00.000Z' }}
+      NEXT_PUBLIC_TRADE_PAUSED: ${{ vars.NEXT_PUBLIC_TRADE_PAUSED || 'false' }}
+      NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ vars.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.22.3
           cache: npm
       - run: npm ci
-      # The repository's full lint command has a pre-existing error baseline.
-      # Keep deployment-specific changes gated without masking that baseline.
       - run: npm run lint:inmotion
       - run: npx tsc --noEmit
+      - run: npm run db:migrate
       - run: npm test
+      - run: npm run test:postgres
       - run: npm run build
 
-  image:
-    needs: verify
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    outputs:
-      image: ${{ steps.meta.outputs.image }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Resolve image name
-        id: meta
+      - name: Package standalone Passenger release
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
-          repository="${GITHUB_REPOSITORY,,}"
-          image="ghcr.io/${repository}:${GITHUB_SHA}"
-          echo "image=${image}" >> "$GITHUB_OUTPUT"
-          echo "rolling=ghcr.io/${repository}:inmotion" >> "$GITHUB_OUTPUT"
-      - name: Log in to GHCR
-        shell: bash
-        run: |
-          printf '%s' "${{ github.token }}" |
-            docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-      - name: Build image
-        shell: bash
-        env:
-          IMAGE: ${{ steps.meta.outputs.image }}
-          ROLLING_IMAGE: ${{ steps.meta.outputs.rolling }}
-          NEXT_PUBLIC_MARKET_ENABLED: ${{ vars.NEXT_PUBLIC_MARKET_ENABLED }}
-          NEXT_PUBLIC_MARKET_VAULT_ADDRESS: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_ADDRESS }}
-          NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS }}
-          NEXT_PUBLIC_MINT_START_AT: ${{ vars.NEXT_PUBLIC_MINT_START_AT }}
-          NEXT_PUBLIC_ROBINHOOD_RPC_URL: ${{ vars.NEXT_PUBLIC_ROBINHOOD_RPC_URL }}
-          NEXT_PUBLIC_RULES_RELAXED: ${{ vars.NEXT_PUBLIC_RULES_RELAXED }}
-          NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
-          NEXT_PUBLIC_TRADE_OPENS_AT: ${{ vars.NEXT_PUBLIC_TRADE_OPENS_AT }}
-          NEXT_PUBLIC_TRADE_PAUSED: ${{ vars.NEXT_PUBLIC_TRADE_PAUSED }}
-          NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ vars.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID }}
-        run: |
-          set -euo pipefail
-          args=(
-            --platform linux/amd64
-            --build-arg "DEPLOYMENT_VERSION=${GITHUB_SHA}"
-            --tag "$IMAGE"
-            --tag "$ROLLING_IMAGE"
-          )
-          public_vars=(
-            NEXT_PUBLIC_MARKET_ENABLED
-            NEXT_PUBLIC_MARKET_VAULT_ADDRESS
-            NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS
-            NEXT_PUBLIC_MINT_START_AT
-            NEXT_PUBLIC_ROBINHOOD_RPC_URL
-            NEXT_PUBLIC_RULES_RELAXED
-            NEXT_PUBLIC_SITE_URL
-            NEXT_PUBLIC_TRADE_OPENS_AT
-            NEXT_PUBLIC_TRADE_PAUSED
-            NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
-          )
-          for name in "${public_vars[@]}"; do
-            if [ -n "${!name:-}" ]; then
-              args+=(--build-arg "${name}=${!name}")
-            fi
-          done
-          docker build "${args[@]}" .
-      - name: Push immutable and rolling tags
-        env:
-          IMAGE: ${{ steps.meta.outputs.image }}
-          ROLLING_IMAGE: ${{ steps.meta.outputs.rolling }}
-        run: |
-          docker push "$IMAGE"
-          docker push "$ROLLING_IMAGE"
+          mkdir -p .next/standalone/.next
+          cp -R public .next/standalone/public
+          cp -R .next/static .next/standalone/.next/static
+          mkdir -p .next/standalone/deploy/inmotion
+          cp -R deploy/inmotion/postgres .next/standalone/deploy/inmotion/postgres
+          cp deploy/inmotion/passenger.cjs .next/standalone/deploy/inmotion/passenger.cjs
+          mkdir -p .next/standalone/scripts
+          cp scripts/migrate-postgres.mjs .next/standalone/scripts/migrate-postgres.mjs
+          cp scripts/postgres-maintenance.mjs .next/standalone/scripts/postgres-maintenance.mjs
+          tar -C .next/standalone -czf passenger-release.tgz .
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: passenger-${{ github.sha }}
+          path: passenger-release.tgz
+          if-no-files-found: error
+          retention-days: 14
 
   deploy:
-    needs: image
+    needs: build
     if: >-
       vars.INMOTION_DEPLOY_ENABLED == 'true' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: inmotion-production
+    environment: inmotion-staging
     env:
-      IMAGE: ${{ needs.image.outputs.image }}
       INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
       INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
       INMOTION_USER: ${{ secrets.INMOTION_USER }}
       INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
       INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
-      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR || '/opt/plank-love' }}
-      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
-      GHCR_READ_USER: ${{ secrets.GHCR_READ_USER }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL || 'https://plank.tanggang.life' }}
+      RELEASE_SHA: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: passenger-${{ github.sha }}
+
       - name: Configure trusted SSH host
         shell: bash
         run: |
@@ -143,57 +122,101 @@ jobs:
           test -n "$INMOTION_USER"
           test -n "$INMOTION_SSH_KEY"
           test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
           mkdir -p "$HOME/.ssh"
           chmod 700 "$HOME/.ssh"
           printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
           printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
-      - name: Copy deployment manifest
+
+      - name: Upload immutable release
         shell: bash
         run: |
           set -euo pipefail
-          port="${INMOTION_PORT:-22}"
+          port="${INMOTION_PORT:-2222}"
           ssh -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
-            "test -d '$INMOTION_APP_DIR' && test -f '$INMOTION_APP_DIR/.env.inmotion'"
+            "mkdir -p '$INMOTION_APP_DIR/incoming'"
           scp -i "$HOME/.ssh/inmotion" -P "$port" \
-            docker-compose.inmotion.yml \
-            "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/docker-compose.inmotion.yml"
-      - name: Authenticate VPS to private GHCR package
-        if: env.GHCR_READ_TOKEN != ''
+            passenger-release.tgz \
+            "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/incoming/${RELEASE_SHA}.tgz"
+
+      - name: Migrate, activate, and restart Passenger
         shell: bash
         run: |
           set -euo pipefail
-          port="${INMOTION_PORT:-22}"
-          printf '%s' "$GHCR_READ_TOKEN" |
-            ssh -i "$HOME/.ssh/inmotion" -p "$port" \
-              "${INMOTION_USER}@${INMOTION_HOST}" \
-              "docker login ghcr.io -u '$GHCR_READ_USER' --password-stdin"
-      - name: Roll out immutable image and verify health
-        shell: bash
-        run: |
-          set -euo pipefail
-          port="${INMOTION_PORT:-22}"
+          port="${INMOTION_PORT:-2222}"
           ssh -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
-            bash -s -- "$INMOTION_APP_DIR" "$IMAGE" <<'REMOTE'
+            bash -s -- "$INMOTION_APP_DIR" "$RELEASE_SHA" "$INMOTION_NODE_BIN" <<'REMOTE'
           set -euo pipefail
           app_dir="$1"
-          image="$2"
-          cd "$app_dir"
-          export PLANK_IMAGE="$image"
-          compose=(docker compose --env-file .env.inmotion -f docker-compose.inmotion.yml)
-          "${compose[@]}" config --quiet
-          "${compose[@]}" pull app valkey
-          "${compose[@]}" up -d --no-build --remove-orphans app valkey
+          release_sha="$2"
+          node_bin="$3"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected INMOTION_APP_DIR: $app_dir" >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+          test -f "$app_dir/shared/.env.production"
+          release_dir="$app_dir/releases/$release_sha"
+          mkdir -p "$release_dir" "$app_dir/shared" "$app_dir/tmp" "$app_dir/logs"
+          tar -xzf "$app_dir/incoming/$release_sha.tgz" -C "$release_dir"
+          test -f "$release_dir/server.js"
+          test -f "$release_dir/scripts/migrate-postgres.mjs"
+
+          "$node_bin" \
+            --env-file="$app_dir/shared/.env.production" \
+            "$release_dir/scripts/migrate-postgres.mjs"
+
+          if [ -L "$app_dir/current" ]; then
+            readlink "$app_dir/current" > "$app_dir/.previous-release"
+          else
+            : > "$app_dir/.previous-release"
+          fi
+          cp "$release_dir/deploy/inmotion/passenger.cjs" "$app_dir/passenger.cjs"
+          rm -f "$app_dir/current.next"
+          ln -s "releases/$release_sha" "$app_dir/current.next"
+          mv -Tf "$app_dir/current.next" "$app_dir/current"
+          rm -f "$app_dir/incoming/$release_sha.tgz"
+          touch "$app_dir/tmp/restart.txt"
+          REMOTE
+
+      - name: Verify public health or roll back
+        shell: bash
+        run: |
+          set -euo pipefail
+          healthy=false
           for attempt in $(seq 1 36); do
             if curl --fail --silent --show-error \
-              http://127.0.0.1:3000/api/trade/status >/dev/null; then
-              "${compose[@]}" ps
-              exit 0
+              "$INMOTION_HEALTH_URL/api/health" >/dev/null &&
+               curl --fail --silent --show-error \
+              "$INMOTION_HEALTH_URL/market" >/dev/null; then
+              healthy=true
+              break
             fi
             sleep 5
           done
-          "${compose[@]}" logs --tail=150 app
-          exit 1
+          if [ "$healthy" = true ]; then
+            exit 0
+          fi
+
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          previous="$(cat "$app_dir/.previous-release")"
+          if [ -n "$previous" ]; then
+            rm -f "$app_dir/current.rollback"
+            ln -s "$previous" "$app_dir/current.rollback"
+            mv -Tf "$app_dir/current.rollback" "$app_dir/current"
+            touch "$app_dir/tmp/restart.txt"
+            echo "Deployment health check failed; previous release restored." >&2
+          else
+            echo "Deployment health check failed; no previous release exists." >&2
+          fi
           REMOTE
+          exit 1

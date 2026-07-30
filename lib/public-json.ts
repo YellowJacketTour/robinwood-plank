@@ -22,7 +22,7 @@ function publicUrlPath(rel: string): string {
 
 async function readFromFs(rel: string): Promise<string | null> {
   try {
-    const full = path.join(process.cwd(), /* turbopackIgnore: true */ rel);
+    const full = path.join(/* turbopackIgnore: true */ process.cwd(), rel);
     return await fs.readFile(full, "utf8");
   } catch {
     return null;

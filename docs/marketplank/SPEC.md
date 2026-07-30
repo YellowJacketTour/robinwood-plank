@@ -101,10 +101,10 @@ offer, and cancel an active listing/offer (`MyPositions.tsx`, via `seaport.cance
 wired through `lib/market/seaport.ts` and the order-relay API. Verified locally end-to-end
 (tabs, empty states, wallet-gated actions) with no console errors.
 
-Orders use the durable adapter in `lib/market/durable-kv.ts`: a VPS can use Redis/Valkey over
-`REDIS_URL`, while existing deployments can retain Upstash/Vercel KV through
-`KV_REST_API_URL` and `KV_REST_API_TOKEN`. With neither backend configured, the app falls back
-to an ephemeral file + memory store that is only suitable for local development.
+Orders use indexed rows in local PostgreSQL on cPanel Passenger. The smaller cache primitives
+continue through `lib/market/durable-kv.ts`, which supports PostgreSQL, Redis/Valkey, and
+Upstash/Vercel KV. With no durable backend configured, the app falls back to an ephemeral file
++ memory store that is only suitable for local development.
 
 Every displayed field is re-derived from the signed order rather than taken from the client
 (`lib/market/order-validation.ts`) — see the audit for why that distinction is the difference
@@ -167,7 +167,7 @@ Nothing above ships to mainnet with real value until, in order:
 | Deployer wallet funded with ETH | ✅ Confirmed — owner has ETH ready |
 | Vault contract written + tested | ✅ 6/6 tests passing, EVM-target bug (Cancun `mcopy`) caught and fixed |
 | Deploy script | ✅ Written (`scripts/deploy-vault.ts`), not executed |
-| Order-relay persistence | ✅ Durable adapter supports private Redis/Valkey or Upstash/Vercel KV, with a local-only file fallback — production must configure one durable backend |
+| Order-relay persistence | ✅ cPanel PostgreSQL uses indexed live-order rows; Redis/Valkey and Upstash remain migration-compatible; the file fallback is local-only |
 | Marketplace fee model (Seaport listings/offers) | ✅ Decided 2026-07-27: $PLANK always 0%, other collections default 0.5%, toggleable per-collection — see §9 |
 | Vault fee parameters (mint/redeem/premium bps) + fee recipient | ✅ Updated in `scripts/deploy-vault.ts`: 1% / 1% / 2.5%, treasury wallet |
 | Initial pool liquidity (ETH + NFTs to seed) | ✅ Decided 2026-07-27: funded from the fee treasury, not the owner's capital — see §9 for the threshold |

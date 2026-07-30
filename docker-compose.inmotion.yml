@@ -14,7 +14,7 @@ services:
         NEXT_PUBLIC_MINT_START_AT: ${NEXT_PUBLIC_MINT_START_AT:-}
         NEXT_PUBLIC_ROBINHOOD_RPC_URL: ${NEXT_PUBLIC_ROBINHOOD_RPC_URL:-}
         NEXT_PUBLIC_RULES_RELAXED: ${NEXT_PUBLIC_RULES_RELAXED:-false}
-        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://plank.love}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://plank.tanggang.life}
         NEXT_PUBLIC_TRADE_OPENS_AT: ${NEXT_PUBLIC_TRADE_OPENS_AT:-}
         NEXT_PUBLIC_TRADE_PAUSED: ${NEXT_PUBLIC_TRADE_PAUSED:-false}
         NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID:-}
@@ -22,11 +22,13 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      DURABLE_KV_BACKEND: ${DURABLE_KV_BACKEND:-redis}
-      REDIS_URL: redis://valkey:6379
-      REDIS_PASSWORD: ${VALKEY_PASSWORD:?Set VALKEY_PASSWORD in .env.inmotion}
-      KV_REST_API_URL: ${KV_REST_API_URL:-}
-      KV_REST_API_TOKEN: ${KV_REST_API_TOKEN:-}
+      DURABLE_KV_BACKEND: postgres
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-plank}
+      PGUSER: ${POSTGRES_USER:-plankapp}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Docker env file}
+      PGPOOL_MAX: ${PGPOOL_MAX:-4}
       UNISWAP_API_KEY: ${UNISWAP_API_KEY:-}
       RELAYER_PRIVATE_KEY: ${RELAYER_PRIVATE_KEY:-}
       CRON_SECRET: ${CRON_SECRET:-}
@@ -40,14 +42,12 @@ services:
     ports:
       - "${PLANK_BIND_ADDRESS:-127.0.0.1}:${PLANK_APP_PORT:-3000}:3000"
     depends_on:
-      valkey:
-        condition: service_healthy
-    read_only: true
+      db-migrate:
+        condition: service_completed_successfully
     tmpfs:
       - /tmp:size=128m,mode=1777
     volumes:
       - next_cache:/app/.next/cache
-      - boards_data:/app/data
     cap_drop:
       - ALL
     security_opt:
@@ -62,35 +62,28 @@ services:
       - frontend
       - data
 
-  valkey:
-    image: valkey/valkey:8.1-alpine
+  postgres:
+    image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?Set VALKEY_PASSWORD in .env.inmotion}
-    command:
-      - sh
-      - -ec
-      - >-
-        exec valkey-server
-        --appendonly yes
-        --appendfsync everysec
-        --save 900 1
-        --save 300 10
-        --requirepass "$$VALKEY_PASSWORD"
+      POSTGRES_DB: ${POSTGRES_DB:-plank}
+      POSTGRES_USER: ${POSTGRES_USER:-plankapp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Docker env file}
     healthcheck:
       test:
         - CMD-SHELL
-        - valkey-cli --no-auth-warning -a "$$VALKEY_PASSWORD" ping | grep -q PONG
-      interval: 10s
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
       start_period: 10s
+    ports:
+      - "127.0.0.1:${PLANK_DB_PORT:-54329}:5432"
     volumes:
-      - valkey_data:/data
+      - postgres_data:/var/lib/postgresql/data
     networks:
+      - frontend
       - data
-    cap_drop:
-      - ALL
     security_opt:
       - no-new-privileges:true
     logging:
@@ -99,9 +92,28 @@ services:
         max-size: 10m
         max-file: "5"
 
-  # One-time copy of existing production Upstash data into the private VPS
-  # Valkey. It is excluded from normal `up` commands by the tools profile and
-  # refuses to write unless the command explicitly includes --apply.
+  db-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tools
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-plank}
+      PGUSER: ${POSTGRES_USER:-plankapp}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Docker env file}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - node
+      - scripts/migrate-postgres.mjs
+    networks:
+      - data
+
+  # Optional one-time copy of production Upstash data into PostgreSQL.
+  # Dry-run is the default; add --apply only during an approved write freeze.
   kv-migrate:
     profiles:
       - tools
@@ -112,14 +124,17 @@ services:
     environment:
       KV_REST_API_URL: ${KV_REST_API_URL:-}
       KV_REST_API_TOKEN: ${KV_REST_API_TOKEN:-}
-      REDIS_URL: redis://valkey:6379
-      REDIS_PASSWORD: ${VALKEY_PASSWORD:?Set VALKEY_PASSWORD in .env.inmotion}
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-plank}
+      PGUSER: ${POSTGRES_USER:-plankapp}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Docker env file}
     command:
       - node
-      - scripts/migrate-upstash-to-redis.mjs
+      - scripts/migrate-upstash-to-postgres.mjs
     depends_on:
-      valkey:
-        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
     networks:
       - frontend
       - data
@@ -130,6 +145,5 @@ networks:
     internal: true
 
 volumes:
-  valkey_data:
+  postgres_data:
   next_cache:
-  boards_data:

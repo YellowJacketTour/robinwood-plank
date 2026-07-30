@@ -8,6 +8,10 @@ import {
 
 const KEYS = [
   "DURABLE_KV_BACKEND",
+  "PGHOST",
+  "PGDATABASE",
+  "PGUSER",
+  "PGPASSWORD",
   "REDIS_URL",
   "KV_REST_API_URL",
   "KV_REST_API_TOKEN",
@@ -67,6 +71,19 @@ test("backend selection prefers the VPS Redis URL when both stores exist", () =>
   );
 });
 
+test("backend selection prefers local PostgreSQL when it is configured", () => {
+  withEnv(
+    {
+      PGHOST: "localhost",
+      PGDATABASE: "plank",
+      PGUSER: "plankapp",
+      PGPASSWORD: "secret",
+      REDIS_URL: "redis://valkey:6379",
+    },
+    () => assert.equal(durableKvBackend(), "postgres")
+  );
+});
+
 test("backend selection retains Upstash compatibility", () => {
   withEnv(
     {
@@ -78,6 +95,9 @@ test("backend selection retains Upstash compatibility", () => {
 });
 
 test("explicit backend selection fails closed when its credentials are absent", () => {
+  withEnv({ DURABLE_KV_BACKEND: "postgres" }, () => {
+    assert.throws(() => durableKvBackend(), /requires PGHOST/);
+  });
   withEnv({ DURABLE_KV_BACKEND: "redis" }, () => {
     assert.throws(() => durableKvBackend(), /requires REDIS_URL/);
   });

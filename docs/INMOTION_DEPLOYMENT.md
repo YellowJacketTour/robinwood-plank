@@ -1,303 +1,288 @@
-# InMotion VPS deployment
+# InMotion cPanel Passenger deployment
 
-This runbook deploys plank.love as a standalone Next.js 16 container with a
-private, persistent Valkey service. It is intended for an InMotion VPS or
-dedicated server with root access. It is not a shared-hosting Passenger
-runbook.
+This runbook deploys the `inmotion` branch to InMotion shared hosting using:
 
-No private key or API secret belongs in Git, a Docker image, or a support
-message. Store runtime secrets only in `/opt/plank-love/.env.inmotion` on the
-VPS and in GitHub's encrypted environment secrets where CI/CD needs them.
+- `plank.tanggang.life`
+- cPanel Node.js 22.22.3 and Passenger
+- Local cPanel PostgreSQL
+- Cloudflare DNS and TLS
+- GitHub Actions build, migration, release, health check, and rollback
 
-## 1. Information required before touching the account
+Docker is only the local verification environment. The shared server does not
+run Docker, Redis, Valkey, PM2, or a custom reverse proxy.
 
-Provide these non-secret facts:
+Never commit or send database passwords, wallet private keys, API keys, SSH
+private keys, or seed phrases.
 
-- Exact InMotion product/plan name.
-- VPS operating system and version.
-- Whether the server is managed through cPanel/WHM.
-- Whether root SSH is enabled.
-- Server CPU architecture (`uname -m`), RAM, disk, and public IP.
-- Whether Docker Engine and Docker Compose v2 are already installed.
-- Which web server currently owns ports 80/443: nginx, Apache, cPanel nginx,
-  or none.
-- Whether `plank.love` DNS is still managed through Cloudflare.
-- Whether the GitHub repository/package will be public or private.
-- Whether the first VPS cutover should keep the existing Upstash store before
-  moving data into Valkey.
-
-Do not send SSH private keys, Redis passwords, wallet keys, API keys, or seed
-phrases. Those will be placed directly in the appropriate secret stores.
-
-## 2. Deployment model
+## 1. Runtime architecture
 
 ```text
-Internet / Cloudflare DNS
-        |
-        v
-InMotion nginx or cPanel reverse proxy (TLS)
-        |
-        v
-127.0.0.1:3000 -> Next.js standalone container
-                         |
-                         v
-                 private Docker network
-                         |
-                         v
-              Valkey + persistent volume
+Cloudflare
+    |
+    v
+plank.tanggang.life
+    |
+    v
+InMotion cPanel / Passenger
+    |
+    +-- Next.js 16 standalone server (Node 22.22.3)
+    |
+    +-- PostgreSQL on localhost
+          +-- indexed signed marketplace orders
+          +-- served-order attribution
+          +-- expiring cache values
+          +-- transactional Boards state
 ```
 
-The application port binds to loopback by default. Valkey has no published
-host port. The `app` filesystem is read-only except for:
+The SQL store is not a custody or trade-execution engine. Makers sign Seaport
+orders in their wallets and fulfillment occurs on-chain. PostgreSQL stores and
+indexes those signed orders so Passenger workers share one authoritative book.
 
-- `/app/.next/cache` — persistent Next image/ISR cache.
-- `/app/data` — the legacy Boards JSON state.
-- `/tmp` — bounded in-memory temporary storage.
+## 2. Local Docker verification
 
-Valkey uses append-only persistence (`appendfsync everysec`) plus RDB
-snapshots in the `valkey_data` Docker volume.
+Create a local secret file:
 
-## 3. First server setup
-
-The exact package-install commands depend on the VPS OS and cPanel status.
-After Docker is installed, verify:
-
-```bash
-docker version
-docker compose version
+```powershell
+Copy-Item .env.docker.example .env.docker.local
 ```
 
-Create the deployment directory and check out the `inmotion` branch so a
-manual image build has the complete Docker build context:
+Set a unique local `POSTGRES_PASSWORD`, then build and start:
 
-```bash
-sudo install -d -m 0750 /opt/plank-love
-sudo chown "$USER":"$USER" /opt/plank-love
-git clone --branch inmotion --single-branch \
-  https://github.com/YellowJacketTour/robinwood-plank.git \
-  /opt/plank-love
-cd /opt/plank-love
+```powershell
+docker compose --env-file .env.docker.local -f docker-compose.inmotion.yml up -d --build
+docker compose --env-file .env.docker.local -f docker-compose.inmotion.yml ps
 ```
 
-If `/opt/plank-love` already exists, clone to a temporary directory and copy
-the checkout into it, preserving the server-owned `.env.inmotion`; do not
-clone over a non-empty deployment directory.
+The migration container applies pending SQL before the app starts. Verify:
 
-Create the real environment file:
-
-```bash
-cp .env.inmotion.example .env.inmotion
-chmod 600 .env.inmotion
-openssl rand -base64 48
+```powershell
+curl.exe --fail http://127.0.0.1:3000/api/health
+curl.exe --fail http://127.0.0.1:3000/market
 ```
 
-Put the generated value in `VALKEY_PASSWORD`. Fill all other public settings
-and server secrets directly on the VPS. Validate without printing resolved
-secret values into CI logs:
+PostgreSQL data remains in the `postgres_data` Docker volume across app
+rebuilds and restarts.
 
-```bash
-docker compose \
-  --env-file .env.inmotion \
-  -f docker-compose.inmotion.yml \
-  config --quiet
-```
+## 3. Domain and Cloudflare
 
-## 4. Local image build and first boot
+In cPanel, add `plank.tanggang.life` under **Domains** before creating the
+Node.js application. It must appear in the Application URL dropdown.
 
-For the initial manual deployment:
+cPanel creates the subdomain's separate document-root directory at
+`/home/CPANEL_USER/plank.tanggang.life`. Use that same directory as the
+Passenger application root and CI release root. The web document root and the
+Passenger application root are separate settings, but aligning them avoids an
+unnecessary second application directory.
 
-```bash
-cd /opt/plank-love
-docker compose \
-  --env-file .env.inmotion \
-  -f docker-compose.inmotion.yml \
-  build app
+In Cloudflare:
 
-docker compose \
-  --env-file .env.inmotion \
-  -f docker-compose.inmotion.yml \
-  up -d
-```
+1. Add the `plank` DNS record pointing to the InMotion account's assigned
+   address.
+2. Start DNS-only while cPanel provisions the hostname and certificate.
+3. After direct HTTPS works, use Cloudflare SSL/TLS **Full (strict)** and
+   enable the proxy if desired.
 
-Check containers and loopback health:
+Do not use the path form `tanggang.life/plank`; the application is designed for
+the subdomain root.
 
-```bash
-docker compose \
-  --env-file .env.inmotion \
-  -f docker-compose.inmotion.yml \
-  ps
+## 4. PostgreSQL
 
-curl --fail --show-error http://127.0.0.1:3000/api/trade/status
-curl --fail --show-error http://127.0.0.1:3000/market
-```
+Create the database and application user with **PostgreSQL Database Wizard**,
+then grant the user all privileges on that one database. cPanel prefixes both
+names with the account username.
 
-Do not change public DNS until the local health checks, logs, order reads,
-IPFS proxy, Uniswap status, and vault SSE stream have all been tested.
-
-## 5. Reverse proxy and TLS
-
-`deploy/inmotion/nginx.plank.love.conf.example` is a starting point for a
-plain nginx VPS. It:
-
-- Proxies the site to loopback port 3000.
-- Preserves the original host/protocol/client headers.
-- Limits request bodies at the proxy.
-- Disables buffering for `/api/market/vault/stream`.
-- Allows the stream to live slightly longer than the app's 290-second cycle.
-
-If cPanel/WHM manages nginx or Apache, do not overwrite its generated vhost.
-The final include path and reload commands must be selected after the account
-layout is known.
-
-## 6. Order-book cutover without data loss
-
-Open Seaport orders are off-chain. They exist in the current Upstash store,
-not in Git and not reconstructably on-chain.
-
-The safest cutover is two phases:
-
-1. Deploy the VPS with `DURABLE_KV_BACKEND=upstash` and the existing
-   `KV_REST_API_URL` / `KV_REST_API_TOKEN`. Both old and new hosts then share
-   one order book during DNS propagation.
-2. After all traffic reaches the VPS, schedule a brief write freeze, copy the
-   data to Valkey, switch `DURABLE_KV_BACKEND=redis`, restart the app, and
-   verify counts before removing Upstash credentials.
-
-Inventory the source keys without writing:
-
-```bash
-docker compose \
-  --env-file .env.inmotion \
-  -f docker-compose.inmotion.yml \
-  --profile tools run --rm kv-migrate
-```
-
-During the approved write freeze, copy into an empty destination:
-
-```bash
-docker compose \
-  --env-file .env.inmotion \
-  -f docker-compose.inmotion.yml \
-  --profile tools run --rm kv-migrate \
-  node scripts/migrate-upstash-to-redis.mjs --apply
-```
-
-The migration refuses to overwrite an existing destination key. `--overwrite`
-must be added explicitly if replacement is intentional. It copies only
-`plank:market:*` string, hash, and set keys and preserves positive TTLs.
-
-After verifying the new book, set:
+Keep these non-secret values for setup:
 
 ```dotenv
-DURABLE_KV_BACKEND=redis
-KV_REST_API_URL=
-KV_REST_API_TOKEN=
+PGHOST=localhost
+PGPORT=5432
+PGDATABASE=CPANEL_PREFIX_plank
+PGUSER=CPANEL_PREFIX_plankapp
+PGPOOL_MAX=4
+PGSSLMODE=disable
 ```
 
-Then recreate only the app:
+Store the password only in the server environment file. `PGPOOL_MAX=4` limits
+each Passenger process to a small pool suitable for shared hosting.
+
+## 5. Dedicated deployment SSH key
+
+Do not reuse or download a personal private key already stored in cPanel.
+Generate a dedicated GitHub deployment key on a trusted workstation:
+
+```powershell
+ssh-keygen -t ed25519 `
+  -f "$env:USERPROFILE\.ssh\plank_inmotion_deploy" `
+  -C "github-actions-plank-inmotion"
+```
+
+Import only the `.pub` file under **cPanel → Manage SSH Keys**, then authorize
+it. Store the private file's complete contents later as the GitHub environment
+secret `INMOTION_SSH_KEY`.
+
+Test the key using the InMotion hostname. Shared hosting commonly uses port
+2222:
+
+```powershell
+ssh -i "$env:USERPROFILE\.ssh\plank_inmotion_deploy" `
+  -p 2222 CPANEL_USER@SERVER_HOSTNAME
+```
+
+Verify the server host-key fingerprint through the account or InMotion support
+before trusting it. Store the verified `known_hosts` line in
+`INMOTION_HOST_KEY`; do not blindly trust an unverified `ssh-keyscan` result.
+
+## 6. Server directories and secrets
+
+Over SSH:
 
 ```bash
-docker compose \
-  --env-file .env.inmotion \
-  -f docker-compose.inmotion.yml \
-  up -d --no-build app
+mkdir -p "$HOME/plank.tanggang.life"/{incoming,releases,shared,tmp,logs}
+chmod 700 "$HOME/plank.tanggang.life/shared"
 ```
 
-Remove real Upstash credentials from the VPS after rollback is no longer
-needed.
+Copy `.env.inmotion.example` to:
 
-## 7. Backups
+```text
+/home/CPANEL_USER/plank.tanggang.life/shared/.env.production
+```
 
-The Valkey volume is production data. A Docker volume on the same VPS is not
-a backup. At minimum:
-
-1. Trigger and verify a Valkey background save.
-2. Archive the `valkey_data` volume.
-3. Encrypt and copy the archive off the VPS.
-4. Test a restore into a separate Valkey instance.
-
-The exact backup destination will be chosen from InMotion Backup Manager,
-object storage, or another off-server system after the account is known.
-
-Before any backup:
+Fill it directly on the server and apply:
 
 ```bash
-docker compose \
-  --env-file .env.inmotion \
-  -f docker-compose.inmotion.yml \
-  exec -T valkey sh -c \
-  'valkey-cli --no-auth-warning -a "$VALKEY_PASSWORD" BGSAVE'
+chmod 600 "$HOME/plank.tanggang.life/shared/.env.production"
 ```
 
-## 8. GitHub Actions CI/CD
+The file is not uploaded or overwritten by CI. It contains the PostgreSQL
+password and all runtime-only secrets. `NEXT_PUBLIC_*` values are also
+configured as GitHub repository variables because Next.js embeds them during
+the build.
 
-`.github/workflows/inmotion.yml` performs:
+## 7. Create the Passenger application
 
-- Locked `npm ci`.
-- Deployment/storage lint, TypeScript, marketplace/contract tests, and a
-  production build.
-- A versioned Docker image build and push to GHCR.
-- Optional SSH deployment to InMotion.
-- Container health verification after rollout.
+In **cPanel → Setup Node.js App → Create Application**:
 
-CI runs immediately. Production deployment remains disabled until repository
-variable `INMOTION_DEPLOY_ENABLED` is exactly `true`.
+```text
+Node.js version:          22.22.3
+Application mode:         Production
+Application root:         plank.tanggang.life
+Application URL:          plank.tanggang.life
+URL path:                 blank
+Application startup file: passenger.cjs
+Passenger log file:       /home/CPANEL_USER/plank.tanggang.life/logs/passenger.log
+```
+
+The first CI release installs `passenger.cjs`. It loads the stable shared env
+file, resolves the active release, and starts Next.js' generated standalone
+server. Passenger supplies the port and owns the process lifecycle.
+
+After creating the application, cPanel displays a command for entering its
+Node virtual environment. Use it to determine the Node executable and verify:
+
+```bash
+which node
+node --version
+```
+
+The resulting absolute executable path becomes the GitHub repository variable
+`INMOTION_NODE_BIN`.
+
+## 8. GitHub configuration
+
+Create a GitHub Environment named `inmotion-staging`.
+
+Environment secrets:
+
+- `INMOTION_HOST`
+- `INMOTION_PORT` (normally `2222`)
+- `INMOTION_USER`
+- `INMOTION_SSH_KEY`
+- `INMOTION_HOST_KEY`
 
 Repository variables:
 
-- `INMOTION_DEPLOY_ENABLED`
-- `INMOTION_APP_DIR` (normally `/opt/plank-love`)
-- Every `NEXT_PUBLIC_*` build value used in `.env.inmotion.example`
+- `INMOTION_DEPLOY_ENABLED` — leave `false` until first-deploy preparation is
+  complete
+- `INMOTION_APP_DIR` — absolute path such as
+  `/home/CPANEL_USER/plank.tanggang.life`
+- `INMOTION_NODE_BIN` — absolute Node 22.22.3 executable shown by cPanel
+- `INMOTION_HEALTH_URL=https://plank.tanggang.life`
+- Every `NEXT_PUBLIC_*` value from `.env.inmotion.example`
 
-GitHub environment secrets for `inmotion-production`:
+The PostgreSQL password, relayer private key, Uniswap API key, and cron secret
+remain only in the server's `.env.production`.
 
-- `INMOTION_HOST`
-- `INMOTION_PORT` (usually `22`)
-- `INMOTION_USER`
-- `INMOTION_SSH_KEY`
-- `INMOTION_HOST_KEY` (trusted `known_hosts` line, not an unverified scan)
-- `GHCR_READ_TOKEN` for a private image package
-- `GHCR_READ_USER`
+## 9. CI/CD behavior
 
-The server's `.env.inmotion` remains authoritative for runtime-only secrets.
-They are not passed to `docker build`.
+Pull requests to `inmotion` or `master` run:
 
-The repository-wide `npm run lint` currently has a pre-existing error
-baseline outside this deployment work. CI gates the files introduced or
-changed for InMotion while still requiring the full TypeScript, test, and
-production-build checks.
+- Locked dependency install
+- Deployment lint
+- TypeScript
+- Marketplace and contract tests
+- Production Next.js build
 
-## 9. Rollback
+A push to `inmotion` packages `.next/standalone`. When
+`INMOTION_DEPLOY_ENABLED` is exactly `true`, the deploy job:
 
-Every image is tagged with its commit SHA. To roll back:
+1. Uploads an immutable release named by commit SHA.
+2. Runs pending PostgreSQL migrations with server-side credentials.
+3. Atomically changes the `current` release symlink.
+4. Touches `tmp/restart.txt` so Passenger reloads.
+5. Checks PostgreSQL through `/api/health` and renders `/market`.
+6. Restores the previous release automatically if health checks fail.
+
+The workflow builds on GitHub, not the shared server.
+
+## 10. Existing Upstash data
+
+Open Seaport orders are off-chain. If the current site has live listings or
+offers, obtain the existing Upstash credentials before cutover.
+
+Inventory without writing:
 
 ```bash
-cd /opt/plank-love
-export PLANK_IMAGE=ghcr.io/OWNER/REPO:PREVIOUS_SHA
-docker compose \
-  --env-file .env.inmotion \
-  -f docker-compose.inmotion.yml \
-  pull app
-docker compose \
-  --env-file .env.inmotion \
-  -f docker-compose.inmotion.yml \
-  up -d --no-build app
+node --env-file=.env.production scripts/migrate-upstash-to-postgres.mjs
 ```
 
-Changing the image does not roll back or delete Valkey data. Storage rollback
-is a separate, explicit recovery operation.
+During an approved write freeze:
 
-## 10. Production acceptance
+```bash
+node --env-file=.env.production \
+  scripts/migrate-upstash-to-postgres.mjs --apply
+```
 
-Before calling the move complete:
+The importer maps listings and offers into indexed SQL rows, imports served
+order hashes, and copies expiring cache keys. Existing destination rows are
+not overwritten unless `--overwrite` is explicitly supplied.
+
+## 11. Maintenance and backups
+
+Configure a daily cPanel Cron Job using the cPanel Node executable:
+
+```bash
+/ABSOLUTE/NODE/BIN \
+  --env-file=/home/CPANEL_USER/plank.tanggang.life/shared/.env.production \
+  /home/CPANEL_USER/plank.tanggang.life/current/scripts/postgres-maintenance.mjs
+```
+
+This removes expired cache entries and orders. Use cPanel's database backup
+facilities and periodically test a restore. A release rollback does not roll
+back database migrations or data.
+
+## 12. Acceptance
+
+Before enabling public traffic:
 
 - Root, `/market`, `/gallery`, `/learn`, `/mint`, and `/launch` render.
 - Mobile and desktop wallet connection work.
-- An existing listing is visible after the store migration.
-- A new signed listing persists across an app container restart.
-- IPFS image and metadata proxies return expected content.
-- Uniswap status/quote routes behave without exposing the API key.
+- Existing migrated listings appear.
+- A new signed listing remains after a Passenger restart.
+- Concurrent listings do not overwrite each other.
+- Boards state remains consistent across repeated Passenger requests.
+- IPFS image and metadata proxies work.
+- Uniswap quote/swap routes do not expose the API key.
 - Vault stats, held inventory, activity, and SSE update.
-- Random redemption has a working relayer/settle path.
-- Valkey is unreachable from the public Internet.
-- TLS, DNS, logs, health checks, backup, and rollback are verified.
+- Passenger logs contain no repeated restart or database-pool errors.
+- PostgreSQL is not remotely exposed.
+- CI health failure successfully restores the prior release.

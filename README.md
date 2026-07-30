@@ -62,7 +62,9 @@ than forking or redeploying it.
 | Env var | Public? | Purpose |
 | --- | --- | --- |
 | `NEXT_PUBLIC_MARKET_ENABLED` | Yes | **Master gate.** `false`/unset renders only the status page. Do not flip without the audit below. |
-| `DURABLE_KV_BACKEND` | **Server only** | Optional backend selector: `redis` for VPS Valkey/Redis or `upstash` for Vercel KV. |
+| `DURABLE_KV_BACKEND` | **Server only** | Backend selector: `postgres` for cPanel Passenger, `redis` for VPS Valkey/Redis, or `upstash` for Vercel KV. |
+| `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` | **Server only** | Local cPanel PostgreSQL connection. Use separate variables rather than a URL so special characters in the password require no URL encoding. |
+| `PGPOOL_MAX` | **Server only** | Per-Passenger-process PostgreSQL pool size; defaults to `4` for shared-hosting connection limits. |
 | `REDIS_URL` / `REDIS_PASSWORD` | **Server only** | Durable order-relay storage on a VPS Redis-compatible service such as Valkey. |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | **Server only** | Existing Upstash/Vercel KV storage and migration source. |
 | `NEXT_PUBLIC_MARKET_VAULT_ADDRESS` | Yes | Phase 2 liquidity vault. Unset until deployed **and audited**. |
@@ -106,11 +108,11 @@ npm run test:contracts # vault + audit regressions
 2. Set env vars in the dashboard (not in git).
 3. Deploy.
 
-## Deploy (InMotion VPS)
+## Deploy (InMotion cPanel Passenger)
 
-The `inmotion` branch includes a standalone Next.js Docker image, private
-persistent Valkey, an Upstash-to-Valkey migration tool, reverse-proxy example,
-and guarded GitHub Actions CI/CD. Follow
+The `inmotion` branch targets Node.js 22 Passenger with local PostgreSQL and
+guarded GitHub Actions CI/CD. Docker Compose uses PostgreSQL locally to mirror
+the production storage path. Follow
 [`docs/INMOTION_DEPLOYMENT.md`](docs/INMOTION_DEPLOYMENT.md). Do not use the
 JSON-file order fallback for production.
 

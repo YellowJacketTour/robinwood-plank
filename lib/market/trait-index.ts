@@ -20,7 +20,8 @@ import {
  *  - fire-and-forget background scans (isolate freezes after the response)
  *
  * So this mirrors rarity-snapshot: Blockscout REST + IPFS backfill, durable
- * Upstash KV, in-request build with inflight dedupe.
+ * Durable KV (PostgreSQL, Redis, or Upstash), in-request build with inflight
+ * dedupe.
  *
  * FAIL CLOSED: trait bids only when complete (every token successfully
  * attributed, failed empty). Partial indexes never leave the API as traits.
