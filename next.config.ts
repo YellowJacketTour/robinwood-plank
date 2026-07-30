@@ -50,16 +50,16 @@ const nextConfig: NextConfig = {
         source: "/:path*",
         headers: securityHeaders,
       },
-      // App HTML must not stick for a year at the edge (stale Instant Swap
-      // clients after vault/env cutovers). Short edge cache + revalidate.
+      // Marketplank is a live application shell. Never let an edge or hosting
+      // proxy carry its HTML across an immutable release switch.
       {
         source: "/market",
         headers: [
           {
             key: "Cache-Control",
-            value: "public, max-age=0, s-maxage=30, stale-while-revalidate=60",
+            value: "no-store, no-cache, must-revalidate, private",
           },
-          { key: "CDN-Cache-Control", value: "public, max-age=0, s-maxage=30, stale-while-revalidate=60" },
+          { key: "Pragma", value: "no-cache" },
         ],
       },
       {

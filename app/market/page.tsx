@@ -5,8 +5,12 @@ import ComingSoonGate from "@/components/market/ComingSoonGate";
 import { MARKET_ENABLED } from "@/lib/constants";
 import { createPageMetadata } from "@/lib/seo";
 
-/** Short ISR so dual-vault Instant Swap UI is not stuck behind year-long HTML cache. */
-export const revalidate = 30;
+/**
+ * Marketplank is a live application shell, not publish-once content. Keeping
+ * the route dynamic prevents Next.js and the hosting proxy from carrying an
+ * old layout across an immutable release switch.
+ */
+export const dynamic = "force-dynamic";
 
 export const metadata = createPageMetadata({
   title: "Marketplank NFT Marketplace",
@@ -20,7 +24,12 @@ export default function MarketPage() {
   return (
     <>
       <Nav />
-      <main id="main-content" tabIndex={-1} className="flex-1 px-3 py-10 sm:px-5">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        data-deployment={process.env.DEPLOYMENT_VERSION || "unknown"}
+        className="flex-1 px-3 py-10 sm:px-5"
+      >
         {/* Browsing a listing grid benefits from real desktop width — the
             site-wide 64rem prose column (.site-shell) is right for the
             marketing/coming-soon state but starves the grid on wide
