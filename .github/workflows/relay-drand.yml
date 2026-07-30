@@ -1,8 +1,9 @@
 name: Relay drand rounds
 
-# GitHub-only, gas-efficient random-redeem maintenance. The gas-only relayer
-# key remains in Actions Secrets and is never copied to Passenger. The script
-# spends gas only when a vault has a pending requester; idle runs are RPC reads.
+# Temporary GitHub fallback for random-redemption maintenance while the
+# InMotion cPanel cron proves a 24-hour healthy window. The manual
+# verify-relayer operation disables this workflow after takeover. The script
+# spends gas only when a vault has an actionable request; idle runs are reads.
 #
 # Secrets:
 #   RELAYER_PRIVATE_KEY — dedicated gas-only throwaway wallet

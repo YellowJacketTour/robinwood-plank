@@ -1,5 +1,14 @@
 # Marketplank security audit — 2026-07-27 (Fable pass)
 
+> [!NOTE]
+> Historical internal audit and remediation record. Later sections in this
+> document supersede earlier blockhash findings with the drand design, but the
+> final pre-launch recommendation still reflects the state at the moment it
+> was written. V1 and V2 were subsequently deployed, Marketplank was enabled,
+> and the application moved from Vercel KV/Cloudflare Worker hosting to
+> InMotion Passenger with PostgreSQL. No independent third-party audit has
+> been recorded in this repository.
+
 **Verdict: NOT READY for `MARKET_ENABLED=true`.**
 
 This pass found defects that the previous audit either missed, declared sound,

@@ -1,6 +1,13 @@
 # Post-Mortem & Corrective Action Plan  
 ## Marketplank Vault Liquidity, Migration & Bootstrap (July 2026)
 
+> [!NOTE]
+> Historical incident record. Cloudflare Worker constraints described here
+> apply to the earlier hosting model. The canonical `inmotion` branch now
+> deploys the application to InMotion Passenger with PostgreSQL; Cloudflare is
+> the DNS/proxy/WAF edge. The dual-vault facts and corrective actions remain
+> relevant.
+
 **Document type:** Formal incident analysis, resolution record, and ongoing development plan  
 **Classification:** Internal product / engineering (shareable with partners after redaction review)  
 **Date of record:** 2026-07-29  
