@@ -3,16 +3,26 @@
 import { useCallback, useState } from "react";
 import CopyCA from "@/components/CopyCA";
 import CountdownTimer from "@/components/trade/CountdownTimer";
-import TradeModeSwitch from "@/components/trade/TradeModeSwitch";
+import TradeModeSwitch, {
+  type TradeMode,
+  type ZeroXStatusResponse,
+} from "@/components/trade/TradeModeSwitch";
 import { TRADE_PAUSED } from "@/lib/constants";
 import { getCountdownParts } from "@/lib/trade";
+
+type Props = {
+  /** Forwarded straight through to TradeModeSwitch so a sibling status rail
+   * can stay in sync with the active tab — see TradeActionZone.tsx. */
+  onModeChange?: (mode: TradeMode) => void;
+  onZeroXStatusChange?: (status: ZeroXStatusResponse | null) => void;
+};
 
 /**
  * Same open/paused gate as the homepage Trade section (Trade.tsx) — this
  * page is the trading destination now, so the widget renders directly
  * instead of behind an extra "Trade $PLANK" reveal click.
  */
-export default function TradeWorkbench() {
+export default function TradeWorkbench({ onModeChange, onZeroXStatusChange }: Props = {}) {
   const [isOpen, setIsOpen] = useState(() => (TRADE_PAUSED ? false : getCountdownParts().isOpen));
   const onOpenChange = useCallback((open: boolean) => {
     setIsOpen(TRADE_PAUSED ? false : open);
@@ -24,7 +34,7 @@ export default function TradeWorkbench() {
       {!TRADE_PAUSED && isOpen ? (
         <>
           <CopyCA />
-          <TradeModeSwitch />
+          <TradeModeSwitch onModeChange={onModeChange} onStatusChange={onZeroXStatusChange} />
         </>
       ) : (
         !TRADE_PAUSED && (
