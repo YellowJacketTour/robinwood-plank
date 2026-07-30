@@ -3,7 +3,7 @@
  * ethers' JsonRpcProvider (which can hang on node:http under nodejs_compat).
  */
 
-import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
+import { SERVER_RPC_URLS } from "@/lib/server/rpc-urls";
 
 type RpcResult<T> = { result?: T; error?: { message?: string; code?: number } };
 
@@ -13,11 +13,11 @@ type RpcResult<T> = { result?: T; error?: { message?: string; code?: number } };
  * and was making Instant Swap's live feed fail after the first successful hit.
  */
 function vaultRpcUrls(): string[] {
-  return ROBINHOOD_RPC_URLS.filter(
+  return SERVER_RPC_URLS.filter(
     (u) => !u.includes("blockscout.com")
   ).concat(
     // only if official list somehow empty
-    ROBINHOOD_RPC_URLS.filter((u) => u.includes("blockscout.com"))
+    SERVER_RPC_URLS.filter((u) => u.includes("blockscout.com"))
   );
 }
 
