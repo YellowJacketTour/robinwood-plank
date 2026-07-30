@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   cancelWalletConnectConnect,
   connectWithWalletConnect,
@@ -40,6 +41,17 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
   const [phase, setPhase] = useState<Phase>("idle");
   const [pendingAddress, setPendingAddress] = useState<string | null>(null);
   const [liveChain, setLiveChain] = useState<number | null>(null);
+  // Rendered via a portal straight onto <body> — this modal is opened from
+  // inside the homepage's ".reveal" section, which sets a (identity)
+  // transform once visible. Any non-"none" transform on an ancestor creates
+  // a new CSS containing block, so a plain `position: fixed` child (this
+  // modal) gets trapped inside that box instead of covering the viewport —
+  // same bug, same fix as TokenSelectModal.
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -211,9 +223,9 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
     }
   }, [checkChainAndFinish]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4"
       role="dialog"
@@ -410,6 +422,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
           </p>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

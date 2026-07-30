@@ -137,6 +137,38 @@ export function formatTokenAmount(
   return neg ? `-${body}` : body;
 }
 
+/**
+ * Thousands separators for a decimal string's INTEGER part only — display
+ * only, operates on the string formatTokenAmount already produced. Never
+ * parses the value (no Number()/parseFloat), so full BigInt precision from
+ * the caller is untouched; this is pure string grouping.
+ */
+export function groupThousands(decimalStr: string): string {
+  const neg = decimalStr.startsWith("-");
+  const body = neg ? decimalStr.slice(1) : decimalStr;
+  const [whole, frac] = body.split(".");
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${neg ? "-" : ""}${grouped}${frac !== undefined ? `.${frac}` : ""}`;
+}
+
+/**
+ * The display-ready form of a base-unit amount: adaptive fraction-digit
+ * precision (huge whole amounts don't need 8 decimal places to be
+ * meaningful; small/dust amounts still get enough digits to not read as
+ * zero) plus thousands separators on the integer part. Built entirely from
+ * formatTokenAmount's bigint-precise string — never a float pass.
+ */
+export function formatDisplayAmount(raw: string | bigint, decimals: number): string {
+  const value = typeof raw === "bigint" ? raw : BigInt(raw || "0");
+  const abs = value < BigInt(0) ? -value : value;
+  const base = BigInt(10) ** BigInt(decimals);
+  const whole = abs / base;
+  const wholeDigits = whole === BigInt(0) ? 0 : whole.toString().length;
+  const maxFractionDigits =
+    wholeDigits >= 9 ? 2 : wholeDigits >= 6 ? 3 : wholeDigits >= 1 ? 4 : 8;
+  return groupThousands(formatTokenAmount(raw, decimals, maxFractionDigits));
+}
+
 /** Quotes older than this should be refreshed before swap (tight for meme volatility). */
 export const QUOTE_MAX_AGE_MS = 20_000;
 
