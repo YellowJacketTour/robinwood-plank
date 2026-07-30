@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BUY_GAS_RESERVE_ETH,
   BUY_GAS_RESERVE_WEI,
@@ -39,6 +39,22 @@ const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModal
 });
 
 type Direction = "buy" | "sell";
+
+/** Mirror of lib/uniswap-tokenlist's CounterToken (client copy — the list
+ * itself always comes from /api/uniswap/tokens, never client-authored). */
+type CounterTokenEntry = {
+  address: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+};
+
+const NATIVE_COUNTER_ENTRY: CounterTokenEntry = {
+  address: NATIVE_TOKEN_ADDRESS,
+  symbol: "ETH",
+  name: "Ether",
+  decimals: 18,
+};
 
 type QuoteState = {
   quote: Record<string, unknown>;
@@ -90,9 +106,32 @@ export default function SwapWidget() {
   const [apiReady, setApiReady] = useState<boolean | null>(null);
   const [slippage, setSlippage] = useState(2.5);
 
-  const inputSymbol = direction === "buy" ? "ETH" : TOKEN.symbol;
-  const outputSymbol = direction === "buy" ? TOKEN.symbol : "ETH";
-  const inputDecimals = direction === "buy" ? 18 : TOKEN.decimals;
+  /** The non-PLANK side of the pair. Server-validated allowlist: native
+   * ETH + the official Uniswap token list for this chain (tokenized
+   * stocks). PLANK is always the other side; the router handles multihop. */
+  const [counters, setCounters] = useState<CounterTokenEntry[]>([NATIVE_COUNTER_ENTRY]);
+  const [counter, setCounter] = useState<CounterTokenEntry>(NATIVE_COUNTER_ENTRY);
+  const counterIsNative = counter.address.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase();
+
+  const inputSymbol = direction === "buy" ? counter.symbol : TOKEN.symbol;
+  const outputSymbol = direction === "buy" ? TOKEN.symbol : counter.symbol;
+  const inputDecimals = direction === "buy" ? counter.decimals : TOKEN.decimals;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/uniswap/tokens")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { counters?: CounterTokenEntry[] } | null) => {
+        if (cancelled || !d?.counters?.length) return;
+        setCounters(d.counters);
+      })
+      .catch(() => {
+        /* selector stays ETH-only — the pre-feature behavior */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const uniswapUrl = useMemo(
     () =>
@@ -215,6 +254,7 @@ export default function SwapWidget() {
           amount: raw.toString(),
           swapper: account || undefined,
           slippageTolerance: slippage,
+          counterToken: counterIsNative ? undefined : counter.address,
         }),
       });
       const data = await res.json();
@@ -272,7 +312,28 @@ export default function SwapWidget() {
     } finally {
       setBusy(false);
     }
-  }, [amountIn, inputDecimals, account, direction, slippage]);
+  }, [amountIn, inputDecimals, account, direction, slippage, counter, counterIsNative]);
+
+  // Uniswap-interface behavior: typing auto-quotes (debounced) — no button
+  // press needed for a price. Any change to the inputs re-quotes; clearing
+  // the amount clears the quote.
+  const fetchQuoteRef = useRef(fetchQuote);
+  fetchQuoteRef.current = fetchQuote;
+  useEffect(() => {
+    const raw = parseTokenAmount(amountIn, inputDecimals);
+    if (raw === null || raw <= BigInt(0)) {
+      setQuote(null);
+      return;
+    }
+    const timer = window.setTimeout(() => void fetchQuoteRef.current(), 600);
+    return () => window.clearTimeout(timer);
+  }, [amountIn, inputDecimals, direction, slippage, counter, account]);
+
+  // Switching the counter token invalidates any priced quote immediately.
+  useEffect(() => {
+    setQuote(null);
+    setStatus(null);
+  }, [counter]);
 
   const executeSwap = useCallback(async () => {
     if (!quote || !account) return;
@@ -368,11 +429,26 @@ export default function SwapWidget() {
       }
 
       if (direction === "buy") {
-        const bal = await getNativeBalance(account);
-        if (bal <= BUY_GAS_RESERVE_WEI || raw + BUY_GAS_RESERVE_WEI > bal) {
-          throw new Error(
-            `Leave ~${BUY_GAS_RESERVE_ETH} ETH free for gas after the buy amount.`
-          );
+        if (counterIsNative) {
+          const bal = await getNativeBalance(account);
+          if (bal <= BUY_GAS_RESERVE_WEI || raw + BUY_GAS_RESERVE_WEI > bal) {
+            throw new Error(
+              `Leave ~${BUY_GAS_RESERVE_ETH} ETH free for gas after the buy amount.`
+            );
+          }
+        } else {
+          // ERC-20 counter: the token balance covers the amount; gas is
+          // still paid in ETH, checked separately.
+          const [tokenBal, ethBal] = await Promise.all([
+            getErc20Balance(counter.address, account),
+            getNativeBalance(account),
+          ]);
+          if (raw > tokenBal) {
+            throw new Error(`Not enough ${counter.symbol} for that amount.`);
+          }
+          if (ethBal < BUY_GAS_RESERVE_WEI) {
+            throw new Error(`Keep ~${BUY_GAS_RESERVE_ETH} ETH for gas.`);
+          }
         }
       }
 
@@ -381,7 +457,11 @@ export default function SwapWidget() {
       setQuote(active);
 
       let didOnChainApprove = false;
-      if (direction === "sell") {
+      // Approval applies whenever the INPUT side is an ERC-20: selling
+      // PLANK, or buying PLANK with a non-native counter token.
+      const erc20In = direction === "sell" ? CONTRACT_ADDRESS : counterIsNative ? null : counter.address;
+      const erc20InSymbol = direction === "sell" ? "$PLANK" : counter.symbol;
+      if (erc20In) {
         const tryApproveTx = async (
           txLike: Record<string, unknown> | null | undefined,
           label: string
@@ -411,7 +491,7 @@ export default function SwapWidget() {
         };
 
         if (active.permitTransaction?.to && active.permitTransaction?.data) {
-          didOnChainApprove = await tryApproveTx(active.permitTransaction, "Approve $PLANK…");
+          didOnChainApprove = await tryApproveTx(active.permitTransaction, `Approve ${erc20InSymbol}…`);
         }
 
         if (!didOnChainApprove) {
@@ -421,7 +501,7 @@ export default function SwapWidget() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               walletAddress: account,
-              token: CONTRACT_ADDRESS,
+              token: erc20In,
               amount: raw.toString(),
             }),
           });
@@ -431,7 +511,7 @@ export default function SwapWidget() {
           };
           const approvalTx = apprData?.approval || apprData?.request || null;
           if (appr.ok && approvalTx) {
-            didOnChainApprove = await tryApproveTx(approvalTx, "Approve $PLANK…");
+            didOnChainApprove = await tryApproveTx(approvalTx, `Approve ${erc20InSymbol}…`);
           }
         }
 
@@ -560,17 +640,17 @@ export default function SwapWidget() {
     } finally {
       setBusy(false);
     }
-  }, [quote, account, amountIn, inputDecimals, direction, slippage]);
+  }, [quote, account, amountIn, inputDecimals, direction, slippage, counter, counterIsNative]);
 
   const estimatedOut = useMemo(() => {
     if (!quote?.amountOut) return "—";
     try {
-      const outDecimals = direction === "buy" ? TOKEN.decimals : 18;
+      const outDecimals = direction === "buy" ? TOKEN.decimals : counter.decimals;
       return formatTokenAmount(quote.amountOut, outDecimals);
     } catch {
       return "—";
     }
-  }, [quote, direction]);
+  }, [quote, direction, counter]);
 
   const btnBase =
     "min-h-11 w-full rounded-lg px-3 py-2.5 text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:text-base";
@@ -625,9 +705,27 @@ export default function SwapWidget() {
             className="min-w-0 flex-1 bg-transparent py-2.5 text-lg font-semibold text-foreground outline-none placeholder:text-foreground/30 sm:text-xl"
             aria-label={`Amount of ${inputSymbol}`}
           />
-          <span className="shrink-0 rounded-md bg-gold-500/15 px-2 py-1 text-xs font-bold text-gold-300 sm:text-sm">
-            {inputSymbol}
-          </span>
+          {direction === "buy" ? (
+            <select
+              value={counter.address}
+              onChange={(e) => {
+                const next = counters.find((t) => t.address === e.target.value);
+                if (next) setCounter(next);
+              }}
+              aria-label="Token to pay with"
+              className="max-w-[9rem] shrink-0 rounded-md border-0 bg-gold-500/15 px-2 py-1.5 text-xs font-bold text-gold-300 outline-none sm:text-sm"
+            >
+              {counters.map((t) => (
+                <option key={t.address} value={t.address} title={t.name}>
+                  {t.symbol}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="shrink-0 rounded-md bg-gold-500/15 px-2 py-1 text-xs font-bold text-gold-300 sm:text-sm">
+              {inputSymbol}
+            </span>
+          )}
         </div>
       </label>
 
@@ -650,9 +748,27 @@ export default function SwapWidget() {
           <span className="min-w-0 flex-1 py-2.5 text-lg font-semibold text-foreground/90 sm:text-xl">
             {estimatedOut}
           </span>
-          <span className="shrink-0 rounded-md bg-forest-800/60 px-2 py-1 text-xs font-bold text-gold-300 sm:text-sm">
-            {outputSymbol}
-          </span>
+          {direction === "sell" ? (
+            <select
+              value={counter.address}
+              onChange={(e) => {
+                const next = counters.find((t) => t.address === e.target.value);
+                if (next) setCounter(next);
+              }}
+              aria-label="Token to receive"
+              className="max-w-[9rem] shrink-0 rounded-md border-0 bg-forest-800/60 px-2 py-1.5 text-xs font-bold text-gold-300 outline-none sm:text-sm"
+            >
+              {counters.map((t) => (
+                <option key={t.address} value={t.address} title={t.name}>
+                  {t.symbol}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="shrink-0 rounded-md bg-forest-800/60 px-2 py-1 text-xs font-bold text-gold-300 sm:text-sm">
+              {outputSymbol}
+            </span>
+          )}
         </div>
       </div>
 

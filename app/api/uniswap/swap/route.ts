@@ -197,7 +197,7 @@ export async function POST(req: Request) {
     }
 
     const quote = body.quote as Record<string, unknown>;
-    assertQuoteIntegrity(quote);
+    await assertQuoteIntegrity(quote);
 
     const swapper =
       typeof body.swapper === "string"

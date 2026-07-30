@@ -94,35 +94,51 @@ export class TradeApiError extends Error {
   }
 }
 
-export function resolveTokens(direction: SwapDirection) {
+export function resolveTokens(
+  direction: SwapDirection,
+  counter?: { address: string; decimals: number }
+) {
+  const c = counter ?? { address: NATIVE_TOKEN_ADDRESS, decimals: 18 };
   if (direction === "buy") {
     return {
-      tokenIn: NATIVE_TOKEN_ADDRESS,
+      tokenIn: c.address,
       tokenOut: CONTRACT_ADDRESS,
-      tokenInDecimals: 18,
+      tokenInDecimals: c.decimals,
       tokenOutDecimals: TOKEN.decimals,
     };
   }
   return {
     tokenIn: CONTRACT_ADDRESS,
-    tokenOut: NATIVE_TOKEN_ADDRESS,
+    tokenOut: c.address,
     tokenInDecimals: TOKEN.decimals,
-    tokenOutDecimals: 18,
+    tokenOutDecimals: c.decimals,
   };
 }
 
-/** Only allow the official PLANK pair on Robinhood Chain. */
-export function assertAllowedPair(tokenIn: string, tokenOut: string, chainId: number) {
+/**
+ * Every pair must have official $PLANK on exactly one side; the other side
+ * must be an allowed counter token (native ETH or a token from the
+ * server-side allowlist — lib/uniswap-tokenlist.ts). The router handles
+ * any multihop between them.
+ */
+export async function assertAllowedPair(tokenIn: string, tokenOut: string, chainId: number) {
   if (chainId !== CHAIN.id) {
     throw new TradeApiError(400, "BAD_CHAIN", `Only chain ${CHAIN.id} (Robinhood) is supported.`);
   }
   const a = tokenIn.toLowerCase();
   const b = tokenOut.toLowerCase();
   const plank = CONTRACT_ADDRESS.toLowerCase();
-  const native = NATIVE_TOKEN_ADDRESS.toLowerCase();
-  const ok = (a === native && b === plank) || (a === plank && b === native);
-  if (!ok) {
-    throw new TradeApiError(400, "BAD_PAIR", "This widget only trades official $PLANK against ETH.");
+  const counter = a === plank ? b : b === plank ? a : null;
+  if (!counter || a === b) {
+    throw new TradeApiError(400, "BAD_PAIR", "This widget only trades official $PLANK pairs.");
+  }
+  const { getCounterToken } = await import("@/lib/uniswap-tokenlist");
+  if (!(await getCounterToken(counter))) {
+    throw new TradeApiError(
+      400,
+      "BAD_PAIR",
+      "That token is not on the allowed list for $PLANK trading."
+    );
   }
 }
 
@@ -179,7 +195,7 @@ function isPlank(addr: string) {
  * Before building a swap tx, ensure the quote still targets our pair + fee wallet
  * (mitigates client tampering of the quote object between /quote and /swap).
  */
-export function assertQuoteIntegrity(quote: Record<string, unknown>): void {
+export async function assertQuoteIntegrity(quote: Record<string, unknown>): Promise<void> {
   const input = quote.input as { token?: string } | undefined;
   const output = quote.output as { token?: string; recipient?: string } | undefined;
 
@@ -194,10 +210,18 @@ export function assertQuoteIntegrity(quote: Record<string, unknown>): void {
     throw new TradeApiError(400, "QUOTE_PAIR", "Quote missing token pair metadata.");
   }
   {
-    const ok =
-      (isNative(tokenIn) && isPlank(tokenOut)) || (isPlank(tokenIn) && isNative(tokenOut));
-    if (!ok) {
-      throw new TradeApiError(400, "QUOTE_PAIR", "Quote is not for the official $PLANK / ETH pair.");
+    // Same rule as assertAllowedPair: PLANK on exactly one side, the other
+    // side native or on the server allowlist. WETH counts as native here —
+    // the router legitimately wraps for CLASSIC routes.
+    const counter = isPlank(tokenIn) ? tokenOut : isPlank(tokenOut) ? tokenIn : null;
+    if (!counter) {
+      throw new TradeApiError(400, "QUOTE_PAIR", "Quote is not for an official $PLANK pair.");
+    }
+    if (!isNative(counter)) {
+      const { getCounterToken } = await import("@/lib/uniswap-tokenlist");
+      if (!(await getCounterToken(counter))) {
+        throw new TradeApiError(400, "QUOTE_PAIR", "Quote counter token is not on the allowed list.");
+      }
     }
   }
 

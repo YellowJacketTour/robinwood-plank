@@ -48,14 +48,19 @@ export async function POST(req: Request) {
       throw new TradeApiError(400, "BAD_AMOUNT", "amount must be a positive integer string.");
     }
 
-    // Force chain + only allow native/PLANK approvals
+    // Force chain + only allow approvals for PLANK, native, or an allowed
+    // counter token (the server-side list — buying PLANK with a tokenized
+    // stock needs the stock's Permit2 approval).
     const t = token.toLowerCase();
-    const allowed = new Set([
+    const core = new Set([
       CONTRACT_ADDRESS.toLowerCase(),
       NATIVE_TOKEN_ADDRESS.toLowerCase(),
     ]);
-    if (!allowed.has(t)) {
-      throw new TradeApiError(400, "BAD_TOKEN", "Only ETH / $PLANK approvals are allowed.");
+    if (!core.has(t)) {
+      const { getCounterToken } = await import("@/lib/uniswap-tokenlist");
+      if (!(await getCounterToken(token))) {
+        throw new TradeApiError(400, "BAD_TOKEN", "That token is not on the allowed trading list.");
+      }
     }
 
     // Ignore client chainId — always Robinhood
