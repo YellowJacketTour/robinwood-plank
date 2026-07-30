@@ -28,17 +28,23 @@ export default function CrossChainDisclaimer({
 }: {
   sourceChains: SourceChainOption[];
 }) {
+  // Same border/background language as ZeroXCrossChainPanel's own Fees
+  // details block and the non-atomic risk callout below it — these three
+  // surfaces are visually separate components/containers (this one is
+  // mounted a level up, by TradeModeSwitch) but are meant to read as one
+  // "risk & fees" system rather than three unrelated cards. See
+  // docs/TRADE_PAGE_SPEC.md §"three stacked disclosure blocks".
   return (
-    <details className="group rounded-lg border border-line bg-panel-soft px-3 py-2 text-cream">
+    <details className="group rounded-lg border border-gold-500/20 bg-wood-950/40 px-3 py-2 text-foreground">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-[0.72rem] font-bold uppercase tracking-wide text-gold-300">
         <span className="flex min-w-0 items-center gap-1.5">
           <ShieldAlert size={13} className="shrink-0 text-gold-400" />
           What to know before you buy cross-chain
         </span>
-        <ChevronDown size={14} className="shrink-0 text-cream-muted transition-transform group-open:rotate-180" />
+        <ChevronDown size={14} className="shrink-0 text-foreground/50 transition-transform group-open:rotate-180" />
       </summary>
       <div className="mt-2.5 space-y-2.5">
-        <ul className="list-disc space-y-1 pl-4 text-[0.72rem] leading-snug text-cream-muted">
+        <ul className="list-disc space-y-1 pl-4 text-[0.72rem] leading-snug text-foreground/70">
           <li>
             One signed transaction, but it still spans two blockchains — your source chain and{" "}
             {CHAIN.name} — executed by 0x&apos;s routers, not plank.love.
