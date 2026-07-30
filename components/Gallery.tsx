@@ -64,6 +64,25 @@ const PAGE_SIZE = 24;
 /** First paint: stage this many cards immediately (newest first). */
 const INITIAL_STAGE = 48;
 
+type TokenHistoryEntry = {
+  kind: string;
+  priceEth: string | null;
+  txHash: string;
+  timestamp: string | null;
+  from: string;
+  to: string;
+};
+
+/** Same compact relative-time format as the market's Activity feed. */
+function timeAgo(iso: string | null): string {
+  if (!iso) return "—";
+  const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 60) return `${Math.floor(secs)}s ago`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  return `${Math.floor(secs / 86400)}d ago`;
+}
+
 /** Compact 0xABCD…WXYZ — unobtrusive on cards; full address via title. */
 function shortOwner(owner: string) {
   const raw = (owner || "").trim();
@@ -148,6 +167,7 @@ function GalleryDetailModal({
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
   const [account, setAccount] = useState<string | null>(null);
+  const [history, setHistory] = useState<TokenHistoryEntry[] | null>(null);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -178,6 +198,26 @@ function GalleryDetailModal({
   const isOwner = Boolean(
     account && nft.owner && account.toLowerCase() === nft.owner.toLowerCase(),
   );
+
+  // Same endpoint + history=1 param ItemDetail uses — the gallery never
+  // recomputes history itself, only reads the shared token detail route.
+  // Mounted per token via the `key` at the call site, so there is no stale
+  // state to clear here when the selected token changes (same pattern as
+  // ItemDetail).
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/market/token?tokenId=${encodeURIComponent(nft.tokenId)}&history=1`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
+      .then((d: { history?: TokenHistoryEntry[] }) => {
+        if (!cancelled) setHistory(Array.isArray(d.history) ? d.history : []);
+      })
+      .catch(() => {
+        if (!cancelled) setHistory([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [nft.tokenId]);
 
   return (
     <div
@@ -292,6 +332,49 @@ function GalleryDetailModal({
                   </ul>
                 </div>
               )}
+              <div>
+                <h4 className="mb-1.5 text-[0.7rem] font-black uppercase tracking-[0.1em] text-foreground">
+                  History
+                </h4>
+                {!history || history.length === 0 ? (
+                  <p className="rounded-lg border border-line bg-wood-950 px-3 py-2.5 text-xs text-cream-muted">
+                    {history === null ? "Loading history…" : "No transfers recorded."}
+                  </p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {history.map((h) => (
+                      <li
+                        key={h.txHash}
+                        className="min-w-0 rounded-lg border border-line bg-wood-950 px-2.5 py-2"
+                      >
+                        <div className="flex items-center justify-between gap-2 text-[0.7rem]">
+                          <a
+                            href={`${ROBINHOOD_EXPLORER_URL}/tx/${h.txHash}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-bold capitalize text-gold-300 hover:underline"
+                          >
+                            {h.kind}
+                          </a>
+                          <span className="shrink-0 font-bold text-gold-300">
+                            {h.priceEth
+                              ? `${Number(h.priceEth).toFixed(4)} Ξ`
+                              : h.kind === "sale"
+                                ? "Unavailable"
+                                : "—"}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center justify-between gap-2 text-[0.6rem] text-foreground/45">
+                          <span className="min-w-0 truncate font-mono">
+                            {shortOwner(h.from)} → {shortOwner(h.to)}
+                          </span>
+                          <span className="shrink-0">{timeAgo(h.timestamp)}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               {!rarity && nft.attributes.length > 0 && (
                 <ul className="grid grid-cols-1 gap-2 min-[380px]:grid-cols-2">
                   {nft.attributes.map((attribute, index) => (
@@ -807,6 +890,16 @@ export default function Gallery() {
     setVisibleCount(PAGE_SIZE);
   }, [query]);
 
+  // Deep link from the landing page's condensed wallet lookup (WalletLookupCard)
+  // — prefill the same search box owner-address matching already supports,
+  // rather than duplicating a wallet-collection fetch here.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) setQuery(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const rarity = useMemo(() => computeRaritySnapshot(items), [items]);
 
   const filtered = useMemo(() => {
@@ -1215,6 +1308,7 @@ export default function Gallery() {
 
       {selected && (
         <GalleryDetailModal
+          key={selected.tokenId}
           nft={selected}
           rarity={selectedRarity}
           onClose={() => setSelected(null)}
