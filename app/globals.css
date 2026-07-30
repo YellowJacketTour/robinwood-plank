@@ -58,23 +58,30 @@
   scroll-behavior: smooth;
 }
 
+/* Mockup-derived (docs/mockups/landing-redesign/finalized.html): a single
+   capped plank-head.webp anchored at the top over a strong dark wash, with
+   the page's own background-color filling everything below it — never
+   plank-legs.webp stretched to the full scroll height. That stretch was a
+   later, unreviewed elaboration on this rule (recorded, not designed) that
+   produced the "wall of bright yellow" the owner flagged as looking
+   strange; this restores the approved treatment. See PlankBackground.tsx
+   (now a no-op — this is pure CSS, no JS sizing needed). */
 body {
   background-color: #14100b;
   color: var(--foreground);
   font-family: var(--font-body), Arial, Helvetica, sans-serif;
   background-image:
-    /* darken/warm wash so foreground text stays readable over the giant render */
-    linear-gradient(180deg, rgba(20, 16, 11, 0.55) 0%, rgba(20, 16, 11, 0.75) 40%, rgba(20, 16, 11, 0.88) 100%),
-    /* head/eyes/smile — always shown at true, undistorted aspect ratio */
-    url("/images/plank-head.webp"),
-    /* legs/body — plain wood grain, safe to stretch to fill the rest of the page
-       (sized dynamically by PlankBackground.tsx so the whole body spans the
-       full page height without warping the face) */
-    url("/images/plank-legs.webp");
-  background-repeat: no-repeat, no-repeat, no-repeat;
-  background-position: top center, top center, top center;
-  background-size: 100% 100%, 100% auto, 100% auto;
-  background-attachment: scroll, scroll, scroll;
+    /* much stronger wash than the app-backdrop texture — this sits directly
+       behind body copy for the entire scroll length, not just under the
+       masthead, so it has to stay legible at the bottom of a long page too */
+    linear-gradient(180deg, rgba(20, 16, 11, 0.88) 0%, rgba(20, 16, 11, 0.95) 40%, rgba(20, 16, 11, 0.97) 100%),
+    /* head/eyes/smile — capped width so it reads as a masthead illustration,
+       never stretched, never repeated */
+    url("/images/plank-head.webp");
+  background-repeat: no-repeat, no-repeat;
+  background-position: top center, top center;
+  background-size: 100% 100%, min(1500px, 120vw) auto;
+  background-attachment: scroll, scroll;
   font-weight: 700;
 }
 
