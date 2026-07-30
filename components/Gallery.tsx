@@ -39,6 +39,7 @@ import {
   type TokenRarity,
 } from "@/lib/rarity";
 import type { GalleryNft } from "@/lib/gallery-types";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 import RarityInsights from "@/components/RarityInsights";
 import {
   ensureNftCacheHydrated,
@@ -747,11 +748,11 @@ export default function Gallery() {
     }
 
     void syncMinted("full");
-    const timer = window.setInterval(() => void syncMinted("poll"), POLL_MS);
+    const stopPoll = startVisibleInterval(() => void syncMinted("poll"), POLL_MS);
 
     return () => {
       aliveRef.current = false;
-      window.clearInterval(timer);
+      stopPoll();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

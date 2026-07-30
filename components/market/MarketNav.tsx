@@ -8,10 +8,12 @@ type Props = {
   active: MarketTab;
   onChange: (tab: MarketTab) => void;
   counts?: Partial<Record<MarketTab, number>>;
+  /** Hover intent: pre-mount a tab's panel before the click lands. */
+  onPrewarm?: (tab: MarketTab) => void;
 };
 
 /** Horizontal on desktop, horizontal-scroll strip on mobile — no wrap, no second row. */
-export default function MarketNav({ active, onChange, counts }: Props) {
+export default function MarketNav({ active, onChange, counts, onPrewarm }: Props) {
   const activeRef = useRef<HTMLButtonElement>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const tabListRef = useRef<HTMLDivElement>(null);
@@ -79,6 +81,8 @@ export default function MarketNav({ active, onChange, counts }: Props) {
           aria-controls={`market-panel-${t.id}`}
           tabIndex={active === t.id ? 0 : -1}
           onClick={() => onChange(t.id)}
+          onPointerEnter={() => onPrewarm?.(t.id)}
+          onFocus={() => onPrewarm?.(t.id)}
           onKeyDown={(event) => {
             if (["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) {
               event.preventDefault();

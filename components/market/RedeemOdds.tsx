@@ -20,6 +20,8 @@ type TierRow = {
 
 type Props = {
   vaultAddress?: string | null;
+  /** False while the owning tab is mounted but off screen — pauses polling. */
+  active?: boolean;
 };
 
 /**
@@ -32,8 +34,8 @@ type Props = {
  * Marketplace listing floors do NOT belong here — redeem odds are about
  * what the vault might draw, not open-market prices.
  */
-export default function RedeemOdds({ vaultAddress = null }: Props) {
-  const { stats } = useVaultBook(vaultAddress);
+export default function RedeemOdds({ vaultAddress = null, active = true }: Props) {
+  const { stats } = useVaultBook(vaultAddress, { active });
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
   /** Live held list from /vault/held — more reliable than stats.heldTokenIds
    * which can be empty when the stats path times out the ID scan. */

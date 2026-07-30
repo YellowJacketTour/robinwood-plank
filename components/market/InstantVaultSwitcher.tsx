@@ -18,13 +18,16 @@ import {
 import { getVaultOnChainSnapshot } from "@/lib/market/vault";
 import { formatTokenAmount } from "@/lib/trade";
 import { CHAIN } from "@/lib/constants";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 
 type Props = {
   role: VaultRole;
   onChange: (role: VaultRole) => void;
+  /** False while the owning tab is mounted but off screen — pauses polling. */
+  active?: boolean;
 };
 
-export default function InstantVaultSwitcher({ role, onChange }: Props) {
+export default function InstantVaultSwitcher({ role, onChange, active = true }: Props) {
   const vaults = listVaults();
   const [snap, setSnap] = useState<
     Record<string, { held: number; pool: string; eth: string; open: boolean }>
@@ -49,7 +52,7 @@ export default function InstantVaultSwitcher({ role, onChange }: Props) {
       }
       if (!cancelled) setSnap(next);
     })();
-    const t = setInterval(() => {
+    const tick = () => {
       void (async () => {
         const next: typeof snap = {};
         for (const v of vaults) {
@@ -67,12 +70,13 @@ export default function InstantVaultSwitcher({ role, onChange }: Props) {
         }
         if (!cancelled) setSnap((prev) => ({ ...prev, ...next }));
       })();
-    }, 20_000);
+    };
+    const stop = active ? startVisibleInterval(tick, 20_000) : null;
     return () => {
       cancelled = true;
-      clearInterval(t);
+      stop?.();
     };
-  }, [vaults.length]);
+  }, [vaults.length, active]);
 
   if (!dualVaultMode() || vaults.length < 2) {
     const only = vaults[0];

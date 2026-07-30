@@ -177,6 +177,15 @@ const nextConfig: NextConfig = {
         source: "/images/:path*",
         headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }],
       },
+      // 4.7 MB self-hosted WalletConnect runtime, lazy-loaded on first wallet
+      // connect. Unhashed checked-in artifact, so a day + SWR week — never
+      // immutable, it can change on deploy.
+      {
+        source: "/wallet-connect-bundle.js",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" },
+        ],
+      },
       {
         source: "/plank-social.jpg",
         headers: [

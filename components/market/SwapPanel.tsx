@@ -43,6 +43,7 @@ import TokenPicker, { type PickerToken } from "@/components/market/TokenPicker";
 import { addPendingVaultTx } from "@/lib/market/pendingVaultTx";
 import { useVaultBook } from "@/lib/market/useVaultBook";
 import { relayDrandRound } from "@/lib/market/drand";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 
 type Mode = "buy" | "sell" | "deposit" | "redeem" | "lp";
 type LpDirection = "add" | "remove";
@@ -144,6 +145,9 @@ type Props = {
   vaultAddress?: string | null;
   /** Short UI label for the active vault (e.g. "V2 — new Instant Swap"). */
   vaultLabel?: string | null;
+  /** False while the Instant Swap tab is mounted but not on screen — pauses
+   * the idle polling loops without losing panel state. */
+  active?: boolean;
 };
 
 /**
@@ -170,9 +174,11 @@ type Props = {
 function StuckRedeemRelay({
   account,
   vaultAddress,
+  active = true,
 }: {
   account: string | null;
   vaultAddress?: string | null;
+  active?: boolean;
 }) {
   const [requester, setRequester] = useState<string | null>(null);
   const [round, setRound] = useState<bigint | null>(null);
@@ -182,6 +188,9 @@ function StuckRedeemRelay({
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
+    // No polling while the Instant Swap tab is backgrounded — this check
+    // costs a settle kick + two eth_calls every cycle.
+    if (!active) return;
     let cancelled = false;
     const check = async () => {
       try {
@@ -205,12 +214,12 @@ function StuckRedeemRelay({
       }
     };
     void check();
-    const interval = setInterval(() => void check(), 6_000);
+    const stop = startVisibleInterval(() => void check(), 6_000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop();
     };
-  }, [vaultAddress]);
+  }, [vaultAddress, active]);
 
   if (!requester) return null;
 
@@ -356,9 +365,11 @@ function StuckRedeemRelay({
 function PendingRedeemClaim({
   account,
   vaultAddress,
+  active = true,
 }: {
   account: string | null;
   vaultAddress?: string | null;
+  active?: boolean;
 }) {
   const [isPending, setIsPending] = useState(false);
   const [round, setRound] = useState<bigint | null>(null);
@@ -374,6 +385,9 @@ function PendingRedeemClaim({
       autoOnce.current = false;
       return;
     }
+    // Idle check only — skip while the tab is backgrounded. Once a redeem is
+    // actually pending, the 3s watcher below keeps running regardless of tab.
+    if (!active && !isPending) return;
     let cancelled = false;
 
     const check = () => {
@@ -388,12 +402,12 @@ function PendingRedeemClaim({
     };
 
     check();
-    const interval = setInterval(check, 5_000);
+    const stop = startVisibleInterval(check, 5_000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop();
     };
-  }, [account, vaultAddress]);
+  }, [account, vaultAddress, active, isPending]);
 
   useEffect(() => {
     if (!isPending) {
@@ -413,10 +427,13 @@ function PendingRedeemClaim({
         .catch(() => {});
     };
     poll();
-    const interval = setInterval(poll, 3_000);
+    // In-flight redeem watcher: deliberately NOT gated on the market tab
+    // (a user who switches tabs mid-redeem still gets confirmation state),
+    // but paused while the whole page is hidden.
+    const stop = startVisibleInterval(poll, 3_000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop();
     };
   }, [isPending, vaultAddress]);
 
@@ -519,12 +536,13 @@ export default function SwapPanel({
   onConnect,
   vaultAddress: vaultAddressProp,
   vaultLabel,
+  active = true,
 }: Props) {
   const collection = MARKET_COLLECTIONS[0];
   const vaultAddress = vaultAddressProp ?? MARKET_VAULT_ADDRESS;
   const hasVault = vaultAddress !== null;
   // Per-selected-vault book (V1 or V2) — not the dual trade feed.
-  const { stats: bookStats } = useVaultBook(vaultAddress);
+  const { stats: bookStats } = useVaultBook(vaultAddress, { active });
   const stats = bookStats;
 
   const [mode, setMode] = useState<Mode>("buy");
@@ -1333,8 +1351,8 @@ export default function SwapPanel({
           <TreasuryBootstrap account={account} />
         )}
 
-        <StuckRedeemRelay account={account} vaultAddress={vaultAddress} />
-        <PendingRedeemClaim account={account} vaultAddress={vaultAddress} />
+        <StuckRedeemRelay account={account} vaultAddress={vaultAddress} active={active} />
+        <PendingRedeemClaim account={account} vaultAddress={vaultAddress} active={active} />
 
         <div className="grid grid-cols-3 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/90 p-1 sm:grid-cols-5">
           {MODES.map((m) => (

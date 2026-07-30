@@ -5,6 +5,7 @@ import { createChart, ColorType, LineSeries, LineStyle } from "lightweight-chart
 import type { IChartApi, ISeriesApi, LineData, UTCTimestamp } from "lightweight-charts";
 import { ethWeiToNumber } from "@/lib/eth-price";
 import { useVaultLive } from "@/lib/market/useVaultLive";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 
 type SaleEvent = { kind: string; priceWei: string | null; timestamp: string | null };
 type VaultEvent = {
@@ -73,7 +74,7 @@ function saveCachedPoints(key: string, points: LineData<UTCTimestamp>[]) {
  * no synthetic candle aggregation, a line of real trades is more honest
  * than fabricated OHLC bars with mostly-empty candles.
  */
-export default function NftPriceChart() {
+export default function NftPriceChart({ active = true }: { active?: boolean } = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -125,12 +126,13 @@ export default function NftPriceChart() {
     };
 
     load();
-    const interval = setInterval(load, 60_000);
+    // Reload cadence only while the chart's tab is on a visible page.
+    const stop = active ? startVisibleInterval(load, 60_000) : null;
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop?.();
     };
-  }, []);
+  }, [active]);
 
   // Vault AMM history is the main price series post-launch (ETH per share).
   // Prefer short feed first (fast) then full lineage; never leave chart
@@ -173,12 +175,12 @@ export default function NftPriceChart() {
     };
 
     loadVault();
-    const interval = setInterval(loadVault, 45_000);
+    const stop = active ? startVisibleInterval(loadVault, 45_000) : null;
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop?.();
     };
-  }, []);
+  }, [active]);
 
   const vaultLivePoints = useMemo<LineData<UTCTimestamp>[]>(() => {
     return vaultActivity.map(vaultEventToPoint).filter((p): p is LineData<UTCTimestamp> => p != null);

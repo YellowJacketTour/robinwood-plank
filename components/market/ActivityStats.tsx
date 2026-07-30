@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatTokenAmount } from "@/lib/trade";
 import { swrJson } from "@/lib/market/swr-fetch";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 
 type SaleLike = {
   tokenId: string;
@@ -122,10 +123,10 @@ export default function ActivityStats({
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setReferenceNow(Date.now()));
-    const timer = window.setInterval(() => setReferenceNow(Date.now()), 60_000);
+    const stop = startVisibleInterval(() => setReferenceNow(Date.now()), 60_000);
     return () => {
       window.cancelAnimationFrame(frame);
-      window.clearInterval(timer);
+      stop();
     };
   }, []);
 
