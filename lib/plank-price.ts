@@ -1,10 +1,18 @@
 /**
- * $PLANK/WETH price history, sourced from the live Uniswap v3 pool via
+ * $PLANK/WETH price history, sourced from the live Uniswap v2 pool via
  * GeckoTerminal's onchain OHLCV API.
  *
  * This is a strictly different concern from the Marketplank NFT vault: it
  * prices the ERC-20 $PLANK token against ETH on the real DEX pair, not vault
  * shares or NFT sales. Never merge this with lib/market/* vault/NFT pricing.
+ *
+ * $PLANK trades across five pools (see lib/plank-pools.ts / DexScreener for
+ * the full list and aggregate stats). This module intentionally tracks the
+ * single DEEPEST pool — Uniswap v2, ~$71K liquidity vs. ~$10.6K on the v3
+ * pool this used to point at — as the more honest single price reference,
+ * not because v2 is the "main" venue in any other sense. The UI must always
+ * say which pool the chart represents; never let it imply "the" $PLANK price
+ * when it's one venue among several.
  *
  * GeckoTerminal network id for Robinhood Chain is "robinhood"; the pool below
  * was confirmed live via `GET /networks/robinhood/pools/{pool}` returning real
@@ -15,11 +23,12 @@
  */
 
 import { durableKv as kv, hasDurableKv } from "@/lib/market/durable-kv";
-import type {
-  PlankCandle,
-  PlankPoolStats,
-  PlankPriceHistory,
-  PriceRange,
+import {
+  dedupeSortedCandles,
+  type PlankCandle,
+  type PlankPoolStats,
+  type PlankPriceHistory,
+  type PriceRange,
 } from "@/lib/plank-price-types";
 
 export type {
@@ -32,8 +41,12 @@ export { PRICE_RANGES } from "@/lib/plank-price-types";
 
 const GECKOTERMINAL_BASE = "https://api.geckoterminal.com/api/v2";
 const NETWORK_ID = "robinhood";
-/** PLANK / WETH 1% Uniswap v3 pool — confirmed live, not the NFT vault. */
-const POOL_ADDRESS = "0x3CE05Efe2e7C9c136f12a1Be695f75F807B6c69E";
+/**
+ * PLANK / WETH Uniswap v2 pool — the deepest of $PLANK's five real pools
+ * (~$71K liquidity, live since 2026-07-20). Confirmed live via GeckoTerminal,
+ * not the NFT vault. See the module doc comment above for why v2 over v3.
+ */
+const POOL_ADDRESS = "0x01b1BEf6fBA02c846eA5c4Ff59193988B5f86F73";
 
 type Timeframe = "day" | "hour" | "minute";
 type RangeConfig = {
@@ -58,6 +71,43 @@ const LAST_GOOD_TTL_SEC = 7 * 24 * 60 * 60;
 
 type OhlcvRow = [number, number, number, number, number, number];
 
+/**
+ * GeckoTerminal's free tier is rate-limited (~30 req/min/IP), and this dev
+ * environment is currently shared by several agents hitting the same pool
+ * endpoints concurrently — a transient 429/5xx here is expected, not
+ * necessarily a real outage. One short retry absorbs that without falling
+ * straight through to the last-good snapshot (or a hard error) on every
+ * momentary burst.
+ */
+async function fetchJsonWithRetry(url: string): Promise<unknown> {
+  const attempt = async (): Promise<Response> => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 8_000);
+    try {
+      return await fetch(url, {
+        headers: {
+          Accept: "application/json;version=20230302",
+          "User-Agent": "plank.love-price-chart/1.0",
+        },
+        signal: ac.signal,
+        cache: "no-store",
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  let res = await attempt();
+  if (!res.ok && (res.status === 429 || res.status >= 500)) {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    res = await attempt();
+  }
+  if (!res.ok) {
+    throw new Error(`GeckoTerminal HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 async function fetchOhlcvRaw(
   config: RangeConfig,
   currency: "usd" | "token"
@@ -65,27 +115,10 @@ async function fetchOhlcvRaw(
   const url =
     `${GECKOTERMINAL_BASE}/networks/${NETWORK_ID}/pools/${POOL_ADDRESS}/ohlcv/${config.timeframe}` +
     `?aggregate=${config.aggregate}&limit=${config.limit}&currency=${currency}`;
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 8_000);
-  try {
-    const res = await fetch(url, {
-      headers: {
-        Accept: "application/json;version=20230302",
-        "User-Agent": "plank.love-price-chart/1.0",
-      },
-      signal: ac.signal,
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      throw new Error(`GeckoTerminal OHLCV HTTP ${res.status}`);
-    }
-    const json = (await res.json()) as {
-      data?: { attributes?: { ohlcv_list?: OhlcvRow[] } };
-    };
-    return json?.data?.attributes?.ohlcv_list ?? [];
-  } finally {
-    clearTimeout(timer);
-  }
+  const json = (await fetchJsonWithRetry(url)) as {
+    data?: { attributes?: { ohlcv_list?: OhlcvRow[] } };
+  };
+  return json?.data?.attributes?.ohlcv_list ?? [];
 }
 
 async function fetchFresh(range: PriceRange): Promise<PlankPriceHistory> {
@@ -123,19 +156,10 @@ async function fetchFresh(range: PriceRange): Promise<PlankPriceHistory> {
   // GeckoTerminal's OHLCV feed occasionally repeats an identical row for the
   // same bucket back-to-back (observed on the live "hour" timeframe) — real
   // upstream data, not something we generate, but lightweight-charts requires
-  // strictly increasing timestamps. Collapse same-time duplicates, keeping
-  // the last (most complete) row for that bucket.
-  const deduped: PlankCandle[] = [];
-  for (const candle of candles) {
-    if (deduped.length > 0 && deduped[deduped.length - 1].time === candle.time) {
-      deduped[deduped.length - 1] = candle;
-    } else {
-      deduped.push(candle);
-    }
-  }
-
+  // strictly increasing timestamps. dedupeSortedCandles is the single source
+  // of truth for this invariant — see its doc comment in plank-price-types.
   return {
-    candles: deduped,
+    candles: dedupeSortedCandles(candles),
     poolAddress: POOL_ADDRESS,
     network: NETWORK_ID,
     fetchedAt: Date.now(),
@@ -145,19 +169,23 @@ async function fetchFresh(range: PriceRange): Promise<PlankPriceHistory> {
 const memCache = new Map<string, { at: number; data: PlankPriceHistory }>();
 const memLastGood = new Map<string, PlankPriceHistory>();
 
+// Keys are scoped by POOL_ADDRESS, not just range — if which pool this
+// module tracks ever changes again, old entries become simply orphaned
+// (and expire on their own TTL) instead of a stale different-pool snapshot
+// silently serving as this pool's "last good" fallback.
 function cacheKey(range: PriceRange): string {
-  return `plank:price-history:v1:${range}`;
+  return `plank:price-history:v1:${POOL_ADDRESS}:${range}`;
 }
 function lastGoodKey(range: PriceRange): string {
-  return `plank:price-history:last-good:v1:${range}`;
+  return `plank:price-history:last-good:v1:${POOL_ADDRESS}:${range}`;
 }
 
 /** How long a fresh pool-stats fetch stays valid before refetching. Stats
  * change faster than candles but a shared 60s cache across every viewer
  * stays comfortably inside GeckoTerminal's free-tier rate budget. */
 const STATS_CACHE_TTL_SEC = 60;
-const STATS_CACHE_KEY = "plank:pool-stats:v1";
-const STATS_LAST_GOOD_KEY = "plank:pool-stats:last-good:v1";
+const STATS_CACHE_KEY = `plank:pool-stats:v1:${POOL_ADDRESS}`;
+const STATS_LAST_GOOD_KEY = `plank:pool-stats:last-good:v1:${POOL_ADDRESS}`;
 
 type PoolAttributes = {
   base_token_price_usd?: string;
@@ -190,26 +218,8 @@ function toNumberOrNull(value: unknown): number | null {
 
 async function fetchPoolStatsFresh(): Promise<PlankPoolStats> {
   const url = `${GECKOTERMINAL_BASE}/networks/${NETWORK_ID}/pools/${POOL_ADDRESS}`;
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 8_000);
-  let attrs: PoolAttributes;
-  try {
-    const res = await fetch(url, {
-      headers: {
-        Accept: "application/json;version=20230302",
-        "User-Agent": "plank.love-price-chart/1.0",
-      },
-      signal: ac.signal,
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      throw new Error(`GeckoTerminal pool HTTP ${res.status}`);
-    }
-    const json = (await res.json()) as { data?: { attributes?: PoolAttributes } };
-    attrs = json?.data?.attributes ?? {};
-  } finally {
-    clearTimeout(timer);
-  }
+  const json = (await fetchJsonWithRetry(url)) as { data?: { attributes?: PoolAttributes } };
+  const attrs = json?.data?.attributes ?? {};
 
   const priceUsd = toNumberOrNull(attrs.base_token_price_usd);
   const priceEth = toNumberOrNull(attrs.base_token_price_native_currency);
