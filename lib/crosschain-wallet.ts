@@ -75,6 +75,14 @@ const CHAIN_METADATA: Record<number, ChainMeta> = {
   },
 };
 
+/** Explorer base URL for a source chain, for building tx links. Robinhood
+ * Chain itself is intentionally NOT here — use CHAIN.blockExplorers.default.url
+ * from lib/constants for that, the same source of truth every other
+ * Robinhood-chain explorer link in this codebase uses. */
+export function getSourceChainExplorerUrl(chainId: number): string | null {
+  return CHAIN_METADATA[chainId]?.blockExplorerUrls[0] ?? null;
+}
+
 export async function getWalletChainId(): Promise<number> {
   const provider = getEthereumProvider();
   if (!provider) throw new Error("No wallet found.");

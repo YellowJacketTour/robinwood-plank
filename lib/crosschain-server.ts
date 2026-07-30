@@ -166,8 +166,50 @@ export function assertPlanStepsSane(
   }
 }
 
+/**
+ * Bridge-only destination guard for the working "bridge ETH into Robinhood
+ * Chain" step (see assertCrossChainDestination above for the dormant
+ * CHAINED-into-$PLANK path, which is NOT live upstream as of 2026-07-30).
+ * Output must be the NATIVE token, on Robinhood Chain — never $PLANK,
+ * never an ERC-20, never any other chain. The user swaps for $PLANK
+ * afterward through the existing same-chain widget.
+ */
+export function assertBridgeDestinationNative(quote: Record<string, unknown>): void {
+  const output = quote.output as { token?: string; chainId?: unknown } | undefined;
+  const tokenOut =
+    (typeof output?.token === "string" && output.token) ||
+    (typeof quote.tokenOut === "string" ? quote.tokenOut : null);
+  // Live BRIDGE quotes carry the destination chain as a top-level
+  // `destinationChainId` field, not `output.chainId` / `tokenOutChainId` —
+  // confirmed against a real quote response (2026-07-30). Check all shapes
+  // since Uniswap's field naming isn't guaranteed stable across routing types.
+  const tokenOutChainId =
+    output?.chainId ?? quote.tokenOutChainId ?? quote.outputChainId ?? quote.destinationChainId;
+
+  if (!tokenOut || tokenOut.toLowerCase() !== CROSSCHAIN_NATIVE_TOKEN_ADDRESS.toLowerCase()) {
+    throw new TradeApiError(
+      400,
+      "QUOTE_DEST",
+      "Bridge quote output is not the native token — refusing."
+    );
+  }
+  const n = typeof tokenOutChainId === "number" ? tokenOutChainId : Number(tokenOutChainId);
+  if (!Number.isFinite(n) || n !== CROSSCHAIN_DEST_CHAIN_ID) {
+    throw new TradeApiError(
+      400,
+      "QUOTE_DEST_CHAIN",
+      "Bridge quote destination is not Robinhood Chain — refusing."
+    );
+  }
+}
+
 /** No open proxy: every path this function will call must match one of these. */
-const ALLOWED_PATH_PATTERNS = [/^\/quote$/, /^\/plan$/, /^\/plan\/[a-zA-Z0-9_-]{1,128}$/];
+const ALLOWED_PATH_PATTERNS = [
+  /^\/quote$/,
+  /^\/swap$/,
+  /^\/plan$/,
+  /^\/plan\/[a-zA-Z0-9_-]{1,128}$/,
+];
 
 export async function crossChainFetch(
   path: string,
