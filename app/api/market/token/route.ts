@@ -101,8 +101,21 @@ export async function GET(req: Request) {
     }
 
     const payload = { tokenId, owner, image, attributes, history, rarity };
-    cache.set(cacheKey, { at: Date.now(), payload });
-    return cachedPublicJson(payload, "token");
+
+    // A transient upstream blip (RPC ownerOf, rarity snapshot, IPFS
+    // metadata) soft-fails fields to null/empty above. Never let such a
+    // degraded payload into the server cache or shared/browser caches —
+    // one blip was pinning hollow item modals (no name/rank/traits/owner)
+    // for the full cache lifetime. Serve last-known-good instead when we
+    // have it; otherwise return the degraded payload uncached.
+    const degraded = owner === null || rarity === null || attributes.length === 0;
+    if (!degraded) {
+      cache.set(cacheKey, { at: Date.now(), payload });
+      return cachedPublicJson(payload, "token");
+    }
+    const lastGood = cache.get(cacheKey);
+    if (lastGood) return cachedPublicJson(lastGood.payload, "token");
+    return publicJson(payload, 200);
   } catch (error) {
     const hit2 = cache.get(cacheKey);
     if (hit2) return cachedPublicJson(hit2.payload, "token");
