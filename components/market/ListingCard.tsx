@@ -22,10 +22,10 @@ type Props = {
   rarity?: RarityLookup;
 };
 
-const TRUST_ICON: Record<string, string> = {
-  "lp-burned": "🔥",
-  "ownership-renounced": "🔒",
-  verified: "✓",
+const TRUST_BADGE: Record<string, { icon: string; label: string }> = {
+  "lp-burned": { icon: "🔥", label: "LP burned" },
+  "ownership-renounced": { icon: "🔒", label: "Ownership renounced" },
+  verified: { icon: "✓", label: "Verified collection" },
 };
 
 /** 2 columns on mobile, up to 5 on desktop via the parent grid — matches Gallery.tsx. */
@@ -44,6 +44,9 @@ export default function ListingCard({
   const isOffer = variant === "offer";
   // Collection-wide bids have no token to open a detail view for.
   const selectable = Boolean(onSelect && listing.tokenId);
+  const trustLabels = collection.trustBadges.map(
+    (badge) => TRUST_BADGE[badge]?.label ?? badge
+  );
   return (
     <li
       className={`dense-card flex flex-col overflow-hidden p-0 ${
@@ -84,7 +87,7 @@ export default function ListingCard({
         />
         {isFloor && (
           <span
-            className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/90 px-2 py-0.5 text-[0.6rem] font-bold text-gold-300"
+            className="card-overlay legible-text absolute bottom-2 right-2 rounded-md bg-black/90 px-2 py-1 text-[0.55rem] font-black uppercase tracking-wide text-gold-300"
             title="Floorboard — cheapest listing"
           >
             Floor
@@ -95,7 +98,7 @@ export default function ListingCard({
           // not the tier's own fill as a background, which goes illegible
           // against similarly-light/pastel artwork (confirmed live).
           <span
-            className={`tier-badge absolute left-1.5 ${isFloor ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide`}
+            className="tier-badge absolute left-2 top-2 rounded-full px-2 py-1 text-[0.55rem] font-black uppercase tracking-wide"
             style={{ color: tierColor(rarity.tier) }}
             title={`Rank #${rarity.rank} · ${rarity.percentile.toFixed(0)}th percentile`}
           >
@@ -103,15 +106,32 @@ export default function ListingCard({
           </span>
         )}
         {collection.trustBadges.length > 0 && (
-          <span
-            className="card-overlay absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/90 text-[0.65rem] text-emerald-300"
-            title={collection.trustBadges.join(", ")}
+          <div
+            className="card-overlay absolute right-2 top-2 flex gap-0.5 sm:gap-1"
+            aria-hidden="true"
           >
-            {TRUST_ICON[collection.trustBadges[0]] ?? "✓"}
-          </span>
+            {collection.trustBadges.map((badge) => {
+              const trust = TRUST_BADGE[badge] ?? {
+                icon: "✓",
+                label: badge,
+              };
+              return (
+                <span
+                  key={badge}
+                  className="flex h-5 w-5 items-center justify-center rounded-full border border-emerald-300/50 bg-black/90 text-[0.6rem] leading-none text-emerald-300 shadow-sm sm:h-6 sm:w-6 sm:text-[0.65rem]"
+                  title={trust.label}
+                >
+                  {trust.icon}
+                </span>
+              );
+            })}
+          </div>
         )}
       </div>
-      <div className="flex flex-1 flex-col gap-1 p-2.5 sm:p-3">
+      <div className="flex flex-1 flex-col gap-1.5 p-2.5 sm:p-3">
+        {trustLabels.length > 0 && (
+          <p className="sr-only">Collection trust: {trustLabels.join(", ")}</p>
+        )}
         <div className="min-w-0 leading-tight">
           <p className="truncate text-xs font-bold text-foreground sm:text-sm">
             {listing.tokenId ? (rarity?.name ?? `#${listing.tokenId}`) : "Any plank"}
@@ -119,28 +139,36 @@ export default function ListingCard({
           {listing.tokenId && (
             <p className="truncate text-[0.55rem] text-foreground/40">
               #{listing.tokenId}
-              {rarity ? ` · R${rarity.rank} · ${rarity.tier}` : ""}
+              {rarity ? ` · Rank ${rarity.rank}` : ""}
             </p>
           )}
         </div>
         <p className="truncate text-[0.6rem] text-foreground/45" title={listing.maker}>
-          {isOffer ? "bid by " : ""}
+          {isOffer ? "Bidder " : "Maker "}
           {shortAddress(listing.maker)}
         </p>
-        <p
-          className={`mt-auto font-display text-base sm:text-lg ${
-            isOffer ? "text-emerald-300" : "text-gold-300"
-          }`}
-        >
-          {formatTokenAmount(listing.priceWei, 18, 4)} Ξ
-        </p>
-        <div className="flex gap-1.5">
+        <div className="mt-auto flex items-end justify-between gap-2 pt-1">
+          <div className="min-w-0">
+            <span className="block text-[0.55rem] font-black uppercase tracking-[0.12em] text-foreground/45">
+              Price
+            </span>
+            <p
+              className={`whitespace-nowrap text-sm font-extrabold tabular-nums sm:text-lg ${
+                isOffer ? "text-emerald-300" : "text-gold-300"
+              }`}
+              aria-label={`${formatTokenAmount(listing.priceWei, 18, 4)} ETH`}
+            >
+              <span aria-hidden="true">
+                {formatTokenAmount(listing.priceWei, 18, 4)} ETH
+              </span>
+            </p>
+          </div>
           <button
             type="button"
             disabled={!canFill}
             onClick={() => onBuy?.(listing)}
             title={canFill ? undefined : "You don't own a plank this bid can take."}
-            className={`min-h-9 flex-1 rounded-md text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 sm:text-sm ${
+            className={`min-h-11 min-w-16 rounded-md px-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-[4.25rem] sm:px-3 sm:text-sm ${
               isOffer
                 ? "bg-emerald-500 text-wood-950 hover:bg-emerald-400"
                 : "bg-gold-500 text-wood-950 hover:bg-gold-400"
@@ -148,24 +176,28 @@ export default function ListingCard({
           >
             {buyLabel ?? "Buy"}
           </button>
-          {onOffer && (
-            <button
-              type="button"
-              onClick={() => onOffer(listing)}
-              className="min-h-9 flex-1 rounded-md border border-gold-500/40 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
-            >
-              Offer
-            </button>
-          )}
         </div>
-        {selectable && (
-          <button
-            type="button"
-            onClick={() => onSelect!(listing.tokenId)}
-            className="min-h-9 w-full rounded-md border border-gold-500/25 text-xs font-bold text-foreground/65 transition hover:border-gold-400 hover:text-gold-300"
-          >
-            Details
-          </button>
+        {(onOffer || selectable) && (
+          <div className="flex gap-1.5">
+            {onOffer && (
+              <button
+                type="button"
+                onClick={() => onOffer(listing)}
+                className="min-h-11 flex-1 rounded-md border border-gold-500/40 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
+              >
+                Offer
+              </button>
+            )}
+            {selectable && (
+              <button
+                type="button"
+                onClick={() => onSelect!(listing.tokenId)}
+                className="min-h-11 flex-1 rounded-md border border-gold-500/25 text-xs font-bold text-foreground/65 transition hover:border-gold-400 hover:text-gold-300"
+              >
+                Details
+              </button>
+            )}
+          </div>
         )}
       </div>
     </li>

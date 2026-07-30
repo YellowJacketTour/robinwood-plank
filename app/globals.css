@@ -675,12 +675,10 @@ body .nft-modal .nft-modal-body {
    for the TEXT, not the fill. Callers set `color: tierColor(tier)` inline;
    this class supplies the guaranteed-dark background + border so that
    bright text always has a backdrop, whatever art or holo sheen sits
-   underneath. z-index lifts it above .holo-card's ::before/::after (both
-   z-index: 1) — those were painting over badge text inside the same
-   holo-card element without this, which is what made some tiers look
-   genuinely garbled rather than merely low-contrast. */
+   underneath. Overlay callers provide their own positioning; z-index lifts
+   those positioned badges above .holo-card's ::before/::after (both z-index:
+   1), which otherwise paint over the badge text. */
 .tier-badge {
-  position: relative;
   z-index: 2;
   /* ≥90% opaque so tier labels stay readable on any art/holo sheen */
   background: rgba(10, 6, 2, 0.92);
@@ -707,9 +705,9 @@ body .nft-modal .nft-modal-body {
    loses to an explicit z-index even if the auto element comes later in the
    DOM. Applied to every non-tier overlay (selection checkmarks, "Listed"
    labels, Floor/trust badges, id/rank badges) so none of them can suffer
-   the same bug independently. */
+   the same bug independently. Position stays caller-owned so absolute
+   overlay utilities are never overridden by this shared class. */
 .card-overlay {
-  position: relative;
   z-index: 2;
 }
 
