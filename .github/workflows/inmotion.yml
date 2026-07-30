@@ -176,6 +176,7 @@ jobs:
             : > "$app_dir/.previous-release"
           fi
           cp "$release_dir/deploy/inmotion/passenger.cjs" "$app_dir/passenger.cjs"
+          cp "$release_dir/deploy/inmotion/passenger.cjs" "$app_dir/passenger.js"
           rm -f "$app_dir/current.next"
           ln -s "releases/$release_sha" "$app_dir/current.next"
           mv -Tf "$app_dir/current.next" "$app_dir/current"
@@ -189,10 +190,21 @@ jobs:
           set -euo pipefail
           healthy=false
           for attempt in $(seq 1 36); do
-            if curl --fail --silent --show-error \
-              "$INMOTION_HEALTH_URL/api/health" >/dev/null &&
+            if health_body="$(
+                 curl --fail --silent --show-error \
+                   --connect-timeout 5 --max-time 15 \
+                   --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                   --header "Accept: application/json" \
+                   "$INMOTION_HEALTH_URL/api/health"
+               )" &&
+               [[ "$health_body" == *'"ok":true'* ]] &&
+               [[ "$health_body" == *'"storage":"postgres"'* ]] &&
+               [[ "$health_body" == *"\"version\":\"$RELEASE_SHA\""* ]] &&
                curl --fail --silent --show-error \
-              "$INMOTION_HEALTH_URL/market" >/dev/null; then
+                 --connect-timeout 5 --max-time 15 \
+                 --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                 --header "Accept: text/html" \
+                 "$INMOTION_HEALTH_URL/market" >/dev/null; then
               healthy=true
               break
             fi

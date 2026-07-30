@@ -168,13 +168,15 @@ Application mode:         Production
 Application root:         plank.tanggang.life
 Application URL:          plank.tanggang.life
 URL path:                 blank
-Application startup file: passenger.cjs
+Application startup file: passenger.js
 Passenger log file:       /home/CPANEL_USER/plank.tanggang.life/logs/passenger.log
 ```
 
-The first CI release installs `passenger.cjs`. It loads the stable shared env
-file, resolves the active release, and starts Next.js' generated standalone
-server. Passenger supplies the port and owns the process lifecycle.
+The first CI release installs the same CommonJS launcher as both
+`passenger.js` (the CloudLinux cPanel startup filename) and `passenger.cjs`.
+It loads the stable shared env file, resolves the active release, and starts
+Next.js' generated standalone server. Passenger supplies the port and owns the
+process lifecycle.
 
 After creating the application, cPanel displays a command for entering its
 Node virtual environment. Use it to determine the Node executable and verify:
