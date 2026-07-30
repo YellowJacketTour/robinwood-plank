@@ -24,6 +24,7 @@ import { formatUsd, weiToUsd } from "@/lib/eth-price";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
 import {
   ensureRobinhoodChain,
+  isRobinhoodChainId,
   getChainId,
   getErc20Balance,
   getNativeBalance,
@@ -134,7 +135,13 @@ export default function SwapWidget() {
   // widget never contradicts the nav or the cross-chain panel — previously
   // this was its own useState populated via getConnectedAccounts(), the
   // owner-reported bug's root cause.
-  const { address: account, chainId: walletChainId, connect: walletConnect, adoptAccount: walletAdoptAccount } = useWallet();
+  const {
+    address: account,
+    chainId: walletChainId,
+    connect: walletConnect,
+    adoptAccount: walletAdoptAccount,
+    disconnect: walletDisconnect,
+  } = useWallet();
   const [direction, setDirection] = useState<Direction>("buy");
   const [amountIn, setAmountIn] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1147,14 +1154,72 @@ export default function SwapWidget() {
             <span className="font-mono text-gold-300" title={account}>
               {shortAddress(account)}
             </span>
+            {/* Opens the connect surface rather than re-requesting accounts:
+                a wallet that has already granted permission resolves
+                eth_requestAccounts silently, so the old behavior looked
+                broken — a click that visibly did nothing. */}
+            <span className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setConnectOpen(true)}
+                className="text-[0.65rem] font-bold text-gold-300/80 underline-offset-2 hover:underline"
+              >
+                Switch
+              </button>
+              <span aria-hidden="true" className="text-gold-300/30">
+                |
+              </span>
+              {/* Disconnecting is the only reliable way to pick a different
+                  account: a wallet that already granted permission resolves
+                  eth_requestAccounts silently, so "Switch" alone could never
+                  change the account (owner-reported). */}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={walletDisconnect}
+                className="text-[0.65rem] font-bold text-cream-muted underline-offset-2 hover:text-gold-300 hover:underline"
+              >
+                Disconnect
+              </button>
+            </span>
+          </div>
+        )}
+
+        {/* Wrong network — any wallet, not just Rabby. ensureRobinhoodChain
+            asks to switch and falls back to wallet_addEthereumChain (EIP-3085)
+            when the chain isn't known to the wallet yet, so this both switches
+            AND adds. */}
+        {account && walletChainId != null && !isRobinhoodChainId(walletChainId) && (
+          <div className="mt-2 rounded-lg border border-amber-400/45 bg-amber-400/10 p-2.5">
+            <p className="text-xs font-bold text-amber-100">
+              Wrong network — your wallet is on chain {walletChainId}.
+            </p>
             <button
               type="button"
               disabled={busy}
-              onClick={handleConnect}
-              className="shrink-0 text-[0.65rem] font-bold text-gold-300/80 underline-offset-2 hover:underline"
+              onClick={async () => {
+                setError(null);
+                try {
+                  setBusy(true);
+                  setStatus(`Switching to ${CHAIN.name}…`);
+                  await ensureRobinhoodChain();
+                  setStatus(null);
+                } catch (e) {
+                  setError(
+                    e instanceof Error ? e.message : `Could not switch to ${CHAIN.name}.`
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              className="mt-1.5 min-h-9 w-full rounded-lg bg-gold-500 text-xs font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50"
             >
-              Switch
+              {busy ? "Switching…" : `Switch to ${CHAIN.name}`}
             </button>
+            <p className="mt-1 text-[0.65rem] text-amber-100/70">
+              If {CHAIN.name} isn&apos;t in your wallet yet, this adds it.
+            </p>
           </div>
         )}
 

@@ -56,7 +56,13 @@ const FENCE_PLANKS = [
 export default function SplashIntro() {
   const pathname = usePathname();
   const isHome = pathname === "/";
-  const [phase, setPhase] = useState<"hidden" | "playing" | "leaving">("hidden");
+  // Start "playing" on the homepage from the FIRST render (server included)
+  // rather than flipping to it in an effect — the effect only runs after
+  // hydration, so the page painted its real content for a beat before the
+  // splash covered it (owner-reported "site loads before the intro does").
+  const [phase, setPhase] = useState<"hidden" | "playing" | "leaving">(() =>
+    pathname === "/" ? "playing" : "hidden"
+  );
   const [reducedMotion, setReducedMotion] = useState(false);
   const pageLoadedRef = useRef(false);
   const minTimeElapsedRef = useRef(false);
@@ -208,15 +214,10 @@ export default function SplashIntro() {
               />
             </div>
           ))}
-          {/* The foreman: stands at the END of the fence on the same
-              baseline — centered-in-front it read as a broken ninth board
-              (owner-reported). eslint-disable-next-line @next/next/no-img-element -- decorative preloader art */}
-          {/* eslint-disable-next-line @next/next/no-img-element -- decorative preloader art */}
-          <img
-            src="/images/plank-head.webp"
-            alt=""
-            className="splash-mascot absolute bottom-0 left-full h-auto w-[52px] drop-shadow-[0_10px_16px_rgba(0,0,0,0.55)]"
-          />
+          {/* No mascot at the fence end. It used plank-head.webp — a crop of
+              the character, not a whole plank — bobbing on a different
+              rhythm to the boards, which read as a broken plank rather than
+              a foreman (owner-reported, twice). The fence stands on its own. */}
         </div>
 
         <h1 className="font-display text-2xl text-gold-300 [text-shadow:0_4px_16px_rgba(0,0,0,0.7)] sm:text-3xl">
@@ -265,11 +266,6 @@ export default function SplashIntro() {
           0%, 100% { transform: rotate(0deg); }
           50% { transform: rotate(1.1deg); }
         }
-        .splash-mascot {
-          animation: splash-mascot-bob 1400ms ease-in-out infinite;
-        }
-        @keyframes splash-mascot-bob {
-          0%, 100% { transform: rotate(-2deg); }
           50% { transform: translateY(-6px) rotate(2deg); }
         }
         .splash-fill {
@@ -294,10 +290,6 @@ export default function SplashIntro() {
             animation: none !important;
             opacity: 1 !important;
             transform: none !important;
-          }
-          .splash-mascot {
-            animation: none !important;
-            transform: translateX(-50%) !important;
           }
           .splash-fill {
             animation: none !important;

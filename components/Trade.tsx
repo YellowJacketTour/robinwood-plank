@@ -94,12 +94,18 @@ export default function Trade() {
 
               <Link
                 href="/trade"
-                className="group flex flex-1 flex-col justify-center rounded-xl border border-line-strong bg-panel p-3 transition-colors hover:border-gold-500/60 sm:p-4"
+                className="group flex flex-1 flex-col justify-center rounded-xl bg-gold-500 p-3 text-wood-950 shadow-[0_8px_24px_-10px_rgba(217,164,65,0.7)] transition hover:bg-gold-400 sm:p-4"
               >
-                <strong className="block font-display text-lg text-gold-300">
-                  More on the trade page →
+                <strong className="flex items-center gap-2 font-display text-xl">
+                  Open the trade page
+                  <span
+                    aria-hidden="true"
+                    className="transition-transform group-hover:translate-x-1"
+                  >
+                    →
+                  </span>
                 </strong>
-                <span className="mt-1 block text-sm text-cream-muted">
+                <span className="mt-1 block text-sm font-bold text-wood-950/80">
                   Live $PLANK price chart, every pool and its depth, and buying in from another
                   chain in one transaction.
                 </span>
