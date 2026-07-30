@@ -68,5 +68,9 @@ on-chain. When you personally decide it's ready, come back to Step 6 and call
 is public forever and seeding is dead forever, for everyone, you included.
 There is no contract-enforced minimum — that judgment call is entirely yours.
 
-Then: start `scripts/relay-drand.ts` so redemptions actually resolve, and set
-`NEXT_PUBLIC_MARKET_VAULT_ADDRESS` before flipping `NEXT_PUBLIC_MARKET_ENABLED`.
+Then: verify the deployed addresses and configure them through a reviewed
+`inmotion` release. Production random-redemption settlement is performed by
+the standalone relayer packaged in each Passenger release and scheduled by the
+cPanel cron. `scripts/relay-drand.ts` remains the source/manual diagnostic, not
+the long-running production command. Follow the
+[InMotion drand relayer runbook](../../docs/INMOTION_DEPLOYMENT.md#12-inmotion-drand-relayer).

@@ -1,44 +1,62 @@
 # InMotion cPanel Passenger deployment
 
-This runbook deploys the `inmotion` branch to InMotion shared hosting using:
+This is the operator runbook for the canonical `inmotion` branch.
 
-- `plank.tanggang.life`
-- cPanel Node.js 22.22.3 and Passenger
-- Local cPanel PostgreSQL
-- Cloudflare DNS and TLS
-- GitHub Actions build, migration, release, health check, and rollback
+## Current state
 
-Docker is only the local verification environment. The shared server does not
-run Docker, Redis, Valkey, PM2, or a custom reverse proxy.
+As verified on 2026-07-30:
 
-Never commit or send database passwords, wallet private keys, API keys, SSH
-private keys, or seed phrases.
+- the InMotion application is healthy at `https://plank.tanggang.life`;
+- `/api/health` reports `storage: "postgres"`;
+- releases are built and deployed from `inmotion`;
+- the physical application root is
+  `/home/CPANEL_USER/plank.tanggang.life`;
+- the standalone drand relayer is packaged with every release;
+- `plank.love` still serves the earlier Cloudflare Worker and has not completed
+  the InMotion hostname cutover; and
+- GitHub's scheduled drand workflow remains an active fallback until the
+  24-hour InMotion verification gate disables it.
+
+The target public hostname is `plank.love`. The application directory does not
+need to move when the hostname changes.
 
 ## 1. Runtime architecture
 
 ```text
-Cloudflare
-    |
-    v
-plank.tanggang.life
-    |
-    v
-InMotion cPanel / Passenger
-    |
-    +-- Next.js 16 standalone server (Node 22.22.3)
-    |
-    +-- PostgreSQL on localhost
-          +-- indexed signed marketplace orders
-          +-- served-order attribution
-          +-- expiring cache values
-          +-- transactional Boards state
+Cloudflare DNS / proxy / WAF
+             |
+             v
+InMotion cPanel Apache + Passenger
+             |
+             +-- Next.js 16 standalone server on Node.js 22.22.3
+             +-- local cPanel PostgreSQL
+             +-- cPanel cron -> standalone drand relayer
+
+GitHub Actions
+             |
+             +-- build, test, package, SSH upload
+             +-- migration, activation, health, rollback
+             +-- manual data-cutover and relayer operations
 ```
 
-The SQL store is not a custody or trade-execution engine. Makers sign Seaport
-orders in their wallets and fulfillment occurs on-chain. PostgreSQL stores and
-indexes those signed orders so Passenger workers share one authoritative book.
+Docker is the local verification environment. InMotion shared hosting does not
+run Docker, Redis, Valkey, PM2, `cloudflared`, or a custom reverse proxy.
 
-## 2. Local Docker verification
+The SQL store is not a custody or execution engine. Makers sign Seaport orders
+in their wallets and fulfillment occurs on-chain. PostgreSQL stores and
+indexes the signed orders, shared application state, and expensive snapshots.
+
+## 2. Branch and release authority
+
+- `inmotion` is the source of truth.
+- Pull requests must target `inmotion`.
+- Pushes to `inmotion` deploy when `INMOTION_DEPLOY_ENABLED=true`.
+- `master` is a legacy branch and is not an InMotion deployment source.
+- Every release is an immutable Git commit SHA.
+
+See [RELEASES.md](RELEASES.md) for versioning, ruleset, and rollback policy.
+
+## 3. Local Docker verification
 
 Create a local secret file:
 
@@ -49,8 +67,11 @@ Copy-Item .env.docker.example .env.docker.local
 Set a unique local `POSTGRES_PASSWORD`, then build and start:
 
 ```powershell
-docker compose --env-file .env.docker.local -f docker-compose.inmotion.yml up -d --build
-docker compose --env-file .env.docker.local -f docker-compose.inmotion.yml ps
+docker compose --env-file .env.docker.local `
+  -f docker-compose.inmotion.yml up -d --build
+
+docker compose --env-file .env.docker.local `
+  -f docker-compose.inmotion.yml ps
 ```
 
 The migration container applies pending SQL before the app starts. Verify:
@@ -60,55 +81,50 @@ curl.exe --fail http://127.0.0.1:3000/api/health
 curl.exe --fail http://127.0.0.1:3000/market
 ```
 
+The health response must contain:
+
+```json
+{"ok":true,"storage":"postgres"}
+```
+
 PostgreSQL data remains in the `postgres_data` Docker volume across app
 rebuilds and restarts.
-
-## 3. Domain and Cloudflare
-
-In cPanel, add `plank.tanggang.life` under **Domains** before creating the
-Node.js application. It must appear in the Application URL dropdown.
-
-cPanel creates the subdomain's separate document-root directory at
-`/home/CPANEL_USER/plank.tanggang.life`. Use that same directory as the
-Passenger application root and CI release root. The web document root and the
-Passenger application root are separate settings, but aligning them avoids an
-unnecessary second application directory.
-
-In Cloudflare:
-
-1. Add the `plank` DNS record pointing to the InMotion account's assigned
-   address.
-2. Start DNS-only while cPanel provisions the hostname and certificate.
-3. After direct HTTPS works, use Cloudflare SSL/TLS **Full (strict)** and
-   enable the proxy if desired.
-
-Do not use the path form `tanggang.life/plank`; the application is designed for
-the subdomain root.
 
 ## 4. PostgreSQL
 
 Create the database and application user with **PostgreSQL Database Wizard**,
-then grant the user all privileges on that one database. cPanel prefixes both
-names with the account username.
-
-Keep these non-secret values for setup:
+then grant the user all privileges on that database. cPanel prefixes the
+database and user names with the account username.
 
 ```dotenv
+DURABLE_KV_BACKEND=postgres
 PGHOST=localhost
 PGPORT=5432
 PGDATABASE=CPANEL_PREFIX_plank
 PGUSER=CPANEL_PREFIX_plankapp
+PGPASSWORD=replace-with-the-real-database-password
 PGPOOL_MAX=4
 PGSSLMODE=disable
 ```
 
-Store the password only in the server environment file. `PGPOOL_MAX=4` limits
+Keep the password only in the server environment file. `PGPOOL_MAX=4` limits
 each Passenger process to a small pool suitable for shared hosting.
+
+PostgreSQL stores:
+
+- indexed signed marketplace orders;
+- served-order attribution;
+- durable KV compatibility values, hashes, and sets;
+- rarity and vault-activity snapshots; and
+- transactional Boards state.
+
+Blockchain ownership, vault inventory, shares, reserves, pending redemption,
+and settlement remain on-chain.
 
 ## 5. Dedicated deployment SSH key
 
-Do not reuse or download a personal private key already stored in cPanel.
-Generate a dedicated GitHub deployment key on a trusted workstation:
+Generate a dedicated GitHub deployment key on a trusted workstation. Do not
+reuse or download a personal private key already stored in cPanel.
 
 ```powershell
 ssh-keygen -t ed25519 `
@@ -117,11 +133,10 @@ ssh-keygen -t ed25519 `
 ```
 
 Import only the `.pub` file under **cPanel → Manage SSH Keys**, then authorize
-it. Store the private file's complete contents later as the GitHub environment
-secret `INMOTION_SSH_KEY`.
+it. Store the private file's complete contents as the GitHub Actions secret
+`INMOTION_SSH_KEY`.
 
-Test the key using the InMotion hostname. Shared hosting commonly uses port
-2222:
+Test the key. InMotion shared hosting commonly uses port 2222:
 
 ```powershell
 ssh -i "$env:USERPROFILE\.ssh\plank_inmotion_deploy" `
@@ -132,13 +147,38 @@ Verify the server host-key fingerprint through the account or InMotion support
 before trusting it. Store the verified `known_hosts` line in
 `INMOTION_HOST_KEY`; do not blindly trust an unverified `ssh-keyscan` result.
 
-## 6. Server directories and secrets
+## 6. Server layout
 
-Over SSH:
+The stable root is:
+
+```text
+/home/CPANEL_USER/plank.tanggang.life
+├── current -> releases/<COMMIT_SHA>
+├── incoming/
+├── releases/
+├── shared/
+│   ├── .env.production
+│   ├── backups/
+│   ├── drand-relayer.lock
+│   └── runtime-secrets/
+│       ├── uniswap-api-key
+│       └── relayer.env
+├── logs/
+│   ├── passenger.log
+│   └── drand-relayer.log
+├── tmp/
+│   └── restart.txt
+├── passenger.js
+└── passenger.cjs
+```
+
+Initial directories:
 
 ```bash
-mkdir -p "$HOME/plank.tanggang.life"/{incoming,releases,shared,tmp,logs}
-chmod 700 "$HOME/plank.tanggang.life/shared"
+app_dir="$HOME/plank.tanggang.life"
+mkdir -p "$app_dir"/{incoming,releases,shared,tmp,logs}
+mkdir -p "$app_dir/shared/runtime-secrets"
+chmod 700 "$app_dir/shared" "$app_dir/shared/runtime-secrets"
 ```
 
 Copy `.env.inmotion.example` to:
@@ -147,20 +187,17 @@ Copy `.env.inmotion.example` to:
 /home/CPANEL_USER/plank.tanggang.life/shared/.env.production
 ```
 
-Fill it directly on the server and apply:
+Fill it directly on the server:
 
 ```bash
 chmod 600 "$HOME/plank.tanggang.life/shared/.env.production"
 ```
 
-The file is not uploaded or overwritten by CI. It contains the PostgreSQL
-password and all runtime-only secrets. `NEXT_PUBLIC_*` values are also
-configured as GitHub repository variables because Next.js embeds them during
-the build.
+CI does not upload or overwrite that file.
 
-## 7. Create the Passenger application
+## 7. Passenger application
 
-In **cPanel → Setup Node.js App → Create Application**:
+In **cPanel → Setup Node.js App**:
 
 ```text
 Node.js version:          22.22.3
@@ -172,105 +209,209 @@ Application startup file: passenger.js
 Passenger log file:       /home/CPANEL_USER/plank.tanggang.life/logs/passenger.log
 ```
 
-The first CI release installs the same CommonJS launcher as both
-`passenger.js` (the CloudLinux cPanel startup filename) and `passenger.cjs`.
-It loads the stable shared env file, resolves the active release, and starts
-Next.js' generated standalone server. Passenger supplies the port and owns the
-process lifecycle.
+The release installs the CommonJS launcher as `passenger.js` and
+`passenger.cjs`. It loads stable shared configuration, resolves the active
+release, and starts Next.js' generated standalone server. Passenger supplies
+the port and owns the process lifecycle.
 
-After creating the application, cPanel displays a command for entering its
-Node virtual environment. Use it to determine the Node executable and verify:
+Use cPanel's virtual-environment command to identify the Node executable:
 
 ```bash
 which node
 node --version
 ```
 
-The resulting absolute executable path becomes the GitHub repository variable
-`INMOTION_NODE_BIN`.
+Store the absolute path as `INMOTION_NODE_BIN`.
 
-## 8. GitHub configuration
+## 8. GitHub Actions configuration
 
-Create a GitHub Environment named `inmotion-staging`.
+The workflow uses the GitHub Environment `inmotion-staging`.
 
-Environment secrets:
+### Actions secrets
 
 - `INMOTION_HOST`
-- `INMOTION_PORT` (normally `2222`)
+- `INMOTION_PORT`
 - `INMOTION_USER`
 - `INMOTION_SSH_KEY`
 - `INMOTION_HOST_KEY`
-- `UNISWAP_API_KEY` — uploaded separately from every release and installed at
-  `shared/runtime-secrets/uniswap-api-key` with mode `600`
+- `UNISWAP_API_KEY`
+- `RELAYER_PRIVATE_KEY`
+- `CRON_SECRET` only while the legacy HTTP cron endpoint remains
 
-Repository variables:
-
-- `INMOTION_DEPLOY_ENABLED` — leave `false` until first-deploy preparation is
-  complete
-- `INMOTION_APP_DIR` — absolute path such as
-  `/home/CPANEL_USER/plank.tanggang.life`
-- `INMOTION_NODE_BIN` — absolute Node 22.22.3 executable shown by cPanel
-- `INMOTION_HEALTH_URL=https://plank.tanggang.life`
-- Every `NEXT_PUBLIC_*` value from `.env.inmotion.example`
+The workflow can resolve repository or environment secrets. Environment-scoped
+secrets are preferred because they restrict deployment credentials to jobs
+that declare `environment: inmotion-staging`.
 
 The PostgreSQL password remains only in the server's `.env.production`.
-`RELAYER_PRIVATE_KEY` begins as a repository Actions secret and is transferred
-once into the cron-only server file described below; Passenger never loads it.
-`UNISWAP_API_KEY` is managed in GitHub Actions and installed as a server-only
-runtime secret during deployment; it is never included in the repository,
-release archive, or `.env.production`.
 
-## 9. CI/CD behavior
+### Repository variables
 
-Pull requests to `inmotion` or `master` run:
+- `INMOTION_DEPLOY_ENABLED=true`
+- `INMOTION_APP_DIR=/home/CPANEL_USER/plank.tanggang.life`
+- `INMOTION_NODE_BIN=/absolute/path/to/node`
+- `INMOTION_HEALTH_URL=https://plank.tanggang.life` until domain cutover
+- `NEXT_PUBLIC_SITE_URL=https://plank.tanggang.life` until domain cutover
+- every other `NEXT_PUBLIC_*` value from `.env.inmotion.example`
 
-- Locked dependency install
-- Deployment lint
-- TypeScript
-- Marketplace and contract tests
-- Production Next.js build
+`NEXT_PUBLIC_*` values are build inputs, not runtime secrets.
+
+## 9. Automatic CI/CD behavior
+
+Pull requests to `inmotion` run:
+
+- locked dependency installation;
+- deployment-critical lint;
+- TypeScript;
+- PostgreSQL migrations against a disposable service;
+- marketplace and contract tests;
+- PostgreSQL integration tests;
+- production Next.js build; and
+- standalone drand relayer bundling.
+
+The workflow also listens to pull requests targeting `master` for legacy
+compatibility, but `master` does not deploy.
 
 A push to `inmotion` packages `.next/standalone`. When
-`INMOTION_DEPLOY_ENABLED` is exactly `true`, the deploy job:
+`INMOTION_DEPLOY_ENABLED=true`, the deploy job:
 
-1. Uploads an immutable release named by commit SHA.
-2. Installs the GitHub-managed Uniswap key as a mode-`600` runtime secret.
-3. Runs pending PostgreSQL migrations with server-side credentials.
-4. Atomically changes the `current` release symlink.
-5. Touches `tmp/restart.txt` so Passenger reloads.
-6. Checks PostgreSQL, confirms the live trade API loaded its key, and renders
-   `/market`.
-7. Restores the previous release automatically if health checks fail.
+1. uploads an immutable release named by commit SHA;
+2. installs the GitHub-managed Uniswap key as a mode-`600` runtime secret;
+3. runs pending PostgreSQL migrations with server-side credentials;
+4. atomically changes the `current` release symlink;
+5. touches `tmp/restart.txt` so Passenger reloads;
+6. checks PostgreSQL and the exact deployment SHA;
+7. confirms the live trade API loaded its server credential;
+8. renders `/market`; and
+9. restores the previous application symlink if health fails.
 
-The workflow builds on GitHub, not the shared server.
+GitHub builds the application. The shared server does not run `npm ci` or
+compile Next.js.
 
-## 10. Existing Upstash data
+## 10. Domain cutover to `plank.love`
 
-Open Seaport orders are off-chain. If the current site has live listings or
-offers, obtain the existing Upstash credentials before cutover.
+Do not move `/home/CPANEL_USER/plank.tanggang.life`. The directory is a stable
+application identifier even after the public hostname changes.
 
-The source credential is a read-only Upstash REST token stored in GitHub
-Actions as `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. It is
-staged on the server only for the duration of a manually dispatched migration
-job and removed on exit. The importer does not use the deprecated Vercel KV
-client.
+### A. Detach the old Cloudflare Worker
 
-Use **Actions → InMotion Passenger CI/CD → Run workflow** with
-`operation=inventory` to enumerate key types, counts, TTLs, the projected SQL
-row counts, and the current destination counts without writing.
+In the `plank.love` Cloudflare zone:
 
-The cutover path is intentionally stricter than the local command:
+1. Open **Workers & Pages → plank-love → Settings → Domains & Routes**.
+2. Remove the `plank.love` and `www.plank.love` custom domains from that
+   Worker.
+3. Confirm those locked Worker DNS records disappear before creating new
+   records.
 
-1. Freeze `POST` and `DELETE` traffic to the old market API.
-2. Dispatch `operation=cutover` with confirmation
-   `REPLACE_INMOTION_MARKET_DATA`.
-3. The workflow records live v1/v2 chain state, creates a mode-`600`
-   `pg_dump` under `shared/backups`, atomically replaces only marketplace
-   rows, reconciles every destination count, and records live chain state
-   again.
-4. Move DNS only after reconciliation and public smoke checks pass.
+Do not delete the Worker until rollback is no longer needed.
 
-Local inventory without writing:
+### B. Register the hostname in cPanel
+
+In **cPanel → Domains → Create A New Domain**:
+
+- domain: `plank.love`;
+- document root: the existing
+  `/home/CPANEL_USER/plank.tanggang.life`; and
+- do not create a second database or duplicate application directory.
+
+If cPanel offers **Share document root**, use the option that maps the new
+hostname to the existing application root.
+
+The existing Node app may need its Application URL changed from
+`plank.tanggang.life` to `plank.love`. Keep the Application root unchanged.
+Make that URL change only after cPanel recognizes the new domain.
+
+### C. Create Cloudflare DNS and origin TLS
+
+Create:
+
+```text
+A      @      <INMOTION_ORIGIN_IP>   DNS only   Auto
+CNAME  www    plank.love             DNS only   Auto
+```
+
+Use DNS-only while cPanel AutoSSL validates and issues the origin certificate.
+Verify:
+
+```bash
+curl --fail https://plank.love/api/health
+curl --fail https://plank.love/market
+```
+
+The health response must report PostgreSQL and the expected deployed SHA. If
+the hostname shows a default "It works" page, the domain is not attached to
+the Passenger application yet.
+
+After direct HTTPS works:
+
+1. set Cloudflare SSL/TLS to **Full (strict)**;
+2. enable the Cloudflare proxy;
+3. repeat the health and market checks; and
+4. inspect browser console and wallet connection on desktop and mobile.
+
+A Cloudflare Tunnel is not part of this design. Shared cPanel hosting does not
+provide a managed, continuously supervised `cloudflared` connector or stable
+private Passenger port.
+
+### D. Change application and CI URLs
+
+Only after the new hostname is healthy:
+
+```bash
+gh variable set NEXT_PUBLIC_SITE_URL \
+  --body https://plank.love \
+  --repo YellowJacketTour/robinwood-plank
+
+gh variable set INMOTION_HEALTH_URL \
+  --body https://plank.love \
+  --repo YellowJacketTour/robinwood-plank
+```
+
+Update the server's `NEXT_PUBLIC_SITE_URL` for consistency, then deploy the
+current `inmotion` SHA. Because public values are compiled into browser
+bundles, an env-file edit without a rebuild is insufficient.
+
+If a legacy cPanel cron still calls:
+
+```text
+/api/market/vault/settle-random
+```
+
+change its hostname only after the new endpoint returns the expected
+authorization result. Do not print its bearer secret while editing or testing.
+
+Add a redirect from `plank.tanggang.life` to `plank.love` last, after GitHub's
+health check no longer depends on the old hostname.
+
+## 11. Upstash-to-PostgreSQL migration
+
+The active InMotion runtime uses PostgreSQL. Upstash is a migration source, not
+a production runtime dependency.
+
+For a fresh cutover, add read-only source credentials temporarily:
+
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+
+Use **Actions → InMotion Passenger CI/CD → Run workflow**:
+
+1. `operation=inventory` enumerates key types, counts, TTLs, projected SQL
+   rows, and current destination counts without writing.
+2. Freeze writes to the old market API.
+3. `operation=cutover` with
+   `confirmation=REPLACE_INMOTION_MARKET_DATA`:
+   - records live V1/V2 chain state;
+   - creates a mode-`600` `pg_dump`;
+   - transactionally replaces marketplace rows;
+   - reconciles every destination count; and
+   - records chain state again.
+4. Verify the public marketplace.
+5. Remove the temporary Upstash secrets.
+
+The importer refuses unsupported Redis types and expiring hashes/sets that
+cannot preserve their TTL semantics. The transaction commits in full or rolls
+back in full.
+
+Local dry-run:
 
 ```bash
 node --env-file=.env.production \
@@ -278,7 +419,7 @@ node --env-file=.env.production \
   scripts/migrate-upstash-to-postgres.mjs
 ```
 
-During an approved write freeze, after a verified backup:
+Approved replacement:
 
 ```bash
 node --env-file=.env.production \
@@ -287,58 +428,60 @@ node --env-file=.env.production \
   --apply --replace --confirm=REPLACE_INMOTION_MARKET_DATA
 ```
 
-The importer maps listings and offers into indexed SQL rows, imports served
-order hashes, and copies cache/index keys. It refuses unsupported Redis types
-and refuses expiring hashes/sets because the PostgreSQL compatibility schema
-cannot preserve those TTLs. The cutover transaction either reconciles and
-commits in full or rolls back in full.
+## 12. InMotion drand relayer
 
-## 11. InMotion drand relayer
-
-Every release contains a standalone Node 22 relayer at:
+Every release contains:
 
 ```text
 /home/CPANEL_USER/plank.tanggang.life/current/ops/drand-relayer/relay-drand.mjs
 ```
 
-After that release is healthy, dispatch **InMotion Passenger CI/CD** with
-`operation=provision-relayer`. The one-time job transfers the dedicated
-gas-only key from the GitHub `RELAYER_PRIVATE_KEY` secret without printing it,
-then atomically installs:
+Dispatch `operation=provision-relayer`. The job:
 
-```text
-/home/CPANEL_USER/plank.tanggang.life/shared/runtime-secrets/relayer.env
-```
+1. transfers `RELAYER_PRIVATE_KEY` without printing it;
+2. writes `shared/runtime-secrets/relayer.env`;
+3. enforces directory mode `700` and file mode `600`;
+4. refuses the key if it appears in Passenger's `.env.production`;
+5. runs the relayer once and verifies both vaults;
+6. replaces old relayer cron lines while preserving unrelated jobs;
+7. installs one managed one-minute cron through `current`; and
+8. verifies that cron appended a structured status.
 
-The directory is mode `700`; the file and structured relayer log are mode
-`600`. The job refuses to continue if `RELAYER_PRIVATE_KEY` appears in
-Passenger's `.env.production`. It replaces only existing crontab lines that
-refer to `relay-drand` or `drand-relayer`, preserves unrelated cron jobs, and
-installs one managed entry through the stable `current` symlink:
+Managed entry:
 
 ```cron
 * * * * * /usr/bin/flock -n /home/CPANEL_USER/plank.tanggang.life/shared/drand-relayer.lock /ABSOLUTE/NODE/BIN --env-file=/home/CPANEL_USER/plank.tanggang.life/shared/runtime-secrets/relayer.env /home/CPANEL_USER/plank.tanggang.life/current/ops/drand-relayer/relay-drand.mjs >> /home/CPANEL_USER/plank.tanggang.life/logs/drand-relayer.log 2>&1
 ```
 
-The provisioning job runs the artifact once before changing cron and verifies
-that both vaults report a non-error structured status. GitHub and InMotion
-relays then overlap safely: contract submission and settlement are
-permissionless and idempotent.
+The key is a dedicated gas-only wallet. It has no custody or contract-admin
+authority. Owners must retain an offline backup.
 
-Leave the GitHub `Relay drand rounds` workflow enabled for the first 24 hours.
-After at least 24 hours, dispatch **InMotion Passenger CI/CD** with
-`operation=verify-relayer` and confirmation `DISABLE_GITHUB_RELAY`. The job
-requires a recent status, at least 90% of expected one-minute successful runs,
-both vaults in every status, no actionable slots, and no fatal run in the
-24-hour window. Only after those checks pass does it disable the GitHub relay
-workflow at repository level. It does not modify `master`.
+The GitHub scheduled workflow may overlap temporarily because submission and
+settlement are permissionless and designed to be safe on repeated runs.
+After at least 24 hours, dispatch:
 
-Owners must retain an offline backup of the dedicated gas-only wallet before
-running the provisioning job.
+```text
+operation=verify-relayer
+confirmation=DISABLE_GITHUB_RELAY
+```
 
-## 12. Maintenance and backups
+The verifier requires:
 
-Configure a daily cPanel Cron Job using the cPanel Node executable:
+- at least 90% of expected one-minute successful runs;
+- both V1 and V2 in every structured status;
+- no actionable or error state left behind;
+- no fatal run in the 24-hour window; and
+- a recent latest status.
+
+Only then does the job disable `.github/workflows/relay-drand.yml` at the
+repository level.
+
+After the standalone cron is verified, remove any older HTTP curl settlement
+cron so there is one production scheduler.
+
+## 13. Maintenance and backups
+
+Configure a daily cPanel cron using the cPanel Node executable:
 
 ```bash
 /ABSOLUTE/NODE/BIN \
@@ -346,23 +489,69 @@ Configure a daily cPanel Cron Job using the cPanel Node executable:
   /home/CPANEL_USER/plank.tanggang.life/current/scripts/postgres-maintenance.mjs
 ```
 
-This removes expired cache entries and orders. Use cPanel's database backup
-facilities and periodically test a restore. A release rollback does not roll
-back database migrations or data.
+This removes expired KV rows and expired orders.
 
-## 13. Acceptance
+Use cPanel database backups and periodically test a restore. A release rollback
+does not roll back database migrations or data.
 
-Before enabling public traffic:
+Recommended checks:
 
+```bash
+tail -n 100 "$HOME/plank.tanggang.life/logs/passenger.log"
+tail -n 100 "$HOME/plank.tanggang.life/logs/drand-relayer.log"
+readlink "$HOME/plank.tanggang.life/current"
+```
+
+Do not output `.env.production`, `relayer.env`, crontab bearer values, or
+runtime secret files during diagnostics.
+
+## 14. Production acceptance
+
+Before moving public traffic:
+
+- `/api/health` reports `ok`, PostgreSQL, and the expected SHA.
 - Root, `/market`, `/gallery`, `/learn`, `/mint`, and `/launch` render.
 - Mobile and desktop wallet connection work.
-- Existing migrated listings appear.
+- Existing migrated listings and offers appear.
 - A new signed listing remains after a Passenger restart.
 - Concurrent listings do not overwrite each other.
 - Boards state remains consistent across repeated Passenger requests.
 - IPFS image and metadata proxies work.
-- Uniswap quote/swap routes do not expose the API key.
-- Vault stats, held inventory, activity, and SSE update.
-- Passenger logs contain no repeated restart or database-pool errors.
+- The Uniswap API key is not present in browser assets or responses.
+- V1 and V2 vault stats, held inventory, activity, and SSE update.
+- Random redemption is idle or settled with no actionable request.
+- Passenger logs show no restart loop or database-pool errors.
 - PostgreSQL is not remotely exposed.
-- CI health failure successfully restores the prior release.
+- A failed test release can restore the previous application symlink.
+- Cloudflare Full (strict) works after proxying.
+- The old hostname is redirected only after the new health URL is active.
+
+## 15. Troubleshooting
+
+### Default "It works" page
+
+The hostname reaches Apache but is not attached to the Passenger app. Check the
+cPanel domain document root and Node application URL. Do not create a second
+copy of the app.
+
+### Health returns 503
+
+Check the Passenger log, `.env.production` permissions, PostgreSQL values, and
+whether migrations applied. `/api/health` intentionally fails when no durable
+backend is available.
+
+### Health shows the previous SHA
+
+Check the `current` symlink and `tmp/restart.txt`. Cloudflare and browser caches
+must not be used as deployment proof; query `/api/health` with no-cache.
+
+### `/market` loads but data APIs fail
+
+Check PostgreSQL connectivity, the last-known-good snapshot rows, upstream RPC
+limits, and Passenger request timeouts. Do not delete durable snapshots as a
+first troubleshooting step.
+
+### Relayer workflow remains active
+
+This is expected until `verify-relayer` proves the full 24-hour window. Do not
+disable the GitHub fallback only because a single InMotion run succeeded.

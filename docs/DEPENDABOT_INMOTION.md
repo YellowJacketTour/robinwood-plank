@@ -1,5 +1,7 @@
 # Dependabot status for `inmotion`
 
+Last verified against GitHub alerts and the `inmotion` lockfile: **2026-07-30**.
+
 This branch remediates every open Dependabot advisory that has a compatible
 patched version. The alerts shown in GitHub remain keyed to the repository's
 default branch, so they will continue to appear until equivalent dependency
@@ -46,3 +48,7 @@ fingerprints for every artifact. The production contract fingerprints were:
 | `IDrandBeacon` | `0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470` |
 | `BLSBN254` | `0x88b084a4d28f97d6a7171fc62ad396a2b61f82944ca14034b88d0b2cadd9057d` |
 | `MarketplankVault` | `0x385851b0b008fb39ac57342c4ac3243e278c7e3ec7e9ba72e71ab6a65eef3822` |
+
+GitHub may continue to show all 16 alerts while `master` remains the repository
+default branch. That count does not describe the dependency graph deployed
+from `inmotion`.
