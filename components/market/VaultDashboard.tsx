@@ -21,6 +21,8 @@ type HeldToken = { tokenId: string; imageUrl: string | null };
 type Props = {
   /** Selected Instant Swap vault — stats + inventory follow this address. */
   vaultAddress?: string | null;
+  /** False while the owning tab is mounted but off screen — pauses polling. */
+  active?: boolean;
 };
 
 function statCell(label: string, value: string, sub?: string) {
@@ -44,8 +46,8 @@ function statCell(label: string, value: string, sub?: string) {
  * When `vaultAddress` is set (Instant Swap dual mode), numbers + inventory
  * track that vault only. Trades board stays dual elsewhere.
  */
-export default function VaultDashboard({ vaultAddress = null }: Props) {
-  const { stats } = useVaultBook(vaultAddress);
+export default function VaultDashboard({ vaultAddress = null, active = true }: Props) {
+  const { stats } = useVaultBook(vaultAddress, { active });
   const [held, setHeld] = useState<HeldToken[]>([]);
   const [heldLoading, setHeldLoading] = useState(true);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());

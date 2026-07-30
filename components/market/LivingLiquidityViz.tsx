@@ -22,6 +22,8 @@ type HeldToken = { tokenId: string; imageUrl: string | null };
 type Props = {
   /** Selected Instant Swap vault — fence + liquidity follow this book. */
   vaultAddress?: string | null;
+  /** False while the owning tab is mounted but off screen — pauses polling. */
+  active?: boolean;
 };
 
 /**
@@ -32,8 +34,8 @@ type Props = {
  * straight from /api/market/vault/stats and /api/market/vault/held, the
  * same live data VaultDashboard renders as plain numbers.
  */
-export default function LivingLiquidityViz({ vaultAddress = null }: Props) {
-  const { stats } = useVaultBook(vaultAddress);
+export default function LivingLiquidityViz({ vaultAddress = null, active = true }: Props) {
+  const { stats } = useVaultBook(vaultAddress, { active });
   const [held, setHeld] = useState<HeldToken[] | null>(null);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
   const heldTokenCount = stats?.heldTokenCount ?? null;

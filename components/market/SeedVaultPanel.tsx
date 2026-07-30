@@ -17,16 +17,19 @@ import { shortVault } from "@/lib/market/vault-registry";
 import { getVaultOnChainSnapshot } from "@/lib/market/vault";
 import TreasuryBootstrap from "@/components/market/TreasuryBootstrap";
 import { formatTokenAmount } from "@/lib/trade";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 
 type Props = {
   account: string | null;
   onConnect: () => void;
+  /** False while the owning tab is mounted but off screen — pauses polling. */
+  active?: boolean;
 };
 
 /** On-chain treasury for V2 (immutable constructor arg) — same as MARKET_FEE_RECIPIENT. */
 const TREASURY = MARKET_FEE_RECIPIENT;
 
-export default function SeedVaultPanel({ account, onConnect }: Props) {
+export default function SeedVaultPanel({ account, onConnect, active = true }: Props) {
   const primary = MARKET_VAULT_ADDRESS;
   const [open, setOpen] = useState<boolean | null>(null);
   const [held, setHeld] = useState(0);
@@ -50,9 +53,9 @@ export default function SeedVaultPanel({ account, onConnect }: Props) {
 
   useEffect(() => {
     void refresh();
-    const t = setInterval(() => void refresh(), 12_000);
-    return () => clearInterval(t);
-  }, [refresh]);
+    const stop = active ? startVisibleInterval(() => void refresh(), 12_000) : null;
+    return () => stop?.();
+  }, [refresh, active]);
 
   if (!primary) return null;
   if (open === true) return null;

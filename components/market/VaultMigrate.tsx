@@ -34,18 +34,21 @@ import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
 import { getOwnedInventory } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { CHAIN } from "@/lib/constants";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 
 type Props = {
   account: string | null;
   onConnect: () => void;
   embedded?: boolean;
+  /** False while the owning tab is mounted but off screen — pauses polling. */
+  active?: boolean;
 };
 
 function explorerAddr(addr: string) {
   return `${CHAIN.blockExplorers.default.url}/address/${addr}`;
 }
 
-export default function VaultMigrate({ account, onConnect, embedded = false }: Props) {
+export default function VaultMigrate({ account, onConnect, embedded = false, active = true }: Props) {
   const vaults = listVaults();
   const dual = dualVaultMode();
   const legacyAddr =
@@ -84,9 +87,9 @@ export default function VaultMigrate({ account, onConnect, embedded = false }: P
 
   useEffect(() => {
     void refresh();
-    const t = setInterval(() => void refresh(), 20_000);
-    return () => clearInterval(t);
-  }, [refresh]);
+    const stop = active ? startVisibleInterval(() => void refresh(), 20_000) : null;
+    return () => stop?.();
+  }, [refresh, active]);
 
   const fees = useMemo(
     () =>

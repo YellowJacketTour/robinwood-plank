@@ -14,22 +14,11 @@ import {
   MarketWalletGate,
 } from "@/components/market/MarketScaffold";
 import ListingGrid from "@/components/market/ListingGrid";
-import OfferForm from "@/components/market/OfferForm";
-import SwapPanel from "@/components/market/SwapPanel";
-import InstantVaultSwitcher from "@/components/market/InstantVaultSwitcher";
-import VaultMigrate from "@/components/market/VaultMigrate";
-import SeedVaultPanel from "@/components/market/SeedVaultPanel";
 import {
   dualVaultMode,
   getVaultByRole,
   type VaultRole,
 } from "@/lib/market/vault-registry";
-import MyPositions from "@/components/market/MyPositions";
-import MyInventory from "@/components/market/MyInventory";
-import MyNfts from "@/components/market/MyNfts";
-import TreasuryDashboard from "@/components/market/TreasuryDashboard";
-import VaultDashboard from "@/components/market/VaultDashboard";
-import NftPriceChart from "@/components/market/NftPriceChart";
 import VaultTradeHistory from "@/components/market/VaultTradeHistory";
 import LivingLiquidityViz from "@/components/market/LivingLiquidityViz";
 import RedeemOdds from "@/components/market/RedeemOdds";
@@ -37,11 +26,9 @@ import EventCountdown from "@/components/market/EventCountdown";
 import CollectionStats from "@/components/market/CollectionStats";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import SweepConfirm from "@/components/market/SweepConfirm";
-import SweepFloorboards from "@/components/market/SweepFloorboards";
 import RarityFloorStrip from "@/components/market/RarityFloorStrip";
 import IncomingBids from "@/components/market/IncomingBids";
 import ListingSkeleton from "@/components/market/ListingSkeleton";
-import ActivityFeed from "@/components/market/ActivityFeed";
 import ItemDetail from "@/components/market/ItemDetail";
 import WalletChip from "@/components/market/WalletChip";
 import WethBalance from "@/components/market/WethBalance";
@@ -53,14 +40,7 @@ import { invalidateSwr, prefetchJson } from "@/lib/market/swr-fetch";
 import { getOwnedTokenIds } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { MARKET_TABS } from "@/lib/market/navigation";
-import {
-  assertAcceptableOffer,
-  assertAcceptableTraitOffer,
-  fulfillOrder,
-  sweepFloor,
-} from "@/lib/market/seaport";
 import type { SweepPlan } from "@/lib/market/sweep";
-import { validateListingOrder, validateOfferOrder } from "@/lib/market/order-validation";
 import { ensureRobinhoodChain, getConnectedAccounts } from "@/lib/wallet";
 import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
 import { formatTokenAmount } from "@/lib/trade";
@@ -69,6 +49,83 @@ import dynamic from "next/dynamic";
 
 const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModal"), {
   ssr: false,
+});
+
+/** Seaport (plus its ethers ceremony) loads on the first buy/list/accept
+ * click, not with the page — every use is inside a user-initiated handler. */
+type SeaportModule = typeof import("@/lib/market/seaport");
+const loadSeaport = () => import("@/lib/market/seaport");
+
+/** Same deal for order validation: it drags in criteria hashing (ethers
+ * keccak + Seaport's MerkleTree) and only runs inside buy/accept handlers. */
+const loadOrderValidation = () => import("@/lib/market/order-validation");
+
+/** Fixed-height pulse placeholder — tab bodies stream in as their own
+ * chunks, and the placeholder keeps the layout from jumping meanwhile. */
+function PanelSkeleton({ className = "min-h-64" }: { className?: string }) {
+  return (
+    <div
+      aria-hidden
+      className={`${className} animate-pulse rounded-xl border border-gold-500/15 bg-wood-900/60`}
+    />
+  );
+}
+
+const panelLoading = () => <PanelSkeleton />;
+const gridLoading = () => <ListingSkeleton />;
+
+// Heavy tab bodies split out of the initial /market chunk. Everything the
+// default Buy & Sell view needs (ListingGrid, FilterBar, scaffold) stays
+// static; these mount when their tab is first visited (or pre-warmed).
+const SwapPanel = dynamic(() => import("@/components/market/SwapPanel"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const InstantVaultSwitcher = dynamic(
+  () => import("@/components/market/InstantVaultSwitcher"),
+  { ssr: false, loading: () => <PanelSkeleton className="min-h-16" /> }
+);
+const VaultMigrate = dynamic(() => import("@/components/market/VaultMigrate"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const SeedVaultPanel = dynamic(() => import("@/components/market/SeedVaultPanel"), {
+  ssr: false,
+});
+const MyPositions = dynamic(() => import("@/components/market/MyPositions"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const MyInventory = dynamic(() => import("@/components/market/MyInventory"), {
+  ssr: false,
+  loading: gridLoading,
+});
+const MyNfts = dynamic(() => import("@/components/market/MyNfts"), {
+  ssr: false,
+  loading: gridLoading,
+});
+const TreasuryDashboard = dynamic(() => import("@/components/market/TreasuryDashboard"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const VaultDashboard = dynamic(() => import("@/components/market/VaultDashboard"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const NftPriceChart = dynamic(() => import("@/components/market/NftPriceChart"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const ActivityFeed = dynamic(() => import("@/components/market/ActivityFeed"), {
+  ssr: false,
+  loading: gridLoading,
+});
+const OfferForm = dynamic(() => import("@/components/market/OfferForm"), {
+  ssr: false,
+});
+const SweepFloorboards = dynamic(() => import("@/components/market/SweepFloorboards"), {
+  ssr: false,
+  loading: () => <PanelSkeleton className="min-h-24" />,
 });
 
 const COLLECTION = MARKET_COLLECTIONS[0];
@@ -262,9 +319,11 @@ export default function MarketView() {
       swrMs: 60_000,
       session: true,
     });
-    // Activity feed + stats lineage
+    // Activity feed. The ?full=1 lineage is deliberately NOT prefetched:
+    // it's the most expensive activity query and rate-limited to 60/min
+    // globally — every visitor requesting it on mount was eating the whole
+    // budget. The Activity tab fetches it when actually opened.
     prefetchJson("/api/market/activity", { ttlMs: 20_000, swrMs: 120_000, session: true });
-    prefetchJson("/api/market/activity?full=1", { ttlMs: 45_000, swrMs: 180_000, session: true });
     // Instant Swap
     prefetchJson("/api/market/vault/stats", { ttlMs: 10_000, swrMs: 90_000, session: true });
     prefetchJson("/api/market/vault/held", { ttlMs: 15_000, swrMs: 120_000, session: true });
@@ -307,8 +366,11 @@ export default function MarketView() {
   // (see visitedTabs' own comment) — it 429'd the public RPC. One at a time
   // on a real delay avoids that same burst while still getting there.
   useEffect(() => {
-    const STAGGER_MS = 6_000;
+    const STAGGER_MS = 15_000;
     const timer = window.setInterval(() => {
+      // Never pre-warm into a backgrounded page — each mount costs an
+      // initial data load the user isn't there to see.
+      if (document.hidden) return;
       setVisitedTabs((prev) => {
         const next = MARKET_TABS.map((marketTab) => marketTab.id).find((id) => !prev.has(id));
         if (!next) {
@@ -410,6 +472,7 @@ export default function MarketView() {
         // browser. The API already does this, but repeating it here means
         // even a compromised API or store cannot show one price and have the
         // wallet sign another.
+        const { validateListingOrder } = await loadOrderValidation();
         const derived = validateListingOrder(full.rawOrder, COLLECTION);
         if (derived.tokenId !== full.tokenId) {
           throw new Error("This listing's details don't match its signature.");
@@ -427,8 +490,9 @@ export default function MarketView() {
     setError(null);
     try {
       setStatus("Confirm in wallet…");
+      const { fulfillOrder } = await loadSeaport();
       await fulfillOrder(
-        buyTarget.listing.rawOrder as Parameters<typeof fulfillOrder>[0],
+        buyTarget.listing.rawOrder as Parameters<SeaportModule["fulfillOrder"]>[0],
         account
       );
       setBuyTarget(null);
@@ -463,6 +527,7 @@ export default function MarketView() {
     try {
       setSweeping(true);
       setStatus("Confirm in wallet…");
+      const { sweepFloor } = await loadSeaport();
       await sweepFloor(sweepTarget.items, account, COLLECTION, sweepTarget.totalWei);
       setSweepTarget(null);
       setStatus("Sweep confirmed.");
@@ -501,7 +566,9 @@ export default function MarketView() {
         if (!full) throw new Error("Offer no longer available.");
         if (!COLLECTION) throw new Error("Unknown collection.");
 
+        const { validateOfferOrder } = await loadOrderValidation();
         const derived = validateOfferOrder(full.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY);
+        const { assertAcceptableOffer } = await loadSeaport();
         assertAcceptableOffer(full, derived);
         // derived.priceWei is the seller's NET proceeds (order-validation
         // OFFER semantics) — the number the seller must see before signing.
@@ -533,6 +600,7 @@ export default function MarketView() {
       try {
         if (!COLLECTION) throw new Error("Unknown collection.");
         if (!offer.criteriaTokenIds?.length) throw new Error("Offer snapshot missing.");
+        const { validateOfferOrder } = await loadOrderValidation();
         const derived = validateOfferOrder(offer.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY, {
           criteriaTokenIds: offer.criteriaTokenIds,
         });
@@ -547,6 +615,7 @@ export default function MarketView() {
         }
         // Dry-run the full cross-check now so a broken offer never reaches
         // the confirm modal; it runs again at send time.
+        const { assertAcceptableTraitOffer } = await loadSeaport();
         assertAcceptableTraitOffer(offer, derived, qualifyingOwned[0]);
         setAcceptTraitTarget({
           offer,
@@ -569,9 +638,11 @@ export default function MarketView() {
       const { offer, chosenTokenId } = acceptTraitTarget;
       // Re-derive EVERYTHING from the signed order at send time; the proof
       // handed to the wallet comes from the same verified snapshot.
+      const { validateOfferOrder } = await loadOrderValidation();
       const derived = validateOfferOrder(offer.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY, {
         criteriaTokenIds: offer.criteriaTokenIds ?? [],
       });
+      const { assertAcceptableTraitOffer, fulfillOrder } = await loadSeaport();
       const criteria = assertAcceptableTraitOffer(
         { priceWei: acceptTraitTarget.verifiedNetWei, criteriaTokenIds: offer.criteriaTokenIds },
         derived,
@@ -579,7 +650,7 @@ export default function MarketView() {
       );
       setStatus(`Accepting trait offer with #${chosenTokenId}…`);
       await fulfillOrder(
-        offer.rawOrder as Parameters<typeof fulfillOrder>[0],
+        offer.rawOrder as Parameters<SeaportModule["fulfillOrder"]>[0],
         account,
         [criteria]
       );
@@ -600,8 +671,9 @@ export default function MarketView() {
     try {
       setAccepting(true);
       setStatus(`Accepting offer on #${acceptTarget.tokenId}…`);
+      const { fulfillOrder } = await loadSeaport();
       await fulfillOrder(
-        acceptTarget.offer.rawOrder as Parameters<typeof fulfillOrder>[0],
+        acceptTarget.offer.rawOrder as Parameters<SeaportModule["fulfillOrder"]>[0],
         account
       );
       setAcceptTarget(null);
@@ -650,6 +722,9 @@ export default function MarketView() {
             active={tab}
             onChange={selectTab}
             counts={{ "buy-sell": listings.length, offers: offers.length }}
+            onPrewarm={(id) =>
+              setVisitedTabs((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+            }
           />
         }
         actions={
@@ -1161,11 +1236,12 @@ export default function MarketView() {
           >
             <div className="space-y-3">
             {/* Dual vault: pick V1 (legacy deposits) or V2 (new book / LP) first */}
-            <InstantVaultSwitcher role={vaultRole} onChange={setVaultRole} />
+            <InstantVaultSwitcher role={vaultRole} onChange={setVaultRole} active={tab === "swap"} />
             <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <SwapPanel
                 account={account}
                 onConnect={handleConnect}
+                active={tab === "swap"}
                 vaultAddress={activeVault?.address ?? null}
                 vaultLabel={
                   vaultRole === "legacy"
@@ -1176,13 +1252,13 @@ export default function MarketView() {
                 }
               />
               <div className="space-y-3">
-                <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} />
-                <VaultDashboard vaultAddress={activeVault?.address ?? null} />
+                <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
+                <VaultDashboard vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
               </div>
             </div>
             <div className="grid items-start gap-3 md:grid-cols-2">
-              <NftPriceChart />
-              <RedeemOdds vaultAddress={activeVault?.address ?? null} />
+              <NftPriceChart active={tab === "swap"} />
+              <RedeemOdds vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
             </div>
             {/* Trades stay dual-vault (V1 + V2) regardless of selection */}
             <VaultTradeHistory />
@@ -1192,7 +1268,7 @@ export default function MarketView() {
                 title="Move V1 vault deposits to V2"
                 description="Optional migration, fee details, dust recovery, redeem, and re-deposit steps."
               >
-                <VaultMigrate account={account} onConnect={handleConnect} embedded />
+                <VaultMigrate account={account} onConnect={handleConnect} embedded active={tab === "swap"} />
               </MarketDisclosure>
             )}
             {/* Seed/bootstrap only on primary (V2) — never seed into legacy V1 */}
@@ -1202,7 +1278,7 @@ export default function MarketView() {
                 title="Seed and bootstrap the V2 vault"
                 description="Treasury-only setup and liquidity controls for the primary vault."
               >
-                <SeedVaultPanel account={account} onConnect={handleConnect} />
+                <SeedVaultPanel account={account} onConnect={handleConnect} active={tab === "swap"} />
               </MarketDisclosure>
             )}
             <MarketDisclosure

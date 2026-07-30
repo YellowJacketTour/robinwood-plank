@@ -28,6 +28,7 @@ import {
   setCachedMintStats,
   setCachedProofs,
 } from "@/lib/nft-cache";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 
 const TOTAL_SUPPLY = 1542;
 const COMMUNITY_SUPPLY = 777;
@@ -270,10 +271,10 @@ export default function MintPanel() {
   useEffect(() => {
     applyCachedStats();
     const initialLoad = window.setTimeout(() => void loadStats(), 0);
-    const timer = window.setInterval(() => void loadStats(), 12_000);
+    const stop = startVisibleInterval(() => void loadStats(), 12_000);
     return () => {
       window.clearTimeout(initialLoad);
-      window.clearInterval(timer);
+      stop();
     };
   }, [loadStats, applyCachedStats]);
 
