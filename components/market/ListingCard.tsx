@@ -1,7 +1,7 @@
 import Image from "next/image";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
-import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
+import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 
 type Props = {
@@ -49,15 +49,14 @@ export default function ListingCard({
   );
   return (
     <li
-      className={`dense-card flex flex-col overflow-hidden p-0 ${
+      // Finalized mockup card: uniform quiet frame, rarity communicated by
+      // the tier pill alone; the card lifts on hover instead of glowing.
+      className={`dense-card flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-gold-500/50 ${
         isOffer ? "border-emerald-500/40" : ""
-      } ${rarity ? tierAnimationClass(rarity.tier) : ""}`}
-      style={rarity ? { boxShadow: tierGlow(rarity.tier), ...tierCardStyle(rarity.tier) } : undefined}
+      }`}
     >
-      {/* holo-card scoped to the artwork only — inherits --holo-intensity
-          from the <li> above it, CSS custom properties inherit down. */}
       <div
-        className={`relative aspect-square w-full bg-wood-900 ${rarity ? "holo-card" : ""} ${
+        className={`relative aspect-square w-full bg-wood-900 ${
           selectable ? "cursor-pointer" : ""
         }`}
         role={selectable ? "button" : undefined}
@@ -105,28 +104,6 @@ export default function ListingCard({
             {rarity.tier}
           </span>
         )}
-        {collection.trustBadges.length > 0 && (
-          <div
-            className="card-overlay absolute right-2 top-2 flex gap-0.5 sm:gap-1"
-            aria-hidden="true"
-          >
-            {collection.trustBadges.map((badge) => {
-              const trust = TRUST_BADGE[badge] ?? {
-                icon: "✓",
-                label: badge,
-              };
-              return (
-                <span
-                  key={badge}
-                  className="flex h-5 w-5 items-center justify-center rounded-full border border-emerald-300/50 bg-black/90 text-[0.6rem] leading-none text-emerald-300 shadow-sm sm:h-6 sm:w-6 sm:text-[0.65rem]"
-                  title={trust.label}
-                >
-                  {trust.icon}
-                </span>
-              );
-            })}
-          </div>
-        )}
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-2.5 sm:p-3">
         {trustLabels.length > 0 && (
@@ -143,10 +120,6 @@ export default function ListingCard({
             </p>
           )}
         </div>
-        <p className="truncate text-[0.6rem] text-foreground/45" title={listing.maker}>
-          {isOffer ? "Bidder " : "Maker "}
-          {shortAddress(listing.maker)}
-        </p>
         <div className="mt-auto flex items-end justify-between gap-2 pt-1">
           <div className="min-w-0">
             <span className="block text-[0.55rem] font-black uppercase tracking-[0.12em] text-foreground/45">
@@ -159,7 +132,7 @@ export default function ListingCard({
               aria-label={`${formatTokenAmount(listing.priceWei, 18, 4)} ETH`}
             >
               <span aria-hidden="true">
-                {formatTokenAmount(listing.priceWei, 18, 4)} ETH
+                {formatTokenAmount(listing.priceWei, 18, 4)} Ξ
               </span>
             </p>
           </div>
@@ -176,6 +149,15 @@ export default function ListingCard({
           >
             {buyLabel ?? "Buy"}
           </button>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <p className="truncate text-[0.6rem] text-foreground/45" title={listing.maker}>
+            {isOffer ? "Bidder " : "Maker "}
+            {shortAddress(listing.maker)}
+          </p>
+          {collection.trustBadges.includes("verified") && (
+            <span className="shrink-0 text-[0.6rem] font-bold text-emerald-300">Verified ✓</span>
+          )}
         </div>
         {(onOffer || selectable) && (
           <div className="flex gap-1.5">

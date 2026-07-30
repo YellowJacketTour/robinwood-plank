@@ -57,15 +57,20 @@ export default function CollectionStats({
     return max === null || v > max ? v : max;
   }, null);
 
+  // Finalized-mockup order and labels: Floor price · Items · Listed · Best
+  // offer · Highest sale.
   const stats: { label: string; value: string }[] = [
-    { label: "Floor", value: floorWei === null ? "—" : `${formatTokenAmount(floorWei, 18, 4)} Ξ` },
+    {
+      label: "Floor price",
+      value: floorWei === null ? "—" : `${formatTokenAmount(floorWei, 18, 4)} Ξ`,
+    },
+    { label: "Items", value: totalSupply ? totalSupply.toLocaleString() : "—" },
     {
       label: "Listed",
       value: totalSupply
         ? `${listings.length.toLocaleString()} / ${totalSupply.toLocaleString()}`
         : String(listings.length),
     },
-    { label: "Items", value: totalSupply ? totalSupply.toLocaleString() : "—" },
     {
       label: "Best offer",
       value: bestOfferWei === null ? "—" : `${formatTokenAmount(bestOfferWei, 18, 4)} WETH`,

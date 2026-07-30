@@ -27,6 +27,8 @@ type Props = {
   /** Omit to hide the tier filter entirely (e.g. rarity data not loaded yet). */
   rarityAvailable?: boolean;
   orientation?: "inline" | "sidebar";
+  /** Listed count per tier — shown beside each rarity checkbox (mockup). */
+  tierCounts?: Partial<Record<RarityTier, number>>;
 };
 
 export default function FilterBar({
@@ -35,6 +37,7 @@ export default function FilterBar({
   resultCount,
   rarityAvailable,
   orientation = "inline",
+  tierCounts,
 }: Props) {
   const dirty =
     filters.query !== "" ||
@@ -46,6 +49,19 @@ export default function FilterBar({
   if (orientation === "sidebar") {
     return (
       <div className="space-y-5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[0.68rem] font-black uppercase tracking-wider text-foreground/60">
+            {resultCount} items
+          </span>
+          <button
+            type="button"
+            onClick={() => onChange(EMPTY_FILTERS)}
+            disabled={!dirty}
+            className="min-h-9 rounded-md border border-gold-500/30 px-3 text-xs text-gold-300 transition disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            Clear all
+          </button>
+        </div>
         <div>
           <label
             htmlFor="market-token-filter"
@@ -129,25 +145,17 @@ export default function FilterBar({
                     }}
                     className="accent-[#d9a441]"
                   />
-                  <span>{tier === "all" ? "All rarities" : tier}</span>
+                  <span className="flex-1">{tier === "all" ? "All rarities" : tier}</span>
+                  {tier !== "all" && tierCounts?.[tier] !== undefined && (
+                    <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[0.58rem] tabular-nums text-foreground/55">
+                      {tierCounts[tier]}
+                    </span>
+                  )}
                 </label>
               ))}
             </div>
           </fieldset>
         )}
-
-        <div className="flex items-center justify-between gap-2 border-t border-gold-500/20 pt-4">
-          <span className="text-[0.68rem] text-foreground/55">{resultCount} items</span>
-          {dirty && (
-            <button
-              type="button"
-              onClick={() => onChange(EMPTY_FILTERS)}
-              className="min-h-9 rounded-md border border-gold-500/30 px-3 text-xs text-gold-300"
-            >
-              Clear all
-            </button>
-          )}
-        </div>
       </div>
     );
   }

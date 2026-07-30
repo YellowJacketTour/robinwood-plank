@@ -99,9 +99,11 @@ export default function EventCountdown() {
   const record = useRecordSale();
 
   useEffect(() => {
+    // The banner shows day/hour/minute precision (finalized mockup) — a
+    // minute cadence is enough and avoids a whole-banner re-render every second.
     const update = () => setRemaining(getRemaining(target));
     update();
-    const timer = window.setInterval(update, 1_000);
+    const timer = window.setInterval(update, 30_000);
     return () => window.clearInterval(timer);
   }, [target]);
 
@@ -110,39 +112,36 @@ export default function EventCountdown() {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gold-500/30 bg-wood-900/90 px-3 py-2">
       {record ? (
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2.5">
           {record.image ? (
-            <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md border border-gold-500/40">
-              <Image src={record.image} alt={`#${record.tokenId}`} fill sizes="32px" className="object-cover" unoptimized />
+            <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded-md border border-gold-500/40">
+              <Image src={record.image} alt={`#${record.tokenId}`} fill sizes="36px" className="object-cover" unoptimized />
             </div>
           ) : (
-            <div className="h-8 w-8 shrink-0 rounded-md border border-gold-500/40 bg-wood-900" />
+            <div className="h-9 w-9 shrink-0 rounded-md border border-gold-500/40 bg-wood-900" />
           )}
-          <p className="min-w-0 truncate text-[0.7rem] text-foreground/70">
-            <span className="font-bold text-gold-300">Highest sale: {formatTokenAmount(record.priceWei, 18, 4)} Ξ</span>
-            {" · "}Plank #{record.tokenId}
-            {record.buyer ? (
-              <>
-                {" · "}
-                <span className="text-foreground/55">
-                  {record.buyer.startsWith("0x") ? shortAddress(record.buyer) : record.buyer}
-                </span>
-              </>
-            ) : null}
-            <span className="text-foreground/40"> · royalty paid</span>
-          </p>
+          <div className="min-w-0 leading-tight">
+            <p className="truncate text-[0.72rem] font-bold text-gold-300">
+              Record sale: Plank #{record.tokenId} · {formatTokenAmount(record.priceWei, 18, 4)} ETH
+            </p>
+            <p className="truncate text-[0.62rem] text-foreground/55">
+              {record.buyer
+                ? `on ${record.buyer.startsWith("0x") ? shortAddress(record.buyer) : record.buyer} · `
+                : ""}
+              royalty paid · verified order
+            </p>
+          </div>
         </div>
       ) : (
         <p className="text-xs font-bold uppercase tracking-wide text-gold-300">Special event</p>
       )}
-      <div className="flex shrink-0 items-center gap-1.5 font-mono text-sm text-foreground" role="timer" aria-live="off">
-        <span>{pad(remaining?.days)}d</span>
-        <span className="text-foreground/40">:</span>
-        <span>{pad(remaining?.hours)}h</span>
-        <span className="text-foreground/40">:</span>
-        <span>{pad(remaining?.minutes)}m</span>
-        <span className="text-foreground/40">:</span>
-        <span>{pad(remaining?.seconds)}s</span>
+      <div className="shrink-0 text-right leading-tight" role="timer" aria-live="off">
+        <p className="text-[0.58rem] font-bold uppercase tracking-wider text-foreground/45">
+          Event closes in
+        </p>
+        <p className="font-mono text-sm font-bold text-foreground">
+          {pad(remaining?.days)}d {pad(remaining?.hours)}h {pad(remaining?.minutes)}m
+        </p>
       </div>
     </div>
   );
