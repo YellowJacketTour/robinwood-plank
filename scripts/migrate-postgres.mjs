@@ -1,10 +1,13 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDir = path.resolve(
-  process.cwd(),
+  scriptDir,
+  "..",
   "deploy",
   "inmotion",
   "postgres",
