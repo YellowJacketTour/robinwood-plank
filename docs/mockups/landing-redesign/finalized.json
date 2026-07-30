@@ -1,0 +1,47 @@
+{
+  "source_mockup": null,
+  "source_plan": null,
+  "source_site": "http://localhost:3000/",
+  "mode": "freeform",
+  "html_file": "docs/mockups/landing-redesign/finalized.html",
+  "pretext_tier": "marketing/landing using prepare() and layout()",
+  "framework": "vanilla",
+  "iterations": 1,
+  "information_contract": "DESIGN.md landing-page parity audit against app/page.tsx + Hero, Trade, MintInfo, MintPanel, MintAllocation, Gallery, NftViewer, AirdropChecker, Distribution, Roadmap, TrustFacts, Footer, Nav",
+  "cro_hierarchy": {
+    "primary_cta": "Trade $PLANK",
+    "secondary_cta": "Mint a Plank",
+    "tertiary_cta": "Browse Market",
+    "trust_signals_position": "directly beneath hero CTA row (moved up from page bottom)"
+  },
+  "preloader": {
+    "theme": "Warming the workshop / Nailing the planks",
+    "min_duration_ms": 3500,
+    "dismiss": "auto after min duration, class toggle + CSS transition",
+    "replay_control": true,
+    "reduced_motion_support": true
+  },
+  "prototype_states": [
+    "preloader playing",
+    "preloader dismissed",
+    "trade open (countdown chip)",
+    "mint live phase 3",
+    "gallery teaser + wallet lookup",
+    "airdrop wallet check"
+  ],
+  "date": "2026-07-30",
+  "screen": "landing-redesign",
+  "branch": "inmotion",
+  "sections": [
+    "header",
+    "hero",
+    "trust-ticker",
+    "trade",
+    "mint",
+    "gallery",
+    "airdrop",
+    "tokenomics",
+    "roadmap",
+    "footer"
+  ]
+}
