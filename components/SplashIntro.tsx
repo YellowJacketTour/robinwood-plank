@@ -3,28 +3,49 @@
 import { useEffect, useRef, useState } from "react";
 
 const SEEN_KEY = "plank-intro-seen";
-const COLORS = ["#f4c93a", "#3a7bf4", "#e2402f"]; // yellow, blue, red
-const CYCLE_MS = 900;
-/** Never dismiss before at least one full color cycle has played, even if
- * the page is technically "loaded" instantly (cached) — a single-frame
- * flash would just read as a glitch. */
-const MIN_CYCLES = 1;
-const FADE_OUT_MS = 250;
+/** Minimum time the preloader stays up even on an instant cached load — a
+ * single-frame flash would just read as a glitch, and this is also long
+ * enough for the "Nailing the planks" beat to land. */
+const MIN_MS = 3200;
+/** Hard cap: never block the site more than this even if `load` never fires
+ * (wallet in-app browsers / low-power mobile sometimes hang on fonts/audio). */
+const MAX_WAIT_MS = 6000;
+const FADE_OUT_MS = 500;
+/** Much shorter gate for prefers-reduced-motion — the static frame still
+ * needs a beat to avoid a content flash, but forcing a full 3.2s wait on a
+ * user who explicitly asked for less motion/delay is its own regression. */
+const REDUCED_MOTION_MIN_MS = 450;
+
+const TOTAL_SUPPLY = 1542;
+
+/** Real hand-drawn plank character art only — every "plank" here is one of
+ * the actual collection assets or the logo mascot (DESIGN.md "Plank
+ * character art": abstract geometric boards are never a substitute). */
+const FENCE_PLANKS = [
+  "/images/plank-logo.webp",
+  "/images/collection/plank-knightwood.png",
+  "/images/collection/plank-bobawood.png",
+  "/images/collection/plank-insidertrader.png",
+  "/images/collection/plank-is-this-art.png",
+  "/images/collection/plank-redacted.png",
+  "/images/plank-logo.webp",
+  "/images/collection/plank-knightwood.png",
+];
 
 /**
- * First-visit-only loading intro: a ball expands from nothing to large and
- * back to nothing, changing color (yellow → blue → red, looping) each
- * cycle, until the page is actually ready — not a fixed timer. "Ready"
- * here is the browser's own load event (every resource — images, fonts,
- * scripts — finished), gated by a minimum of one full cycle so a
- * fully-cached instant load doesn't just flash once. Shown once ever per
- * browser (localStorage-gated).
+ * First-visit-only branded loading intro: eight plank boards drop into a
+ * fence in a staggered sequence under the mascot, with a gold progress bar
+ * and "Nailing the planks" headline (ports docs/mockups/landing-redesign's
+ * finalized preloader). Dismisses once the page has actually loaded AND at
+ * least MIN_MS has elapsed — not a fixed timer, so a slow connection never
+ * gets cut short and a fast one never just flashes once. Shown once ever per
+ * browser (localStorage-gated), same as the previous color-cycling splash.
  */
 export default function SplashIntro() {
   const [phase, setPhase] = useState<"hidden" | "playing" | "leaving">("hidden");
-  const [colorIndex, setColorIndex] = useState(0);
-  const cyclesRef = useRef(0);
+  const [reducedMotion, setReducedMotion] = useState(false);
   const pageLoadedRef = useRef(false);
+  const minTimeElapsedRef = useRef(false);
   const dismissedRef = useRef(false);
 
   const dismiss = () => {
@@ -44,7 +65,7 @@ export default function SplashIntro() {
   dismissRef.current = dismiss;
 
   const tryFinish = () => {
-    if (pageLoadedRef.current && cyclesRef.current >= MIN_CYCLES) dismissRef.current();
+    if (pageLoadedRef.current && minTimeElapsedRef.current) dismissRef.current();
   };
   const tryFinishRef = useRef(tryFinish);
   tryFinishRef.current = tryFinish;
@@ -60,17 +81,14 @@ export default function SplashIntro() {
     if (seen) return;
 
     // Wallet in-app browsers (Rabby / MetaMask / etc.) and low-power mobile
-    // often never fire a clean window "load" (audio/fonts hang) — a full-screen
-    // splash that waits forever looks like "the site won't load."
+    // often never fire a clean window "load" (audio/fonts hang) — a
+    // full-screen splash that waits forever looks like "the site won't
+    // load." This is a functional workaround, unrelated to motion prefs.
     const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
     const isWalletWebView =
       /Rabby|MetaMask|Coinbase|Trust|Rainbow|WebView|wv\)/i.test(ua) ||
-      // Many wallet browsers report as Chrome Mobile without "Mobile Safari"
       (/Android/i.test(ua) && /Version\/4\.0/i.test(ua));
-    const reduceMotion =
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduceMotion || isWalletWebView) {
+    if (isWalletWebView) {
       try {
         localStorage.setItem(SEEN_KEY, "1");
       } catch {
@@ -79,7 +97,18 @@ export default function SplashIntro() {
       return;
     }
 
+    const reduceMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    setReducedMotion(reduceMotion);
+
     setPhase("playing");
+
+    const minMs = reduceMotion ? REDUCED_MOTION_MIN_MS : MIN_MS;
+    const minTimer = window.setTimeout(() => {
+      minTimeElapsedRef.current = true;
+      tryFinishRef.current();
+    }, minMs);
 
     const onLoad = () => {
       pageLoadedRef.current = true;
@@ -90,47 +119,140 @@ export default function SplashIntro() {
     } else {
       window.addEventListener("load", onLoad);
     }
-    // Hard cap: never block the site more than ~2.5s even if load never fires.
     const maxWait = window.setTimeout(() => {
       pageLoadedRef.current = true;
-      cyclesRef.current = Math.max(cyclesRef.current, MIN_CYCLES);
+      minTimeElapsedRef.current = true;
       dismissRef.current();
-    }, 2500);
+    }, MAX_WAIT_MS);
+
     return () => {
-      window.removeEventListener("load", onLoad);
+      window.clearTimeout(minTimer);
       window.clearTimeout(maxWait);
+      window.removeEventListener("load", onLoad);
     };
   }, []);
 
   if (phase === "hidden") return null;
 
-  const handleIteration = () => {
-    cyclesRef.current += 1;
-    setColorIndex((i) => (i + 1) % COLORS.length);
-    tryFinishRef.current();
-  };
-
   return (
     <div
-      className={`fixed inset-0 z-[999] flex items-center justify-center bg-[#0c0703] transition-opacity ${
+      className={`fixed inset-0 z-[999] grid place-items-center overflow-hidden bg-wood-950 transition-opacity ${
         phase === "leaving" ? "opacity-0" : "opacity-100"
       }`}
       style={{ transitionDuration: `${FADE_OUT_MS}ms` }}
-      aria-hidden="true"
+      role="status"
+      aria-live="polite"
     >
       <div
-        className="splash-ball h-6 w-6 rounded-full"
-        style={{ background: COLORS[colorIndex], boxShadow: `0 0 50px 10px ${COLORS[colorIndex]}66` }}
-        onAnimationIteration={handleIteration}
+        aria-hidden="true"
+        className="wood-grain-surface pointer-events-none absolute inset-0 opacity-70"
       />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_30%,rgba(219,165,63,0.16),transparent_60%)]"
+      />
+
+      <div className="relative z-[1] flex flex-col items-center gap-5 px-5 text-center">
+        <p className="text-[0.68rem] font-black uppercase tracking-[0.24em] text-gold-300/90">
+          Warming the workshop
+        </p>
+
+        <div className="relative flex h-[148px] w-[min(360px,82vw)] items-end justify-center" aria-hidden="true">
+          {FENCE_PLANKS.map((src, index) => (
+            // eslint-disable-next-line @next/next/no-img-element -- decorative preloader art, no need for next/image optimization
+            <img
+              key={index}
+              src={src}
+              alt=""
+              className={`splash-plank absolute bottom-0 h-auto w-[46px] drop-shadow-[0_10px_14px_rgba(0,0,0,0.5)] ${
+                reducedMotion ? "opacity-100" : ""
+              }`}
+              style={{
+                left: `${index * 46}px`,
+                animationDelay: reducedMotion ? undefined : `${index * 140}ms`,
+              }}
+            />
+          ))}
+          {/* eslint-disable-next-line @next/next/no-img-element -- decorative preloader art */}
+          <img
+            src="/images/plank-head.webp"
+            alt=""
+            className="splash-mascot absolute bottom-2 left-1/2 h-auto w-[46px] -translate-x-1/2 drop-shadow-[0_10px_16px_rgba(0,0,0,0.55)]"
+          />
+        </div>
+
+        <h1 className="font-display text-2xl text-gold-300 [text-shadow:0_4px_16px_rgba(0,0,0,0.7)] sm:text-3xl">
+          <span className={reducedMotion ? "" : "splash-hammer inline-block"} aria-hidden="true">
+            🔨
+          </span>{" "}
+          Nailing the planks
+        </h1>
+        <p className="max-w-xs text-sm font-bold text-cream-muted">
+          The fence is almost up — <strong className="text-gold-400">
+            {TOTAL_SUPPLY.toLocaleString()} RobinWood Planks
+          </strong>{" "}
+          are waiting on the other side.
+        </p>
+
+        <div className="h-2 w-[min(280px,70vw)] overflow-hidden rounded-full border border-line-strong bg-wood-950">
+          <div
+            className={`splash-fill h-full rounded-full bg-gradient-to-r from-gold-600 to-gold-300 ${
+              reducedMotion ? "w-full" : ""
+            }`}
+          />
+        </div>
+      </div>
+
       <style>{`
-        .splash-ball {
-          animation: splash-pulse ${CYCLE_MS}ms ease-in-out infinite;
+        .splash-plank {
+          opacity: 0;
+          animation: splash-plank-drop 2600ms cubic-bezier(0.22, 1, 0.36, 1) infinite;
         }
-        @keyframes splash-pulse {
-          0% { transform: scale(0); opacity: 0; }
-          50% { transform: scale(9); opacity: 1; }
-          100% { transform: scale(0); opacity: 0; }
+        @keyframes splash-plank-drop {
+          0% { opacity: 0; transform: translateY(-160px) rotate(-6deg); }
+          22% { opacity: 1; }
+          30% { transform: translateY(0) rotate(0deg); }
+          34% { transform: translateY(-6px) rotate(-1deg); }
+          40%, 100% { opacity: 1; transform: translateY(0) rotate(0deg); }
+        }
+        .splash-mascot {
+          animation: splash-mascot-bob 1400ms ease-in-out infinite;
+        }
+        @keyframes splash-mascot-bob {
+          0%, 100% { transform: translateX(-50%) rotate(-2deg); }
+          50% { transform: translateX(-50%) translateY(-6px) rotate(2deg); }
+        }
+        .splash-fill {
+          width: 4%;
+          animation: splash-progress ${MIN_MS}ms cubic-bezier(0.22, 0.8, 0.3, 1) forwards;
+        }
+        @keyframes splash-progress {
+          0% { width: 4%; }
+          70% { width: 78%; }
+          100% { width: 100%; }
+        }
+        .splash-hammer {
+          animation: splash-hammer-swing 620ms ease-in-out infinite;
+        }
+        @keyframes splash-hammer-swing {
+          0%, 100% { transform: rotate(0deg); }
+          50% { transform: rotate(-24deg); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .splash-plank,
+          .splash-hammer {
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+          }
+          .splash-mascot {
+            animation: none !important;
+            transform: translateX(-50%) !important;
+          }
+          .splash-fill {
+            animation: none !important;
+            width: 100% !important;
+          }
         }
       `}</style>
     </div>
