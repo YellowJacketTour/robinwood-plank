@@ -41,7 +41,8 @@ import { getOwnedTokenIds } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { MARKET_TABS } from "@/lib/market/navigation";
 import type { SweepPlan } from "@/lib/market/sweep";
-import { ensureRobinhoodChain, getConnectedAccounts } from "@/lib/wallet";
+import { ensureRobinhoodChain } from "@/lib/wallet";
+import { useWallet } from "@/lib/wallet-context";
 import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
 import { formatTokenAmount } from "@/lib/trade";
 import type { Listing, MarketTab, Offer } from "@/lib/market/types";
@@ -226,7 +227,12 @@ export default function MarketView() {
   const [filters, setFilters] = useState<MarketFilters>(EMPTY_FILTERS);
   const [rarityMap, setRarityMap] = useState<Map<string, RarityLookup>>(new Map());
   const [detailTokenId, setDetailTokenId] = useState<string | null>(null);
-  const [account, setAccount] = useState<string | null>(null);
+  // Shared app-wide wallet state (lib/wallet-context.tsx) — this workspace
+  // previously kept its own useState populated once via getConnectedAccounts()
+  // with no accountsChanged listener, which is why the nav could say
+  // "Connect wallet" while this exact WalletChip still showed a connected
+  // address (the owner-reported bug).
+  const { address: account, adoptAccount: walletAdoptAccount } = useWallet();
   const [listings, setListings] = useState<Array<WithOrder<Listing>>>([]);
   const [offers, setOffers] = useState<Array<WithOrder<Listing>>>([]);
   const [offerTarget, setOfferTarget] = useState<{ tokenId?: string; trait?: boolean } | null>(
@@ -301,9 +307,6 @@ export default function MarketView() {
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       void refresh();
-    });
-    void getConnectedAccounts().then((accounts) => {
-      if (accounts[0]) setAccount(accounts[0]);
     });
     return () => window.cancelAnimationFrame(frame);
   }, [refresh]);
@@ -461,15 +464,21 @@ export default function MarketView() {
     return () => window.removeEventListener("plank:connect-wallet", openConnect);
   }, [handleConnect]);
 
-  const onWalletConnected = useCallback(async (addr: string) => {
-    try {
-      await ensureRobinhoodChain();
-    } catch {
-      /* WC may already be on 4663; ensure will prompt if not */
-    }
-    setAccount(addr);
-    setConnectOpen(false);
-  }, []);
+  const onWalletConnected = useCallback(
+    async (addr: string) => {
+      try {
+        await ensureRobinhoodChain();
+      } catch {
+        /* WC may already be on 4663; ensure will prompt if not */
+      }
+      // ConnectWalletModal's own finish() already pushes addr into the
+      // shared context; this call is defensive/idempotent so this
+      // workspace's account never lags behind even if that wiring changes.
+      walletAdoptAccount(addr);
+      setConnectOpen(false);
+    },
+    [walletAdoptAccount]
+  );
 
   const requireAccount = useCallback(async () => {
     if (account) return account;
