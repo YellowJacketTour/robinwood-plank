@@ -6,13 +6,27 @@ import ZeroXCrossChainPanel from "@/components/trade/ZeroXCrossChainPanel";
 import CrossChainDisclaimer from "@/components/trade/CrossChainDisclaimer";
 
 type SourceChainOption = { chainId: number; name: string };
-type StatusResponse = {
+/** Only the fields this component (and TradeStatusPanel, via the callbacks
+ * below) actually reads — the full shape lives in app/api/zerox/status/route.ts. */
+export type ZeroXStatusResponse = {
   crossChainEnabled?: boolean;
   configured?: boolean;
   sourceChains?: SourceChainOption[];
+  siteFee?: { label: string; enabled: boolean };
 };
 
-type Mode = "same" | "crosschain";
+export type TradeMode = "same" | "crosschain";
+
+type Props = {
+  /** Reports the active tab up so a sibling (TradeStatusPanel) can render a
+   * mode-aware Routing/fee value instead of a same-chain-only hardcoded one —
+   * see docs/TRADE_PAGE_SPEC.md §5, "Routing row is mode-blind". */
+  onModeChange?: (mode: TradeMode) => void;
+  /** Reports the same /api/zerox/status payload this component already
+   * fetches, so the status rail can show the real 0x fee instead of guessing
+   * or re-fetching. */
+  onStatusChange?: (status: ZeroXStatusResponse | null) => void;
+};
 
 /**
  * Same-chain vs cross-chain is a mode switch, not a variant of one flow —
@@ -23,16 +37,19 @@ type Mode = "same" | "crosschain";
  * /trade showed before this component existed — no dead tab, no empty
  * switch, no layout shift.
  */
-export default function TradeModeSwitch() {
-  const [status, setStatus] = useState<StatusResponse | null>(null);
-  const [mode, setMode] = useState<Mode>("same");
+export default function TradeModeSwitch({ onModeChange, onStatusChange }: Props) {
+  const [status, setStatus] = useState<ZeroXStatusResponse | null>(null);
+  const [mode, setMode] = useState<TradeMode>("same");
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/zerox/status")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: StatusResponse | null) => {
-        if (!cancelled && d) setStatus(d);
+      .then((d: ZeroXStatusResponse | null) => {
+        if (!cancelled) {
+          setStatus(d);
+          onStatusChange?.(d);
+        }
       })
       .catch(() => {
         /* switch just stays hidden — same-chain widget still works */
@@ -40,9 +57,18 @@ export default function TradeModeSwitch() {
     return () => {
       cancelled = true;
     };
+    // onStatusChange intentionally excluded — it's a setState callback from
+    // the parent and re-running this fetch on every parent render would
+    // defeat the "fetch once" contract the comment above documents.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const crossChainReady = Boolean(status?.crossChainEnabled && status?.configured);
+
+  useEffect(() => {
+    onModeChange?.(crossChainReady ? mode : "same");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, crossChainReady]);
 
   if (!crossChainReady) return <SwapWidget />;
 

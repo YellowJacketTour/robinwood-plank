@@ -4,8 +4,8 @@ import AppBackdrop from "@/components/AppBackdrop";
 import TradePageHeader from "@/components/trade/TradePageHeader";
 import PlankPriceChart from "@/components/trade/PlankPriceChart";
 import ChartErrorBoundary from "@/components/trade/ChartErrorBoundary";
-import TradeWorkbench from "@/components/trade/TradeWorkbench";
-import TradeStatusPanel from "@/components/trade/TradeStatusPanel";
+import PlankPoolsPanel from "@/components/trade/PlankPoolsPanel";
+import TradeActionZone from "@/components/trade/TradeActionZone";
 import TradeSafetyNotes from "@/components/trade/TradeSafetyNotes";
 import { createPageMetadata } from "@/lib/seo";
 
@@ -42,6 +42,17 @@ export default function TradePage() {
             <PlankPriceChart />
           </ChartErrorBoundary>
 
+          {/* Pools evidence sits immediately under the chart, not buried in
+              the safety band. The chart discloses it only tracks the single
+              deepest pool as its price reference — the very next thing on
+              the page has to be the panel backing that disclosure with all
+              five real venues, or the disclosure is a promise the visitor
+              has to scroll to go verify instead of evidence already in view
+              (docs/TRADE_PAGE_SPEC.md §1). */}
+          <div className="mx-auto w-full max-w-4xl">
+            <PlankPoolsPanel />
+          </div>
+
           {/* Action zone: workbench + status read as one paired unit, capped
               narrower than the shell so the fluid workbench column lands
               close to the rail instead of stranding it across empty space
@@ -50,13 +61,7 @@ export default function TradePage() {
               width as the page's dominant visual; this row is the focused
               action beneath it. */}
           <div className="mx-auto w-full max-w-4xl">
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start sm:gap-5">
-              <div className="min-w-0">
-                <TradeWorkbench />
-              </div>
-
-              <TradeStatusPanel />
-            </div>
+            <TradeActionZone />
           </div>
 
           {/* Safety disclosures read as a full-width trust band beneath the

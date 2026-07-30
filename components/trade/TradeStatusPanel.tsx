@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Globe2, Percent, Route, ShieldCheck } from "lucide-react";
 import { CHAIN, CONTRACT_ADDRESS } from "@/lib/constants";
 import { explorerTokenUrl, shortAddress } from "@/lib/trade";
+import type { TradeMode, ZeroXStatusResponse } from "@/components/trade/TradeModeSwitch";
 
 /** Only the fields this panel renders — the full shape lives in
  * app/api/trade/status/route.ts. Never fabricate a field that isn't here. */
@@ -16,14 +17,27 @@ type TradeStatus = {
   siteFee: { label: string; enabled: boolean; appliesTo: string };
 };
 
+type Props = {
+  /** Active tab on TradeModeSwitch, lifted via TradeActionZone. Defaults to
+   * "same" so this panel is still correct standalone (e.g. before the mode
+   * switch has fetched its status, or if cross-chain is disabled entirely). */
+  activeMode?: TradeMode;
+  /** Same /api/zerox/status payload TradeModeSwitch already fetched — reused
+   * here instead of a second fetch so the rail's 0x fee always matches the
+   * one real source of truth (docs/TRADE_PAGE_SPEC.md §5, "Routing row is
+   * mode-blind"). */
+  zeroXStatus?: ZeroXStatusResponse | null;
+};
+
 /**
  * Live read of /api/trade/status — the same source CountdownTimer and
  * SwapWidget already trust. Renders only what the endpoint actually returns;
  * no hardcoded price, volume, or contract data (DESIGN.md).
  */
-export default function TradeStatusPanel() {
+export default function TradeStatusPanel({ activeMode = "same", zeroXStatus }: Props = {}) {
   const [status, setStatus] = useState<TradeStatus | null>(null);
   const [failed, setFailed] = useState(false);
+  const isCrossChain = activeMode === "crosschain";
 
   useEffect(() => {
     let cancelled = false;
@@ -91,10 +105,20 @@ export default function TradeStatusPanel() {
           <div className="flex items-center gap-2.5 rounded-lg border border-line bg-panel-strong px-2.5 py-2">
             <Percent className="h-3.5 w-3.5 shrink-0 text-gold-400/80" aria-hidden="true" />
             <dt className="min-w-0 flex-1 text-[0.65rem] font-bold uppercase tracking-wider text-cream-muted">
-              Site fee
+              Site fee{isCrossChain ? " (0x)" : ""}
             </dt>
             <dd className="shrink-0 font-semibold text-cream">
-              {status ? (status.siteFee.enabled ? status.siteFee.label : "None") : "—"}
+              {isCrossChain
+                ? zeroXStatus?.siteFee
+                  ? zeroXStatus.siteFee.enabled
+                    ? zeroXStatus.siteFee.label
+                    : "None"
+                  : "—"
+                : status
+                  ? status.siteFee.enabled
+                    ? status.siteFee.label
+                    : "None"
+                  : "—"}
             </dd>
           </div>
           <div className="flex items-center gap-2.5 rounded-lg border border-line bg-panel-strong px-2.5 py-2">
@@ -103,11 +127,13 @@ export default function TradeStatusPanel() {
               Routing
             </dt>
             <dd className="shrink-0 text-right font-semibold text-cream">
-              {status
-                ? status.tradingApiConfigured
-                  ? "Uniswap Trading API"
-                  : "Offline — use Uniswap"
-                : "—"}
+              {isCrossChain
+                ? "0x Cross-Chain API"
+                : status
+                  ? status.tradingApiConfigured
+                    ? "Uniswap Trading API"
+                    : "Offline — use Uniswap"
+                  : "—"}
             </dd>
           </div>
           <div className="flex items-center gap-2.5 rounded-lg border border-line bg-panel-strong px-2.5 py-2">
