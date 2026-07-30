@@ -235,6 +235,8 @@ jobs:
           healthy=false
           health_body=""
           trade_body=""
+          market_body=""
+          market_deployment=""
           for attempt in $(seq 1 36); do
             if health_body="$(
                  curl --fail --silent --show-error \
@@ -258,13 +260,21 @@ jobs:
                [[ "$health_body" == *'"storage":"postgres"'* ]] &&
                [[ "$health_body" == *"\"version\":\"$RELEASE_SHA\""* ]] &&
                [[ "$trade_body" == *'"tradingApiConfigured":true'* ]] &&
-               curl --fail --silent --show-error \
-                  --connect-timeout 5 --max-time 15 \
-                  --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
-                  --header "Accept: text/html" \
-                  --header "Cache-Control: no-cache" \
-                  --header "Pragma: no-cache" \
-                  "$INMOTION_HEALTH_URL/market?deployment=$RELEASE_SHA&attempt=$attempt" >/dev/null; then
+               market_body="$(
+                 curl --fail --silent --show-error \
+                   --connect-timeout 5 --max-time 15 \
+                   --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                   --header "Accept: text/html" \
+                   --header "Cache-Control: no-cache" \
+                   --header "Pragma: no-cache" \
+                   "$INMOTION_HEALTH_URL/market?tab=swap"
+               )" &&
+               market_deployment="$(
+                 printf '%s' "$market_body" |
+                   grep -o 'data-deployment="[^"]*"' |
+                   head -n 1 || true
+               )" &&
+               [[ "$market_deployment" == "data-deployment=\"$RELEASE_SHA\"" ]]; then
               healthy=true
               break
             fi
@@ -277,6 +287,7 @@ jobs:
           echo "::error::Public deployment verification did not observe release $RELEASE_SHA after 36 attempts."
           echo "Last public health response: $health_body"
           echo "Last public trade status response: $trade_body"
+          echo "Last canonical market deployment marker: ${market_deployment:-missing}"
 
           port="${INMOTION_PORT:-2222}"
           ssh -i "$HOME/.ssh/inmotion" -p "$port" \
