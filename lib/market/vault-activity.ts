@@ -45,7 +45,7 @@ const TOPICS = {
 const VAULT_TOPIC_SET = new Set(Object.values(TOPICS));
 /** v3 = dual-vault + Add/Remove LP (LiquidityContributed / LiquidityRemoved). */
 const KV_KEY = "plank:market:vault-activity-v3";
-const KV_TTL = 6 * 60 * 60;
+const STORED_HISTORY_LIMIT = 500;
 
 function hasKv(): boolean {
   return hasDurableKv();
@@ -171,7 +171,9 @@ function dedupeKey(e: VaultTradeEvent): string {
   return `${(e.vaultAddress || "").toLowerCase()}:${e.txHash}:${e.logIndex}:${e.kind}`;
 }
 
-function mergeEvents(...lists: VaultTradeEvent[][]): VaultTradeEvent[] {
+export function mergeVaultActivityHistory(
+  ...lists: VaultTradeEvent[][]
+): VaultTradeEvent[] {
   const map = new Map<string, VaultTradeEvent>();
   for (const list of lists) {
     for (const e of list) {
@@ -197,9 +199,11 @@ async function readKv(): Promise<VaultTradeEvent[]> {
 async function writeKv(events: VaultTradeEvent[]): Promise<void> {
   if (!hasKv() || events.length === 0) return;
   try {
-    // Cap stored history
-    const trimmed = events.slice(0, 500);
-    await kv.set(KV_KEY, trimmed, { ex: KV_TTL });
+    // Keep the last known-good history indefinitely. A current short scan
+    // merges new events into this lineage; upstream outages must not erase
+    // the only fast copy or force a full-chain cold walk.
+    const trimmed = events.slice(0, STORED_HISTORY_LIMIT);
+    await kv.set(KV_KEY, trimmed);
   } catch {
     /* */
   }
@@ -429,11 +433,11 @@ async function scanVault(
   } catch {
     /* */
   }
-  let merged = mergeEvents(...parts);
+  let merged = mergeVaultActivityHistory(...parts);
   if (merged.length < Math.min(cap, 25) || full) {
     try {
       parts.push(await fromBlockscoutTxMethods(vault, full ? cap : 30));
-      merged = mergeEvents(...parts);
+      merged = mergeVaultActivityHistory(...parts);
     } catch {
       /* */
     }
@@ -441,7 +445,7 @@ async function scanVault(
   if (merged.length < Math.min(cap, 15) || full) {
     try {
       parts.push(await fromEthRpc(vault, cap, full));
-      merged = mergeEvents(...parts);
+      merged = mergeVaultActivityHistory(...parts);
     } catch {
       /* */
     }
@@ -468,6 +472,15 @@ export async function getVaultActivity(
         : [];
 
   const kvEvents = await readKv();
+  // Full lineage is a read-heavy chart/history request. Once PostgreSQL has a
+  // verified lineage, serve it immediately instead of repeating the expensive
+  // multi-source full-chain walk in every Passenger process. The normal
+  // activity request still performs a bounded live scan and merges new events
+  // into this durable history.
+  if (full && kvEvents.length > 0) {
+    return kvEvents.slice(0, cap);
+  }
+
   // Per-vault budget so dual mode still has room for V1 redeems.
   const perVault = Math.max(20, Math.ceil(cap / Math.max(1, vaults.length)));
 
@@ -475,7 +488,7 @@ export async function getVaultActivity(
     vaults.map((v) => scanVault(v, perVault, full).catch(() => [] as VaultTradeEvent[]))
   );
 
-  let merged = mergeEvents(kvEvents, ...scanned);
+  const merged = mergeVaultActivityHistory(kvEvents, ...scanned);
 
   if (merged.length === 0 && kvEvents.length > 0) {
     return kvEvents.slice(0, cap);
@@ -484,8 +497,15 @@ export async function getVaultActivity(
   const out = merged.slice(0, cap);
   const headKv = kvEvents[0]?.blockNumber ?? 0;
   const headOut = out[0]?.blockNumber ?? 0;
-  if (out.length > 0 && (out.length > kvEvents.length || headOut > headKv)) {
-    void writeKv(out);
+  const durableHistory = merged.slice(0, STORED_HISTORY_LIMIT);
+  if (
+    durableHistory.length > 0 &&
+    (durableHistory.length > kvEvents.length || headOut > headKv)
+  ) {
+    // Persist the full merged lineage, not the caller's short response. The
+    // old behavior truncated a 400-event history back to 80 whenever a new
+    // event arrived through the normal live endpoint.
+    void writeKv(durableHistory);
   }
   return out;
 }
