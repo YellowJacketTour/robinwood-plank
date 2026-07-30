@@ -19,14 +19,16 @@ on:
           - deploy
           - inventory
           - cutover
+          - provision-relayer
+          - verify-relayer
       confirmation:
-        description: For cutover, enter REPLACE_INMOTION_MARKET_DATA
+        description: Cutover or relay-disable confirmation, when required.
         required: false
         type: string
 
 concurrency:
   group: inmotion-passenger-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -76,6 +78,7 @@ jobs:
         with:
           node-version: 22.22.3
           cache: npm
+      - run: npm install -g npm@11.6.2
       - run: npm ci
       - run: npm run lint:inmotion
       - run: npx tsc --noEmit
@@ -83,6 +86,7 @@ jobs:
       - run: npm test
       - run: npm run test:postgres
       - run: npm run build
+      - run: npm run build:relayer
 
       - name: Package standalone Passenger release
         if: github.event_name != 'pull_request'
@@ -102,6 +106,8 @@ jobs:
           cp scripts/backup-postgres.mjs .next/standalone/scripts/backup-postgres.mjs
           cp scripts/snapshot-vault-state.mjs .next/standalone/scripts/snapshot-vault-state.mjs
           cp -R scripts/lib .next/standalone/scripts/lib
+          test -s .next/standalone/ops/drand-relayer/relay-drand.mjs
+          cp scripts/verify-relayer-log.mjs .next/standalone/ops/drand-relayer/verify-log.mjs
           tar -C .next/standalone -czf passenger-release.tgz .
 
       - uses: actions/upload-artifact@v7
@@ -423,3 +429,231 @@ jobs:
 
           "$node_bin" "$app_dir/current/scripts/snapshot-vault-state.mjs"
           REMOTE
+
+  provision-relayer:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'provision-relayer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      RELAYER_PRIVATE_KEY: ${{ secrets.RELAYER_PRIVATE_KEY }}
+    steps:
+      - name: Validate relayer and SSH inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELAYER_PRIVATE_KEY" =~ ^0x[0-9a-fA-F]{64}$ ]]
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Transfer cron-only key and repoint cPanel cron
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          relayer_env="$RUNNER_TEMP/relayer.env"
+          {
+            printf 'RELAYER_PRIVATE_KEY=%s\n' "$RELAYER_PRIVATE_KEY"
+            printf 'RPC_URL=%s\n' 'https://rpc.mainnet.chain.robinhood.com'
+            printf 'BEACON_ADDRESS=%s\n' '0x87d584df130FED0Fe540954eD48CE2691A18D619'
+            printf 'DRAND_CHAIN_HASH=%s\n' '04f1e9062b8a81f848fded9c12306733282b2727ecced50032187751166ec8c3'
+            printf 'VAULT_ADDRESSES=%s\n' '0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04,0xb2019Fd4cA24502e812C0C73b751Fa49979BF708'
+          } > "$relayer_env"
+          port="${INMOTION_PORT:-2222}"
+          staged="$INMOTION_APP_DIR/shared/runtime-secrets/.relayer-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.env"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            "mkdir -p '$INMOTION_APP_DIR/shared/runtime-secrets' && chmod 700 '$INMOTION_APP_DIR/shared/runtime-secrets'"
+          scp -i "$HOME/.ssh/inmotion" -P "$port" \
+            "$relayer_env" "${INMOTION_USER}@${INMOTION_HOST}:${staged}"
+          rm -f "$relayer_env"
+
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "$staged" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          staged="$3"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          cleanup() { rm -f "$staged"; }
+          trap cleanup EXIT
+          test -x "$node_bin"
+          test -s "$staged"
+          artifact="$app_dir/current/ops/drand-relayer/relay-drand.mjs"
+          verifier="$app_dir/current/ops/drand-relayer/verify-log.mjs"
+          test -s "$artifact"
+          test -s "$verifier"
+          if grep -q '^RELAYER_PRIVATE_KEY=' "$app_dir/shared/.env.production"; then
+            echo "RELAYER_PRIVATE_KEY must not be in Passenger .env.production." >&2
+            exit 1
+          fi
+
+          secret_dir="$app_dir/shared/runtime-secrets"
+          secret_file="$secret_dir/relayer.env"
+          logs_dir="$app_dir/logs"
+          log_file="$logs_dir/drand-relayer.log"
+          lock_file="$app_dir/shared/drand-relayer.lock"
+          mkdir -p "$secret_dir" "$logs_dir"
+          chmod 700 "$secret_dir"
+          chmod 700 "$logs_dir"
+          chmod 600 "$staged"
+          mv -f "$staged" "$secret_file"
+          chmod 600 "$secret_file"
+          touch "$log_file"
+          chmod 600 "$log_file"
+          flock_bin="$(command -v flock)"
+          test -x "$flock_bin"
+
+          "$flock_bin" -w 55 "$lock_file" \
+            "$node_bin" --env-file="$secret_file" "$artifact" \
+            >> "$log_file" 2>&1
+          "$node_bin" "$verifier" \
+            --require-hours=0 --max-age-minutes=10 "$log_file"
+
+          cron_before="$(mktemp)"
+          cron_after="$(mktemp)"
+          trap 'rm -f "$staged" "$cron_before" "$cron_after"' EXIT
+          crontab -l > "$cron_before" 2>/dev/null || true
+          old_relay_count="$(grep -Ec 'relay-drand|drand-relayer' "$cron_before" || true)"
+          awk '!/plank-drand-relayer/ && !/relay-drand/ && !/drand-relayer/' \
+            "$cron_before" > "$cron_after"
+          {
+            printf '%s\n' '# plank-drand-relayer (managed by inmotion branch)'
+            printf '* * * * * %s -n %s %s --env-file=%s %s >> %s 2>&1\n' \
+              "$flock_bin" "$lock_file" "$node_bin" "$secret_file" \
+              "$artifact" "$log_file"
+          } >> "$cron_after"
+          crontab "$cron_after"
+          managed_count="$(crontab -l | grep -c 'plank-drand-relayer' || true)"
+          test "$managed_count" -eq 1
+          test "$(stat -c '%a' "$secret_dir")" = "700"
+          test "$(stat -c '%a' "$secret_file")" = "600"
+
+          status_before="$(grep -c 'RELAYER_STATUS=' "$log_file" || true)"
+          cron_observed=false
+          for attempt in $(seq 1 18); do
+            sleep 5
+            status_after="$(grep -c 'RELAYER_STATUS=' "$log_file" || true)"
+            if [ "$status_after" -gt "$status_before" ]; then
+              cron_observed=true
+              break
+            fi
+          done
+          test "$cron_observed" = "true"
+          "$node_bin" "$verifier" \
+            --require-hours=0 --max-age-minutes=10 "$log_file"
+          echo "RELAYER_PROVISIONED={\"oldRelayLines\":$old_relay_count,\"managedEntries\":$managed_count}"
+          tail -n 3 "$log_file"
+          REMOTE
+
+  verify-relayer:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'verify-relayer'
+    permissions:
+      actions: write
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Validate disable confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CONFIRMATION" = "DISABLE_GITHUB_RELAY"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Verify 24 hours of InMotion relay health
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          secret_dir="$app_dir/shared/runtime-secrets"
+          secret_file="$secret_dir/relayer.env"
+          artifact="$app_dir/current/ops/drand-relayer/relay-drand.mjs"
+          verifier="$app_dir/current/ops/drand-relayer/verify-log.mjs"
+          log_file="$app_dir/logs/drand-relayer.log"
+          lock_file="$app_dir/shared/drand-relayer.lock"
+          test "$(stat -c '%a' "$secret_dir")" = "700"
+          test "$(stat -c '%a' "$secret_file")" = "600"
+          test -s "$artifact"
+          test -s "$verifier"
+          test "$(crontab -l | grep -c 'plank-drand-relayer')" -eq 1
+          flock_bin="$(command -v flock)"
+          "$flock_bin" -w 55 "$lock_file" \
+            "$node_bin" --env-file="$secret_file" "$artifact" \
+            >> "$log_file" 2>&1
+          "$node_bin" "$verifier" \
+            --require-hours=24 --max-age-minutes=10 "$log_file"
+          REMOTE
+
+      - name: Disable the GitHub scheduled relay
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method PUT \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/relay-drand.yml/disable"
+          state="$(
+            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/relay-drand.yml" \
+              --jq '.state'
+          )"
+          test "$state" = "disabled_manually"
+          echo "GitHub relay workflow disabled after verified InMotion takeover."
