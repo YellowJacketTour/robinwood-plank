@@ -38,7 +38,28 @@
   },
   "overrides": {
     "postcss": "^8.5.20",
-    "sharp": "^0.35.0"
+    "sharp": "^0.35.0",
+    "hardhat": {
+      "adm-zip": "0.6.0",
+      "undici": "6.27.0",
+      "uuid": "11.1.1",
+      "lodash": "4.18.1",
+      "@sentry/node": {
+        "cookie": "0.7.2"
+      },
+      "solc": {
+        "tmp": "0.2.6"
+      }
+    },
+    "@nomicfoundation/hardhat-verify": {
+      "undici": "6.27.0"
+    },
+    "@nomicfoundation/ignition-core": {
+      "lodash": "4.18.1"
+    },
+    "mocha": {
+      "serialize-javascript": "7.0.5"
+    }
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
