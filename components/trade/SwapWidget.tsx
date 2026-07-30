@@ -30,6 +30,13 @@ import {
   signTypedData,
   waitForTransaction,
 } from "@/lib/wallet";
+import dynamic from "next/dynamic";
+
+/** Same connect surface the market uses (WalletConnect QR + extension) —
+ * loaded on demand; the WC runtime itself only loads on "Show QR". */
+const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModal"), {
+  ssr: false,
+});
 
 type Direction = "buy" | "sell";
 
@@ -134,25 +141,41 @@ export default function SwapWidget() {
     };
   }, []);
 
+  const [connectOpen, setConnectOpen] = useState(false);
+
+  /** Post-connect bookkeeping shared by both connect paths. */
+  const adoptAccount = useCallback((addr: string) => {
+    setAccount(addr);
+    // An indicative (wallet-less) quote can't be executed — clear it so
+    // the user re-quotes as themselves.
+    setQuote((q) => (q?.indicative ? null : q));
+    setStatus(null);
+    setError(null);
+  }, []);
+
   const handleConnect = useCallback(async () => {
     setError(null);
     setStatus(null);
+    // No injected wallet (mobile browsers, extension-less desktops): open
+    // the same WalletConnect QR / extension modal the market uses instead
+    // of failing with "no wallet found" — this was the dead end that read
+    // as "trading not working" without an extension.
+    if (typeof window === "undefined" || !window.ethereum) {
+      setConnectOpen(true);
+      return;
+    }
     try {
       setBusy(true);
       setStatus("Connecting…");
       const addr = await connectWallet();
       await ensureRobinhoodChain();
-      setAccount(addr);
-      // An indicative (wallet-less) quote can't be executed — clear it so
-      // the user re-quotes as themselves.
-      setQuote((q) => (q?.indicative ? null : q));
-      setStatus(null);
+      adoptAccount(addr);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect wallet.");
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [adoptAccount]);
 
   const flipDirection = () => {
     setDirection((d) => (d === "buy" ? "sell" : "buy"));
@@ -554,6 +577,11 @@ export default function SwapWidget() {
 
   return (
     <div className="wood-ledger space-y-2.5 p-2.5 sm:p-3">
+      <ConnectWalletModal
+        open={connectOpen}
+        onClose={() => setConnectOpen(false)}
+        onConnected={adoptAccount}
+      />
       <p className="rounded-lg border border-amber-500/35 bg-amber-950/40 px-2.5 py-1.5 text-[0.65rem] leading-snug text-amber-100/90 sm:text-[0.7rem]">
         <strong className="text-amber-200">Not a bridge:</strong> swaps only go to the Uniswap
         Router on {CHAIN.name} — never Ethereum L1. Keep ~{BUY_GAS_RESERVE_ETH} ETH free for gas.
