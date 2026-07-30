@@ -214,11 +214,11 @@ Repository variables:
 - Every `NEXT_PUBLIC_*` value from `.env.inmotion.example`
 
 The PostgreSQL password remains only in the server's `.env.production`.
-`RELAYER_PRIVATE_KEY` remains a repository Actions secret used by the direct
-GitHub drand relay and is never copied to Passenger. `UNISWAP_API_KEY` is
-managed in GitHub Actions and installed as a server-only runtime secret during
-deployment; it is never included in the repository, release archive, or
-`.env.production`.
+`RELAYER_PRIVATE_KEY` begins as a repository Actions secret and is transferred
+once into the cron-only server file described below; Passenger never loads it.
+`UNISWAP_API_KEY` is managed in GitHub Actions and installed as a server-only
+runtime secret during deployment; it is never included in the repository,
+release archive, or `.env.production`.
 
 ## 9. CI/CD behavior
 
@@ -293,7 +293,50 @@ and refuses expiring hashes/sets because the PostgreSQL compatibility schema
 cannot preserve those TTLs. The cutover transaction either reconciles and
 commits in full or rolls back in full.
 
-## 11. Maintenance and backups
+## 11. InMotion drand relayer
+
+Every release contains a standalone Node 22 relayer at:
+
+```text
+/home/CPANEL_USER/plank.tanggang.life/current/ops/drand-relayer/relay-drand.mjs
+```
+
+After that release is healthy, dispatch **InMotion Passenger CI/CD** with
+`operation=provision-relayer`. The one-time job transfers the dedicated
+gas-only key from the GitHub `RELAYER_PRIVATE_KEY` secret without printing it,
+then atomically installs:
+
+```text
+/home/CPANEL_USER/plank.tanggang.life/shared/runtime-secrets/relayer.env
+```
+
+The directory is mode `700`; the file and structured relayer log are mode
+`600`. The job refuses to continue if `RELAYER_PRIVATE_KEY` appears in
+Passenger's `.env.production`. It replaces only existing crontab lines that
+refer to `relay-drand` or `drand-relayer`, preserves unrelated cron jobs, and
+installs one managed entry through the stable `current` symlink:
+
+```cron
+* * * * * /usr/bin/flock -n /home/CPANEL_USER/plank.tanggang.life/shared/drand-relayer.lock /ABSOLUTE/NODE/BIN --env-file=/home/CPANEL_USER/plank.tanggang.life/shared/runtime-secrets/relayer.env /home/CPANEL_USER/plank.tanggang.life/current/ops/drand-relayer/relay-drand.mjs >> /home/CPANEL_USER/plank.tanggang.life/logs/drand-relayer.log 2>&1
+```
+
+The provisioning job runs the artifact once before changing cron and verifies
+that both vaults report a non-error structured status. GitHub and InMotion
+relays then overlap safely: contract submission and settlement are
+permissionless and idempotent.
+
+Leave the GitHub `Relay drand rounds` workflow enabled for the first 24 hours.
+After at least 24 hours, dispatch **InMotion Passenger CI/CD** with
+`operation=verify-relayer` and confirmation `DISABLE_GITHUB_RELAY`. The job
+requires a recent status, at least 90% of expected one-minute successful runs,
+both vaults in every status, no actionable slots, and no fatal run in the
+24-hour window. Only after those checks pass does it disable the GitHub relay
+workflow at repository level. It does not modify `master`.
+
+Owners must retain an offline backup of the dedicated gas-only wallet before
+running the provisioning job.
+
+## 12. Maintenance and backups
 
 Configure a daily cPanel Cron Job using the cPanel Node executable:
 
@@ -307,7 +350,7 @@ This removes expired cache entries and orders. Use cPanel's database backup
 facilities and periodically test a restore. A release rollback does not roll
 back database migrations or data.
 
-## 12. Acceptance
+## 13. Acceptance
 
 Before enabling public traffic:
 

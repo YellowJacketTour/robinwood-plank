@@ -5,7 +5,8 @@
  * DrandBeacon verifies every signature on-chain and all settlement methods are
  * permissionless.
  */
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   Contract,
@@ -323,6 +324,7 @@ async function main(): Promise<void> {
   const balance = await provider.getBalance(wallet.address);
   console.log(
     `RELAYER_GAS=${JSON.stringify({
+      timestamp: new Date().toISOString(),
       address: wallet.address,
       balanceWei: balance.toString(),
       low: balance < BigInt("100000000000000"),
@@ -420,10 +422,15 @@ async function main(): Promise<void> {
   }
 }
 
-const invokedPath = process.argv[1]
-  ? pathToFileURL(process.argv[1]).href
-  : undefined;
-if (invokedPath === import.meta.url) {
+let invokedDirectly = false;
+try {
+  invokedDirectly =
+    Boolean(process.argv[1]) &&
+    realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+} catch {
+  invokedDirectly = false;
+}
+if (invokedDirectly) {
   main().catch((error) => {
     console.error(
       `RELAYER_FATAL=${JSON.stringify({
