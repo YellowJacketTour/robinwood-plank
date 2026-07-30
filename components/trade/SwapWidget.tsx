@@ -470,6 +470,11 @@ export default function SwapWidget() {
             amount: raw.toString(),
             swapper: account,
             slippageTolerance: slippage,
+            // MUST match the counter the user actually chose. Omitting it
+            // re-prices the trade against native ETH at execution time, so a
+            // buy with a non-native counter (AAPL, USDG, …) would build a
+            // swap for the wrong pair entirely.
+            counterToken: counterIsNative ? undefined : counter.address,
           }),
         });
         const qData = (await qRes.json()) as Record<string, unknown>;
