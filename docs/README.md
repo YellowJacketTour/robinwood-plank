@@ -16,6 +16,9 @@ earlier hosting or contract state.
   testing, and secret handling.
 - [Release and versioning policy](RELEASES.md): SHA releases, SemVer tags,
   deployment, and rollback.
+- [Release notes — 2026-07-30](RELEASE_NOTES-2026-07-30.md): what shipped to
+  production, what is committed but unpushed, flag defaults, and known
+  limitations for the trade-page/cross-chain/gasless work.
 - [InMotion deployment](INMOTION_DEPLOYMENT.md): cPanel, Passenger,
   PostgreSQL, GitHub Actions, domain cutover, and cron.
 - [Dependabot status](DEPENDABOT_INMOTION.md): alert-by-alert resolution on
