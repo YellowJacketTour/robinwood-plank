@@ -31,6 +31,7 @@ type Body = {
   amount?: unknown;
   swapper?: unknown;
   slippageTolerance?: unknown;
+  counterToken?: unknown;
 };
 
 export async function POST(req: Request) {
@@ -80,8 +81,29 @@ export async function POST(req: Request) {
       }
     }
 
-    const { tokenIn, tokenOut } = resolveTokens(direction);
-    assertAllowedPair(tokenIn, tokenOut, CHAIN.id);
+    // Optional counter token (the non-PLANK side). Absent → native ETH,
+    // exactly the pre-feature behavior. Validated against the server-side
+    // allowlist — never trusted from the client.
+    const counterRaw = typeof body.counterToken === "string" ? body.counterToken.trim() : "";
+    let counter: { address: string; decimals: number } | undefined;
+    if (counterRaw) {
+      if (!/^0x[a-fA-F0-9]{40}$/.test(counterRaw)) {
+        throw new TradeApiError(400, "BAD_TOKEN", "counterToken must be a token address.");
+      }
+      const { getCounterToken } = await import("@/lib/uniswap-tokenlist");
+      const entry = await getCounterToken(counterRaw);
+      if (!entry) {
+        throw new TradeApiError(
+          400,
+          "BAD_TOKEN",
+          "That token is not on the allowed list for $PLANK trading."
+        );
+      }
+      counter = { address: entry.address, decimals: entry.decimals };
+    }
+
+    const { tokenIn, tokenOut } = resolveTokens(direction, counter);
+    await assertAllowedPair(tokenIn, tokenOut, CHAIN.id);
 
     // Spec-accurate fee payload (empty array when site fee disabled — full output to buyer)
     const integratorFees = getIntegratorFees();
