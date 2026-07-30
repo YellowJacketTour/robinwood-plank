@@ -314,6 +314,17 @@
   }
 
   .tabActions {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    align-self: stretch;
+    padding: 0 0.35rem 0 0.25rem;
+    border-left: 1px solid rgba(217, 164, 65, 0.18);
+    background: rgba(24, 13, 6, 0.98);
+    box-shadow: -12px 0 20px rgba(14, 9, 4, 0.94);
+  }
+
+  .tabActions:empty {
     display: none;
   }
 

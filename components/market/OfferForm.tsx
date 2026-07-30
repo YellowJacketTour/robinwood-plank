@@ -16,8 +16,10 @@ import type { Listing, MarketCollection } from "@/lib/market/types";
 import TraitCriteriaPicker from "@/components/market/TraitCriteriaPicker";
 
 type Props = {
-  account: string;
+  account: string | null;
   collection: MarketCollection;
+  /** Dialog for item/Buy & Sell entry points; inline for the Offers workbench. */
+  presentation?: "dialog" | "inline";
   /** Set for a single-token offer; omit WITH traitMode for a criteria bid. */
   tokenId?: string;
   /**
@@ -29,6 +31,8 @@ type Props = {
   listings?: Array<Pick<Listing, "tokenId" | "priceWei">>;
   onSubmitted: () => void;
   onClose: () => void;
+  /** Inline workbenches stay visible while disconnected; this owns the gate. */
+  onConnect?: () => void;
 };
 
 const DURATIONS = [1, 3, 7, 30];
@@ -37,28 +41,34 @@ const DURATIONS = [1, 3, 7, 30];
 export default function OfferForm({
   account,
   collection,
+  presentation = "dialog",
   tokenId,
   traitMode,
   listings,
   onSubmitted,
   onClose,
+  onConnect,
 }: Props) {
   const [priceEth, setPriceEth] = useState("");
   const [days, setDays] = useState(7);
   const [busy, setBusy] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [indexReloadKey, setIndexReloadKey] = useState(0);
 
   const [index, setIndex] = useState<TraitIndexResponse | null>(null);
   const [indexError, setIndexError] = useState<string | null>(null);
   const [clauses, setClauses] = useState<CriteriaClause[]>([]);
 
   useEffect(() => {
+    if (presentation !== "dialog") return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, presentation]);
 
   useEffect(() => {
     if (!traitMode) return;
@@ -81,15 +91,20 @@ export default function OfferForm({
     return () => {
       cancelled = true;
     };
-  }, [traitMode, collection]);
+  }, [traitMode, collection, indexReloadKey]);
 
   const qualifyingIds = useMemo(
-    () => resolveCriteriaTokenIds(index?.traits, clauses),
+    () => resolveCriteriaTokenIds(index?.traits, clauses, index?.rankings),
     [index, clauses]
   );
 
   const submit = async () => {
     setError(null);
+    setSuccess(null);
+    if (!account) {
+      onConnect?.();
+      return;
+    }
     const wei = parseTokenAmount(priceEth, 18);
     if (wei === null || wei <= BigInt(0)) {
       setError("Enter an amount.");
@@ -111,8 +126,13 @@ export default function OfferForm({
         feeBps: collection.feeBps,
       });
 
-      const traitPairs = clausesToTraitLabels(clauses).filter((t) => t.traitType !== "Rarity");
+      const traitPairs = clausesToTraitLabels(clauses).filter(
+        (trait) => trait.traitType !== "Rarity" && trait.traitType !== "Rank"
+      );
       const rarityClause = clauses.find((c): c is Extract<CriteriaClause, { kind: "rarity" }> => c.kind === "rarity");
+      const rankClause = clauses.find(
+        (c): c is Extract<CriteriaClause, { kind: "rank" }> => c.kind === "rank"
+      );
 
       const res = await fetch("/api/market/orders", {
         method: "POST",
@@ -127,6 +147,7 @@ export default function OfferForm({
                 criteria: {
                   traits: traitPairs,
                   ...(rarityClause ? { rarityTier: rarityClause.tier } : {}),
+                  ...(rankClause ? { rankMax: rankClause.maxRank } : {}),
                 },
               }
             : {}),
@@ -134,6 +155,9 @@ export default function OfferForm({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Offer failed.");
+      setPriceEth("");
+      setReviewOpen(false);
+      setSuccess("Bid published. The open offers list is refreshing.");
       onSubmitted();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Offer failed.");
@@ -146,29 +170,159 @@ export default function OfferForm({
     !traitMode ||
     Boolean(index?.complete && index.traits && clauses.length > 0 && qualifyingIds.length > 0);
 
+  const openReview = () => {
+    setError(null);
+    setSuccess(null);
+    if (!account) {
+      onConnect?.();
+      return;
+    }
+    const wei = parseTokenAmount(priceEth, 18);
+    if (wei === null || wei <= BigInt(0)) {
+      setError("Enter an amount.");
+      return;
+    }
+    if (traitMode && (clauses.length === 0 || qualifyingIds.length === 0)) {
+      setError("Pick at least one trait or rarity that matches some planks.");
+      return;
+    }
+    setReviewOpen(true);
+  };
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center"
-      role="dialog"
-      aria-modal="true"
+      className={
+        presentation === "dialog"
+          ? "fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center"
+          : ""
+      }
+      role={presentation === "dialog" ? "dialog" : undefined}
+      aria-modal={presentation === "dialog" ? "true" : undefined}
     >
-      <div className="wood-ledger w-full max-w-md space-y-3 rounded-b-none p-4 sm:rounded-b-xl">
+      <div
+        className={`wood-ledger w-full space-y-3 p-4 ${
+          presentation === "dialog"
+            ? "max-w-md rounded-b-none sm:rounded-b-xl"
+            : "rounded-xl border border-gold-500/25"
+        }`}
+      >
+        {reviewOpen && (
+          <div
+            className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 sm:items-center sm:p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="offer-review-title"
+          >
+            <div className="wood-ledger w-full max-w-lg rounded-t-xl border border-gold-500/35 p-4 sm:rounded-xl">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[0.65rem] font-black uppercase tracking-[0.14em] text-gold-300/75">
+                    Verify before signing
+                  </p>
+                  <h3 id="offer-review-title" className="mt-1 font-display text-2xl text-gold-300">
+                    Review {traitMode ? "criteria bid" : "offer"}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReviewOpen(false)}
+                  className="flex h-10 w-10 items-center justify-center rounded-md border border-gold-500/25 text-foreground/65 hover:text-gold-300"
+                  aria-label="Close review"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <dl className="mt-4 grid grid-cols-2 gap-2">
+                <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                  <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                    Scope
+                  </dt>
+                  <dd className="mt-1 text-sm text-foreground">
+                    {traitMode
+                      ? formatCriteriaLabel(clauses)
+                      : tokenId
+                        ? `Plank #${tokenId}`
+                        : collection.name}
+                  </dd>
+                </div>
+                <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                  <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                    Qualifying
+                  </dt>
+                  <dd className="mt-1 text-sm text-foreground">
+                    {traitMode ? `${qualifyingIds.length} Planks` : "1 exact token"}
+                  </dd>
+                </div>
+                <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                  <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                    Offer
+                  </dt>
+                  <dd className="mt-1 text-sm text-foreground">{priceEth} WETH</dd>
+                </div>
+                <div className="rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                  <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                    Duration
+                  </dt>
+                  <dd className="mt-1 text-sm text-foreground">{days} days</dd>
+                </div>
+                <div className="col-span-2 rounded-lg border border-gold-500/20 bg-wood-950/90 p-3">
+                  <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                    Marketplace fee / seller net
+                  </dt>
+                  <dd className="mt-1 text-sm text-foreground">
+                    {(collection.feeBps / 100).toFixed(2)}% fee · seller net verified from
+                    the signed order before acceptance
+                  </dd>
+                </div>
+              </dl>
+
+              <p className="mt-3 text-xs leading-5 text-foreground/55">
+                WETH balance, allowance, expiry, and the order payload are checked before
+                signing. The server re-resolves the criteria snapshot before publication.
+              </p>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setReviewOpen(false)}
+                  className="min-h-11 rounded-lg border border-gold-500/30 text-sm text-foreground/75 hover:text-gold-300"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReviewOpen(false);
+                    void submit();
+                  }}
+                  className="min-h-11 rounded-lg bg-gold-500 text-sm font-bold text-wood-950 hover:bg-gold-400"
+                >
+                  Continue to wallet
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex items-center justify-between">
           <h3 className="font-display text-lg text-gold-300">
-            {traitMode
+            {presentation === "inline" && traitMode
+              ? "Build a criteria bid"
+              : traitMode
               ? "Bid on criteria"
               : tokenId
                 ? `Offer · #${tokenId}`
                 : `Offer · any ${collection.name}`}
           </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-foreground/60 hover:text-gold-300"
-          >
-            ✕
-          </button>
+          {presentation === "dialog" && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-foreground/60 hover:text-gold-300"
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         {traitMode && (
@@ -213,12 +367,18 @@ export default function OfferForm({
             </div>
             <TraitCriteriaPicker
               traits={index?.traits ?? null}
+              rankings={index?.rankings}
               complete={Boolean(index?.complete && index.traits)}
               building={index?.building}
               scanned={index?.scanned}
               totalSupply={index?.totalSupply}
               loading={!index && !indexError}
               loadError={indexError}
+              onRetry={() => {
+                setIndexError(null);
+                setIndex(null);
+                setIndexReloadKey((key) => key + 1);
+              }}
               clauses={clauses}
               onChange={setClauses}
               listings={listings}
@@ -269,20 +429,25 @@ export default function OfferForm({
         <button
           type="button"
           disabled={busy || !traitReady}
-          onClick={submit}
+          onClick={openReview}
           className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
         >
           {busy
             ? "Signing…"
+            : !account
+              ? "Connect to build this bid"
             : traitMode
-              ? clauses.length > 1
-                ? "Bid on combo"
-                : "Bid on criteria"
-              : "Make offer"}
+              ? "Review & sign criteria bid"
+              : "Review offer"}
         </button>
         {error && (
           <p className="text-center text-xs text-red-300" role="alert">
             {error}
+          </p>
+        )}
+        {success && (
+          <p className="text-center text-xs text-emerald-300" role="status">
+            {success}
           </p>
         )}
       </div>

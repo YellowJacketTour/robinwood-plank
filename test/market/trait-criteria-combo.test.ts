@@ -66,15 +66,35 @@ test("resolveCriteriaTokenIds multi-trait combo", () => {
   assert.deepEqual(ids, ["1", "10", "100"]);
 });
 
+test("rank criteria resolves a verified top-N set and combines with traits", () => {
+  const rankings = { "1": 1, "2": 40, "10": 12, "20": 75, "100": 180 };
+  assert.deepEqual(
+    resolveCriteriaTokenIds(traits, [{ kind: "rank", maxRank: 50 }], rankings),
+    ["1", "2", "10"]
+  );
+  assert.deepEqual(
+    resolveCriteriaTokenIds(
+      traits,
+      [
+        { kind: "trait", traitType: "Holographic", value: "Yes" },
+        { kind: "rank", maxRank: 50 },
+      ],
+      rankings
+    ),
+    ["1", "10"]
+  );
+});
+
 test("parseCriteriaFromBody accepts nested criteria and legacy trait", () => {
   const a = parseCriteriaFromBody({
     criteria: {
       traits: [{ traitType: "Holographic", value: "Yes" }],
       rarityTier: "Epic",
+      rankMax: 100,
     },
   });
   assert.equal(a.error, undefined);
-  assert.equal(a.clauses.length, 2);
+  assert.equal(a.clauses.length, 3);
 
   const b = parseCriteriaFromBody({ trait: { traitType: "Base", value: "Oak" } });
   assert.equal(b.clauses.length, 1);
@@ -82,16 +102,22 @@ test("parseCriteriaFromBody accepts nested criteria and legacy trait", () => {
 
   const bad = parseCriteriaFromBody({ rarityTier: "Mythic" });
   assert.ok(bad.error);
+  assert.ok(parseCriteriaFromBody({ criteria: { rankMax: 0 } }).error);
 });
 
 test("formatCriteriaLabel and clausesToTraitLabels", () => {
   const clauses = [
     { kind: "trait" as const, traitType: "Holographic", value: "Yes" },
     { kind: "rarity" as const, tier: "Epic" as const },
+    { kind: "rank" as const, maxRank: 100 },
   ];
-  assert.equal(formatCriteriaLabel(clauses), "Holographic: Yes · Rarity: Epic");
+  assert.equal(
+    formatCriteriaLabel(clauses),
+    "Holographic: Yes · Rarity: Epic · Rank: top 100"
+  );
   assert.deepEqual(clausesToTraitLabels(clauses), [
     { traitType: "Holographic", value: "Yes" },
     { traitType: "Rarity", value: "Epic" },
+    { traitType: "Rank", value: "Top 100" },
   ]);
 });

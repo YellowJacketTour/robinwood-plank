@@ -18,12 +18,15 @@ import { criteriaFloorWei } from "@/lib/market/trait-criteria";
 type Props = {
   /** traitType → value → ids; null while incomplete. */
   traits: TraitMap | null;
+  /** Token id → verified rank, used for top-N rank clauses. */
+  rankings?: Record<string, number> | null;
   complete: boolean;
   building?: boolean;
   scanned?: number;
   totalSupply?: number | null;
   loading?: boolean;
   loadError?: string | null;
+  onRetry?: () => void;
   clauses: CriteriaClause[];
   onChange: (next: CriteriaClause[]) => void;
   /** Live listings for floor-under-criteria display. */
@@ -40,12 +43,14 @@ type Props = {
  */
 export default function TraitCriteriaPicker({
   traits,
+  rankings,
   complete,
   building,
   scanned,
   totalSupply,
   loading,
   loadError,
+  onRetry,
   clauses,
   onChange,
   listings,
@@ -58,8 +63,8 @@ export default function TraitCriteriaPicker({
   );
 
   const qualifyingIds = useMemo(
-    () => resolveCriteriaTokenIds(traits, clauses),
-    [traits, clauses]
+    () => resolveCriteriaTokenIds(traits, clauses, rankings),
+    [traits, clauses, rankings]
   );
 
   const floorWei = useMemo(
@@ -72,6 +77,7 @@ export default function TraitCriteriaPicker({
     [clauses]
   );
   const hasRarity = clauses.some((c) => c.kind === "rarity");
+  const hasRank = clauses.some((c) => c.kind === "rank");
 
   const addTraitClause = () => {
     if (!traits || clauses.length >= MAX_CRITERIA_CLAUSES) return;
@@ -86,6 +92,11 @@ export default function TraitCriteriaPicker({
   const addRarityClause = () => {
     if (hasRarity || clauses.length >= MAX_CRITERIA_CLAUSES) return;
     onChange([...clauses, { kind: "rarity", tier: "Rare" }]);
+  };
+
+  const addRankClause = () => {
+    if (!rankings || hasRank || clauses.length >= MAX_CRITERIA_CLAUSES) return;
+    onChange([...clauses, { kind: "rank", maxRank: 100 }]);
   };
 
   const updateClause = (idx: number, next: CriteriaClause) => {
@@ -109,9 +120,18 @@ export default function TraitCriteriaPicker({
   }
   if (loadError) {
     return (
-      <p className={`text-xs text-red-300 ${className ?? ""}`} role="alert">
-        {loadError}
-      </p>
+      <div className={`flex flex-wrap items-center gap-2 ${className ?? ""}`} role="alert">
+        <p className="text-xs text-red-300">{loadError}</p>
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="min-h-9 rounded-md border border-gold-500/35 px-3 text-xs font-bold text-gold-300"
+          >
+            Retry criteria index
+          </button>
+        )}
+      </div>
     );
   }
   if (!complete || !traits) {
@@ -153,10 +173,13 @@ export default function TraitCriteriaPicker({
             <select
               value={clause.kind}
               onChange={(e) => {
-                const kind = e.target.value as "trait" | "rarity";
+                const kind = e.target.value as "trait" | "rarity" | "rank";
                 if (kind === "rarity") {
                   if (hasRarity && clause.kind !== "rarity") return;
                   updateClause(idx, { kind: "rarity", tier: "Rare" });
+                } else if (kind === "rank") {
+                  if (!rankings || (hasRank && clause.kind !== "rank")) return;
+                  updateClause(idx, { kind: "rank", maxRank: 100 });
                 } else {
                   const freeType =
                     traitTypes.find((t) => !usedTraitTypes.has(t) || (clause.kind === "trait" && t === clause.traitType)) ??
@@ -176,6 +199,12 @@ export default function TraitCriteriaPicker({
               <option value="trait">Trait</option>
               <option value="rarity" disabled={hasRarity && clause.kind !== "rarity"}>
                 Rarity
+              </option>
+              <option
+                value="rank"
+                disabled={!rankings || (hasRank && clause.kind !== "rank")}
+              >
+                Rank
               </option>
             </select>
           </label>
@@ -244,7 +273,7 @@ export default function TraitCriteriaPicker({
                 </select>
               </label>
             </>
-          ) : (
+          ) : clause.kind === "rarity" ? (
             <label className={dense ? "" : "min-w-0 flex-1"}>
               {!dense && (
                 <span className="mb-1 block text-[0.65rem] font-bold text-foreground/60">
@@ -271,6 +300,31 @@ export default function TraitCriteriaPicker({
                     </option>
                   );
                 })}
+              </select>
+            </label>
+          ) : (
+            <label className={dense ? "" : "min-w-0 flex-1"}>
+              {!dense && (
+                <span className="mb-1 block text-[0.65rem] font-bold text-foreground/60">
+                  Maximum rank
+                </span>
+              )}
+              <select
+                value={clause.maxRank}
+                onChange={(e) =>
+                  updateClause(idx, {
+                    kind: "rank",
+                    maxRank: Number(e.target.value),
+                  })
+                }
+                className={selectCls}
+                aria-label={`Clause ${idx + 1} maximum rank`}
+              >
+                {[10, 25, 50, 100, 250, 500, 1000].map((maxRank) => (
+                  <option key={maxRank} value={maxRank}>
+                    Top {maxRank}
+                  </option>
+                ))}
               </select>
             </label>
           )}
@@ -305,6 +359,14 @@ export default function TraitCriteriaPicker({
           className="min-h-8 rounded-md border border-gold-500/35 px-2 text-[0.65rem] font-bold text-gold-300 transition hover:border-gold-400 disabled:opacity-40"
         >
           + Rarity
+        </button>
+        <button
+          type="button"
+          disabled={!rankings || hasRank || clauses.length >= MAX_CRITERIA_CLAUSES}
+          onClick={addRankClause}
+          className="min-h-8 rounded-md border border-gold-500/35 px-2 text-[0.65rem] font-bold text-gold-300 transition hover:border-gold-400 disabled:opacity-40"
+        >
+          + Rank
         </button>
         {clauses.length > 0 && (
           <span className="text-[0.65rem] text-foreground/60">

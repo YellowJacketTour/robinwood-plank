@@ -50,7 +50,7 @@ export function MarketCollectionHero({ collection }: { collection: MarketCollect
           rel="noopener noreferrer"
           title={collection.contractAddress}
         >
-          Contract {shortContract}
+          NFT contract {shortContract}
         </a>
       </div>
     </header>

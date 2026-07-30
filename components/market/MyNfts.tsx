@@ -49,12 +49,15 @@ const STATE_LABEL: Record<BatchSendStatus["state"], string> = {
  */
 export default function MyNfts({ account, collections, alreadyListed }: Props) {
   const [inventory, setInventory] = useState<OwnedInventory[] | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Map<string, SelectedItem>>(new Map());
   const [recipient, setRecipient] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [ackRecipient, setAckRecipient] = useState(false);
+  const [ackPermanent, setAckPermanent] = useState(false);
   const [statuses, setStatuses] = useState<BatchSendStatus[] | null>(null);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
   const [feeQuote, setFeeQuote] = useState<SendFeeQuote | null>(null);
@@ -62,16 +65,35 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
   const [detailItem, setDetailItem] = useState<SelectedItem | null>(null);
 
   const refresh = useCallback(() => {
-    setInventory(null);
+    setRefreshing(true);
     setLoadError(null);
     void getOwnedInventory(collections, account)
       .then(setInventory)
-      .catch(() => setLoadError("Could not load your planks — try again."));
+      .catch(() => setLoadError("Could not load your planks — try again."))
+      .finally(() => setRefreshing(false));
   }, [account, collections]);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let cancelled = false;
+    const frame = window.requestAnimationFrame(() => {
+      setRefreshing(true);
+      setLoadError(null);
+      void getOwnedInventory(collections, account)
+        .then((nextInventory) => {
+          if (!cancelled) setInventory(nextInventory);
+        })
+        .catch(() => {
+          if (!cancelled) setLoadError("Could not load your planks — try again.");
+        })
+        .finally(() => {
+          if (!cancelled) setRefreshing(false);
+        });
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [account, collections]);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,24 +111,28 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
   // changes — never a stale or assumed number, and never shown as final
   // until this resolves (see send-fee.ts for why it tracks gas directly).
   useEffect(() => {
-    if (selectedItems.length === 0) {
-      setFeeQuote(null);
-      return;
-    }
     let cancelled = false;
-    setFeeQuoting(true);
-    quoteSendFee(selectedItems.length)
-      .then((q) => {
-        if (!cancelled) setFeeQuote(q);
-      })
-      .catch(() => {
-        if (!cancelled) setFeeQuote(null);
-      })
-      .finally(() => {
-        if (!cancelled) setFeeQuoting(false);
-      });
+    const frame = window.requestAnimationFrame(() => {
+      if (selectedItems.length === 0) {
+        setFeeQuote(null);
+        setFeeQuoting(false);
+        return;
+      }
+      setFeeQuoting(true);
+      quoteSendFee(selectedItems.length)
+        .then((q) => {
+          if (!cancelled) setFeeQuote(q);
+        })
+        .catch(() => {
+          if (!cancelled) setFeeQuote(null);
+        })
+        .finally(() => {
+          if (!cancelled) setFeeQuoting(false);
+        });
+    });
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(frame);
     };
   }, [selectedItems.length]);
 
@@ -124,6 +150,8 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
       setStatuses(null);
       setError(null);
       setConfirming(false);
+      setAckRecipient(false);
+      setAckPermanent(false);
     },
     [busy, alreadyListed]
   );
@@ -138,6 +166,10 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
     }
     if (!confirming) {
       setConfirming(true);
+      return;
+    }
+    if (!ackRecipient || !ackPermanent) {
+      setError("Confirm the recipient and permanent-transfer warnings.");
       return;
     }
     try {
@@ -190,17 +222,40 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
         });
       }
       refresh();
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "The fee or transfer transaction failed. Your selection is preserved for retry."
+      );
     } finally {
       setBusy(false);
       setConfirming(false);
+      setAckRecipient(false);
+      setAckPermanent(false);
     }
-  }, [account, confirming, recipient, selectedItems, refresh]);
+  }, [
+    account,
+    ackPermanent,
+    ackRecipient,
+    confirming,
+    recipient,
+    selectedItems,
+    refresh,
+  ]);
 
-  if (loadError) {
+  if (loadError && inventory === null) {
     return (
-      <p className="rounded-lg border border-dashed border-red-500/30 px-4 py-6 text-center text-sm text-red-300" role="alert">
-        {loadError}
-      </p>
+      <div className="rounded-lg border border-dashed border-red-500/30 px-4 py-6 text-center" role="alert">
+        <p className="text-sm text-red-300">{loadError}</p>
+        <button
+          type="button"
+          onClick={refresh}
+          className="mt-3 min-h-10 rounded-md border border-red-500/35 px-3 text-xs text-red-200"
+        >
+          Retry inventory
+        </button>
+      </div>
     );
   }
   if (inventory === null) {
@@ -228,6 +283,32 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
     // the end of the grid sit underneath it and become unclickable
     // (confirmed live: this was a real bug, not a hypothetical).
     <div className={`space-y-4 ${selected.size > 0 ? "pb-64 sm:pb-4" : "pb-4"}`}>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h3 className="font-display text-xl text-gold-300">Owned Planks</h3>
+          <p className="text-xs text-foreground/55">
+            {totalOwned} owned · {selectedItems.length} selected
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={refresh}
+          disabled={refreshing}
+          className="min-h-10 rounded-md border border-gold-500/30 px-3 text-xs text-gold-300 disabled:opacity-50"
+        >
+          {refreshing ? "Reloading…" : "Reload"}
+        </button>
+      </div>
+
+      {loadError && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-950/20 px-3 py-2 text-xs text-red-200" role="alert">
+          <span>{loadError}</span>
+          <button type="button" onClick={refresh} className="min-h-9 underline">
+            Retry
+          </button>
+        </div>
+      )}
+
       {groups.map((group) => (
         <section key={group.collection.slug} className="space-y-2">
           <h3 className="text-xs font-bold uppercase tracking-wider text-foreground/50">
@@ -323,8 +404,10 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
               <button
                 type="button"
                 onClick={() => {
-                  setSelected(new Map());
-                  setConfirming(false);
+                setSelected(new Map());
+                setConfirming(false);
+                setAckRecipient(false);
+                setAckPermanent(false);
                 }}
                 className="text-xs font-bold text-foreground/50 hover:text-gold-300"
               >
@@ -340,15 +423,40 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
               onChange={(e) => {
                 setRecipient(e.target.value);
                 setConfirming(false);
+                setAckRecipient(false);
+                setAckPermanent(false);
               }}
               className="min-h-11 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 font-mono text-sm text-foreground outline-none focus:border-gold-400"
             />
 
             {confirming && !busy && (
-              <p className="rounded-lg border border-red-500/30 bg-red-950/20 px-2.5 py-2 text-center text-xs text-red-200">
-                Sending is permanent and cannot be undone. Confirm you have
-                the right address, then tap Send again.
-              </p>
+              <div className="space-y-2 rounded-lg border border-red-500/30 bg-red-950/20 px-3 py-3 text-xs text-red-100">
+                <p className="font-bold">Review permanent transfer</p>
+                <p>
+                  {selectedItems.length} Plank{selectedItems.length > 1 ? "s" : ""} ·{" "}
+                  {selectedItems.length + 1} wallet confirmation
+                  {selectedItems.length + 1 > 1 ? "s" : ""} including the send fee · recipient{" "}
+                  {recipient}
+                </p>
+                <label className="flex min-h-10 cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={ackRecipient}
+                    onChange={(event) => setAckRecipient(event.target.checked)}
+                    className="accent-[#d9a441]"
+                  />
+                  I verified the complete recipient address.
+                </label>
+                <label className="flex min-h-10 cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={ackPermanent}
+                    onChange={(event) => setAckPermanent(event.target.checked)}
+                    className="accent-[#d9a441]"
+                  />
+                  I understand these transfers are permanent.
+                </label>
+              </div>
             )}
 
             <div className="flex items-center justify-between rounded-lg border border-gold-500/20 bg-wood-950/90 px-2.5 py-2">
@@ -373,14 +481,15 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
                   5
                 )}{" "}
                 Ξ. No native batch transfer on this collection though — your
-                wallet will still ask for {selectedItems.length} separate
-                signatures, sent one after another.
+                wallet will still ask for {selectedItems.length + 1} confirmations:
+                one fee payment, then {selectedItems.length} transfer
+                {selectedItems.length > 1 ? "s" : ""}.
               </p>
             )}
 
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || (confirming && (!ackRecipient || !ackPermanent))}
               onClick={() => void submit()}
               className={`min-h-12 w-full rounded-lg text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                 confirming
@@ -391,8 +500,8 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
               {busy
                 ? "Sending…"
                 : confirming
-                  ? `Confirm send to ${recipient.slice(0, 6)}…${recipient.slice(-4)}`
-                  : `Send ${selectedItems.length}`}
+                  ? `Confirm & send to ${recipient.slice(0, 6)}…${recipient.slice(-4)}`
+                  : `Review transfer · ${selectedItems.length}`}
             </button>
 
             {error && (

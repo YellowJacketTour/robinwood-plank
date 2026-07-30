@@ -43,11 +43,12 @@ import ListingSkeleton from "@/components/market/ListingSkeleton";
 import ActivityFeed from "@/components/market/ActivityFeed";
 import ItemDetail from "@/components/market/ItemDetail";
 import WalletChip from "@/components/market/WalletChip";
+import WethBalance from "@/components/market/WethBalance";
 import FilterBar, { applyFilters, EMPTY_FILTERS } from "@/components/market/FilterBar";
 import type { MarketFilters } from "@/components/market/FilterBar";
 import { getRarityMap } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
-import { prefetchJson } from "@/lib/market/swr-fetch";
+import { invalidateSwr, prefetchJson } from "@/lib/market/swr-fetch";
 import { getOwnedTokenIds } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { MARKET_TABS } from "@/lib/market/navigation";
@@ -70,6 +71,36 @@ const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModal
 });
 
 const COLLECTION = MARKET_COLLECTIONS[0];
+
+function OrderBookAlert({
+  message,
+  onRetry,
+}: {
+  message: string | null;
+  onRetry: () => void;
+}) {
+  if (!message) return null;
+  return (
+    <div
+      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/25 bg-red-950/15 px-3 py-2.5"
+      role="alert"
+    >
+      <div>
+        <p className="text-sm font-bold text-red-200">{message}</p>
+        <p className="text-xs text-foreground/50">
+          Any last good listings and offers remain visible while you reconnect.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="min-h-10 rounded-md border border-gold-500/40 px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+      >
+        Retry order book
+      </button>
+    </div>
+  );
+}
 
 function isTab(value: string | null): value is MarketTab {
   return value !== null && MARKET_TABS.some((tab) => tab.id === value);
@@ -167,6 +198,7 @@ export default function MarketView() {
   const [sweeping, setSweeping] = useState(false);
   const [sort, setSort] = useState<SortKey>("price-asc");
   const [loading, setLoading] = useState(true);
+  const [bookError, setBookError] = useState<string | null>(null);
   const [ownedTokenIds, setOwnedTokenIds] = useState<Set<string> | undefined>(undefined);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -188,16 +220,30 @@ export default function MarketView() {
       ]);
       setListings(listingsRes.items ?? []);
       setOffers(offersRes.items ?? []);
+      setBookError(null);
+    } catch {
+      setBookError("The live order book could not be loaded.");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
+  const retryOrderBook = useCallback(() => {
+    if (!COLLECTION) return;
+    invalidateSwr(`/api/market/orders?collection=${COLLECTION.slug}`);
+    setBookError(null);
+    setLoading(true);
     void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      void refresh();
+    });
     void getConnectedAccounts().then((accounts) => {
       if (accounts[0]) setAccount(accounts[0]);
     });
+    return () => window.cancelAnimationFrame(frame);
   }, [refresh]);
 
   // Warm every public tab's data as soon as /market mounts so tab switches
@@ -607,27 +653,29 @@ export default function MarketView() {
         }
         actions={
           <>
-            {account && <WalletChip account={account} />}
+            {account ? (
+              <WalletChip account={account} />
+            ) : (
+              <button
+                type="button"
+                onClick={handleConnect}
+                className="min-h-11 shrink-0 rounded-lg bg-gold-500 px-3.5 text-xs font-bold text-wood-950 transition hover:bg-gold-400"
+              >
+                Connect
+              </button>
+            )}
             {tab === "buy-sell" &&
-              (account ? (
+              account && (
                 // Routes to "My Listings" (MyInventory) rather than opening a
                 // duplicate typed-token form. One picker, not two.
                 <button
                   type="button"
                   onClick={() => selectTab("positions")}
-                  className="min-h-10 shrink-0 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+                  className="min-h-11 shrink-0 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400"
                 >
                   Sell
                 </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleConnect}
-                  className="min-h-10 shrink-0 rounded-lg bg-gold-500 px-3.5 text-xs font-bold text-wood-950 transition hover:bg-gold-400"
-                >
-                  Connect
-                </button>
-              ))}
+              )}
           </>
         }
       />
@@ -840,6 +888,7 @@ export default function MarketView() {
                     totalSupply={TOTAL_SUPPLY}
                   />
                 )}
+                <OrderBookAlert message={bookError} onRetry={retryOrderBook} />
                 {account && !loading && (
                   <IncomingBids
                     dense
@@ -871,7 +920,11 @@ export default function MarketView() {
                         rarity={rarityMap}
                         activeTier={filters.tier}
                         onSelectTier={(tier) => {
-                          setFilters((f) => ({ ...f, tier }));
+                          setFilters((f) => ({
+                            ...f,
+                            tier,
+                            tiers: tier === "all" ? [] : [tier],
+                          }));
                         }}
                       />
                     ) : undefined
@@ -933,6 +986,17 @@ export default function MarketView() {
                           ? "No listings yet — be the first to sell."
                           : "No matches."
                       }
+                      emptyAction={
+                        listings.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setFilters(EMPTY_FILTERS)}
+                            className="min-h-10 rounded-md border border-gold-500/35 px-3 text-xs text-gold-300 hover:border-gold-400"
+                          >
+                            Clear filters
+                          </button>
+                        ) : undefined
+                      }
                     />
                   )}
                 </MarketBrowseLayout>
@@ -943,87 +1007,130 @@ export default function MarketView() {
         <MarketTabPanel id="offers" active={tab === "offers"}>
           {visitedTabs.has("offers") && (
           <MarketTabSection
-            eyebrow="Buyer demand"
+            eyebrow="Name your price"
             title="Offers"
-            description="Bids from buyers can target a trait, rarity, AND-combination, or single Plank. Accepting one sells the buyer a qualifying Plank you own."
+            description="Bid on one Plank, a rarity tier, or a precise trait combo. Criteria clauses use AND logic and sellers verify net proceeds before accepting."
           >
-            <div className="space-y-3">
-              <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={async () => {
-                  const who = await requireAccount();
-                  if (who) setOfferTarget({ trait: true });
-                }}
-                className="min-h-10 shrink-0 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
-              >
-                Bid on trait / rarity / combo
-              </button>
+            <OrderBookAlert message={bookError} onRetry={retryOrderBook} />
+            {account && (
+              <div className="mb-3 flex justify-end">
+                <WethBalance account={account} />
               </div>
-            {account && !loading && (
-              <IncomingBids
-                offers={offers as unknown as Array<WithOrder<Offer>>}
-                ownedTokenIds={ownedTokenIds}
-                onAcceptToken={(o) => void handleAcceptOffer(o as unknown as Listing)}
-                onAcceptCriteria={(o) => void handleAcceptTraitOffer(o as WithOrder<Offer>)}
-              />
             )}
-            {!loading && traitOffers.length > 0 && (
-              <ul className="space-y-2">
-                {traitOffers.map((o) => {
-                  const canAccept =
-                    ownedTokenIds &&
-                    o.criteriaTokenIds?.some((id) =>
-                      ownedTokenIds.has(BigInt(id).toString())
-                    );
-                  return (
-                    <li
-                      key={o.id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gold-500/25 bg-wood-900/90 px-3 py-2"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-bold text-foreground">
-                          Any{" "}
-                          {o.traits?.map((t) => `${t.traitType}: ${t.value}`).join(", ") ??
-                            "qualifying plank"}
-                        </p>
-                        <p className="text-[0.65rem] text-foreground/60">
-                          {o.criteriaTokenIds?.length ?? 0} planks qualify · seller nets{" "}
-                          {formatTokenAmount(o.priceWei, 18, 6)} WETH
+            <div className="grid items-start gap-3 lg:grid-cols-[360px_minmax(0,1fr)]">
+              <div className="lg:sticky lg:top-[8.75rem]">
+                {COLLECTION ? (
+                  <OfferForm
+                    presentation="inline"
+                    account={account}
+                    collection={COLLECTION}
+                    traitMode
+                    listings={listings}
+                    onClose={() => undefined}
+                    onConnect={handleConnect}
+                    onSubmitted={() => void refresh()}
+                  />
+                ) : null}
+              </div>
+              <div className="min-w-0 space-y-3">
+                {account && !loading && (
+                  <IncomingBids
+                    offers={offers as unknown as Array<WithOrder<Offer>>}
+                    ownedTokenIds={ownedTokenIds}
+                    onAcceptToken={(o) => void handleAcceptOffer(o as unknown as Listing)}
+                    onAcceptCriteria={(o) => void handleAcceptTraitOffer(o as WithOrder<Offer>)}
+                  />
+                )}
+                {!loading && traitOffers.length > 0 && (
+                  <section aria-labelledby="open-criteria-bids">
+                    <div className="mb-2 flex items-end justify-between gap-3">
+                      <div>
+                        <h3 id="open-criteria-bids" className="font-display text-xl text-gold-300">
+                          Open criteria bids
+                        </h3>
+                        <p className="text-xs text-foreground/55">
+                          Rarity, trait, rank, and combo orders.
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleAcceptTraitOffer(o)}
-                        disabled={account !== null && !canAccept}
-                        title={
-                          account !== null && !canAccept
-                            ? "None of your planks carry this trait"
-                            : undefined
-                        }
-                        className="min-h-9 rounded-md bg-gold-500 px-3 text-xs font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-40"
-                      >
-                        Accept
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            {loading ? (
-              <ListingSkeleton />
-            ) : (
-              <ListingGrid
-                listings={sortListings(tokenOffers, sort === "price-asc" ? "price-desc" : sort)}
-                collections={MARKET_COLLECTIONS}
-                onBuy={handleAcceptOffer}
-                onSelect={openDetail}
-                buyLabel="Accept"
-                variant="offer"
-                ownedTokenIds={ownedTokenIds}
-                emptyMessage={traitOffers.length > 0 ? "No single-token offers." : "No offers yet."}
-              />
-            )}
+                      <span className="rounded-full border border-gold-500/25 px-2 py-1 text-[0.65rem] text-gold-300">
+                        {traitOffers.length} active
+                      </span>
+                    </div>
+                    <ul className="space-y-2">
+                      {traitOffers.map((o) => {
+                        const canAccept =
+                          ownedTokenIds &&
+                          o.criteriaTokenIds?.some((id) =>
+                            ownedTokenIds.has(BigInt(id).toString())
+                          );
+                        return (
+                          <li
+                            key={o.id}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gold-500/25 bg-wood-900/90 px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-bold text-foreground">
+                                Any{" "}
+                                {o.traits
+                                  ?.map((t) => `${t.traitType}: ${t.value}`)
+                                  .join(", ") ?? "qualifying plank"}
+                              </p>
+                              <p className="text-xs text-foreground/60">
+                                {o.criteriaTokenIds?.length ?? 0} planks qualify · seller nets{" "}
+                                {formatTokenAmount(o.priceWei, 18, 6)} WETH
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void handleAcceptTraitOffer(o)}
+                              disabled={account !== null && !canAccept}
+                              title={
+                                account !== null && !canAccept
+                                  ? "None of your planks carry this trait"
+                                  : undefined
+                              }
+                              className="min-h-10 rounded-md bg-gold-500 px-3 text-xs font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-40"
+                            >
+                              Accept
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                )}
+                <section aria-labelledby="single-token-offers">
+                  <div className="mb-2">
+                    <h3 id="single-token-offers" className="font-display text-xl text-gold-300">
+                      Single-token offers
+                    </h3>
+                    <p className="text-xs text-foreground/55">
+                      Offers tied to one exact token ID.
+                    </p>
+                  </div>
+                  {loading ? (
+                    <ListingSkeleton />
+                  ) : (
+                    <ListingGrid
+                      listings={sortListings(
+                        tokenOffers,
+                        sort === "price-asc" ? "price-desc" : sort
+                      )}
+                      collections={MARKET_COLLECTIONS}
+                      onBuy={handleAcceptOffer}
+                      onSelect={openDetail}
+                      buyLabel="Accept"
+                      variant="offer"
+                      ownedTokenIds={ownedTokenIds}
+                      emptyMessage={
+                        traitOffers.length > 0
+                          ? "No single-token offers."
+                          : "No offers yet. Build the first criteria bid."
+                      }
+                    />
+                  )}
+                </section>
+              </div>
             </div>
           </MarketTabSection>
           )}
@@ -1036,13 +1143,8 @@ export default function MarketView() {
             description="Follow collection sales, mints, transfers, venue attribution, price history, and live V1/V2 liquidity-pool trades."
           >
             <div className="space-y-3">
-              <EventCountdown />
               <ActivityFeed
                 onSelectToken={openDetail}
-                collection={COLLECTION}
-                listings={listings}
-                offers={offers}
-                totalSupply={TOTAL_SUPPLY}
               />
               <VaultTradeHistory />
             </div>
@@ -1057,27 +1159,9 @@ export default function MarketView() {
             description="Buy or sell vault shares, provide liquidity, deposit NFTs for shares, or redeem shares for a random or specific Plank."
           >
             <div className="space-y-3">
-            {/* CSS multi-column masonry, not a manual 2-column split — a
-                manual split left one side visibly taller than the other
-                (a whole empty quadrant under the shorter column, the
-                reported "hanging module" complaint) because these panels'
-                heights are all data-dependent and unequal. Columns
-                self-balance by filling whichever is currently shortest.
-                SwapPanel goes first so the actual action panel lands at
-                the top of column 1, not wherever the flow happens to put
-                it. break-inside-avoid keeps each card from being sliced
-                across the column break. */}
             {/* Dual vault: pick V1 (legacy deposits) or V2 (new book / LP) first */}
             <InstantVaultSwitcher role={vaultRole} onChange={setVaultRole} />
-            <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} />
-            {/* Seed/bootstrap only on primary (V2) — never seed into legacy V1 */}
-            {vaultRole === "primary" && (
-              <SeedVaultPanel account={account} onConnect={handleConnect} />
-            )}
-            {dualVaultMode() && (
-              <VaultMigrate account={account} onConnect={handleConnect} />
-            )}
-            <div className="gap-3 [column-fill:balance] sm:columns-2 [&>*]:mb-3 [&>*]:break-inside-avoid">
+            <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <SwapPanel
                 account={account}
                 onConnect={handleConnect}
@@ -1090,13 +1174,25 @@ export default function MarketView() {
                       : "new Instant Swap"
                 }
               />
-              <VaultDashboard vaultAddress={activeVault?.address ?? null} />
+              <div className="space-y-3">
+                <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} />
+                <VaultDashboard vaultAddress={activeVault?.address ?? null} />
+              </div>
+            </div>
+            <div className="grid items-start gap-3 md:grid-cols-2">
               <NftPriceChart />
               <RedeemOdds vaultAddress={activeVault?.address ?? null} />
-              {/* Trades stay dual-vault (V1 + V2) regardless of selection */}
-              <VaultTradeHistory />
-              <TreasuryDashboard />
             </div>
+            {/* Trades stay dual-vault (V1 + V2) regardless of selection */}
+            <VaultTradeHistory />
+            {dualVaultMode() && (
+              <VaultMigrate account={account} onConnect={handleConnect} />
+            )}
+            {/* Seed/bootstrap only on primary (V2) — never seed into legacy V1 */}
+            {vaultRole === "primary" && (
+              <SeedVaultPanel account={account} onConnect={handleConnect} />
+            )}
+            <TreasuryDashboard />
             </div>
           </MarketTabSection>
           )}
@@ -1136,6 +1232,7 @@ export default function MarketView() {
               description="List Planks from your wallet, accept matching bids, cancel active orders, and manage marketplace approvals."
             >
               <div className="space-y-3">
+              <OrderBookAlert message={bookError} onRetry={retryOrderBook} />
               <IncomingBids
                 offers={offers as unknown as Array<WithOrder<Offer>>}
                 ownedTokenIds={ownedTokenIds}
