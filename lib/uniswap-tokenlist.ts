@@ -22,6 +22,11 @@ export type CounterToken = {
   symbol: string;
   name: string;
   decimals: number;
+  /** From the upstream Uniswap list, when present — as of this writing NONE
+   * of the ~100 Robinhood Chain entries carry one (checked live against
+   * tokens.uniswap.org), so the client always has a letter-avatar fallback
+   * and never fabricates artwork for a token that doesn't have one. */
+  logoURI?: string;
 };
 
 const TOKEN_LIST_URL = "https://tokens.uniswap.org";
@@ -48,6 +53,7 @@ type ListedToken = {
   symbol?: string;
   name?: string;
   decimals?: number;
+  logoURI?: string;
 };
 
 let cache: { at: number; tokens: CounterToken[] } | null = null;
@@ -78,6 +84,11 @@ async function fetchChainTokens(): Promise<CounterToken[]> {
       symbol: t.symbol,
       name: typeof t.name === "string" && t.name ? t.name : t.symbol,
       decimals: t.decimals,
+      // Only ever pass through a well-formed http(s) URL — an externally
+      // sourced field renders as an <img src>, so anything else (data:,
+      // javascript:, malformed) is dropped rather than trusted.
+      logoURI:
+        typeof t.logoURI === "string" && /^https:\/\//.test(t.logoURI) ? t.logoURI : undefined,
     }))
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
 }

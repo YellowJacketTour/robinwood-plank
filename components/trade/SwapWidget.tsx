@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeftRight, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import {
   BUY_GAS_RESERVE_ETH,
   BUY_GAS_RESERVE_WEI,
@@ -14,10 +15,12 @@ import {
 import {
   buildUniswapSwapUrl,
   explorerTokenUrl,
-  formatTokenAmount,
+  formatDisplayAmount,
   parseTokenAmount,
   shortAddress,
 } from "@/lib/trade";
+import { formatUsd, weiToUsd } from "@/lib/eth-price";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 import {
   connectWallet,
   ensureRobinhoodChain,
@@ -31,12 +34,26 @@ import {
   waitForTransaction,
 } from "@/lib/wallet";
 import dynamic from "next/dynamic";
+import TokenSelectModal from "@/components/trade/TokenSelectModal";
+import TokenIcon from "@/components/trade/TokenIcon";
 
 /** Same connect surface the market uses (WalletConnect QR + extension) —
  * loaded on demand; the WC runtime itself only loads on "Show QR". */
 const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModal"), {
   ssr: false,
 });
+
+/** Quotes go stale — this drives the countdown ring and the auto-refetch
+ * cadence. Separate from lib/trade's QUOTE_MAX_AGE_MS, which gates whether
+ * an EXECUTABLE quote is fresh enough to swap; this one is purely display. */
+const QUOTE_TTL_MS = 30_000;
+
+/** One route hop from the real Uniswap quote response (v3-pool / v2-pool
+ * entries) — only the fields the route line actually renders. */
+type RouteHop = {
+  tokenIn?: { symbol?: string };
+  tokenOut?: { symbol?: string };
+};
 
 type Direction = "buy" | "sell";
 
@@ -47,6 +64,7 @@ type CounterTokenEntry = {
   symbol: string;
   name: string;
   decimals: number;
+  logoURI?: string;
 };
 
 const NATIVE_COUNTER_ENTRY: CounterTokenEntry = {
@@ -116,6 +134,33 @@ export default function SwapWidget() {
   const inputSymbol = direction === "buy" ? counter.symbol : TOKEN.symbol;
   const outputSymbol = direction === "buy" ? TOKEN.symbol : counter.symbol;
   const inputDecimals = direction === "buy" ? counter.decimals : TOKEN.decimals;
+
+  const [tokenModalOpen, setTokenModalOpen] = useState(false);
+  const [rateInverted, setRateInverted] = useState(false);
+  const [ethUsd, setEthUsd] = useState(0);
+  // Drives the quote-age countdown ring; ticks only while the tab is visible.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    let cancelled = false;
+    // Cheapest existing USD source — the same field VaultDashboard reads,
+    // no new endpoint. Best-effort: USD lines just don't render without it.
+    fetch("/api/market/vault/stats")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { ethUsd?: number } | null) => {
+        if (!cancelled && typeof d?.ethUsd === "number" && d.ethUsd > 0) setEthUsd(d.ethUsd);
+      })
+      .catch(() => {
+        /* USD estimates just stay hidden */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return startVisibleInterval(() => setNowMs(Date.now()), 1000);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -329,10 +374,27 @@ export default function SwapWidget() {
     return () => window.clearTimeout(timer);
   }, [amountIn, inputDecimals, direction, slippage, counter, account]);
 
+  // Quote freshness: while a quote is showing, the amount is still valid, and
+  // the tab is visible, silently re-quote once it crosses QUOTE_TTL_MS. Pauses
+  // in background tabs via startVisibleInterval — no always-on timer.
+  useEffect(() => {
+    if (!quote) return;
+    return startVisibleInterval(
+      () => {
+        const raw = parseTokenAmount(amountIn, inputDecimals);
+        if (raw === null || raw <= BigInt(0)) return;
+        if (Date.now() - quote.fetchedAt >= QUOTE_TTL_MS) void fetchQuoteRef.current();
+      },
+      1000,
+      { runOnRestore: false }
+    );
+  }, [quote, amountIn, inputDecimals]);
+
   // Switching the counter token invalidates any priced quote immediately.
   useEffect(() => {
     setQuote(null);
     setStatus(null);
+    setRateInverted(false);
   }, [counter]);
 
   const executeSwap = useCallback(async () => {
@@ -646,11 +708,106 @@ export default function SwapWidget() {
     if (!quote?.amountOut) return "—";
     try {
       const outDecimals = direction === "buy" ? TOKEN.decimals : counter.decimals;
-      return formatTokenAmount(quote.amountOut, outDecimals);
+      return formatDisplayAmount(quote.amountOut, outDecimals);
     } catch {
       return "—";
     }
   }, [quote, direction, counter]);
+
+  const outputDecimals = direction === "buy" ? TOKEN.decimals : counter.decimals;
+
+  // Quote-age ring: 0 = just fetched, 1 = at/after QUOTE_TTL_MS.
+  const quoteAgeFrac = quote ? Math.max(0, Math.min(1, (nowMs - quote.fetchedAt) / QUOTE_TTL_MS)) : 0;
+
+  // "1 inputSymbol = X outputSymbol" (and its invert) computed from the
+  // quote's raw base-unit amounts with bigint mul/div at full precision —
+  // only the final display value goes through formatDisplayAmount.
+  const rate = useMemo(() => {
+    if (!quote?.amountOut) return null;
+    const inRaw = parseTokenAmount(amountIn, inputDecimals);
+    if (inRaw === null || inRaw <= BigInt(0)) return null;
+    let outRaw: bigint;
+    try {
+      outRaw = BigInt(quote.amountOut);
+    } catch {
+      return null;
+    }
+    if (outRaw <= BigInt(0)) return null;
+
+    const PRECISION_DIGITS = 24;
+    const precision = BigInt(10) ** BigInt(PRECISION_DIGITS);
+    const inScale = BigInt(10) ** BigInt(inputDecimals);
+    const outScale = BigInt(10) ** BigInt(outputDecimals);
+
+    const forwardScaled = (outRaw * inScale * precision) / (inRaw * outScale);
+    const inverseScaled = (inRaw * outScale * precision) / (outRaw * inScale);
+
+    return {
+      forward: formatDisplayAmount(forwardScaled, PRECISION_DIGITS),
+      inverse: formatDisplayAmount(inverseScaled, PRECISION_DIGITS),
+    };
+  }, [quote, amountIn, inputDecimals, outputDecimals]);
+
+  // Route line from the quote's real route array (v3-pool / v2-pool hops) —
+  // the first split path is representative; never a computed/fake route.
+  const routeLine = useMemo(() => {
+    const q = quote?.quote as { route?: RouteHop[][] } | undefined;
+    const path = q?.route?.[0];
+    if (!Array.isArray(path) || path.length === 0) return null;
+    const symbols: string[] = [];
+    path.forEach((hop, i) => {
+      const inSym = hop.tokenIn?.symbol;
+      const outSym = hop.tokenOut?.symbol;
+      if (i === 0 && inSym) symbols.push(inSym === "WETH" ? "ETH" : inSym);
+      if (outSym) symbols.push(outSym === "WETH" ? "ETH" : outSym);
+    });
+    return symbols.length > 1 ? symbols.join(" → ") : null;
+  }, [quote]);
+
+  // priceImpact is a real field on the upstream quote (percent) — only
+  // rendered when the API actually returns it, never computed client-side.
+  const priceImpact = useMemo(() => {
+    const q = quote?.quote as { priceImpact?: unknown } | undefined;
+    const raw = q?.priceImpact;
+    const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+    return Number.isFinite(n) ? n : null;
+  }, [quote]);
+
+  const impactColorClass =
+    priceImpact == null
+      ? ""
+      : priceImpact < 1
+        ? "text-forest-600"
+        : priceImpact < 3
+          ? "text-gold-300"
+          : "text-red-300";
+
+  // USD estimates: only derivable when one side is native ETH (ethUsd comes
+  // from the same source VaultDashboard uses). Stock counter tokens have no
+  // price source here, so both sides stay blank rather than fabricate one —
+  // the opposite (PLANK) side is derived from the swap's own ratio, i.e. the
+  // same trade value, once a quote actually confirms that ratio.
+  const usdEstimate = useMemo(() => {
+    if (!(ethUsd > 0) || !counterIsNative) return { pay: null as string | null, receive: null as string | null };
+    if (direction === "buy") {
+      const payWei = parseTokenAmount(amountIn, 18);
+      const payUsd = payWei && payWei > BigInt(0) ? weiToUsd(payWei, ethUsd) : 0;
+      const pay = payUsd > 0 ? formatUsd(payUsd) : null;
+      const receive = pay && quote ? pay : null;
+      return { pay, receive };
+    }
+    const receiveWei = quote?.amountOut ? (() => {
+      try {
+        return BigInt(quote.amountOut);
+      } catch {
+        return null;
+      }
+    })() : null;
+    const receiveUsd = receiveWei && receiveWei > BigInt(0) ? weiToUsd(receiveWei, ethUsd) : 0;
+    const receive = receiveUsd > 0 ? formatUsd(receiveUsd) : null;
+    const pay = receive; // PLANK side derived from the same trade value
+    return { pay, receive };
+  }, [ethUsd, counterIsNative, direction, amountIn, quote]);
 
   const btnBase =
     "min-h-11 w-full rounded-lg px-3 py-2.5 text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:text-base";
@@ -661,6 +818,14 @@ export default function SwapWidget() {
         open={connectOpen}
         onClose={() => setConnectOpen(false)}
         onConnected={adoptAccount}
+      />
+      <TokenSelectModal
+        open={tokenModalOpen}
+        onClose={() => setTokenModalOpen(false)}
+        tokens={counters}
+        selected={counter}
+        onSelect={setCounter}
+        title={direction === "buy" ? "Select token to pay with" : "Select token to receive"}
       />
       <p className="rounded-lg border border-amber-500/35 bg-amber-950/40 px-2.5 py-1.5 text-[0.65rem] leading-snug text-amber-100/90 sm:text-[0.7rem]">
         <strong className="text-amber-200">Not a bridge:</strong> swaps only go to the Uniswap
@@ -706,27 +871,25 @@ export default function SwapWidget() {
             aria-label={`Amount of ${inputSymbol}`}
           />
           {direction === "buy" ? (
-            <select
-              value={counter.address}
-              onChange={(e) => {
-                const next = counters.find((t) => t.address === e.target.value);
-                if (next) setCounter(next);
-              }}
-              aria-label="Token to pay with"
-              className="max-w-[9rem] shrink-0 rounded-md border-0 bg-gold-500/15 px-2 py-1.5 text-xs font-bold text-gold-300 outline-none sm:text-sm"
+            <button
+              type="button"
+              onClick={() => setTokenModalOpen(true)}
+              aria-label="Change token to pay with"
+              className="flex shrink-0 items-center gap-1.5 rounded-full bg-gold-500/15 py-1.5 pl-1.5 pr-2.5 text-xs font-bold text-gold-300 transition-colors hover:bg-gold-500/25 sm:text-sm"
             >
-              {counters.map((t) => (
-                <option key={t.address} value={t.address} title={t.name}>
-                  {t.symbol}
-                </option>
-              ))}
-            </select>
+              <TokenIcon symbol={counter.symbol} logoURI={counter.logoURI} size={18} />
+              {counter.symbol}
+              <ChevronDown size={14} />
+            </button>
           ) : (
             <span className="shrink-0 rounded-md bg-gold-500/15 px-2 py-1 text-xs font-bold text-gold-300 sm:text-sm">
               {inputSymbol}
             </span>
           )}
         </div>
+        {usdEstimate.pay && (
+          <p className="mt-1 text-right text-[0.65rem] text-foreground/45">≈ {usdEstimate.pay}</p>
+        )}
       </label>
 
       <div className="flex justify-center">
@@ -749,28 +912,105 @@ export default function SwapWidget() {
             {estimatedOut}
           </span>
           {direction === "sell" ? (
-            <select
-              value={counter.address}
-              onChange={(e) => {
-                const next = counters.find((t) => t.address === e.target.value);
-                if (next) setCounter(next);
-              }}
-              aria-label="Token to receive"
-              className="max-w-[9rem] shrink-0 rounded-md border-0 bg-forest-800/60 px-2 py-1.5 text-xs font-bold text-gold-300 outline-none sm:text-sm"
+            <button
+              type="button"
+              onClick={() => setTokenModalOpen(true)}
+              aria-label="Change token to receive"
+              className="flex shrink-0 items-center gap-1.5 rounded-full bg-forest-800/60 py-1.5 pl-1.5 pr-2.5 text-xs font-bold text-gold-300 transition-colors hover:bg-forest-800 sm:text-sm"
             >
-              {counters.map((t) => (
-                <option key={t.address} value={t.address} title={t.name}>
-                  {t.symbol}
-                </option>
-              ))}
-            </select>
+              <TokenIcon symbol={counter.symbol} logoURI={counter.logoURI} size={18} />
+              {counter.symbol}
+              <ChevronDown size={14} />
+            </button>
           ) : (
             <span className="shrink-0 rounded-md bg-forest-800/60 px-2 py-1 text-xs font-bold text-gold-300 sm:text-sm">
               {outputSymbol}
             </span>
           )}
         </div>
+        {usdEstimate.receive && (
+          <p className="mt-1 text-right text-[0.65rem] text-foreground/45">≈ {usdEstimate.receive}</p>
+        )}
       </div>
+
+      {quote && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gold-500/15 bg-wood-950/60 px-2.5 py-2 text-[0.7rem] text-foreground/65 sm:text-xs">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {rate ? (
+              <button
+                type="button"
+                onClick={() => setRateInverted((v) => !v)}
+                className="flex min-w-0 items-center gap-1 truncate text-left font-semibold text-foreground/80 hover:text-gold-300"
+                title="Flip the displayed rate direction"
+              >
+                <span className="truncate">
+                  {rateInverted
+                    ? `1 ${outputSymbol} = ${rate.inverse} ${inputSymbol}`
+                    : `1 ${inputSymbol} = ${rate.forward} ${outputSymbol}`}
+                </span>
+                <ArrowLeftRight size={12} className="shrink-0" />
+              </button>
+            ) : (
+              <span className="text-foreground/40">Rate unavailable</span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {quote.indicative && (
+              <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[0.6rem] font-bold text-amber-200">
+                Indicative
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => void fetchQuote()}
+              disabled={busy}
+              aria-label="Refresh quote"
+              title="Refresh quote"
+              className="flex h-6 w-6 items-center justify-center rounded-full text-gold-300/80 transition-colors hover:text-gold-300 disabled:opacity-40"
+            >
+              <RefreshCw size={13} className={busy ? "animate-spin" : ""} />
+            </button>
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 20 20"
+              className="-rotate-90 shrink-0 text-gold-400"
+              aria-hidden="true"
+            >
+              <circle cx="10" cy="10" r="8" stroke="currentColor" strokeOpacity="0.2" strokeWidth="2.5" fill="none" />
+              <circle
+                cx="10"
+                cy="10"
+                r="8"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                fill="none"
+                strokeLinecap="round"
+                strokeDasharray={2 * Math.PI * 8}
+                strokeDashoffset={2 * Math.PI * 8 * quoteAgeFrac}
+              />
+            </svg>
+          </div>
+        </div>
+      )}
+
+      {quote && (routeLine || priceImpact != null) && (
+        <details className="group rounded-lg border border-gold-500/15 bg-wood-950/40 px-2.5 py-1.5 text-[0.7rem] text-foreground/60 sm:text-xs">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-bold uppercase tracking-wide text-foreground/50">
+            <span>Route &amp; impact</span>
+            <ChevronRight size={13} className="shrink-0 transition-transform group-open:rotate-90" />
+          </summary>
+          <div className="mt-1.5 space-y-1">
+            {routeLine && <p className="truncate font-mono text-foreground/70">{routeLine}</p>}
+            {priceImpact != null && (
+              <p className={`font-semibold ${impactColorClass}`}>
+                Price impact {priceImpact >= 0 ? "" : "-"}
+                {Math.abs(priceImpact).toFixed(2)}%
+              </p>
+            )}
+          </div>
+        </details>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-2 text-[0.7rem] text-foreground/55 sm:text-xs">
         <label className="flex items-center gap-1.5">
