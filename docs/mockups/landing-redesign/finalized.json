@@ -10,12 +10,14 @@
   "information_contract": "DESIGN.md landing-page parity audit against app/page.tsx + Hero, Trade, MintInfo, MintPanel, MintAllocation, Gallery, NftViewer, AirdropChecker, Distribution, Roadmap, TrustFacts, Footer, Nav",
   "cro_hierarchy": {
     "primary_cta": "Trade $PLANK",
-    "secondary_cta": "Mint a Plank",
-    "tertiary_cta": "Browse Market",
-    "trust_signals_position": "directly beneath hero CTA row (moved up from page bottom)"
+    "secondary_cta": "Buy a Plank (Marketplank)",
+    "tertiary_cta": "View Gallery",
+    "trust_signals_position": "directly beneath hero CTA row (moved up from page bottom)",
+    "collection_state": "sold out / fully minted — conversion path routes to Marketplank (Buy on the Market, Instant Swap), not a mint transaction"
   },
   "preloader": {
     "theme": "Warming the workshop / Nailing the planks",
+    "actors": "real character art (plank-logo.webp + public/images/collection/*.png), not abstract shapes",
     "min_duration_ms": 3500,
     "dismiss": "auto after min duration, class toggle + CSS transition",
     "replay_control": true,
@@ -25,7 +27,7 @@
     "preloader playing",
     "preloader dismissed",
     "trade open (countdown chip)",
-    "mint live phase 3",
+    "collection sold out / market-snapshot panel",
     "gallery teaser + wallet lookup",
     "airdrop wallet check"
   ],

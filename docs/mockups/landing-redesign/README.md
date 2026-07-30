@@ -1,9 +1,10 @@
 # Landing page redesign mockup
 
-Open `finalized.html` directly in a browser, or via a static server rooted at the
-repo root (relative asset paths resolve to `../../../public/images/...`, same
-convention as `docs/mockups/market-redesign/finalized.html`). No build, wallet,
-API, or chain connection is required.
+Open `finalized.html` directly in a browser, or via a static server rooted at
+either the repo root or this folder — all images are vendored locally under
+`assets/` and referenced with plain relative paths (`assets/...`), so nothing
+breaks depending on which directory a reviewer's static server treats as its
+root. No build, wallet, API, or chain connection is required.
 
 The preloader plays automatically on load (~3.5s) and dismisses into the page.
 A "↻ Replay intro" button sits fixed bottom-right for review — click it to
@@ -15,22 +16,29 @@ Every piece of information the current live landing page (`app/page.tsx` and
 its section components) communicates is retained — better presented, nothing
 dropped, per DESIGN.md's information-contract rule:
 
-- **Header/nav** — brand mark, Market / Trade / Mint / Gallery / Airdrop /
+- **Header/nav** — brand mark, Trade / Collection / Gallery / Airdrop /
   Tokenomics / Roadmap links, Trade kept as the single emphasized nav item
-  (matching `NAV_LINKS` in `lib/constants.ts`), chain pill, Connect wallet.
+  (matching `NAV_LINKS` in `lib/constants.ts`); "Mint" is relabeled
+  "Collection" since there is no live mint to link to anymore. Chain pill,
+  Connect wallet.
 - **Hero** (`components/Hero.tsx`) — chain badge, mascot + title + "Plank is
-  Plank." tagline, countdown to trade open, supply line (1,542 NFTs · trade on
-  Uniswap), collage art, copyable contract address, and the Trade / Mint /
-  Market CTA row.
+  Plank." tagline, countdown to trade open, supply line (now "1,542 RobinWood
+  NFTs · fully minted · buy on the market"), collage art, copyable contract
+  address, and a Trade / Buy a Plank / View Gallery CTA row.
 - **Trust facts** (`components/TrustFacts.tsx`) — 100% burnt liquidity, 0%
   tax, 0 limits, ownership renounced — moved from the page bottom to directly
   under the hero CTAs (see CRO rationale below).
 - **Trade** (`components/Trade.tsx`) — verified-CA messaging, countdown/open
   state, swap affordance, integrator fee and Universal Router disclosure.
-- **Mint** (`components/MintInfo.tsx` + `MintPanel.tsx` + `MintAllocation.tsx`)
-  — live phase, minted/price/community/free-wood-list/paid stats, progress
-  bar, quantity stepper, mint CTA, gas/price footnotes, and the three
-  allocation cards (777 community, 765 paid & reserve, 0.01 ETH price).
+- **Collection / sold-out mint** (`components/MintInfo.tsx` + `MintPanel.tsx`
+  + `MintAllocation.tsx`) — reworked from a live-mint form (the original
+  component's job when supply was still available) into a "sold out"
+  provenance story: full 1,542/1,542 supply, community/free/wood-list/paid
+  splits, and the original 0.01 ETH price kept as history, not an active
+  price. The conversion path points at Marketplank ("Buy on the Market" /
+  "Instant Swap") instead of a mint transaction. A market-snapshot panel
+  (floor / listed / last sale over real collection art) fills the space
+  beside the provenance card, replacing what was decorative-only side art.
 - **Gallery** (`components/Gallery.tsx`) — live-rarity teaser grid pulling
   real collection art, minted count, link to the full gallery; condensed from
   the live page's full interactive grid/search/insights workbench, which is
@@ -79,13 +87,13 @@ ownership) directly beneath the hero's CTA row, so hesitation about "is this
 a rug" is answered in the same viewport as the ask, not ten scrolls later.
 Nothing about the facts changed — only their position in the page's argument.
 
-**One CTA, then the case for it.** After Trade/Mint/Market and the trust
-strip, every following section supports one of those three actions:
-Trade → the swap card and fee/contract facts; Mint → the live mint panel and
-allocation cards; Market/Gallery → the rarity teaser and wallet lookup. The
-Airdrop, Tokenomics, and Roadmap sections come after — they're incentive and
-credibility content for a visitor who hasn't converted yet, not gatekeepers
-in front of the ask.
+**One CTA, then the case for it.** After the Trade / Buy-a-Plank / Gallery
+hero row and the trust strip, every following section supports one of those
+actions: Trade → the swap card and fee/contract facts; Buy a Plank → the
+sold-out provenance story and market snapshot; Market/Gallery → the rarity
+teaser and wallet lookup. The Airdrop, Tokenomics, and Roadmap sections come
+after — they're incentive and credibility content for a visitor who hasn't
+converted yet, not gatekeepers in front of the ask.
 
 **Scannable, one-job sections.** Each section keeps a single eyebrow + title +
 one-line lede pattern (mirroring `SectionHead` from the live page), so a
@@ -103,16 +111,25 @@ button, verified-CA messaging inline with Trade), not sanding it down.
 information surface, not a promotional card" — the risk statement and full,
 never-truncated contract address are both preserved verbatim.
 
+**Plank grain on large surfaces.** Per DESIGN.md's "Elevation & Depth" (the
+canonical `repeating-linear-gradient(92deg, rgba(233,180,63,0.05) 0 1px,
+transparent 1px 11px)` fine gold board-line texture, sourced from the live
+footer), the mockup applies it to the hero band, the trust ticker, every
+`.panel`/`.wood-frame` surface, and the footer — never behind dense data text,
+since data cells (mint stats, airdrop stats, etc.) already paint their own
+opaque background over it.
+
 ## The preloader
 
 "Warming the workshop" — a full-screen sequence themed around building the
-RobinWood fence: eight plank boards drop into place in a staggered sequence
-(built from a CSS box gradient standing in for `plank-legs`/plank-board
-art, with the actual `plank-head.webp` mascot bobbing at the base), under a
-"🔨 Nailing the planks" headline and a gold progress bar that fills over
-~3.5 seconds. Copy calls out the real supply figure (1,542 RobinWood Planks)
-so the wait itself reinforces scarcity/lore rather than feeling like dead
-time. It:
+RobinWood fence. Eight of the actual hand-drawn character assets (alternating
+`plank-logo.webp` and five pieces from `public/images/collection/`) drop into
+place in a staggered sequence — real warm-wood art with the thick ink outline
+and smiley face, not abstract geometric boards — with `plank-head.webp`
+bobbing at the base as the anchor mascot. A "🔨 Nailing the planks" headline
+sits above a gold progress bar that fills over ~3.5 seconds. Copy calls out
+the real supply figure (1,542 RobinWood Planks) so the wait itself reinforces
+scarcity/lore rather than feeling like dead time. It:
 
 - Plays for a minimum of ~3.5s (`MIN_MS` in the inline script) before
   auto-dismissing with a fade.
@@ -125,7 +142,7 @@ time. It:
 
 ## Notes on this build pass
 
-While verifying the mockup with the shared browse-automation tool, two build
+While verifying the mockup with the shared browse-automation tool, three build
 issues surfaced and were fixed in the shipped file:
 
 1. A scroll-triggered `IntersectionObserver` reveal effect left below-the-fold
@@ -138,14 +155,24 @@ issues surfaced and were fixed in the shipped file:
    `opacity:0` on any element carrying that class name regardless of origin.
    Renamed to `fx-in` (kept only as a semantic marker; carries no active
    styling) to avoid the collision.
+3. Every image originally used `../../../public/images/...`, matching the
+   market-redesign mockup's convention. That only resolves when a static
+   server's document root sits at the repo root — a server rooted at this
+   folder instead (as the review server at `:3792` is) 404s on every image,
+   including the one filling what read as a "blank panel" in review. Fixed by
+   vendoring the actually-used assets into a local `assets/` folder next to
+   `finalized.html` and switching every reference to a plain relative path
+   (`assets/...`), which resolves correctly regardless of which directory a
+   static server treats as its root.
 
 ## Verification
 
-Screenshotted via the gstack `browse` tool against a static server rooted at
-the repo root (`npx http-server -p 4791 .`, so `../../../public/images/...`
-resolves correctly), at 1440×900 and 390×844, plus a capture of the preloader
-mid-animation. See `verify-desktop.png`, `verify-mobile.png`, and
-`verify-preloader.png` in this folder.
+Screenshotted via the gstack `browse` tool at 1440×900 and 390×844, plus a
+capture of the preloader mid-animation, confirming zero broken images
+(`[...document.images].filter(i => !i.complete || i.naturalWidth === 0)`
+returns empty) against both the repo-root-rooted server and the
+mockup-folder-rooted `:3792` review server. See `verify-desktop.png`,
+`verify-mobile.png`, and `verify-preloader.png` in this folder.
 
 ## Runtime mapping
 
