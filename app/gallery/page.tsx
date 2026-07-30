@@ -1,5 +1,6 @@
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
+import AppBackdrop from "@/components/AppBackdrop";
 import Gallery from "@/components/Gallery";
 import { createPageMetadata } from "@/lib/seo";
 
@@ -14,6 +15,7 @@ export const metadata = createPageMetadata({
 export default function GalleryPage() {
   return (
     <>
+      <AppBackdrop />
       <Nav />
       <main id="main-content" tabIndex={-1} className="flex-1">
         <Gallery />

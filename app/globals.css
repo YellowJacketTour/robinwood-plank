@@ -160,6 +160,10 @@ body :where(.bg-gold-500, .bg-gold-400):not([data-market-shell] *) {
   );
 }
 
+/* Also reused, unchanged, by components/AppBackdrop.tsx as the shared quiet
+   backdrop for dense app pages (Trade/Market/Gallery) — see that file for
+   why. Keep this the single source of truth for that texture; don't fork a
+   second copy of the gradient recipe elsewhere. */
 .site-footer-surface {
   background-color: #160e08;
   background-image:

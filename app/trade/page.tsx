@@ -1,5 +1,6 @@
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
+import AppBackdrop from "@/components/AppBackdrop";
 import TradePageHeader from "@/components/trade/TradePageHeader";
 import PlankPriceChart from "@/components/trade/PlankPriceChart";
 import ChartErrorBoundary from "@/components/trade/ChartErrorBoundary";
@@ -23,6 +24,7 @@ export const metadata = createPageMetadata({
 export default function TradePage() {
   return (
     <>
+      <AppBackdrop />
       <Nav />
       <main id="main-content" tabIndex={-1} className="flex-1 px-3 py-6 sm:px-5 sm:py-10">
         {/* Same finalized-mockup shell cap as /market: min(1440px, 100% - 32px).
