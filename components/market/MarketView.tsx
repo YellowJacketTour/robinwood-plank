@@ -254,6 +254,10 @@ export default function MarketView() {
   const [showInventory, setShowInventory] = useState(false);
   const [sweepTarget, setSweepTarget] = useState<SweepPlan | null>(null);
   const [sweeping, setSweeping] = useState(false);
+  /** Finalized mockup: the sweep planner is progressive disclosure — a
+   * toolbar toggle opens it instead of the full control cluster living
+   * inline in the toolbar. */
+  const [sweepOpen, setSweepOpen] = useState(false);
   const [sort, setSort] = useState<SortKey>("price-asc");
   const [loading, setLoading] = useState(true);
   const [bookError, setBookError] = useState<string | null>(null);
@@ -688,6 +692,12 @@ export default function MarketView() {
   }, [acceptTarget, account, accepting, refresh]);
 
   const visibleListings = applyFilters(listings, filters, rarityMap);
+  // Listed count per tier for the filter rail's rarity rows (mockup parity).
+  const tierListedCounts: Partial<Record<string, number>> = {};
+  for (const l of listings) {
+    const t = l.tokenId ? rarityMap.get(l.tokenId)?.tier : undefined;
+    if (t) tierListedCounts[t] = (tierListedCounts[t] ?? 0) + 1;
+  }
   // TRAIT bids (criteria orders with a committed snapshot) render as their own
   // rows — they have no single tokenId, so a token-card grid can't show them.
   const traitOffers = offers.filter(
@@ -987,6 +997,7 @@ export default function MarketView() {
                       resultCount={loading ? 0 : visibleListings.length}
                       rarityAvailable={rarityMap.size > 0}
                       orientation="sidebar"
+                      tierCounts={tierListedCounts}
                     />
                   }
                   lead={
@@ -1008,14 +1019,20 @@ export default function MarketView() {
                   toolbar={
                     <>
                       {COLLECTION && !loading && (
-                        <SweepFloorboards
-                          listings={listings}
-                          collection={COLLECTION}
-                          account={account}
-                          rarity={rarityMap}
-                          tierScope={filters.tier}
-                          onSweep={(plan) => void handleSweep(plan)}
-                        />
+                        <button
+                          type="button"
+                          onClick={() => setSweepOpen((v) => !v)}
+                          aria-pressed={sweepOpen}
+                          aria-controls="sweep-planner"
+                          className={`min-h-10 shrink-0 rounded-lg border px-3 text-xs font-bold transition ${
+                            sweepOpen
+                              ? "border-gold-400 bg-gold-500/15 text-gold-200"
+                              : "border-gold-500/40 text-gold-300 hover:border-gold-400"
+                          }`}
+                          title="Batch-buy the cheapest listings — scopes, presets, and confirmation"
+                        >
+                          Sweep floorboards
+                        </button>
                       )}
                       {COLLECTION && !loading && (
                         <button
@@ -1027,7 +1044,7 @@ export default function MarketView() {
                           className="min-h-10 shrink-0 rounded-lg border border-gold-500/40 px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
                           title="Bid on any plank matching trait, rarity, or combo"
                         >
-                          Bid on trait / rarity
+                          Bid by criteria
                         </button>
                       )}
                       <label className="flex items-center gap-1.5">
@@ -1047,6 +1064,21 @@ export default function MarketView() {
                     </>
                   }
                 >
+                  {COLLECTION && !loading && sweepOpen && (
+                    <div
+                      id="sweep-planner"
+                      className="mb-3 rounded-xl border border-gold-500/30 bg-wood-900/80 p-3"
+                    >
+                      <SweepFloorboards
+                        listings={listings}
+                        collection={COLLECTION}
+                        account={account}
+                        rarity={rarityMap}
+                        tierScope={filters.tier}
+                        onSweep={(plan) => void handleSweep(plan)}
+                      />
+                    </div>
+                  )}
                   {loading ? (
                     <ListingSkeleton />
                   ) : (
