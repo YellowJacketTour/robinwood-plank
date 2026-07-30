@@ -16,7 +16,6 @@ import {
 
 // v4: no Mythic tier (not in collection metadata); Background-based labels.
 const KV_KEY = "plank:market:rarity-snapshot-v4";
-const KV_TTL_SEC = 6 * 60 * 60;
 
 let cached: { snapshot: RaritySnapshot; at: number } | null = null;
 let inflight: Promise<RaritySnapshot> | null = null;
@@ -116,7 +115,12 @@ async function readKv(): Promise<RaritySnapshot | null> {
 async function writeKv(s: RaritySnapshot): Promise<void> {
   if (!hasKv()) return;
   try {
-    await kv.set(KV_KEY, snapshotToBlob(s), { ex: KV_TTL_SEC });
+    // Keep the last known-good snapshot indefinitely. The collection metadata
+    // is immutable after reveal, while rebuilding all 1,500+ entries depends
+    // on rate-limited Blockscout/IPFS services. Expiring this value caused
+    // every Passenger worker to cold-rebuild at the same six-hour boundary,
+    // producing intermittent 500s until one rebuild succeeded.
+    await kv.set(KV_KEY, snapshotToBlob(s));
   } catch {
     /* best-effort */
   }
