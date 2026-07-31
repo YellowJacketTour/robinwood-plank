@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  deserializeRedisValue,
+  deserializeStoredValue,
   durableKvBackend,
-  serializeRedisValue,
+  serializeStoredValue,
 } from "../../lib/market/durable-kv";
+
+/**
+ * Locks in the PostgreSQL-only storage contract (owner direction
+ * 2026-07-31: Redis/Upstash were dead legacy from a prior deployment target
+ * and were deleted, not shimmed):
+ * - backend selection is postgres-or-nothing, and asking for a removed
+ *   backend is a hard, descriptive error — never a silent fallback;
+ * - the JSON codec round-trips every shape consumers store.
+ */
 
 const KEYS = [
   "DURABLE_KV_BACKEND",
@@ -37,71 +46,70 @@ function withEnv(
   }
 }
 
-test("Redis JSON codec preserves objects, arrays, numbers, booleans, and strings", () => {
-  const value = {
-    order: { id: "listing-1", priceWei: "4206900000000000" },
-    live: true,
-    attempts: 3,
-    tags: ["plank", "market"],
-  };
-  assert.deepEqual(
-    deserializeRedisValue(serializeRedisValue(value)),
-    value
+const PG = {
+  PGHOST: "localhost",
+  PGDATABASE: "plank",
+  PGUSER: "plank",
+  PGPASSWORD: "secret",
+};
+
+test("JSON codec preserves objects, arrays, numbers, booleans, and strings", () => {
+  const values: unknown[] = [
+    { a: 1, b: [true, "x"], c: { nested: null } },
+    ["a", 2, false],
+    42,
+    true,
+    "plain",
+  ];
+  for (const value of values) {
+    assert.deepEqual(deserializeStoredValue(serializeStoredValue(value)), value);
+  }
+  assert.equal(deserializeStoredValue<string>("legacy"), "legacy");
+  assert.equal(deserializeStoredValue(null), null);
+  assert.throws(() => serializeStoredValue(undefined), /undefined/);
+});
+
+test("postgres config selects postgres, explicitly or by default", () => {
+  withEnv({ ...PG, DURABLE_KV_BACKEND: "postgres" }, () =>
+    assert.equal(durableKvBackend(), "postgres")
   );
-  assert.equal(
-    deserializeRedisValue<string>(serializeRedisValue("plain-string")),
-    "plain-string"
+  withEnv(PG, () => assert.equal(durableKvBackend(), "postgres"));
+});
+
+test("no postgres config means no durable backend (dev file fallback)", () => {
+  withEnv({}, () => assert.equal(durableKvBackend(), null));
+});
+
+test("explicit postgres without credentials fails closed", () => {
+  withEnv({ DURABLE_KV_BACKEND: "postgres" }, () =>
+    assert.throws(() => durableKvBackend(), /requires PGHOST/)
   );
 });
 
-test("Redis JSON codec tolerates legacy raw string values", () => {
-  assert.equal(deserializeRedisValue<string>("legacy"), "legacy");
-  assert.equal(deserializeRedisValue(null), null);
-  assert.throws(() => serializeRedisValue(undefined), /undefined/);
-});
-
-test("backend selection prefers the VPS Redis URL when both stores exist", () => {
+test("removed backends are a hard error, never a silent fallback", () => {
+  withEnv({ ...PG, DURABLE_KV_BACKEND: "redis", REDIS_URL: "redis://x" }, () =>
+    assert.throws(() => durableKvBackend(), /removed/)
+  );
   withEnv(
     {
-      REDIS_URL: "redis://valkey:6379",
-      KV_REST_API_URL: "https://example.upstash.io",
-      KV_REST_API_TOKEN: "token",
+      ...PG,
+      DURABLE_KV_BACKEND: "upstash",
+      KV_REST_API_URL: "https://x",
+      KV_REST_API_TOKEN: "t",
     },
-    () => assert.equal(durableKvBackend(), "redis")
+    () => assert.throws(() => durableKvBackend(), /removed/)
+  );
+  withEnv({ ...PG, DURABLE_KV_BACKEND: "bogus" }, () =>
+    assert.throws(() => durableKvBackend(), /must be "postgres"/)
   );
 });
 
-test("backend selection prefers local PostgreSQL when it is configured", () => {
+test("legacy Redis/Upstash env vars alone no longer select anything", () => {
+  withEnv({ REDIS_URL: "redis://x" }, () =>
+    assert.equal(durableKvBackend(), null)
+  );
   withEnv(
-    {
-      PGHOST: "localhost",
-      PGDATABASE: "plank",
-      PGUSER: "plankapp",
-      PGPASSWORD: "secret",
-      REDIS_URL: "redis://valkey:6379",
-    },
-    () => assert.equal(durableKvBackend(), "postgres")
+    { KV_REST_API_URL: "https://x", KV_REST_API_TOKEN: "t" },
+    () => assert.equal(durableKvBackend(), null)
   );
-});
-
-test("backend selection retains Upstash compatibility", () => {
-  withEnv(
-    {
-      KV_REST_API_URL: "https://example.upstash.io",
-      KV_REST_API_TOKEN: "token",
-    },
-    () => assert.equal(durableKvBackend(), "upstash")
-  );
-});
-
-test("explicit backend selection fails closed when its credentials are absent", () => {
-  withEnv({ DURABLE_KV_BACKEND: "postgres" }, () => {
-    assert.throws(() => durableKvBackend(), /requires PGHOST/);
-  });
-  withEnv({ DURABLE_KV_BACKEND: "redis" }, () => {
-    assert.throws(() => durableKvBackend(), /requires REDIS_URL/);
-  });
-  withEnv({ DURABLE_KV_BACKEND: "upstash" }, () => {
-    assert.throws(() => durableKvBackend(), /requires KV_REST_API_URL/);
-  });
 });
