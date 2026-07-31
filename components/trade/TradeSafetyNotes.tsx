@@ -82,7 +82,7 @@ export default function TradeSafetyNotes({ activeMode = "same", zeroXStatus }: P
       <p className="text-[0.7rem] font-black uppercase tracking-[0.08em] text-cream">
         Trading safety
       </p>
-      <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+      <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-1">
         {NOTES.map(({ title, body, icon: Icon }) => (
           <li
             key={title}
