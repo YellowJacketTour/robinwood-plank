@@ -34,17 +34,23 @@ const HEX_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 // --- learn: per-section visibility ----------------------------------------
 
 /**
- * v1 deliberately stores VISIBILITY ONLY, not the section text. The Learn
- * content stays single-sourced in components/learn/LearnGuide.tsx (no drift);
- * this doc decides which sections the public page renders. Body editing is a
- * later phase.
+ * Per-section visibility plus optional per-section TEXT OVERRIDES. A section
+ * with no override renders its coded JSX from LearnGuide.tsx (the permanent
+ * fallback — clearing an override restores the coded text, so there is no
+ * drift, only explicit replacement). Overrides are plain text: blank lines
+ * split paragraphs; no HTML/markup is interpreted (nothing an admin types
+ * can inject markup into the page).
  */
 export type LearnDoc = {
   /** Section ids from LearnGuide's TOC that are hidden on the public page. */
   hidden: string[];
+  /** Section id -> replacement body text ("" is dropped = use coded text). */
+  overrides: Record<string, string>;
 };
 
-export const LEARN_FALLBACK: LearnDoc = { hidden: [] };
+export const LEARN_FALLBACK: LearnDoc = { hidden: [], overrides: {} };
+
+const MAX_OVERRIDE_CHARS = 20_000;
 
 export function sanitizeLearn(v: unknown): SanitizeResult<LearnDoc> {
   if (!isRecord(v) || !Array.isArray(v.hidden)) {
@@ -60,7 +66,29 @@ export function sanitizeLearn(v: unknown): SanitizeResult<LearnDoc> {
     }
     if (!hidden.includes(id)) hidden.push(id);
   }
-  return { ok: true, value: { hidden } };
+  const overrides: Record<string, string> = {};
+  if (v.overrides !== undefined) {
+    if (!isRecord(v.overrides)) {
+      return { ok: false, message: "overrides must be an object of id -> text." };
+    }
+    for (const [id, text] of Object.entries(v.overrides)) {
+      if (!SLUG.test(id)) {
+        return { ok: false, message: `Bad override section id: ${id}` };
+      }
+      if (typeof text !== "string") {
+        return { ok: false, message: `${id}: override must be a string.` };
+      }
+      if (text.length > MAX_OVERRIDE_CHARS) {
+        return {
+          ok: false,
+          message: `${id}: override exceeds ${MAX_OVERRIDE_CHARS} characters.`,
+        };
+      }
+      const trimmed = text.trim();
+      if (trimmed) overrides[id] = trimmed;
+    }
+  }
+  return { ok: true, value: { hidden, overrides } };
 }
 
 // --- intro: rotating splash phrases ---------------------------------------
@@ -171,17 +199,35 @@ export function sanitizeBanner(v: unknown): SanitizeResult<BannerDoc> {
  */
 export type FlagsDoc = {
   tradePaused: boolean | null;
+  /** Runtime kill switch / enable for /market. Consumed server-side by
+   * app/market/page.tsx, so both directions work without a deployment.
+   * RULES_RELAXED deliberately has NO runtime override: it relaxes trade
+   * protections inside lib/boards.ts and stays a reviewed env change. */
+  marketEnabled: boolean | null;
 };
 
-export const FLAGS_FALLBACK: FlagsDoc = { tradePaused: null };
+export const FLAGS_FALLBACK: FlagsDoc = { tradePaused: null, marketEnabled: null };
+
+function triState(
+  v: unknown,
+  name: string
+): { ok: true; value: boolean | null } | { ok: false; message: string } {
+  if (v !== null && v !== undefined && typeof v !== "boolean") {
+    return { ok: false, message: `${name} must be true, false, or null.` };
+  }
+  return { ok: true, value: (v as boolean | null | undefined) ?? null };
+}
 
 export function sanitizeFlags(v: unknown): SanitizeResult<FlagsDoc> {
   if (!isRecord(v)) return { ok: false, message: "flags doc must be an object." };
-  const t = v.tradePaused;
-  if (t !== null && t !== undefined && typeof t !== "boolean") {
-    return { ok: false, message: "tradePaused must be true, false, or null." };
-  }
-  return { ok: true, value: { tradePaused: t ?? null } };
+  const tradePaused = triState(v.tradePaused, "tradePaused");
+  if (!tradePaused.ok) return tradePaused;
+  const marketEnabled = triState(v.marketEnabled, "marketEnabled");
+  if (!marketEnabled.ok) return marketEnabled;
+  return {
+    ok: true,
+    value: { tradePaused: tradePaused.value, marketEnabled: marketEnabled.value },
+  };
 }
 
 // --- collections: admin-staged market collections -------------------------

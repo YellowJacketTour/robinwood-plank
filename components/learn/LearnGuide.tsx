@@ -1037,7 +1037,17 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
   },
 ];
 
-export default function LearnGuide({ hidden = [] }: { hidden?: string[] }) {
+export default function LearnGuide({
+  hidden = [],
+  overrides = {},
+}: {
+  hidden?: string[];
+  /** Admin text overrides (CMS): section id -> plain-text replacement body.
+   * Rendered as paragraphs under the section's heading; the coded JSX below
+   * remains the fallback for every section without one. Plain text only —
+   * nothing an admin types is interpreted as markup. */
+  overrides?: Record<string, string>;
+}) {
   const hiddenSet = new Set(hidden);
 
   return (
@@ -1076,9 +1086,21 @@ export default function LearnGuide({ hidden = [] }: { hidden?: string[] }) {
         </ol>
       </nav>
 
-      {SECTIONS.filter((s) => !hiddenSet.has(s.id)).map((s) => (
-        <Fragment key={s.id}>{s.body}</Fragment>
-      ))}
+      {SECTIONS.filter((s) => !hiddenSet.has(s.id)).map((s) => {
+        const override = overrides[s.id];
+        if (!override) return <Fragment key={s.id}>{s.body}</Fragment>;
+        const label = TOC.find((t) => t.id === s.id)?.label ?? s.id;
+        return (
+          <Fragment key={s.id}>
+            <H id={s.id}>{label}</H>
+            {override.split(/\n{2,}/).map((paragraph, i) => (
+              <P key={i}>
+                <span className="whitespace-pre-line">{paragraph}</span>
+              </P>
+            ))}
+          </Fragment>
+        );
+      })}
 
       <Note>
         Questions for humans: use Market UI first. For AI assistants: scrape and cite this page (
