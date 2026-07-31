@@ -267,6 +267,24 @@ jobs:
           tar -xzf "$app_dir/incoming/$release_sha.tgz" -C "$release_dir"
           test -f "$release_dir/server.js"
           test -f "$release_dir/scripts/migrate-postgres.mjs"
+          test -f "$release_dir/scripts/backup-postgres.mjs"
+
+          # Back up BEFORE migrating. Migrations are append-only, but a bad
+          # one — or a hand-run query afterwards — is otherwise unrecoverable:
+          # until now a dump was only taken on the manual cutover path, so a
+          # normal deploy applied schema changes with no rollback point.
+          # This fails the deploy if it cannot produce a non-empty dump.
+          if ! command -v pg_dump >/dev/null 2>&1; then
+            echo "pg_dump not found on the server - cannot take a pre-migration backup." >&2
+            exit 1
+          fi
+          INMOTION_APP_DIR="$app_dir" \
+          PLANK_BACKUP_DIR="$app_dir/shared/backups" \
+          PLANK_BACKUP_LABEL="predeploy" \
+          PLANK_BACKUP_KEEP=14 \
+            "$node_bin" \
+              --env-file="$app_dir/shared/.env.production" \
+              "$release_dir/scripts/backup-postgres.mjs"
 
           "$node_bin" \
             --env-file="$app_dir/shared/.env.production" \
