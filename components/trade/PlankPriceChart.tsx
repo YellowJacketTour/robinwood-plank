@@ -457,7 +457,12 @@ export default function PlankPriceChart({ active = true }: { active?: boolean } 
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
         <StatTile label="24H Volume (this pool)" value={formatCompactUsd(stats?.volumeUsd24h)} />
         <StatTile label="Liquidity (this pool)" value={formatCompactUsd(stats?.liquidityUsd)} />
-        <StatTile label="FDV" value={formatCompactUsd(stats?.fdvUsd)} />
+        {/* Its three neighbours are pool-scoped and say so, so a bare "FDV"
+            here reads as this pool's FDV. It is token-wide (price x total
+            supply) — labelled inline per docs/TRADE_PAGE_SPEC.md §2. It is
+            an FDV, never a market cap: see lib/plank-valuation.ts, and
+            PlankValuation below for the supply basis behind it. */}
+        <StatTile label="FDV (token-wide)" value={formatCompactUsd(stats?.fdvUsd)} />
         <StatTile
           label="Buys / Sells (24H)"
           value={
