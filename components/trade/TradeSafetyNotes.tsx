@@ -103,7 +103,7 @@ export default function TradeSafetyNotes({ activeMode = "same", zeroXStatus }: P
         className="block truncate text-center text-[0.65rem] text-cream-muted underline-offset-2 hover:text-gold-300 hover:underline"
         title={CONTRACT_ADDRESS}
       >
-        View contract on {CHAIN.blockExplorers.default.name} ↗
+        View the $PLANK token contract on {CHAIN.blockExplorers.default.name} ↗
       </a>
     </section>
   );
