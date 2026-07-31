@@ -77,6 +77,20 @@ export type PlankPool = {
   liquidityUsd: number | null;
   volumeUsd24h: number | null;
   priceChangePct24h: number | null;
+  /**
+   * DexScreener's own fully-diluted valuation for this pair (its price x
+   * $PLANK's total supply). Carried purely so /trade can cross-check our
+   * independently-computed FDV against a third party — it is never the
+   * number the UI publishes as the headline.
+   *
+   * DexScreener also returns a `marketCap` field, deliberately NOT mapped
+   * here: for $PLANK it is byte-identical to `fdv` on every pair, because
+   * DexScreener has no verified circulating supply either and falls back to
+   * total supply. Importing it would put a "market cap" label on an FDV
+   * number, which is the exact error lib/plank-valuation.ts exists to
+   * prevent.
+   */
+  fdvUsd: number | null;
   txns24h: { buys: number; sells: number } | null;
   /** ISO timestamp; null if DexScreener didn't return a creation time. */
   pairCreatedAt: string | null;

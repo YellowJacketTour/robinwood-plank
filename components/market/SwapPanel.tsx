@@ -6,6 +6,7 @@ import { MARKET_FEE_RECIPIENT, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { getNativeBalance } from "@/lib/wallet";
 import TreasuryBootstrap from "@/components/market/TreasuryBootstrap";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
+import type { MarketCollection } from "@/lib/market/types";
 import {
   buyShares,
   claimRandomRedeemFor,
@@ -139,6 +140,10 @@ type Props = {
   onConnect: () => void;
   /** Target vault for Instant Swap txs (primary V2 or legacy V1). */
   vaultAddress?: string | null;
+  /** The collection this swap surface serves. Falls back to the first
+   * configured collection; its vaultAddress is the vault fallback when no
+   * explicit vault is passed (per-collection vault wiring). */
+  collection?: MarketCollection;
   /** Short UI label for the active vault (e.g. "V2 — new Instant Swap"). */
   vaultLabel?: string | null;
   /** False while the Instant Swap tab is mounted but not on screen — pauses
@@ -189,24 +194,31 @@ function StuckRedeemRelay({
     if (!active) return;
     let cancelled = false;
     const check = async () => {
+      const zero = "0x0000000000000000000000000000000000000000";
+      let pending = false;
       try {
-        // Always try sponsored settle first when anything is pending — free for users.
-        await kickServerRandomSettle(vaultAddress);
-      } catch {
-        /* ignore */
-      }
-      try {
+        // Read state first. These two go to the public RPC; the settle kick
+        // below goes to the keyed provider, so kicking unconditionally every
+        // 6s billed a sponsored-settle round-trip on every idle tab.
         const [who, r] = await Promise.all([
           getPendingRequester(vaultAddress),
           getPendingRound(vaultAddress),
         ]);
         if (cancelled) return;
-        const zero = "0x0000000000000000000000000000000000000000";
-        setRequester(who && who.toLowerCase() !== zero ? who : null);
+        pending = Boolean(who && who.toLowerCase() !== zero);
+        setRequester(pending ? who : null);
         setRound(r.round > BigInt(0) ? r.round : null);
         setAvailable(r.available);
       } catch {
         /* */
+      }
+      if (!pending || cancelled) return;
+      try {
+        // Sponsored settle — free for users, so try it whenever a draw is
+        // actually waiting.
+        await kickServerRandomSettle(vaultAddress);
+      } catch {
+        /* ignore */
       }
     };
     void check();
@@ -531,11 +543,13 @@ export default function SwapPanel({
   account,
   onConnect,
   vaultAddress: vaultAddressProp,
+  collection: collectionProp,
   vaultLabel,
   active = true,
 }: Props) {
-  const collection = MARKET_COLLECTIONS[0];
-  const vaultAddress = vaultAddressProp ?? MARKET_VAULT_ADDRESS;
+  const collection = collectionProp ?? MARKET_COLLECTIONS[0];
+  const vaultAddress =
+    vaultAddressProp ?? collection.vaultAddress ?? MARKET_VAULT_ADDRESS;
   const hasVault = vaultAddress !== null;
   // Per-selected-vault book (V1 or V2) — not the dual trade feed.
   const { stats: bookStats } = useVaultBook(vaultAddress, { active });

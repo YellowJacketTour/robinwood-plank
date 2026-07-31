@@ -132,9 +132,12 @@ const BASE_RECONNECT_MS = 1_500;
 const MAX_RECONNECT_MS = 20_000;
 /** Start REST trade polling almost immediately — SSE is flaky on CF under RPC pressure. */
 const POLL_FALLBACK_AFTER_ERRORS = 1;
-const POLL_INTERVAL_MS = 10_000;
-/** The server ticks every 4s but only actually refreshes chain data every
- * 10s (see app/api/market/vault/stream/route.ts), so most ticks resend the
+/** Must stay above the activity route's cache TTL (20s). At 10s roughly half
+ * the polls missed the cache and forced a fresh chain read, so every open tab
+ * was paying for a rebuild the SSE stream had already done. */
+const POLL_INTERVAL_MS = 30_000;
+/** The server ticks every 8s but only actually refreshes chain data every
+ * 60s (see app/api/market/vault/stream/route.ts), so most ticks resend the
  * identical payload — comparing the raw text before parsing/emitting skips
  * those, which otherwise re-rendered every subscribed swap-tab component
  * (VaultDashboard, VaultTradeHistory, LivingLiquidityViz) 2-3x more often
@@ -259,9 +262,11 @@ function stopPollFallback() {
 }
 
 function connect() {
+  // One REST read for immediate paint. The recurring poll is a *fallback* —
+  // starting it unconditionally meant every tab ran a permanent second data
+  // feed alongside SSE, duplicating data it already had. The error handlers
+  // below start it the moment SSE actually fails.
   hydrateFromRest();
-  // Always keep REST poll warm so the trade ticker never depends solely on SSE.
-  startPollFallback();
   if (source || typeof window === "undefined") return;
   const es = new EventSource("/api/market/vault/stream");
   source = es;
@@ -284,8 +289,11 @@ function connect() {
       state = makeState(nextStats, nextActivity, true);
       saveSnapshot(nextStats, nextActivity);
       consecutiveErrors = 0;
-      // Keep REST poll running as a backstop — stopping it caused empty
-      // tickers whenever SSE flapped.
+      // SSE is delivering again, so the REST fallback is pure duplicate load.
+      // Stopping it is safe now that mergeActivity() never lets a partial
+      // payload shrink the ticker — that was the actual cause of the empty
+      // tickers this used to guard against.
+      stopPollFallback();
       for (const e of nextActivity) clearPendingVaultTx(e.txHash);
       emit();
     } catch {

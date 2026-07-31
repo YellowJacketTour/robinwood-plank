@@ -1,3 +1,4 @@
+import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import type { MarketCollection } from "@/lib/market/types";
 
@@ -23,6 +24,10 @@ export const MARKET_COLLECTIONS: MarketCollection[] = [
     image: "/images/plank-logo.webp",
     trustBadges: ["lp-burned", "ownership-renounced", "verified"],
     feeBps: 0, // $PLANK trades are always free — this is the one collection that never changes.
+    // The collection entry is the source of the vault link (Instant Swap).
+    // RobinWood's is the env-configured V2 vault; a future collection's
+    // vault goes here directly when its release promotes it.
+    vaultAddress: MARKET_VAULT_ADDRESS ?? undefined,
   },
   // Next collection added here defaults to MARKET_DEFAULT_FEE_BPS unless
   // given its own feeBps override, e.g. `feeBps: MARKET_DEFAULT_FEE_BPS`.
@@ -30,4 +35,16 @@ export const MARKET_COLLECTIONS: MarketCollection[] = [
 
 export function getCollection(slug: string): MarketCollection | undefined {
   return MARKET_COLLECTIONS.find((c) => c.slug === slug);
+}
+
+/**
+ * Every vault address linked from a collection entry (lowercased). Combined
+ * with the env-derived MARKET_VAULT_ADDRESSES at validation sites so a
+ * per-collection vault is accepted the moment its collection entry ships —
+ * no extra env var required.
+ */
+export function collectionVaultAddresses(): string[] {
+  return MARKET_COLLECTIONS.flatMap((c) =>
+    c.vaultAddress ? [c.vaultAddress.toLowerCase()] : []
+  );
 }

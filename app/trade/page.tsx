@@ -5,6 +5,7 @@ import TradePageHeader from "@/components/trade/TradePageHeader";
 import PlankPriceChart from "@/components/trade/PlankPriceChart";
 import ChartErrorBoundary from "@/components/trade/ChartErrorBoundary";
 import PlankPoolsPanel from "@/components/trade/PlankPoolsPanel";
+import PlankValuation from "@/components/trade/PlankValuation";
 import TradeActionZone from "@/components/trade/TradeActionZone";
 import { createPageMetadata } from "@/lib/seo";
 
@@ -50,6 +51,22 @@ export default function TradePage() {
               (docs/TRADE_PAGE_SPEC.md §1). */}
           <div className="mx-auto w-full max-w-4xl">
             <PlankPoolsPanel />
+          </div>
+
+          {/* Valuation sits AFTER the pools panel, not between it and the
+              chart, because docs/TRADE_PAGE_SPEC.md §1 requires the pools
+              evidence to be the very next thing under the chart's
+              one-pool disclosure. It still reads as price context rather
+              than action, so it stays above the workbench and shares the
+              pools panel's max-w-4xl column.
+
+              The chart's stat strip already surfaces a token-wide FDV tile;
+              this panel is where that number gets its supply basis, its
+              concentration disclosure, and its cross-check against both
+              aggregators. See lib/plank-valuation.ts for why the page shows
+              an FDV and never a circulating market cap. */}
+          <div className="mx-auto w-full max-w-4xl">
+            <PlankValuation />
           </div>
 
           {/* Action zone (workbench + status, capped at max-w-4xl so the

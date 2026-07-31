@@ -3,11 +3,13 @@ import {
   CONTRACT_ADDRESS,
   SNIPER_TRAP_MINUTES,
   TOKEN,
-  TRADE_PAUSED,
+  TRADE_PAUSED as ENV_TRADE_PAUSED,
 } from "@/lib/constants";
 import { getTrapWindow, isListingWindowActive, WALLET_COOLDOWN_MINUTES } from "@/lib/boards";
 import { buildUniswapSwapUrl, getCountdownParts, getTradeOpensAt } from "@/lib/trade";
 import { getPublicSiteFee, isTradingApiConfigured } from "@/lib/uniswap-server";
+import { getContent } from "@/lib/content-store";
+import type { FlagsDoc } from "@/lib/content-docs";
 import { publicJson, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +25,16 @@ export async function GET(req: Request) {
 
   const parts = getCountdownParts();
   const opensAt = getTradeOpensAt();
+
+  // Admin runtime override (/admin → Flags, stored in the database):
+  // null = the build-baked env flag stands. Clients fetch this route and OR
+  // `paused` with their baked value (CountdownTimer), so PAUSING takes effect
+  // everywhere without a deployment. UNPAUSING via override only affects
+  // consumers that trust this route's value — a client bundle baked with
+  // TRADE_PAUSED=true still shows paused until rebuilt.
+  const flags = (await getContent("flags").catch(() => null)) as FlagsDoc | null;
+  const TRADE_PAUSED =
+    flags && flags.tradePaused !== null ? flags.tradePaused : ENV_TRADE_PAUSED;
 
   return publicJson({
     isOpen: parts.isOpen,

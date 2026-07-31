@@ -4,6 +4,8 @@ import AppBackdrop from "@/components/AppBackdrop";
 import MarketView from "@/components/market/MarketView";
 import ComingSoonGate from "@/components/market/ComingSoonGate";
 import { MARKET_ENABLED } from "@/lib/constants";
+import { getContent } from "@/lib/content-store";
+import type { FlagsDoc } from "@/lib/content-docs";
 import { createPageMetadata } from "@/lib/seo";
 
 /**
@@ -21,7 +23,14 @@ export const metadata = createPageMetadata({
   keywords: ["Marketplank", "RobinWood marketplace", "Robinhood Chain NFT marketplace"],
 });
 
-export default function MarketPage() {
+export default async function MarketPage() {
+  // Admin runtime override (/admin → Flags): null = the baked env flag
+  // stands. This is a server component on a force-dynamic route, so both
+  // directions (kill switch AND enable) work without a deployment.
+  const flags = (await getContent("flags").catch(() => null)) as FlagsDoc | null;
+  const marketEnabled =
+    flags && flags.marketEnabled !== null ? flags.marketEnabled : MARKET_ENABLED;
+
   return (
     <>
       <AppBackdrop />
@@ -36,8 +45,8 @@ export default function MarketPage() {
             site's 64rem prose column so the grid gets desktop room, but
             capped — at ultrawide widths an uncapped workspace inflated every
             panel far past the approved composition. */}
-        <div className={MARKET_ENABLED ? "mx-auto w-full max-w-[1440px]" : "site-shell"}>
-          {MARKET_ENABLED ? <MarketView /> : <ComingSoonGate />}
+        <div className={marketEnabled ? "mx-auto w-full max-w-[1440px]" : "site-shell"}>
+          {marketEnabled ? <MarketView /> : <ComingSoonGate />}
         </div>
       </main>
       <Footer />

@@ -2,9 +2,11 @@ import type { Metadata, Viewport } from "next";
 import { Uncial_Antiqua, Nunito_Sans } from "next/font/google";
 import "./globals.css";
 import PlankBackground from "@/components/PlankBackground";
-import AudioPlayer from "@/components/AudioPlayer";
+import WoodAmpProvider from "@/components/woodamp/WoodAmpProvider";
+import WoodAmpWindow from "@/components/woodamp/WoodAmpWindow";
 import HoloField from "@/lib/holo";
 import SplashIntro from "@/components/SplashIntro";
+import SiteBanner from "@/components/SiteBanner";
 import ArtServiceWorker from "@/components/ArtServiceWorker";
 import { rootMetadata } from "@/lib/seo";
 import { WalletProvider } from "@/lib/wallet-context";
@@ -40,12 +42,19 @@ export default function RootLayout({
     <html lang="en" className={`${stencil.variable} ${body.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
         <WalletProvider>
-          <SplashIntro />
-          <ArtServiceWorker />
-          <PlankBackground />
-          <AudioPlayer />
-          <HoloField />
-          {children}
+          {/* WoodAmp owns the site's single audio element; it lives here in
+              the root layout so playback survives client-side navigation
+              (route links in Nav use <Link> for exactly this reason). */}
+          <WoodAmpProvider>
+            <SplashIntro />
+            <ArtServiceWorker />
+            <PlankBackground />
+            <HoloField />
+            {/* Admin-managed announcement — renders nothing unless enabled */}
+            <SiteBanner />
+            {children}
+            <WoodAmpWindow />
+          </WoodAmpProvider>
         </WalletProvider>
       </body>
     </html>
