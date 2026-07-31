@@ -80,6 +80,9 @@ jobs:
       NEXT_PUBLIC_ZEROX_ENABLED: ${{ vars.NEXT_PUBLIC_ZEROX_ENABLED || 'false' }}
       NEXT_PUBLIC_ZEROX_CROSSCHAIN_ENABLED: ${{ vars.NEXT_PUBLIC_ZEROX_CROSSCHAIN_ENABLED || 'false' }}
       NEXT_PUBLIC_CROSSCHAIN_ENABLED: ${{ vars.NEXT_PUBLIC_CROSSCHAIN_ENABLED || 'false' }}
+      # 'reown' swaps the connect surface to AppKit; unset keeps the legacy
+      # WalletConnect QR modal. Off in production until dogfooded.
+      NEXT_PUBLIC_WALLET_UI: ${{ vars.NEXT_PUBLIC_WALLET_UI || '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
