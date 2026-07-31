@@ -99,7 +99,20 @@ export async function GET(req: Request) {
     console.info(`[orders] retired ${item.id} (${reason})`);
   }
 
-  return publicJson({ kind, items: live });
+  // Listings only. Offers stay ours alone — a foreign offer is not something a
+  // holder can accept from here, so surfacing one would be a dead end.
+  if (kind === "offer") return publicJson({ kind, items: live });
+
+  const { readOpenSeaListings } = await import("@/lib/market/opensea");
+  const { mergeBook } = await import("@/lib/market/book");
+  const foreign = await readOpenSeaListings().catch(() => []);
+  const merged = mergeBook(
+    live as unknown as import("@/lib/market/types").Listing[],
+    foreign,
+    collectionSlug ?? "robinwood"
+  );
+
+  return publicJson({ kind, items: merged });
 }
 
 /**

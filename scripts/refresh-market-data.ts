@@ -122,14 +122,17 @@ async function main(): Promise<void> {
   // learn whether their orders on this chain are fulfillable by us — that
   // decides a working Buy button versus an honest deep link.
   await step("opensea", async () => {
-    const { refreshOpenSeaStats, probeOpenSeaListingShape, OPENSEA_COLLECTION_SLUG } =
-      await import("../lib/market/opensea");
-    const stats = await refreshOpenSeaStats();
-    for (const line of await probeOpenSeaListingShape(OPENSEA_COLLECTION_SLUG)) {
-      console.log(`[refresh]   ${line}`);
-    }
-    if (!stats) return "no stats (no key yet, or OpenSea unreachable)";
-    return `volume=${stats.volume ?? "?"} sales=${stats.sales ?? "?"} floor=${stats.floorPrice ?? "?"}`;
+    const { refreshOpenSeaStats, refreshOpenSeaListings } = await import(
+      "../lib/market/opensea"
+    );
+    const [stats, listings] = await Promise.all([
+      refreshOpenSeaStats(),
+      refreshOpenSeaListings(),
+    ]);
+    const statsPart = stats
+      ? `volume=${stats.volume ?? "?"} sales=${stats.sales ?? "?"} floor=${stats.floorPrice ?? "?"}`
+      : "no stats";
+    return `${statsPart}, ${listings.length} listings`;
   });
 
   await step("rarity", async () => {

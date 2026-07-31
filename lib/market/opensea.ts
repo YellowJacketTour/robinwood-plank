@@ -346,6 +346,92 @@ export async function fetchOpenSeaListings(
   );
 }
 
+/** Cached, normalised OpenSea listings. No TTL — see migration 003. */
+export const OPENSEA_LISTINGS_KV = "plank:market:opensea-listings-v1";
+
+export type NormalisedOpenSeaListing = {
+  tokenId: string;
+  priceWei: string;
+  maker: string;
+  /** ISO-8601, or null when OpenSea gives no end time. */
+  expiresAt: string | null;
+};
+
+const ITEM_TYPE_ERC721 = 2;
+
+/**
+ * Reduce OpenSea's order payload to the few fields the book needs.
+ *
+ * Deliberately drops the signature and protocol_data. We do not fulfil these
+ * orders — they route through a conduit we do not control and pay no creator
+ * royalty — so storing the material needed to sign against them would imply a
+ * capability we have decided not to build.
+ */
+export function normaliseOpenSeaListings(
+  listings: OpenSeaListing[]
+): NormalisedOpenSeaListing[] {
+  const out: NormalisedOpenSeaListing[] = [];
+  for (const l of listings) {
+    const p = l.protocol_data?.parameters;
+    const offer = p?.offer?.[0];
+    if (!p?.offerer || !offer || Number(offer.itemType) !== ITEM_TYPE_ERC721) continue;
+    if (offer.identifierOrCriteria == null) continue;
+
+    // Price the buyer actually pays: every consideration leg summed, not the
+    // seller's take. Quoting the seller's net would understate it.
+    let total = BigInt(0);
+    for (const c of p.consideration ?? []) {
+      try {
+        total += BigInt(c.startAmount ?? "0");
+      } catch {
+        /* skip a leg we cannot read rather than mis-price the whole order */
+      }
+    }
+    if (total <= BigInt(0)) continue;
+
+    out.push({
+      tokenId: String(offer.identifierOrCriteria),
+      priceWei: total.toString(),
+      maker: p.offerer.toLowerCase(),
+      expiresAt: null,
+    });
+  }
+  return out;
+}
+
+/** Item page for a token on OpenSea. */
+export function openSeaTokenUrl(contract: string, tokenId: string): string {
+  return `https://opensea.io/assets/robinhood/${contract.toLowerCase()}/${tokenId}`;
+}
+
+export async function readOpenSeaListings(): Promise<NormalisedOpenSeaListing[]> {
+  if (!hasDurableKv()) return [];
+  try {
+    return (await kv.get<NormalisedOpenSeaListing[]>(OPENSEA_LISTINGS_KV)) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Refresh the cached OpenSea book. Keeps the previous copy when OpenSea returns
+ * nothing — an outage should shrink the visible market, not empty it.
+ */
+export async function refreshOpenSeaListings(): Promise<NormalisedOpenSeaListing[]> {
+  const page = await fetchOpenSeaListings(OPENSEA_COLLECTION_SLUG, 100);
+  if (!page?.listings?.length) return readOpenSeaListings();
+  const normalised = normaliseOpenSeaListings(page.listings);
+  if (normalised.length === 0) return readOpenSeaListings();
+  if (hasDurableKv()) {
+    try {
+      await kv.set(OPENSEA_LISTINGS_KV, normalised);
+    } catch {
+      /* next run retries */
+    }
+  }
+  return normalised;
+}
+
 /**
  * One-shot reconnaissance, logged rather than stored.
  *

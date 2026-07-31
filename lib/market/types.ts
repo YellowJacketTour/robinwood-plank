@@ -47,6 +47,23 @@ export type Listing = {
    * fails.
    */
   imageUrl?: string;
+  /**
+   * Which marketplace holds this order.
+   *
+   * Absent means Marketplank — our own relay, fulfillable natively with the
+   * safety rails in lib/wallet.ts. "opensea" means the order lives in OpenSea's
+   * orderbook: the collection trades there too, and hiding that would show
+   * buyers an incomplete market.
+   *
+   * Foreign listings are never given a Buy button. Their orders reference a
+   * conduit we do not control and pay no creator royalty, and our own
+   * order-validation deliberately fails closed on a non-zero conduitKey. They
+   * link out instead, so the venue that settles the trade is the venue the
+   * buyer chose.
+   */
+  venue?: "opensea";
+  /** Where to send the buyer for a foreign listing. */
+  externalUrl?: string;
 };
 
 export type Offer = {

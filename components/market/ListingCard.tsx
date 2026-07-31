@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { ExternalLink } from "lucide-react";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
@@ -137,20 +138,58 @@ export default function ListingCard({
               </span>
             </p>
           </div>
-          <button
-            type="button"
-            disabled={!canFill}
-            onClick={() => onBuy?.(listing)}
-            title={canFill ? undefined : "You don't own a plank this bid can take."}
-            className={`min-h-11 min-w-16 rounded-md px-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-[4.25rem] sm:px-3 sm:text-sm ${
-              isOffer
-                ? "bg-emerald-500 text-wood-950 hover:bg-emerald-400"
-                : "bg-gold-500 text-wood-950 hover:bg-gold-400"
+          {listing.venue === "opensea" ? (
+            /**
+             * Foreign listing: link out, never a Buy button. The order routes
+             * through a conduit we do not control, so a Buy here would be us
+             * promising a fill we cannot guarantee — the exact failure that
+             * made stale listings revert for buyers. A different label, a
+             * different colour and an outbound arrow mean nobody clicks
+             * expecting one flow and lands in another.
+             */
+            <a
+              href={listing.externalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex min-h-11 min-w-16 items-center justify-center gap-1 rounded-md border border-[#58BDF0]/40 px-2 text-xs font-bold text-[#58BDF0] transition hover:border-[#58BDF0] sm:min-w-[4.25rem] sm:px-3 sm:text-sm"
+            >
+              View
+              <ExternalLink size={12} strokeWidth={2.5} aria-hidden />
+              <span className="sr-only">on OpenSea, opens in a new tab</span>
+            </a>
+          ) : (
+            <button
+              type="button"
+              disabled={!canFill}
+              onClick={() => onBuy?.(listing)}
+              title={canFill ? undefined : "You don't own a plank this bid can take."}
+              className={`min-h-11 min-w-16 rounded-md px-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-[4.25rem] sm:px-3 sm:text-sm ${
+                isOffer
+                  ? "bg-emerald-500 text-wood-950 hover:bg-emerald-400"
+                  : "bg-gold-500 text-wood-950 hover:bg-gold-400"
+              }`}
+            >
+              {buyLabel ?? "Buy"}
+            </button>
+          )}
+        </div>
+        {!isOffer && (
+          /**
+           * Labelled on BOTH venues, not just the foreign one. Marking only
+           * OpenSea would make "unmarked" mean "ours" — an inference, and
+           * inferences fail for anyone landing mid-scroll. Explicit costs a
+           * little more ink and removes the ambiguity entirely.
+           */
+          <span
+            className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[0.55rem] font-black uppercase tracking-wider ${
+              listing.venue === "opensea"
+                ? "bg-[#58BDF0]/15 text-[#58BDF0]"
+                : "bg-gold-500/15 text-gold-300"
             }`}
           >
-            {buyLabel ?? "Buy"}
-          </button>
-        </div>
+            {listing.venue === "opensea" ? "OpenSea" : "Marketplank"}
+          </span>
+        )}
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-[0.6rem] text-foreground/45" title={listing.maker}>
             {isOffer ? "Bidder " : "Maker "}
