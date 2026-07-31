@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatEther } from "ethers";
 import { NFT_CONTRACT_ADDRESS, ROBINHOOD_EXPLORER_URL } from "@/lib/mint-contract";
 import { getMintReadClient, touchMintReadClient } from "@/lib/robinhood-provider";
@@ -49,6 +49,17 @@ const EMPTY_STATS: Stats = {
  */
 export default function MintPanel() {
   const [stats, setStats] = useState<Stats>(EMPTY_STATS);
+
+  /**
+   * Set once the contract itself confirms nothing is left to mint.
+   *
+   * The verification read above is worth doing; repeating it forever is not.
+   * The stats cache holds for 10s while this polled every 60s, so every single
+   * tick re-issued all twelve eth_calls — about 13.5M provider compute units a
+   * month per continuously-open tab, more than the entire monthly allowance,
+   * spent re-reading twelve values that cannot change. Verify, then stop.
+   */
+  const settledRef = useRef(false);
 
   const applyCachedStats = useCallback(() => {
     ensureNftCacheHydrated();
@@ -103,6 +114,10 @@ export default function MintPanel() {
         ]);
       touchMintReadClient();
 
+      // Sold out is terminal — supply only ever decreases, and the panel has no
+      // mint form, so nothing here can move again.
+      if (Number(remainingTotal) === 0) settledRef.current = true;
+
       setCachedMintStats({
         phase: Number(phase),
         paused: Boolean(paused),
@@ -136,7 +151,12 @@ export default function MintPanel() {
   useEffect(() => {
     applyCachedStats();
     const initialLoad = window.setTimeout(() => void loadStats(), 0);
-    const stop = startVisibleInterval(() => void loadStats(), 60_000);
+    // Keeps polling if the contract ever says supply remains; goes quiet the
+    // moment it confirms sold out.
+    const stop = startVisibleInterval(() => {
+      if (settledRef.current) return;
+      void loadStats();
+    }, 60_000);
     return () => {
       window.clearTimeout(initialLoad);
       stop();
