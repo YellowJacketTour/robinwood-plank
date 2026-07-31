@@ -314,25 +314,31 @@ describe("MarketplankVaultV3", () => {
     expect(await vault.pendingRedeemCount()).to.equal(0n);
   });
 
-  it("a forfeited redeem refunds the burned share to the requester, not the treasury", async () => {
+  it("forfeit burns the requester's share to the treasury — the bond that blocks a free reroll", async () => {
+    // drand rounds are public before they are relayed on-chain, so a requester
+    // can predict their draw off-chain and decline it by never relaying. The
+    // share-burn on forfeit is what makes declining cost a full share, so this
+    // MUST stay: the requester does not get it back. (An independent review
+    // caught an earlier version that refunded the requester and enabled a
+    // near-free rare-sniping reroll.)
     const { treasury, alice, bob, vault } = await seededVault();
-    const beacon = await ethers.getContractAt("DrandBeaconMock", await vault.beacon());
-
     const aliceBefore: bigint = await vault.balanceOf(alice.address);
     const treasuryBefore: bigint = await vault.balanceOf(treasury.address);
 
-    // Alice requests (burns 1 share), the round is NEVER relayed, ~24h passes.
     await vault.connect(alice).requestRandomRedeem({ value: REDEEM_FEE });
     expect(await vault.balanceOf(alice.address)).to.equal(aliceBefore - SHARE_UNIT);
     await time.increase(30_000); // overshoot ROUND_EXPIRY at the 1s mock period
 
-    // Anyone can forfeit; the burned share comes back to Alice, not treasury.
     await vault.connect(bob).forfeitExpiredRedeem(alice.address);
-    expect(await vault.balanceOf(alice.address)).to.equal(aliceBefore, "share refunded to requester");
-    expect(await vault.balanceOf(treasury.address)).to.equal(treasuryBefore, "treasury unchanged");
+    expect(await vault.balanceOf(alice.address)).to.equal(
+      aliceBefore - SHARE_UNIT,
+      "requester loses the share — declining a draw is costly"
+    );
+    expect(await vault.balanceOf(treasury.address)).to.equal(
+      treasuryBefore + SHARE_UNIT,
+      "the forfeited share goes to the treasury"
+    );
     expect(await vault.pendingRequester()).to.equal(ethers.ZeroAddress, "slot freed");
-    // The ETH fee stays with the treasury (accrued), not refunded.
-    expect(await vault.accruedFees()).to.be.gte(REDEEM_FEE);
   });
 
   // ── Batch ───────────────────────────────────────────────────────────────

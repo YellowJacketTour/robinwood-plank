@@ -358,17 +358,22 @@ contract MarketplankVaultV3 is ERC20, ReentrancyGuard, IERC721Receiver {
         delete redeemRequests[requester];
         pendingRequester = address(0);
         pendingRedeemCount -= 1;
-        // Refund the burned share to the REQUESTER (V1/V2 sent it to the
-        // treasury). Forfeit is only reachable when the target drand round went
-        // unrelayed for ROUND_EXPIRY (~24h) — i.e. an infrastructure failure,
-        // not the user's fault — so punishing them is unfair. This is safe and
-        // ungameable: a draw pins the instant its round is relayed and a pinned
-        // request cannot be forfeited, so nobody can forfeit a draw they have
-        // seen to reroll for a rarer one. Refund the share (an internal mint,
-        // no external call); the ETH fee stays with the treasury as the cost of
-        // the failed attempt — refunding it would need an ETH send that a
-        // reverting requester could use to re-brick the single slot.
-        _mint(requester, SHARE_UNIT);
+        // The burned share is re-minted to the TREASURY, never the requester —
+        // and this is load-bearing, not a fee. A drand round is public on the
+        // drand network the instant it is emitted, BEFORE anyone relays it into
+        // this vault's beacon (relaying is a separate, permissionless act). So a
+        // requester can compute their own draw off-chain,
+        //     index = keccak256(seed, requester) % frozenLen,
+        // WITHOUT pinning it on-chain. If forfeit refunded the share, a
+        // requester who dislikes that draw could simply never relay the round,
+        // wait out ROUND_EXPIRY, forfeit for a full refund, and retry — a
+        // near-free reroll that cherry-picks rares, defeating the commit-reveal
+        // entirely. Burning the share on forfeit makes declining a draw cost a
+        // full share, which is what makes "frozen means frozen" actually hold.
+        // (We tried refunding the requester and an independent review caught
+        // exactly this; see git history.) Keeps solvency exact: the NFT stays in
+        // the vault, its claim moves to the treasury.
+        _mint(treasury, SHARE_UNIT);
 
         emit RedeemForfeited(requester);
         _assertSolvent();
