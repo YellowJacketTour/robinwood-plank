@@ -145,16 +145,19 @@ test("an explicit OPENSEA_API_KEY wins and is never rotated", async () => {
 
 test("key status never leaks the key itself", async () => {
   const store = new Map<string, unknown>();
+  // 12.5 days, not 12: an exact day boundary makes Math.floor return 11 or 12
+  // depending on how many milliseconds elapse before the assertion, which is a
+  // flake that only shows up on a fast enough machine.
   store.set(KEY, {
     apiKey: "super-secret-value",
-    expiresAt: daysFromNow(12),
+    expiresAt: daysFromNow(12.5),
     issuedAt: Date.now(),
   } satisfies Stored);
   const { openSeaKeyStatus } = await load(store)();
 
   const status = await openSeaKeyStatus();
   assert.equal(status.source, "managed");
-  assert.equal(status.daysRemaining, 11);
+  assert.equal(status.daysRemaining, 12);
   assert.ok(
     !JSON.stringify(status).includes("super-secret-value"),
     "health output must never carry the credential"
