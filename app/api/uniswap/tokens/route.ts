@@ -15,6 +15,26 @@ export async function GET(req: Request) {
   const limited = rateLimit(req, { key: "uniswap-tokens", limit: 120, windowMs: 60_000 });
   if (limited) return limited;
   try {
+    // Registry first: chain-discovered and ranked by real traded volume, so the
+    // picker opens on what people actually trade rather than on an alphabetical
+    // wall of tokenised equities. Falls back to the venue list when the
+    // registry has not been built yet, which keeps a cold cache working.
+    const { readTokenRegistry } = await import("@/lib/market/token-registry");
+    const registry = await readTokenRegistry().catch(() => []);
+    if (registry.length > 0) {
+      const plank = PLANK_TOKEN.address.toLowerCase();
+      const counters = registry
+        .filter((t) => t.address !== plank)
+        .map((t) => ({
+          address: t.address,
+          symbol: t.symbol,
+          name: t.name,
+          decimals: t.decimals,
+          ...(t.logoURI ? { logoURI: t.logoURI } : {}),
+        }));
+      return cachedPublicJson({ plank: PLANK_TOKEN, counters }, "market");
+    }
+
     const counters = await getCounterTokens();
     return cachedPublicJson({ plank: PLANK_TOKEN, counters }, "market");
   } catch (error) {
