@@ -3,9 +3,7 @@ import {
   CONTRACT_ADDRESS,
   DRAND_BEACON_ADDRESS,
   MARKET_OFFER_CURRENCY,
-  MARKET_VAULT_ADDRESS,
   MARKET_VAULT_ADDRESSES,
-  MARKET_VAULT_LEGACY_ADDRESS,
   PERMIT2_ADDRESS,
   SEAPORT_ADDRESS,
   UNIVERSAL_ROUTER_ADDRESS,
@@ -511,7 +509,7 @@ export function assertSafeSwapDestination(to: string, kind: string) {
     return;
   }
   if (kind === "vault") {
-    if (!MARKET_VAULT_ADDRESS && !MARKET_VAULT_LEGACY_ADDRESS) {
+    if (MARKET_VAULT_ADDRESSES.length === 0) {
       throw new Error("No liquidity vault deployed — vault transactions are disabled.");
     }
     if (!vaultDestinations().has(to.toLowerCase())) {

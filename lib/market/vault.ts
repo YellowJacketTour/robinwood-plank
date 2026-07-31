@@ -13,6 +13,7 @@ import {
 } from "@/lib/wallet";
 import { relayDrandRound } from "@/lib/market/drand";
 import { clearPendingVaultTx } from "@/lib/market/pendingVaultTx";
+import { vaultGeneration } from "@/lib/market/vault-registry";
 
 /**
  * Thin wrapper around contracts/MarketplankVault.sol — UNAUDITED, not
@@ -804,19 +805,7 @@ async function getVaultBytecodeAt(addr: string): Promise<string> {
 }
 
 async function getVaultBytecode(): Promise<string> {
-  const addr = requireVaultAddress();
-  const res = await fetch(CHAIN.rpcUrls.default, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "eth_getCode",
-      params: [addr, "latest"],
-    }),
-  });
-  const json = (await res.json()) as { result?: string };
-  return (json.result || "").toLowerCase();
+  return getVaultBytecodeAt(requireVaultAddress());
 }
 
 /** True if the deployed vault bytecode includes contributeLiquidity(uint256). */
@@ -824,7 +813,7 @@ export async function vaultSupportsContributeLiquidity(
   vaultAddress?: string | null
 ): Promise<boolean> {
   try {
-    // selector contributeLiquidity(uint256) = 0xc1244a5c
+    // selector contributeLiquidity(uint256) = 0xc1244a5c (V2's absolute-credit LP)
     const code = vaultAddress
       ? await getVaultBytecodeAt(requireVaultAddress(vaultAddress))
       : await getVaultBytecode();
@@ -834,12 +823,12 @@ export async function vaultSupportsContributeLiquidity(
   }
 }
 
-/** True if removeLiquidity(uint256,uint256) is present (tracked LP withdraw). */
+/** True if removeLiquidity(uint256,uint256) is present (V2's tracked LP withdraw). */
 export async function vaultSupportsRemoveLiquidity(
   vaultAddress?: string | null
 ): Promise<boolean> {
   try {
-    // selector removeLiquidity(uint256,uint256) = 0x9d7de6b3
+    // selector removeLiquidity(uint256,uint256) = 0x9d7de6b3 (V2 signature)
     const code = vaultAddress
       ? await getVaultBytecodeAt(requireVaultAddress(vaultAddress))
       : await getVaultBytecode();
@@ -884,15 +873,25 @@ export type VaultCapabilities = {
   shareTransferLp: boolean;
 };
 
-export async function getVaultCapabilities(): Promise<VaultCapabilities> {
+export async function getVaultCapabilities(
+  vaultAddress?: string | null
+): Promise<VaultCapabilities> {
+  // V3+ (current generation) has proportional LP via addLiquidity /
+  // removeLiquidity(uint256,uint256,uint256) — DIFFERENT selectors than V1/V2,
+  // so read the generation instead of grepping for the old selectors (which
+  // would falsely report a brand-new V3 as having no LP). The precise V3 LP
+  // call wiring lives in the trade/LP UI.
+  if (vaultGeneration(vaultAddress ?? MARKET_VAULT_ADDRESS) >= 3) {
+    return { contributeLiquidity: true, removeLiquidity: true, shareTransferLp: false };
+  }
   const [contributeLiquidity, removeLiquidity] = await Promise.all([
-    vaultSupportsContributeLiquidity(),
-    vaultSupportsRemoveLiquidity(),
+    vaultSupportsContributeLiquidity(vaultAddress),
+    vaultSupportsRemoveLiquidity(vaultAddress),
   ]);
   return {
     contributeLiquidity,
     removeLiquidity,
-    // Any ERC-20 vault can receive shares; live vault uses this for ask-side depth.
+    // Any ERC-20 vault can receive shares; live V1/V2 uses this for ask-side depth.
     shareTransferLp: true,
   };
 }
