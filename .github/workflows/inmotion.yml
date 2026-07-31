@@ -179,16 +179,33 @@ jobs:
           set -euo pipefail
           test "${#UNISWAP_API_KEY}" -ge 16
           port="${INMOTION_PORT:-2222}"
+
+          # Retry SSH/SCP. A deploy has failed on `scp: Connection closed`
+          # (exit 255) with the box under load average 36 — a dropped
+          # connection, not a bad artifact, yet it failed the whole deploy and
+          # left production a commit behind. These are idempotent: the upload
+          # writes to a SHA-named path and the mkdir is -p.
+          retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if "$@"; then return 0; fi
+              echo "::warning::transfer attempt $attempt failed, retrying in $((attempt * 10))s"
+              sleep $((attempt * 10))
+            done
+            echo "::error::transfer failed after 3 attempts"
+            return 1
+          }
+
           runtime_secret="$RUNNER_TEMP/uniswap-api-key"
           umask 077
           printf '%s' "$UNISWAP_API_KEY" > "$runtime_secret"
-          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+          retry ssh -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
             "mkdir -p '$INMOTION_APP_DIR/incoming' '$INMOTION_APP_DIR/shared/runtime-secrets' && chmod 700 '$INMOTION_APP_DIR/shared/runtime-secrets'"
-          scp -i "$HOME/.ssh/inmotion" -P "$port" \
+          retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
             passenger-release.tgz \
             "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/incoming/${RELEASE_SHA}.tgz"
-          scp -i "$HOME/.ssh/inmotion" -P "$port" \
+          retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
             "$runtime_secret" \
             "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.uniswap-api-key.${RELEASE_SHA}"
           rm -f "$runtime_secret"
@@ -199,7 +216,7 @@ jobs:
           if [ -n "${RPC_URL:-}" ]; then
             rpc_secret="$RUNNER_TEMP/rpc-url"
             printf '%s' "$RPC_URL" > "$rpc_secret"
-            scp -i "$HOME/.ssh/inmotion" -P "$port" \
+            retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
               "$rpc_secret" \
               "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.rpc-url.${RELEASE_SHA}"
             rm -f "$rpc_secret"
@@ -210,7 +227,7 @@ jobs:
           if [ -n "${ZEROX_API_KEY:-}" ]; then
             zerox_secret="$RUNNER_TEMP/zerox-api-key"
             printf '%s' "$ZEROX_API_KEY" > "$zerox_secret"
-            scp -i "$HOME/.ssh/inmotion" -P "$port" \
+            retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
               "$zerox_secret" \
               "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.zerox-api-key.${RELEASE_SHA}"
             rm -f "$zerox_secret"
