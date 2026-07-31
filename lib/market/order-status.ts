@@ -1,5 +1,6 @@
 import { Interface } from "ethers";
-import { CHAIN, SEAPORT_ADDRESS } from "@/lib/constants";
+import { SEAPORT_ADDRESS } from "@/lib/constants";
+import { ethCallFree } from "@/lib/market/fetch-rpc";
 
 /**
  * On-chain order liveness, read straight from Seaport.
@@ -49,21 +50,22 @@ type OrderComponentsLike = {
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const ZERO_HASH = "0x" + "0".repeat(64);
 
+/**
+ * Free endpoints, with failover and caching.
+ *
+ * Liveness runs up to six eth_calls per order across the whole book, so this is
+ * the highest-volume server read in the app. It posted to a single hardcoded
+ * public URL: no failover, and no coalescing despite a validation pass asking
+ * the same getCounter for the same offerer repeatedly. ethCallFree keeps it at
+ * zero cost while adding both.
+ *
+ * Deliberately never the metered provider. Liveness gates whether a listing is
+ * shown, so letting it escalate onto a paid endpoint would put a security read
+ * on the bill precisely when the book is busiest.
+ */
 async function ethCallTo(to: string, data: string): Promise<string | null> {
   try {
-    const res = await fetch(CHAIN.rpcUrls.default, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "eth_call",
-        params: [{ to, data }, "latest"],
-      }),
-      cache: "no-store",
-    });
-    const json = (await res.json()) as { result?: string; error?: unknown };
-    return json.result ?? null;
+    return await ethCallFree(to, data);
   } catch {
     return null;
   }
