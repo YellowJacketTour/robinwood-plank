@@ -81,7 +81,14 @@ async function readKv(vault: string): Promise<HeldTokenRow[] | null> {
 async function writeKv(vault: string, rows: HeldTokenRow[]): Promise<void> {
   if (!hasKv()) return;
   try {
-    await kv.set(kvKeyFor(vault), { at: Date.now(), rows }, { ex: 15 * 60 });
+    // No TTL. This row is only ever read as the last-known-good fallback for
+    // when BOTH Blockscout paths fail (see the tail of getVaultHeldTokens), so
+    // a 15-minute expiry meant the fallback was reliably absent during exactly
+    // the outage it exists for — the fence would throw instead of showing the
+    // holdings we already knew. Same rule as migrations 002 and 003: a
+    // last-known-good snapshot is not a disposable request cache. Freshness
+    // comes from the 45s memory cache and the cron, never from expiry.
+    await kv.set(kvKeyFor(vault), { at: Date.now(), rows });
   } catch {
     /* best-effort */
   }

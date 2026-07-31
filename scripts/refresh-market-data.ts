@@ -30,6 +30,7 @@ const explicit = [
   "--opensea",
   "--official-assets",
   "--token-registry",
+  "--owners",
 ].filter((t) => args.has(t));
 
 /** Full runs include the expensive collection-wide rebuilds; incremental ones don't. */
@@ -37,8 +38,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["sales", "vault", "opensea", "official-assets", "token-registry", "rarity", "traits", "collection"]
-      : ["sales", "vault", "opensea", "official-assets", "token-registry"]
+      ? ["sales", "vault", "opensea", "official-assets", "token-registry", "owners", "rarity", "traits", "collection"]
+      : ["sales", "vault", "opensea", "official-assets", "token-registry", "owners"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -154,6 +155,16 @@ async function main(): Promise<void> {
     const tokens = await refreshTokenRegistry();
     const top = tokens.slice(0, 6).map((t) => t.symbol).join(", ");
     return `${tokens.length} tokens — top: ${top}`;
+  });
+
+  // Collection-wide owner snapshot. Keeps /api/market/token off a per-token
+  // ownerOf — measured at ~26 CU per distinct token view, and since every
+  // visitor looks at different tokens no cache could ever absorb it.
+  await step("owners", async () => {
+    const { rebuildOwnerIndex } = await import("../lib/market/owner-index");
+    const { NFT_CONTRACT_ADDRESS } = await import("../lib/mint-contract");
+    const snapshot = await rebuildOwnerIndex(NFT_CONTRACT_ADDRESS);
+    return `${snapshot.count} owners indexed via ${snapshot.source}`;
   });
 
   await step("rarity", async () => {

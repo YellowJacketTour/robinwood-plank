@@ -21,6 +21,69 @@ function resolveStatsVault(vaultAddress?: string | null): string | null {
 
 const IFACE = new Interface(vaultAbi);
 const SHARE_UNIT = BigInt(1_000_000_000_000_000_000);
+
+/**
+ * `mintFeeBps`, `redeemFeeBps` and `targetPremiumBps` are declared `immutable`
+ * in contracts/MarketplankVault.sol — set once in the constructor, with no
+ * setter anywhere. Their value cannot change for the life of the vault.
+ *
+ * They were nonetheless being re-read on every stats refresh, and the vault SSE
+ * stream ticks every 8s (app/api/market/vault/stream/route.ts) — longer than the
+ * 5s rpc-cache TTL, so essentially every tick paid for all three. That is 3 x 26
+ * CU forever, to learn a number that is carved into the bytecode: the same
+ * mistake CONTRIBUTING.md records against MintPanel, in a different file.
+ *
+ * Read once per vault per process, then never again.
+ */
+type ImmutableVaultConfig = {
+  mintFeeBps: number;
+  redeemFeeBps: number;
+  targetPremiumBps: number;
+};
+
+const immutableConfigCache = new Map<string, ImmutableVaultConfig>();
+const immutableConfigInflight = new Map<string, Promise<ImmutableVaultConfig>>();
+
+async function getImmutableVaultConfig(vault: string): Promise<ImmutableVaultConfig> {
+  const key = vault.toLowerCase();
+  const cached = immutableConfigCache.get(key);
+  if (cached) return cached;
+
+  const existing = immutableConfigInflight.get(key);
+  if (existing) return existing;
+
+  const task = (async (): Promise<ImmutableVaultConfig> => {
+    const [mintFeeHex, redeemFeeHex, premiumHex] = await ethCallMany([
+      { to: vault, data: IFACE.encodeFunctionData("mintFeeBps", []) },
+      { to: vault, data: IFACE.encodeFunctionData("redeemFeeBps", []) },
+      { to: vault, data: IFACE.encodeFunctionData("targetPremiumBps", []) },
+    ]);
+    const config: ImmutableVaultConfig = {
+      mintFeeBps: Number(IFACE.decodeFunctionResult("mintFeeBps", mintFeeHex)[0]),
+      redeemFeeBps: Number(IFACE.decodeFunctionResult("redeemFeeBps", redeemFeeHex)[0]),
+      targetPremiumBps: Number(
+        IFACE.decodeFunctionResult("targetPremiumBps", premiumHex)[0]
+      ),
+    };
+    // Only pin a plausible read. A malformed/empty decode returning 0 across the
+    // board would otherwise be frozen in for the process lifetime.
+    if (Number.isFinite(config.mintFeeBps) && Number.isFinite(config.redeemFeeBps)) {
+      immutableConfigCache.set(key, config);
+    }
+    return config;
+  })().finally(() => {
+    immutableConfigInflight.delete(key);
+  });
+
+  immutableConfigInflight.set(key, task);
+  return task;
+}
+
+/** Test/ops hook — lets a test prove the second read costs nothing. */
+export function clearImmutableVaultConfigCache(): void {
+  immutableConfigCache.clear();
+  immutableConfigInflight.clear();
+}
 /** Below this many hours of observed fee events, annualized APR is noisy.
  * Young vaults still get a number once we have ≥1h of deposit/redeem history
  * so Instant Swap isn't stuck on "—" after a day of real volume. */
@@ -106,17 +169,17 @@ export async function getVaultStats(
   const vault = resolveStatsVault(vaultAddress);
   if (!vault) return null;
 
-  // One batched eth_call round-trip (Workers-safe fetch) + optional USD price.
-  const [coreHexes, ethUsd] = await Promise.all([
+  // Only the four values that can actually change are re-read. The three
+  // immutable fee/premium getters come from getImmutableVaultConfig, which
+  // reads them once per process — see the note on that function.
+  const [coreHexes, immutableConfig, ethUsd] = await Promise.all([
     ethCallMany([
       { to: vault, data: IFACE.encodeFunctionData("ethReserve", []) },
       { to: vault, data: IFACE.encodeFunctionData("balanceOf", [vault]) },
       { to: vault, data: IFACE.encodeFunctionData("heldTokenCount", []) },
       { to: vault, data: IFACE.encodeFunctionData("poolOpen", []) },
-      { to: vault, data: IFACE.encodeFunctionData("mintFeeBps", []) },
-      { to: vault, data: IFACE.encodeFunctionData("redeemFeeBps", []) },
-      { to: vault, data: IFACE.encodeFunctionData("targetPremiumBps", []) },
     ]),
+    getImmutableVaultConfig(vault),
     withTimeout(
       getEthUsdPrice().then((p) => p.usd || null),
       2_000,
@@ -124,23 +187,13 @@ export async function getVaultStats(
       "eth-usd"
     ),
   ]);
-  const [
-    ethReserveHex,
-    shareReserveHex,
-    heldCountHex,
-    poolOpenHex,
-    mintFeeHex,
-    redeemFeeHex,
-    premiumHex,
-  ] = coreHexes;
+  const [ethReserveHex, shareReserveHex, heldCountHex, poolOpenHex] = coreHexes;
 
   const ethReserveWei = BigInt(IFACE.decodeFunctionResult("ethReserve", ethReserveHex)[0]);
   const shareReserveWei = BigInt(IFACE.decodeFunctionResult("balanceOf", shareReserveHex)[0]);
   const heldTokenCount = Number(IFACE.decodeFunctionResult("heldTokenCount", heldCountHex)[0]);
   const poolOpen = Boolean(IFACE.decodeFunctionResult("poolOpen", poolOpenHex)[0]);
-  const mintFeeBps = Number(IFACE.decodeFunctionResult("mintFeeBps", mintFeeHex)[0]);
-  const redeemFeeBps = Number(IFACE.decodeFunctionResult("redeemFeeBps", redeemFeeHex)[0]);
-  const targetPremiumBps = Number(IFACE.decodeFunctionResult("targetPremiumBps", premiumHex)[0]);
+  const { mintFeeBps, redeemFeeBps, targetPremiumBps } = immutableConfig;
 
   const sharePriceWei =
     shareReserveWei > BigInt(0) ? (ethReserveWei * BigInt(1_000_000_000_000_000_000)) / shareReserveWei : null;
