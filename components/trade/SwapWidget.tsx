@@ -50,7 +50,7 @@ function isDutchRouting(routing: string): boolean {
 
 /** Same connect surface the market uses (WalletConnect QR + extension) —
  * loaded on demand; the WC runtime itself only loads on "Show QR". */
-const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModal"), {
+const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModalSwitch"), {
   ssr: false,
 });
 
