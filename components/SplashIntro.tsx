@@ -2,6 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import {
+  INTRO_FALLBACK,
+  sanitizeIntro,
+  type IntroPhrase,
+} from "@/lib/content-docs";
 
 /**
  * Owner direction (2026-07-30): the "Nailing the planks" intro must play on
@@ -26,6 +31,30 @@ const FADE_OUT_MS = 500;
 const REDUCED_MOTION_MIN_MS = 450;
 
 const TOTAL_SUPPLY = 1542;
+
+/**
+ * CMS phrase rotation (admin-managed at /admin → Content). The splash must
+ * paint on the FIRST frame, so it never waits on a fetch: each visit reads
+ * the phrase list synchronously from localStorage (cached by the previous
+ * visit) and refreshes the cache in the background for next time. First-ever
+ * visit uses the built-in default.
+ */
+const INTRO_CACHE_KEY = "plank-intro-doc-v1";
+
+function pickCachedPhrase(): IntroPhrase {
+  const fallback = INTRO_FALLBACK.phrases[0];
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(INTRO_CACHE_KEY);
+    if (!raw) return fallback;
+    const parsed = sanitizeIntro(JSON.parse(raw));
+    if (!parsed.ok || parsed.value.phrases.length === 0) return fallback;
+    const phrases = parsed.value.phrases;
+    return phrases[Math.floor(Math.random() * phrases.length)];
+  } catch {
+    return fallback;
+  }
+}
 
 /** The plank CHARACTER only — the plain hand-drawn smiley plank (owner
  * direction: never the NFT collection art here; its colored square
@@ -64,6 +93,11 @@ export default function SplashIntro() {
     pathname === "/" ? "playing" : "hidden"
   );
   const [reducedMotion, setReducedMotion] = useState(false);
+  // Server markup always carries the default phrase (localStorage can't be
+  // read during render without a hydration mismatch); the cached pick lands
+  // right after hydration, well inside the splash's 3.2s hold.
+  const [phrase, setPhrase] = useState<IntroPhrase>(INTRO_FALLBACK.phrases[0]);
+  const isDefaultPhrase = phrase === INTRO_FALLBACK.phrases[0];
   const pageLoadedRef = useRef(false);
   const minTimeElapsedRef = useRef(false);
   const dismissedRef = useRef(false);
@@ -84,6 +118,35 @@ export default function SplashIntro() {
   };
   const tryFinishRef = useRef(tryFinish);
   tryFinishRef.current = tryFinish;
+
+  // Pick this visit's phrase from the cache, then refresh the cache for the
+  // next visit. Fetch failures leave the cache (and the default) untouched.
+  useEffect(() => {
+    if (!isHome) return;
+    // One-time client-only localStorage hydration — the same pattern (and
+    // suppression) as WoodAmpProvider's stored-mute restore.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPhrase(pickCachedPhrase());
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const res = await fetch("/api/content/intro", {
+          signal: controller.signal,
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { doc?: unknown };
+        const parsed = sanitizeIntro(data.doc);
+        if (!parsed.ok) return;
+        window.localStorage.setItem(
+          INTRO_CACHE_KEY,
+          JSON.stringify(parsed.value)
+        );
+      } catch {
+        // Offline — keep the previous cache.
+      }
+    })();
+    return () => controller.abort();
+  }, [isHome]);
 
   useEffect(() => {
     // Homepage only — every other route (Trade, Market, Gallery, Learn,
@@ -182,7 +245,7 @@ export default function SplashIntro() {
 
       <div className="relative z-[1] flex flex-col items-center gap-5 px-5 text-center">
         <p className="text-[0.68rem] font-black uppercase tracking-[0.24em] text-gold-300/90">
-          Warming the workshop
+          {phrase.eyebrow}
         </p>
 
         <div className="relative flex h-[148px] w-[min(360px,82vw)] items-end justify-center" aria-hidden="true">
@@ -224,14 +287,22 @@ export default function SplashIntro() {
           <span className={reducedMotion ? "" : "splash-hammer inline-block"} aria-hidden="true">
             🔨
           </span>{" "}
-          Nailing the planks
+          {phrase.headline}
         </h1>
-        <p className="max-w-xs text-sm font-bold text-cream-muted">
-          The fence is almost up — <strong className="text-gold-400">
-            {TOTAL_SUPPLY.toLocaleString()} RobinWood Planks
-          </strong>{" "}
-          are waiting on the other side.
-        </p>
+        {isDefaultPhrase ? (
+          // The built-in phrase keeps its richer markup (gold supply count);
+          // CMS phrases are plain text by design.
+          <p className="max-w-xs text-sm font-bold text-cream-muted">
+            The fence is almost up — <strong className="text-gold-400">
+              {TOTAL_SUPPLY.toLocaleString()} RobinWood Planks
+            </strong>{" "}
+            are waiting on the other side.
+          </p>
+        ) : (
+          <p className="max-w-xs text-sm font-bold text-cream-muted">
+            {phrase.subline}
+          </p>
+        )}
 
         <div className="h-2 w-[min(280px,70vw)] overflow-hidden rounded-full border border-line-strong bg-wood-950">
           <div

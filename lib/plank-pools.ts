@@ -36,6 +36,7 @@ type DexScreenerPair = {
   liquidity?: { usd?: number };
   volume?: { h24?: number };
   priceChange?: { h24?: number };
+  fdv?: number;
   txns?: { h24?: { buys?: number; sells?: number } };
   pairCreatedAt?: number;
   url?: string;
@@ -96,6 +97,10 @@ async function fetchPoolsFresh(): Promise<PlankPoolsSummary> {
       liquidityUsd: toNumberOrNull(p.liquidity?.usd),
       volumeUsd24h: toNumberOrNull(p.volume?.h24),
       priceChangePct24h: toNumberOrNull(p.priceChange?.h24),
+      // DexScreener's FDV for this pair — cross-check input only. See the
+      // field's doc comment in lib/plank-price-types.ts for why its sibling
+      // `marketCap` field is intentionally not carried across.
+      fdvUsd: toNumberOrNull(p.fdv),
       txns24h: p.txns?.h24
         ? { buys: Number(p.txns.h24.buys) || 0, sells: Number(p.txns.h24.sells) || 0 }
         : null,

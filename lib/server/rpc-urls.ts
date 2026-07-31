@@ -18,3 +18,59 @@ export const SERVER_RPC_URLS: string[] = Array.from(
     )
   )
 );
+
+/**
+ * Ordered RPC list for the /api/rpc browser proxy — public endpoint FIRST,
+ * keyed provider only as fallback. The reverse of SERVER_RPC_URLS, deliberately.
+ *
+ * That proxy exists solely because the public RPC sends a malformed duplicate
+ * `Access-Control-Allow-Origin: *,*` header that browsers reject; it is a CORS
+ * shim, not a quality upgrade. Sending browser display reads through the metered
+ * provider meant every anonymous visitor's gallery scroll was billed, while a
+ * connected wallet would have read the very same public endpoint for free —
+ * chain 4663 is registered in wallets with this exact URL, so "route through the
+ * wallet" and "route through the public RPC" reach the same node either way.
+ *
+ * Reads that a decision depends on — ownership checks, order validation,
+ * signature verification — keep using SERVER_RPC_URLS. Those must not be at the
+ * mercy of a rate-limited public endpoint, and must never be sourced from
+ * anything a user could control.
+ *
+ * Worst case here is a 429 from the public node, which falls through to the
+ * keyed provider: the same request we would have made anyway.
+ */
+/**
+ * Free endpoints only — the public Robinhood RPC and the Blockscout eth-rpc
+ * bridge. Never the keyed provider.
+ *
+ * For reads that must not cost anything but should still survive one endpoint
+ * failing. Ownership checks behind order validation are the case this exists
+ * for: they were posting directly to a single hardcoded public URL with no
+ * failover, no coalescing and no metering. Routing them through here keeps them
+ * free, adds a second endpoint to fall through to, and lets rpc-cache collapse
+ * the duplicate reads a whole-book validation pass generates.
+ *
+ * Deliberately NOT the keyed provider, even as a last resort: a security read
+ * silently escalating onto a metered endpoint under load is how a rate-limit
+ * incident turns into a billing one.
+ */
+export const FREE_RPC_URLS: string[] = Array.from(new Set(ROBINHOOD_RPC_URLS));
+
+/**
+ * True when this URL is the metered provider, i.e. calls to it cost compute
+ * units. The public Robinhood endpoints are free, so counting them would make
+ * the rpc-usage meter overstate spend and hide the effect of moving traffic off
+ * the paid provider.
+ */
+export function isMeteredRpcUrl(url: string): boolean {
+  const keyed = process.env.RPC_URL?.trim();
+  return Boolean(keyed && url === keyed);
+}
+
+export const CLIENT_PROXY_RPC_URLS: string[] = Array.from(
+  new Set(
+    [...ROBINHOOD_RPC_URLS, process.env.RPC_URL?.trim()].filter(
+      (url): url is string => Boolean(url && url.length > 0)
+    )
+  )
+);

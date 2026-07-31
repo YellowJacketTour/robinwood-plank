@@ -135,7 +135,8 @@ If application health fails, the code rolls back but the schema does not.
 - The relayer key is gas-only and cron-only. It must not be loaded by
   Passenger.
 - The Uniswap key is installed separately from the release archive.
-- Use read-only Upstash credentials for inventory and migration.
+- PostgreSQL is the only datastore. Do not add `KV_REST_API_*`, `@vercel/kv`,
+  or `REDIS_URL` — those paths are dead legacy and are being removed.
 
 When adding a variable, update the relevant example file, README table,
 deployment runbook, workflow input, and validation code in the same pull
@@ -157,6 +158,38 @@ For wallet flows:
 - test rejection, wrong-chain, insufficient-funds, and reverted-transaction
   paths; and
 - verify both desktop extension and mobile WalletConnect behavior.
+
+## Chain reads and provider budget
+
+The RPC provider bills per call, in compute units, against a fixed monthly
+allowance. Cost scales with (open tabs) x (poll rate), so a single careless
+interval can consume the whole month. This has already happened once: MintPanel
+re-read twelve immutable getters every 60s per tab — about 13.5M compute units a
+month for one open tab, against a 30M allowance — to poll values that could not
+change on a sold-out collection.
+
+Rules:
+
+- **Never add a bare `setInterval` that hits the chain.** Use
+  `startVisibleInterval` so a backgrounded tab stops polling, and stop entirely
+  once the data is known to be final.
+- **Ask whether the value can actually change.** Sold-out supply, mined
+  receipts, and fixed-height blocks are immutable. Read them once.
+- **Route every read through `lib/market/fetch-rpc.ts` or `/api/rpc`.** Both go
+  through `lib/market/rpc-cache.ts`, which collapses identical concurrent reads
+  and serves repeats within a short TTL. A read that bypasses them bypasses the
+  only spend limiter in the app.
+- **Do not cache writes or nonces.** `NEVER_CACHE` in `rpc-cache.ts` covers
+  this; extend it rather than working around it.
+- **Prefer Blockscout or IPFS** for bulk history and metadata. Both are keyless
+  and unmetered; `eth_getLogs` is the most expensive method the app uses.
+- **Move expensive rebuilds to the cron** (`scripts/refresh-market-data.ts`)
+  rather than doing them on a user request.
+
+Check the effect of a change with `GET /api/market/rpc-usage`, which reports
+calls, compute units, projected monthly spend, and cache effectiveness for the
+responding worker. Take a delta over a few minutes rather than reading a single
+sample — a freshly restarted worker is cold-start biased.
 
 ## UI acceptance
 

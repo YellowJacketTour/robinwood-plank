@@ -1,7 +1,10 @@
 import { BrowserProvider, Contract, Interface, JsonRpcProvider, parseEther } from "ethers";
 import vaultAbi from "@/lib/market/vault-abi.json";
 import { CHAIN, MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } from "@/lib/constants";
-import { MARKET_COLLECTIONS } from "@/lib/market/collections";
+import {
+  collectionVaultAddresses,
+  MARKET_COLLECTIONS,
+} from "@/lib/market/collections";
 import {
   ensureRobinhoodChain,
   getEthereumProvider,
@@ -37,17 +40,26 @@ const ERC721_IFACE = new Interface([
   "function approve(address to, uint256 tokenId)",
 ]);
 
+/** Vault addresses this build trusts: the env-derived primary/legacy pair
+ * plus every vault linked from a collection entry — so a per-collection
+ * vault is accepted the moment its collection entry ships, no env change. */
+function trustedVaultAddresses(): string[] {
+  const out = MARKET_VAULT_ADDRESSES.map((a) => a.toLowerCase());
+  for (const address of collectionVaultAddresses()) {
+    if (!out.includes(address)) out.push(address);
+  }
+  return out;
+}
+
 /** Default primary; pass an explicit address for legacy vault ops. */
 function requireVaultAddress(vaultAddress?: string | null): string {
   if (vaultAddress) {
     if (!/^0x[0-9a-fA-F]{40}$/.test(vaultAddress)) {
       throw new Error("Invalid vault address.");
     }
-    if (
-      MARKET_VAULT_ADDRESSES.length > 0 &&
-      !MARKET_VAULT_ADDRESSES.some((a) => a.toLowerCase() === vaultAddress.toLowerCase())
-    ) {
-      throw new Error("That vault address is not configured (primary/legacy).");
+    const trusted = trustedVaultAddresses();
+    if (trusted.length > 0 && !trusted.includes(vaultAddress.toLowerCase())) {
+      throw new Error("That vault address is not configured for any collection.");
     }
     return vaultAddress;
   }

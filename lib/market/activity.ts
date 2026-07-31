@@ -90,13 +90,14 @@ export type ActivityEvent = {
    *   (deposit vs redeem) is visible from `from`/`to` already on this event.
    * null — a plain wallet-to-wallet transfer, no contract intermediary.
    *
-   * NOTE ON SCOPE: this only ever sees activity that happens ON THIS CHAIN
-   * (Robinhood Chain, id 4663). It cannot and does not claim to see trades
-   * on OpenSea/Blur/Magic Eden/etc. on OTHER chains — those platforms would
-   * need to explicitly index this custom chain (they do not today, per
-   * research: Reservoir/NFTGo-style aggregators cover 60+ established chains
-   * but not a brand-new bespoke L3 unless they explicitly add it). That is a
-   * business-outreach question, not a code gap.
+   * NOTE ON SCOPE: this only ever sees activity that happens ON THIS CHAIN.
+   * Robinhood Chain is an Arbitrum Layer-2 on Ethereum (chain id 4663, ETH gas,
+   * Ethereum blobs for data availability — docs.robinhood.com/chain), mainnet
+   * live since July 2026. It cannot and does not claim to see trades on
+   * OpenSea/Blur/Magic Eden/etc. on OTHER chains; an NFT aggregator has to index
+   * this chain explicitly before its listings could appear here. Verify current
+   * coverage before assuming either way — this is a business-outreach question,
+   * not a code gap.
    */
   venue: { kind: "marketplank" | "seaport" | "vault" | "other"; contract: string } | null;
 };

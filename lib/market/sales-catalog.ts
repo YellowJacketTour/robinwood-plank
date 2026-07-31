@@ -9,6 +9,7 @@ import {
   fetchTxTokenTransfers,
   fetchTransaction,
 } from "@/lib/market/blockscout";
+import { ethCall } from "@/lib/market/fetch-rpc";
 
 /**
  * Royalty-aware marketplace sales catalog for RobinWood.
@@ -22,13 +23,85 @@ import {
  */
 
 export const SALES_KV_KEY = "plank:market:sales-catalog-v2";
-const SALES_KV_TTL = 7 * 24 * 60 * 60;
 
+/**
+ * Deliberately stored with no TTL, like the rarity and vault-activity
+ * snapshots (see migration 002_preserve_market_snapshots.sql). This used to
+ * expire after 7 days with nothing scheduled to rebuild it, so Highest sale,
+ * volume and sale history silently went blank a week after the last manual
+ * seed and stayed blank. A stale catalog is worth far more than an empty one;
+ * the scheduled refresh keeps it current.
+ */
+
+/** Rebuild-on-miss is bounded so a cold request can't hang on Blockscout. */
+const COLD_BUILD_TRANSFER_PAGES = 12;
+const COLD_BUILD_TX_DETAIL = 60;
+/** Don't retry a failed or empty cold build on every single request. */
+const COLD_BUILD_RETRY_MS = 5 * 60 * 1000;
+
+let coldBuildInflight: Promise<SalesCatalogBlob | null> | null = null;
+let lastColdBuildAt = 0;
+
+/**
+ * Fallbacks only. The live values come from royaltyInfo() on-chain via
+ * resolveRoyaltyConfig() — if the collection ever changes its receiver or rate,
+ * a hardcoded pair here would silently reject every subsequent sale (the
+ * royalty gate would never match) and the catalog would quietly stop growing.
+ */
 /** EIP-2981 royaltyInfo(1, 1e18) on RobinWood — receiver. */
 export const ROYALTY_RECEIVER = "0x269a93ec8486fbc3a82e352430e84fd8af8ebb0d";
 
 /** Royalty bps implied by royaltyInfo(1, 1 ether) = 0.081 ether → 810 bps. */
 export const ROYALTY_BPS = 810;
+
+export type RoyaltyConfig = { receiver: string; bps: number };
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+/** royaltyInfo(uint256,uint256) */
+const ROYALTY_INFO_SELECTOR = "0x2a55205a";
+const ROYALTY_CACHE_MS = 60 * 60 * 1000;
+const ONE_ETH = BigInt("1000000000000000000");
+
+let royaltyCache: { at: number; config: RoyaltyConfig } | null = null;
+
+/**
+ * EIP-2981 royaltyInfo(tokenId=1, salePrice=1 ether) on the collection.
+ * Falls back to the constants above when the call fails, so a flaky RPC
+ * degrades to the previous behaviour rather than emptying the catalog.
+ */
+export async function resolveRoyaltyConfig(): Promise<RoyaltyConfig> {
+  if (royaltyCache && Date.now() - royaltyCache.at < ROYALTY_CACHE_MS) {
+    return royaltyCache.config;
+  }
+  const fallback: RoyaltyConfig = {
+    receiver: ROYALTY_RECEIVER.toLowerCase(),
+    bps: ROYALTY_BPS,
+  };
+  try {
+    const encoded =
+      ROYALTY_INFO_SELECTOR +
+      BigInt(1).toString(16).padStart(64, "0") +
+      ONE_ETH.toString(16).padStart(64, "0");
+    const raw = await ethCall(NFT_CONTRACT_ADDRESS, encoded);
+    const body = raw.startsWith("0x") ? raw.slice(2) : raw;
+    if (body.length < 128) throw new Error("short royaltyInfo response");
+    const receiver = `0x${body.slice(24, 64)}`.toLowerCase();
+    const amount = BigInt(`0x${body.slice(64, 128)}`);
+    const bps = Number((amount * BigInt(10_000)) / ONE_ETH);
+    if (!/^0x[0-9a-f]{40}$/.test(receiver) || receiver === ZERO_ADDRESS) {
+      throw new Error("royaltyInfo returned no receiver");
+    }
+    if (!Number.isFinite(bps) || bps <= 0 || bps > 10_000) {
+      throw new Error(`royaltyInfo returned implausible bps ${bps}`);
+    }
+    const config = { receiver, bps };
+    royaltyCache = { at: Date.now(), config };
+    return config;
+  } catch {
+    royaltyCache = { at: Date.now(), config: fallback };
+    return fallback;
+  }
+}
 
 export type SaleRecord = {
   txHash: string;
@@ -73,7 +146,11 @@ function platformFromMethod(method: string): string {
   return "marketplace";
 }
 
-export async function readSalesCatalog(): Promise<SalesCatalogBlob | null> {
+/**
+ * Read whatever is in durable KV, without rebuilding. Callers that render the
+ * catalog should use readSalesCatalog() instead.
+ */
+export async function readStoredSalesCatalog(): Promise<SalesCatalogBlob | null> {
   if (!hasKv()) return null;
   try {
     // Prefer v2; fall back to v1 flat map for migration display
@@ -119,13 +196,87 @@ export async function readSalesCatalog(): Promise<SalesCatalogBlob | null> {
   return null;
 }
 
+/**
+ * The catalog as consumers should see it: stored copy when present, otherwise
+ * one bounded rebuild that is persisted for everyone after it.
+ *
+ * Previously a KV miss just returned null forever — nothing in the request
+ * path ever rebuilt this, unlike the rarity snapshot and trait index. Combined
+ * with the old 7-day TTL that meant the sale surfaces went permanently blank.
+ */
+export async function readSalesCatalog(): Promise<SalesCatalogBlob | null> {
+  const stored = await readStoredSalesCatalog();
+  if (stored?.sales?.length) return stored;
+  if (!hasKv()) return stored;
+
+  if (coldBuildInflight) return coldBuildInflight;
+  if (Date.now() - lastColdBuildAt < COLD_BUILD_RETRY_MS) return stored;
+
+  coldBuildInflight = (async () => {
+    lastColdBuildAt = Date.now();
+    try {
+      const built = await buildRoyaltySalesCatalog({
+        maxTransferPages: COLD_BUILD_TRANSFER_PAGES,
+        maxTxDetail: COLD_BUILD_TX_DETAIL,
+      });
+      // Union rather than replace, for the same reason the cron does.
+      const merged = mergeSalesCatalogs(stored, built);
+      if (!merged.sales.length) return stored;
+      await writeSalesCatalog(merged);
+      return merged;
+    } catch {
+      return stored;
+    } finally {
+      coldBuildInflight = null;
+    }
+  })();
+
+  return coldBuildInflight;
+}
+
 export async function writeSalesCatalog(blob: SalesCatalogBlob): Promise<void> {
   if (!hasKv()) return;
   try {
-    await kv.set(SALES_KV_KEY, blob, { ex: SALES_KV_TTL });
+    // No TTL — see the note on SALES_KV_KEY.
+    await kv.set(SALES_KV_KEY, blob);
   } catch {
     /* */
   }
+}
+
+/**
+ * Union two catalogs by (txHash, tokenId), newest-priced-first.
+ *
+ * A settled sale is a historical fact — it cannot stop having happened. Rebuilds
+ * walk a bounded number of Blockscout pages and tolerate a mid-walk failure, so
+ * any single build can legitimately return fewer sales than the stored copy.
+ * Replacing rather than merging would let one short upstream walk silently
+ * delete confirmed sales from Highest sale, volume and history.
+ */
+export function mergeSalesCatalogs(
+  ...blobs: Array<SalesCatalogBlob | null | undefined>
+): SalesCatalogBlob {
+  const byKey = new Map<string, SaleRecord>();
+  for (const blob of blobs) {
+    for (const sale of blob?.sales ?? []) {
+      if (!sale?.txHash || sale.tokenId == null) continue;
+      const key = `${sale.txHash.toLowerCase()}:${sale.tokenId}`;
+      const prev = byKey.get(key);
+      // Prefer the record carrying a timestamp/block, which a fuller walk has.
+      if (!prev || (!prev.timestamp && sale.timestamp)) byKey.set(key, sale);
+    }
+  }
+  const sales = [...byKey.values()].sort((a, b) => {
+    try {
+      const aw = BigInt(a.priceWei);
+      const bw = BigInt(b.priceWei);
+      if (aw === bw) return b.blockNumber - a.blockNumber;
+      return aw > bw ? -1 : 1;
+    } catch {
+      return 0;
+    }
+  });
+  return { version: 2, sales, updatedAt: Date.now() };
 }
 
 export function statsFromCatalog(blob: SalesCatalogBlob | null): {
@@ -188,15 +339,16 @@ export async function priceRoyaltySaleTx(
   hintMethod?: string | null
 ): Promise<SaleRecord[]> {
   if (!txHash || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) return [];
-  const [tx, moves] = await Promise.all([
+  const [tx, moves, royalty] = await Promise.all([
     fetchTransaction(txHash),
     fetchTxTokenTransfers(txHash),
+    resolveRoyaltyConfig(),
   ]);
   if (!moves.length) return [];
 
   const nft = NFT_CONTRACT_ADDRESS.toLowerCase();
   const weth = (MARKET_OFFER_CURRENCY || "").toLowerCase();
-  const roy = ROYALTY_RECEIVER.toLowerCase();
+  const roy = royalty.receiver;
 
   const nftMoves = moves.filter((m) => {
     const addr = (m.token?.address_hash || m.token?.address || "").toLowerCase();
@@ -231,7 +383,7 @@ export async function priceRoyaltySaleTx(
   }
 
   // Sale price: prefer WETH consideration sum, else native ETH (listing fills).
-  let totalPrice = wethTotal > BigInt(0) ? wethTotal : nativeWei;
+  const totalPrice = wethTotal > BigInt(0) ? wethTotal : nativeWei;
   if (totalPrice <= BigInt(0)) return [];
 
   // Royalty gate:
@@ -240,7 +392,7 @@ export async function priceRoyaltySaleTx(
   //    royalty in consideration; if we only see native value, accept when
   //    method is marketplace and price is non-trivial — still require either
   //    royalty leg OR method is a known marketplace fulfill).
-  const expectedRoy = (totalPrice * BigInt(ROYALTY_BPS)) / BigInt(10_000);
+  const expectedRoy = (totalPrice * BigInt(royalty.bps)) / BigInt(10_000);
   const method = (hintMethod || tx?.method || "").toLowerCase();
   const hasExplicitRoyalty = royaltyWei > BigInt(0);
   // Allow small variance (±20%) on expected royalty if we only have total price
