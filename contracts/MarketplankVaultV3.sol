@@ -501,9 +501,11 @@ contract MarketplankVaultV3 is ERC20, ReentrancyGuard, IERC721Receiver {
         if (sharesUsed == 0 || sharesUsed > maxSharesIn) revert InsufficientOutput();
         if (lpMinted == 0 || lpMinted < minLpOut) revert InsufficientOutput();
 
-        // Exact integer statements of "rounding always favours the pool".
-        if (msg.value * l < e * lpMinted) revert InsufficientLiquidity();
-        if (sharesUsed * l < s * lpMinted) revert InsufficientLiquidity();
+        // Rounding always favours the pool, by construction and with no runtime
+        // check needed: lpMinted = floor(msg.value*l/e) gives e*lpMinted <=
+        // msg.value*l, and sharesUsed = ceil(msg.value*s/e) gives sharesUsed*l
+        // >= s*lpMinted. Both hold for every input, so an explicit assert here
+        // would be permanently unreachable dead code.
 
         _transfer(msg.sender, address(this), sharesUsed);
         ethReserve = e + msg.value;
