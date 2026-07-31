@@ -126,6 +126,35 @@ async function fetchChainTokens(): Promise<CounterToken[]> {
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
 }
 
+/**
+ * Push tokenised equities to the end of the picker.
+ *
+ * 95 of the 103 tokens on this chain's Uniswap list are Robinhood stock
+ * tokens, so a plain alphabetical sort opens the picker on AAOI, AAPL, AMAT,
+ * AMD, AMZN — a wall of tickers. That is the wrong first impression for an
+ * audience here to trade $PLANK and other chain-native tokens; equities are a
+ * thing this chain happens to carry, not what these users came for.
+ *
+ * Nothing is hidden — every stock token is still listed and still searchable
+ * by symbol. They simply stop crowding out the first screen.
+ *
+ * Uses Robinhood's own registry to identify them, which is exact. If it has
+ * not been fetched yet the order falls back to plain alphabetical, so a cold
+ * cache degrades to today's behaviour rather than to something arbitrary.
+ */
+export function demoteEquities<T extends { address: string }>(
+  tokens: T[],
+  equityAddresses: Set<string>
+): T[] {
+  if (equityAddresses.size === 0) return tokens;
+  const rest: T[] = [];
+  const equities: T[] = [];
+  for (const t of tokens) {
+    (equityAddresses.has(t.address.toLowerCase()) ? equities : rest).push(t);
+  }
+  return [...rest, ...equities];
+}
+
 /** Core money tokens first (deduped against the fetched list), then the
  * official chain tokens. The core set survives upstream-list outages — it
  * must never disappear just because tokens.uniswap.org is down. */
@@ -137,17 +166,30 @@ function withCore(tokens: CounterToken[]): CounterToken[] {
 
 /** Native ETH + core money tokens first, then the official chain tokens.
  * Never includes PLANK. */
+/** Addresses of tokenised equities, from Robinhood's own registry. */
+async function equityAddresses(): Promise<Set<string>> {
+  try {
+    const { readOfficialAssets } = await import("@/lib/market/robinhood-assets");
+    return new Set((await readOfficialAssets()).map((a) => a.address));
+  } catch {
+    return new Set();
+  }
+}
+
 export async function getCounterTokens(): Promise<CounterToken[]> {
+  // withCore pins ETH/WETH/USDG at the front; demoteEquities only reorders
+  // what follows, so the core money tokens stay first either way.
+  const equities = await equityAddresses();
   if (cache && Date.now() - cache.at < TTL_MS) {
-    return withCore(cache.tokens);
+    return demoteEquities(withCore(cache.tokens), equities);
   }
   try {
     const tokens = await fetchChainTokens();
     cache = { at: Date.now(), tokens };
-    return withCore(tokens);
+    return demoteEquities(withCore(tokens), equities);
   } catch {
     // Stale-if-error, else ETH+core-only (pre-feature behavior plus core).
-    if (cache) return withCore(cache.tokens);
+    if (cache) return demoteEquities(withCore(cache.tokens), equities);
     return withCore([]);
   }
 }

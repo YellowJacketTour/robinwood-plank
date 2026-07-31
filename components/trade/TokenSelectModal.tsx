@@ -19,6 +19,18 @@ export type CounterTokenEntry = {
    * on-chain ERC20 metadata, never curated. Never set for anything in the
    * server's list. */
   unverified?: boolean;
+  /**
+   * Robinhood lists this exact contract on this chain (lib/market/robinhood-assets.ts).
+   * The issuer's own answer, so it outranks every heuristic.
+   */
+  official?: boolean;
+  /**
+   * Another result in the same search shares this symbol, and nothing
+   * authoritative separates them. Set on all of them — the risk is that the
+   * top row looks like the answer when it is only a marginally higher holder
+   * count.
+   */
+  ambiguousSymbol?: boolean;
 };
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
@@ -652,7 +664,29 @@ export default function TokenSelectModal({
                     <span className="flex min-w-0 items-center gap-3">
                       <TokenIcon symbol={t.symbol} logoURI={t.logoURI} size={34} />
                       <span className="min-w-0">
-                        <span className="block truncate text-sm font-bold text-cream">{t.name}</span>
+                        <span className="flex items-center gap-1.5 truncate">
+                          <span className="truncate text-sm font-bold text-cream">{t.name}</span>
+                          {t.official && (
+                            /* Robinhood lists this exact contract on this chain.
+                               Authority, not a heuristic — see lib/market/robinhood-assets.ts. */
+                            <span
+                              title="Listed by Robinhood on this chain"
+                              className="inline-flex shrink-0 items-center rounded-full bg-[#58BDF0]/15 px-1.5 py-0.5 text-[0.5rem] font-black uppercase tracking-wider text-[#58BDF0]"
+                            >
+                              Official
+                            </span>
+                          )}
+                        </span>
+                        {t.ambiguousSymbol && (
+                          /* Several results share this symbol and nothing
+                             authoritative separates them. Saying so is more
+                             use than a confident-looking ordering: the first
+                             row is not evidence. */
+                          <span className="flex items-center gap-1 text-[0.6rem] text-amber-300/90">
+                            <AlertTriangle size={10} className="shrink-0" aria-hidden />
+                            Several tokens use this symbol — check the address
+                          </span>
+                        )}
                         <span className="flex items-center gap-1.5 truncate text-[0.7rem] text-cream-muted">
                           <span className="font-bold">{t.symbol}</span>
                           {!isNative && (
