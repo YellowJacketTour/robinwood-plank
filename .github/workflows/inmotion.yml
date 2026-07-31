@@ -72,6 +72,14 @@ jobs:
       NEXT_PUBLIC_TRADE_OPENS_AT: ${{ vars.NEXT_PUBLIC_TRADE_OPENS_AT || '2026-07-25T21:20:00.000Z' }}
       NEXT_PUBLIC_TRADE_PAUSED: ${{ vars.NEXT_PUBLIC_TRADE_PAUSED || 'false' }}
       NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ vars.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID }}
+      # Feature flags baked into the client bundle at build time. These are
+      # repository VARIABLES, not secrets — NEXT_PUBLIC_* values are readable
+      # in the shipped JS by design, so storing them as secrets would be
+      # false assurance. Default off; set the variable to 'true' to enable.
+      NEXT_PUBLIC_GASLESS_ENABLED: ${{ vars.NEXT_PUBLIC_GASLESS_ENABLED || 'false' }}
+      NEXT_PUBLIC_ZEROX_ENABLED: ${{ vars.NEXT_PUBLIC_ZEROX_ENABLED || 'false' }}
+      NEXT_PUBLIC_ZEROX_CROSSCHAIN_ENABLED: ${{ vars.NEXT_PUBLIC_ZEROX_CROSSCHAIN_ENABLED || 'false' }}
+      NEXT_PUBLIC_CROSSCHAIN_ENABLED: ${{ vars.NEXT_PUBLIC_CROSSCHAIN_ENABLED || 'false' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
