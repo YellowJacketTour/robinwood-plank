@@ -70,12 +70,18 @@ body {
   background-color: #14100b;
   color: var(--foreground);
   font-family: var(--font-body), Arial, Helvetica, sans-serif;
-  /* Solid page field. The plank-head masthead illustration is rendered by
-     the hero section itself (components/Hero.tsx) rather than as a body
-     background: a page-length canvas can't be reliably darkened by a single
-     gradient, so the art used to bleed through mid-page as a bright band.
-     Scoping it to the hero keeps the mockup's "capped head at the top"
-     intent and guarantees the rest of the page stays clean. */
+  background-image:
+    /* much stronger wash than the app-backdrop texture — this sits directly
+       behind body copy for the entire scroll length, not just under the
+       masthead, so it has to stay legible at the bottom of a long page too */
+    linear-gradient(180deg, rgba(20, 16, 11, 0.88) 0%, rgba(20, 16, 11, 0.95) 40%, rgba(20, 16, 11, 0.97) 100%),
+    /* head/eyes/smile — capped width so it reads as a masthead illustration,
+       never stretched, never repeated */
+    url("/images/plank-head.webp");
+  background-repeat: no-repeat, no-repeat;
+  background-position: top center, top center;
+  background-size: 100% 100%, min(1500px, 120vw) auto;
+  background-attachment: scroll, scroll;
   font-weight: 700;
 }
 
@@ -84,13 +90,19 @@ body {
    ([data-market-shell]) — there, component styles are authoritative; the
    !important overrides were silently repainting the mockup-accurate market
    type gold and oversized. */
-/* Display type only. The heavy outline existed to keep copy legible over the
-   full-page character art; the background now matches the mockup (capped
-   head over a near-solid wash), so body copy sits on near-black and the
-   outline just made everything look chunky and unlike the approved design.
-   Headings keep a soft lift for depth. */
-body :where(h1, h2, h3, h4):not([data-market-shell] *) {
-  text-shadow: 0 2px 6px rgba(20, 8, 2, 0.75);
+body :where(h1, h2, h3, h4, p, a, button, dt, dd, li, code, strong, span, td, th, label):not([data-market-shell] *) {
+  text-shadow:
+    -1px -1px 0 #1a0b03,
+    1px -1px 0 #1a0b03,
+    -1px 1px 0 #1a0b03,
+    1px 1px 0 #1a0b03,
+    0 3px 5px rgba(20, 8, 2, 0.98),
+    0 0 14px rgba(20, 8, 2, 0.82);
+}
+
+body p:not([data-market-shell] *) {
+  font-size: clamp(1rem, 1.35vw, 1.2rem) !important;
+  line-height: 1.55 !important;
 }
 
 body dt:not([data-market-shell] *) {
@@ -821,4 +833,110 @@ body .nft-modal .nft-modal-body {
     opacity: 1;
     transform: none;
   }
+}
+
+/* ============================================================
+   WoodAmp (components/woodamp/) — keyframes + range hardware.
+   Layout and colors are Tailwind utilities in the components; only
+   what CSS utilities can't express lives here. The global
+   prefers-reduced-motion kill-switch above freezes the animations.
+   Colors reference the @theme vars — never restate a hex.
+   ============================================================ */
+
+@keyframes woodamp-eq {
+  from {
+    transform: scaleY(0.3);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes woodamp-marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.woodamp-eq-bar {
+  transform-origin: bottom;
+  animation: woodamp-eq 0.8s ease-in-out infinite alternate;
+}
+
+.woodamp-marquee > span {
+  display: inline-block;
+  animation: woodamp-marquee 12s linear infinite;
+}
+
+.woodamp-eq-paused,
+.woodamp-marquee-paused {
+  animation-play-state: paused !important;
+}
+
+/* Seek/volume sliders: a groove carved into the wood with a brass knob.
+   The input itself is the groove; thumbs are styled per-engine. */
+.woodamp-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.8),
+    inset 0 -1px 0 rgba(233, 180, 63, 0.12);
+  outline-offset: 4px;
+  cursor: pointer;
+}
+
+.woodamp-range:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.woodamp-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(
+    180deg,
+    var(--color-gold-300),
+    var(--color-gold-600)
+  );
+  border: 1px solid rgba(38, 17, 5, 0.8);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 242, 207, 0.5);
+}
+
+.woodamp-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(
+    180deg,
+    var(--color-gold-300),
+    var(--color-gold-600)
+  );
+  border: 1px solid rgba(38, 17, 5, 0.8);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 242, 207, 0.5);
+}
+
+.woodamp-range-slim {
+  height: 6px;
+}
+
+.woodamp-range-slim::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+}
+
+.woodamp-range-slim::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
 }
