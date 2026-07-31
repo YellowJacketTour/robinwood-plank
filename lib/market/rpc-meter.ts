@@ -34,14 +34,24 @@ export type RpcMeterSnapshot = {
   calls: number;
   computeUnits: number;
   byMethod: Record<string, { calls: number; computeUnits: number }>;
+  /** Reads served without touching the provider (see rpc-cache.ts). */
+  cache: { hit: number; miss: number; coalesced: number };
 };
+
+export type RpcCacheEvent = "hit" | "miss" | "coalesced";
 
 type MeterGlobal = typeof globalThis & { __plankRpcMeter?: RpcMeterSnapshot };
 
 function meter(): RpcMeterSnapshot {
   const g = globalThis as MeterGlobal;
   if (!g.__plankRpcMeter) {
-    g.__plankRpcMeter = { since: Date.now(), calls: 0, computeUnits: 0, byMethod: {} };
+    g.__plankRpcMeter = {
+      since: Date.now(),
+      calls: 0,
+      computeUnits: 0,
+      byMethod: {},
+      cache: { hit: 0, miss: 0, coalesced: 0 },
+    };
   }
   return g.__plankRpcMeter;
 }
@@ -61,6 +71,12 @@ export function recordRpc(method: string, count = 1): void {
   entry.computeUnits += cu;
 }
 
+export function recordRpcCacheEvent(event: RpcCacheEvent): void {
+  const m = meter();
+  m.cache ??= { hit: 0, miss: 0, coalesced: 0 };
+  m.cache[event] += 1;
+}
+
 export function readRpcMeter(): RpcMeterSnapshot {
   const m = meter();
   return {
@@ -68,12 +84,19 @@ export function readRpcMeter(): RpcMeterSnapshot {
     calls: m.calls,
     computeUnits: m.computeUnits,
     byMethod: JSON.parse(JSON.stringify(m.byMethod)) as RpcMeterSnapshot["byMethod"],
+    cache: { ...(m.cache ?? { hit: 0, miss: 0, coalesced: 0 }) },
   };
 }
 
 export function resetRpcMeter(): void {
   const g = globalThis as MeterGlobal;
-  g.__plankRpcMeter = { since: Date.now(), calls: 0, computeUnits: 0, byMethod: {} };
+  g.__plankRpcMeter = {
+    since: Date.now(),
+    calls: 0,
+    computeUnits: 0,
+    byMethod: {},
+    cache: { hit: 0, miss: 0, coalesced: 0 },
+  };
 }
 
 /** Projected 30-day compute units at the rate observed so far. */
