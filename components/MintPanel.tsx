@@ -164,7 +164,7 @@ export default function MintPanel() {
           rel="noopener noreferrer"
           className="min-h-11 shrink-0 text-xs font-bold text-gold-300 hover:text-gold-400 sm:text-sm"
         >
-          Contract ↗
+          NFT contract ↗
         </a>
       </div>
 

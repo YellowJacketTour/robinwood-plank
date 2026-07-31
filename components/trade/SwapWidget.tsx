@@ -1321,7 +1321,7 @@ export default function SwapWidget() {
           rel="noopener noreferrer"
           className="underline underline-offset-2 hover:text-gold-300"
         >
-          {CONTRACT_ADDRESS.slice(0, 6)}…{CONTRACT_ADDRESS.slice(-4)}
+          $PLANK token {CONTRACT_ADDRESS.slice(0, 6)}…{CONTRACT_ADDRESS.slice(-4)}
         </a>{" "}
         · not financial advice
       </p>

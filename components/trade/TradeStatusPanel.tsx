@@ -139,7 +139,7 @@ export default function TradeStatusPanel({ activeMode = "same", zeroXStatus }: P
           <div className="flex items-center gap-2.5 rounded-lg border border-line bg-panel-strong px-2.5 py-2">
             <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-gold-400/80" aria-hidden="true" />
             <dt className="min-w-0 flex-1 text-[0.65rem] font-bold uppercase tracking-wider text-cream-muted">
-              Contract
+              $PLANK token
             </dt>
             <dd className="shrink-0">
               <a
