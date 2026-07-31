@@ -125,7 +125,9 @@ describe("MarketplankVaultV3", () => {
     const rc2 = await tx2.wait();
 
     const after = await ethers.provider.getBalance(alice.address);
-    const gas = rc.gasUsed * rc.gasPrice + rc2.gasUsed * rc2.gasPrice;
+    const gas: bigint =
+      (rc.gasUsed as bigint) * (rc.gasPrice as bigint) +
+      (rc2.gasUsed as bigint) * (rc2.gasPrice as bigint);
     // Ignoring gas, an untraded round trip cannot create ETH.
     expect(after + gas).to.be.lte(before, "LP round trip must not mint ETH");
   });
