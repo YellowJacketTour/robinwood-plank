@@ -7,6 +7,10 @@ import { usePathname } from "next/navigation";
 import { CHAIN, NAV_LINKS } from "@/lib/constants";
 import { shortAddress } from "@/lib/trade";
 import { useWallet } from "@/lib/wallet-context";
+import {
+  WoodAmpMenuRow,
+  WoodAmpRailChip,
+} from "@/components/woodamp/WoodAmpChip";
 
 function navHref(href: string, pathname: string) {
   if (href.startsWith("#") && pathname !== "/") {
@@ -257,6 +261,7 @@ export default function Nav() {
               })}
             </ul>
 
+            <WoodAmpRailChip />
             <div className="hidden xl:block">
               <NetworkContext compact />
             </div>
@@ -313,6 +318,7 @@ export default function Nav() {
               <NetworkContext />
               <ConnectWalletAction onNavigate={() => closeMenu()} />
             </div>
+            <WoodAmpMenuRow onOpen={() => closeMenu()} />
             <ul className="mt-3 flex flex-col gap-1">
               {NAV_LINKS.map((link) => {
                 const href = navHref(link.href, pathname);

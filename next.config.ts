@@ -22,6 +22,11 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
+      // WoodAmp community tracks: without an explicit media-src, audio
+      // falls back to default-src 'self' and any community-hosted track
+      // URL is silently blocked. Hosted files stay same-origin; https:
+      // covers admin-approved remote tracks (Phase 2).
+      "media-src 'self' https:",
       "connect-src 'self' https://rpc.mainnet.chain.robinhood.com https://*.alchemy.com https://*.infura.io wss: https:",
       "frame-ancestors 'self'",
       "base-uri 'self'",

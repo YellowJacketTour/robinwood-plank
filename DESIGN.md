@@ -278,12 +278,24 @@ Avoid excessive nesting of rounded cards. A border or spacing change is preferre
 
 The header (`components/Nav.tsx`) is a 58 px mobile / 68 px desktop sticky product rail (`h-[58px] lg:h-[68px]`) with a translucent near-black wood surface (`bg-wood-950/90` with backdrop blur) and a narrow gold divider (`border-gold-500/25`). It keeps the RobinWood mark legible without competing with the page masthead.
 
-- Navigation order is Market, Trade, Mint, Gallery, Learn, and Airdrop. Trade is the single gold primary action; it is not repeated as both a text link and a button.
+- Navigation order is Market, Trade, Mint, Gallery, and Learn. (Airdrop was removed from the rail in July 2026 to make room for the WoodAmp chip; the homepage `#airdrop` section and checker remain.) Trade is the single gold primary action; it is not repeated as both a text link and a button.
 - The current route receives a restrained dark-gold state (`bg-gold-500/15 text-gold-300`) and `aria-current="page"`. Gold-filled controls remain reserved for the primary action.
 - The header may show the configured chain as read-only context, using a neutral chain glyph rather than a live-status dot. Wallet connection remains owned by the page workflow until the application has one shared wallet/session boundary.
-- Internal route changes use client navigation so the root layout and persistent audio player remain mounted. Home-section links retain their hash targets when followed from another route.
+- Internal route changes use client navigation so the root layout and the persistent WoodAmp audio system remain mounted. Home-section links retain their hash targets when followed from another route.
+- The right-hand rail also carries the WoodAmp music chip (see "WoodAmp music player" below): a wood-grain pill using the same control vocabulary as the chain chip, with the marquee title appearing at `xl` and the chip staying compact at `lg`.
 - The compact menu remains in use through tablet widths; the full desktop rail begins at 1024 px so no destination is clipped. It is a full-width disclosure below the header, preserves the same order, uses 44–48 px rows, contains background scrolling, closes after selection, and supports backdrop click, Escape dismissal, breakpoint reset, first-link focus, and focus return.
 - Every page with the shared header provides `#main-content` for the keyboard skip link.
+
+### WoodAmp music player
+
+WoodAmp (`components/woodamp/`) is the site's single audio system — a Winamp-inspired community-radio player that absorbed the old `components/AudioPlayer.tsx` background loop. One `<audio>` element, owned by `WoodAmpProvider` in the root layout, feeds three surfaces: the nav rail chip, the mobile-menu row, and the popout window.
+
+- Behavior contract carried over from the old player, unchanged: starts muted on fresh tabs, the visitor's unmute choice persists in `localStorage` (`plank-audio-muted`, the pre-WoodAmp key) and syncs across open tabs, and audio uses `preload="none"` so wallet WebViews don't hang on load.
+- The popout's cabinet is `.site-footer-surface` — the sanctioned quiet wood; knobs and the play control are gold-gradient "brass" hardware. The time/track display and the Planklist sit on untextured `bg-panel-strong`: grain never goes behind dense data text. Uncial Antiqua appears only for "WoodAmp" and "Planklist"; times use tabular numerals; every control is ≥44 px.
+- Desktop (`lg+`) the popout is a draggable floating window (bottom-right default). Below `lg` it is a bottom sheet with backdrop tap, Escape dismissal, scroll containment, and focus return — the market filter-sheet pattern.
+- The window root carries `data-market-shell` so the marketing type clamps never repaint it.
+- The playlist is the Phase 1 static manifest in `lib/woodamp-playlist.ts` (`sugar.mp3` remains track 1 so the ambient loop is unchanged). Phase 2 moves the list to an admin-managed `/api/music/playlist` backed by the durable KV store; remote community tracks must be direct audio URLs (CSP `media-src` allows `https:`), and platform links (SoundCloud/YouTube pages) are not playable sources.
+- The EQ bars and marquees pause when nothing is audible and are frozen by the global reduced-motion rule. Fake data is not displayed: no hardcoded bitrates or invented track stats.
 
 ### Shared footer
 
