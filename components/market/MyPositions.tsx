@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import {
+  cancelAllOrders,
   cancelOrder,
   getMarketApprovals,
   revokeCollectionApproval,
@@ -42,6 +43,9 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
   const [approvalLoading, setApprovalLoading] = useState(true);
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<"nft" | "weth" | null>(null);
+  /** Two-step confirm — bumping the counter kills live orders too. */
+  const [confirmCancelAll, setConfirmCancelAll] = useState(false);
+  const [cancellingAll, setCancellingAll] = useState(false);
 
   const mine: Row[] = [
     ...listings
@@ -138,6 +142,22 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
     },
     [account, revoking, refreshApprovals]
   );
+
+  const cancelAll = useCallback(async () => {
+    if (cancellingAll) return;
+    setError(null);
+    try {
+      setCancellingAll(true);
+      await cancelAllOrders(account);
+      setConfirmCancelAll(false);
+      await refreshApprovals();
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not cancel orders.");
+    } finally {
+      setCancellingAll(false);
+    }
+  }, [account, cancellingAll, refreshApprovals, onChanged]);
 
   const hasLiveApproval =
     approvals !== null &&
@@ -316,6 +336,46 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
               </button>
             )}
           </div>
+          {approvals.collectionApprovedForAll && (
+            /**
+             * Only shown in the state that is actually risky. Listing through
+             * Marketplank grants a single-token approve, which the transfer
+             * consumes — so a seller on that path is self-healing and gets no
+             * warning here. A blanket approval is different: it outlives the
+             * transfer, so an old signature can be filled again the moment the
+             * token comes back. Warning everyone regardless would be crying
+             * wolf, and people stop reading warnings that are usually wrong.
+             */
+            <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+              <p className="text-xs text-amber-200/90">
+                Blanket approval is live, so any order you have ever signed for
+                this collection can still be filled whenever you hold the token
+                — including old listings that are no longer shown here, at
+                whatever price they were signed at.
+              </p>
+              <p className="text-[0.65rem] text-cream-muted">
+                Revoking above stops it. To also invalidate the signatures
+                themselves, cancel every order in one transaction — this kills
+                your live listings and offers too, and re-listing means signing
+                again.
+              </p>
+              <button
+                type="button"
+                disabled={cancellingAll}
+                onClick={() => (confirmCancelAll ? void cancelAll() : setConfirmCancelAll(true))}
+                onBlur={() => setConfirmCancelAll(false)}
+                className="flex min-h-9 w-full items-center justify-center gap-1.5 rounded-md border border-red-500/30 px-3 text-xs font-bold text-red-300 transition hover:border-red-400 disabled:opacity-50"
+              >
+                {cancellingAll ? (
+                  <Loader2 size={13} strokeWidth={2.5} className="animate-spin" />
+                ) : confirmCancelAll ? (
+                  `Cancel all ${mine.length} order${mine.length === 1 ? "" : "s"} — tap again`
+                ) : (
+                  "Cancel every order I've signed"
+                )}
+              </button>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-wood-950 px-3 py-2">
             <p className="text-xs text-foreground/70">
               WETH allowance: {formatTokenAmount(approvals.wethAllowance.toString(), 18, 4)}

@@ -18,7 +18,13 @@ const securityHeaders = [
     key: "Content-Security-Policy",
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      // static.cloudflareinsights.com: Cloudflare injects its Web Analytics
+      // beacon at the edge whenever the feature is on for the zone, which it
+      // is. Without this the browser blocks it on every single page load — a
+      // console error for every visitor, and analytics that silently never
+      // report. Turn the feature off in the Cloudflare dashboard rather than
+      // dropping this entry, otherwise the error simply comes back.
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
