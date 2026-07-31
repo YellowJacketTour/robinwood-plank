@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "build:relayer": "esbuild scripts/relay-drand.ts --bundle --platform=node --format=esm --target=node22 --outfile=.next/standalone/ops/drand-relayer/relay-drand.mjs",
-    "build:market-refresh": "esbuild scripts/refresh-market-data.ts --bundle --platform=node --format=esm --target=node22 --external:pg --external:pg-native --external:redis --outfile=.next/standalone/scripts/refresh-market-data.mjs",
+    "build:market-refresh": "esbuild scripts/refresh-market-data.ts --bundle --platform=node --format=esm --target=node22 --external:pg --external:pg-native --outfile=.next/standalone/scripts/refresh-market-data.mjs",
     "start": "next start",
     "lint": "eslint",
     "lint:inmotion": "eslint app/api/health/route.ts lib/postgres.ts lib/public-json.ts lib/boards-store.ts lib/market/durable-kv.ts lib/market/orders-store.ts lib/market/served-orders.ts lib/market/rarity-snapshot.ts lib/market/vault-activity.ts lib/market/sales-catalog.ts lib/market/fetch-rpc.ts lib/market/rpc-budget.ts lib/market/rpc-cache.ts lib/market/rpc-meter.ts app/api/rpc/route.ts app/api/market/rpc-usage/route.ts scripts/refresh-market-data.ts test/market/durable-kv.test.ts test/market/sales-catalog-durability.test.ts test/market/rpc-cache.test.ts test/market/vault-activity-cache.test.ts test/market/relay-drand.test.ts test/market/verify-relayer-log.test.ts scripts/migrate-postgres.mjs scripts/backup-postgres.mjs scripts/snapshot-vault-state.mjs scripts/postgres-maintenance.mjs scripts/verify-relayer-log.mjs scripts/verify-postgres-storage.ts scripts/relay-drand.ts deploy/inmotion/passenger.cjs next.config.ts",
@@ -30,7 +30,6 @@
     "@opensea/seaport-js": "^4.1.5",
     "@reown/appkit": "1.8.23",
     "@reown/appkit-adapter-ethers": "1.8.23",
-    "@vercel/kv": "^3.0.0",
     "ethers": "^6.17.0",
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^1.28.0",
@@ -39,7 +38,6 @@
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "redis": "^6.1.0",
     "sharp": "^0.35.0"
   },
   "overrides": {
