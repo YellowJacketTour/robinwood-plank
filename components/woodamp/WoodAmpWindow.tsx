@@ -2,7 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import {
+  isEmbedSource,
+  type WoodAmpSource,
+} from "@/lib/woodamp-playlist";
+import WoodAmpEmbed from "./WoodAmpEmbed";
 import { formatTime, useWoodAmp } from "./WoodAmpProvider";
+
+const SOURCE_BADGES: Record<WoodAmpSource, string> = {
+  hosted: "Hosted",
+  remote: "Remote",
+  "embed-youtube": "YouTube",
+  "embed-soundcloud": "SoundCloud",
+  external: "Link ↗",
+};
 
 /**
  * The WoodAmp popout — a Winamp-inspired player drawn entirely in the
@@ -215,29 +228,36 @@ export default function WoodAmpWindow() {
               </span>
             </div>
             <div className="col-span-2 flex items-center gap-2 text-[0.5625rem] font-black uppercase tracking-[0.12em] text-cream-muted">
-              <span>
-                {track.source === "hosted" ? "Hosted" : "Community link"}
-              </span>
+              <span>{SOURCE_BADGES[track.source]}</span>
               <span className="ml-auto tabular-nums">
                 {duration > 0 ? formatTime(duration) : "–:––"}
               </span>
             </div>
           </div>
 
-          {/* seek */}
-          <div className="px-0.5 pt-2.5">
-            <input
-              type="range"
-              min={0}
-              max={duration || 0}
-              step={0.1}
-              value={Math.min(currentTime, duration || 0)}
-              onChange={(e) => seek(Number(e.target.value))}
-              disabled={!duration}
-              aria-label="Seek"
-              className="woodamp-range w-full"
-            />
-          </div>
+          {/* embed tracks play in the provider's own iframe player */}
+          {isEmbedSource(track.source) && (
+            <div className="pt-2.5">
+              <WoodAmpEmbed track={track} onEnded={next} />
+            </div>
+          )}
+
+          {/* seek — <audio> tracks only; embeds seek inside their player */}
+          {!isEmbedSource(track.source) && (
+            <div className="px-0.5 pt-2.5">
+              <input
+                type="range"
+                min={0}
+                max={duration || 0}
+                step={0.1}
+                value={Math.min(currentTime, duration || 0)}
+                onChange={(e) => seek(Number(e.target.value))}
+                disabled={!duration}
+                aria-label="Seek"
+                className="woodamp-range w-full"
+              />
+            </div>
+          )}
 
           {/* transport */}
           <div className="flex items-center gap-2 px-0.5 pt-2">
@@ -253,9 +273,16 @@ export default function WoodAmpWindow() {
             <button
               type="button"
               onClick={togglePlay}
+              disabled={isEmbedSource(track.source)}
               aria-label={playing ? "Pause" : "Play"}
-              title={playing ? "Pause" : "Play"}
-              className="flex h-11 min-w-[52px] items-center justify-center rounded-lg border border-wood-950/60 bg-gradient-to-b from-gold-400 to-gold-600 text-base text-wood-950 shadow-[0_3px_8px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,242,207,0.5)] hover:from-gold-300"
+              title={
+                isEmbedSource(track.source)
+                  ? "Use the controls inside the embedded player"
+                  : playing
+                    ? "Pause"
+                    : "Play"
+              }
+              className="flex h-11 min-w-[52px] items-center justify-center rounded-lg border border-wood-950/60 bg-gradient-to-b from-gold-400 to-gold-600 text-base text-wood-950 shadow-[0_3px_8px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,242,207,0.5)] hover:from-gold-300 disabled:opacity-50"
             >
               {playing ? "⏸" : "▶"}
             </button>
@@ -343,19 +370,9 @@ export default function WoodAmpWindow() {
                 </span>
               </div>
               <ul className="max-h-[210px] overflow-y-auto rounded-lg border border-gold-500/25 bg-panel-strong">
-                {playlist.map((t, i) => (
-                  <li
-                    key={t.id}
-                    className="border-b border-gold-500/10 last:border-b-0"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => selectTrack(i)}
-                      aria-current={i === index ? "true" : undefined}
-                      className={`flex min-h-11 w-full items-center gap-2.5 px-2.5 py-1 text-left hover:bg-gold-500/10 ${
-                        i === index ? "bg-gold-500/10" : ""
-                      }`}
-                    >
+                {playlist.map((t, i) => {
+                  const rowInner = (
+                    <>
                       <span className="w-4 shrink-0 text-right text-[0.65rem] text-cream-muted tabular-nums">
                         {i + 1}
                       </span>
@@ -372,16 +389,47 @@ export default function WoodAmpWindow() {
                         </span>
                       </span>
                       <span className="shrink-0 rounded-full border border-gold-500/25 px-1.5 py-0.5 text-[0.5rem] font-black uppercase tracking-[0.1em] text-gold-600">
-                        {t.source === "hosted" ? "Hosted" : "Remote"}
+                        {SOURCE_BADGES[t.source]}
                       </span>
                       {typeof t.duration === "number" && (
                         <span className="shrink-0 text-[0.68rem] text-cream-muted tabular-nums">
                           {formatTime(t.duration)}
                         </span>
                       )}
-                    </button>
-                  </li>
-                ))}
+                    </>
+                  );
+                  const rowClass = `flex min-h-11 w-full items-center gap-2.5 px-2.5 py-1 text-left hover:bg-gold-500/10 ${
+                    i === index ? "bg-gold-500/10" : ""
+                  }`;
+                  return (
+                    <li
+                      key={t.id}
+                      className="border-b border-gold-500/10 last:border-b-0"
+                    >
+                      {t.source === "external" ? (
+                        // Community showcase link — nothing we can play;
+                        // opens on the platform in a new tab.
+                        <a
+                          href={t.src}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={rowClass}
+                        >
+                          {rowInner}
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => selectTrack(i)}
+                          aria-current={i === index ? "true" : undefined}
+                          className={rowClass}
+                        >
+                          {rowInner}
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </>
           )}
