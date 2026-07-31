@@ -106,9 +106,11 @@ export default function SystemSection() {
               </dd>
             </div>
             <div>
-              <dt className={LABEL}>Release</dt>
+              <dt className={LABEL}>Deployed version</dt>
               <dd className="mt-1 break-all font-mono text-xs text-cream">
-                {status.version}
+                {status.version === "unknown"
+                  ? "dev server (no release SHA)"
+                  : status.version}
               </dd>
             </div>
             <div>
@@ -118,7 +120,7 @@ export default function SystemSection() {
                   <>
                     <Dot ok={null} />
                     <span className="text-cream-muted">
-                      RELAYER_LOG_PATH not set
+                      no log here (dev) — production reads RELAYER_LOG_PATH
                     </span>
                   </>
                 ) : relayer?.state === "unreadable" ? (

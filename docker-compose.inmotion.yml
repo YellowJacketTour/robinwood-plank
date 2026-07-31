@@ -112,33 +112,6 @@ services:
     networks:
       - data
 
-  # Optional one-time copy of production Upstash data into PostgreSQL.
-  # Dry-run is the default; add --apply only during an approved write freeze.
-  kv-migrate:
-    profiles:
-      - tools
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: tools
-    environment:
-      KV_REST_API_URL: ${KV_REST_API_URL:-}
-      KV_REST_API_TOKEN: ${KV_REST_API_TOKEN:-}
-      PGHOST: postgres
-      PGPORT: "5432"
-      PGDATABASE: ${POSTGRES_DB:-plank}
-      PGUSER: ${POSTGRES_USER:-plankapp}
-      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Docker env file}
-    command:
-      - node
-      - scripts/migrate-upstash-to-postgres.mjs
-    depends_on:
-      db-migrate:
-        condition: service_completed_successfully
-    networks:
-      - frontend
-      - data
-
 networks:
   frontend:
   data:
