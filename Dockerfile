@@ -9,7 +9,6 @@ RUN npm ci
 
 FROM dependencies AS tools
 COPY scripts/migrate-postgres.mjs ./scripts/migrate-postgres.mjs
-COPY scripts/migrate-upstash-to-postgres.mjs ./scripts/migrate-upstash-to-postgres.mjs
 COPY deploy/inmotion/postgres ./deploy/inmotion/postgres
 CMD ["node", "scripts/migrate-postgres.mjs"]
 

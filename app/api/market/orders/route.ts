@@ -1,4 +1,4 @@
-import { CHAIN, MARKET_OFFER_CURRENCY } from "@/lib/constants";
+import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
 import { ethCallFree } from "@/lib/market/fetch-rpc";
 import { getCollection } from "@/lib/market/collections";
 import { resolveTokenImage } from "@/lib/market/token-image";

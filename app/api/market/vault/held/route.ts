@@ -1,4 +1,5 @@
 import { MARKET_VAULT_ADDRESSES } from "@/lib/constants";
+import { collectionVaultAddresses } from "@/lib/market/collections";
 import { getVaultHeldTokens } from "@/lib/market/vault-held";
 import { cachedPublicJson } from "@/lib/http-cache";
 import { publicError, rateLimit } from "@/lib/security";
@@ -12,8 +13,11 @@ const CACHE_MS = 20_000;
 function parseVaultParam(req: Request): string | null {
   const raw = new URL(req.url).searchParams.get("vault");
   if (!raw || !/^0x[0-9a-fA-F]{40}$/.test(raw)) return null;
-  const hit = MARKET_VAULT_ADDRESSES.find((a) => a.toLowerCase() === raw.toLowerCase());
-  return hit ?? null;
+  const lc = raw.toLowerCase();
+  const hit = MARKET_VAULT_ADDRESSES.find((a) => a.toLowerCase() === lc);
+  if (hit) return hit;
+  // Per-collection vaults (collection entries ship with releases).
+  return collectionVaultAddresses().includes(lc) ? raw : null;
 }
 
 /**

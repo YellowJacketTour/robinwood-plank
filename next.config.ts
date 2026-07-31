@@ -28,6 +28,16 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
+      // WoodAmp community tracks: without an explicit media-src, audio
+      // falls back to default-src 'self' and any community-hosted track
+      // URL is silently blocked. Hosted files stay same-origin; https:
+      // covers admin-approved remote tracks (Phase 2).
+      "media-src 'self' https:",
+      // WoodAmp embed tracks play through the providers' official iframe
+      // players (postMessage-controlled, no provider SDK script — so
+      // script-src stays untouched). Without frame-src, iframes fall back to
+      // default-src 'self' and the embeds are silently blocked.
+      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com",
       "connect-src 'self' https://rpc.mainnet.chain.robinhood.com https://*.alchemy.com https://*.infura.io wss: https:",
       "frame-ancestors 'self'",
       "base-uri 'self'",
@@ -98,6 +108,18 @@ const nextConfig: NextConfig = {
       // Later entries win over an earlier match on the same path/header —
       // carve public read-only routes out of the blanket no-store above.
       // Exact paths only — never /api/market/vault/stream (SSE).
+      // Admin uploads are content-addressed (name embeds the sha256 prefix),
+      // so a stored file never changes — immutable is safe and lets audio
+      // seek without refetching.
+      {
+        source: "/api/media/:name*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
       {
         source: "/api/market/vault/stats",
         headers: [
