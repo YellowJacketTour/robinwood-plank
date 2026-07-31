@@ -48,7 +48,7 @@ import { formatTokenAmount } from "@/lib/trade";
 import type { Listing, MarketTab, Offer } from "@/lib/market/types";
 import dynamic from "next/dynamic";
 
-const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModal"), {
+const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModalSwitch"), {
   ssr: false,
 });
 
