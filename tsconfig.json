@@ -32,6 +32,7 @@
   ],
   "exclude": [
     "node_modules",
+    "_to_delete",
     "test",
     "hardhat.config.ts",
     "typechain-types",
