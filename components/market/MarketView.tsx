@@ -14,6 +14,7 @@ import {
   MarketWalletGate,
 } from "@/components/market/MarketScaffold";
 import ListingGrid from "@/components/market/ListingGrid";
+import Link from "next/link";
 import {
   dualVaultMode,
   getVaultByAddress,
@@ -86,10 +87,6 @@ const InstantVaultSwitcher = dynamic(
   () => import("@/components/market/InstantVaultSwitcher"),
   { ssr: false, loading: () => <PanelSkeleton className="min-h-16" /> }
 );
-const VaultMigrate = dynamic(() => import("@/components/market/VaultMigrate"), {
-  ssr: false,
-  loading: panelLoading,
-});
 const SeedVaultPanel = dynamic(() => import("@/components/market/SeedVaultPanel"), {
   ssr: false,
 });
@@ -1347,13 +1344,24 @@ export default function MarketView() {
             {/* Trades stay dual-vault (V1 + V2) regardless of selection */}
             <VaultTradeHistory />
             {dualVaultMode() && (
-              <MarketDisclosure
-                eyebrow="Migration"
-                title="Migrate your planks to the current vault"
-                description="Optional migration, fee details, dust recovery, redeem, and re-deposit steps."
+              <Link
+                href="/migrate"
+                className="flex flex-wrap items-center gap-3 rounded-xl border border-line-strong bg-gradient-to-r from-gold-500/12 to-transparent px-4 py-3.5 transition hover:border-gold-500/60"
               >
-                <VaultMigrate account={account} onConnect={handleConnect} embedded active={tab === "swap"} />
-              </MarketDisclosure>
+                <span className="h-2.5 w-2.5 flex-none rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-extrabold text-cream">
+                    Have planks in a retiring vault? Migrate them.
+                  </span>
+                  <span className="block text-[0.72rem] text-cream/60">
+                    A guided page redeems on the old vault and deposits on the new — one plank at a time, same
+                    fees, no migration tax.
+                  </span>
+                </span>
+                <span className="inline-flex min-h-[44px] flex-none items-center rounded-lg bg-gold-500 px-4 text-sm font-black text-[#261105]">
+                  Open /migrate →
+                </span>
+              </Link>
             )}
             {/* Seed/bootstrap only on the current (primary) vault — never seed into a legacy */}
             {activeVault?.role === "primary" && (
