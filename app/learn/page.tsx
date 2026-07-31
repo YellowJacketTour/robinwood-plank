@@ -23,7 +23,7 @@ export default async function LearnPage() {
       <Nav />
       <main id="main-content" tabIndex={-1} className="flex-1 px-3 py-10 sm:px-5">
         <div className="mx-auto w-full max-w-3xl lg:max-w-4xl">
-          <LearnGuide hidden={learn.hidden} />
+          <LearnGuide hidden={learn.hidden} overrides={learn.overrides} />
         </div>
       </main>
       <Footer />

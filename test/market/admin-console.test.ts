@@ -90,11 +90,32 @@ test("sanitizePlaylist rejects a source that disagrees with the URL", () => {
   );
 });
 
-test("sanitizeLearn: visibility ids only, deduplicated", () => {
+test("sanitizeLearn: visibility ids deduplicated; overrides validated", () => {
   const ok = sanitizeLearn({ hidden: ["faq", "faq", "vault-math"] });
-  assert.deepEqual(ok, { ok: true, value: { hidden: ["faq", "vault-math"] } });
+  assert.deepEqual(ok, {
+    ok: true,
+    value: { hidden: ["faq", "vault-math"], overrides: {} },
+  });
   assert.equal(sanitizeLearn({ hidden: ["Bad Id!"] }).ok, false);
   assert.equal(sanitizeLearn({}).ok, false);
+  // Overrides: trimmed, empty entries dropped, ids validated, plain string only.
+  const withOverride = sanitizeLearn({
+    hidden: [],
+    overrides: { faq: "  New text.  ", map: "", "Bad Id!": undefined },
+  });
+  assert.equal(withOverride.ok, false); // bad id key rejects
+  const clean = sanitizeLearn({
+    hidden: [],
+    overrides: { faq: "  New text.  ", map: "" },
+  });
+  assert.deepEqual(clean, {
+    ok: true,
+    value: { hidden: [], overrides: { faq: "New text." } },
+  });
+  assert.equal(
+    sanitizeLearn({ hidden: [], overrides: { faq: 42 } }).ok,
+    false
+  );
 });
 
 test("sanitizeIntro: requires complete phrases, keeps at least one", () => {
@@ -126,17 +147,21 @@ test("sanitizeBanner: enabled requires text; links validated", () => {
   );
 });
 
-test("sanitizeFlags: tri-state tradePaused only", () => {
+test("sanitizeFlags: tri-state tradePaused and marketEnabled", () => {
   assert.deepEqual(sanitizeFlags({ tradePaused: null }), {
     ok: true,
-    value: { tradePaused: null },
+    value: { tradePaused: null, marketEnabled: null },
   });
-  assert.deepEqual(sanitizeFlags({ tradePaused: true }), {
+  assert.deepEqual(sanitizeFlags({ tradePaused: true, marketEnabled: false }), {
     ok: true,
-    value: { tradePaused: true },
+    value: { tradePaused: true, marketEnabled: false },
   });
-  assert.deepEqual(sanitizeFlags({}), { ok: true, value: { tradePaused: null } });
+  assert.deepEqual(sanitizeFlags({}), {
+    ok: true,
+    value: { tradePaused: null, marketEnabled: null },
+  });
   assert.equal(sanitizeFlags({ tradePaused: "yes" }).ok, false);
+  assert.equal(sanitizeFlags({ marketEnabled: 1 }).ok, false);
 });
 
 test("sanitizeCollections: address, standard, fee bounds, dup slugs, vault rules", () => {

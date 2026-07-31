@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import {
   sanitizeBanner,
   sanitizeIntro,
@@ -40,10 +40,12 @@ function LearnVisibilityCard({ address }: { address: string | null }) {
     sanitizeLearn,
     address
   );
+  const [editing, setEditing] = useState<string | null>(null);
 
   const toggle = useCallback(
     (id: string) => {
       mutate((prev) => ({
+        ...prev,
         hidden: prev.hidden.includes(id)
           ? prev.hidden.filter((h) => h !== id)
           : [...prev.hidden, id],
@@ -52,10 +54,22 @@ function LearnVisibilityCard({ address }: { address: string | null }) {
     [mutate]
   );
 
+  const setOverride = useCallback(
+    (id: string, text: string) => {
+      mutate((prev) => {
+        const overrides = { ...prev.overrides };
+        if (text) overrides[id] = text;
+        else delete overrides[id];
+        return { ...prev, overrides };
+      });
+    },
+    [mutate]
+  );
+
   return (
     <CardChrome
       title="Learn sections"
-      subtitle="Show or hide /learn sections publicly"
+      subtitle="Visibility + text overrides for /learn"
       dirty={dirty}
       save={save}
       onReload={() => void load()}
@@ -63,43 +77,85 @@ function LearnVisibilityCard({ address }: { address: string | null }) {
       canSave={!!address && doc !== null}
     >
       <p className="mt-3 text-xs text-cream-muted">
-        Content stays in code (no drift) — this only controls what the public
-        page renders. Hidden sections disappear from the page and its table of
-        contents.
+        Each section can be shown/hidden, and its text can be overridden with
+        plain text (blank line = new paragraph; no markup is interpreted).
+        Sections without an override keep the coded text, and clearing an
+        override restores it — the code is always the fallback, so nothing can
+        drift silently.
       </p>
       {doc === null ? (
         <p className="mt-3 text-sm text-cream-muted">Loading…</p>
       ) : (
-        <ul className="mt-3 grid gap-1 sm:grid-cols-2">
+        <ul className="mt-3 space-y-1">
           {TOC.map((entry) => {
             const hidden = doc.hidden.includes(entry.id);
+            const override = doc.overrides[entry.id] ?? "";
+            const isEditing = editing === entry.id;
             return (
-              <li key={entry.id}>
-                <button
-                  type="button"
-                  onClick={() => toggle(entry.id)}
-                  aria-pressed={!hidden}
-                  className={`flex min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 text-left text-sm transition-colors ${
-                    hidden
-                      ? "border-line bg-panel-strong text-cream-muted/60"
-                      : "border-line bg-panel-soft text-cream hover:border-line-strong"
-                  }`}
-                >
-                  <span className="truncate">{entry.label}</span>
+              <li
+                key={entry.id}
+                className="rounded-md border border-line bg-panel-soft"
+              >
+                <div className="flex items-center gap-2 px-3 py-1.5">
                   <span
-                    className={`shrink-0 text-[0.5625rem] font-black uppercase tracking-[0.12em] ${
+                    className={`min-w-0 flex-1 truncate text-sm ${
+                      hidden ? "text-cream-muted/60" : "text-cream"
+                    }`}
+                  >
+                    {entry.label}
+                  </span>
+                  {override ? <Chip>custom text</Chip> : null}
+                  <button
+                    type="button"
+                    onClick={() => setEditing(isEditing ? null : entry.id)}
+                    className={`${BUTTON_SECONDARY} h-8 px-2 text-[0.5625rem]`}
+                  >
+                    {isEditing ? "Close" : "Edit text"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggle(entry.id)}
+                    aria-pressed={!hidden}
+                    className={`h-8 w-20 shrink-0 rounded-md border border-line text-[0.5625rem] font-black uppercase tracking-[0.12em] ${
                       hidden ? "text-rose-400" : "text-emerald-400"
                     }`}
                   >
                     {hidden ? "Hidden" : "Shown"}
-                  </span>
-                </button>
+                  </button>
+                </div>
+                {isEditing ? (
+                  <div className="border-t border-line p-3">
+                    <textarea
+                      className="min-h-40 w-full rounded-md border border-line bg-panel-strong p-3 text-sm text-cream placeholder:text-cream-muted/60 focus:border-line-strong focus:outline-none"
+                      placeholder="Leave empty to keep the coded text. Plain text only — blank line starts a new paragraph."
+                      value={override}
+                      onChange={(e) => setOverride(entry.id, e.target.value)}
+                    />
+                    {override ? (
+                      <button
+                        type="button"
+                        className={`${BUTTON_SECONDARY} mt-2 h-8 px-2 text-[0.5625rem] text-rose-400`}
+                        onClick={() => setOverride(entry.id, "")}
+                      >
+                        Clear override (restore coded text)
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </li>
             );
           })}
         </ul>
       )}
     </CardChrome>
+  );
+}
+
+function Chip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-full border border-gold-500/40 px-2 py-0.5 text-[0.5625rem] font-black uppercase tracking-[0.12em] text-gold-300">
+      {children}
+    </span>
   );
 }
 

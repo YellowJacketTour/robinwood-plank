@@ -472,10 +472,16 @@ const MARKET_DESTINATIONS = new Set([
   ...MARKET_COLLECTIONS.map((c) => c.contractAddress.toLowerCase()),
 ]);
 
-/** Vault sends: any configured vault (primary + legacy), plus collection approvals. */
+/** Vault sends: any configured vault (primary + legacy + per-collection
+ * vaultAddress entries), plus collection approvals. Still a build-time
+ * constant set — collection entries ship with releases, never from runtime
+ * data. */
 function vaultDestinations(): Set<string> {
   const set = new Set(MARKET_COLLECTIONS.map((c) => c.contractAddress.toLowerCase()));
   for (const v of MARKET_VAULT_ADDRESSES) set.add(v.toLowerCase());
+  for (const c of MARKET_COLLECTIONS) {
+    if (c.vaultAddress) set.add(c.vaultAddress.toLowerCase());
+  }
   return set;
 }
 

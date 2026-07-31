@@ -23,6 +23,46 @@ import { CARD, LABEL, NOTE_MUTED } from "../ui";
  * with TRADE_PAUSED=true stays paused until rebuilt (clients OR the two).
  */
 
+function OverrideRow({
+  label,
+  value,
+  options,
+  dangerWhen,
+  onChange,
+}: {
+  label: string;
+  value: boolean | null;
+  options: { value: boolean | null; label: string }[];
+  /** Which boolean renders in the danger color when selected. */
+  dangerWhen: boolean;
+  onChange: (value: boolean | null) => void;
+}) {
+  return (
+    <div className="mt-4">
+      <p className={LABEL}>{label}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {options.map((option) => (
+          <button
+            key={String(option.value)}
+            type="button"
+            onClick={() => onChange(option.value)}
+            aria-pressed={value === option.value}
+            className={`inline-flex min-h-11 items-center rounded-md border px-4 text-[0.6875rem] font-black uppercase tracking-[0.12em] transition-colors ${
+              value === option.value
+                ? option.value === dangerWhen
+                  ? "border-rose-400/60 bg-rose-400/15 text-rose-400"
+                  : "border-gold-500/60 bg-gold-500/15 text-gold-300"
+                : "border-line bg-panel-strong text-cream-muted hover:border-line-strong"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const ENV_FLAGS = [
   { name: "TRADE_PAUSED", value: TRADE_PAUSED },
   { name: "MARKET_ENABLED", value: MARKET_ENABLED },
@@ -63,8 +103,8 @@ export default function FlagsSection({ address }: { address: string | null }) {
       </section>
 
       <CardChrome
-        title="Trade pause override"
-        subtitle="Runtime — takes effect without a deployment"
+        title="Runtime overrides"
+        subtitle="Take effect without a deployment"
         dirty={dirty}
         save={save}
         onReload={() => void load()}
@@ -75,38 +115,38 @@ export default function FlagsSection({ address }: { address: string | null }) {
           <p className="mt-3 text-sm text-cream-muted">Loading…</p>
         ) : (
           <>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {(
-                [
-                  { value: null, label: "No override (env decides)" },
-                  { value: true, label: "Force PAUSED" },
-                  { value: false, label: "Force live" },
-                ] as const
-              ).map((option) => (
-                <button
-                  key={String(option.value)}
-                  type="button"
-                  onClick={() =>
-                    mutate(() => ({ tradePaused: option.value }))
-                  }
-                  aria-pressed={doc.tradePaused === option.value}
-                  className={`inline-flex min-h-11 items-center rounded-md border px-4 text-[0.6875rem] font-black uppercase tracking-[0.12em] transition-colors ${
-                    doc.tradePaused === option.value
-                      ? option.value === true
-                        ? "border-rose-400/60 bg-rose-400/15 text-rose-400"
-                        : "border-gold-500/60 bg-gold-500/15 text-gold-300"
-                      : "border-line bg-panel-strong text-cream-muted hover:border-line-strong"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
+            <OverrideRow
+              label="Trade pause"
+              value={doc.tradePaused}
+              dangerWhen={true}
+              options={[
+                { value: null, label: "No override (env decides)" },
+                { value: true, label: "Force PAUSED" },
+                { value: false, label: "Force live" },
+              ]}
+              onChange={(value) => mutate((prev) => ({ ...prev, tradePaused: value }))}
+            />
+            <OverrideRow
+              label="Marketplank (/market)"
+              value={doc.marketEnabled}
+              dangerWhen={false}
+              options={[
+                { value: null, label: "No override (env decides)" },
+                { value: false, label: "Force COMING SOON gate" },
+                { value: true, label: "Force enabled" },
+              ]}
+              onChange={(value) =>
+                mutate((prev) => ({ ...prev, marketEnabled: value }))
+              }
+            />
             <p className={NOTE_MUTED}>
-              Pausing reaches every surface within its next /api/trade/status
-              poll. &ldquo;Force live&rdquo; only unpauses surfaces that trust
-              the API — a build shipped with TRADE_PAUSED=true stays paused
-              until redeployed.
+              Trade pause: pausing reaches every surface within its next
+              /api/trade/status poll; &ldquo;Force live&rdquo; only unpauses
+              surfaces that trust the API — a build shipped with
+              TRADE_PAUSED=true stays paused until redeployed. Marketplank is
+              decided server-side per request, so both directions work fully.
+              RULES_RELAXED has no runtime override on purpose: it relaxes
+              trade protections and stays a reviewed env change.
             </p>
           </>
         )}
