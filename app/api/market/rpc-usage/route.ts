@@ -23,11 +23,20 @@ export async function GET(req: Request) {
       .sort((a, b) => b[1].computeUnits - a[1].computeUnits)
       .map(([method, v]) => ({ method, ...v }));
 
+    const { hit, miss, coalesced } = snapshot.cache;
+    const served = hit + miss + coalesced;
+
     return publicJson({
       since: new Date(snapshot.since).toISOString(),
       elapsedSeconds: Math.round(elapsedMs / 1000),
       calls: snapshot.calls,
       computeUnits: snapshot.computeUnits,
+      /** Reads absorbed before reaching the provider. */
+      cache: {
+        ...snapshot.cache,
+        served,
+        avoidedPct: served > 0 ? Number((((hit + coalesced) / served) * 100).toFixed(1)) : null,
+      },
       cuPerSecond:
         elapsedMs > 0 ? Number((snapshot.computeUnits / (elapsedMs / 1000)).toFixed(2)) : null,
       projectedMonthlyCu: projectedMonthlyCu(snapshot),

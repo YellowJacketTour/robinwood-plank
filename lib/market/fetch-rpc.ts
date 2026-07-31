@@ -5,6 +5,7 @@
 
 import { SERVER_RPC_URLS } from "@/lib/server/rpc-urls";
 import { recordRpc } from "@/lib/market/rpc-meter";
+import { peekRpcCache, putRpcCache, withRpcCache } from "@/lib/market/rpc-cache";
 
 type RpcResult<T> = { result?: T; error?: { message?: string; code?: number } };
 
@@ -62,6 +63,16 @@ export async function rpcCall<T = unknown>(
   params: unknown[],
   opts?: { timeoutMs?: number }
 ): Promise<T> {
+  // Identical concurrent reads collapse into one upstream request, and
+  // repeat reads inside the TTL are free. See lib/market/rpc-cache.ts.
+  return withRpcCache(method, params, () => rpcCallUncached<T>(method, params, opts));
+}
+
+async function rpcCallUncached<T = unknown>(
+  method: string,
+  params: unknown[],
+  opts?: { timeoutMs?: number }
+): Promise<T> {
   const timeoutMs = opts?.timeoutMs ?? 8_000;
   const errors: string[] = [];
 
@@ -101,20 +112,42 @@ export async function ethCallMany(
 ): Promise<string[]> {
   const timeoutMs = 12_000;
   const errors: string[] = [];
-  const batch = calls.map((c, i) => ({
+
+  // Providers bill every entry in a JSON-RPC array separately, so a batch saves
+  // round-trips but no compute units. Dropping already-cached entries before
+  // building the body is what actually saves money — and on the vault-stats hot
+  // path most of these seven repeat unchanged between refreshes.
+  const paramsFor = (c: { to: string; data: string }) => [{ to: c.to, data: c.data }, "latest"];
+  const results = new Array<string | undefined>(calls.length);
+  const missIndexes: number[] = [];
+  calls.forEach((c, i) => {
+    const cached = peekRpcCache<string>("eth_call", paramsFor(c));
+    if (cached !== undefined) results[i] = cached;
+    else missIndexes.push(i);
+  });
+  if (missIndexes.length === 0) return results as string[];
+
+  const fill = (out: string[]): string[] => {
+    missIndexes.forEach((originalIndex, k) => {
+      results[originalIndex] = out[k];
+      putRpcCache("eth_call", paramsFor(calls[originalIndex]), out[k]);
+    });
+    return results as string[];
+  };
+
+  const pending = missIndexes.map((i) => calls[i]);
+  const batch = pending.map((c, i) => ({
     jsonrpc: "2.0" as const,
     id: i + 1,
     method: "eth_call",
-    params: [{ to: c.to, data: c.data }, "latest"],
+    params: paramsFor(c),
   }));
 
   for (const url of vaultRpcUrls()) {
     if (url.includes("blockscout.com")) continue; // no batches / rate limits
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
-    // One HTTP request, but providers bill every entry in the array — batching
-    // saves round-trips, not compute units.
-    recordRpc("eth_call", calls.length);
+    recordRpc("eth_call", pending.length);
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -142,7 +175,7 @@ export async function ethCallMany(
         continue;
       }
       const ordered = [...data].sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
-      if (ordered.length !== calls.length || ordered.some((r) => r.error || r.result == null)) {
+      if (ordered.length !== pending.length || ordered.some((r) => r.error || r.result == null)) {
         errors.push("batch incomplete");
         // Retry the batch once rather than fanning out to N individual calls.
         // The fan-out billed 2N requests to the provider for what is usually a
@@ -150,7 +183,7 @@ export async function ethCallMany(
         // rate limiting strictly worse.
         continue;
       }
-      return ordered.map((r) => r.result as string);
+      return fill(ordered.map((r) => r.result as string));
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
     } finally {
@@ -158,12 +191,13 @@ export async function ethCallMany(
     }
   }
 
-  // Sequential fallback across URL list
+  // Sequential fallback across the URL list — only for the entries that missed
+  // cache. ethCall routes through rpcCall, so these populate the cache too.
   const out: string[] = [];
-  for (const c of calls) {
+  for (const c of pending) {
     out.push(await ethCall(c.to, c.data));
   }
-  return out;
+  return fill(out);
 }
 
 export async function ethBlockNumber(): Promise<number> {
