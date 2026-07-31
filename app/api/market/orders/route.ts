@@ -107,10 +107,30 @@ export async function GET(req: Request) {
   const { readOpenSeaListings } = await import("@/lib/market/opensea");
   const { mergeBook } = await import("@/lib/market/book");
   const foreign = await readOpenSeaListings().catch(() => []);
+
+  // Serve foreign listings OUR artwork. The collection image map already holds
+  // every token, built by the cron from Blockscout + IPFS, so there is no
+  // reason to depend on OpenSea for a picture we own — and without it every
+  // OpenSea row falls back to the collection logo and the grid looks broken.
+  let imageByTokenId: Record<string, string> | undefined;
+  if (foreign.length > 0) {
+    try {
+      const { getCollectionImageMap } = await import("@/lib/market/collection-index");
+      const { NFT_CONTRACT_ADDRESS } = await import("@/lib/mint-contract");
+      const map = await getCollectionImageMap(NFT_CONTRACT_ADDRESS);
+      imageByTokenId = Object.fromEntries(
+        Object.entries(map ?? {}).map(([id, rec]) => [id, rec?.imageUri ?? ""])
+      );
+    } catch {
+      // No index yet — cards fall back to the collection logo, as before.
+    }
+  }
+
   const merged = mergeBook(
     live as unknown as import("@/lib/market/types").Listing[],
     foreign,
-    collectionSlug ?? "robinwood"
+    collectionSlug ?? "robinwood",
+    imageByTokenId
   );
 
   return publicJson({ kind, items: merged });

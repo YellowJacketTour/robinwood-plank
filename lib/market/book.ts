@@ -25,8 +25,28 @@ import type { Listing } from "@/lib/market/types";
 export function mergeBook(
   ours: Listing[],
   theirs: NormalisedOpenSeaListing[],
-  collectionSlug: string
+  collectionSlug: string,
+  /**
+   * tokenId -> artwork URI, from our own collection index.
+   *
+   * Foreign listings arrive with no image. Left unresolved they fall back to
+   * the collection logo, so a grid of OpenSea rows renders as identical
+   * placeholders — which reads as broken, and the art is the product. We
+   * already know every token's artwork: the index holds all 1,542, built from
+   * Blockscout and IPFS. Never ask OpenSea for it; we have it, theirs would be
+   * a third-party dependency for something we own.
+   */
+  imageByTokenId?: Map<string, string> | Record<string, string>
 ): Listing[] {
+  const lookupImage = (tokenId: string): string | undefined => {
+    if (!imageByTokenId) return undefined;
+    const v =
+      imageByTokenId instanceof Map
+        ? imageByTokenId.get(tokenId)
+        : imageByTokenId[tokenId];
+    return v && v.length > 0 ? v : undefined;
+  };
+
   const byToken = new Map<string, Listing>();
   for (const l of ours) byToken.set(String(l.tokenId), l);
 
@@ -55,7 +75,11 @@ export function mergeBook(
       kind: "fixed",
       venue: "opensea",
       externalUrl: openSeaTokenUrl(NFT_CONTRACT_ADDRESS, tokenId),
-      ...(existing?.imageUrl ? { imageUrl: existing.imageUrl } : {}),
+      // Ours first (already resolved at listing time), then our own index.
+      ...(() => {
+        const img = existing?.imageUrl || lookupImage(tokenId);
+        return img ? { imageUrl: img } : {};
+      })(),
     });
   }
 
