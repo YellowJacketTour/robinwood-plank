@@ -60,6 +60,23 @@ async function main(): Promise<void> {
   }
   console.log(`[refresh] backend=${durableKvBackend()} mode=${full ? "full" : "incremental"}`);
 
+  // Renew the OpenSea credential before it lapses. Free keys expire after 30
+  // days; a silent expiry would make volume quietly stop updating, which is the
+  // same failure the sales catalog already had. Runs every cron pass, does
+  // nothing until the key is within a week of expiry. Never fatal — losing
+  // OpenSea data must not stop the rest of the refresh.
+  try {
+    const { ensureOpenSeaKey } = await import("../lib/market/opensea");
+    const key = await ensureOpenSeaKey();
+    const loud = key.status === "failed" || key.status === "unavailable";
+    (loud ? console.error : console.log)(`[refresh] opensea-key: ${key.status} — ${key.detail}`);
+  } catch (error) {
+    console.error(
+      "[refresh] opensea-key: check failed —",
+      error instanceof Error ? error.message : error
+    );
+  }
+
   // Sales catalog — the one that actually changes over time, and the one whose
   // absence blanks Highest sale / volume / sale history.
   await step("sales", async () => {
