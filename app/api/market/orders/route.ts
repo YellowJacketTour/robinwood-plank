@@ -11,9 +11,10 @@ import {
   putOffer,
   removeListing,
   removeOffer,
+  retireOrder,
   totalOrderCount,
 } from "@/lib/market/orders-store";
-import { getOrderLiveness, filterLiveOrders, computeOrderHash } from "@/lib/market/order-status";
+import { getOrderLiveness, splitLiveOrders, computeOrderHash } from "@/lib/market/order-status";
 import { markOrderServed } from "@/lib/market/served-orders";
 import { verifyOrderSignature } from "@/lib/market/signature";
 import { getVerifiedCriteriaTokenIds } from "@/lib/market/trait-index";
@@ -77,13 +78,27 @@ export async function GET(req: Request) {
 
   const items =
     kind === "offer" ? await getOffers(collectionSlug) : await getListings(collectionSlug);
-  // Drop orders that are dead on-chain (cancelled / filled / counter-advanced)
-  // so users never click a listing that is guaranteed to revert. Cached
-  // server-side; unknown-liveness rows are kept rather than hiding the whole
-  // book during an RPC outage (audit finding 4).
-  const live = await filterLiveOrders(
+  // Drop orders that are dead on-chain (cancelled / filled / counter-advanced /
+  // seller no longer holds or approves the token) so users never click a
+  // listing that is guaranteed to revert. Cached server-side; unknown-liveness
+  // rows are kept rather than hiding the whole book during an RPC outage
+  // (audit finding 4).
+  const { live, dead } = await splitLiveOrders(
     items as Array<{ id?: string; rawOrder?: unknown }>
   );
+
+  // Retire them for good rather than hiding them on every request. Hiding alone
+  // meant a seller who reacquired the token would have a stale listing silently
+  // reappear at its old price. Fire-and-forget: the response must not wait on a
+  // write, and a failed retirement just means we hide it again next time.
+  for (const { item, reason } of dead) {
+    if (!item.id) continue;
+    void retireOrder(item.id).catch(() => {
+      /* retried on the next read */
+    });
+    console.info(`[orders] retired ${item.id} (${reason})`);
+  }
+
   return publicJson({ kind, items: live });
 }
 

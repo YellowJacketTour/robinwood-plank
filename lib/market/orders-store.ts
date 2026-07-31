@@ -300,6 +300,32 @@ export async function getOfferRawOrder(id: string): Promise<unknown | null> {
   return state.offers[id]?.rawOrder ?? null;
 }
 
+/**
+ * Retire an order that is provably unfillable on-chain.
+ *
+ * Expires rather than deletes: every read already filters `expires_at > NOW()`,
+ * so the order disappears from the book at once and — crucially — *stays* gone.
+ * Merely hiding it at read time meant a seller who reacquired the token would
+ * have their old listing quietly go live again at a price that may be far below
+ * the current market. The daily postgres-maintenance cron sweeps the row later,
+ * which leaves a short window to inspect what was retired and why.
+ *
+ * Only ever called with on-chain evidence (see lib/market/order-status.ts), so
+ * this cannot be used to grief someone else's listing.
+ */
+export async function retireOrder(id: string): Promise<void> {
+  if (hasPostgres()) {
+    await postgresQuery(
+      "UPDATE market_orders SET expires_at = NOW(), updated_at = NOW() WHERE id = $1",
+      [id]
+    );
+    return;
+  }
+  // Non-Postgres stores have no expiry column; removal is the equivalent.
+  await removeListing(id);
+  await removeOffer(id);
+}
+
 export async function removeListing(id: string): Promise<void> {
   if (hasPostgres()) {
     await postgresQuery(

@@ -290,7 +290,7 @@ export async function getOrderLiveness(rawOrder: unknown): Promise<OrderLiveness
  * bounded — the cache TTL forces a recheck within 30s.
  */
 const LIVENESS_TTL_MS = 30_000;
-type LivenessCacheEntry = { dead: boolean; at: number };
+type LivenessCacheEntry = { dead: boolean; at: number; reason?: string };
 const livenessCache = new Map<string, LivenessCacheEntry>();
 const MAX_LIVENESS_CACHE = 10_000;
 
@@ -298,9 +298,19 @@ function orderCacheKey(item: { id?: string }): string {
   return typeof item.id === "string" ? item.id : "";
 }
 
-export async function filterLiveOrders<T extends { id?: string; rawOrder?: unknown }>(
+export type LiveOrderSplit<T> = {
+  live: T[];
+  /** Provably unfillable on-chain. Safe to retire — the evidence is not forgeable. */
+  dead: Array<{ item: T; reason: string }>;
+};
+
+/**
+ * Split a book into orders that can still be filled and orders that provably
+ * cannot. Unknown liveness counts as live: an unreachable node is not evidence.
+ */
+export async function splitLiveOrders<T extends { id?: string; rawOrder?: unknown }>(
   items: T[]
-): Promise<T[]> {
+): Promise<LiveOrderSplit<T>> {
   const now = Date.now();
   if (livenessCache.size > MAX_LIVENESS_CACHE) {
     for (const [k, v] of livenessCache) {
@@ -308,23 +318,33 @@ export async function filterLiveOrders<T extends { id?: string; rawOrder?: unkno
     }
   }
 
-  const out: T[] = [];
+  const live: T[] = [];
+  const dead: Array<{ item: T; reason: string }> = [];
   for (const item of items) {
     const key = orderCacheKey(item);
     const cached = key ? livenessCache.get(key) : undefined;
     if (cached && now - cached.at < LIVENESS_TTL_MS) {
-      if (!cached.dead) out.push(item);
+      if (cached.dead) dead.push({ item, reason: cached.reason ?? "dead" });
+      else live.push(item);
       continue;
     }
 
     const liveness = await getOrderLiveness(item.rawOrder);
     if (liveness.known) {
-      if (key) livenessCache.set(key, { dead: liveness.dead, at: now });
-      if (!liveness.dead) out.push(item);
+      const reason = liveness.dead ? liveness.reason : undefined;
+      if (key) livenessCache.set(key, { dead: liveness.dead, at: now, reason });
+      if (liveness.dead) dead.push({ item, reason: reason ?? "dead" });
+      else live.push(item);
     } else {
       // Unknown — keep it (fail open for display) and do not cache the miss.
-      out.push(item);
+      live.push(item);
     }
   }
-  return out;
+  return { live, dead };
+}
+
+export async function filterLiveOrders<T extends { id?: string; rawOrder?: unknown }>(
+  items: T[]
+): Promise<T[]> {
+  return (await splitLiveOrders(items)).live;
 }
