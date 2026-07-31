@@ -20,6 +20,14 @@ const CU_BY_METHOD: Record<string, number> = {
   eth_chainId: 0,
   eth_gasPrice: 19,
   eth_getCode: 19,
+
+  // Alchemy NFT API (lib/market/alchemy-nft.ts). Billed from the same monthly
+  // allowance as JSON-RPC, so it must be metered too — otherwise moving work
+  // onto it would look free and we would optimise ourselves over the line.
+  alchemy_getOwnersForContract: 600,
+  alchemy_getNFTsForOwner: 480,
+  alchemy_getNFTsForContract: 600,
+  alchemy_getNFTMetadata: 80,
 };
 
 /** Unknown methods are not free — assume eth_call-ish rather than zero. */
