@@ -66,6 +66,36 @@ test("foreign-only tokens join the book, tagged and linked out", () => {
   );
 });
 
+test("foreign listings get OUR artwork, not a placeholder", () => {
+  // Without this every OpenSea row falls back to the collection logo, so the
+  // grid renders as rows of identical placeholders — which reads as broken,
+  // and the art is the product. We already hold all 1,542 images.
+  const images = { "99": "ipfs://Qm.../99.png" };
+  const book = mergeBook([], [theirs("99", "3000000000000000")], "robinwood", images);
+
+  assert.equal(book[0].imageUrl, "ipfs://Qm.../99.png");
+});
+
+test("our own resolved image wins over the index", () => {
+  const images = { "7": "ipfs://index/7.png" };
+  const book = mergeBook(
+    [ours("7", "20000000000000000")],
+    [theirs("7", "9000000000000000")],
+    "robinwood",
+    images
+  );
+
+  // The OpenSea price wins, but the image we already resolved at listing time
+  // is the more specific one and should survive the swap.
+  assert.equal(book[0].venue, "opensea");
+  assert.equal(book[0].imageUrl, "ipfs://art/7");
+});
+
+test("a missing index entry is not a broken image URL", () => {
+  const book = mergeBook([], [theirs("42", "1000000000000000")], "robinwood", { "1": "x" });
+  assert.equal(book[0].imageUrl, undefined, "absent, so the card falls back cleanly");
+});
+
 test("a foreign listing never carries fulfilment material", () => {
   const book = mergeBook([], [theirs("42", "1000000000000000")], "robinwood");
   const foreign = book[0];
