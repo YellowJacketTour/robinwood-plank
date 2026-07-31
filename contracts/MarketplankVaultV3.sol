@@ -358,8 +358,17 @@ contract MarketplankVaultV3 is ERC20, ReentrancyGuard, IERC721Receiver {
         delete redeemRequests[requester];
         pendingRequester = address(0);
         pendingRedeemCount -= 1;
-        // Re-mint the burned share to the treasury so the invariant balances.
-        _mint(treasury, SHARE_UNIT);
+        // Refund the burned share to the REQUESTER (V1/V2 sent it to the
+        // treasury). Forfeit is only reachable when the target drand round went
+        // unrelayed for ROUND_EXPIRY (~24h) — i.e. an infrastructure failure,
+        // not the user's fault — so punishing them is unfair. This is safe and
+        // ungameable: a draw pins the instant its round is relayed and a pinned
+        // request cannot be forfeited, so nobody can forfeit a draw they have
+        // seen to reroll for a rarer one. Refund the share (an internal mint,
+        // no external call); the ETH fee stays with the treasury as the cost of
+        // the failed attempt — refunding it would need an ETH send that a
+        // reverting requester could use to re-brick the single slot.
+        _mint(requester, SHARE_UNIT);
 
         emit RedeemForfeited(requester);
         _assertSolvent();

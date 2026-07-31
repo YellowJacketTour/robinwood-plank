@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { deployBeaconMock, relayPendingRound } from "./helpers/beacon";
 
 /**
@@ -311,6 +312,27 @@ describe("MarketplankVaultV3", () => {
     expect(await nft.ownerOf(drawn)).to.equal(badAddr);
     expect(await vault.pendingRequester()).to.equal(ethers.ZeroAddress);
     expect(await vault.pendingRedeemCount()).to.equal(0n);
+  });
+
+  it("a forfeited redeem refunds the burned share to the requester, not the treasury", async () => {
+    const { treasury, alice, bob, vault } = await seededVault();
+    const beacon = await ethers.getContractAt("DrandBeaconMock", await vault.beacon());
+
+    const aliceBefore: bigint = await vault.balanceOf(alice.address);
+    const treasuryBefore: bigint = await vault.balanceOf(treasury.address);
+
+    // Alice requests (burns 1 share), the round is NEVER relayed, ~24h passes.
+    await vault.connect(alice).requestRandomRedeem({ value: REDEEM_FEE });
+    expect(await vault.balanceOf(alice.address)).to.equal(aliceBefore - SHARE_UNIT);
+    await time.increase(30_000); // overshoot ROUND_EXPIRY at the 1s mock period
+
+    // Anyone can forfeit; the burned share comes back to Alice, not treasury.
+    await vault.connect(bob).forfeitExpiredRedeem(alice.address);
+    expect(await vault.balanceOf(alice.address)).to.equal(aliceBefore, "share refunded to requester");
+    expect(await vault.balanceOf(treasury.address)).to.equal(treasuryBefore, "treasury unchanged");
+    expect(await vault.pendingRequester()).to.equal(ethers.ZeroAddress, "slot freed");
+    // The ETH fee stays with the treasury (accrued), not refunded.
+    expect(await vault.accruedFees()).to.be.gte(REDEEM_FEE);
   });
 
   // ── Batch ───────────────────────────────────────────────────────────────
