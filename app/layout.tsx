@@ -7,6 +7,7 @@ import WoodAmpWindow from "@/components/woodamp/WoodAmpWindow";
 import HoloField from "@/lib/holo";
 import SplashIntro from "@/components/SplashIntro";
 import SiteBanner from "@/components/SiteBanner";
+import MigrateBanner from "@/components/MigrateBanner";
 import ArtServiceWorker from "@/components/ArtServiceWorker";
 import { rootMetadata } from "@/lib/seo";
 import { WalletProvider } from "@/lib/wallet-context";
@@ -52,6 +53,9 @@ export default function RootLayout({
             <HoloField />
             {/* Admin-managed announcement — renders nothing unless enabled */}
             <SiteBanner />
+            {/* Wallet-detected vault-migration reminder — renders nothing unless
+                a connected wallet holds legacy value and isn't on /migrate */}
+            <MigrateBanner />
             {children}
             <WoodAmpWindow />
           </WoodAmpProvider>
