@@ -6,6 +6,7 @@ import WoodAmpProvider from "@/components/woodamp/WoodAmpProvider";
 import WoodAmpWindow from "@/components/woodamp/WoodAmpWindow";
 import HoloField from "@/lib/holo";
 import SplashIntro from "@/components/SplashIntro";
+import SiteBanner from "@/components/SiteBanner";
 import ArtServiceWorker from "@/components/ArtServiceWorker";
 import { rootMetadata } from "@/lib/seo";
 import { WalletProvider } from "@/lib/wallet-context";
@@ -49,6 +50,8 @@ export default function RootLayout({
             <ArtServiceWorker />
             <PlankBackground />
             <HoloField />
+            {/* Admin-managed announcement — renders nothing unless enabled */}
+            <SiteBanner />
             {children}
             <WoodAmpWindow />
           </WoodAmpProvider>
