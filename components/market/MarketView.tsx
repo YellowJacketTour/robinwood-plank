@@ -967,6 +967,11 @@ export default function MarketView() {
           tokenId={detailTokenId}
           collection={COLLECTION}
           listing={detailListing}
+          // The grid already has this — it draws the tier pill on every card.
+          // Passing it makes the panel open with name, tier, rank and
+          // exclusivity already filled instead of showing a bare
+          // Token/Owner/History skeleton until the fetch lands.
+          initialRarity={rarityMap.get(String(detailTokenId)) ?? null}
           onBuy={(l) => {
             closeDetail();
             void handleBuy(l);

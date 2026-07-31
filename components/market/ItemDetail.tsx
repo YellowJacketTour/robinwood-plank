@@ -48,6 +48,22 @@ type Props = {
    * this token's on-chain owner. Omit to leave Send unavailable, e.g. in a
    * read-only context. */
   account?: string | null;
+  /**
+   * Rarity the grid already knows for this token.
+   *
+   * Without it the panel opens showing only Token/Owner/History and fills in
+   * name, tier, rank, exclusivity and traits once /api/market/token returns —
+   * so for the first moment it looks far thinner than the Gallery viewer,
+   * which is what "the Marketplank one is basic" actually was. The caller has
+   * this in hand (it draws the tier pill on every card), so seeding it costs
+   * nothing and the panel opens complete.
+   */
+  initialRarity?: {
+    name: string;
+    tier: string;
+    rank: number;
+    percentile: number;
+  } | null;
 };
 
 const EXPLORER_BASE = "https://robinhoodchain.blockscout.com";
@@ -66,10 +82,28 @@ export default function ItemDetail({
   onOffer,
   onClose,
   account,
+  initialRarity,
 }: Props) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
-  const [detail, setDetail] = useState<TokenDetail | null>(null);
+  /**
+   * Seeded with what the caller already knows so the panel opens complete —
+   * name, tier, rank and exclusivity render on the first paint instead of
+   * after a round trip. Owner, traits and history still stream in; the fetch
+   * below replaces this wholesale, so nothing here can go stale.
+   */
+  const [detail, setDetail] = useState<TokenDetail | null>(
+    initialRarity
+      ? ({
+          tokenId,
+          owner: "",
+          image: listing?.imageUrl ?? null,
+          attributes: [],
+          history: [],
+          rarity: { ...initialRarity, normalizedScore: initialRarity.percentile },
+        } as TokenDetail)
+      : null
+  );
   const [failed, setFailed] = useState(false);
   const [traitIndex, setTraitIndex] = useState<TraitIndexResponse | null>(null);
   const [sendOpen, setSendOpen] = useState(false);
