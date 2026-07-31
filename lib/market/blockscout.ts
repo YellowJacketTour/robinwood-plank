@@ -90,6 +90,21 @@ function nextPath(basePath: string, next: Record<string, string | number> | null
   return `${bare}?${qs.toString()}`;
 }
 
+type BlockscoutPage = {
+  items?: unknown[];
+  next_page_params?: Record<string, string | number> | null;
+};
+
+/**
+ * Walks next_page_params, tolerating a mid-walk failure.
+ *
+ * Blockscout intermittently 500s on a single page deep into a long walk. This
+ * used to throw and discard every page already collected, so one transient
+ * upstream blip failed the whole catalog/index build — the caller saw nothing
+ * rather than the 30 pages that had succeeded. Now a failed page is retried
+ * once, and if it still fails we return the partial result. Page 0 failing is
+ * a real outage, so that still throws.
+ */
 async function paginate<T>(
   firstPath: string,
   pick: (page: unknown) => T[],
@@ -98,10 +113,23 @@ async function paginate<T>(
   const out: T[] = [];
   let path: string | null = firstPath;
   for (let page = 0; page < maxPages && path; page += 1) {
-    const data = await bsGet<{
-      items?: unknown[];
-      next_page_params?: Record<string, string | number> | null;
-    }>(path);
+    let data: BlockscoutPage;
+    try {
+      data = await bsGet<BlockscoutPage>(path);
+    } catch (error) {
+      try {
+        await new Promise((r) => setTimeout(r, 500));
+        data = await bsGet<BlockscoutPage>(path);
+      } catch (retryError) {
+        if (page === 0) throw retryError;
+        console.warn(
+          `[blockscout] partial walk: ${out.length} items from ${page} page(s) before ${
+            retryError instanceof Error ? retryError.message : String(retryError)
+          }`
+        );
+        return out;
+      }
+    }
     out.push(...pick(data));
     path = nextPath(firstPath, data.next_page_params);
   }

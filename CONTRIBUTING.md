@@ -135,7 +135,8 @@ If application health fails, the code rolls back but the schema does not.
 - The relayer key is gas-only and cron-only. It must not be loaded by
   Passenger.
 - The Uniswap key is installed separately from the release archive.
-- Use read-only Upstash credentials for inventory and migration.
+- PostgreSQL is the only datastore. Do not add `KV_REST_API_*`, `@vercel/kv`,
+  or `REDIS_URL` — those paths are dead legacy and are being removed.
 
 When adding a variable, update the relevant example file, README table,
 deployment runbook, workflow input, and validation code in the same pull

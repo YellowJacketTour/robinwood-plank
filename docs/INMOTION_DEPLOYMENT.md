@@ -385,51 +385,35 @@ authorization result. Do not print its bearer secret while editing or testing.
 Add a redirect from `plank.tanggang.life` to `plank.love` last, after GitHub's
 health check no longer depends on the old hostname.
 
-## 11. Upstash-to-PostgreSQL migration
+## 11. Storage: PostgreSQL only (historical note)
 
-The active InMotion runtime uses PostgreSQL. Upstash is a migration source, not
-a production runtime dependency.
+**PostgreSQL is the only datastore.** There is no KV service, no Upstash, no
+Redis. Do not add one, and do not write code against `KV_REST_API_URL`,
+`KV_REST_API_TOKEN`, `@vercel/kv`, or `REDIS_URL`.
 
-For a fresh cutover, add read-only source credentials temporarily:
+### How the cutover happened
 
-- `UPSTASH_REDIS_REST_URL`
-- `UPSTASH_REDIS_REST_TOKEN`
+The app was originally built against Upstash (Vercel KV) by an earlier
+contributor. All marketplace data — the KV values, hash fields and set members
+now living in `plank_kv_values`, `plank_kv_hash_fields` and
+`plank_kv_set_members` — was migrated into PostgreSQL on InMotion in a single
+transactional replacement, verified by reconciling destination row counts
+against a read-only inventory of the source and by recording live V1/V2 vault
+chain state on both sides of the switch. A mode-`600` `pg_dump` was taken first.
 
-Use **Actions → InMotion Passenger CI/CD → Run workflow**:
+The migration tooling that performed it (`scripts/migrate-upstash-to-*.mjs`,
+`scripts/lib/upstash-*.mjs`, the `inventory` / `cutover` workflow operations and
+their tests) has since been **deleted** — the cutover is done and cannot
+meaningfully be re-run. The table names still read "Redis-compatible" because
+the schema deliberately preserved KV semantics during the move; that is a
+description of the column shape, not a live dependency.
 
-1. `operation=inventory` enumerates key types, counts, TTLs, projected SQL
-   rows, and current destination counts without writing.
-2. Freeze writes to the old market API.
-3. `operation=cutover` with
-   `confirmation=REPLACE_INMOTION_MARKET_DATA`:
-   - records live V1/V2 chain state;
-   - creates a mode-`600` `pg_dump`;
-   - transactionally replaces marketplace rows;
-   - reconciles every destination count; and
-   - records chain state again.
-4. Verify the public marketplace.
-5. Remove the temporary Upstash secrets.
+The legacy Redis and Upstash branches inside `lib/market/durable-kv.ts` are
+likewise unused (`DURABLE_KV_BACKEND=postgres` in every environment) and are
+slated for removal. They are retained for now only to avoid touching the
+signed-order storage path in the same change.
 
-The importer refuses unsupported Redis types and expiring hashes/sets that
-cannot preserve their TTL semantics. The transaction commits in full or rolls
-back in full.
-
-Local dry-run:
-
-```bash
-node --env-file=.env.production \
-  --env-file=.env.upstash-readonly \
-  scripts/migrate-upstash-to-postgres.mjs
-```
-
-Approved replacement:
-
-```bash
-node --env-file=.env.production \
-  --env-file=.env.upstash-readonly \
-  scripts/migrate-upstash-to-postgres.mjs \
-  --apply --replace --confirm=REPLACE_INMOTION_MARKET_DATA
-```
+Restores come from `pg_dump` backups (§13), not from the old KV service.
 
 ## 12. InMotion drand relayer
 
@@ -493,6 +477,50 @@ Configure a daily cPanel cron using the cPanel Node executable:
 ```
 
 This removes expired KV rows and expired orders.
+
+### Market data refresh (required)
+
+Every market snapshot — the royalty sales catalog, vault activity, rarity, the
+trait index, the collection index — used to be rebuilt only by whichever user
+request happened to find the key missing, or by a set of hand-run seed scripts
+that still wrote to the pre-PostgreSQL datastore and therefore changed nothing
+the app could see (§11). Those scripts are deleted; this cron replaces them.
+Without it the sale surfaces drift stale and cold rebuilds land on user
+requests.
+
+Incremental, every 15 minutes — sales catalog and vault activity:
+
+```cron
+*/15 * * * * /usr/bin/flock -n /home/CPANEL_USER/plank.tanggang.life/shared/market-refresh.lock /ABSOLUTE/NODE/BIN --env-file=/home/CPANEL_USER/plank.tanggang.life/shared/.env.production /home/CPANEL_USER/plank.tanggang.life/current/scripts/refresh-market-data.mjs >> /home/CPANEL_USER/plank.tanggang.life/logs/market-refresh.log 2>&1
+```
+
+Full rebuild, once daily off-peak — adds rarity, traits and the collection index:
+
+```cron
+17 4 * * * /usr/bin/flock -n /home/CPANEL_USER/plank.tanggang.life/shared/market-refresh-full.lock /ABSOLUTE/NODE/BIN --env-file=/home/CPANEL_USER/plank.tanggang.life/shared/.env.production /home/CPANEL_USER/plank.tanggang.life/current/scripts/refresh-market-data.mjs --full >> /home/CPANEL_USER/plank.tanggang.life/logs/market-refresh.log 2>&1
+```
+
+`flock` matters: a full sales rebuild can run several minutes, and overlapping
+runs would duplicate the upstream load the refresh exists to avoid. The script
+exits non-zero only when every target fails, so one flaky upstream does not turn
+a routine run red.
+
+Verify after the first run:
+
+```bash
+tail -n 50 "$HOME/plank.tanggang.life/logs/market-refresh.log"
+```
+
+Expect `[refresh] backend=postgres` — if it says anything else, the cron is not
+seeing the same storage the app reads, and its writes will be invisible.
+
+### RPC budget
+
+`GET /api/market/rpc-usage` reports outbound JSON-RPC calls and compute units
+for the responding Passenger worker, with a projected monthly total against the
+30M-CU provider free tier. It is per-process, so multiply by worker count. Use
+it to attribute a rising bill to a specific code path instead of guessing from
+the provider dashboard.
 
 Use cPanel database backups and periodically test a restore. A release rollback
 does not roll back database migrations or data.

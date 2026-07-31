@@ -15,10 +15,9 @@ import { postgresQuery } from "@/lib/postgres";
  * lib/market/signature.ts), so the server cannot forge or alter one; it can
  * only lose or serve them.
  *
- * Backend: indexed PostgreSQL rows on cPanel Passenger, Redis/Valkey via
- * REDIS_URL, or Upstash/Vercel KV via its REST credentials. Falls back to a
- * file + in-memory globalThis cache otherwise — fine for local dev, not
- * durable on a serverless filesystem in production.
+ * Backend: indexed PostgreSQL rows on cPanel Passenger — the only datastore.
+ * Falls back to a file + in-memory globalThis cache when unconfigured, which is
+ * fine for local dev and not durable in production.
  *
  * CONCURRENCY (audit finding 6): the old design stored the whole book under a
  * single KV key and did read-modify-write with no compare-and-set, so two

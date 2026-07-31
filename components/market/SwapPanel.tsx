@@ -189,24 +189,31 @@ function StuckRedeemRelay({
     if (!active) return;
     let cancelled = false;
     const check = async () => {
+      const zero = "0x0000000000000000000000000000000000000000";
+      let pending = false;
       try {
-        // Always try sponsored settle first when anything is pending — free for users.
-        await kickServerRandomSettle(vaultAddress);
-      } catch {
-        /* ignore */
-      }
-      try {
+        // Read state first. These two go to the public RPC; the settle kick
+        // below goes to the keyed provider, so kicking unconditionally every
+        // 6s billed a sponsored-settle round-trip on every idle tab.
         const [who, r] = await Promise.all([
           getPendingRequester(vaultAddress),
           getPendingRound(vaultAddress),
         ]);
         if (cancelled) return;
-        const zero = "0x0000000000000000000000000000000000000000";
-        setRequester(who && who.toLowerCase() !== zero ? who : null);
+        pending = Boolean(who && who.toLowerCase() !== zero);
+        setRequester(pending ? who : null);
         setRound(r.round > BigInt(0) ? r.round : null);
         setAvailable(r.available);
       } catch {
         /* */
+      }
+      if (!pending || cancelled) return;
+      try {
+        // Sponsored settle — free for users, so try it whenever a draw is
+        // actually waiting.
+        await kickServerRandomSettle(vaultAddress);
+      } catch {
+        /* ignore */
       }
     };
     void check();

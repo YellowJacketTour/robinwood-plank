@@ -4,6 +4,7 @@
  */
 
 import { SERVER_RPC_URLS } from "@/lib/server/rpc-urls";
+import { recordRpc } from "@/lib/market/rpc-meter";
 
 type RpcResult<T> = { result?: T; error?: { message?: string; code?: number } };
 
@@ -29,6 +30,8 @@ async function postRpc(
 ): Promise<RpcResult<unknown>> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
+  // Metered before the await: a call that times out or 429s is still billed.
+  recordRpc(method);
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -109,6 +112,9 @@ export async function ethCallMany(
     if (url.includes("blockscout.com")) continue; // no batches / rate limits
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
+    // One HTTP request, but providers bill every entry in the array — batching
+    // saves round-trips, not compute units.
+    recordRpc("eth_call", calls.length);
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -138,19 +144,11 @@ export async function ethCallMany(
       const ordered = [...data].sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
       if (ordered.length !== calls.length || ordered.some((r) => r.error || r.result == null)) {
         errors.push("batch incomplete");
-        // sequential on this same URL before giving up
-        try {
-          const out: string[] = [];
-          for (const c of calls) {
-            const one = await postRpc(url, "eth_call", [{ to: c.to, data: c.data }, "latest"], 8_000);
-            if (one.error || one.result == null) throw new Error(one.error?.message || "eth_call failed");
-            out.push(one.result as string);
-          }
-          return out;
-        } catch (e) {
-          errors.push(e instanceof Error ? e.message : String(e));
-          continue;
-        }
+        // Retry the batch once rather than fanning out to N individual calls.
+        // The fan-out billed 2N requests to the provider for what is usually a
+        // transient partial failure, and on a rate-limited provider it made the
+        // rate limiting strictly worse.
+        continue;
       }
       return ordered.map((r) => r.result as string);
     } catch (error) {

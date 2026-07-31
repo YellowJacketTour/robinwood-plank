@@ -46,8 +46,8 @@ and verified before GitHub build and health-check variables are changed.
 
 Cloudflare is the public edge, not the application runtime. The production
 application, persistent marketplace data, and scheduled relayer run on the
-InMotion account. Upstash is supported only as a migration source after the
-PostgreSQL cutover.
+InMotion account. PostgreSQL is the only datastore; there is no KV, Upstash, or
+Redis service.
 
 See [Architecture](ARCHITECTURE.md) for the data and trust boundaries,
 [Architecture Map](docs/ARCHITECTURE_MAP.md) for a diagrammed inventory of

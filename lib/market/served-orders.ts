@@ -22,10 +22,9 @@ import { postgresQuery } from "@/lib/postgres";
  * an order, and Activity cross-checks against it, never inferring from the
  * executing contract alone.
  *
- * Backend mirrors lib/market/orders-store.ts: a PostgreSQL primary-key table,
- * Redis/Valkey SET, or Upstash/Vercel KV SET gives indexed membership and
- * idempotent additions. Local dev can still fall back to a file + in-process
- * Set.
+ * Backend mirrors lib/market/orders-store.ts: a PostgreSQL primary-key table
+ * gives indexed membership and idempotent additions. Local dev can still fall
+ * back to a file + in-process Set.
  */
 
 const KV_SET_KEY = "plank:market:served-order-hashes";

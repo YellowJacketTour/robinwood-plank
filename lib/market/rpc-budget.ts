@@ -35,6 +35,15 @@ export function logScanBudget(): { chunkBlocks: number; maxChunks: number } {
   return { chunkBlocks: 50_000, maxChunks: 12 };
 }
 
+/**
+ * Resolves `fallback` when `promise` outruns `ms`. Note it does NOT cancel the
+ * underlying work — the promise runs to completion and its result is discarded.
+ *
+ * That is deliberate here rather than an oversight: getVaultActivity memoizes
+ * and shares one scan between the SSE stream and estimateApr, so cancelling on
+ * one caller's timeout would fail the other. The scan cost is bounded instead,
+ * at the source — see the incremental eth_getLogs path in vault-activity.ts.
+ */
 export async function withTimeout<T>(
   promise: Promise<T>,
   ms: number,

@@ -80,7 +80,6 @@ Changes in these areas require focused review and regression tests:
   cPanel cron may load `shared/runtime-secrets/relayer.env`.
 - Use a dedicated deployment SSH key and a verified `known_hosts` entry.
 - Use a dedicated gas-only relayer wallet and retain its backup offline.
-- Remove temporary Upstash migration credentials after cutover verification.
 
 If a secret appears in git, CI output, chat, an issue, or a pull request, treat
 it as compromised. Revoke or rotate it at the provider, then remove the
