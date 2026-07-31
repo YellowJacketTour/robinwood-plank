@@ -12,7 +12,7 @@ import { durableKv as kv, hasDurableKv } from "@/lib/market/durable-kv";
  * volume quietly stop updating — the same class of failure as the sales catalog
  * expiring with nothing to rebuild it. So the key is treated as managed state
  * rather than static config: stored in PostgreSQL, checked on every cron run,
- * and re-minted before it lapses.
+ * and requested afresh before it lapses.
  *
  * Set OPENSEA_API_KEY to override with a full (non-expiring) key from
  * opensea.io/settings/developer. That takes precedence and is never rotated.
@@ -21,25 +21,36 @@ import { durableKv as kv, hasDurableKv } from "@/lib/market/durable-kv";
  */
 
 const KEY_KV = "plank:market:opensea-api-key-v1";
+/** Last good collection stats from OpenSea. No TTL — see migration 003. */
+export const OPENSEA_STATS_KV = "plank:market:opensea-collection-stats-v1";
 const BASE = "https://api.opensea.io/api/v2";
+
+/** The collection as OpenSea knows it. */
+export const OPENSEA_COLLECTION_SLUG = "robinwoodplanks42069";
 
 /** Renew with a week in hand — a cron can miss a few runs without lapsing. */
 const RENEW_BEFORE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * OpenSea allows one key creation per hour per caller. Overshoot it, so a
- * failed mint cannot turn into a retry loop that stays permanently rate
- * limited and never recovers.
+ * Wait one cron cycle before retrying a failed key request.
+ *
+ * OpenSea allows one key creation per hour, so the obvious choice is to back
+ * off for an hour — but that is the wrong reasoning. We do not know where in
+ * their window we are, only that we were refused. A refused request costs one
+ * cheap HTTP call and nothing else, so retrying every cycle recovers as soon as
+ * the window opens instead of idling for up to an hour after it already has.
+ * With a 7-day renewal margin, four wasted requests an hour is not a concern;
+ * a key lapsing because we slept through the reset would be.
  */
-const MINT_COOLDOWN_MS = 70 * 60 * 1000;
+const ISSUE_COOLDOWN_MS = 14 * 60 * 1000;
 
 export type StoredOpenSeaKey = {
   apiKey: string;
   /** ISO-8601 from OpenSea. */
   expiresAt: string;
-  mintedAt: number;
+  issuedAt: number;
   name?: string;
-  /** Last mint ATTEMPT, success or not — drives the cooldown. */
+  /** Last issuance ATTEMPT, success or not — drives the cooldown. */
   lastAttemptAt?: number;
 };
 
@@ -62,7 +73,7 @@ async function writeStored(value: StoredOpenSeaKey): Promise<void> {
     // No TTL. This is managed state, not a cache — see migration 003.
     await kv.set(KEY_KV, value);
   } catch {
-    /* a failed write just means we mint again next run */
+    /* a failed write just means we request another next run */
   }
 }
 
@@ -74,9 +85,9 @@ function msUntilExpiry(stored: StoredOpenSeaKey): number {
 /**
  * The key to use right now, or null if we have none.
  *
- * Read-only by design: request paths must never mint. Several Passenger
+ * Read-only by design: request paths must never ask for a key. Several Passenger
  * workers hitting a 1-per-hour endpoint at once would rate-limit each other
- * and leave everyone without a key. Minting is the cron's job.
+ * and leave everyone without a key. Requesting one is the cron's job.
  */
 export async function getOpenSeaApiKey(): Promise<string | null> {
   const fromEnv = envKey();
@@ -87,7 +98,7 @@ export async function getOpenSeaApiKey(): Promise<string | null> {
   return stored.apiKey;
 }
 
-async function mintKey(): Promise<StoredOpenSeaKey | null> {
+async function requestKey(): Promise<StoredOpenSeaKey | null> {
   const res = await fetch(`${BASE}/auth/keys`, {
     method: "POST",
     headers: { accept: "application/json" },
@@ -96,7 +107,7 @@ async function mintKey(): Promise<StoredOpenSeaKey | null> {
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(
-      `OpenSea key mint failed: HTTP ${res.status} ${body.slice(0, 160)}`
+      `OpenSea key request failed: HTTP ${res.status} ${body.slice(0, 160)}`
     );
   }
   const json = (await res.json()) as {
@@ -105,12 +116,12 @@ async function mintKey(): Promise<StoredOpenSeaKey | null> {
     name?: string;
   };
   if (!json.api_key || !json.expires_at) {
-    throw new Error("OpenSea key mint returned an unexpected shape.");
+    throw new Error("OpenSea key request returned an unexpected shape.");
   }
   return {
     apiKey: json.api_key,
     expiresAt: json.expires_at,
-    mintedAt: Date.now(),
+    issuedAt: Date.now(),
     name: json.name,
   };
 }
@@ -122,7 +133,11 @@ export type KeyEnsureResult = {
 };
 
 /**
- * Mint or renew as needed. Call from the cron only.
+ * Obtain or renew the API credential as needed. Call from the cron only.
+ *
+ * NOTE ON WORDING: this is an HTTP request to OpenSea for an API key. It is
+ * unrelated to NFT minting — the collection is sold out and nothing here ever
+ * touches a contract.
  */
 export async function ensureOpenSeaKey(): Promise<KeyEnsureResult> {
   if (envKey()) {
@@ -143,25 +158,25 @@ export async function ensureOpenSeaKey(): Promise<KeyEnsureResult> {
 
   const lastAttempt = stored?.lastAttemptAt ?? 0;
   const sinceAttempt = Date.now() - lastAttempt;
-  if (sinceAttempt < MINT_COOLDOWN_MS) {
-    const mins = Math.ceil((MINT_COOLDOWN_MS - sinceAttempt) / 60_000);
+  if (sinceAttempt < ISSUE_COOLDOWN_MS) {
+    const mins = Math.ceil((ISSUE_COOLDOWN_MS - sinceAttempt) / 60_000);
     return {
       status: "cooldown",
       detail: `renewal needed but OpenSea allows one key per hour; retrying in ~${mins}m`,
     };
   }
 
-  // Record the attempt BEFORE the call, so a crash mid-mint still burns the
+  // Record the attempt BEFORE the call, so a crash mid-request still burns the
   // cooldown rather than letting the next run hammer a rate-limited endpoint.
   if (stored) await writeStored({ ...stored, lastAttemptAt: Date.now() });
 
   try {
-    const minted = await mintKey();
-    if (!minted) return { status: "failed", detail: "mint returned nothing" };
-    await writeStored({ ...minted, lastAttemptAt: Date.now() });
+    const issued = await requestKey();
+    if (!issued) return { status: "failed", detail: "key request returned nothing" };
+    await writeStored({ ...issued, lastAttemptAt: Date.now() });
     return {
       status: "renewed",
-      detail: `new key expires ${minted.expiresAt}`,
+      detail: `new key expires ${issued.expiresAt}`,
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -169,7 +184,7 @@ export async function ensureOpenSeaKey(): Promise<KeyEnsureResult> {
       await writeStored({
         apiKey: "",
         expiresAt: new Date(0).toISOString(),
-        mintedAt: 0,
+        issuedAt: 0,
         lastAttemptAt: Date.now(),
       });
     }
@@ -245,4 +260,145 @@ export async function fetchOpenSeaCollectionStats(
   return openSeaGet<OpenSeaCollectionStats>(
     `/collections/${encodeURIComponent(slug)}/stats`
   );
+}
+
+export type StoredOpenSeaStats = {
+  volume: number | null;
+  sales: number | null;
+  floorPrice: number | null;
+  floorSymbol: string | null;
+  numOwners: number | null;
+  fetchedAt: number;
+};
+
+export async function readOpenSeaStats(): Promise<StoredOpenSeaStats | null> {
+  if (!hasDurableKv()) return null;
+  try {
+    return (await kv.get<StoredOpenSeaStats>(OPENSEA_STATS_KV)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Refresh OpenSea's own collection figures.
+ *
+ * Kept separate from our sales catalog rather than added to it: an OpenSea sale
+ * on this chain already appears in our catalog (it gates on the royalty leg,
+ * not on the venue), so summing the two would double count. Reconciling by
+ * transaction hash is the next step; storing their number first lets us see how
+ * far apart the two are before deciding.
+ *
+ * Never overwrites good data with nothing — an outage keeps the last figure.
+ */
+export async function refreshOpenSeaStats(): Promise<StoredOpenSeaStats | null> {
+  const stats = await fetchOpenSeaCollectionStats(OPENSEA_COLLECTION_SLUG);
+  const t = stats?.total;
+  if (!t || (t.volume == null && t.sales == null)) return readOpenSeaStats();
+
+  const next: StoredOpenSeaStats = {
+    volume: t.volume ?? null,
+    sales: t.sales ?? null,
+    floorPrice: t.floor_price ?? null,
+    floorSymbol: t.floor_price_symbol ?? null,
+    numOwners: t.num_owners ?? null,
+    fetchedAt: Date.now(),
+  };
+  if (hasDurableKv()) {
+    try {
+      await kv.set(OPENSEA_STATS_KV, next);
+    } catch {
+      /* next run retries */
+    }
+  }
+  return next;
+}
+
+export type OpenSeaListing = {
+  order_hash?: string;
+  chain?: string;
+  price?: { current?: { currency?: string; decimals?: number; value?: string } };
+  protocol_address?: string;
+  protocol_data?: {
+    parameters?: {
+      offerer?: string;
+      zone?: string;
+      orderType?: number;
+      conduitKey?: string;
+      offer?: Array<{ itemType?: number; token?: string; identifierOrCriteria?: string }>;
+      consideration?: Array<{
+        itemType?: number;
+        token?: string;
+        startAmount?: string;
+        recipient?: string;
+      }>;
+    };
+    signature?: string;
+  };
+};
+
+export async function fetchOpenSeaListings(
+  slug: string,
+  limit = 50
+): Promise<{ listings?: OpenSeaListing[]; next?: string } | null> {
+  return openSeaGet(
+    `/listings/collection/${encodeURIComponent(slug)}/all?limit=${limit}`
+  );
+}
+
+/**
+ * One-shot reconnaissance, logged rather than stored.
+ *
+ * The open question for surfacing OpenSea listings is whether we could ever
+ * *fulfil* one. Our own orders use no conduit, and OpenSea's mainnet conduit
+ * (0x1E00…3c71) is provably absent from chain 4663 — checked with eth_getCode —
+ * so they must use different addresses here. Which conduit, and whether it is
+ * deployed, decides between a working Buy button and an honest deep link. That
+ * cannot be reasoned about; it has to be read off a real order.
+ *
+ * Everything logged here is public on-chain data: addresses, order types,
+ * conduit keys. Never the API key.
+ */
+export async function probeOpenSeaListingShape(slug: string): Promise<string[]> {
+  const out: string[] = [];
+  const stats = await fetchOpenSeaCollectionStats(slug);
+  if (!stats) {
+    out.push("stats: unavailable (no key, or collection slug wrong)");
+  } else {
+    const t = stats.total ?? {};
+    out.push(
+      `stats: volume=${t.volume ?? "?"} sales=${t.sales ?? "?"} ` +
+        `floor=${t.floor_price ?? "?"} ${t.floor_price_symbol ?? ""} owners=${t.num_owners ?? "?"}`
+    );
+  }
+
+  const page = await fetchOpenSeaListings(slug, 20);
+  const listings = page?.listings ?? [];
+  out.push(`listings: ${listings.length} returned`);
+  const sample = listings[0];
+  if (!sample?.protocol_data?.parameters) {
+    out.push("listing shape: no protocol_data to inspect");
+    return out;
+  }
+
+  const p = sample.protocol_data.parameters;
+  out.push(
+    `listing shape: chain=${sample.chain} protocol=${sample.protocol_address} ` +
+      `orderType=${p.orderType} zone=${p.zone} conduitKey=${p.conduitKey}`
+  );
+  const recipients = (p.consideration ?? [])
+    .map((c) => `${c.recipient}:${c.startAmount}`)
+    .join(" ");
+  out.push(`consideration: ${recipients || "none"}`);
+
+  const zeroKey = `0x${"0".repeat(64)}`;
+  if (p.conduitKey && p.conduitKey !== zeroKey) {
+    out.push(
+      `conduit: non-zero key — resolve via ConduitController.getConduit() and ` +
+        `eth_getCode before assuming fulfilment is possible`
+    );
+  } else {
+    out.push("conduit: zero — Seaport pulls approvals directly, same as our own orders");
+  }
+  return out;
 }

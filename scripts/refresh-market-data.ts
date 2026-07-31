@@ -20,17 +20,22 @@
 
 const args = new Set(process.argv.slice(2));
 const full = args.has("--full");
-const explicit = ["--sales", "--vault", "--rarity", "--traits", "--collection"].filter(
-  (t) => args.has(t)
-);
+const explicit = [
+  "--sales",
+  "--vault",
+  "--rarity",
+  "--traits",
+  "--collection",
+  "--opensea",
+].filter((t) => args.has(t));
 
 /** Full runs include the expensive collection-wide rebuilds; incremental ones don't. */
 const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["sales", "vault", "rarity", "traits", "collection"]
-      : ["sales", "vault"]
+      ? ["sales", "vault", "opensea", "rarity", "traits", "collection"]
+      : ["sales", "vault", "opensea"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -110,6 +115,21 @@ async function main(): Promise<void> {
     const { getVaultActivity } = await import("../lib/market/vault-activity");
     const events = await getVaultActivity(full ? 400 : 100);
     return `${events.length} events`;
+  });
+
+  // OpenSea's own collection figures, stored for reconciliation against our
+  // catalog. Also logs the shape of a real listing, which is the only way to
+  // learn whether their orders on this chain are fulfillable by us — that
+  // decides a working Buy button versus an honest deep link.
+  await step("opensea", async () => {
+    const { refreshOpenSeaStats, probeOpenSeaListingShape, OPENSEA_COLLECTION_SLUG } =
+      await import("../lib/market/opensea");
+    const stats = await refreshOpenSeaStats();
+    for (const line of await probeOpenSeaListingShape(OPENSEA_COLLECTION_SLUG)) {
+      console.log(`[refresh]   ${line}`);
+    }
+    if (!stats) return "no stats (no key yet, or OpenSea unreachable)";
+    return `volume=${stats.volume ?? "?"} sales=${stats.sales ?? "?"} floor=${stats.floorPrice ?? "?"}`;
   });
 
   await step("rarity", async () => {

@@ -11,12 +11,12 @@ import test from "node:test";
 type Stored = {
   apiKey: string;
   expiresAt: string;
-  mintedAt: number;
+  issuedAt: number;
   name?: string;
   lastAttemptAt?: number;
 };
 
-function load(store: Map<string, unknown>, mint?: () => Response | Promise<Response>) {
+function load(store: Map<string, unknown>, issueKey?: () => Response | Promise<Response>) {
   process.env.DURABLE_KV_BACKEND = "postgres";
   process.env.PGHOST = "opensea-test.invalid";
   process.env.PGDATABASE = "t";
@@ -32,9 +32,9 @@ function load(store: Map<string, unknown>, mint?: () => Response | Promise<Respo
       store.set(key, value);
       return "OK";
     };
-    if (mint) {
+    if (issueKey) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      globalThis.fetch = (async () => mint()) as any;
+      globalThis.fetch = (async () => issueKey()) as any;
     }
     return import("../../lib/market/opensea");
   };
@@ -45,7 +45,7 @@ const okResponse = (expiresAt: string) =>
   ({
     ok: true,
     status: 200,
-    json: async () => ({ api_key: "minted-key", expires_at: expiresAt, name: "test" }),
+    json: async () => ({ api_key: "issued-key", expires_at: expiresAt, name: "test" }),
     text: async () => "",
   }) as unknown as Response;
 
@@ -56,17 +56,17 @@ test("a key with plenty of life left is not renewed", async () => {
   store.set(KEY, {
     apiKey: "existing",
     expiresAt: daysFromNow(25),
-    mintedAt: Date.now(),
+    issuedAt: Date.now(),
   } satisfies Stored);
-  let minted = false;
+  let requested = false;
   const { ensureOpenSeaKey } = await load(store, () => {
-    minted = true;
+    requested = true;
     return okResponse(daysFromNow(30));
   })();
 
   const result = await ensureOpenSeaKey();
   assert.equal(result.status, "fresh");
-  assert.equal(minted, false, "must not burn the hourly mint quota needlessly");
+  assert.equal(requested, false, "must not burn the hourly key-issuance quota needlessly");
 });
 
 test("a key close to expiry is renewed before it lapses", async () => {
@@ -74,7 +74,7 @@ test("a key close to expiry is renewed before it lapses", async () => {
   store.set(KEY, {
     apiKey: "old",
     expiresAt: daysFromNow(3), // inside the 7-day renewal window
-    mintedAt: Date.now() - 27 * 86_400_000,
+    issuedAt: Date.now() - 27 * 86_400_000,
     lastAttemptAt: Date.now() - 3 * 60 * 60 * 1000,
   } satisfies Stored);
   const { ensureOpenSeaKey, getOpenSeaApiKey } = await load(store, () =>
@@ -83,29 +83,29 @@ test("a key close to expiry is renewed before it lapses", async () => {
 
   const result = await ensureOpenSeaKey();
   assert.equal(result.status, "renewed");
-  assert.equal(await getOpenSeaApiKey(), "minted-key", "the new key must be the one served");
+  assert.equal(await getOpenSeaApiKey(), "issued-key", "the new key must be the one served");
 });
 
-test("renewal respects the one-key-per-hour limit", async () => {
+test("a just-attempted renewal waits a cycle rather than retrying immediately", async () => {
   const store = new Map<string, unknown>();
   store.set(KEY, {
     apiKey: "old",
     expiresAt: daysFromNow(1),
-    mintedAt: Date.now(),
-    lastAttemptAt: Date.now() - 5 * 60 * 1000, // 5 minutes ago
+    issuedAt: Date.now(),
+    lastAttemptAt: Date.now() - 60 * 1000, // one minute ago
   } satisfies Stored);
-  let minted = false;
+  let requested = false;
   const { ensureOpenSeaKey } = await load(store, () => {
-    minted = true;
+    requested = true;
     return okResponse(daysFromNow(30));
   })();
 
   const result = await ensureOpenSeaKey();
   assert.equal(result.status, "cooldown");
-  assert.equal(minted, false, "hammering a rate-limited endpoint never recovers");
+  assert.equal(requested, false, "hammering a rate-limited endpoint never recovers");
 });
 
-test("a failed mint burns the cooldown so it cannot retry-loop", async () => {
+test("a failed key request burns the cooldown so it cannot retry-loop", async () => {
   const store = new Map<string, unknown>();
   const { ensureOpenSeaKey } = await load(
     store,
@@ -126,9 +126,9 @@ test("a failed mint burns the cooldown so it cannot retry-loop", async () => {
 
 test("an explicit OPENSEA_API_KEY wins and is never rotated", async () => {
   const store = new Map<string, unknown>();
-  let minted = false;
+  let requested = false;
   const loader = load(store, () => {
-    minted = true;
+    requested = true;
     return okResponse(daysFromNow(30));
   });
   const { ensureOpenSeaKey, getOpenSeaApiKey } = await loader();
@@ -136,7 +136,7 @@ test("an explicit OPENSEA_API_KEY wins and is never rotated", async () => {
   try {
     const result = await ensureOpenSeaKey();
     assert.equal(result.status, "env");
-    assert.equal(minted, false, "a full key must never be replaced by a 30-day free one");
+    assert.equal(requested, false, "a full key must never be replaced by a 30-day free one");
     assert.equal(await getOpenSeaApiKey(), "full-key-from-portal");
   } finally {
     delete process.env.OPENSEA_API_KEY;
@@ -148,7 +148,7 @@ test("key status never leaks the key itself", async () => {
   store.set(KEY, {
     apiKey: "super-secret-value",
     expiresAt: daysFromNow(12),
-    mintedAt: Date.now(),
+    issuedAt: Date.now(),
   } satisfies Stored);
   const { openSeaKeyStatus } = await load(store)();
 
