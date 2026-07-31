@@ -112,6 +112,37 @@ services:
     networks:
       - data
 
+  # Rebuilds the market data snapshots (sales catalog, vault activity, and on
+  # --full the rarity/trait/collection indexes). Mirrors the production cron;
+  # see §13 of docs/INMOTION_DEPLOYMENT.md.
+  market-refresh:
+    profiles:
+      - tools
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tools
+    environment:
+      DURABLE_KV_BACKEND: postgres
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-plank}
+      PGUSER: ${POSTGRES_USER:-plankapp}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Docker env file}
+      RPC_URL: ${RPC_URL:-}
+      NEXT_PUBLIC_MARKET_VAULT_ADDRESS: ${NEXT_PUBLIC_MARKET_VAULT_ADDRESS:-}
+      NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS: ${NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS:-}
+    command:
+      - npx
+      - tsx
+      - scripts/refresh-market-data.ts
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    networks:
+      - frontend
+      - data
+
 networks:
   frontend:
   data:

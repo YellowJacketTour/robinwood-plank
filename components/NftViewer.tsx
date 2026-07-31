@@ -1038,7 +1038,7 @@ export default function NftViewer() {
                   rel="noopener noreferrer"
                   className="font-bold text-gold-300 hover:text-gold-400"
                 >
-                  Contract ↗
+                  NFT contract ↗
                 </a>
               </div>
             </div>

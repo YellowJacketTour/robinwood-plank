@@ -87,23 +87,43 @@ export const REOWN_THEME_VARIABLES = {
 } as const;
 
 /**
- * Only injected + WalletConnect connectors. Every embedded-wallet / email /
- * social / SIWE / swap / onramp / send-transaction feature is explicitly
- * disabled — out of scope per the adoption decision, and AppKit's own
- * "send" UI must never substitute for lib/wallet.ts's sendTransaction().
+ * Connector + sign-in surface, tuned to the AppKit demo the owner approved
+ * (demo.reown.com). Wallet first, then email and socials — those create
+ * Reown embedded wallets, which is the point: someone without a wallet can
+ * still buy $PLANK.
+ *
+ * Deliberately OFF, and each for a reason rather than caution:
+ * - swaps: AppKit's built-in swap is 1inch-routed and would bypass our own
+ *   Uniswap path — i.e. our 0.4207% fee. Trading stays in our widget.
+ * - onramp / pay / payments: card-purchase flows we haven't diligenced.
+ * - send: AppKit's send UI must never substitute for lib/wallet.ts's
+ *   sendTransaction(), which is where target validation, pre-simulation and
+ *   balance-delta proof live. Receiving and history are read-only and safe.
  */
 export const REOWN_FEATURES = {
-  analytics: false,
-  email: false,
-  socials: false,
+  analytics: true,
+  email: true,
+  socials: ["google", "x", "farcaster", "discord", "apple", "github"],
+  emailShowWallets: true,
   swaps: false,
   onramp: false,
   send: false,
-  receive: false,
-  history: false,
+  receive: true,
+  history: true,
+  allWallets: true,
+  collapseWallets: false,
   legalCheckbox: false,
-  connectMethodsOrder: ["wallet"] as const,
-} as const;
+  connectMethodsOrder: ["wallet", "email", "social"],
+  connectorTypeOrder: [
+    "walletConnect",
+    "recent",
+    "injected",
+    "featured",
+    "custom",
+    "external",
+    "recommended",
+  ],
+};
 
 export const REOWN_METADATA = {
   name: "plank.love",

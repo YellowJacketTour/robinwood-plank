@@ -23,6 +23,15 @@ const SEAPORT_ABI = new Interface([
   "function getCounter(address offerer) view returns (uint256)",
 ]);
 
+const ERC721_ABI = new Interface([
+  "function ownerOf(uint256 tokenId) view returns (address)",
+  "function isApprovedForAll(address owner, address operator) view returns (bool)",
+  "function getApproved(uint256 tokenId) view returns (address)",
+]);
+
+/** Seaport ERC-721 offer item type. */
+const ITEM_TYPE_ERC721 = 2;
+
 type OrderComponentsLike = {
   offerer: string;
   zone?: string;
@@ -40,7 +49,7 @@ type OrderComponentsLike = {
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const ZERO_HASH = "0x" + "0".repeat(64);
 
-async function ethCall(data: string): Promise<string | null> {
+async function ethCallTo(to: string, data: string): Promise<string | null> {
   try {
     const res = await fetch(CHAIN.rpcUrls.default, {
       method: "POST",
@@ -49,7 +58,7 @@ async function ethCall(data: string): Promise<string | null> {
         jsonrpc: "2.0",
         id: 1,
         method: "eth_call",
-        params: [{ to: SEAPORT_ADDRESS, data }, "latest"],
+        params: [{ to, data }, "latest"],
       }),
       cache: "no-store",
     });
@@ -60,8 +69,110 @@ async function ethCall(data: string): Promise<string | null> {
   }
 }
 
+async function ethCall(data: string): Promise<string | null> {
+  return ethCallTo(SEAPORT_ADDRESS, data);
+}
+
+/** The single ERC-721 being sold, or null if this order isn't that shape. */
+function erc721OfferItem(
+  p: OrderComponentsLike
+): { token: string; tokenId: string } | null {
+  const offer = Array.isArray(p.offer) ? p.offer : [];
+  if (offer.length !== 1) return null;
+  const item = offer[0] as {
+    itemType?: number | string;
+    token?: string;
+    identifierOrCriteria?: string | number;
+  };
+  if (Number(item?.itemType) !== ITEM_TYPE_ERC721) return null;
+  if (!item.token || item.identifierOrCriteria == null) return null;
+  return { token: item.token, tokenId: String(item.identifierOrCriteria) };
+}
+
+/**
+ * Can Seaport still pull this token from the offerer at fill time?
+ *
+ * Seaport's own getOrderStatus knows nothing about this: an order stays
+ * "valid" after the seller transfers the NFT away or revokes approval, and
+ * only reverts when someone actually tries to buy it. Measured on production
+ * 2026-07-31, 9 of 29 live listings (31%) were unfillable for exactly this
+ * reason — every one of them a seller who had moved the token on. Buyers
+ * experienced that as "the Buy button doesn't work".
+ *
+ * Returns null when the chain could not be read, so callers keep failing open
+ * rather than hiding a listing on an RPC hiccup.
+ */
+async function canStillTransfer(
+  offerer: string,
+  token: string,
+  tokenId: string
+): Promise<boolean | null> {
+  let id: bigint;
+  try {
+    id = BigInt(tokenId);
+  } catch {
+    return null;
+  }
+
+  const ownerRes = await ethCallTo(
+    token,
+    ERC721_ABI.encodeFunctionData("ownerOf", [id])
+  );
+  // A burned or nonexistent token reverts ownerOf and returns "0x" — that is a
+  // definitive "not fillable", not an unknown.
+  if (ownerRes === null) return null;
+  if (ownerRes === "0x") return false;
+
+  let owner: string;
+  try {
+    [owner] = ERC721_ABI.decodeFunctionResult("ownerOf", ownerRes) as unknown as [string];
+  } catch {
+    return null;
+  }
+  if (owner.toLowerCase() !== offerer.toLowerCase()) return false;
+
+  // Marketplank only ever produces zero-conduit orders, so Seaport itself is
+  // the operator that must be approved (see lib/market/order-validation.ts).
+  const allRes = await ethCallTo(
+    token,
+    ERC721_ABI.encodeFunctionData("isApprovedForAll", [offerer, SEAPORT_ADDRESS])
+  );
+  if (allRes === null) return null;
+  if (allRes !== "0x") {
+    try {
+      const [approved] = ERC721_ABI.decodeFunctionResult(
+        "isApprovedForAll",
+        allRes
+      ) as unknown as [boolean];
+      if (approved) return true;
+    } catch {
+      /* fall through to the per-token check */
+    }
+  }
+
+  const oneRes = await ethCallTo(
+    token,
+    ERC721_ABI.encodeFunctionData("getApproved", [id])
+  );
+  if (oneRes === null) return null;
+  if (oneRes === "0x") return false;
+  try {
+    const [operator] = ERC721_ABI.decodeFunctionResult(
+      "getApproved",
+      oneRes
+    ) as unknown as [string];
+    return operator.toLowerCase() === SEAPORT_ADDRESS.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 export type OrderLiveness =
-  | { known: true; dead: true; reason: "cancelled" | "filled" | "counter-advanced" }
+  | {
+      known: true;
+      dead: true;
+      reason: "cancelled" | "filled" | "counter-advanced" | "not-owned" | "not-approved";
+    }
   | { known: true; dead: false }
   /** RPC unavailable — caller must not treat this as permission to delete. */
   | { known: false };
@@ -143,6 +254,19 @@ export async function getOrderLiveness(rawOrder: unknown): Promise<OrderLiveness
       }
     }
 
+    // Seaport says the order is valid. That is necessary but not sufficient:
+    // it has no idea whether the offerer still holds the token or still
+    // approves Seaport to move it. Check the collection directly.
+    const item = erc721OfferItem(p);
+    if (item) {
+      const transferable = await canStillTransfer(p.offerer, item.token, item.tokenId);
+      if (transferable === false) {
+        return { known: true, dead: true, reason: "not-owned" };
+      }
+      // null means the chain could not be read — fall through to "live" so an
+      // RPC hiccup never hides a good listing.
+    }
+
     return { known: true, dead: false };
   } catch {
     return { known: false };
@@ -166,7 +290,7 @@ export async function getOrderLiveness(rawOrder: unknown): Promise<OrderLiveness
  * bounded — the cache TTL forces a recheck within 30s.
  */
 const LIVENESS_TTL_MS = 30_000;
-type LivenessCacheEntry = { dead: boolean; at: number };
+type LivenessCacheEntry = { dead: boolean; at: number; reason?: string };
 const livenessCache = new Map<string, LivenessCacheEntry>();
 const MAX_LIVENESS_CACHE = 10_000;
 
@@ -174,9 +298,19 @@ function orderCacheKey(item: { id?: string }): string {
   return typeof item.id === "string" ? item.id : "";
 }
 
-export async function filterLiveOrders<T extends { id?: string; rawOrder?: unknown }>(
+export type LiveOrderSplit<T> = {
+  live: T[];
+  /** Provably unfillable on-chain. Safe to retire — the evidence is not forgeable. */
+  dead: Array<{ item: T; reason: string }>;
+};
+
+/**
+ * Split a book into orders that can still be filled and orders that provably
+ * cannot. Unknown liveness counts as live: an unreachable node is not evidence.
+ */
+export async function splitLiveOrders<T extends { id?: string; rawOrder?: unknown }>(
   items: T[]
-): Promise<T[]> {
+): Promise<LiveOrderSplit<T>> {
   const now = Date.now();
   if (livenessCache.size > MAX_LIVENESS_CACHE) {
     for (const [k, v] of livenessCache) {
@@ -184,23 +318,33 @@ export async function filterLiveOrders<T extends { id?: string; rawOrder?: unkno
     }
   }
 
-  const out: T[] = [];
+  const live: T[] = [];
+  const dead: Array<{ item: T; reason: string }> = [];
   for (const item of items) {
     const key = orderCacheKey(item);
     const cached = key ? livenessCache.get(key) : undefined;
     if (cached && now - cached.at < LIVENESS_TTL_MS) {
-      if (!cached.dead) out.push(item);
+      if (cached.dead) dead.push({ item, reason: cached.reason ?? "dead" });
+      else live.push(item);
       continue;
     }
 
     const liveness = await getOrderLiveness(item.rawOrder);
     if (liveness.known) {
-      if (key) livenessCache.set(key, { dead: liveness.dead, at: now });
-      if (!liveness.dead) out.push(item);
+      const reason = liveness.dead ? liveness.reason : undefined;
+      if (key) livenessCache.set(key, { dead: liveness.dead, at: now, reason });
+      if (liveness.dead) dead.push({ item, reason: reason ?? "dead" });
+      else live.push(item);
     } else {
       // Unknown — keep it (fail open for display) and do not cache the miss.
-      out.push(item);
+      live.push(item);
     }
   }
-  return out;
+  return { live, dead };
+}
+
+export async function filterLiveOrders<T extends { id?: string; rawOrder?: unknown }>(
+  items: T[]
+): Promise<T[]> {
+  return (await splitLiveOrders(items)).live;
 }

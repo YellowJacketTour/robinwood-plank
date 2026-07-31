@@ -35,11 +35,17 @@ export default function TradeActionZone() {
             <TradeWorkbench onModeChange={setMode} onZeroXStatusChange={setZeroXStatus} />
           </div>
 
-          <TradeStatusPanel activeMode={mode} zeroXStatus={zeroXStatus} />
+          {/* Safety sits in the rail under the status panel rather than as a
+              full-width band below: the rail ran out of content well before
+              the widget did, leaving a tall empty column, and these
+              guarantees are most useful right beside the thing you're about
+              to sign. */}
+          <div className="space-y-4 sm:space-y-5">
+            <TradeStatusPanel activeMode={mode} zeroXStatus={zeroXStatus} />
+            <TradeSafetyNotes activeMode={mode} zeroXStatus={zeroXStatus} />
+          </div>
         </div>
       </div>
-
-      <TradeSafetyNotes activeMode={mode} zeroXStatus={zeroXStatus} />
     </>
   );
 }

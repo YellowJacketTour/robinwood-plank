@@ -95,7 +95,11 @@ try {
     },
     themeMode: REOWN_THEME_MODE,
     themeVariables: REOWN_THEME_VARIABLES,
-    features: { ...REOWN_FEATURES, connectMethodsOrder: [...REOWN_FEATURES.connectMethodsOrder] },
+    // AppKit's Features type uses its own string unions (SocialProvider,
+    // ConnectMethod, ConnectorTypeOrder). Our config is authored as plain
+    // literals in lib/wallet-reown.ts so it stays readable and diffable, so
+    // it's asserted here rather than importing four internal union types.
+    features: { ...REOWN_FEATURES } as Parameters<typeof createAppKit>[0]["features"],
   });
 } catch (e) {
   moduleInitError = e instanceof Error ? e.message : "AppKit init failed.";
