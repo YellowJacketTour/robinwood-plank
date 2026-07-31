@@ -1,6 +1,6 @@
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
-import { ethCall } from "@/lib/market/fetch-rpc";
+import { getOwnerFromIndex } from "@/lib/market/owner-index";
 import { robinwoodTokenUri, resolveTokenImage } from "@/lib/market/token-image";
 import { fetchActivity } from "@/lib/market/activity";
 import { compactRarityFor, getRaritySnapshot } from "@/lib/market/rarity-snapshot";
@@ -16,13 +16,23 @@ const MAX_TOKEN_ID = 1542;
 const CACHE_MS = 5 * 60_000;
 const cache = new Map<string, { at: number; payload: unknown }>();
 
+/**
+ * Owner for display, from the collection-wide index rather than a per-token
+ * ownerOf.
+ *
+ * This route is the app's largest source of DISTINCT provider reads: every
+ * visitor opens different tokens, so each view was its own uncacheable 26 CU
+ * eth_call and the egress cache could never collapse them. The index answers
+ * all 1,542 tokens from one aggregator walk instead — see
+ * lib/market/owner-index.ts.
+ *
+ * Display only. This value is never used to authorize anything; order
+ * validation reads ownerOf on the authoritative RPC path (see
+ * app/api/market/orders/route.ts).
+ */
 async function readOwner(tokenId: string): Promise<string | null> {
   try {
-    const idHex = BigInt(tokenId).toString(16).padStart(64, "0");
-    // ownerOf(uint256) selector 0x6352211e
-    const result = await ethCall(NFT_CONTRACT_ADDRESS, `0x6352211e${idHex}`);
-    if (!result || result.length < 66) return null;
-    return `0x${result.slice(-40)}`;
+    return await getOwnerFromIndex(tokenId, NFT_CONTRACT_ADDRESS);
   } catch {
     return null;
   }

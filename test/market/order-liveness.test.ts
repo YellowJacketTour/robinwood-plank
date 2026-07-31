@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Interface } from "ethers";
 import { getOrderLiveness } from "../../lib/market/order-status";
+import { clearRpcCache } from "../../lib/market/rpc-cache";
 import { SEAPORT_ADDRESS } from "../../lib/constants";
 
 /**
@@ -66,6 +67,11 @@ type Stub = {
 
 function stubChain(s: Stub) {
   const original = globalThis.fetch;
+  // Liveness reads now go through ethCallFree, which coalesces via rpc-cache.
+  // That is exactly what we want in production — one pass asks the same
+  // getCounter for the same offerer over and over — but between tests it would
+  // serve the previous case's owner and quietly invert the assertion.
+  clearRpcCache();
   globalThis.fetch = (async (_url: string, init?: { body?: string }) => {
     const body = JSON.parse(String(init?.body ?? "{}")) as {
       params?: Array<{ to?: string; data?: string }>;

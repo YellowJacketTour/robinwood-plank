@@ -1,4 +1,5 @@
 import { CHAIN, MARKET_OFFER_CURRENCY } from "@/lib/constants";
+import { ethCallFree } from "@/lib/market/fetch-rpc";
 import { getCollection } from "@/lib/market/collections";
 import { resolveTokenImage } from "@/lib/market/token-image";
 import {
@@ -224,20 +225,14 @@ async function ownsToken(
 ): Promise<boolean> {
   try {
     const idHex = BigInt(tokenId).toString(16).padStart(64, "0");
-    const res = await fetch(CHAIN.rpcUrls.default, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "eth_call",
-        params: [{ to: contractAddress, data: `0x6352211e${idHex}` }, "latest"], // ownerOf
-      }),
-      cache: "no-store",
-    });
-    const data = (await res.json()) as { result?: string };
-    if (!data.result || data.result.length < 66) return false;
-    const owner = `0x${data.result.slice(-40)}`;
+    // Free endpoints only, but with failover and caching — this used to post to
+    // a single hardcoded public URL, so one endpoint hiccuping meant a real
+    // owner could not list (the fail-closed branch below). It stays off the
+    // metered provider deliberately: a security read must not be able to
+    // escalate onto a paid endpoint under load.
+    const result = await ethCallFree(contractAddress, `0x6352211e${idHex}`); // ownerOf
+    if (!result || result.length < 66) return false;
+    const owner = `0x${result.slice(-40)}`;
     return owner.toLowerCase() === maker.toLowerCase();
   } catch {
     // FAIL CLOSED (audit finding 5). Previously this returned `true` on any RPC

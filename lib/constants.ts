@@ -143,6 +143,37 @@ export const SITE_FEE = Object.freeze({
   enabled: true,
 });
 
+/**
+ * The address the $PLANK constructor minted 100% of the supply to, and the
+ * address it then handed ownership to. Hard-coded in the deployed, verified
+ * token source itself:
+ *
+ *   address supplyRecipient = 0x6d05f45b602397eC1842395b2b465298BC36e5fB;
+ *   _mint(supplyRecipient, 8884200694208880 * (10 ** decimals()) / 10);
+ *   _transferOwnership(0x6d05f45b602397eC1842395b2b465298BC36e5fB);
+ *
+ * Verified on Robinhood Chain 2026-07-31. It is NOT a vesting, timelock, or
+ * LP-lock contract — Blockscout reports it as an EOA carrying an EIP-7702
+ * delegation to Alchemy's `SemiModularAccount7702`, i.e. a smart-account
+ * wallet whose owner can move the balance at any time. That distinction is
+ * the whole reason /trade shows an FDV and refuses to publish a "circulating
+ * market cap": there is nothing locked here to honestly subtract.
+ *
+ * Used only to read a balance for disclosure. Never an allowlisted
+ * destination, never a fee recipient.
+ */
+export const PLANK_SUPPLY_RECIPIENT =
+  "0x6d05f45b602397eC1842395b2b465298BC36e5fB" as const;
+
+/**
+ * Conventional burn sink. $PLANK is `ERC20Burnable`, so supply can fall via a
+ * real `burn()` (which lowers `totalSupply()` directly), but tokens are also
+ * commonly "burned" by sending them here, where `totalSupply()` still counts
+ * them. Both are read before any valuation figure is published — as of
+ * 2026-07-31 both this address and the zero address hold exactly 0 $PLANK.
+ */
+export const BURN_ADDRESS = "0x000000000000000000000000000000000000dEaD" as const;
+
 export const TOKEN = {
   symbol: "PLANK",
   name: "RobinWood Plank",
@@ -319,6 +350,8 @@ export const MARKET_OFFER_CURRENCY = "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73
 export const EXPORTED_ADDRESS_CONSTANTS: Readonly<Record<string, string>> =
   Object.freeze({
     CONTRACT_ADDRESS,
+    PLANK_SUPPLY_RECIPIENT,
+    BURN_ADDRESS,
     NATIVE_TOKEN_ADDRESS,
     UNIVERSAL_ROUTER_ADDRESS,
     UNISWAPX_REACTOR_ADDRESS,

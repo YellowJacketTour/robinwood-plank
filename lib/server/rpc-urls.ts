@@ -40,6 +40,23 @@ export const SERVER_RPC_URLS: string[] = Array.from(
  * keyed provider: the same request we would have made anyway.
  */
 /**
+ * Free endpoints only — the public Robinhood RPC and the Blockscout eth-rpc
+ * bridge. Never the keyed provider.
+ *
+ * For reads that must not cost anything but should still survive one endpoint
+ * failing. Ownership checks behind order validation are the case this exists
+ * for: they were posting directly to a single hardcoded public URL with no
+ * failover, no coalescing and no metering. Routing them through here keeps them
+ * free, adds a second endpoint to fall through to, and lets rpc-cache collapse
+ * the duplicate reads a whole-book validation pass generates.
+ *
+ * Deliberately NOT the keyed provider, even as a last resort: a security read
+ * silently escalating onto a metered endpoint under load is how a rate-limit
+ * incident turns into a billing one.
+ */
+export const FREE_RPC_URLS: string[] = Array.from(new Set(ROBINHOOD_RPC_URLS));
+
+/**
  * True when this URL is the metered provider, i.e. calls to it cost compute
  * units. The public Robinhood endpoints are free, so counting them would make
  * the rpc-usage meter overstate spend and hide the effect of moving traffic off
