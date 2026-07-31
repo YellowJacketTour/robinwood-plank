@@ -1,4 +1,5 @@
 import { SERVER_RPC_URLS } from "@/lib/server/rpc-urls";
+import { recordRpc } from "@/lib/market/rpc-meter";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +29,20 @@ export async function POST(req: Request) {
   const raw = await req.text();
   if (!raw || raw.length > MAX_BODY_BYTES) {
     return publicJson({ error: "BAD_BODY", message: "Invalid JSON-RPC body." }, 400);
+  }
+
+  // Client reads proxy through here to the same provider the server uses, so
+  // they land on the same bill and belong in the same meter. Batches are
+  // billed per entry.
+  try {
+    const parsed = JSON.parse(raw) as
+      | { method?: string }
+      | Array<{ method?: string }>;
+    for (const entry of Array.isArray(parsed) ? parsed : [parsed]) {
+      if (entry?.method) recordRpc(entry.method);
+    }
+  } catch {
+    /* malformed bodies are rejected by the upstream anyway */
   }
 
   let lastError: unknown = null;

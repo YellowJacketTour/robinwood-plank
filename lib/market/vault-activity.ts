@@ -47,6 +47,27 @@ const VAULT_TOPIC_SET = new Set(Object.values(TOPICS));
 const KV_KEY = "plank:market:vault-activity-v3";
 const STORED_HISTORY_LIMIT = 500;
 
+/**
+ * Highest block already covered by an eth_getLogs scan, per vault. Without
+ * this every refresh re-walked the same 12 x 50k-block windows from the chain
+ * head backwards — a fixed 12 eth_getLogs per vault per refresh, forever, on a
+ * vault that had not emitted an event in weeks. Recording where the last scan
+ * finished turns the steady state into a single forward window.
+ */
+const SCAN_HEAD_KV_KEY = "plank:market:vault-scan-head-v1";
+
+/**
+ * Both the SSE stream (getVaultActivity(40)) and estimateApr inside
+ * getVaultStats (getVaultActivity(80)) run on every stream refresh, in the same
+ * Promise.all. They were each paying for a full multi-source rebuild. Scanning
+ * once at a shared cap and slicing serves both from one pass.
+ */
+const MEMO_MS = 30_000;
+const MEMO_MIN_CAP = 100;
+
+let memo: { at: number; full: boolean; cap: number; events: VaultTradeEvent[] } | null = null;
+let memoInflight: { full: boolean; cap: number; promise: Promise<VaultTradeEvent[]> } | null = null;
+
 function hasKv(): boolean {
   return hasDurableKv();
 }
@@ -209,6 +230,33 @@ async function writeKv(events: VaultTradeEvent[]): Promise<void> {
   }
 }
 
+async function readScanHeads(): Promise<Record<string, number>> {
+  if (!hasKv()) return {};
+  try {
+    const v = await kv.get<Record<string, number>>(SCAN_HEAD_KV_KEY);
+    if (v && typeof v === "object") return v;
+  } catch {
+    /* */
+  }
+  return {};
+}
+
+/**
+ * Only ever advances. A lower value would re-scan blocks we already have, and
+ * a concurrent Passenger worker holding a staler head must not walk it back.
+ */
+async function writeScanHead(vault: string, block: number): Promise<void> {
+  if (!hasKv() || !Number.isFinite(block) || block <= 0) return;
+  try {
+    const heads = await readScanHeads();
+    const key = vault.toLowerCase();
+    if ((heads[key] ?? 0) >= block) return;
+    await kv.set(SCAN_HEAD_KV_KEY, { ...heads, [key]: block });
+  } catch {
+    /* */
+  }
+}
+
 /**
  * Deep Blockscout walk: vault address logs are dominated by ERC-20 Transfer
  * share mints. We keep paginating until we have enough *decoded* vault
@@ -357,27 +405,64 @@ async function fromEthRpc(
     transactionHash: string;
     logIndex: string;
   }> = [];
-  let toBlock = latest;
-  for (
-    let chunk = 0;
-    chunk < chunks && toBlock >= 0 && (full || rawLogs.length < limit * 3);
-    chunk += 1
-  ) {
-    const fromBlock = Math.max(0, toBlock - chunkBlocks);
-    try {
-      const found = await ethGetLogs({
-        address: vault,
-        topics: [topics],
-        fromBlock: "0x" + fromBlock.toString(16),
-        toBlock: "0x" + toBlock.toString(16),
-      });
-      rawLogs.push(...found);
-    } catch {
-      break;
+
+  const getLogs = (fromBlock: number, toBlock: number) =>
+    ethGetLogs({
+      address: vault,
+      topics: [topics],
+      fromBlock: "0x" + fromBlock.toString(16),
+      toBlock: "0x" + toBlock.toString(16),
+    });
+
+  // A full/backfill request always re-walks from the head; the incremental
+  // path is only for the routine live refresh.
+  const head = full ? 0 : (await readScanHeads())[vault.toLowerCase()] ?? 0;
+
+  if (head > 0 && head < latest) {
+    // Steady state: one forward window covering only new blocks. Advance the
+    // stored head to the last block actually covered, so a partial scan (chain
+    // moved further than maxChunks allows, or a window threw) resumes rather
+    // than silently skipping the gap.
+    let from = head + 1;
+    let scannedTo = head;
+    for (let chunk = 0; chunk < maxChunks && from <= latest; chunk += 1) {
+      const to = Math.min(latest, from + chunkBlocks - 1);
+      try {
+        rawLogs.push(...(await getLogs(from, to)));
+      } catch {
+        break;
+      }
+      scannedTo = to;
+      from = to + 1;
     }
-    if (fromBlock === 0) break;
-    toBlock = fromBlock - 1;
+    // Awaited, not fire-and-forget: a short-lived process (the refresh cron)
+    // can exit before a floating write lands, which would silently throw away
+    // the head and make the next run repeat the full cold walk.
+    if (scannedTo > head) await writeScanHead(vault, scannedTo);
+  } else {
+    // Cold start (or explicit full backfill): walk backwards from the head.
+    let toBlock = latest;
+    let completed = true;
+    for (
+      let chunk = 0;
+      chunk < chunks && toBlock >= 0 && (full || rawLogs.length < limit * 3);
+      chunk += 1
+    ) {
+      const fromBlock = Math.max(0, toBlock - chunkBlocks);
+      try {
+        rawLogs.push(...(await getLogs(fromBlock, toBlock)));
+      } catch {
+        completed = false;
+        break;
+      }
+      if (fromBlock === 0) break;
+      toBlock = fromBlock - 1;
+    }
+    // Only claim coverage up to `latest` if no window failed — otherwise the
+    // next run would skip the blocks this one never actually read.
+    if (completed) await writeScanHead(vault, latest);
   }
+
   if (rawLogs.length === 0) return [];
 
   rawLogs.sort((a, b) => {
@@ -464,6 +549,40 @@ export async function getVaultActivity(
   if (!MARKET_VAULT_ADDRESS && MARKET_VAULT_ADDRESSES.length === 0) return [];
   const full = opts?.full ?? false;
   const cap = full ? 400 : limit;
+
+  // Scan at a shared cap so the stream's limit=40 and estimateApr's limit=80
+  // resolve to the same pass instead of two independent rebuilds.
+  const scanCap = full ? 400 : Math.max(cap, MEMO_MIN_CAP);
+
+  if (memo && memo.full === full && memo.cap >= cap && Date.now() - memo.at < MEMO_MS) {
+    return memo.events.slice(0, cap);
+  }
+  if (memoInflight && memoInflight.full === full && memoInflight.cap >= cap) {
+    return (await memoInflight.promise).slice(0, cap);
+  }
+
+  const run = buildVaultActivity(scanCap, full).then(
+    (events) => {
+      memo = { at: Date.now(), full, cap: scanCap, events };
+      return events;
+    },
+    (err) => {
+      // Don't cache a failure — the next caller should be free to retry.
+      throw err;
+    }
+  );
+  memoInflight = { full, cap: scanCap, promise: run };
+  try {
+    return (await run).slice(0, cap);
+  } finally {
+    if (memoInflight?.promise === run) memoInflight = null;
+  }
+}
+
+async function buildVaultActivity(
+  cap: number,
+  full: boolean
+): Promise<VaultTradeEvent[]> {
   const vaults =
     MARKET_VAULT_ADDRESSES.length > 0
       ? [...MARKET_VAULT_ADDRESSES]

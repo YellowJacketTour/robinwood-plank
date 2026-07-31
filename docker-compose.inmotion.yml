@@ -112,9 +112,10 @@ services:
     networks:
       - data
 
-  # Optional one-time copy of production Upstash data into PostgreSQL.
-  # Dry-run is the default; add --apply only during an approved write freeze.
-  kv-migrate:
+  # Rebuilds the market data snapshots (sales catalog, vault activity, and on
+  # --full the rarity/trait/collection indexes). Mirrors the production cron;
+  # see §13 of docs/INMOTION_DEPLOYMENT.md.
+  market-refresh:
     profiles:
       - tools
     build:
@@ -122,16 +123,19 @@ services:
       dockerfile: Dockerfile
       target: tools
     environment:
-      KV_REST_API_URL: ${KV_REST_API_URL:-}
-      KV_REST_API_TOKEN: ${KV_REST_API_TOKEN:-}
+      DURABLE_KV_BACKEND: postgres
       PGHOST: postgres
       PGPORT: "5432"
       PGDATABASE: ${POSTGRES_DB:-plank}
       PGUSER: ${POSTGRES_USER:-plankapp}
       PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Docker env file}
+      RPC_URL: ${RPC_URL:-}
+      NEXT_PUBLIC_MARKET_VAULT_ADDRESS: ${NEXT_PUBLIC_MARKET_VAULT_ADDRESS:-}
+      NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS: ${NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS:-}
     command:
-      - node
-      - scripts/migrate-upstash-to-postgres.mjs
+      - npx
+      - tsx
+      - scripts/refresh-market-data.ts
     depends_on:
       db-migrate:
         condition: service_completed_successfully

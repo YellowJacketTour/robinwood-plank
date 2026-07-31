@@ -6,9 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "build:relayer": "esbuild scripts/relay-drand.ts --bundle --platform=node --format=esm --target=node22 --outfile=.next/standalone/ops/drand-relayer/relay-drand.mjs",
+    "build:market-refresh": "esbuild scripts/refresh-market-data.ts --bundle --platform=node --format=esm --target=node22 --external:pg --external:pg-native --external:redis --outfile=.next/standalone/scripts/refresh-market-data.mjs",
     "start": "next start",
     "lint": "eslint",
-    "lint:inmotion": "eslint app/api/health/route.ts lib/postgres.ts lib/public-json.ts lib/boards-store.ts lib/market/durable-kv.ts lib/market/orders-store.ts lib/market/served-orders.ts lib/market/rarity-snapshot.ts lib/market/vault-activity.ts test/market/durable-kv.test.ts test/market/upstash-migration.test.ts test/market/vault-activity-cache.test.ts test/market/relay-drand.test.ts test/market/verify-relayer-log.test.ts scripts/lib/*.mjs scripts/migrate-postgres.mjs scripts/migrate-upstash-to-postgres.mjs scripts/backup-postgres.mjs scripts/snapshot-vault-state.mjs scripts/postgres-maintenance.mjs scripts/verify-relayer-log.mjs scripts/verify-postgres-storage.ts scripts/relay-drand.ts deploy/inmotion/passenger.cjs next.config.ts",
+    "lint:inmotion": "eslint app/api/health/route.ts lib/postgres.ts lib/public-json.ts lib/boards-store.ts lib/market/durable-kv.ts lib/market/orders-store.ts lib/market/served-orders.ts lib/market/rarity-snapshot.ts lib/market/vault-activity.ts lib/market/sales-catalog.ts lib/market/fetch-rpc.ts lib/market/rpc-budget.ts scripts/refresh-market-data.ts test/market/durable-kv.test.ts test/market/sales-catalog-durability.test.ts test/market/vault-activity-cache.test.ts test/market/relay-drand.test.ts test/market/verify-relayer-log.test.ts scripts/migrate-postgres.mjs scripts/backup-postgres.mjs scripts/snapshot-vault-state.mjs scripts/postgres-maintenance.mjs scripts/verify-relayer-log.mjs scripts/verify-postgres-storage.ts scripts/relay-drand.ts deploy/inmotion/passenger.cjs next.config.ts",
     "test:contracts": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json hardhat test",
     "test:market": "tsx --test test/market/*.test.ts",
     "test:postgres": "tsx scripts/verify-postgres-storage.ts",
@@ -19,8 +20,8 @@
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "db:migrate": "node scripts/migrate-postgres.mjs",
     "db:maintenance": "node scripts/postgres-maintenance.mjs",
-    "migrate:kv-to-redis": "node scripts/migrate-upstash-to-redis.mjs",
-    "migrate:kv-to-postgres": "node scripts/migrate-upstash-to-postgres.mjs"
+    "market:refresh": "tsx scripts/refresh-market-data.ts",
+    "market:refresh:full": "tsx scripts/refresh-market-data.ts --full"
   },
   "engines": {
     "node": ">=20.9.0"

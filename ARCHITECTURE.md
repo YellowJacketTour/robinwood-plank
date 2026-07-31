@@ -103,8 +103,8 @@ expired orders.
 
 ### On-chain state
 
-The following remain authoritative on Robinhood Chain and are not migrated
-from Upstash:
+The following remain authoritative on Robinhood Chain and are never stored in
+PostgreSQL as a source of truth:
 
 - NFT ownership and transfers;
 - vault-held token IDs and reserves;
@@ -135,12 +135,15 @@ same-origin `/api/rpc` proxy, and the separate client-shared
 
 ### Durable KV adapters
 
-`lib/market/durable-kv.ts` exposes the small KV surface used by marketplace
-consumers:
+`lib/market/durable-kv.ts` exposes the small KV-shaped surface used by
+marketplace consumers. **PostgreSQL is the only datastore** — every environment
+sets `DURABLE_KV_BACKEND=postgres`.
 
-- PostgreSQL for InMotion production;
-- Redis or Valkey for a conventional VPS;
-- Upstash REST for legacy deployments and migration input.
+The module still contains Redis and Upstash branches inherited from the
+pre-PostgreSQL design. They are dead: unconfigured, unused, and slated for
+removal. Do not write new code against them, and do not reintroduce
+`KV_REST_API_*`, `@vercel/kv`, or `REDIS_URL`. See §11 of the InMotion
+deployment runbook for how the cutover was performed.
 
 If no backend is configured, orders fall back to `.data/market-orders.json`
 and process memory. That path is for local development only.
@@ -251,7 +254,6 @@ must therefore be backward-compatible with the immediately previous release.
 | Uniswap API key | GitHub Actions secret, installed mode `600` | Passenger launcher |
 | Relayer private key | GitHub Actions secret, provisioned once to `relayer.env` | cPanel cron only |
 | Deployment SSH key | GitHub Actions secret | CI SSH/SCP only |
-| Upstash read token | Temporary migration input | Manual inventory/cutover job only |
 
 `NEXT_PUBLIC_*` values are not secrets. They are embedded during the build and
 must be assumed readable by every visitor.

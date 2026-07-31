@@ -195,7 +195,7 @@ Off-site / infra
   ├─ Blockscout explorer + REST indexes
   ├─ Public / site RPC (rate-limited)
   ├─ IPFS (metadata + art CIDs)
-  ├─ Durable store (PostgreSQL / Redis / Upstash)
+  ├─ Durable store (PostgreSQL)
   ├─ Cloudflare Workers (OpenNext host)
   ├─ Uniswap Trading API (server-side quotes)
   └─ drand public randomness network`}</Code>
@@ -719,7 +719,7 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
           <><strong>drand + DrandBeacon</strong> — unbiased random redeem.</>,
           <><strong>IPFS gateways</strong> — metadata/art content; proxied by site.</>,
           <><strong>Cloudflare Workers / OpenNext</strong> — host Next.js edge deployment.</>,
-          <><strong>Durable storage</strong> — PostgreSQL on cPanel, or Redis/Upstash on compatible hosts, for trait indexes, activity seeds, and vault caches.</>,
+          <><strong>Durable storage</strong> — PostgreSQL on cPanel, for trait indexes, sales/activity snapshots, and vault caches.</>,
           <><strong>X (Twitter)</strong> — official announcements / Wood List social coordination.</>,
         ]}
       />
