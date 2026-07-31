@@ -3,7 +3,7 @@
  * ethers' JsonRpcProvider (which can hang on node:http under nodejs_compat).
  */
 
-import { SERVER_RPC_URLS } from "@/lib/server/rpc-urls";
+import { SERVER_RPC_URLS, isMeteredRpcUrl } from "@/lib/server/rpc-urls";
 import { recordRpc } from "@/lib/market/rpc-meter";
 import { peekRpcCache, putRpcCache, withRpcCache } from "@/lib/market/rpc-cache";
 
@@ -31,8 +31,9 @@ async function postRpc(
 ): Promise<RpcResult<unknown>> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
-  // Metered before the await: a call that times out or 429s is still billed.
-  recordRpc(method);
+  // Counted before the await: a call that times out or 429s is still billed.
+  // Only the keyed provider bills — the public Robinhood endpoints are free.
+  if (isMeteredRpcUrl(url)) recordRpc(method);
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -147,7 +148,7 @@ export async function ethCallMany(
     if (url.includes("blockscout.com")) continue; // no batches / rate limits
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
-    recordRpc("eth_call", pending.length);
+    if (isMeteredRpcUrl(url)) recordRpc("eth_call", pending.length);
     try {
       const res = await fetch(url, {
         method: "POST",

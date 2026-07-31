@@ -1,4 +1,4 @@
-import { SERVER_RPC_URLS } from "@/lib/server/rpc-urls";
+import { CLIENT_PROXY_RPC_URLS, isMeteredRpcUrl } from "@/lib/server/rpc-urls";
 import { recordRpc } from "@/lib/market/rpc-meter";
 import { peekRpcCache, putRpcCache } from "@/lib/market/rpc-cache";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
@@ -31,11 +31,11 @@ type UpstreamRpc = { jsonrpc?: string; id?: unknown; result?: unknown; error?: u
 async function proxyToRpc(
   body: string
 ): Promise<
-  | { ok: true; parsed: UpstreamRpc | UpstreamRpc[] }
+  | { ok: true; parsed: UpstreamRpc | UpstreamRpc[]; metered: boolean }
   | { ok: false; response: Response }
 > {
   let lastError: unknown = null;
-  for (const url of SERVER_RPC_URLS) {
+  for (const url of CLIENT_PROXY_RPC_URLS) {
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -46,7 +46,11 @@ async function proxyToRpc(
       });
       const text = await res.text();
       try {
-        return { ok: true, parsed: JSON.parse(text) as UpstreamRpc | UpstreamRpc[] };
+        return {
+          ok: true,
+          parsed: JSON.parse(text) as UpstreamRpc | UpstreamRpc[],
+          metered: isMeteredRpcUrl(url),
+        };
       } catch {
         lastError = new Error(`Non-JSON response from ${url}`);
         continue;
@@ -107,7 +111,8 @@ export async function POST(req: Request) {
     const upstream = await proxyToRpc(JSON.stringify(isBatch ? missEntries : missEntries[0]));
     if (!upstream.ok) return upstream.response;
 
-    for (const e of missEntries) recordRpc(e.method!);
+    // Only the keyed provider costs anything; a public-RPC answer is free.
+    if (upstream.metered) for (const e of missEntries) recordRpc(e.method!);
 
     const raws = Array.isArray(upstream.parsed) ? upstream.parsed : [upstream.parsed];
     const byId = new Map(raws.map((r) => [Number(r?.id ?? 0), r]));
@@ -128,7 +133,7 @@ export async function POST(req: Request) {
   }
 
   let lastError: unknown = null;
-  for (const url of SERVER_RPC_URLS) {
+  for (const url of CLIENT_PROXY_RPC_URLS) {
     try {
       const res = await fetch(url, {
         method: "POST",
