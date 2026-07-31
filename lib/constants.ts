@@ -192,7 +192,9 @@ export const NAV_LINKS = [
   { href: "#mint", label: "Mint", activePaths: ["/mint", "/launch"] },
   { href: "/gallery", label: "Gallery" },
   { href: "/learn", label: "Learn" },
-  { href: "#airdrop", label: "Airdrop" },
+  // Airdrop intentionally removed from the nav (2026-07) to make room for
+  // the WoodAmp music chip — the #airdrop section and its checker still
+  // exist on the homepage; they're just not a top-level destination anymore.
 ] as const;
 
 export const SOCIAL_LINKS = {

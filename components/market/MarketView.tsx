@@ -1323,7 +1323,8 @@ export default function MarketView() {
                 account={account}
                 onConnect={handleConnect}
                 active={tab === "swap"}
-                vaultAddress={activeVault?.address ?? null}
+                collection={COLLECTION}
+                vaultAddress={activeVault?.address ?? COLLECTION.vaultAddress ?? null}
                 vaultLabel={
                   vaultRole === "legacy"
                     ? "legacy deposits"

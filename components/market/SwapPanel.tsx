@@ -6,6 +6,7 @@ import { MARKET_FEE_RECIPIENT, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { getNativeBalance } from "@/lib/wallet";
 import TreasuryBootstrap from "@/components/market/TreasuryBootstrap";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
+import type { MarketCollection } from "@/lib/market/types";
 import {
   buyShares,
   claimRandomRedeemFor,
@@ -139,6 +140,10 @@ type Props = {
   onConnect: () => void;
   /** Target vault for Instant Swap txs (primary V2 or legacy V1). */
   vaultAddress?: string | null;
+  /** The collection this swap surface serves. Falls back to the first
+   * configured collection; its vaultAddress is the vault fallback when no
+   * explicit vault is passed (per-collection vault wiring). */
+  collection?: MarketCollection;
   /** Short UI label for the active vault (e.g. "V2 — new Instant Swap"). */
   vaultLabel?: string | null;
   /** False while the Instant Swap tab is mounted but not on screen — pauses
@@ -538,11 +543,13 @@ export default function SwapPanel({
   account,
   onConnect,
   vaultAddress: vaultAddressProp,
+  collection: collectionProp,
   vaultLabel,
   active = true,
 }: Props) {
-  const collection = MARKET_COLLECTIONS[0];
-  const vaultAddress = vaultAddressProp ?? MARKET_VAULT_ADDRESS;
+  const collection = collectionProp ?? MARKET_COLLECTIONS[0];
+  const vaultAddress =
+    vaultAddressProp ?? collection.vaultAddress ?? MARKET_VAULT_ADDRESS;
   const hasVault = vaultAddress !== null;
   // Per-selected-vault book (V1 or V2) — not the dual trade feed.
   const { stats: bookStats } = useVaultBook(vaultAddress, { active });

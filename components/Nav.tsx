@@ -4,9 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CHAIN, NAV_LINKS } from "@/lib/constants";
+import { NAV_LINKS } from "@/lib/constants";
 import { shortAddress } from "@/lib/trade";
 import { useWallet } from "@/lib/wallet-context";
+import {
+  WoodAmpMenuRow,
+  WoodAmpRailChip,
+} from "@/components/woodamp/WoodAmpChip";
 
 function navHref(href: string, pathname: string) {
   if (href.startsWith("#") && pathname !== "/") {
@@ -30,21 +34,6 @@ function isActive(link: (typeof NAV_LINKS)[number], pathname: string) {
   return (
     href.startsWith("/") &&
     (pathname === href || pathname.startsWith(`${href}/`))
-  );
-}
-
-/** Finalized-mockup chain chip: rounded pill, live green dot, plain case. */
-function NetworkContext({ compact = false }: { compact?: boolean }) {
-  return (
-    <div
-      className={`flex items-center gap-2 rounded-full border border-gold-500/20 bg-black/25 px-3.5 text-xs font-bold text-foreground/70 ${
-        compact ? "min-h-10" : "min-h-11"
-      }`}
-      aria-label={`Network: ${CHAIN.name}`}
-    >
-      <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
-      {CHAIN.name}
-    </div>
   );
 }
 
@@ -257,9 +246,7 @@ export default function Nav() {
               })}
             </ul>
 
-            <div className="hidden xl:block">
-              <NetworkContext compact />
-            </div>
+            <WoodAmpRailChip />
             <ConnectWalletAction />
           </div>
 
@@ -309,10 +296,10 @@ export default function Nav() {
             aria-label="Primary navigation"
             className="fixed inset-x-0 top-[58px] z-50 max-h-[calc(100dvh-58px)] overflow-y-auto border-y border-gold-500/25 bg-wood-950 px-4 pb-5 shadow-2xl lg:hidden"
           >
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <NetworkContext />
+            <div className="mt-4 flex items-center justify-end gap-3">
               <ConnectWalletAction onNavigate={() => closeMenu()} />
             </div>
+            <WoodAmpMenuRow onOpen={() => closeMenu()} />
             <ul className="mt-3 flex flex-col gap-1">
               {NAV_LINKS.map((link) => {
                 const href = navHref(link.href, pathname);
