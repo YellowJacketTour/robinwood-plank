@@ -82,7 +82,7 @@ export default function TradeSafetyNotes({ activeMode = "same", zeroXStatus }: P
       <p className="text-[0.7rem] font-black uppercase tracking-[0.08em] text-cream">
         Trading safety
       </p>
-      <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+      <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-1">
         {NOTES.map(({ title, body, icon: Icon }) => (
           <li
             key={title}
@@ -103,7 +103,7 @@ export default function TradeSafetyNotes({ activeMode = "same", zeroXStatus }: P
         className="block truncate text-center text-[0.65rem] text-cream-muted underline-offset-2 hover:text-gold-300 hover:underline"
         title={CONTRACT_ADDRESS}
       >
-        View contract on {CHAIN.blockExplorers.default.name} ↗
+        View the $PLANK token contract on {CHAIN.blockExplorers.default.name} ↗
       </a>
     </section>
   );

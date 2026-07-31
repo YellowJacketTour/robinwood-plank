@@ -348,6 +348,34 @@ export async function sweepFloor(
   return executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress);
 }
 
+/**
+ * Invalidates EVERY order this account has ever signed, in one transaction, by
+ * bumping their Seaport counter.
+ *
+ * The escape hatch for stale signatures. Cancelling orders individually costs a
+ * transaction each and requires knowing which orders exist — and a seller who
+ * listed, moved the token elsewhere, and later reacquired it has no way to
+ * enumerate the old signatures floating around. One counter bump kills all of
+ * them at once, including any this relay never stored.
+ *
+ * Destructive by design: live listings and offers die too, and re-listing means
+ * signing fresh orders. Callers must say so before offering the button.
+ */
+export async function cancelAllOrders(accountAddress: string): Promise<string> {
+  const seaport = await getSeaport();
+  const methods = seaport.bulkCancelOrders(accountAddress);
+  const tx = await methods.buildTransaction();
+  if (!tx.to || !tx.data) throw new Error("Could not build bulk-cancel transaction.");
+  const hash = await sendTransaction({
+    to: tx.to,
+    from: accountAddress,
+    data: String(tx.data),
+    kind: "market",
+  });
+  await waitForTransaction(hash, { label: "Cancel all" });
+  return hash;
+}
+
 /** Cancels one of the caller's own orders on-chain, via the wallet safety rail. */
 export async function cancelOrder(
   parameters: Parameters<Seaport["cancelOrders"]>[0][number],

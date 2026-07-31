@@ -50,7 +50,7 @@ function isDutchRouting(routing: string): boolean {
 
 /** Same connect surface the market uses (WalletConnect QR + extension) —
  * loaded on demand; the WC runtime itself only loads on "Show QR". */
-const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModal"), {
+const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModalSwitch"), {
   ssr: false,
 });
 
@@ -1321,7 +1321,7 @@ export default function SwapWidget() {
           rel="noopener noreferrer"
           className="underline underline-offset-2 hover:text-gold-300"
         >
-          {CONTRACT_ADDRESS.slice(0, 6)}…{CONTRACT_ADDRESS.slice(-4)}
+          $PLANK token {CONTRACT_ADDRESS.slice(0, 6)}…{CONTRACT_ADDRESS.slice(-4)}
         </a>{" "}
         · not financial advice
       </p>

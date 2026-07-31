@@ -1,19 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  deserializeStoredValue,
+  deserializeRedisValue,
   durableKvBackend,
-  serializeStoredValue,
+  serializeRedisValue,
 } from "../../lib/market/durable-kv";
-
-/**
- * Locks in the PostgreSQL-only storage contract (owner direction
- * 2026-07-31: Redis/Upstash were dead legacy from a prior deployment target
- * and were deleted, not shimmed):
- * - backend selection is postgres-or-nothing, and asking for a removed
- *   backend is a hard, descriptive error — never a silent fallback;
- * - the JSON codec round-trips every shape consumers store.
- */
 
 const KEYS = [
   "DURABLE_KV_BACKEND",
@@ -21,6 +12,8 @@ const KEYS = [
   "PGDATABASE",
   "PGUSER",
   "PGPASSWORD",
+  // Legacy vars, kept in the reset list so a stray value in the environment
+  // cannot influence these assertions. Nothing reads them any more.
   "REDIS_URL",
   "KV_REST_API_URL",
   "KV_REST_API_TOKEN",
@@ -46,70 +39,65 @@ function withEnv(
   }
 }
 
-const PG = {
-  PGHOST: "localhost",
-  PGDATABASE: "plank",
-  PGUSER: "plank",
-  PGPASSWORD: "secret",
-};
-
-test("JSON codec preserves objects, arrays, numbers, booleans, and strings", () => {
-  const values: unknown[] = [
-    { a: 1, b: [true, "x"], c: { nested: null } },
-    ["a", 2, false],
-    42,
-    true,
-    "plain",
-  ];
-  for (const value of values) {
-    assert.deepEqual(deserializeStoredValue(serializeStoredValue(value)), value);
-  }
-  assert.equal(deserializeStoredValue<string>("legacy"), "legacy");
-  assert.equal(deserializeStoredValue(null), null);
-  assert.throws(() => serializeStoredValue(undefined), /undefined/);
-});
-
-test("postgres config selects postgres, explicitly or by default", () => {
-  withEnv({ ...PG, DURABLE_KV_BACKEND: "postgres" }, () =>
-    assert.equal(durableKvBackend(), "postgres")
+test("Redis JSON codec preserves objects, arrays, numbers, booleans, and strings", () => {
+  const value = {
+    order: { id: "listing-1", priceWei: "4206900000000000" },
+    live: true,
+    attempts: 3,
+    tags: ["plank", "market"],
+  };
+  assert.deepEqual(
+    deserializeRedisValue(serializeRedisValue(value)),
+    value
   );
-  withEnv(PG, () => assert.equal(durableKvBackend(), "postgres"));
-});
-
-test("no postgres config means no durable backend (dev file fallback)", () => {
-  withEnv({}, () => assert.equal(durableKvBackend(), null));
-});
-
-test("explicit postgres without credentials fails closed", () => {
-  withEnv({ DURABLE_KV_BACKEND: "postgres" }, () =>
-    assert.throws(() => durableKvBackend(), /requires PGHOST/)
+  assert.equal(
+    deserializeRedisValue<string>(serializeRedisValue("plain-string")),
+    "plain-string"
   );
 });
 
-test("removed backends are a hard error, never a silent fallback", () => {
-  withEnv({ ...PG, DURABLE_KV_BACKEND: "redis", REDIS_URL: "redis://x" }, () =>
-    assert.throws(() => durableKvBackend(), /removed/)
-  );
+test("Redis JSON codec tolerates legacy raw string values", () => {
+  assert.equal(deserializeRedisValue<string>("legacy"), "legacy");
+  assert.equal(deserializeRedisValue(null), null);
+  assert.throws(() => serializeRedisValue(undefined), /undefined/);
+});
+
+test("PostgreSQL is selected when it is configured", () => {
   withEnv(
     {
-      ...PG,
-      DURABLE_KV_BACKEND: "upstash",
-      KV_REST_API_URL: "https://x",
-      KV_REST_API_TOKEN: "t",
+      PGHOST: "localhost",
+      PGDATABASE: "plank",
+      PGUSER: "plankapp",
+      PGPASSWORD: "secret",
     },
-    () => assert.throws(() => durableKvBackend(), /removed/)
-  );
-  withEnv({ ...PG, DURABLE_KV_BACKEND: "bogus" }, () =>
-    assert.throws(() => durableKvBackend(), /must be "postgres"/)
+    () => assert.equal(durableKvBackend(), "postgres")
   );
 });
 
-test("legacy Redis/Upstash env vars alone no longer select anything", () => {
-  withEnv({ REDIS_URL: "redis://x" }, () =>
-    assert.equal(durableKvBackend(), null)
-  );
+test("legacy KV credentials no longer select a backend", () => {
+  // Redis and Upstash are gone. Leftover credentials in an environment must not
+  // resurrect them — their top-level imports were unresolvable in the
+  // standalone release and broke the market-refresh cron.
   withEnv(
-    { KV_REST_API_URL: "https://x", KV_REST_API_TOKEN: "t" },
+    {
+      REDIS_URL: "redis://valkey:6379",
+      KV_REST_API_URL: "https://example.upstash.io",
+      KV_REST_API_TOKEN: "token",
+    },
     () => assert.equal(durableKvBackend(), null)
   );
+});
+
+test("an unsupported backend is rejected rather than silently ignored", () => {
+  for (const backend of ["redis", "upstash", "sqlite"]) {
+    withEnv({ DURABLE_KV_BACKEND: backend }, () => {
+      assert.throws(() => durableKvBackend(), /only supported datastore/);
+    });
+  }
+});
+
+test("explicit postgres selection fails closed when its credentials are absent", () => {
+  withEnv({ DURABLE_KV_BACKEND: "postgres" }, () => {
+    assert.throws(() => durableKvBackend(), /requires PGHOST/);
+  });
 });

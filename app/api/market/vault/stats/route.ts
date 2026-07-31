@@ -30,7 +30,7 @@ function parseVaultParam(req: Request): string | null {
 /**
  * Public read-only vault dashboard data.
  * Optional `?vault=0x…` (must be a configured vault) — Instant Swap V1/V2 switch.
- * Layers: isolate memory → database (fast path) → chain → stale cache fallback.
+ * Layers: isolate memory → PostgreSQL (fast path) → chain → stale DB fallback.
  */
 export async function GET(req: Request) {
   const limited = rateLimit(req, { key: "vault-stats", limit: 60, windowMs: 60_000 });

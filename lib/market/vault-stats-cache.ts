@@ -4,7 +4,7 @@
  * Cloudflare Workers share no module memory between isolates, and the public
  * Robinhood RPC rate-limits CF egress (HTTP 429). Without a durable cache,
  * Instant Swap's live panels go blank after the first successful read.
- * The shared durable adapter supports PostgreSQL, Upstash, or Redis/Valkey.
+ * The shared durable adapter is backed by PostgreSQL.
  */
 
 import {

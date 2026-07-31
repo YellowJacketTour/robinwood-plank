@@ -5,22 +5,20 @@ import {
 } from "@/lib/postgres";
 
 /**
- * Durable storage adapter — PostgreSQL only.
+ * Durable key/value adapter used by the marketplace.
  *
- * The Redis and Upstash/Vercel-KV backends this adapter once multiplexed
- * were legacy from a prior deployment target and were REMOVED on owner
- * direction (2026-07-31): the stack is PostgreSQL, full stop. The
- * key/hash/set API surface predates that decision (the table names
- * plank_kv_values / plank_kv_hash_fields / plank_kv_set_members are part of
- * the released schema, which is append-only), so the shape stays — but there
- * is exactly one implementation behind it.
+ * PostgreSQL is the only datastore. The Upstash/Vercel KV and Redis backends
+ * this module used to carry were inherited from the pre-PostgreSQL design and
+ * were dead — every environment sets DURABLE_KV_BACKEND=postgres. They were not
+ * merely unused: their top-level `import { createClient } from "redis"` and
+ * `import { kv } from "@vercel/kv"` were unresolvable in the standalone
+ * Passenger release, whose node_modules is traced from what the app actually
+ * uses. That broke the market-refresh cron with ERR_MODULE_NOT_FOUND the first
+ * time it ran. Do not reintroduce them.
  *
- * Selection:
- *   DURABLE_KV_BACKEND=postgres (or unset) -> PostgreSQL when
- *     PGHOST/PGDATABASE/PGUSER/PGPASSWORD are configured
- *   no PostgreSQL config                   -> null (consumers fall back to
- *     their .data/ file + in-memory dev stores)
- *   any other DURABLE_KV_BACKEND value     -> hard error, fail closed
+ * The KV-shaped surface (get/set/hget/hset/sadd) is kept because callers depend
+ * on it and the schema preserved those semantics during the migration — see
+ * INMOTION_DEPLOYMENT.md section 11.
  */
 
 export type DurableKvBackend = "postgres" | null;
@@ -30,7 +28,7 @@ export function durableKvBackend(): DurableKvBackend {
   const requested = process.env.DURABLE_KV_BACKEND?.trim().toLowerCase();
   if (requested && requested !== "postgres") {
     throw new Error(
-      `DURABLE_KV_BACKEND must be "postgres" (Redis/Upstash support was removed), received "${requested}".`
+      `DURABLE_KV_BACKEND must be "postgres", received "${requested}". PostgreSQL is the only supported datastore.`
     );
   }
   if (requested === "postgres" && !hasPostgresConfig()) {
@@ -45,15 +43,19 @@ export function hasDurableKv(): boolean {
   return durableKvBackend() !== null;
 }
 
-export function serializeStoredValue(value: unknown): string {
+/**
+ * JSON codec for stored values. Named for the Redis-compatible semantics the
+ * schema preserves, not for a Redis dependency — there is none.
+ */
+export function serializeRedisValue(value: unknown): string {
   const encoded = JSON.stringify(value);
   if (encoded === undefined) {
-    throw new TypeError("Cannot store undefined in durable storage.");
+    throw new TypeError("Cannot store undefined in durable KV.");
   }
   return encoded;
 }
 
-export function deserializeStoredValue<T>(value: string | null): T | null {
+export function deserializeRedisValue<T>(value: string | null): T | null {
   if (value === null) return null;
   try {
     return JSON.parse(value) as T;
@@ -79,7 +81,7 @@ async function postgresSet(
   value: unknown,
   options?: SetOptions
 ): Promise<string> {
-  const encoded = serializeStoredValue(value);
+  const encoded = serializeRedisValue(value);
   const expiresAt = options?.ex
     ? new Date(Date.now() + options.ex * 1_000)
     : null;
@@ -95,9 +97,56 @@ async function postgresSet(
   return "OK";
 }
 
+async function postgresHashGet<T>(
+  key: string,
+  field: string
+): Promise<T | null> {
+  const result = await postgresQuery<{ value: T }>(
+    `SELECT value
+       FROM plank_kv_hash_fields
+      WHERE key_name = $1 AND field_name = $2`,
+    [key, field]
+  );
+  return result.rows[0]?.value ?? null;
+}
+
+async function postgresHashGetAll<T>(key: string): Promise<T | null> {
+  const result = await postgresQuery<{ field_name: string; value: unknown }>(
+    `SELECT field_name, value
+       FROM plank_kv_hash_fields
+      WHERE key_name = $1`,
+    [key]
+  );
+  if (result.rows.length === 0) return null;
+  return Object.fromEntries(
+    result.rows.map((row) => [row.field_name, row.value])
+  ) as T;
+}
+
+async function postgresHashSet(
+  key: string,
+  values: Record<string, unknown>
+): Promise<number> {
+  const entries = Object.entries(values);
+  if (entries.length === 0) return 0;
+  await withPostgresTransaction(async (client) => {
+    for (const [field, value] of entries) {
+      await client.query(
+        `INSERT INTO plank_kv_hash_fields
+           (key_name, field_name, value, updated_at)
+         VALUES ($1, $2, $3::jsonb, NOW())
+         ON CONFLICT (key_name, field_name) DO UPDATE
+           SET value = EXCLUDED.value, updated_at = NOW()`,
+        [key, field, serializeRedisValue(value)]
+      );
+    }
+  });
+  return entries.length;
+}
+
 /**
  * Minimal API shared by every current marketplace consumer. Keeping this
- * surface intentionally small makes storage changes reviewable.
+ * surface intentionally small makes storage migrations reviewable.
  */
 export const durableKv = {
   async get<T>(key: string): Promise<T | null> {
@@ -109,46 +158,17 @@ export const durableKv = {
   },
 
   async hget<T>(key: string, field: string): Promise<T | null> {
-    const result = await postgresQuery<{ value: T }>(
-      `SELECT value
-         FROM plank_kv_hash_fields
-        WHERE key_name = $1 AND field_name = $2`,
-      [key, field]
-    );
-    return result.rows[0]?.value ?? null;
+    return postgresHashGet<T>(key, field);
   },
 
   async hgetall<T extends Record<string, unknown>>(
     key: string
   ): Promise<T | null> {
-    const result = await postgresQuery<{ field_name: string; value: unknown }>(
-      `SELECT field_name, value
-         FROM plank_kv_hash_fields
-        WHERE key_name = $1`,
-      [key]
-    );
-    if (result.rows.length === 0) return null;
-    return Object.fromEntries(
-      result.rows.map((row) => [row.field_name, row.value])
-    ) as T;
+    return postgresHashGetAll<T>(key);
   },
 
   async hset(key: string, values: Record<string, unknown>): Promise<number> {
-    const entries = Object.entries(values);
-    if (entries.length === 0) return 0;
-    await withPostgresTransaction(async (client) => {
-      for (const [field, value] of entries) {
-        await client.query(
-          `INSERT INTO plank_kv_hash_fields
-             (key_name, field_name, value, updated_at)
-           VALUES ($1, $2, $3::jsonb, NOW())
-           ON CONFLICT (key_name, field_name) DO UPDATE
-             SET value = EXCLUDED.value, updated_at = NOW()`,
-          [key, field, serializeStoredValue(value)]
-        );
-      }
-    });
-    return entries.length;
+    return postgresHashSet(key, values);
   },
 
   async hdel(key: string, field: string): Promise<number> {

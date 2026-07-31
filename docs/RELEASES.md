@@ -117,8 +117,6 @@ The `InMotion Passenger CI/CD` workflow supports:
 | Operation | Purpose | Confirmation |
 | --- | --- | --- |
 | `deploy` | Rebuild and deploy the selected `inmotion` SHA. | None |
-| `inventory` | Compare read-only Upstash source data with PostgreSQL. | None |
-| `cutover` | Back up PostgreSQL and transactionally replace marketplace rows. | `REPLACE_INMOTION_MARKET_DATA` |
 | `provision-relayer` | Install the cron-only key, verify one run, and manage the cron entry. | None |
 | `verify-relayer` | Prove 24 hours of InMotion health, then disable the GitHub fallback schedule. | `DISABLE_GITHUB_RELAY` |
 

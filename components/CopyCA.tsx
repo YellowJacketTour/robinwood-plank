@@ -18,8 +18,12 @@ export default function CopyCA() {
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col items-stretch gap-2 rounded-xl border-2 border-gold-500/70 bg-wood-950/90 p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center">
-      <span className="shrink-0 rounded-md bg-gold-500/10 px-2 py-1 text-xs font-bold uppercase tracking-widest text-gold-300">
-        CA
+      {/* "CA" alone is ambiguous — this project has TWO contracts (the
+          $PLANK ERC-20 and the RobinWood ERC-721). Naming the asset is the
+          difference between a user verifying the right address and sending
+          funds to the wrong one. */}
+      <span className="shrink-0 rounded-md bg-gold-500/10 px-2 py-1 text-[0.68rem] font-bold uppercase tracking-widest text-gold-300">
+        $PLANK token CA
       </span>
       <code className="min-w-0 flex-1 truncate text-left text-xs text-foreground/90 sm:text-sm" title={CONTRACT_ADDRESS}>
         {CONTRACT_ADDRESS}
