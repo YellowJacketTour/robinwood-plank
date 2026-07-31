@@ -29,6 +29,7 @@ const explicit = [
   "--collection",
   "--opensea",
   "--official-assets",
+  "--token-registry",
 ].filter((t) => args.has(t));
 
 /** Full runs include the expensive collection-wide rebuilds; incremental ones don't. */
@@ -36,8 +37,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["sales", "vault", "opensea", "official-assets", "rarity", "traits", "collection"]
-      : ["sales", "vault", "opensea", "official-assets"]
+      ? ["sales", "vault", "opensea", "official-assets", "token-registry", "rarity", "traits", "collection"]
+      : ["sales", "vault", "opensea", "official-assets", "token-registry"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -144,6 +145,15 @@ async function main(): Promise<void> {
     const { refreshOfficialAssets } = await import("../lib/market/robinhood-assets");
     const assets = await refreshOfficialAssets();
     return `${assets.length} official tokens on chain ${CHAIN_ID}`;
+  });
+
+  // Token registry — chain-discovered, ranked by traded volume. Must run after
+  // official-assets so equities can be annotated in the same pass.
+  await step("token-registry", async () => {
+    const { refreshTokenRegistry } = await import("../lib/market/token-registry");
+    const tokens = await refreshTokenRegistry();
+    const top = tokens.slice(0, 6).map((t) => t.symbol).join(", ");
+    return `${tokens.length} tokens — top: ${top}`;
   });
 
   await step("rarity", async () => {
