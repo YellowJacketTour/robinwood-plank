@@ -30,7 +30,7 @@ import {
   vaultSupportsContributeLiquidity,
   vaultSupportsRemoveLiquidity,
 } from "@/lib/market/vault";
-import { shortVault, vaultColorKind } from "@/lib/market/vault-registry";
+import { shortVault, vaultColorKind, vaultKindLabel } from "@/lib/market/vault-registry";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
@@ -1135,7 +1135,7 @@ export default function SwapPanel({
   };
 
   const activeKind = vaultColorKind(vaultAddress);
-  const activeTag = activeKind === "v1" ? "V1" : activeKind === "v2" ? "V2" : "Vault";
+  const activeTag = vaultKindLabel(activeKind);
   // Vault identity lives in the chooser cards; the tag re-appears only in the
   // review modal as a signing safeguard. `vaultLabel` stays a prop for callers.
   void vaultLabel;
@@ -1421,12 +1421,12 @@ export default function SwapPanel({
             <p className="text-[0.7rem] text-foreground/65">
               {lpFull === false || lpRemove === false ? (
                 <>
-                  <strong className="text-foreground/85">Full Add/Remove LP is on V2 only.</strong> This
-                  vault build (usually <span className="font-semibold text-orange-300">V1</span>) supports{" "}
-                  <strong className="text-foreground/85">Deposit</strong> and{" "}
-                  <strong className="text-foreground/85">Redeem</strong>, but not tracked LP credits. Switch
-                  the vault picker above to <span className="font-semibold text-emerald-300">V2</span> to Add
-                  LP / Remove LP. On V1 use Sell if you want ETH for shares.
+                  <strong className="text-foreground/85">This vault does not support Add/Remove LP.</strong>{" "}
+                  It supports <strong className="text-foreground/85">Deposit</strong> and{" "}
+                  <strong className="text-foreground/85">Redeem</strong>, but not liquidity provision. Switch
+                  the vault picker above to the{" "}
+                  <span className="font-semibold text-emerald-300">current vault</span> to Add LP / Remove LP.
+                  Here, use Sell if you want ETH for shares.
                 </>
               ) : lpDirection === "add" ? (
                 <>

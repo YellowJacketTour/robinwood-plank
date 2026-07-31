@@ -36,6 +36,7 @@
     "test",
     "hardhat.config.ts",
     "typechain-types",
-    "scripts/deploy-vault.ts"
+    "scripts/deploy-vault.ts",
+    "scripts/deploy-vault-v3.ts"
   ]
 }

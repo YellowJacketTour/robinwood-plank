@@ -16,8 +16,8 @@ import {
 import ListingGrid from "@/components/market/ListingGrid";
 import {
   dualVaultMode,
+  getVaultByAddress,
   getVaultByRole,
-  type VaultRole,
 } from "@/lib/market/vault-registry";
 import VaultTradeHistory from "@/components/market/VaultTradeHistory";
 import LivingLiquidityViz from "@/components/market/LivingLiquidityViz";
@@ -43,7 +43,7 @@ import { MARKET_TABS } from "@/lib/market/navigation";
 import type { SweepPlan } from "@/lib/market/sweep";
 import { ensureRobinhoodChain } from "@/lib/wallet";
 import { useWallet } from "@/lib/wallet-context";
-import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
+import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { formatTokenAmount } from "@/lib/trade";
 import type { Listing, MarketTab, Offer } from "@/lib/market/types";
 import dynamic from "next/dynamic";
@@ -213,8 +213,8 @@ function sortListings<T extends Listing>(items: T[], key: SortKey): T[] {
 export default function MarketView() {
   const [tab, setTab] = useState<MarketTab>("buy-sell");
   /** Instant Swap vault book: primary = V2, legacy = V1 deposits. */
-  const [vaultRole, setVaultRole] = useState<VaultRole>("primary");
-  const activeVault = getVaultByRole(vaultRole) ?? getVaultByRole("primary");
+  const [vaultAddr, setVaultAddr] = useState<string | null>(MARKET_VAULT_ADDRESS);
+  const activeVault = getVaultByAddress(vaultAddr) ?? getVaultByRole("primary");
   // Each tab mounts the first time it's actually opened, then stays mounted
   // (hidden, not removed) for the rest of the visit — switching back to an
   // already-opened tab is then instant with no re-fetch. Mounting every tab
@@ -1316,8 +1316,12 @@ export default function MarketView() {
             description="Buy or sell vault shares instantly, provide liquidity, deposit a Plank, or redeem shares for an NFT."
           >
             <div className="space-y-3">
-            {/* Dual vault: pick V1 (legacy deposits) or V2 (new book / LP) first */}
-            <InstantVaultSwitcher role={vaultRole} onChange={setVaultRole} active={tab === "swap"} />
+            {/* Pick which vault to act on — current vault (deposit/trade/LP) or a legacy (redeem/withdraw) */}
+            <InstantVaultSwitcher
+              selected={activeVault?.address ?? vaultAddr}
+              onSelect={setVaultAddr}
+              active={tab === "swap"}
+            />
             <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <SwapPanel
                 account={account}
@@ -1326,11 +1330,9 @@ export default function MarketView() {
                 collection={COLLECTION}
                 vaultAddress={activeVault?.address ?? COLLECTION.vaultAddress ?? null}
                 vaultLabel={
-                  vaultRole === "legacy"
+                  activeVault?.role === "legacy"
                     ? "legacy deposits"
-                    : activeVault?.isV1
-                      ? "primary vault"
-                      : "new Instant Swap"
+                    : "current vault"
                 }
               />
               <div className="space-y-3">
@@ -1347,17 +1349,17 @@ export default function MarketView() {
             {dualVaultMode() && (
               <MarketDisclosure
                 eyebrow="Migration"
-                title="Move V1 value to V2"
+                title="Migrate your planks to the current vault"
                 description="Optional migration, fee details, dust recovery, redeem, and re-deposit steps."
               >
                 <VaultMigrate account={account} onConnect={handleConnect} embedded active={tab === "swap"} />
               </MarketDisclosure>
             )}
-            {/* Seed/bootstrap only on primary (V2) — never seed into legacy V1 */}
-            {vaultRole === "primary" && (
+            {/* Seed/bootstrap only on the current (primary) vault — never seed into a legacy */}
+            {activeVault?.role === "primary" && (
               <MarketDisclosure
                 eyebrow="Operator controls"
-                title="Seed and bootstrap the V2 vault"
+                title="Seed and bootstrap the current vault"
                 description="Treasury-only setup and liquidity controls for the primary vault."
               >
                 <SeedVaultPanel account={account} onConnect={handleConnect} active={tab === "swap"} />

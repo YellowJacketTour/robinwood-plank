@@ -1,80 +1,68 @@
 "use client";
 
 /**
- * Intuitive dual-vault control for Instant Swap.
- * V2 (primary) = new book + LP · V1 (legacy) = existing deposits / redeem.
+ * N-vault control for Instant Swap. One card per configured vault — the current
+ * vault first, then legacies newest-first — each carrying its own identity,
+ * explorer link, and live meta line. Selection is by address.
  */
 
 import { useEffect, useState } from "react";
 import {
   dualVaultMode,
-  listVaults,
+  listVaultsForDisplay,
   shortVault,
   vaultColorKind,
-  type VaultRole,
+  vaultKindLabel,
+  VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
 import { getVaultOnChainSnapshot } from "@/lib/market/vault";
 import { formatTokenAmount } from "@/lib/trade";
 import { CHAIN } from "@/lib/constants";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
 
+type Snap = { held: number; pool: string; eth: string; open: boolean };
+
 type Props = {
-  role: VaultRole;
-  onChange: (role: VaultRole) => void;
+  /** Selected vault address. */
+  selected: string | null;
+  onSelect: (address: string) => void;
   /** False while the owning tab is mounted but off screen — pauses polling. */
   active?: boolean;
 };
 
-export default function InstantVaultSwitcher({ role, onChange, active = true }: Props) {
-  const vaults = listVaults();
-  const [snap, setSnap] = useState<
-    Record<string, { held: number; pool: string; eth: string; open: boolean }>
-  >({});
+export default function InstantVaultSwitcher({ selected, onSelect, active = true }: Props) {
+  const vaults = listVaultsForDisplay();
+  const [snap, setSnap] = useState<Record<string, Snap>>({});
+
+  const addrKey = vaults.map((v) => v.address).join(",");
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      const next: typeof snap = {};
+    const read = async (merge: boolean) => {
+      const next: Record<string, Snap> = {};
       for (const v of vaults) {
         try {
           const s = await getVaultOnChainSnapshot(v.address);
-          next[v.role] = {
+          next[v.address.toLowerCase()] = {
             held: s.held,
             pool: formatTokenAmount(s.shareReserve, 18, 2),
             eth: formatTokenAmount(s.ethReserve, 18, 4),
             open: s.poolOpen,
           };
         } catch {
-          next[v.role] = { held: 0, pool: "—", eth: "—", open: false };
+          if (!merge) next[v.address.toLowerCase()] = { held: 0, pool: "—", eth: "—", open: false };
         }
       }
-      if (!cancelled) setSnap(next);
-    })();
-    const tick = () => {
-      void (async () => {
-        const next: typeof snap = {};
-        for (const v of vaults) {
-          try {
-            const s = await getVaultOnChainSnapshot(v.address);
-            next[v.role] = {
-              held: s.held,
-              pool: formatTokenAmount(s.shareReserve, 18, 2),
-              eth: formatTokenAmount(s.ethReserve, 18, 4),
-              open: s.poolOpen,
-            };
-          } catch {
-            /* keep */
-          }
-        }
-        if (!cancelled) setSnap((prev) => ({ ...prev, ...next }));
-      })();
+      if (!cancelled) setSnap((prev) => (merge ? { ...prev, ...next } : next));
     };
-    const stop = active ? startVisibleInterval(tick, 20_000) : null;
+    void read(false);
+    const stop = active ? startVisibleInterval(() => void read(true), 20_000) : null;
     return () => {
       cancelled = true;
       stop?.();
     };
-  }, [vaults.length, active]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addrKey, active]);
 
   if (!dualVaultMode() || vaults.length < 2) {
     const only = vaults[0];
@@ -86,37 +74,34 @@ export default function InstantVaultSwitcher({ role, onChange, active = true }: 
     );
   }
 
-  // Finalized mockup: two compact vault cards, primary (V2) first, no
-  // instructional panel around them — each card carries its own identity,
-  // explorer link, and live meta line. Active card gets the emerald frame.
-  const ordered = [...vaults].sort((a) => (a.role === "primary" ? -1 : 1));
+  const selectedLc = selected?.toLowerCase() ?? null;
 
   return (
     <div className="space-y-2">
       <div className="grid gap-2 sm:grid-cols-2">
-        {ordered.map((v) => {
-          const active = role === v.role;
-          const s = snap[v.role];
-          const kind = vaultColorKind(v.role === "legacy" ? "legacy" : "primary");
-          const isV1Card = kind === "v1";
-          const title = isV1Card ? "V1 — Legacy vault" : "V2 — Primary vault";
-          const blurb = isV1Card
-            ? "Original vault · deposit & redeem · limited LP controls"
-            : "New book · deposit, redeem, Add & Remove LP · Instant Swap";
+        {vaults.map((v) => {
+          const isActive = v.address.toLowerCase() === selectedLc;
+          const s = snap[v.address.toLowerCase()];
+          const kind = vaultColorKind(v.address);
           return (
             <button
-              key={v.role}
+              key={v.address}
               type="button"
-              onClick={() => onChange(v.role)}
-              aria-pressed={active}
+              onClick={() => onSelect(v.address)}
+              aria-pressed={isActive}
               className={`rounded-[10px] border px-3.5 py-3 text-left transition ${
-                active
+                isActive
                   ? "border-[#60d890] bg-[rgba(18,49,33,0.54)]"
                   : "border-line bg-wood-950 hover:border-line-strong"
               }`}
             >
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                <p className="text-sm font-extrabold text-foreground">{title}</p>
+                <span
+                  className={`rounded border px-1.5 py-0.5 text-[0.6rem] font-extrabold uppercase tracking-wide ${VAULT_LABEL_CLASS[kind]}`}
+                >
+                  {vaultKindLabel(kind)}
+                </span>
+                <p className="text-sm font-extrabold text-foreground">{v.label}</p>
                 <a
                   href={`${CHAIN.blockExplorers.default.url}/address/${v.address}`}
                   target="_blank"
@@ -131,7 +116,7 @@ export default function InstantVaultSwitcher({ role, onChange, active = true }: 
               <p className="mt-1 text-[0.62rem] text-foreground/55">
                 {s
                   ? `${s.open ? "Open" : "Closed"} · ${s.held} held · ${s.pool} shares · ${s.eth} Ξ liquidity`
-                  : blurb}
+                  : v.purpose}
               </p>
             </button>
           );

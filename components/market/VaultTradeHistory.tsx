@@ -6,6 +6,7 @@ import { usePendingVaultTx } from "@/lib/market/pendingVaultTx";
 import ScrollBox from "@/components/market/ScrollBox";
 import {
   vaultColorKind,
+  vaultKindLabel,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
 
@@ -62,8 +63,9 @@ function shortAddr(a: string) {
 function vaultTag(vaultAddress?: string): { text: string; className: string } | null {
   if (!vaultAddress) return null;
   const kind = vaultColorKind(vaultAddress);
-  if (kind === "v1") return { text: "V1", className: VAULT_LABEL_CLASS.v1 };
-  if (kind === "v2") return { text: "V2", className: VAULT_LABEL_CLASS.v2 };
+  if (kind !== "unknown") {
+    return { text: vaultKindLabel(kind), className: VAULT_LABEL_CLASS[kind] };
+  }
   return {
     text: shortAddr(vaultAddress),
     className: VAULT_LABEL_CLASS.unknown,

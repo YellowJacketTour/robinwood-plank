@@ -264,37 +264,79 @@ export const MARKET_VAULT_ADDRESS: string | null = parseOptionalAddress(
 );
 
 /**
- * Legacy vault that still holds pre-migrate deposits. Keep this set to V1
- * when PRIMARY points at a new vault so holders can redeem without being
- * stranded. Optional: null means single-vault mode.
+ * Parse a comma-separated address list, validating each element. Blank entries
+ * are skipped; a malformed entry fails closed at module load.
  */
-export const MARKET_VAULT_LEGACY_ADDRESS: string | null = (() => {
-  const legacy = parseOptionalAddress(
+function parseAddressList(raw: string | undefined, envName: string): string[] {
+  if (!raw) return [];
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const v = part.trim();
+    if (!v) continue;
+    if (!/^0x[0-9a-fA-F]{40}$/.test(v)) {
+      throw new Error(`${envName} contains an invalid 20-byte address: "${v}"`);
+    }
+    out.push(v);
+  }
+  return out;
+}
+
+/**
+ * Every legacy (redeem-only) vault that still holds pre-migration deposits.
+ * Prefer the plural NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES (comma list) so a
+ * third+ vault never needs new env plumbing; the singular
+ * NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS is still read as a one-release
+ * fallback. Deduped against the primary and each other, order preserved.
+ *
+ * NEVER drop a legacy until its vault reads empty — removing it bricks every
+ * legacy call for its holders ("Blocked unsafe vault target").
+ */
+export const MARKET_VAULT_LEGACY_ADDRESSES: readonly string[] = (() => {
+  const fromList = parseAddressList(
+    process.env.NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES,
+    "NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES"
+  );
+  const fromSingular = parseOptionalAddress(
     process.env.NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS,
     "NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS"
   );
-  if (!legacy || !MARKET_VAULT_ADDRESS) return legacy;
-  if (legacy.toLowerCase() === MARKET_VAULT_ADDRESS.toLowerCase()) return null;
-  return legacy;
-})();
-
-/**
- * Known production V1 vault (Robinhood). Used for migration copy and as a
- * hard fallback label so we never "forget" where the first 57 deposits live.
- */
-export const MARKET_VAULT_V1_KNOWN = "0xb2019Fd4cA24502e812C0C73b751Fa49979BF708" as const;
-
-/** Every vault address the UI/wallet may talk to (primary + legacy). */
-export const MARKET_VAULT_ADDRESSES: readonly string[] = (() => {
+  const raw = fromList.length > 0 ? fromList : fromSingular ? [fromSingular] : [];
+  const primary = MARKET_VAULT_ADDRESS?.toLowerCase();
+  const seen = new Set<string>();
   const out: string[] = [];
-  if (MARKET_VAULT_ADDRESS) out.push(MARKET_VAULT_ADDRESS);
-  if (MARKET_VAULT_LEGACY_ADDRESS) out.push(MARKET_VAULT_LEGACY_ADDRESS);
+  for (const a of raw) {
+    const lc = a.toLowerCase();
+    if (lc === primary || seen.has(lc)) continue;
+    seen.add(lc);
+    out.push(a);
+  }
   return out;
 })();
 
-/** True when primary and legacy are both set and different. */
-export const MARKET_VAULT_DUAL_MODE =
-  MARKET_VAULT_ADDRESS !== null && MARKET_VAULT_LEGACY_ADDRESS !== null;
+/**
+ * Back-compat: the first legacy vault. Existing single-legacy consumers keep
+ * working; new code that must enumerate ALL legacies uses the plural above.
+ */
+export const MARKET_VAULT_LEGACY_ADDRESS: string | null =
+  MARKET_VAULT_LEGACY_ADDRESSES[0] ?? null;
+
+/**
+ * Known production vault addresses (Robinhood), used for generation labels and
+ * as hard fallbacks so the client never "forgets" where historic deposits live.
+ */
+export const MARKET_VAULT_V1_KNOWN = "0xb2019Fd4cA24502e812C0C73b751Fa49979BF708" as const;
+export const MARKET_VAULT_V2_KNOWN = "0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04" as const;
+
+/** Every vault address the UI/wallet may talk to (primary + all legacies). */
+export const MARKET_VAULT_ADDRESSES: readonly string[] = (() => {
+  const out: string[] = [];
+  if (MARKET_VAULT_ADDRESS) out.push(MARKET_VAULT_ADDRESS);
+  out.push(...MARKET_VAULT_LEGACY_ADDRESSES);
+  return out;
+})();
+
+/** True when more than one vault is configured (primary + >=1 legacy). */
+export const MARKET_VAULT_DUAL_MODE = MARKET_VAULT_ADDRESSES.length > 1;
 
 /** The vault's own DrandBeacon — read live from the deployed vault's
  * beacon() getter, not guessed or copied from a deploy script that could
@@ -362,7 +404,9 @@ export const EXPORTED_ADDRESS_CONSTANTS: Readonly<Record<string, string>> =
     MARKET_FEE_RECIPIENT,
     MARKET_OFFER_CURRENCY,
     ...(MARKET_VAULT_ADDRESS ? { MARKET_VAULT_ADDRESS } : {}),
-    ...(MARKET_VAULT_LEGACY_ADDRESS ? { MARKET_VAULT_LEGACY_ADDRESS } : {}),
+    ...Object.fromEntries(
+      MARKET_VAULT_LEGACY_ADDRESSES.map((a, i) => [`MARKET_VAULT_LEGACY_ADDRESS_${i}`, a])
+    ),
   });
 
 for (const [name, value] of Object.entries(EXPORTED_ADDRESS_CONSTANTS)) {

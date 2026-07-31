@@ -6,6 +6,7 @@ import { useVaultBook } from "@/lib/market/useVaultBook";
 import {
   shortVault,
   vaultColorKind,
+  vaultKindLabel,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
 
@@ -49,7 +50,7 @@ export default function VaultDashboard({ vaultAddress = null, active = true }: P
   }
 
   const vaultBadge =
-    colorKind === "v1" ? "V1" : colorKind === "v2" ? "V2" : vaultAddress ? shortVault(vaultAddress) : null;
+    colorKind === "unknown" ? (vaultAddress ? shortVault(vaultAddress) : null) : vaultKindLabel(colorKind);
 
   const ethUsd = stats.ethUsd ?? 0;
   const ethAndUsd = (wei: string, ethDecimals = 4) => {
