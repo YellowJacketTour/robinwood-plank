@@ -3,7 +3,7 @@
  * ethers' JsonRpcProvider (which can hang on node:http under nodejs_compat).
  */
 
-import { SERVER_RPC_URLS, isMeteredRpcUrl } from "@/lib/server/rpc-urls";
+import { SERVER_RPC_URLS, FREE_RPC_URLS, isMeteredRpcUrl } from "@/lib/server/rpc-urls";
 import { recordRpc } from "@/lib/market/rpc-meter";
 import { peekRpcCache, putRpcCache, withRpcCache } from "@/lib/market/rpc-cache";
 
@@ -105,6 +105,34 @@ async function rpcCallUncached<T = unknown>(
 
 export async function ethCall(to: string, data: string): Promise<string> {
   return rpcCall<string>("eth_call", [{ to, data }, "latest"]);
+}
+
+/**
+ * eth_call over the free endpoints only, still cached and coalesced.
+ *
+ * For reads that must never cost compute units but should not depend on one
+ * hardcoded URL either. Callers that previously posted straight to
+ * CHAIN.rpcUrls.default get failover to a second free endpoint and dedupe of
+ * repeat reads, at the same price: nothing.
+ */
+export async function ethCallFree(to: string, data: string): Promise<string> {
+  const params = [{ to, data }, "latest"];
+  return withRpcCache("eth_call", params, async () => {
+    const errors: string[] = [];
+    for (const url of FREE_RPC_URLS) {
+      try {
+        const data_ = await postRpc(url, "eth_call", params, 8_000);
+        if (data_.error) {
+          errors.push(data_.error.message || "RPC error");
+          continue;
+        }
+        return data_.result as string;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    throw new Error(`Free eth_call failed: ${errors.slice(-2).join(" | ")}`);
+  });
 }
 
 /** Batch several eth_calls in one HTTP round-trip (less rate-limit pressure). */
