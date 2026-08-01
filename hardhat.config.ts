@@ -35,6 +35,14 @@ const config: HardhatUserConfig = {
     },
     customChains: [
       {
+        network: "robinhood",
+        chainId: 4663,
+        urls: {
+          apiURL: "https://robinhoodchain.blockscout.com/api",
+          browserURL: "https://robinhoodchain.blockscout.com",
+        },
+      },
+      {
         network: "robinhood-testnet",
         chainId: 46630,
         urls: {
