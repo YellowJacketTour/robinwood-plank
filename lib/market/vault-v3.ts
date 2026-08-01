@@ -209,6 +209,14 @@ export async function v3RemoveLiquidity(account: string, lpIn: bigint, s: V3Snap
   );
 }
 
+/** The connected account's native ETH balance on the configured chain. */
+export async function getEthBalance(account: string): Promise<bigint> {
+  if (!cachedProvider) {
+    cachedProvider = new JsonRpcProvider(CHAIN.rpcUrls.default, { chainId: CHAIN.id, name: CHAIN.name });
+  }
+  return cachedProvider.getBalance(account);
+}
+
 export function formatUnits(wei: bigint, dp = 4): string {
   const whole = wei / SHARE_UNIT;
   const frac = (wei % SHARE_UNIT).toString().padStart(18, "0").slice(0, dp);
