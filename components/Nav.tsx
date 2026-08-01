@@ -45,8 +45,7 @@ function isActive(link: (typeof NAV_LINKS)[number], pathname: string) {
  * when a wallet was already connected elsewhere on the page.
  */
 function ConnectWalletAction({ onNavigate }: { onNavigate?: () => void }) {
-  const pathname = usePathname() || "/";
-  const { address, isConnected, disconnect } = useWallet();
+  const { address, isConnected, disconnect, openConnect } = useWallet();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -103,20 +102,20 @@ function ConnectWalletAction({ onNavigate }: { onNavigate?: () => void }) {
   }
 
   return (
-    <Link
-      href="/market?connect=1"
-      onClick={(e) => {
+    // Connecting is not a destination. This used to link to /market?connect=1,
+    // so pressing it from /admin (or anywhere but the market) navigated away
+    // and lost whatever the visitor was doing. The modal is mounted by
+    // WalletProvider, so it opens in place on every page.
+    <button
+      type="button"
+      onClick={() => {
         onNavigate?.();
-        if (pathname === "/market") {
-          // Already on the market — just open the modal, no navigation.
-          e.preventDefault();
-          window.dispatchEvent(new CustomEvent("plank:connect-wallet"));
-        }
+        openConnect();
       }}
       className="inline-flex min-h-11 shrink-0 items-center rounded-lg bg-gold-500 px-4 text-sm font-bold text-wood-950 transition-colors hover:bg-gold-400"
     >
       Connect wallet
-    </Link>
+    </button>
   );
 }
 

@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { isAddress } from "ethers";
+import { useWallet } from "@/lib/wallet-context";
 
 /**
  * Condensed "Check Your Planks" card for the landing page (DESIGN.md:
@@ -13,6 +14,7 @@ import { isAddress } from "ethers";
  */
 export default function WalletLookupCard() {
   const router = useRouter();
+  const { openConnect } = useWallet();
   const [address, setAddress] = useState("");
   const [error, setError] = useState("");
 
@@ -28,7 +30,9 @@ export default function WalletLookupCard() {
   }
 
   function connectWallet() {
-    router.push("/market?connect=1");
+    // Same fix as the nav button: connecting happens where the visitor is.
+    // Bouncing them to /market to connect abandoned this card's whole point.
+    openConnect();
   }
 
   return (

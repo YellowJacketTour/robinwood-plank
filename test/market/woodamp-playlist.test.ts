@@ -8,7 +8,13 @@ import {
   verifyAdminProof,
   ADMIN_SIGNATURE_WINDOW_MS,
 } from "../../lib/admin-auth";
-import { sanitizePlaylist, WOODAMP_PLAYLIST } from "../../lib/woodamp-playlist";
+import {
+  classifyTrackUrl,
+  resolveTrackUrl,
+  sanitizePlaylist,
+  sunoAudioUrl,
+  WOODAMP_PLAYLIST,
+} from "../../lib/woodamp-playlist";
 
 /**
  * Locks in the WoodAmp Phase 2 contracts:
@@ -228,4 +234,68 @@ test("adminAddresses: env parses a comma-separated list; unset falls back to tre
   const fallback = adminAddresses("");
   assert.equal(fallback.length, 2);
   for (const entry of fallback) assert.match(entry, /^0x[0-9a-f]{40}$/);
+});
+
+// --- Suno share links + credited uploads -----------------------------------
+
+const SUNO_ID = "ec323f42-46f9-4d44-8f58-de00275fb36a";
+
+test("a Suno share link resolves to the CDN audio file", () => {
+  // Visitors copy the share page, which is an app shell we cannot play. The
+  // CDN serves the finished mp3 at the same uuid, so the paste is rewritten
+  // once at add time and everything downstream sees a plain audio URL.
+  assert.equal(
+    sunoAudioUrl(`https://suno.com/song/${SUNO_ID}?sh=5tKh9ePyJImQCM2p`),
+    `https://cdn1.suno.ai/${SUNO_ID}.mp3`
+  );
+  assert.equal(
+    resolveTrackUrl(`https://suno.com/song/${SUNO_ID}`),
+    `https://cdn1.suno.ai/${SUNO_ID}.mp3`
+  );
+  assert.equal(classifyTrackUrl(`https://suno.com/song/${SUNO_ID}`), "remote");
+});
+
+test("a CDN URL is already playable and passes through untouched", () => {
+  const cdn = `https://cdn1.suno.ai/${SUNO_ID}.mp3`;
+  assert.equal(resolveTrackUrl(cdn), cdn);
+  assert.equal(classifyTrackUrl(cdn), "remote");
+});
+
+test("a Suno page that is not a song stays external rather than guessing", () => {
+  // Better a working link-out than a 404 dressed up as a track.
+  assert.equal(sunoAudioUrl("https://suno.com/song/not-a-uuid"), null);
+  assert.equal(classifyTrackUrl("https://suno.com/playlist/abc"), "external");
+  assert.equal(sunoAudioUrl("http://suno.com/song/" + SUNO_ID), null);
+  assert.equal(sunoAudioUrl("https://evil.example/song/" + SUNO_ID), null);
+});
+
+test("a hosted upload keeps the originating post as credit", () => {
+  const parsed = sanitizePlaylist([
+    {
+      id: "community-cut",
+      title: "Community Cut",
+      artist: "@someone",
+      src: "/api/media/community-cut.mp3",
+      source: "hosted",
+      link: " https://x.com/someone/status/123 ",
+    },
+  ]);
+  assert.ok(parsed.ok);
+  assert.equal(parsed.tracks[0].link, "https://x.com/someone/status/123");
+});
+
+test("a credit link must be https — it is rendered as an href", () => {
+  for (const link of ["javascript:alert(1)", "data:text/html,x", "not a url"]) {
+    const parsed = sanitizePlaylist([
+      {
+        id: "x",
+        title: "X",
+        artist: "Y",
+        src: "/audio/x.mp3",
+        source: "hosted",
+        link,
+      },
+    ]);
+    assert.equal(parsed.ok, false, `${link} must be rejected`);
+  }
 });

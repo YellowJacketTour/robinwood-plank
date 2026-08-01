@@ -31,6 +31,7 @@ import {
   getEthereumProvider,
   type Eip1193Provider,
 } from "@/lib/wallet";
+import ConnectWalletModalSwitch from "@/components/ConnectWalletModalSwitch";
 
 export type WalletStatus = "disconnected" | "connecting" | "connected";
 
@@ -54,6 +55,16 @@ export type WalletContextValue = {
   adoptAccount: (address: string) => void;
   /** Re-check eth_accounts + chain without prompting. Safe to call anytime. */
   refresh: () => Promise<void>;
+  /**
+   * Open the wallet-chooser modal from anywhere. The modal is mounted once
+   * here, at the provider, so every surface can offer "Connect wallet"
+   * without navigating: the nav button used to link to /market?connect=1,
+   * which threw an admin (or anyone on any other page) out to the market
+   * just to connect.
+   */
+  openConnect: () => void;
+  closeConnect: () => void;
+  connectOpen: boolean;
 };
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -63,6 +74,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [chainId, setChainId] = useState<number | null>(null);
   const [status, setStatus] = useState<WalletStatus>("disconnected");
   const activeProviderRef = useRef<Eip1193Provider | null>(null);
+  const [connectOpen, setConnectOpen] = useState(false);
+  // The modal's chunk (and, under Reown, AppKit itself) should not load on
+  // every page just because the provider wraps the whole app — so it is not
+  // rendered until someone actually asks to connect. It stays mounted after
+  // that, to keep the connector's own state across open/close.
+  const [connectMounted, setConnectMounted] = useState(false);
 
   const applyAccounts = useCallback((accounts: string[] | undefined) => {
     const next = accounts?.[0] ?? null;
@@ -137,6 +154,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [adoptAccount, refresh]);
 
+  const openConnect = useCallback(() => {
+    setConnectMounted(true);
+    setConnectOpen(true);
+  }, []);
+
+  const closeConnect = useCallback(() => setConnectOpen(false), []);
+
+  const onModalConnected = useCallback(
+    (addr: string) => {
+      // The modal's own finish() already reports the address; this is
+      // idempotent insurance so the shared context can never lag behind.
+      adoptAccount(addr);
+      setConnectOpen(false);
+      void ensureRobinhoodChain().catch(() => undefined);
+    },
+    [adoptAccount]
+  );
+
   const disconnect = useCallback(() => {
     setAddress(null);
     setChainId(null);
@@ -145,7 +180,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   // Mount: silently pick up a previously-authorized wallet (eth_accounts
   // never prompts) and start listening. Unmount: detach whatever is bound.
+  // Reading the wallet IS synchronising with an external system, which is what
+  // effects are for; the setState happens in refresh() once that read returns.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
     return () => {
       const prev = activeProviderRef.current;
@@ -166,11 +204,36 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       disconnect,
       adoptAccount,
       refresh,
+      openConnect,
+      closeConnect,
+      connectOpen,
     }),
-    [address, chainId, status, connect, disconnect, adoptAccount, refresh]
+    [
+      address,
+      chainId,
+      status,
+      connect,
+      disconnect,
+      adoptAccount,
+      refresh,
+      openConnect,
+      closeConnect,
+      connectOpen,
+    ]
   );
 
-  return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
+  return (
+    <WalletContext.Provider value={value}>
+      {children}
+      {connectMounted ? (
+        <ConnectWalletModalSwitch
+          open={connectOpen}
+          onClose={closeConnect}
+          onConnected={onModalConnected}
+        />
+      ) : null}
+    </WalletContext.Provider>
+  );
 }
 
 export function useWallet(): WalletContextValue {

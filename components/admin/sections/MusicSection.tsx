@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   classifyTrackUrl,
+  resolveTrackUrl,
   sanitizePlaylist,
+  sunoAudioUrl,
+  titleFromPost,
   type WoodAmpTrack,
 } from "@/lib/woodamp-playlist";
 import { adminMessage, adminPayloadHash } from "@/lib/admin-auth";
 import { signMessage } from "@/lib/wallet";
-import { uploadMediaFile } from "../api";
+import { importXTrack, uploadMediaFile, type XImportOutcome } from "../api";
 import {
   BUTTON_PRIMARY,
   BUTTON_SECONDARY,
@@ -113,16 +116,11 @@ function PlaylistManager({ address }: { address: string | null }) {
     [mutate]
   );
 
-  const add = useCallback(
-    (track: WoodAmpTrack) => {
-      mutate((prev) => [...prev, track]);
-    },
-    [mutate]
-  );
-
-  const handleSave = useCallback(async () => {
-    if (!tracks || !address) return;
-    const parsed = sanitizePlaylist(tracks);
+  const handleSave = useCallback(
+    async (override?: WoodAmpTrack[]) => {
+    const list = override ?? tracks;
+    if (!list || !address) return;
+    const parsed = sanitizePlaylist(list);
     if (!parsed.ok) {
       setSave({
         kind: "error",
@@ -172,7 +170,23 @@ function PlaylistManager({ address }: { address: string | null }) {
         message: err instanceof Error ? err.message : "Save failed.",
       });
     }
-  }, [address, tracks]);
+    },
+    [address, tracks]
+  );
+
+  /**
+   * Adding a track is one action, not two. An imported track used to land in
+   * an unsaved list, so the admin had to notice a second button and press it
+   * before anything was live — easy to miss, and the work was already done.
+   */
+  const add = useCallback(
+    (track: WoodAmpTrack) => {
+      const next = tracks ? [...tracks, track] : [track];
+      mutate(() => next);
+      void handleSave(next);
+    },
+    [handleSave, mutate, tracks]
+  );
 
   const busy = save.kind === "signing" || save.kind === "saving";
 
@@ -252,7 +266,12 @@ function PlaylistManager({ address }: { address: string | null }) {
               />
             ))}
           </ol>
-          <AddTrackForm existing={tracks} onAdd={add} busy={busy} />
+          <AddTrackForm
+            existing={tracks}
+            onAdd={add}
+            busy={busy}
+            address={address}
+          />
         </>
       ) : null}
     </section>
@@ -318,6 +337,19 @@ function TrackRow({
           </label>
           <p className={`${LABEL} sm:col-span-2`}>
             id: {track.id} · {SOURCE_LABELS[track.source]}
+            {track.link ? (
+              <>
+                {" · credited to "}
+                <a
+                  href={track.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline decoration-dotted"
+                >
+                  {track.link.replace(/^https:\/\/(www\.)?/, "").slice(0, 48)}
+                </a>
+              </>
+            ) : null}
           </p>
         </div>
         <div className="flex gap-2">
@@ -362,61 +394,188 @@ function slugify(text: string): string {
     .slice(0, 64);
 }
 
+/** X/Twitter post — the audio is in a video player we cannot stream from. */
+function isXLink(src: string): boolean {
+  try {
+    const host = new URL(src.trim()).hostname.toLowerCase().replace(/^www\./, "");
+    return host === "x.com" || host === "twitter.com" || host === "mobile.twitter.com";
+  } catch {
+    return false;
+  }
+}
+
 function AddTrackForm({
   existing,
   onAdd,
   busy,
+  address,
 }: {
   existing: WoodAmpTrack[];
   onAdd: (track: WoodAmpTrack) => void;
   busy: boolean;
+  address: string | null;
 }) {
   const [title, setTitle] = useState("");
   const [artist, setArtist] = useState("");
   const [src, setSrc] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [looking, setLooking] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  // Which URL we last auto-filled from, so re-editing the title doesn't get
+  // clobbered and the same URL isn't looked up twice.
+  const filledFor = useRef<string | null>(null);
 
   const existingIds = useMemo(
     () => new Set(existing.map((t) => t.id)),
     [existing]
   );
 
-  const classified = src.trim() ? classifyTrackUrl(src) : null;
+  const trimmed = src.trim();
+  const classified = trimmed ? classifyTrackUrl(trimmed) : null;
+  // X posts are the one case where the pasted URL can never become audio, so
+  // the form asks for the file instead of quietly adding a link-out.
+  const needsUpload = isXLink(trimmed);
+  const suno = sunoAudioUrl(trimmed);
 
-  const handleAdd = useCallback(() => {
+  // Ask the source what the track is called as soon as a URL is pasted.
+  // Debounced because this fires per keystroke, and every lookup is an
+  // outbound request on the server's behalf.
+  useEffect(() => {
+    if (!trimmed || filledFor.current === trimmed) return;
+    const supported =
+      needsUpload ||
+      classified === "embed-youtube" ||
+      classified === "embed-soundcloud" ||
+      Boolean(suno);
+    if (!supported) return;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setLooking(true);
+      try {
+        const res = await fetch(
+          `/api/music/track-meta?url=${encodeURIComponent(trimmed)}`,
+          { signal: controller.signal }
+        );
+        const data = (await res.json()) as {
+          meta?: { title?: string; artist?: string } | null;
+        };
+        if (controller.signal.aborted) return;
+        filledFor.current = trimmed;
+        // Never overwrite something already typed — the admin's wording wins.
+        if (data.meta?.title) setTitle((prev) => prev || data.meta!.title!);
+        if (data.meta?.artist) setArtist((prev) => prev || data.meta!.artist!);
+      } catch {
+        // A failed lookup is not an error the admin needs to see; the fields
+        // simply stay empty and typing still works.
+      } finally {
+        if (!controller.signal.aborted) setLooking(false);
+      }
+    }, 500);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [classified, needsUpload, suno, trimmed]);
+
+  const nextId = useCallback(
+    (base: string) => {
+      let id = base;
+      let n = 2;
+      while (existingIds.has(id)) id = `${base}-${n++}`.slice(0, 64);
+      return id;
+    },
+    [existingIds]
+  );
+
+  const commit = useCallback(
+    (track: WoodAmpTrack) => {
+      const parsed = sanitizePlaylist([...existing, track]);
+      if (!parsed.ok) {
+        setError(parsed.error.message);
+        return false;
+      }
+      onAdd(track);
+      setTitle("");
+      setArtist("");
+      setSrc("");
+      if (fileRef.current) fileRef.current.value = "";
+      return true;
+    },
+    [existing, onAdd]
+  );
+
+  const handleAdd = useCallback(async () => {
     setError(null);
+
+    if (needsUpload) {
+      if (!address) {
+        setError("Connect the admin wallet to import.");
+        return;
+      }
+      const file = fileRef.current?.files?.[0];
+      setUploading(true);
+      // Rip the post's audio server-side. A file, if one was picked, is the
+      // manual fallback for posts we can't resolve (private, deleted, or
+      // audio that didn't come from X in the first place).
+      const outcome = file
+        ? await uploadMediaFile(file, address)
+        : await importXTrack(trimmed, address);
+      setUploading(false);
+      if (!outcome.ok) {
+        setError(outcome.message);
+        return;
+      }
+      // A rip already knows the post's text and handle, so nothing has to be
+      // typed in first — requiring a title up front meant going and reading
+      // the post to supply what the import was about to fetch anyway. Typed
+      // values still win; these are only the fallback.
+      const post = file
+        ? null
+        : (outcome as XImportOutcome & { ok: true }).post;
+      const derived = post ? titleFromPost(post.text, post.author) : "";
+      const finalTitle = title.trim() || derived;
+      if (!slugify(finalTitle)) {
+        setError("Give the track a title — this post had no text to borrow.");
+        return;
+      }
+      // We host the audio; the post stays attached as the credit.
+      commit({
+        id: nextId(slugify(finalTitle)),
+        title: finalTitle,
+        artist: artist.trim() || post?.author || "Plank Community Radio",
+        src: outcome.upload.url,
+        source: "hosted",
+        link: trimmed,
+      });
+      return;
+    }
+
     const baseId = slugify(title);
     if (!baseId) {
       setError("Give the track a title first.");
       return;
     }
-    const source = classifyTrackUrl(src.trim());
+
+    // Suno share pages are rewritten to their CDN audio here, so what gets
+    // stored is what plays.
+    const resolved = resolveTrackUrl(trimmed);
+    const source = classifyTrackUrl(resolved);
     if (!source) {
-      setError("Enter a valid URL (audio file, YouTube, SoundCloud, or X link).");
+      setError("Enter a valid URL (audio file, YouTube, SoundCloud, Suno, or X link).");
       return;
     }
-    let id = baseId;
-    let n = 2;
-    while (existingIds.has(id)) {
-      id = `${baseId}-${n++}`.slice(0, 64);
-    }
-    const track: WoodAmpTrack = {
-      id,
+    commit({
+      id: nextId(baseId),
       title: title.trim(),
       artist: artist.trim() || "Plank Community Radio",
-      src: src.trim(),
+      src: resolved,
       source,
-    };
-    const parsed = sanitizePlaylist([...existing, track]);
-    if (!parsed.ok) {
-      setError(parsed.error.message);
-      return;
-    }
-    onAdd(track);
-    setTitle("");
-    setArtist("");
-    setSrc("");
-  }, [artist, existing, existingIds, onAdd, src, title]);
+      ...(suno ? { link: trimmed } : {}),
+    });
+  }, [address, artist, commit, needsUpload, nextId, suno, title, trimmed]);
+
+  const disabled = busy || uploading;
 
   return (
     <div className="mt-4 rounded-md border border-line bg-panel-soft p-3">
@@ -427,37 +586,71 @@ function AddTrackForm({
           placeholder="Title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          disabled={busy}
+          disabled={disabled}
         />
         <input
           className={INPUT}
           placeholder="Artist / community credit"
           value={artist}
           onChange={(e) => setArtist(e.target.value)}
-          disabled={busy}
+          disabled={disabled}
         />
         <input
           className={`${INPUT} font-mono text-xs sm:col-span-2`}
-          placeholder="/audio/track.mp3, https://…/track.mp3, YouTube/SoundCloud/X link"
+          placeholder="/audio/track.mp3, https://…/track.mp3, YouTube/SoundCloud/Suno/X link"
           value={src}
           onChange={(e) => setSrc(e.target.value)}
-          disabled={busy}
+          disabled={disabled}
           spellCheck={false}
         />
       </div>
+
+      {needsUpload ? (
+        <div className="mt-3 rounded-md border border-gold-500/30 bg-panel-strong p-3">
+          <p className={LABEL}>X post — audio will be ripped and hosted</p>
+          <p className="mt-1 text-xs text-cream-muted">
+            The post&apos;s audio is pulled once and served from here, so it
+            streams in WoodAmp instead of bouncing to x.com, with the post kept
+            as the credit. Title and artist are taken from the post — fill them
+            in above only to override. Leave the file picker empty unless the
+            rip fails: private and deleted posts can&apos;t be read, and then
+            you can supply the audio yourself.
+          </p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".mp3,.m4a,.ogg,.wav"
+            className="mt-2 text-sm text-cream-muted file:mr-3 file:h-11 file:cursor-pointer file:rounded-md file:border-0 file:bg-gold-500 file:px-4 file:text-[0.6875rem] file:font-black file:uppercase file:tracking-[0.12em] file:text-[#261105] hover:file:bg-gold-400"
+            disabled={disabled || !address}
+          />
+        </div>
+      ) : null}
+
       <p className="mt-2 text-xs text-cream-muted">
-        {classified
-          ? `Will be added as: ${SOURCE_LABELS[classified]}.`
-          : "Direct audio plays everywhere; YouTube/SoundCloud play inside the WoodAmp window; X links open on the platform."}
+        {looking
+          ? "Reading the title and artist from the source…"
+          : needsUpload
+          ? "Ripped, added, and saved in one go — two wallet prompts: one for the import, one for the playlist."
+          : suno
+            ? "Suno track — plays from Suno's CDN, credited to the song page. Upload the file here if you want it to outlive their link."
+            : classified
+              ? `Will be added as: ${SOURCE_LABELS[classified]}.`
+              : "Direct audio plays everywhere; YouTube/SoundCloud play inside the WoodAmp window; paste an X or Suno link to upload or stream it."}
       </p>
       {error ? <p className="mt-2 text-sm text-rose-400">{error}</p> : null}
       <button
         type="button"
         className={`${BUTTON_SECONDARY} mt-3`}
-        onClick={handleAdd}
-        disabled={busy}
+        onClick={() => void handleAdd()}
+        disabled={disabled}
       >
-        Add to Planklist
+        {uploading
+          ? needsUpload
+            ? "Ripping audio…"
+            : "Uploading…"
+          : needsUpload
+            ? "Rip, add & save"
+            : "Add to Planklist"}
       </button>
     </div>
   );

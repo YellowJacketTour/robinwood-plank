@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Deploy, or provision/verify the drand relayer.
+        description: Deploy, provision/verify the drand relayer, or set the admin allowlist.
         required: true
         type: choice
         default: deploy
@@ -19,8 +19,15 @@ on:
           - deploy
           - provision-relayer
           - verify-relayer
+          - set-admin-allowlist
       confirmation:
         description: Relay-disable confirmation, when required.
+        required: false
+        type: string
+      admin_addresses:
+        description: >-
+          set-admin-allowlist only — comma-separated 0x wallets allowed to sign
+          /admin mutations. Empty uses the PLANK_ADMIN_ADDRESSES repo variable.
         required: false
         type: string
 
@@ -634,3 +641,133 @@ jobs:
           )"
           test "$state" = "disabled_manually"
           echo "GitHub relay workflow disabled after verified InMotion takeover."
+
+  # ---------------------------------------------------------------------------
+  # Runtime admin allowlist.
+  #
+  # PLANK_ADMIN_ADDRESSES gates every /admin mutation. It is read per request,
+  # not baked into the bundle, so it lives in the server's shared/.env.production
+  # rather than the build env — and CI otherwise never touches that file.
+  #
+  # This job exists so the allowlist can be changed without anyone holding a
+  # shell on the box: the deploy key stays a secret the workflow uses and no
+  # human reads. The addresses themselves are public on-chain wallets, so they
+  # come from a repository variable (or a dispatch input), not a secret.
+  #
+  # The remote script rewrites in place rather than appending: a second
+  # PLANK_ADMIN_ADDRESSES= line would silently shadow the first, which is the
+  # kind of bug that only shows up as "why is my wallet still rejected".
+  # ---------------------------------------------------------------------------
+  admin-allowlist:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'set-admin-allowlist'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      ADMIN_ADDRESSES: ${{ inputs.admin_addresses || vars.PLANK_ADMIN_ADDRESSES }}
+    steps:
+      - name: Validate the allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ADMIN_ADDRESSES"
+          # Comma-separated 0x addresses, nothing else. This string is written
+          # into an env file the server sources, so anything unexpected in it
+          # is a shell-injection question, not a formatting one.
+          printf '%s' "$ADMIN_ADDRESSES" \
+            | grep -Eq '^0x[0-9a-fA-F]{40}(,0x[0-9a-fA-F]{40})*$'
+          echo "Allowlist entries: $(printf '%s\n' "$ADMIN_ADDRESSES" | tr ',' '\n' | wc -l)"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_APP_DIR"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Apply the allowlist and restart Passenger
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$ADMIN_ADDRESSES" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          addresses="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+
+          # This file also holds the PostgreSQL password. Keep a timestamped
+          # copy before touching it, and never write it in place — build the
+          # replacement beside it and move it over atomically, so an
+          # interrupted run cannot leave the app with a half-written config.
+          backup="$env_file.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+          cp -p "$env_file" "$backup"
+          chmod 600 "$backup"
+
+          tmp="$env_file.next.$$"
+          grep -v '^[[:space:]]*PLANK_ADMIN_ADDRESSES=' "$env_file" > "$tmp"
+          printf 'PLANK_ADMIN_ADDRESSES=%s\n' "$addresses" >> "$tmp"
+          chmod 600 "$tmp"
+          mv -f "$tmp" "$env_file"
+
+          # Prove exactly one definition survived, and that it is ours.
+          test "$(grep -c '^PLANK_ADMIN_ADDRESSES=' "$env_file")" -eq 1
+          test "$(grep '^PLANK_ADMIN_ADDRESSES=' "$env_file")" \
+             = "PLANK_ADMIN_ADDRESSES=$addresses"
+          # The password line must still be there — a botched rewrite that
+          # dropped it would take the site down on restart.
+          test "$(grep -c '^PGPASSWORD=' "$env_file")" -eq 1
+
+          touch "$app_dir/tmp/restart.txt"
+          echo "Admin allowlist applied; backup kept at $backup"
+          REMOTE
+
+      - name: Confirm the app came back up
+        shell: bash
+        env:
+          INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          url="${INMOTION_HEALTH_URL:-https://plank.love}"
+          for attempt in $(seq 1 20); do
+            # Same headers the deploy job's health check uses. A bare curl
+            # user-agent is refused at the edge, which reads as an outage when
+            # the app is in fact serving perfectly well.
+            code="$(
+              curl -sS -o /dev/null -w '%{http_code}' \
+                --connect-timeout 5 --max-time 15 \
+                --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                --header "Accept: application/json" \
+                --header "Cache-Control: no-cache" \
+                "$url/api/health?attempt=$attempt" || true
+            )"
+            if [ "$code" = "200" ]; then
+              echo "Healthy after restart (attempt $attempt)."
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::App did not return 200 from $url/api/health after the restart."
+          echo "The previous .env.production is on the server as .env.production.bak.*"
+          exit 1
