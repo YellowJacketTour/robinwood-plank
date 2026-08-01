@@ -5,27 +5,44 @@ export const CONTRACT_ADDRESS = "0x69420eaf0eBF43E08F621B014f25cEfDfA7e2DDc";
 
 export const SITE_URL = "https://plank.love";
 
-/** Robinhood Chain (primary public Uniswap AMM). */
-export const CHAIN = {
-  id: 4663,
-  name: "Robinhood Chain",
-  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-  rpcUrls: {
-    default: "https://rpc.mainnet.chain.robinhood.com",
-  },
-  blockExplorers: {
-    default: {
-      name: "Robinhood Chain Explorer",
-      // Verified 2026-07-27: https://explorer.mainnet.chain.robinhood.com is a
-      // 3xx redirect to this Blockscout host. wallet_addEthereumChain seeds
-      // this URL permanently into users' wallets, so store the canonical
-      // final host, not a redirect that can rot.
-      url: "https://robinhoodchain.blockscout.com",
-    },
-  },
-  /** Uniswap app chain slug used in custom interface links. */
-  uniswapSlug: "robinhood",
-} as const;
+/**
+ * DEV-ONLY: when NEXT_PUBLIC_DEV_LOCAL_CHAIN=1, the whole app talks to a local
+ * Hardhat node (chainId 31337) instead of Robinhood Chain, so the V3 vault can
+ * be deployed and exercised end-to-end without any mainnet. Unset in production;
+ * scripts/local-v3-setup.ts prints the .env.local this expects.
+ */
+const DEV_LOCAL_CHAIN = process.env.NEXT_PUBLIC_DEV_LOCAL_CHAIN === "1";
+
+/** Robinhood Chain (primary public Uniswap AMM); a local Hardhat node in dev. */
+export const CHAIN = DEV_LOCAL_CHAIN
+  ? ({
+      id: 31337,
+      name: "Localhost (V3 dev)",
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+      rpcUrls: { default: process.env.NEXT_PUBLIC_DEV_LOCAL_RPC || "http://127.0.0.1:8545" },
+      blockExplorers: { default: { name: "Local node", url: "http://127.0.0.1:8545" } },
+      uniswapSlug: "robinhood",
+    } as const)
+  : ({
+      id: 4663,
+      name: "Robinhood Chain",
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+      rpcUrls: {
+        default: "https://rpc.mainnet.chain.robinhood.com",
+      },
+      blockExplorers: {
+        default: {
+          name: "Robinhood Chain Explorer",
+          // Verified 2026-07-27: https://explorer.mainnet.chain.robinhood.com is a
+          // 3xx redirect to this Blockscout host. wallet_addEthereumChain seeds
+          // this URL permanently into users' wallets, so store the canonical
+          // final host, not a redirect that can rot.
+          url: "https://robinhoodchain.blockscout.com",
+        },
+      },
+      /** Uniswap app chain slug used in custom interface links. */
+      uniswapSlug: "robinhood",
+    } as const);
 
 /** Native ETH sentinel used by the Uniswap Trading API. */
 export const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -343,7 +360,8 @@ export const MARKET_VAULT_DUAL_MODE = MARKET_VAULT_ADDRESSES.length > 1;
  * drift. Lives here (not lib/market/drand.ts) so lib/wallet.ts's
  * destination allowlist and lib/market/drand.ts's send helper can both
  * import it without importing each other. */
-export const DRAND_BEACON_ADDRESS = "0x87d584df130FED0Fe540954eD48CE2691A18D619";
+export const DRAND_BEACON_ADDRESS =
+  process.env.NEXT_PUBLIC_DRAND_BEACON_ADDRESS || "0x87d584df130FED0Fe540954eD48CE2691A18D619";
 
 /** Seaport protocol version Marketplank targets. */
 export const SEAPORT_VERSION = "1.6";

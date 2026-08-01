@@ -26,6 +26,14 @@ const config: HardhatUserConfig = {
     cache: "./.hardhat-cache",
     artifacts: "./.hardhat-artifacts",
   },
+  networks: {
+    // LOCAL ONLY. `npx hardhat node` serves this on 127.0.0.1:8545 (chainId
+    // 31337); scripts/local-v3-setup.ts deploys the V3 dev stack here so the
+    // frontend can be exercised without touching mainnet. There is still no
+    // Robinhood/mainnet network here — deployment to real value stays a
+    // deliberate, wallet-signed act (scripts/deploy-vault-v3.ts).
+    localhost: { url: "http://127.0.0.1:8545", chainId: 31337 },
+  },
 };
 
 export default config;
