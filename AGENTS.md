@@ -17,6 +17,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
   `data-market-shell` styling-boundary mechanism, and the plank-character-art
   brand rule. Component code must use the token names and mechanisms it
   documents, not ad hoc hexes or a competing naming scheme.
+- **Vaults are an N-vault registry, not a hardcoded pair.** Resolve every vault
+  through `lib/market/vault-registry.ts` by *address*, never by role — with more
+  than one legacy, "the legacy vault" is ambiguous. Never remove a legacy from
+  `NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES` until its `heldTokenCount` is `0`;
+  doing so bricks every client call to it ("Blocked unsafe vault target").
+- **Never render a vault version number in the UI.** `V1`/`V2`/`V3` are internal
+  identity only. Users see product names — Driftwood, WormWood, Premium Plank
+  Liquidity — from `VAULT_NAMES` in the registry.
+- **Do not migrate users into V2.** Its LP primitive is a proven flash-loanable
+  drain (`docs/marketplank/AUDIT-2026-07-31-lp.md`). V3 is the destination.
 - Never print, commit, or copy production secrets into release artifacts.
 - `RELAYER_PRIVATE_KEY` is cron-only and must not be loaded by Passenger.
 - PostgreSQL migrations are append-only and must remain compatible with the

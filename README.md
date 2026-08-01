@@ -6,7 +6,7 @@
 The official RobinWood NFT collection and `$PLANK` application for
 [Robinhood Chain](https://robinhoodchain.blockscout.com/) (chain ID `4663`).
 It includes the collection site, mint and launch surfaces, a Uniswap-routed
-trade widget, and Marketplank, a Seaport marketplace with a dual-vault Instant
+trade widget, and Marketplank, a Seaport marketplace with a multi-vault Instant
 Swap experience.
 
 > [!IMPORTANT]
@@ -20,7 +20,10 @@ Swap experience.
 - Uniswap-routed `$PLANK` quotes and swaps with a server-held API key.
 - Seaport 1.6 listings, offers, cancellations, and fulfillment.
 - PostgreSQL-backed signed-order storage and shared marketplace caches.
-- V1 and V2 Marketplank vault support, including drand-backed random redemption.
+- An N-vault Marketplank registry (V1/V2 legacy, V3 primary) with drand-backed
+  random redemption and a guided migration flow out of the legacy vaults.
+- `MarketplankVaultV3`: proportional non-transferable LP, explicit reserves,
+  ETH-denominated flat fees, and a 30 bps constant-product swap fee.
 - A standalone drand relayer run by cPanel cron with a dedicated gas-only key.
 - Docker Compose for local production-parity testing.
 - GitHub Actions build, test, migration, immutable release, health check,
@@ -92,6 +95,29 @@ Native development can run without a durable backend, but the file and memory
 fallback is local-only. Use Docker or configure PostgreSQL before testing
 concurrency, persistence, Passenger restarts, or market-data migrations.
 
+### Local vault harness
+
+To exercise Instant Swap, liquidity, and the `/migrate` flow end-to-end without
+touching mainnet, deploy the whole stack — mock NFT, mock drand beacon, V3 with a
+real seeded pool, plus mock V1 and V2 so migration has something to migrate — to
+a local Hardhat node:
+
+```bash
+npx hardhat node                                              # terminal 1
+npx hardhat run scripts/local-v3-setup.ts --network localhost # terminal 2
+```
+
+Paste the printed `.env.local` block, restart `npm run dev`, add the Localhost
+network to your wallet (`http://127.0.0.1:8545`, chain ID `31337`), and import a
+printed test key. To add fresh positions later without redeploying — so your
+`.env.local` addresses and wallet state survive:
+
+```bash
+PLAYER_ADDRESS=0xYourWallet npx hardhat run scripts/local-topup.ts --network localhost
+```
+
+These scripts are local-only and must never be pointed at real value.
+
 ## Validation commands
 
 ```bash
@@ -124,8 +150,10 @@ one requires a new build and deploy.
 | --- | --- |
 | `NEXT_PUBLIC_SITE_URL` | Canonical public origin used by the application. |
 | `NEXT_PUBLIC_MARKET_ENABLED` | Feature gate for Marketplank. |
-| `NEXT_PUBLIC_MARKET_VAULT_ADDRESS` | Primary V2 vault. |
-| `NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS` | V1 vault retained for existing positions. |
+| `NEXT_PUBLIC_MARKET_VAULT_ADDRESS` | Primary vault — where new deposits, trades, and liquidity go. |
+| `NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES` | Comma list of older vaults retained for existing positions. Do not remove one until it holds zero tokens. |
+| `NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS` | Deprecated singular form, still read for one release. Prefer the plural above. |
+| `NEXT_PUBLIC_MARKET_VAULT_V1_KNOWN`, `NEXT_PUBLIC_MARKET_VAULT_V2_KNOWN` | Known prior deployments, used to derive a vault's generation and fee model from its address. Defaults are the production addresses below; override only for local test deployments. |
 | `NEXT_PUBLIC_ROBINHOOD_RPC_URL` | Browser RPC for Robinhood Chain. |
 | `NEXT_PUBLIC_RULES_RELAXED` | Enables the post-launch external venue behavior. |
 | `NEXT_PUBLIC_TRADE_PAUSED` | Emergency trade-widget pause. |
@@ -171,7 +199,9 @@ a valid maker signature.
 | Official Uniswap-routed widget | `0.4207%` integrator fee (`42.07` bips) to `0xfa987d386c4f61b27cb67a1e4e1239866fe8d9ba` |
 | RobinWood Seaport listings/offers | `0%` marketplace fee |
 | Future approved collections | `0.5%` default, configured per collection |
-| Vault mint / redeem / targeted redeem | Immutable deployed-contract parameters; deploy-tool defaults are `1%` / `1%` / `2.5%` premium |
+| Vault mint / redeem / targeted redeem (V1, V2) | Immutable share-denominated parameters; deploy-tool defaults are `1%` / `1%` / `2.5%` premium |
+| Vault mint / redeem / targeted redeem (V3) | Immutable flat **ETH** fees fixed at deployment, under wei ceilings enforced in the constructor. Deposit mints exactly one share; redeem burns exactly one — no share-fee dust |
+| V3 pool swap | `30` bps, retained in the reserve so LPs earn |
 
 The server injects the Uniswap integrator fee. Clients cannot override its fee
 recipient or route.
@@ -218,12 +248,35 @@ Always verify addresses in the repository and on the explorer before signing.
 | RobinWood NFT | `0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156` |
 | Seaport 1.6 | `0x0000000000000068F116a894984e2DB1123eB395` |
 | WETH | `0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73` |
-| Marketplank V2 vault | `0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04` |
-| Marketplank V1 vault | `0xb2019Fd4cA24502e812C0C73b751Fa49979BF708` |
+| Marketplank V3 vault ("Premium Plank Liquidity") | `0xacE28f72Fc3e15eA1671e689806694A9b0cE047D` |
+| Marketplank V2 vault ("WormWood") | `0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04` |
+| Marketplank V1 vault ("Driftwood") | `0xb2019Fd4cA24502e812C0C73b751Fa49979BF708` |
 | drand beacon | `0x87d584df130FED0Fe540954eD48CE2691A18D619` |
 
 Multiple unrelated contracts on Robinhood Chain report the symbol `WETH`.
 Never resolve the offer currency by symbol.
+
+### Vault status
+
+`MarketplankVaultV3` is **live on mainnet** at
+`0xacE28f72Fc3e15eA1671e689806694A9b0cE047D` (verified on-chain:
+`VAULT_VERSION() == 3`, share symbol `vROBIN`). It was deployed via
+`.github/workflows/deploy-vault-v3.yml` following
+[`docs/marketplank/DEPLOY-V3-RUNBOOK.md`](docs/marketplank/DEPLOY-V3-RUNBOOK.md).
+
+The repository variables now point the primary at it, with V1 and V2 as
+legacies. Note that `NEXT_PUBLIC_*` values are **baked at build time**: changing
+`NEXT_PUBLIC_MARKET_VAULT_ADDRESS` has no effect on the running site until the
+next build and deploy. The `.env.*.example` files still show the pre-V3 shape
+and are illustrative, not the production source of truth — the repository
+variables are.
+
+**V2 must not receive new deposits or liquidity.** Its LP primitive is a proven
+flash-loanable drain — see the audit linked below. It stays configured only so
+existing depositors can exit through `/migrate`.
+
+Version numbers are internal. The UI presents each vault by product name
+(Driftwood, WormWood, Premium Plank Liquidity) via `lib/market/vault-registry.ts`.
 
 ## Documentation
 
@@ -236,6 +289,9 @@ Never resolve the offer currency by symbol.
 - [InMotion deployment runbook](docs/INMOTION_DEPLOYMENT.md)
 - [Dependabot status](docs/DEPENDABOT_INMOTION.md)
 - [Marketplank engineering specification](docs/marketplank/SPEC.md)
+- [V2 LP drain audit — why V3 exists](docs/marketplank/AUDIT-2026-07-31-lp.md)
+- [V3 internal audit](docs/marketplank/AUDIT-2026-08-01-v3-internal.md)
+- [V3 deploy runbook](docs/marketplank/DEPLOY-V3-RUNBOOK.md)
 - [Vault LP migration postmortem](docs/marketplank/POSTMORTEM-2026-07-29-vault-lp-migration.md)
 - [Wallet-signed vault deployment tool](scripts/deploy-tool/README.md)
 
