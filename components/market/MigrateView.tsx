@@ -37,6 +37,25 @@ import { getV3Snapshot, v3Deposit } from "@/lib/market/vault-v3";
 import { useLegacyPosition, type SlotState } from "@/lib/market/useLegacyPosition";
 import { formatShares, type SourcePlan } from "@/lib/market/migration";
 
+/**
+ * True when a deposit reverted because the plank is no longer the sender's to
+ * deposit — i.e. it was already migrated (stale list). Benign: skip it rather
+ * than aborting the batch. Anything else is a real failure worth surfacing.
+ */
+function isAlreadyMigratedError(e: unknown): boolean {
+  const m = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return (
+    m.includes("incorrect owner") ||
+    m.includes("not token owner") ||
+    m.includes("not owned") ||
+    m.includes("caller is not") ||
+    m.includes("alreadyheld") ||
+    m.includes("already held") ||
+    m.includes("tokennotheld") ||
+    m.includes("nonexistent token")
+  );
+}
+
 export default function MigrateView() {
   const { address, isConnected, connect } = useWallet();
   const primary = getVaultByRole("primary");
@@ -94,17 +113,33 @@ export default function MigrateView() {
 
   const depositOwned = () =>
     run(`Depositing your planks into ${primary?.version ?? "the current vault"}…`, async () => {
+      const isV3 = Boolean(primary && primary.feeModel === "eth");
       // V3 (ETH-fee) deposits must forward the mint fee via the V3 call layer —
       // the legacy depositForShares sends no value and reverts IncorrectFee.
-      if (primary && primary.feeModel === "eth") {
-        const snap = await getV3Snapshot(primary.address, address!);
-        for (const p of pos.owned) {
-          await v3Deposit(address!, p.tokenId, snap, primary.address);
+      const snap = isV3 ? await getV3Snapshot(primary!.address, address!) : null;
+      const planks = [...pos.owned]; // snapshot: the list mutates as we mark each done
+      let skipped = 0;
+      let done = 0;
+      for (const p of planks) {
+        try {
+          if (isV3) await v3Deposit(address!, p.tokenId, snap!, primary!.address);
+          else await depositForShares(address!, p.tokenId, undefined, primary?.address ?? null);
+          pos.markDeposited(p.tokenId); // optimistic: count ticks down immediately
+          done += 1;
+        } catch (e) {
+          // A plank already migrated (stale list) is benign — skip it, don't
+          // abort the whole batch or flash a scary revert. Re-throw anything else.
+          if (isAlreadyMigratedError(e)) {
+            pos.markDeposited(p.tokenId);
+            skipped += 1;
+            continue;
+          }
+          throw e;
         }
-      } else {
-        for (const p of pos.owned) {
-          await depositForShares(address!, p.tokenId, undefined, primary?.address ?? null);
-        }
+      }
+      if (done === 0 && skipped > 0) {
+        // Everything in the (stale) list was already deposited — treat as success.
+        setStatus("Already migrated — nothing left to deposit.");
       }
     });
 

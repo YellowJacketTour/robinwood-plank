@@ -49,6 +49,9 @@ export type LegacyPosition = {
   hasValue: boolean;
   loading: boolean;
   refresh: () => Promise<void>;
+  /** Optimistically drop a plank from `owned` the instant its deposit confirms,
+   *  so the count updates without waiting on the slow authoritative rescan. */
+  markDeposited: (tokenId: string) => void;
 };
 
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -122,6 +125,10 @@ export function useLegacyPosition(
     await scan();
   }, [scan]);
 
+  const markDeposited = useCallback((tokenId: string) => {
+    setOwned((prev) => prev.filter((p) => p.tokenId !== tokenId));
+  }, []);
+
   useEffect(() => {
     if (!address) {
       setPlan(null);
@@ -137,5 +144,5 @@ export function useLegacyPosition(
   const anySlotMine = Object.values(slots).some((s) => s.mine);
   const hasValue = Boolean(plan?.hasValue) || owned.length > 0 || anySlotMine;
 
-  return { plan, owned, slots, hasValue, loading, refresh };
+  return { plan, owned, slots, hasValue, loading, refresh, markDeposited };
 }
