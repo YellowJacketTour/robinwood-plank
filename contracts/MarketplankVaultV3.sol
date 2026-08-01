@@ -3,18 +3,20 @@ pragma solidity ^0.8.24;
 
 /**
  * ============================================================================
- *    ____   _         _    _   _  _  __           .---.__
- *   |  _ \ | |       / \  | \ | || |/ /          | O   O `.
- *   | |_) || |      / _ \ |  \| || ' /           |  |  |  |
- *   |  __/ | |___  / ___ \| |\  || . \           |  \__/  |
- *   |_|    |_____|/_/   \_\_| \_||_|\_\           |  | |   |
- *                                                | .| | |. |
- *                                                |  | | |  |
- *                                                |  | | |  |
- *                                                |__|_|_|__|
- *
- *   Premium Plank Liquidity  ·  share token: vROBIN
- *   "it's just a plank — but it makes a market."
+ *          __________
+ *        .' .  .  . '._            ____   _         _    _   _  _  __
+ *      .'____________ '._         |  _ \ | |       / \  | \ | || |/ /
+ *     |  ,-.      ,-.   |'.        | |_) || |      / _ \ |  \| || ' /
+ *     | ( o )    ( o )  | |        |  __/ | |___  / ___ \| |\  || . \
+ *     |  `-'      `-'   | |        |_|    |_____|/_/   \_\_| \_||_|\_\
+ *     |                 | |
+ *     |  '-.______.-'   | |        Premium Plank Liquidity
+ *     |    .      .     |,'        share token: vROBIN
+ *     |  .    .     .   |
+ *     |    .    .    .  |          "it's just a plank —
+ *     |  .    .    .    |           but it makes a market."
+ *     | .    .    .   . |
+ *     |_________________|
  *
  *  Deposit an NFT, mint one fungible vault share. Trade shares against ETH on a
  *  constant-product pool with a 30 bps swap fee. Provide liquidity for a
