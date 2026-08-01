@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { withImageWidth } from "@/lib/ipfs";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { BUY_GAS_RESERVE_ETH } from "@/lib/constants";
 import type { Listing, MarketCollection } from "@/lib/market/types";
@@ -31,7 +32,14 @@ export default function BuyConfirm({
   onConfirm,
   onCancel,
 }: Props) {
-  const image = listing.imageUrl || collection.image;
+  // Ask the proxy for a thumbnail tier, and skip Next's optimizer, exactly as
+  // ListingCard/ItemDetail/MyNfts do. `/api/ipfs/image?…` is a route, not a
+  // static asset: routing it through /_next/image returns 400 ("url" parameter
+  // is not allowed), which rendered a broken thumbnail on the one screen where
+  // a buyer is confirming they want to spend money. Every other Image call site
+  // in the market already pairs withImageWidth with unoptimized; this was the
+  // only one that did not.
+  const image = withImageWidth(listing.imageUrl, 64) || collection.image;
 
   return (
     <div
@@ -61,6 +69,7 @@ export default function BuyConfirm({
               fill
               sizes="64px"
               className="object-cover"
+              unoptimized={Boolean(listing.imageUrl)}
             />
           </div>
           <div className="min-w-0">
