@@ -481,6 +481,39 @@ export function formatUnits(wei: bigint, dp = 4): string {
   return `${whole}.${frac}`;
 }
 
+// ── Price history (share price = ethReserve / shareReserve, over time) ───────
+export type PricePoint = { ts: number; price: number };
+
+/** Sample the vault's share price over recent blocks for the Price chart. Reads
+ *  historical reserves via blockTag calls (needs an archive node in prod; the
+ *  local dev node keeps full state). Lazy — call only when the Price tab opens. */
+export async function getV3PriceSeries(addr?: string | null, points = 24, lookbackBlocks = 100_000): Promise<PricePoint[]> {
+  const v = reader(addr);
+  const p = provider();
+  const latest = await p.getBlockNumber();
+  const from = Math.max(0, latest - lookbackBlocks);
+  const step = Math.max(1, Math.floor((latest - from) / Math.max(1, points - 1)));
+  const blocks: number[] = [];
+  for (let b = from; b < latest; b += step) blocks.push(b);
+  blocks.push(latest);
+  const out: PricePoint[] = [];
+  await Promise.all(
+    blocks.map(async (b) => {
+      try {
+        const [eth, sh, blk] = await Promise.all([
+          v.ethReserve.staticCall({ blockTag: b }) as Promise<bigint>,
+          v.shareReserve.staticCall({ blockTag: b }) as Promise<bigint>,
+          p.getBlock(b),
+        ]);
+        if (sh > BigInt(0) && blk) out.push({ ts: Number(blk.timestamp), price: Number(eth) / Number(sh) });
+      } catch {
+        /* block before deploy / archive miss — skip */
+      }
+    })
+  );
+  return out.sort((a, b) => a.ts - b.ts);
+}
+
 // ── Activity feed (recent vault events) ────────────────────────────────────
 export type V3ActivityKind = "buy" | "sell" | "deposit" | "redeem" | "lp-add" | "lp-remove";
 export type V3Activity = {
