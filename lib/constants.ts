@@ -353,9 +353,13 @@ export const MARKET_VAULT_LEGACY_ADDRESS: string | null =
 /**
  * Known production vault addresses (Robinhood), used for generation labels and
  * as hard fallbacks so the client never "forgets" where historic deposits live.
+ * Env-overridable so the local dev stack can stand up its own V1/V2 vaults and
+ * have the registry label them correctly (dev-only; prod uses the literals).
  */
-export const MARKET_VAULT_V1_KNOWN = "0xb2019Fd4cA24502e812C0C73b751Fa49979BF708" as const;
-export const MARKET_VAULT_V2_KNOWN = "0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04" as const;
+export const MARKET_VAULT_V1_KNOWN =
+  process.env.NEXT_PUBLIC_MARKET_VAULT_V1_KNOWN || "0xb2019Fd4cA24502e812C0C73b751Fa49979BF708";
+export const MARKET_VAULT_V2_KNOWN =
+  process.env.NEXT_PUBLIC_MARKET_VAULT_V2_KNOWN || "0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04";
 
 /** Every vault address the UI/wallet may talk to (primary + all legacies). */
 export const MARKET_VAULT_ADDRESSES: readonly string[] = (() => {
