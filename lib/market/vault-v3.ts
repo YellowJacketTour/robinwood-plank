@@ -482,7 +482,20 @@ export function formatUnits(wei: bigint, dp = 4): string {
 }
 
 // ── Activity feed (recent vault events) ────────────────────────────────────
-export type V3Activity = { kind: string; detail: string; who: string; block: number; key: string };
+export type V3ActivityKind = "buy" | "sell" | "deposit" | "redeem" | "lp-add" | "lp-remove";
+export type V3Activity = {
+  kind: V3ActivityKind;
+  tokenId?: string;   // deposit / redeem — drives the row thumbnail
+  eth?: bigint;       // ETH in/out
+  shares?: bigint;    // shares in/out
+  targeted?: boolean; // redeem: targeted vs random
+  who: string;        // short actor address
+  block: number;
+  ts: number;         // unix seconds (0 if unknown)
+  tx: string;         // tx hash
+  key: string;
+  image?: string;     // resolved client-side for deposit/redeem thumbnails
+};
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
@@ -493,26 +506,44 @@ export async function getV3Activity(addr?: string | null, lookback = 50_000): Pr
   const p = provider();
   const latest = await p.getBlockNumber();
   const from = Math.max(0, latest - lookback);
-  const out: V3Activity[] = [];
-  const grab = async (name: string, fmt: (a: readonly unknown[]) => { detail: string; who: string }) => {
+  type Raw = Omit<V3Activity, "who" | "key" | "ts"> & { who: string; ti: number; name: string };
+  const rows: Raw[] = [];
+  const grab = async (name: string, fmt: (a: readonly unknown[]) => Partial<Raw> & { who: string }) => {
     try {
       const logs = await v.queryFilter(v.filters[name](), from, latest);
       for (const log of logs) {
         const args = ("args" in log ? (log.args as readonly unknown[]) : []) ?? [];
-        const { detail, who } = fmt(args);
-        out.push({ kind: name, detail, who, block: log.blockNumber, key: `${log.blockNumber}-${log.transactionIndex}-${name}` });
+        rows.push({ ...fmt(args), block: log.blockNumber, tx: log.transactionHash, ti: log.index ?? 0, name } as Raw);
       }
     } catch {
       /* event not present / node hiccup — skip */
     }
   };
   await Promise.all([
-    grab("Bought", (a) => ({ who: String(a[0]), detail: `bought ${formatUnits(a[2] as bigint, 2)} shares for ${formatUnits(a[1] as bigint, 4)} Ξ` })),
-    grab("Sold", (a) => ({ who: String(a[0]), detail: `sold ${formatUnits(a[1] as bigint, 2)} shares for ${formatUnits(a[2] as bigint, 4)} Ξ` })),
-    grab("Deposited", (a) => ({ who: String(a[0]), detail: `deposited plank #${(a[1] as bigint).toString()}` })),
-    grab("Redeemed", (a) => ({ who: String(a[0]), detail: `redeemed plank #${(a[1] as bigint).toString()}${a[2] ? " (targeted)" : ""}` })),
-    grab("LiquidityAdded", (a) => ({ who: String(a[0]), detail: `added ${formatUnits(a[2] as bigint, 4)} Ξ liquidity` })),
-    grab("LiquidityRemoved", (a) => ({ who: String(a[0]), detail: `removed ${formatUnits(a[2] as bigint, 4)} Ξ liquidity` })),
+    grab("Bought", (a) => ({ kind: "buy", who: String(a[0]), eth: a[1] as bigint, shares: a[2] as bigint })),
+    grab("Sold", (a) => ({ kind: "sell", who: String(a[0]), shares: a[1] as bigint, eth: a[2] as bigint })),
+    grab("Deposited", (a) => ({ kind: "deposit", who: String(a[0]), tokenId: (a[1] as bigint).toString() })),
+    grab("Redeemed", (a) => ({ kind: "redeem", who: String(a[0]), tokenId: (a[1] as bigint).toString(), targeted: Boolean(a[2]) })),
+    grab("LiquidityAdded", (a) => ({ kind: "lp-add", who: String(a[0]), shares: a[1] as bigint, eth: a[2] as bigint })),
+    grab("LiquidityRemoved", (a) => ({ kind: "lp-remove", who: String(a[0]), shares: a[1] as bigint, eth: a[2] as bigint })),
   ]);
-  return out.sort((x, y) => y.block - x.block).slice(0, 25).map((r) => ({ ...r, who: short(r.who) }));
+  rows.sort((x, y) => y.block - x.block || y.ti - x.ti);
+  const top = rows.slice(0, 25);
+  // block timestamps (unique blocks only) for relative-time display
+  const tsMap = new Map<number, number>();
+  await Promise.all(
+    [...new Set(top.map((r) => r.block))].map(async (b) => {
+      try {
+        const blk = await p.getBlock(b);
+        if (blk) tsMap.set(b, Number(blk.timestamp));
+      } catch {
+        /* skip */
+      }
+    })
+  );
+  return top.map((r) => ({
+    kind: r.kind, tokenId: r.tokenId, eth: r.eth, shares: r.shares, targeted: r.targeted,
+    who: short(r.who), block: r.block, ts: tsMap.get(r.block) ?? 0, tx: r.tx,
+    key: `${r.block}-${r.ti}-${r.name}`,
+  }));
 }

@@ -10,7 +10,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { ArrowDown, ArrowUp, ArrowLeftRight, ExternalLink } from "lucide-react";
 import { useWallet } from "@/lib/wallet-context";
+import { CHAIN } from "@/lib/constants";
 import { shortVault } from "@/lib/market/vault-registry";
 import {
   getV3Snapshot,
@@ -27,6 +29,7 @@ import {
   type V3Snapshot,
   type V3Pending,
   type V3Activity,
+  type V3ActivityKind,
 } from "@/lib/market/vault-v3";
 import { useLegacyPosition } from "@/lib/market/useLegacyPosition";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
@@ -43,6 +46,36 @@ type TabKey = "price" | "odds" | "activity" | "liquidity";
 
 const toPicker = (ids: Set<string>): PickerToken[] =>
   Array.from(ids).sort((a, b) => Number(a) - Number(b)).map((tokenId) => ({ tokenId }));
+
+const ACTIVITY_META: Record<V3ActivityKind, { label: string; cls: string; dir: "up" | "down" | "swap" }> = {
+  buy: { label: "Buy", cls: "border-emerald-400/40 bg-emerald-500/10 text-emerald-300", dir: "down" },
+  sell: { label: "Sell", cls: "border-rose-400/40 bg-rose-500/10 text-rose-300", dir: "up" },
+  deposit: { label: "Deposit", cls: "border-sky-400/40 bg-sky-500/10 text-sky-300", dir: "down" },
+  redeem: { label: "Redeem", cls: "border-gold-500/40 bg-gold-500/10 text-gold-300", dir: "up" },
+  "lp-add": { label: "Add LP", cls: "border-violet-400/40 bg-violet-500/10 text-violet-300", dir: "swap" },
+  "lp-remove": { label: "Remove LP", cls: "border-violet-400/40 bg-violet-500/10 text-violet-300", dir: "swap" },
+};
+const hasExplorer = /^https?:\/\//.test(CHAIN.blockExplorers.default.url) && !CHAIN.blockExplorers.default.url.includes("127.0.0.1");
+
+function relativeTime(ts: number): string {
+  if (!ts) return "";
+  const s = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+/** The "item" column: the plank for deposit/redeem, else the fungible subject. */
+function activityItem(a: V3Activity): string {
+  if (a.tokenId) return `RobinWood #${a.tokenId}`;
+  if (a.kind === "buy" || a.kind === "sell") return a.shares !== undefined ? `${formatUnits(a.shares, 2)} shares` : "shares";
+  return "liquidity";
+}
+/** The "amount" column, in ETH. */
+function activityAmount(a: V3Activity): string {
+  return a.eth !== undefined ? `${formatUnits(a.eth, 4)} Ξ` : "—";
+}
 
 // Resolve real plank artwork by token id via the RobinWood metadata directory —
 // the same source the marketplace/gallery cards use — so vault cards show real
@@ -183,11 +216,21 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
     return () => stop?.();
   }, [load, active]);
 
-  // Lazy-load the activity feed the first time the tab is opened.
+  // Lazy-load the activity feed the first time the tab is opened, resolving a
+  // plank thumbnail for each deposit/redeem row.
   useEffect(() => {
     if (tab !== "activity" || activity !== null || activityLoading) return;
     setActivityLoading(true);
     getV3Activity(vaultAddress)
+      .then(async (rows) =>
+        Promise.all(
+          rows.map(async (r) =>
+            (r.kind === "deposit" || r.kind === "redeem") && r.tokenId
+              ? { ...r, image: await resolvePlankImage(r.tokenId) }
+              : r
+          )
+        )
+      )
       .then(setActivity)
       .catch(() => setActivity([]))
       .finally(() => setActivityLoading(false));
@@ -379,15 +422,56 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
             activityLoading && activity === null ? (
               <div className="flex min-h-[3.5rem] items-center rounded-lg border border-line bg-wood-950 px-3 text-[0.78rem] text-cream-muted">Loading recent activity…</div>
             ) : activity && activity.length > 0 ? (
-              <ul className="divide-y divide-line/60">
-                {activity.map((a) => (
-                  <li key={a.key} className="flex flex-wrap items-baseline gap-x-2 py-1.5 text-[0.75rem]">
-                    <span className="font-mono text-cream-muted">{a.who}</span>
-                    <span className="text-cream">{a.detail}</span>
-                    <span className="ml-auto tabular-nums text-[0.66rem] text-cream/40">#{a.block}</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="-mx-4 overflow-x-auto">
+                <table className="w-full min-w-[560px] text-left text-[0.78rem]">
+                  <thead>
+                    <tr className="border-b border-line text-[0.6rem] font-black uppercase tracking-wide text-cream-muted">
+                      <th className="px-4 py-2 font-black">Type</th>
+                      <th className="px-2 py-2 font-black">NFT</th>
+                      <th className="px-2 py-2 font-black">Amount</th>
+                      <th className="px-2 py-2 font-black">From</th>
+                      <th className="px-2 py-2 font-black">Time</th>
+                      <th className="px-4 py-2 text-right font-black">Tx</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activity.map((a) => {
+                      const m = ACTIVITY_META[a.kind];
+                      return (
+                        <tr key={a.key} className="border-b border-line/50 last:border-0">
+                          <td className="px-4 py-2">
+                            <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[0.6rem] font-black uppercase tracking-wide ${m.cls}`}>
+                              {m.dir === "up" ? <ArrowUp size={11} strokeWidth={3} /> : m.dir === "down" ? <ArrowDown size={11} strokeWidth={3} /> : <ArrowLeftRight size={11} strokeWidth={3} />}
+                              {m.label}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2">
+                            <span className="inline-flex items-center gap-1.5">
+                              {a.image && (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={a.image} alt="" className="h-6 w-6 rounded object-cover" />
+                              )}
+                              <span className="text-cream">{activityItem(a)}</span>
+                            </span>
+                          </td>
+                          <td className="px-2 py-2 tabular-nums text-cream">{activityAmount(a)}</td>
+                          <td className="px-2 py-2 font-mono text-[0.72rem] text-cream-muted">{a.who}</td>
+                          <td className="px-2 py-2 whitespace-nowrap text-[0.72rem] text-cream-muted">{relativeTime(a.ts) || `#${a.block}`}</td>
+                          <td className="px-4 py-2 text-right">
+                            {hasExplorer ? (
+                              <a href={`${CHAIN.blockExplorers.default.url}/tx/${a.tx}`} target="_blank" rel="noreferrer" className="inline-flex text-cream-muted hover:text-gold-300" aria-label="View transaction">
+                                <ExternalLink size={13} />
+                              </a>
+                            ) : (
+                              <span className="font-mono text-[0.66rem] text-cream/30">{a.tx.slice(0, 6)}…</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <div className="flex min-h-[3.5rem] items-center rounded-lg border border-line bg-wood-950 px-3 text-[0.78rem] text-cream-muted">
                 No activity yet — buys, sells, deposits and redeems show here once the vault sees trades.
