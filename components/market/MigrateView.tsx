@@ -20,8 +20,8 @@ import {
   getVaultByRole,
   shortVault,
   vaultColorKind,
-  vaultGeneration,
   vaultKindLabel,
+  vaultName,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
 import TokenPicker, { type PickerToken } from "@/components/market/TokenPicker";
@@ -118,7 +118,7 @@ export default function MigrateView() {
   // OPTIONAL: deposit a user-chosen set of wallet planks into V3. Never forced,
   // never all-or-nothing — the caller passes exactly the ids the user picked.
   const depositPlanks = (ids: string[]) =>
-    run(`Depositing ${ids.length} plank${ids.length === 1 ? "" : "s"} into ${primary?.version ?? "the current vault"}…`, async () => {
+    run(`Depositing ${ids.length} plank${ids.length === 1 ? "" : "s"} into ${primary?.name ?? "Premium Plank Liquidity"}…`, async () => {
       const isV3 = Boolean(primary && primary.feeModel === "eth");
       // V3 (ETH-fee) deposits must forward the mint fee via the V3 call layer —
       // the legacy depositForShares sends no value and reverts IncorrectFee.
@@ -160,11 +160,11 @@ export default function MigrateView() {
     const hit = Object.entries(pos.slots).find(([, s]) => s.mine);
     if (!hit) return null;
     const addr = hit[0];
-    return { address: addr, version: `V${vaultGeneration(addr)}` };
+    return { address: addr, name: vaultName(addr) };
   }, [pos.slots]);
 
   type NextAction =
-    | { kind: "finishMine"; address: string; version: string }
+    | { kind: "finishMine"; address: string; name: string }
     | { kind: "withdrawLp"; s: SourcePlan }
     | { kind: "redeem"; s: SourcePlan }
     | { kind: "dust"; s: SourcePlan }
@@ -173,7 +173,7 @@ export default function MigrateView() {
   // Ordered priority: finish a pending redeem I own → clear each source's LP →
   // redeem its planks → mop up dust. Sources are already V2→V1. NO deposit here.
   const nextAction: NextAction = useMemo(() => {
-    if (mineSlot) return { kind: "finishMine", address: mineSlot.address, version: mineSlot.version };
+    if (mineSlot) return { kind: "finishMine", address: mineSlot.address, name: mineSlot.name };
     for (const s of sources) {
       if (s.needsLpWithdraw && s.lpWithdrawCovered) return { kind: "withdrawLp", s };
       if (s.redeemableNfts > 0 && slotFreeFor(s.address)) return { kind: "redeem", s };
@@ -208,10 +208,10 @@ export default function MigrateView() {
 
   const nextLabel = (n: NextAction): string => {
     if (!n) return "All done";
-    if (n.kind === "finishMine") return `Finish your pending ${n.version} redeem`;
-    if (n.kind === "withdrawLp") return `Withdraw your ${n.s.version} liquidity`;
-    if (n.kind === "redeem") return `Redeem a plank from ${n.s.version}`;
-    return `Sell your ${n.s.version} dust for ETH`;
+    if (n.kind === "finishMine") return `Finish your pending ${n.name} redeem`;
+    if (n.kind === "withdrawLp") return `Withdraw your ${vaultName(n.s.address)} liquidity`;
+    if (n.kind === "redeem") return `Redeem a plank from ${vaultName(n.s.address)}`;
+    return `Sell your ${vaultName(n.s.address)} dust for ETH`;
   };
 
   const doNext = useCallback(async () => {
@@ -228,16 +228,16 @@ export default function MigrateView() {
   const steps = useMemo(() => {
     const out: { key: string; label: string; sub: string }[] = [];
     if (mineSlot)
-      out.push({ key: `fin-${mineSlot.address}`, label: `Finish your pending ${mineSlot.version} redeem`, sub: "the share is burned — claim the plank to free the slot" });
+      out.push({ key: `fin-${mineSlot.address}`, label: `Finish your pending ${mineSlot.name} redeem`, sub: "the share is burned — claim the plank to free the slot" });
     for (const s of sources) {
       if (s.needsLpWithdraw)
-        out.push({ key: `lp-${s.address}`, label: `Withdraw ${s.version} liquidity`, sub: `${formatShares(s.lpShareCredit, 2)} sh${s.lpEthCredit > BigInt(0) ? ` + ${formatShares(s.lpEthCredit, 4)} Ξ` : ""} back to shares` });
+        out.push({ key: `lp-${s.address}`, label: `Withdraw ${vaultName(s.address)} liquidity`, sub: `${formatShares(s.lpShareCredit, 2)} sh${s.lpEthCredit > BigInt(0) ? ` + ${formatShares(s.lpEthCredit, 4)} Ξ` : ""} back to shares` });
       for (let i = 0; i < s.redeemableNfts; i++)
-        out.push({ key: `rd-${s.address}-${i}`, label: `Redeem a plank from ${s.version}`, sub: "drand draw · relayer finishes it for you" });
+        out.push({ key: `rd-${s.address}-${i}`, label: `Redeem a plank from ${vaultName(s.address)}`, sub: "drand draw · relayer finishes it for you" });
       if (s.stuckLpShares > BigInt(0) || s.stuckLpEth > BigInt(0))
-        out.push({ key: `stuck-${s.address}`, label: `${s.version} liquidity is waiting`, sub: "the retiring pool can't cover the withdrawal yet — check back later" });
+        out.push({ key: `stuck-${s.address}`, label: `${vaultName(s.address)} liquidity is waiting`, sub: "the retiring pool can't cover the withdrawal yet — check back later" });
     }
-    for (const s of sources) if (s.hasDust) out.push({ key: `dust-${s.address}`, label: `Sell ${s.version} dust`, sub: `${formatShares(s.dustShares, 2)} sh → ETH` });
+    for (const s of sources) if (s.hasDust) out.push({ key: `dust-${s.address}`, label: `Sell ${vaultName(s.address)} dust`, sub: `${formatShares(s.dustShares, 2)} sh → ETH` });
     return out;
   }, [mineSlot, sources]);
 
@@ -251,9 +251,9 @@ export default function MigrateView() {
         </p>
         <h1 className="mt-1 font-display text-3xl text-gold-300">Get out of the retiring vaults</h1>
         <p className="mt-1 max-w-[70ch] text-sm text-cream/80">
-          V1 and V2 are winding down. This page walks you through redeeming your value out of them, one plank at
-          a time, into your own wallet — that&apos;s the migration. Putting those planks into V3 afterwards is
-          optional. You sign each step; we watch the chain in between.{" "}
+          Driftwood and WormWood are winding down. This page walks you through redeeming your value out of them,
+          one plank at a time, into your own wallet — that&apos;s the migration. Putting those planks into Premium
+          Plank Liquidity afterwards is optional. You sign each step; we watch the chain in between.{" "}
           <b className="text-cream">Same fees as always — no migration tax.</b>
         </p>
       </header>
@@ -382,17 +382,17 @@ export default function MigrateView() {
               ) : (
                 <div className="mt-3">
                   <p className="text-sm text-emerald-300">
-                    Your value is out of V1/V2 and sitting safely in your wallet as planks. 🎉
+                    Your value is out of Driftwood &amp; WormWood and sitting safely in your wallet as planks. 🎉
                   </p>
                   <p className="mt-1 text-[0.72rem] text-cream/60">
-                    That&apos;s the migration done. Putting planks into V3 is optional — do it below, or anytime on
+                    That&apos;s the migration done. Putting planks into Premium Plank Liquidity is optional — do it below, or anytime on
                     the swap page.
                   </p>
                 </div>
               )}
               {nextAction && (
                 <p className="mt-2 text-[0.66rem] text-cream/50">
-                  Migrating just means getting out of V1/V2 — you sign each step, redeems finish automatically via
+                  Migrating just means getting out of Driftwood &amp; WormWood — you sign each step, redeems finish automatically via
                   the relayer, and stopping anytime is safe (redeemed planks stay in your wallet).
                 </p>
               )}
@@ -403,11 +403,11 @@ export default function MigrateView() {
             {pos.owned.length > 0 && (
               <div className="rounded-xl border border-line bg-panel-strong p-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <h2 className="font-display text-lg text-gold-300">Optional: put planks into {primary?.version ?? "V3"}</h2>
+                  <h2 className="font-display text-lg text-gold-300">Optional: put planks into {primary?.name ?? "Premium Plank Liquidity"}</h2>
                   <span className="text-[0.66rem] text-cream-muted">{pos.owned.length} in your wallet</span>
                 </div>
                 <p className="mt-1 text-[0.72rem] text-cream/60">
-                  Depositing mints one {primary?.version ?? "V3"} share per plank (a flat ETH fee each). Pick the
+                  Depositing mints one {primary?.name ?? "Premium Plank Liquidity"} share per plank (a flat ETH fee each). Pick the
                   ones you want — the rest stay in your wallet. You can also do this on the swap page.
                 </p>
                 <div className="mt-3">
@@ -437,7 +437,7 @@ export default function MigrateView() {
                       ? "Working…"
                       : selectedForDeposit.size === 0
                         ? "Select planks to deposit"
-                        : `Deposit ${selectedForDeposit.size} into ${primary?.version ?? "V3"}`}
+                        : `Deposit ${selectedForDeposit.size} into ${primary?.name ?? "Premium Plank Liquidity"}`}
                   </button>
                   <button
                     type="button"
@@ -486,7 +486,7 @@ export default function MigrateView() {
               <h3 className="text-sm font-extrabold text-cream">The honest math</h3>
               <ul className="mt-2 space-y-1.5 text-[0.72rem] text-cream/70">
                 <li><b className="text-cream">Redeem</b> on the old vault burns <b className="text-cream">1 share</b> + a flat ETH fee and hands you the plank.</li>
-                <li><b className="text-cream">Deposit</b> into {primary?.version ?? "V3"} mints <b className="text-cream">exactly 1 share</b> for the same flat ETH fee.</li>
+                <li><b className="text-cream">Deposit</b> into {primary?.name ?? "Premium Plank Liquidity"} mints <b className="text-cream">exactly 1 share</b> for the same flat ETH fee.</li>
                 <li>Round-trip cost is a little ETH in fees — <b className="text-cream">no migration tax</b>, no share haircut.</li>
                 <li>The old pools&apos; seed ETH is non-withdrawable by design and stays behind — migrating doesn&apos;t recover it.</li>
               </ul>
@@ -567,7 +567,7 @@ function SourceCard({
         >
           {vaultKindLabel(kind)}
         </span>
-        <h3 className="text-sm font-extrabold text-cream">Your position on {s.version}</h3>
+        <h3 className="text-sm font-extrabold text-cream">Your position on {vaultName(s.address)}</h3>
         <span className="ml-auto font-mono text-[0.65rem] text-cream/45">{shortVault(s.address)}</span>
       </div>
 

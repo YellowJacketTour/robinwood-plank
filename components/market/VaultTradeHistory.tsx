@@ -132,7 +132,7 @@ export default function VaultTradeHistory() {
     <div className="space-y-1.5 rounded-xl border border-line bg-panel p-3">
       <div className="flex items-center justify-between">
         <p className="text-[0.72rem] font-black text-foreground">
-          Live V1 + V2 vault trades
+          Live Driftwood + WormWood trades
         </p>
         <span
           className={`flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[0.55rem] font-bold uppercase ${live ? "text-emerald-300/70" : connected ? "text-gold-300/70" : "text-foreground/30"}`}

@@ -47,8 +47,8 @@ export default function MigrateBanner() {
 
   const detail =
     totalShares > BigInt(0)
-      ? `Your wallet holds ${formatShares(totalShares, 2)} shares in a retiring vault`
-      : "You have a pending redeem to finish in a retiring vault";
+      ? `Your wallet holds ${formatShares(totalShares, 2)} shares in an older pool`
+      : "You have a pending redeem to finish in an older pool";
 
   return (
     <div
@@ -58,7 +58,7 @@ export default function MigrateBanner() {
     >
       <span className="h-2.5 w-2.5 flex-none rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.7)]" />
       <p className="min-w-0 flex-1 text-sm text-cream">
-        <b className="text-gold-300">The old vaults are retiring.</b> {detail} — redeem it out in a few clicks.
+        <b className="text-gold-300">Driftwood &amp; WormWood are winding down.</b> {detail} — redeem it out in a few clicks.
       </p>
       <Link
         href="/migrate"

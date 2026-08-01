@@ -172,7 +172,7 @@ type Props = {
  * can relay, settle (claimFor), or forfeit an expired unpinned request so
  * deposits/redeems cannot be bricked by abandonment.
  */
-function StuckRedeemRelay({
+export function StuckRedeemRelay({
   account,
   vaultAddress,
   active = true,
@@ -370,7 +370,7 @@ function StuckRedeemRelay({
  * requestRandomRedeem; without this panel those shares were stuck. Polls
  * pendingRequester so a claim survives refresh / new device.
  */
-function PendingRedeemClaim({
+export function PendingRedeemClaim({
   account,
   vaultAddress,
   active = true,

@@ -12,7 +12,6 @@ import {
   listVaultsForDisplay,
   shortVault,
   vaultColorKind,
-  vaultKindLabel,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
 import { getVaultOnChainSnapshot } from "@/lib/market/vault";
@@ -99,7 +98,7 @@ export default function InstantVaultSwitcher({ selected, onSelect, active = true
                 <span
                   className={`rounded border px-1.5 py-0.5 text-[0.6rem] font-extrabold uppercase tracking-wide ${VAULT_LABEL_CLASS[kind]}`}
                 >
-                  {vaultKindLabel(kind)}
+                  {v.role === "primary" ? "Current" : "Older pool"}
                 </span>
                 <p className="text-sm font-extrabold text-foreground">{v.label}</p>
                 <a

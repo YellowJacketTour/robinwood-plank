@@ -78,7 +78,7 @@ export default function SeedVaultPanel({ account, onConnect, active = true }: Pr
         </h3>
         <p className="mt-2 text-sm text-foreground/75">
           Image picker + starting ETH only appear when the{" "}
-          <strong className="text-gold-300">treasury</strong> wallet is connected (same as V1). Scroll
+          <strong className="text-gold-300">treasury</strong> wallet is connected (same as Driftwood). Scroll
           to this gold card on <strong>Instant Swap</strong>.
         </p>
       </div>
@@ -139,7 +139,7 @@ export default function SeedVaultPanel({ account, onConnect, active = true }: Pr
             <code className="break-all font-mono text-xs">{treasury}</code>
           </p>
           <p className="text-[0.8rem] text-amber-50/80">
-            In Rabby, switch to the treasury account (same one that seeded V1), then reconnect. The NFT
+            In Rabby, switch to the treasury account (same one that seeded Driftwood), then reconnect. The NFT
             image grid only unlocks for that address because <code className="font-mono">seedShares</code>{" "}
             is treasury-only on-chain.
           </p>
@@ -175,7 +175,7 @@ export default function SeedVaultPanel({ account, onConnect, active = true }: Pr
         </button>
         {MARKET_VAULT_LEGACY_ADDRESS && (
           <span className="text-[0.65rem] text-foreground/35">
-            Legacy V1 stays at {shortVault(MARKET_VAULT_LEGACY_ADDRESS)}
+            Legacy Driftwood stays at {shortVault(MARKET_VAULT_LEGACY_ADDRESS)}
           </span>
         )}
       </div>

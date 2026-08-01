@@ -30,19 +30,55 @@ export type FeeModel = "share" | "eth";
 export type VaultDescriptor = {
   role: VaultRole;
   address: string;
-  /** 1 = V1, 2 = V2, 3 = V3 (current). */
+  /** 1 = oldest, 2 = middle, 3 = current. Internal identity for logic/tests — never shown to users. */
   generation: number;
-  /** "Vn" short label. */
+  /** "Vn" — internal identity only; never rendered (we present pools by product name, not a version ladder). */
   version: string;
-  /** Share-denominated (V1/V2) vs ETH-denominated (V3+) fees. */
+  /** Share-denominated (older pools) vs ETH-denominated (current) fees. */
   feeModel: FeeModel;
-  /** Short UI label. */
+  /** Product name shown to users (Driftwood / WormWood / Premium Plank Liquidity). */
+  name: string;
+  /** Short UI label — same as `name`. */
   label: string;
   /** One-line purpose. */
   purpose: string;
   /** True when this is the historically first production vault. */
   isV1: boolean;
 };
+
+/**
+ * Product names. We deliberately present each pool as its own product rather
+ * than a V1/V2/V3 ladder — the version framing reads as "the team shipped two
+ * mistakes before this one." These names reframe them as distinct, intentional
+ * pools. Keyed by generation; keep the generation logic (address-derived) as the
+ * stable internal identity.
+ */
+export const VAULT_NAMES: Record<number, string> = {
+  1: "Driftwood",
+  2: "WormWood",
+  3: "Premium Plank Liquidity",
+};
+
+/** Compact form for badges / activity tags where the full name won't fit. */
+export const VAULT_SHORT_NAMES: Record<number, string> = {
+  1: "Driftwood",
+  2: "WormWood",
+  3: "Premium Plank",
+};
+
+function nameForGen(gen: number): string {
+  return VAULT_NAMES[gen] ?? "Plank Vault";
+}
+
+/** Product name for a vault address (Driftwood / WormWood / Premium Plank Liquidity). */
+export function vaultName(addr: string | null | undefined): string {
+  return nameForGen(vaultGeneration(addr));
+}
+
+/** Compact product name for badges/tags. */
+export function vaultShortName(addr: string | null | undefined): string {
+  return VAULT_SHORT_NAMES[vaultGeneration(addr)] ?? "Vault";
+}
 
 export function isVaultAddress(addr: string | null | undefined): addr is string {
   return Boolean(addr && /^0x[0-9a-fA-F]{40}$/.test(addr));
@@ -94,9 +130,12 @@ function genKind(gen: number): VaultColorKind {
   return "unknown";
 }
 
-/** "V1" / "V2" / "V3" / "Vault" from a colour kind. */
+/** Product name (compact) from a colour kind — for badges/tags. */
 export function vaultKindLabel(kind: VaultColorKind): string {
-  return kind === "unknown" ? "Vault" : kind.toUpperCase();
+  if (kind === "v1") return VAULT_SHORT_NAMES[1];
+  if (kind === "v2") return VAULT_SHORT_NAMES[2];
+  if (kind === "v3") return VAULT_SHORT_NAMES[3];
+  return "Vault";
 }
 
 /** Tailwind classes for vault badges/labels. V2 is demoted (it is retiring). */
@@ -117,21 +156,18 @@ export const VAULT_TEXT_CLASS: Record<VaultColorKind, string> = {
 function describe(role: VaultRole, address: string): VaultDescriptor {
   const generation = vaultGeneration(address);
   const feeModel = feeModelForVault(address);
-  const version = generation > 0 ? `V${generation}` : "Vault";
+  const version = generation > 0 ? `V${generation}` : "Vault"; // internal identity only — never rendered
   const isV1 = generation === 1;
-  let label: string;
+  const name = nameForGen(generation);
   let purpose: string;
   if (role === "primary") {
-    label = `${version} — Current vault`;
     purpose = "Deposit, redeem, Instant Swap, and provide liquidity";
   } else if (generation === 2) {
-    label = "V2 — Legacy (retiring)";
-    purpose = "Withdraw LP and redeem here, then migrate to the current vault";
+    purpose = `Withdraw liquidity and redeem here, then move to ${nameForGen(3)}`;
   } else {
-    label = `${version} — Legacy vault`;
-    purpose = "Redeem existing deposits, then migrate — do not abandon until empty";
+    purpose = "Redeem existing deposits, then move over — don't abandon until empty";
   }
-  return { role, address, generation, version, feeModel, label, purpose, isV1 };
+  return { role, address, generation, version, feeModel, name, label: name, purpose, isV1 };
 }
 
 /** All vaults the migrate UI and Instant Swap may target, primary first. */
