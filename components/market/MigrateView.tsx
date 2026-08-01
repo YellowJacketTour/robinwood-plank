@@ -33,6 +33,7 @@ import {
   removeLiquidity,
   decodeVaultError,
 } from "@/lib/market/vault";
+import { getV3Snapshot, v3Deposit } from "@/lib/market/vault-v3";
 import { useLegacyPosition, type SlotState } from "@/lib/market/useLegacyPosition";
 import { formatShares, type SourcePlan } from "@/lib/market/migration";
 
@@ -93,10 +94,17 @@ export default function MigrateView() {
 
   const depositOwned = () =>
     run(`Depositing your planks into ${primary?.version ?? "the current vault"}…`, async () => {
-      for (const p of pos.owned) {
-        // NOTE: current vault is share-fee today; when it is the ETH-fee V3,
-        // depositForShares must forward the mint fee (wired with the V3 call layer).
-        await depositForShares(address!, p.tokenId, undefined, primary?.address ?? null);
+      // V3 (ETH-fee) deposits must forward the mint fee via the V3 call layer —
+      // the legacy depositForShares sends no value and reverts IncorrectFee.
+      if (primary && primary.feeModel === "eth") {
+        const snap = await getV3Snapshot(primary.address, address!);
+        for (const p of pos.owned) {
+          await v3Deposit(address!, p.tokenId, snap, primary.address);
+        }
+      } else {
+        for (const p of pos.owned) {
+          await depositForShares(address!, p.tokenId, undefined, primary?.address ?? null);
+        }
       }
     });
 
