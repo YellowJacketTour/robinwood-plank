@@ -342,7 +342,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
             >
               <span className="h-2.5 w-2.5 flex-none rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" />
               <span className="min-w-0 flex-1 text-sm text-cream">
-                <b className="text-gold-300">You hold value in a retiring vault.</b> V1/V2 are winding down — move it to V3.
+                <b className="text-gold-300">You hold value in an older pool.</b> Driftwood &amp; WormWood are winding down — move it to Premium Plank Liquidity.
               </span>
               <span className="inline-flex min-h-[40px] flex-none items-center rounded-lg bg-gold-500 px-4 text-sm font-black text-[#261105]">Migrate now →</span>
             </Link>

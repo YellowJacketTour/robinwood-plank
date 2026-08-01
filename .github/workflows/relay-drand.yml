@@ -33,5 +33,8 @@ jobs:
           RPC_URL: https://rpc.mainnet.chain.robinhood.com
           BEACON_ADDRESS: "0x87d584df130FED0Fe540954eD48CE2691A18D619"
           DRAND_CHAIN_HASH: "04f1e9062b8a81f848fded9c12306733282b2727ecced50032187751166ec8c3"
-          VAULT_ADDRESSES: "0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04,0xb2019Fd4cA24502e812C0C73b751Fa49979BF708"
+          # Override via the RELAY_VAULT_ADDRESSES repo Variable at V3 cutover
+          # (set it to "<V3>,<V2>,<V1>"). Falls back to the current V2,V1 list so
+          # behavior is unchanged until the variable is set.
+          VAULT_ADDRESSES: ${{ vars.RELAY_VAULT_ADDRESSES || '0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04,0xb2019Fd4cA24502e812C0C73b751Fa49979BF708' }}
         run: npx tsx scripts/relay-drand.ts

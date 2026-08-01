@@ -1,7 +1,7 @@
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import AppBackdrop from "@/components/AppBackdrop";
-import MigrateView from "@/components/market/MigrateView";
+import FloorboardsView from "@/components/market/FloorboardsView";
 import ComingSoonGate from "@/components/market/ComingSoonGate";
 import { MARKET_ENABLED } from "@/lib/constants";
 import { getContent } from "@/lib/content-store";
@@ -9,21 +9,23 @@ import type { FlagsDoc } from "@/lib/content-docs";
 import { createPageMetadata } from "@/lib/seo";
 
 /**
- * Guided vault migration (V1 & V2 → the current vault). Dynamic like /market so
- * an immutable release switch never serves a stale layout, and so the admin
- * Flags override can gate it without a redeploy.
+ * "Under the floorboards" is a live application shell like /market — keep it
+ * dynamic so a release switch or the admin kill flag both take effect without a
+ * redeploy.
  */
 export const dynamic = "force-dynamic";
 
 export const metadata = createPageMetadata({
-  title: "Migrate your planks",
+  title: "Under the floorboards",
   description:
-    "Move your RobinWood planks out of Driftwood and WormWood into Premium Plank Liquidity — redeem on the older pool, deposit on the new. Same fees, no migration tax.",
-  path: "/migrate",
-  keywords: ["RobinWood vault migration", "Marketplank migrate", "plank vault upgrade"],
+    "Shop the honest floor: pull RobinWood planks out of the V1 vault below listed floor price.",
+  path: "/floorboards",
+  keywords: ["RobinWood floor", "plank arbitrage", "Marketplank V1 vault"],
 });
 
-export default async function MigratePage() {
+export default async function FloorboardsPage() {
+  // Shares the market kill switch — the floorboards are a market surface, so
+  // when the marketplace is gated off this page is too.
   const flags = (await getContent("flags").catch(() => null)) as FlagsDoc | null;
   const marketEnabled =
     flags && flags.marketEnabled !== null ? flags.marketEnabled : MARKET_ENABLED;
@@ -35,11 +37,11 @@ export default async function MigratePage() {
       <main
         id="main-content"
         tabIndex={-1}
-        className="flex-1 px-3 py-6 sm:px-5 sm:py-10"
         data-deployment={process.env.DEPLOYMENT_VERSION || "unknown"}
+        className="flex-1 px-3 pb-10 pt-0 sm:px-5 sm:py-6 lg:py-10"
       >
-        <div className={marketEnabled ? "mx-auto w-full max-w-[1220px]" : "site-shell"}>
-          {marketEnabled ? <MigrateView /> : <ComingSoonGate />}
+        <div className={marketEnabled ? "mx-auto w-full max-w-[1440px]" : "site-shell"}>
+          {marketEnabled ? <FloorboardsView /> : <ComingSoonGate />}
         </div>
       </main>
       <Footer />

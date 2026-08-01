@@ -1304,7 +1304,7 @@ export default function MarketView() {
           <MarketTabSection
             eyebrow="On-chain record"
             title="Activity"
-            description="Follow collection sales, mints, transfers, venue attribution, price history, and live V1/V2 liquidity-pool trades."
+            description="Follow collection sales, mints, transfers, venue attribution, price history, and live vault liquidity-pool trades."
           >
             <div className="space-y-3">
               <ActivityFeed
@@ -1326,7 +1326,21 @@ export default function MarketView() {
             {vaultGeneration(activeVault?.address ?? vaultAddr) >= 3 ? (
               // V3: the full self-contained V3 page (vault line, trade card,
               // context column, tabbed analytics, and its own migration nudge).
-              <V3SwapView vaultAddress={activeVault?.address ?? vaultAddr} active={tab === "swap"} />
+              <>
+                <V3SwapView vaultAddress={activeVault?.address ?? vaultAddr} active={tab === "swap"} />
+                {/* Quiet side-door to the retired V1 pool — only once V3 is the
+                    primary vault and a legacy V1 still exists (dual mode). */}
+                {dualVaultMode() && (
+                  <Link
+                    href="/floorboards"
+                    className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-[0.72rem] text-cream-muted transition hover:border-line-strong hover:text-cream"
+                  >
+                    <span aria-hidden className="text-gold-300/70">⌄</span>
+                    Hunting cheaper planks? Look under the floorboards
+                    <span aria-hidden className="ml-auto text-gold-300/70">→</span>
+                  </Link>
+                )}
+              </>
             ) : (
               <>
                 {/* Pick which vault to act on — current vault or a legacy */}

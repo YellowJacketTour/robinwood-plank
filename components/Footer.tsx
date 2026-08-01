@@ -73,6 +73,14 @@ export default function Footer() {
                   Gallery
                 </Link>
               </li>
+              <li>
+                <Link
+                  href="/floorboards"
+                  className="flex min-h-11 items-center text-sm text-foreground/75 transition-colors hover:text-gold-300"
+                >
+                  Under the floorboards
+                </Link>
+              </li>
               {SOCIALS.map((social) => (
                 <li key={social.name}>
                   <a
