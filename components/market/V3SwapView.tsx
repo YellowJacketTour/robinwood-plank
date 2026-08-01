@@ -42,6 +42,7 @@ import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import type { PickerToken } from "@/components/market/TokenPicker";
 import V3SwapPanel, { type Action } from "@/components/market/V3SwapPanel";
 import VaultPlankGrid from "@/components/market/VaultPlankGrid";
+import V3PriceChart from "@/components/market/V3PriceChart";
 
 type TabKey = "vault" | "odds" | "price" | "activity" | "liquidity";
 
@@ -437,11 +438,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
               <b className="text-cream">{snap && snap.availableCount > 0 ? (100 / snap.availableCount).toFixed(1) : "—"}%</b> chance. Rarity-tier odds populate from the rarity snapshot on mainnet.
             </p>
           )}
-          {tab === "price" && (
-            <div className="flex min-h-[3.5rem] items-center rounded-lg border border-line bg-wood-950 px-3 text-[0.75rem] text-cream-muted">
-              Share price {snap ? `${formatUnits(sharePrice, 5)} Ξ` : "…"} — price history streams in once the vault sees trade volume.
-            </div>
-          )}
+          {tab === "price" && <V3PriceChart vaultAddress={vaultAddress} currentPrice={sharePrice} />}
           {tab === "activity" && (
             activityLoading && activity === null ? (
               <div className="flex min-h-[3.5rem] items-center rounded-lg border border-line bg-wood-950 px-3 text-[0.78rem] text-cream-muted">Loading recent activity…</div>
