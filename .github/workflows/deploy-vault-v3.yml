@@ -1,0 +1,155 @@
+name: Deploy MarketplankVaultV3
+
+# Dispatch-only, heavily gated on-chain deploy + seed of MarketplankVaultV3.
+# NEVER runs on push. It is the automated, reviewed path for the one-time V3
+# deploy — green-gate the tests, then deploy+seed on the chosen Robinhood network
+# using the treasury key (secrets.DEPLOYER_PK). The key is used ONLY here; it is
+# never written to shared/.env.production, the release tarball, or Passenger
+# (same isolation as RELAYER_PRIVATE_KEY — see AGENTS.md/SECURITY.md).
+#
+# Rehearse on robinhood-testnet first. Mainnet additionally requires the typed
+# confirmation AND vars.V3_DEPLOY_ENABLED == 'true'. openPool() is ONE-WAY and is
+# only called when confirm_open is checked. The app cutover (repo Variable +
+# inmotion rebuild + relayer VAULT_ADDRESSES) is a DELIBERATE, SEPARATE step — this
+# workflow never auto-flips production; it prints the exact cutover commands.
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: "Target chain"
+        type: choice
+        options: ["robinhood-testnet", "robinhood"]
+        default: "robinhood-testnet"
+      confirmation:
+        description: "Type DEPLOY_V3_MAINNET to allow a MAINNET deploy (ignored on testnet)"
+        type: string
+        default: ""
+      treasury:
+        description: "Treasury — fee recipient + sole seeder, MUST equal the deploy key's address. IMMUTABLE. Blank on testnet defaults to the signer."
+        type: string
+        required: false
+        default: ""
+      collection:
+        description: "NFT collection (RobinWood). IMMUTABLE."
+        type: string
+        default: "0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156"
+      mint_fee_wei:
+        description: "mintFeeWei (IMMUTABLE, must be > 0; <= 0.05 ETH)"
+        type: string
+        required: true
+      redeem_fee_wei:
+        description: "redeemFeeWei (IMMUTABLE, must be > 0; <= 0.05 ETH)"
+        type: string
+        required: true
+      target_premium_wei:
+        description: "targetPremiumWei (IMMUTABLE, <= 0.1 ETH)"
+        type: string
+        required: true
+      swap_fee_bps:
+        description: "swapFeeBps (IMMUTABLE, <= 100)"
+        type: string
+        required: true
+      seed_token_ids:
+        description: "Comma/space list of NFT tokenIds the treasury owns, to deposit as the (locked) seed"
+        type: string
+        required: true
+      seed_eth_wei:
+        description: "ETH seed in wei — LOCKED FOREVER at openPool(). Keep it small."
+        type: string
+        required: true
+      confirm_open:
+        description: "Call the ONE-WAY openPool() to finalize (leave unchecked to deploy+seed+checklist only)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-vault-v3
+  cancel-in-progress: false
+
+jobs:
+  green-gate:
+    # No deploy of any kind unless the operator has armed the gate.
+    if: vars.V3_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - name: Full green gate (test:market + test:contracts, incl. V3 audit/fuzz)
+        run: npm test
+
+  deploy:
+    needs: green-gate
+    if: >-
+      vars.V3_DEPLOY_ENABLED == 'true' &&
+      (inputs.network == 'robinhood-testnet' || inputs.confirmation == 'DEPLOY_V3_MAINNET')
+    runs-on: ubuntu-latest
+    # A GitHub Environment lets you require a human reviewer before the mainnet
+    # deploy job runs — configure required reviewers on 'v3-mainnet' for a second
+    # pair of eyes. Testnet uses its own, ungated environment.
+    environment: ${{ inputs.network == 'robinhood' && 'v3-mainnet' || 'v3-testnet' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+
+      - name: Guardrails (mainnet confirmation + non-zero fees)
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.network }}" = "robinhood" ] && [ "${{ inputs.confirmation }}" != "DEPLOY_V3_MAINNET" ]; then
+            echo "::error::Mainnet deploy requires confirmation=DEPLOY_V3_MAINNET"; exit 1
+          fi
+          # Audit Low-1: zero fees nullify the redeem-slot rate limiter. Refuse.
+          if [ "${{ inputs.mint_fee_wei }}" = "0" ] || [ "${{ inputs.redeem_fee_wei }}" = "0" ]; then
+            echo "::error::mint_fee_wei and redeem_fee_wei must be > 0 (audit AUDIT-2026-08-01 Low-1)"; exit 1
+          fi
+          if [ -z "${DEPLOYER_PK:-}" ]; then
+            echo "::error::deploy key not set — add secrets.DEPLOYER_PK_TESTNET (testnet) or secrets.DEPLOYER_PK (mainnet) first"; exit 1
+          fi
+        env:
+          DEPLOYER_PK: ${{ inputs.network == 'robinhood' && secrets.DEPLOYER_PK || secrets.DEPLOYER_PK_TESTNET }}
+
+      - name: Deploy + seed (+ open if confirm_open)
+        env:
+          DEPLOYER_PK: ${{ inputs.network == 'robinhood' && secrets.DEPLOYER_PK || secrets.DEPLOYER_PK_TESTNET }}
+          ROBINHOOD_RPC_URL: ${{ vars.NEXT_PUBLIC_ROBINHOOD_RPC_URL }}
+          ROBINHOOD_TESTNET_RPC_URL: ${{ vars.ROBINHOOD_TESTNET_RPC_URL }}
+          ROBINHOOD_TESTNET_CHAIN_ID: ${{ vars.ROBINHOOD_TESTNET_CHAIN_ID }}
+          # Testnet self-provisions a mock ERC721 (mainnet collection isn't on testnet).
+          DEPLOY_MOCK_COLLECTION: ${{ inputs.network == 'robinhood-testnet' && '1' || '' }}
+          MARKET_COLLECTION_ADDRESS: ${{ inputs.collection }}
+          MARKET_DRAND_BEACON_ADDRESS: ${{ vars.DRAND_BEACON_ADDRESS }}
+          MARKET_FEE_RECIPIENT: ${{ inputs.treasury }}
+          MARKET_MINT_FEE_WEI: ${{ inputs.mint_fee_wei }}
+          MARKET_REDEEM_FEE_WEI: ${{ inputs.redeem_fee_wei }}
+          MARKET_TARGET_PREMIUM_WEI: ${{ inputs.target_premium_wei }}
+          MARKET_SWAP_FEE_BPS: ${{ inputs.swap_fee_bps }}
+          SEED_TOKEN_IDS: ${{ inputs.seed_token_ids }}
+          SEED_ETH_WEI: ${{ inputs.seed_eth_wei }}
+          CONFIRM_OPEN: ${{ inputs.confirm_open && '1' || '' }}
+        run: npx hardhat run scripts/deploy-and-seed-v3.ts --network ${{ inputs.network }}
+
+      - name: Upload deploy record
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: v3-deploy-${{ inputs.network }}-${{ github.run_id }}
+          path: deploy-out/v3.json
+          if-no-files-found: warn
+
+      - name: Cutover instructions (deliberate, separate step — NOT automated)
+        if: inputs.network == 'robinhood' && inputs.confirm_open
+        run: |
+          echo "V3 is deployed + open on MAINNET. To cut the app over (do these deliberately):"
+          echo "  1. gh variable set NEXT_PUBLIC_MARKET_VAULT_ADDRESS --body <V3 from deploy-out/v3.json>"
+          echo "  2. gh variable set NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES --body 0xb2019Fd4cA24502e812C0C73b751Fa49979BF708,0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04"
+          echo "  3. Dispatch inmotion.yml (operation=deploy) to rebuild the site with the new baked address."
+          echo "  4. Set RELAY_VAULT_ADDRESSES variable to <V3>,<V2>,<V1> so the relayer services V3."
+          echo "  5. MARKET_ENABLED stays as-is until the go-live decision (admin flag, no rebuild)."
