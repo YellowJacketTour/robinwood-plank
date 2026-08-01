@@ -84,6 +84,49 @@ async function main() {
     console.log("\n Funded PLAYER", player, "→ 100 ETH · planks 25-30 · 1.5 shares");
   }
 
+  // ── Legacy V1 + V2 vaults so /migrate has real positions to move ──────────
+  // Two instances of the audited share-fee vault (MarketplankVault). The client
+  // registry labels them V1/V2 via the *_KNOWN env vars printed below; both
+  // share the SAME collection + beacon as V3, so the dev relay can finish their
+  // random redeems too. The treasury (deployer/player) takes a redeemable share
+  // position in each, plus a V2 LP position — so the full migration flow
+  // (withdraw LP → redeem → deposit into V3) is exercisable end-to-end.
+  const Legacy = await ethers.getContractFactory("MarketplankVault");
+  const legacy = async (name: string) => {
+    const c = await Legacy.deploy(nftAddr, name, "vROBIN", 100, 100, 200, deployer.address, beaconAddr);
+    await c.waitForDeployment();
+    return c;
+  };
+  const v1 = await legacy("Marketplank RobinWood Vault V1");
+  const v2 = await legacy("Marketplank RobinWood Vault V2");
+  const v1Addr = await v1.getAddress();
+  const v2Addr = await v2.getAddress();
+
+  for (let id = 31; id <= 40; id++) await nft.mint(deployer.address, id);
+  await nft.setApprovalForAll(v1Addr, true);
+  await nft.setApprovalForAll(v2Addr, true);
+
+  // V1: 5 deposits (~4.95 sh), seed 2 sh + 0.3 ETH, open. Redeemable, no LP.
+  for (let id = 31; id <= 35; id++) await v1.deposit(id);
+  await v1.seedShares(E("2"), { value: E("0.3") });
+  await v1.openPool();
+
+  // V2: 5 deposits, seed, open, then a real LP contribution (share + ETH).
+  for (let id = 36; id <= 40; id++) await v2.deposit(id);
+  await v2.seedShares(E("2"), { value: E("0.3") });
+  await v2.openPool();
+  await v2.contributeLiquidity(E("1"), { value: E("0.15") });
+
+  // Playing from a separate injected wallet? Hand it the redeemable shares.
+  // (contributeLiquidity credit is non-transferable — it stays on the treasury.)
+  if (player && /^0x[0-9a-fA-F]{40}$/.test(player) && player.toLowerCase() !== deployer.address.toLowerCase()) {
+    await v1.transfer(player, await v1.balanceOf(deployer.address));
+    await v2.transfer(player, await v2.balanceOf(deployer.address));
+  }
+
+  const v1Bal: bigint = await v1.balanceOf(deployer.address);
+  const v2Bal: bigint = await v2.balanceOf(deployer.address);
+
   const held: bigint = await vault.heldTokenCount();
   const eth: bigint = await vault.ethReserve();
   const shares: bigint = await vault.shareReserve();
@@ -104,14 +147,18 @@ async function main() {
     ethers.formatEther(shares), "shares in pool");
   console.log(" Deployer holds:", ethers.formatEther(bal), "shares +", ethers.formatEther(lp), "LP + planks 9-12");
   console.log(" Alice (acct #1) holds planks 13-18 ·  Bob (acct #2) planks 19-24");
+  console.log("\n Legacy vaults (to migrate FROM):");
+  console.log("  V1", v1Addr, "→ you hold", ethers.formatEther(v1Bal), "shares · holds planks 31-35");
+  console.log("  V2", v2Addr, "→ you hold", ethers.formatEther(v2Bal), "shares + an LP position · holds planks 36-40");
 
   console.log("\n--- paste into .env.local, then restart `npm run dev` ---");
   console.log("NEXT_PUBLIC_MARKET_ENABLED=true");
   console.log("NEXT_PUBLIC_DEV_LOCAL_CHAIN=1");
   console.log("NEXT_PUBLIC_DEV_LOCAL_RPC=http://127.0.0.1:8545");
   console.log("NEXT_PUBLIC_MARKET_VAULT_ADDRESS=" + vaultAddr);
-  console.log("NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=");
-  console.log("NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES=");
+  console.log("NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES=" + v1Addr + "," + v2Addr);
+  console.log("NEXT_PUBLIC_MARKET_VAULT_V1_KNOWN=" + v1Addr);
+  console.log("NEXT_PUBLIC_MARKET_VAULT_V2_KNOWN=" + v2Addr);
   console.log("NEXT_PUBLIC_NFT_CONTRACT_ADDRESS=" + nftAddr);
   console.log("NEXT_PUBLIC_DRAND_BEACON_ADDRESS=" + beaconAddr);
   console.log("\n--- wallet import (test account #0, LOCAL ONLY) ---");

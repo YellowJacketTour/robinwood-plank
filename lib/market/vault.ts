@@ -546,6 +546,25 @@ export async function kickServerRandomSettle(
   vaultAddress?: string | null,
   forRequester?: string | null
 ): Promise<{ ok: boolean; status?: string; detail?: string }> {
+  // DEV-LOCAL: the production settle-random relayer uses the real drand API and
+  // the real beacon's submitRound; against the local mock beacon it can't work.
+  // Route through the dev relay instead (it injects the mock round + claims for
+  // the requester, and is generic across V1/V2/V3 — same beacon).
+  if (process.env.NEXT_PUBLIC_DEV_LOCAL_CHAIN === "1") {
+    try {
+      const res = await fetch("/api/dev-relay", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ vault: vaultAddress, requester: forRequester }),
+      });
+      if (!res.ok) return { ok: false, status: "no_key", detail: `dev-relay HTTP ${res.status}` };
+      const d = (await res.json()) as { status?: string; detail?: string };
+      if (d.status === "settled" || d.status === "idle") return { ok: true, status: d.status };
+      return { ok: false, status: d.status, detail: d.detail };
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+    }
+  }
   try {
     const qs = new URLSearchParams({ public: "1" });
     if (vaultAddress) qs.set("vault", vaultAddress);

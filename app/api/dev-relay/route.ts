@@ -23,9 +23,11 @@ const BEACON = process.env.NEXT_PUBLIC_DRAND_BEACON_ADDRESS || "";
 // Hardhat account #0 — a public, well-known key that only funds local nodes.
 const HH_KEY0 = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
+// Minimal surface shared by BOTH the legacy (V1/V2) and V3 vaults, so this one
+// relay can finish a random redeem on any of them (they share the mock beacon).
 const VAULT_ABI = [
   "function pendingRequester() view returns (address)",
-  "function redeemRequests(address) view returns (uint64 targetRound, uint64 frozenLen, bool active, bool pinned, uint256 drawnTokenId)",
+  "function pendingRound() view returns (uint64 round, bool available)",
   "function claimRandomRedeemFor(address requester) returns (uint256)",
 ];
 const BEACON_ABI = [
@@ -62,7 +64,7 @@ export async function POST(req: Request) {
       return json("idle");
     }
 
-    const [targetRound] = (await v.redeemRequests(requester)) as [bigint];
+    const [targetRound] = (await v.pendingRound()) as [bigint, boolean];
     const beacon = new Contract(BEACON, BEACON_ABI, signer);
 
     if (!(await beacon.isRoundAvailable(targetRound))) {
