@@ -113,7 +113,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
           <span className="font-mono text-[0.66rem] text-cream-muted">{snap ? shortVault(snap.address) : "…"}</span>
         </span>
         {snap && (
-          <span className="flex flex-wrap gap-x-4 gap-y-1 text-[0.72rem] text-cream-muted">
+          <span className="flex flex-wrap gap-x-4 gap-y-1 text-[0.72rem] tabular-nums text-cream-muted">
             <span className={snap.poolOpen ? "text-emerald-400" : "text-amber-400"}>● {snap.poolOpen ? "Open" : "Closed"}</span>
             <span><b className="text-gold-300">{snap.held}</b> planks</span>
             <span><b className="text-gold-300">{formatUnits(snap.ethReserve, 3)} Ξ</b> liquidity</span>
@@ -143,13 +143,14 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
             <h3 className="flex items-center gap-2 text-[0.7rem] font-black uppercase tracking-wide text-cream">
               Your position <span className="ml-auto text-[0.6rem] font-bold text-cream-muted">on V3</span>
             </h3>
-            <div className="mt-3 grid grid-cols-3 gap-2">
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
               <Stat k="Shares" v={snap ? formatUnits(snap.shareBalance, 2) : "—"} n="vROBIN" />
               <Stat k="Planks held" v={plankBal !== null ? String(plankBal) : "—"} n="in your wallet" ok />
               <Stat k="Your LP" v={snap ? formatUnits(snap.lpBalance, 2) : "—"} n={`${poolShare}% of pool`} ok />
             </div>
+            {isConnected && owned.length > 0 && <PlankStrip label="Your planks" tokens={owned} />}
             {!isConnected && (
-              <button type="button" onClick={() => void connect()} className="mt-3 min-h-[40px] w-full rounded-lg border border-line-strong bg-wood-950 text-sm font-bold text-cream">
+              <button type="button" onClick={() => void connect()} className="mt-3 min-h-[44px] w-full rounded-lg border border-line-strong bg-wood-950 text-sm font-bold text-cream">
                 Connect to see your position
               </button>
             )}
@@ -167,6 +168,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
               <Cell k="Deposit / redeem" v={snap ? `${formatUnits(snap.mintFeeWei)} Ξ` : "—"} />
               <Cell k="Swap fee" v={snap ? `${(snap.swapFeeBps / 100).toFixed(2)}%` : "—"} />
             </div>
+            {held.length > 0 && <PlankStrip label="In the vault" tokens={held} />}
           </div>
         </div>
       </div>
@@ -175,7 +177,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
       <div className="overflow-hidden rounded-xl border border-line bg-panel-strong">
         <div className="flex gap-1 border-b border-line bg-wood-950/60 p-1.5">
           {([["price", "Price"], ["odds", "Redeem odds"], ["activity", "Activity"], ["liquidity", "Liquidity"]] as [TabKey, string][]).map(([id, label]) => (
-            <button key={id} type="button" onClick={() => setTab(id)} className={`rounded-lg px-3.5 py-2 text-[0.72rem] font-black ${tab === id ? "bg-gold-500/15 text-gold-300" : "text-cream-muted hover:text-cream"}`}>{label}</button>
+            <button key={id} type="button" onClick={() => setTab(id)} aria-pressed={tab === id} className={`min-h-11 rounded-lg px-3.5 py-2 text-[0.72rem] font-black ${tab === id ? "bg-gold-500/15 text-gold-300" : "text-cream-muted hover:text-cream"}`}>{label}</button>
           ))}
         </div>
         <div className="p-4">
@@ -213,7 +215,7 @@ function Stat({ k, v, n, ok }: { k: string; v: string; n: string; ok?: boolean }
   return (
     <div className="rounded-lg border border-line bg-wood-950 px-2.5 py-2">
       <div className="text-[0.52rem] font-black uppercase tracking-wide text-cream-muted">{k}</div>
-      <div className={`font-mono text-lg font-black ${ok ? "text-emerald-400" : "text-gold-300"}`}>{v}</div>
+      <div className={`font-mono text-lg font-black tabular-nums ${ok ? "text-emerald-400" : "text-gold-300"}`}>{v}</div>
       <div className="text-[0.52rem] text-cream/50">{n}</div>
     </div>
   );
@@ -223,7 +225,44 @@ function Cell({ k, v }: { k: string; v: string }) {
   return (
     <div className="rounded-lg border border-line bg-wood-950 px-2.5 py-2">
       <div className="text-[0.5rem] font-black uppercase tracking-wide text-cream-muted">{k}</div>
-      <div className="mt-0.5 font-mono text-sm font-black text-cream">{v}</div>
+      <div className="mt-0.5 font-mono text-sm font-black tabular-nums text-cream">{v}</div>
+    </div>
+  );
+}
+
+/**
+ * A compact strip of plank artwork — the mockup's stated differentiator for the
+ * context column. Shows the real NFT image when resolvable; falls back to the
+ * token id on a fresh local vault whose mock art has no tokenURI.
+ */
+function PlankStrip({ label, tokens }: { label: string; tokens: PickerToken[] }) {
+  const MAX = 8;
+  const shown = tokens.slice(0, MAX);
+  const extra = tokens.length - shown.length;
+  return (
+    <div className="mt-3">
+      <div className="mb-1.5 text-[0.5rem] font-black uppercase tracking-wide text-cream-muted">{label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {shown.map((t) => (
+          <span
+            key={t.tokenId}
+            title={`Plank #${t.tokenId}`}
+            className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-md border border-line bg-wood-900 text-[0.55rem] font-black tabular-nums text-cream/50"
+          >
+            {t.imageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={t.imageUrl} alt={`Plank #${t.tokenId}`} className="h-full w-full object-cover" />
+            ) : (
+              <>#{t.tokenId}</>
+            )}
+          </span>
+        ))}
+        {extra > 0 && (
+          <span className="flex h-9 min-w-9 items-center justify-center rounded-md border border-line bg-wood-900 px-1.5 text-[0.55rem] font-black tabular-nums text-cream-muted">
+            +{extra}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
