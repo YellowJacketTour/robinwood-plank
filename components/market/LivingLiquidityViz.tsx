@@ -10,6 +10,7 @@ import { useVaultBook } from "@/lib/market/useVaultBook";
 import {
   shortVault,
   vaultColorKind,
+  vaultKindLabel,
   VAULT_LABEL_CLASS,
   VAULT_TEXT_CLASS,
 } from "@/lib/market/vault-registry";
@@ -114,7 +115,7 @@ export default function LivingLiquidityViz({ vaultAddress = null, active = true 
   const vaultFeeEth = stats ? formatTokenAmount(stats.vaultFeeRevenueWei, 18, 4) : "0";
   const marketFeeEth = stats ? formatTokenAmount(stats.marketplaceFeeRevenueEstWei, 18, 4) : "0";
 
-  const vaultTag = colorKind === "v1" ? "V1" : colorKind === "v2" ? "V2" : null;
+  const vaultTag = colorKind === "unknown" ? null : vaultKindLabel(colorKind);
 
   return (
     <div className="overflow-hidden rounded-xl border border-line bg-panel">

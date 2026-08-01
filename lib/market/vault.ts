@@ -1,6 +1,6 @@
 import { BrowserProvider, Contract, Interface, JsonRpcProvider, parseEther } from "ethers";
 import vaultAbi from "@/lib/market/vault-abi.json";
-import { CHAIN, MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } from "@/lib/constants";
+import { CHAIN, MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES, READ_RPC_URL } from "@/lib/constants";
 import {
   collectionVaultAddresses,
   MARKET_COLLECTIONS,
@@ -13,6 +13,7 @@ import {
 } from "@/lib/wallet";
 import { relayDrandRound } from "@/lib/market/drand";
 import { clearPendingVaultTx } from "@/lib/market/pendingVaultTx";
+import { vaultGeneration } from "@/lib/market/vault-registry";
 
 /**
  * Thin wrapper around contracts/MarketplankVault.sol — UNAUDITED, not
@@ -75,6 +76,18 @@ function collectionAddress(): string {
   return c.contractAddress;
 }
 
+/** Resolve READ_RPC_URL to an absolute URL. A relative same-origin proxy path
+ *  ("/api/rpc") is resolved against the browser origin — these reads run client
+ *  side. Both the public Robinhood RPC and the local dev node block direct
+ *  browser reads via CORS; the proxy does the request server-side. */
+function readUrl(): string {
+  if (READ_RPC_URL.startsWith("/")) {
+    const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+    return origin + READ_RPC_URL;
+  }
+  return READ_RPC_URL;
+}
+
 /** Read-only contract handle (never used to send). */
 async function getVaultReader(vaultAddress?: string | null): Promise<Contract> {
   const address = requireVaultAddress(vaultAddress);
@@ -101,7 +114,7 @@ function getPublicVaultReader(vaultAddress?: string | null): Contract {
   const key = address.toLowerCase();
   const hit = publicVaultReaderCache.get(key);
   if (hit) return hit;
-  const provider = new JsonRpcProvider(CHAIN.rpcUrls.default, { chainId: CHAIN.id, name: CHAIN.name });
+  const provider = new JsonRpcProvider(readUrl(), { chainId: CHAIN.id, name: CHAIN.name });
   const c = new Contract(address, vaultAbi, provider);
   publicVaultReaderCache.set(key, c);
   return c;
@@ -470,7 +483,15 @@ export async function finishRandomRedeem(
   let available = false;
 
   while (Date.now() - started < timeoutMs) {
-    const who = (await getPendingRequester(vaultAddress)).toLowerCase();
+    // A transient read failure here must NOT abort the flow — the share is
+    // already burned on-chain. Skip this tick and retry rather than throwing.
+    let who: string | null = null;
+    try {
+      who = (await getPendingRequester(vaultAddress)).toLowerCase();
+    } catch {
+      await sleep(1_500);
+      continue;
+    }
     if (who === zero) {
       throw new Error(
         "No pending random redeem for your wallet — request may have already settled or failed."
@@ -481,9 +502,14 @@ export async function finishRandomRedeem(
         "Another wallet holds the vault redeem slot right now. Wait for them to finish, or use Settle for them if available."
       );
     }
-    const pend = await getPendingRound(vaultAddress);
-    round = pend.round;
-    available = pend.available;
+    try {
+      const pend = await getPendingRound(vaultAddress);
+      round = pend.round;
+      available = pend.available;
+    } catch {
+      await sleep(1_500);
+      continue;
+    }
     if (round > BigInt(0)) break;
     await sleep(1_500);
   }
@@ -545,6 +571,25 @@ export async function kickServerRandomSettle(
   vaultAddress?: string | null,
   forRequester?: string | null
 ): Promise<{ ok: boolean; status?: string; detail?: string }> {
+  // DEV-LOCAL: the production settle-random relayer uses the real drand API and
+  // the real beacon's submitRound; against the local mock beacon it can't work.
+  // Route through the dev relay instead (it injects the mock round + claims for
+  // the requester, and is generic across V1/V2/V3 — same beacon).
+  if (process.env.NEXT_PUBLIC_DEV_LOCAL_CHAIN === "1") {
+    try {
+      const res = await fetch("/api/dev-relay", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ vault: vaultAddress, requester: forRequester }),
+      });
+      if (!res.ok) return { ok: false, status: "no_key", detail: `dev-relay HTTP ${res.status}` };
+      const d = (await res.json()) as { status?: string; detail?: string };
+      if (d.status === "settled" || d.status === "idle") return { ok: true, status: d.status };
+      return { ok: false, status: d.status, detail: d.detail };
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+    }
+  }
   try {
     const qs = new URLSearchParams({ public: "1" });
     if (vaultAddress) qs.set("vault", vaultAddress);
@@ -603,13 +648,18 @@ export async function requestAndFinishRandomRedeem(
   while (Date.now() - started < timeoutMs) {
     const kick = await kickServerRandomSettle(vaultAddress, accountAddress);
     if (kick.ok && (kick.status === "settled" || kick.status === "forfeited" || kick.status === "idle")) {
-      // Confirm slot is free for us
-      const who = (await getPendingRequester(vaultAddress)).toLowerCase();
-      const me = accountAddress.toLowerCase();
-      const zero = "0x0000000000000000000000000000000000000000";
-      if (who === zero || who !== me) {
-        opts?.onProgress?.("Redeem complete — NFT delivered, slot free.");
-        return requestHash;
+      // Confirm slot is free for us — a transient read here shouldn't abort a
+      // flow whose request already committed; just re-poll next tick.
+      try {
+        const who = (await getPendingRequester(vaultAddress)).toLowerCase();
+        const me = accountAddress.toLowerCase();
+        const zero = "0x0000000000000000000000000000000000000000";
+        if (who === zero || who !== me) {
+          opts?.onProgress?.("Redeem complete — NFT delivered, slot free.");
+          return requestHash;
+        }
+      } catch {
+        /* transient — retry */
       }
     }
     if (kick.status === "no_key") break; // fall through to user gas
@@ -789,7 +839,7 @@ export async function getVaultOnChainSnapshot(
 }
 
 async function getVaultBytecodeAt(addr: string): Promise<string> {
-  const res = await fetch(CHAIN.rpcUrls.default, {
+  const res = await fetch(readUrl(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -804,19 +854,7 @@ async function getVaultBytecodeAt(addr: string): Promise<string> {
 }
 
 async function getVaultBytecode(): Promise<string> {
-  const addr = requireVaultAddress();
-  const res = await fetch(CHAIN.rpcUrls.default, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "eth_getCode",
-      params: [addr, "latest"],
-    }),
-  });
-  const json = (await res.json()) as { result?: string };
-  return (json.result || "").toLowerCase();
+  return getVaultBytecodeAt(requireVaultAddress());
 }
 
 /** True if the deployed vault bytecode includes contributeLiquidity(uint256). */
@@ -824,7 +862,7 @@ export async function vaultSupportsContributeLiquidity(
   vaultAddress?: string | null
 ): Promise<boolean> {
   try {
-    // selector contributeLiquidity(uint256) = 0xc1244a5c
+    // selector contributeLiquidity(uint256) = 0xc1244a5c (V2's absolute-credit LP)
     const code = vaultAddress
       ? await getVaultBytecodeAt(requireVaultAddress(vaultAddress))
       : await getVaultBytecode();
@@ -834,12 +872,12 @@ export async function vaultSupportsContributeLiquidity(
   }
 }
 
-/** True if removeLiquidity(uint256,uint256) is present (tracked LP withdraw). */
+/** True if removeLiquidity(uint256,uint256) is present (V2's tracked LP withdraw). */
 export async function vaultSupportsRemoveLiquidity(
   vaultAddress?: string | null
 ): Promise<boolean> {
   try {
-    // selector removeLiquidity(uint256,uint256) = 0x9d7de6b3
+    // selector removeLiquidity(uint256,uint256) = 0x9d7de6b3 (V2 signature)
     const code = vaultAddress
       ? await getVaultBytecodeAt(requireVaultAddress(vaultAddress))
       : await getVaultBytecode();
@@ -884,15 +922,25 @@ export type VaultCapabilities = {
   shareTransferLp: boolean;
 };
 
-export async function getVaultCapabilities(): Promise<VaultCapabilities> {
+export async function getVaultCapabilities(
+  vaultAddress?: string | null
+): Promise<VaultCapabilities> {
+  // V3+ (current generation) has proportional LP via addLiquidity /
+  // removeLiquidity(uint256,uint256,uint256) — DIFFERENT selectors than V1/V2,
+  // so read the generation instead of grepping for the old selectors (which
+  // would falsely report a brand-new V3 as having no LP). The precise V3 LP
+  // call wiring lives in the trade/LP UI.
+  if (vaultGeneration(vaultAddress ?? MARKET_VAULT_ADDRESS) >= 3) {
+    return { contributeLiquidity: true, removeLiquidity: true, shareTransferLp: false };
+  }
   const [contributeLiquidity, removeLiquidity] = await Promise.all([
-    vaultSupportsContributeLiquidity(),
-    vaultSupportsRemoveLiquidity(),
+    vaultSupportsContributeLiquidity(vaultAddress),
+    vaultSupportsRemoveLiquidity(vaultAddress),
   ]);
   return {
     contributeLiquidity,
     removeLiquidity,
-    // Any ERC-20 vault can receive shares; live vault uses this for ask-side depth.
+    // Any ERC-20 vault can receive shares; live V1/V2 uses this for ask-side depth.
     shareTransferLp: true,
   };
 }

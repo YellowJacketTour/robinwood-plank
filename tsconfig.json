@@ -36,6 +36,10 @@
     "test",
     "hardhat.config.ts",
     "typechain-types",
-    "scripts/deploy-vault.ts"
+    "scripts/deploy-vault.ts",
+    "scripts/deploy-vault-v3.ts",
+    "scripts/local-v3-setup.ts",
+    "scripts/local-topup.ts",
+    "scripts/deploy-and-seed-v3.ts"
   ]
 }

@@ -14,10 +14,12 @@ import {
   MarketWalletGate,
 } from "@/components/market/MarketScaffold";
 import ListingGrid from "@/components/market/ListingGrid";
+import Link from "next/link";
 import {
   dualVaultMode,
+  getVaultByAddress,
   getVaultByRole,
-  type VaultRole,
+  vaultGeneration,
 } from "@/lib/market/vault-registry";
 import VaultTradeHistory from "@/components/market/VaultTradeHistory";
 import LivingLiquidityViz from "@/components/market/LivingLiquidityViz";
@@ -43,7 +45,7 @@ import { MARKET_TABS } from "@/lib/market/navigation";
 import type { SweepPlan } from "@/lib/market/sweep";
 import { ensureRobinhoodChain } from "@/lib/wallet";
 import { useWallet } from "@/lib/wallet-context";
-import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
+import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { formatTokenAmount } from "@/lib/trade";
 import type { Listing, MarketTab, Offer } from "@/lib/market/types";
 import dynamic from "next/dynamic";
@@ -82,14 +84,14 @@ const SwapPanel = dynamic(() => import("@/components/market/SwapPanel"), {
   ssr: false,
   loading: panelLoading,
 });
+const V3SwapView = dynamic(() => import("@/components/market/V3SwapView"), {
+  ssr: false,
+  loading: panelLoading,
+});
 const InstantVaultSwitcher = dynamic(
   () => import("@/components/market/InstantVaultSwitcher"),
   { ssr: false, loading: () => <PanelSkeleton className="min-h-16" /> }
 );
-const VaultMigrate = dynamic(() => import("@/components/market/VaultMigrate"), {
-  ssr: false,
-  loading: panelLoading,
-});
 const SeedVaultPanel = dynamic(() => import("@/components/market/SeedVaultPanel"), {
   ssr: false,
 });
@@ -213,8 +215,8 @@ function sortListings<T extends Listing>(items: T[], key: SortKey): T[] {
 export default function MarketView() {
   const [tab, setTab] = useState<MarketTab>("buy-sell");
   /** Instant Swap vault book: primary = V2, legacy = V1 deposits. */
-  const [vaultRole, setVaultRole] = useState<VaultRole>("primary");
-  const activeVault = getVaultByRole(vaultRole) ?? getVaultByRole("primary");
+  const [vaultAddr, setVaultAddr] = useState<string | null>(MARKET_VAULT_ADDRESS);
+  const activeVault = getVaultByAddress(vaultAddr) ?? getVaultByRole("primary");
   // Each tab mounts the first time it's actually opened, then stays mounted
   // (hidden, not removed) for the rest of the visit — switching back to an
   // already-opened tab is then instant with no re-fetch. Mounting every tab
@@ -1302,7 +1304,7 @@ export default function MarketView() {
           <MarketTabSection
             eyebrow="On-chain record"
             title="Activity"
-            description="Follow collection sales, mints, transfers, venue attribution, price history, and live V1/V2 liquidity-pool trades."
+            description="Follow collection sales, mints, transfers, venue attribution, price history, and live vault liquidity-pool trades."
           >
             <div className="space-y-3">
               <ActivityFeed
@@ -1321,60 +1323,86 @@ export default function MarketView() {
             description="Buy or sell vault shares instantly, provide liquidity, deposit a Plank, or redeem shares for an NFT."
           >
             <div className="space-y-3">
-            {/* Dual vault: pick V1 (legacy deposits) or V2 (new book / LP) first */}
-            <InstantVaultSwitcher role={vaultRole} onChange={setVaultRole} active={tab === "swap"} />
-            <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-              <SwapPanel
-                account={account}
-                onConnect={handleConnect}
-                active={tab === "swap"}
-                collection={COLLECTION}
-                vaultAddress={activeVault?.address ?? COLLECTION.vaultAddress ?? null}
-                vaultLabel={
-                  vaultRole === "legacy"
-                    ? "legacy deposits"
-                    : activeVault?.isV1
-                      ? "primary vault"
-                      : "new Instant Swap"
-                }
-              />
-              <div className="space-y-3">
-                <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
-                <VaultDashboard vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
-              </div>
-            </div>
-            <div className="grid items-start gap-3 md:grid-cols-2">
-              <NftPriceChart active={tab === "swap"} />
-              <RedeemOdds vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
-            </div>
-            {/* Trades stay dual-vault (V1 + V2) regardless of selection */}
-            <VaultTradeHistory />
-            {dualVaultMode() && (
-              <MarketDisclosure
-                eyebrow="Migration"
-                title="Move V1 value to V2"
-                description="Optional migration, fee details, dust recovery, redeem, and re-deposit steps."
-              >
-                <VaultMigrate account={account} onConnect={handleConnect} embedded active={tab === "swap"} />
-              </MarketDisclosure>
+            {vaultGeneration(activeVault?.address ?? vaultAddr) >= 3 ? (
+              // V3: the full self-contained V3 page (vault line, trade card,
+              // context column, tabbed analytics, and its own migration nudge).
+              <>
+                <V3SwapView vaultAddress={activeVault?.address ?? vaultAddr} active={tab === "swap"} />
+                {/* Quiet side-door to the retired V1 pool — only once V3 is the
+                    primary vault and a legacy V1 still exists (dual mode). */}
+                {dualVaultMode() && (
+                  <Link
+                    href="/floorboards"
+                    className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-[0.72rem] text-cream-muted transition hover:border-line-strong hover:text-cream"
+                  >
+                    <span aria-hidden className="text-gold-300/70">⌄</span>
+                    Hunting cheaper planks? Look under the floorboards
+                    <span aria-hidden className="ml-auto text-gold-300/70">→</span>
+                  </Link>
+                )}
+              </>
+            ) : (
+              <>
+                {/* Pick which vault to act on — current vault or a legacy */}
+                <InstantVaultSwitcher
+                  selected={activeVault?.address ?? vaultAddr}
+                  onSelect={setVaultAddr}
+                  active={tab === "swap"}
+                />
+                <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                  <SwapPanel
+                    account={account}
+                    onConnect={handleConnect}
+                    active={tab === "swap"}
+                    collection={COLLECTION}
+                    vaultAddress={activeVault?.address ?? COLLECTION.vaultAddress ?? null}
+                    vaultLabel={
+                      activeVault?.role === "legacy"
+                        ? "legacy deposits"
+                        : "current vault"
+                    }
+                  />
+                  <div className="space-y-3">
+                    <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
+                    <VaultDashboard vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
+                  </div>
+                </div>
+                <div className="grid items-start gap-3 md:grid-cols-2">
+                  <NftPriceChart active={tab === "swap"} />
+                  <RedeemOdds vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
+                </div>
+                <VaultTradeHistory />
+                {dualVaultMode() && (
+                  <Link
+                    href="/migrate"
+                    className="flex flex-wrap items-center gap-3 rounded-xl border border-line-strong bg-gradient-to-r from-gold-500/12 to-transparent px-4 py-3.5 transition hover:border-gold-500/60"
+                  >
+                    <span className="h-2.5 w-2.5 flex-none rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-extrabold text-cream">Have planks in a retiring vault? Migrate them.</span>
+                      <span className="block text-[0.72rem] text-cream/60">A guided page redeems on the old vault and deposits on the new — same fees, no migration tax.</span>
+                    </span>
+                    <span className="inline-flex min-h-[44px] flex-none items-center rounded-lg bg-gold-500 px-4 text-sm font-black text-[#261105]">Open /migrate →</span>
+                  </Link>
+                )}
+                {activeVault?.role === "primary" && (
+                  <MarketDisclosure
+                    eyebrow="Operator controls"
+                    title="Seed and bootstrap the current vault"
+                    description="Treasury-only setup and liquidity controls for the primary vault."
+                  >
+                    <SeedVaultPanel account={account} onConnect={handleConnect} active={tab === "swap"} />
+                  </MarketDisclosure>
+                )}
+                <MarketDisclosure
+                  eyebrow="Protocol accounting"
+                  title="Treasury and fee dashboard"
+                  description="Live fee balances, collection flows, and treasury status."
+                >
+                  <TreasuryDashboard />
+                </MarketDisclosure>
+              </>
             )}
-            {/* Seed/bootstrap only on primary (V2) — never seed into legacy V1 */}
-            {vaultRole === "primary" && (
-              <MarketDisclosure
-                eyebrow="Operator controls"
-                title="Seed and bootstrap the V2 vault"
-                description="Treasury-only setup and liquidity controls for the primary vault."
-              >
-                <SeedVaultPanel account={account} onConnect={handleConnect} active={tab === "swap"} />
-              </MarketDisclosure>
-            )}
-            <MarketDisclosure
-              eyebrow="Protocol accounting"
-              title="Treasury and fee dashboard"
-              description="Live fee balances, collection flows, and treasury status."
-            >
-              <TreasuryDashboard />
-            </MarketDisclosure>
             </div>
           </MarketTabSection>
           )}

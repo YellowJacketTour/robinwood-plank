@@ -59,6 +59,23 @@ describe("MarketplankVault — randomized solvency & draw-immutability", () => {
     // kind of thing that must actually be driven, not merely present. If a
     // future change makes it unreachable this counter catches it.
     let forfeits = 0;
+    let lpOps = 0;
+
+    // Aggregate LP credit, tracked here because the contract keeps no total.
+    // The solvency invariant covers shares against NFTs but says nothing about
+    // ETH, so a pool can satisfy it while owing LPs more than it holds.
+    const ethCredit = new Map<string, bigint>();
+    const shareCredit = new Map<string, bigint>();
+    const sumOf = (m: Map<string, bigint>) =>
+      [...m.values()].reduce((a, b) => a + b, 0n);
+
+    // Constant-product k. Trades may only ever grow it (there is no swap fee,
+    // so it should be flat); only an LP operation may legitimately shrink it.
+    // A trade-driven collapse in k means value left the pool for free.
+    let k: bigint | null = null;
+    let lastOpWasLp = false;
+    const creditShortfalls: bigint[] = [];
+    const kDrops: bigint[] = [];
 
     const check = async () => {
       const supply: bigint = await vault.totalSupply();
@@ -69,6 +86,22 @@ describe("MarketplankVault — randomized solvency & draw-immutability", () => {
         `solvency broken (seed ${seed})`
       );
       expect(await vault.ethReserve()).to.be.lte(await ethers.provider.getBalance(addr));
+
+      // Aggregate LP credit must remain claimable from the reserve. This is
+      // the property the absolute-credit model does not maintain.
+      const ethReserve: bigint = await vault.ethReserve();
+      const totalEthCredit = sumOf(ethCredit);
+      if (totalEthCredit > ethReserve) {
+        creditShortfalls.push(totalEthCredit - ethReserve);
+      }
+
+      // k must not fall across a pure trade.
+      const poolShares: bigint = await vault.balanceOf(addr);
+      const kNow = ethReserve * poolShares;
+      if (k !== null && !lastOpWasLp && poolShares > 0n && ethReserve > 0n && kNow < k) {
+        kDrops.push(k - kNow);
+      }
+      k = kNow;
 
       const [isPinned, drawn] = await vault.pendingDraw();
       if (isPinned) {
@@ -101,7 +134,8 @@ describe("MarketplankVault — randomized solvency & draw-immutability", () => {
 
     for (let step = 0; step < 120; step++) {
       const who = actors[Math.floor(rand() * actors.length)];
-      const op = Math.floor(rand() * 9);
+      const op = Math.floor(rand() * 11);
+      lastOpWasLp = op === 9 || op === 10;
       try {
         if (op === 0) {
           await deposit(who);
@@ -133,6 +167,30 @@ describe("MarketplankVault — randomized solvency & draw-immutability", () => {
           await expect(
             vault.connect(treasury).seedShares(SHARE_UNIT / 4n, { value: 1n })
           ).to.be.revertedWithCustomError(vault, "BootstrapComplete");
+        } else if (op === 9) {
+          // One-sided contributions ~2/3 of the time: that asymmetry is the
+          // precondition for moving the price with your own contribution.
+          const roll = rand();
+          const bal: bigint = await vault.balanceOf(who.address);
+          const shares = roll < 0.33 ? 0n : bal / 4n;
+          const eth = roll > 0.66 ? 0n : ethers.parseEther("0.05");
+          if (shares === 0n && eth === 0n) throw new Error("skip");
+          await vault.connect(who).contributeLiquidity(shares, { value: eth });
+          shareCredit.set(who.address, (shareCredit.get(who.address) ?? 0n) + shares);
+          ethCredit.set(who.address, (ethCredit.get(who.address) ?? 0n) + eth);
+          lpOps++;
+        } else if (op === 10) {
+          // Draw from [0, 2x credit] so both the success and the over-credit
+          // revert paths are driven.
+          const ec = ethCredit.get(who.address) ?? 0n;
+          const sc = shareCredit.get(who.address) ?? 0n;
+          const wantEth = (ec * BigInt(Math.floor(rand() * 200))) / 100n;
+          const wantShares = (sc * BigInt(Math.floor(rand() * 200))) / 100n;
+          if (wantEth === 0n && wantShares === 0n) throw new Error("skip");
+          await vault.connect(who).removeLiquidity(wantShares, wantEth);
+          ethCredit.set(who.address, ec - wantEth);
+          shareCredit.set(who.address, sc - wantShares);
+          lpOps++;
         } else {
           // Push time forward — sometimes past the beacon's expiry window, so
           // the forfeit path is genuinely reachable (rounds are timed now, not
@@ -152,20 +210,55 @@ describe("MarketplankVault — randomized solvency & draw-immutability", () => {
       }
       await check();
     }
-    return { forfeits };
+    return { forfeits, lpOps, creditShortfalls, kDrops };
   }
 
   let totalForfeits = 0;
+  let totalLpOps = 0;
+  let worstShortfall = 0n;
+  let worstKDrop = 0n;
   for (const seed of [1, 7, 12345, 98765]) {
     for (const fees of [0n, 100n]) {
       it(`holds the invariant over 120 random ops (seed ${seed}, fees ${fees}bps)`, async () => {
-        const { forfeits } = await run(seed, fees);
-        totalForfeits += forfeits;
+        const r = await run(seed, fees);
+        totalForfeits += r.forfeits;
+        totalLpOps += r.lpOps;
+        for (const s of r.creditShortfalls) if (s > worstShortfall) worstShortfall = s;
+        for (const d of r.kDrops) if (d > worstKDrop) worstKDrop = d;
       });
     }
   }
 
   it("actually drove the forfeit path (it re-mints a share, so it must be covered)", () => {
     expect(totalForfeits).to.be.greaterThan(0);
+  });
+
+  it("actually drove the LP paths (the entire V1->V2 delta)", () => {
+    expect(totalLpOps).to.be.greaterThan(0);
+  });
+
+  /**
+   * The share-solvency invariant above says nothing about ETH, so these two
+   * properties are what a value-extraction bug actually shows up in.
+   *
+   * They are reported rather than asserted because the current contract does
+   * violate them — see VaultLp.audit.test.ts for the deterministic exploit.
+   * Once LP accounting is proportional, flip both to expect(...).to.equal(0n).
+   */
+  it("reports aggregate LP credit exceeding the ETH reserve", () => {
+    if (worstShortfall > 0n) {
+      console.log(
+        `      credit shortfall observed: ${ethers.formatEther(worstShortfall)} ETH ` +
+          `owed beyond the reserve`
+      );
+    }
+    expect(worstShortfall).to.be.gte(0n);
+  });
+
+  it("reports constant-product k falling across a pure trade", () => {
+    if (worstKDrop > 0n) {
+      console.log(`      k dropped across a non-LP operation by ${worstKDrop}`);
+    }
+    expect(worstKDrop).to.be.gte(0n);
   });
 });

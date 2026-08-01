@@ -1,4 +1,8 @@
+// DEV override (local V3 harness): scripts/local-v3-setup.ts deploys a mock
+// collection; NEXT_PUBLIC_NFT_CONTRACT_ADDRESS points the app at it. Unset in
+// production, where the real RobinWood address below stands.
 export const NFT_CONTRACT_ADDRESS =
+  process.env.NEXT_PUBLIC_NFT_CONTRACT_ADDRESS ||
   "0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156";
 
 export const ROBINHOOD_CHAIN_ID = 4663;
