@@ -78,6 +78,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
+      - run: npm install -g npm@11.6.2
       - run: npm ci
       - name: Full green gate (test:market + test:contracts, incl. V3 audit/fuzz)
         run: npm test
@@ -98,6 +99,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
+      - run: npm install -g npm@11.6.2
       - run: npm ci
 
       - name: Guardrails (mainnet confirmation + non-zero fees)
