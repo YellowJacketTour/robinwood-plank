@@ -107,18 +107,39 @@ export default function VaultDashboard({ vaultAddress = null, active = true }: P
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-center">
-        <div className="rounded-lg border border-line bg-wood-950 px-2 py-1.5">
-          <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Mint fee</p>
-          <p className="text-xs font-bold text-foreground">{(stats.mintFeeBps / 100).toFixed(2)}%</p>
-        </div>
-        <div className="rounded-lg border border-line bg-wood-950 px-2 py-1.5">
-          <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Redeem fee</p>
-          <p className="text-xs font-bold text-foreground">{(stats.redeemFeeBps / 100).toFixed(2)}%</p>
-        </div>
-        <div className="rounded-lg border border-line bg-wood-950 px-2 py-1.5">
-          <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Redeem premium</p>
-          <p className="text-xs font-bold text-foreground">{(stats.targetPremiumBps / 100).toFixed(2)}%</p>
-        </div>
+        {stats.feeModel === "share" ? (
+          <>
+            <div className="rounded-lg border border-line bg-wood-950 px-2 py-1.5">
+              <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Mint fee</p>
+              <p className="text-xs font-bold text-foreground">{((stats.mintFeeBps ?? 0) / 100).toFixed(2)}%</p>
+            </div>
+            <div className="rounded-lg border border-line bg-wood-950 px-2 py-1.5">
+              <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Redeem fee</p>
+              <p className="text-xs font-bold text-foreground">{((stats.redeemFeeBps ?? 0) / 100).toFixed(2)}%</p>
+            </div>
+            <div className="rounded-lg border border-line bg-wood-950 px-2 py-1.5">
+              <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Redeem premium</p>
+              <p className="text-xs font-bold text-foreground">{((stats.targetPremiumBps ?? 0) / 100).toFixed(2)}%</p>
+            </div>
+          </>
+        ) : (
+          // Eth-model (V3+): fees are flat ETH, not a percentage of share
+          // value — printing a bps figure here would be a fabricated number.
+          <>
+            <div className="rounded-lg border border-line bg-wood-950 px-2 py-1.5">
+              <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Mint fee</p>
+              <p className="text-xs font-bold text-foreground">{ethAndUsd(stats.mintFeeWei ?? "0", 5)}</p>
+            </div>
+            <div className="rounded-lg border border-line bg-wood-950 px-2 py-1.5">
+              <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Redeem fee</p>
+              <p className="text-xs font-bold text-foreground">{ethAndUsd(stats.redeemFeeWei ?? "0", 5)}</p>
+            </div>
+            <div className="rounded-lg border border-line bg-wood-950 px-2 py-1.5">
+              <p className="text-[0.55rem] font-black uppercase tracking-[0.06em] text-[#9e9279]">Redeem premium</p>
+              <p className="text-xs font-bold text-foreground">{ethAndUsd(stats.targetPremiumWei ?? "0", 5)}</p>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
