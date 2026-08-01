@@ -20,16 +20,20 @@ import {
   v3ClaimRandomRedeem,
   v3ClaimRandomRedeemFor,
   v3ForfeitExpiredRedeem,
+  getV3Activity,
   decodeV3Error,
   formatUnits,
   SHARE_UNIT,
   type V3Snapshot,
   type V3Pending,
+  type V3Activity,
 } from "@/lib/market/vault-v3";
 import { useLegacyPosition } from "@/lib/market/useLegacyPosition";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
 import { getOwnedTokenIds, getOwnedInventory } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
+import { robinwoodTokenUri } from "@/lib/market/token-image";
+import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import type { PickerToken } from "@/components/market/TokenPicker";
 import V3SwapPanel, { type Action } from "@/components/market/V3SwapPanel";
@@ -39,6 +43,38 @@ type TabKey = "price" | "odds" | "activity" | "liquidity";
 
 const toPicker = (ids: Set<string>): PickerToken[] =>
   Array.from(ids).sort((a, b) => Number(a) - Number(b)).map((tokenId) => ({ tokenId }));
+
+// Resolve real plank artwork by token id via the RobinWood metadata directory —
+// the same source the marketplace/gallery cards use — so vault cards show real
+// art (and stay consistent), even locally where the mock NFT has no tokenURI.
+// Cached per id (module-level) so the 15s poll never re-fetches a resolved id.
+const imgCache = new Map<string, string | null>();
+async function resolvePlankImage(tokenId: string): Promise<string | undefined> {
+  if (imgCache.has(tokenId)) return imgCache.get(tokenId) ?? undefined;
+  try {
+    const meta = await fetchNftMetadata(robinwoodTokenUri(tokenId));
+    const img = meta?.image ? resolveIpfsUrl(meta.image) : undefined;
+    imgCache.set(tokenId, img ?? null);
+    return img;
+  } catch {
+    imgCache.set(tokenId, null);
+    return undefined;
+  }
+}
+async function enrichImages(tokens: PickerToken[]): Promise<PickerToken[]> {
+  const out = [...tokens];
+  const CONC = 6;
+  for (let i = 0; i < out.length; i += CONC) {
+    await Promise.all(
+      out.slice(i, i + CONC).map(async (t, k) => {
+        if (t.imageUrl) return;
+        const img = await resolvePlankImage(t.tokenId);
+        if (img) out[i + k] = { ...t, imageUrl: img };
+      })
+    );
+  }
+  return out;
+}
 
 /** The vault's held planks. Prefer the image-bearing indexer route (production);
  *  fall back to on-chain enumeration (works locally / when the indexer is down,
@@ -50,14 +86,14 @@ async function fetchHeld(vault?: string | null): Promise<PickerToken[]> {
     if (res.ok) {
       const j = (await res.json()) as { tokens?: { tokenId: string; imageUrl: string | null }[] };
       if (Array.isArray(j.tokens) && j.tokens.length) {
-        return j.tokens.map((t) => ({ tokenId: String(t.tokenId), imageUrl: t.imageUrl ?? undefined }));
+        return enrichImages(j.tokens.map((t) => ({ tokenId: String(t.tokenId), imageUrl: t.imageUrl ?? undefined })));
       }
     }
   } catch {
     /* fall through to on-chain */
   }
   const ids = vault ? await getOwnedTokenIds(NFT_CONTRACT_ADDRESS, vault, { force: true }) : new Set<string>();
-  return toPicker(ids);
+  return enrichImages(toPicker(ids));
 }
 
 /** The connected wallet's planks, with artwork where resolvable. */
@@ -66,12 +102,12 @@ async function fetchOwned(account?: string | null): Promise<PickerToken[]> {
   try {
     const inv = await getOwnedInventory(MARKET_COLLECTIONS, account);
     const items = inv.flatMap((g) => g.items).map((i) => ({ tokenId: String(i.tokenId), imageUrl: i.imageUrl || undefined }));
-    if (items.length) return items;
+    if (items.length) return enrichImages(items);
   } catch {
     /* fall through to on-chain */
   }
   const ids = await getOwnedTokenIds(NFT_CONTRACT_ADDRESS, account, { force: true });
-  return toPicker(ids);
+  return enrichImages(toPicker(ids));
 }
 
 export default function V3SwapView({ vaultAddress, active = true }: { vaultAddress?: string | null; active?: boolean }) {
@@ -88,6 +124,8 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
   // Default to Redeem odds — the only tab with real computed data on a fresh
   // vault; Price/Activity have nothing to show until there's trade volume.
   const [tab, setTab] = useState<TabKey>("odds");
+  const [activity, setActivity] = useState<V3Activity[] | null>(null);
+  const [activityLoading, setActivityLoading] = useState(false);
   // Trade widget state, lifted here so the grid and the widget share it.
   const [action, setAction] = useState<Action>("buy");
   const [redeemMode, setRedeemMode] = useState<"random" | "specific">("random");
@@ -144,6 +182,16 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
     const stop = active ? startVisibleInterval(() => { if (!running.current) void load(); }, 15_000) : null;
     return () => stop?.();
   }, [load, active]);
+
+  // Lazy-load the activity feed the first time the tab is opened.
+  useEffect(() => {
+    if (tab !== "activity" || activity !== null || activityLoading) return;
+    setActivityLoading(true);
+    getV3Activity(vaultAddress)
+      .then(setActivity)
+      .catch(() => setActivity([]))
+      .finally(() => setActivityLoading(false));
+  }, [tab, activity, activityLoading, vaultAddress]);
 
   const refresh = useCallback(async () => {
     running.current = true;
@@ -249,7 +297,6 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
       {/* single V3 vault line */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-line bg-panel-strong px-4 py-3">
         <span className="inline-flex items-center gap-2">
-          <span className="rounded border border-emerald-400/50 bg-emerald-500/15 px-1.5 py-0.5 text-[0.56rem] font-black tracking-wide text-emerald-400">V3</span>
           <span className="text-sm font-extrabold text-cream">RobinWood Vault</span>
           <span className="font-mono text-[0.66rem] text-cream-muted">{snap ? shortVault(snap.address) : "…"}</span>
         </span>
@@ -266,22 +313,8 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
         )}
       </div>
 
-      {/* hero: big artwork grid leads, the full trade widget docks as a rail */}
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]">
-        <VaultPlankGrid
-          tokens={gridSource}
-          selected={cart}
-          selectable={gridSelectable}
-          onToggle={toggleCart}
-          loading={snap === null}
-          headerLabel={action === "deposit" ? "Your planks" : "In the vault"}
-          emptyMessage={
-            action === "deposit"
-              ? isConnected ? "No planks in your wallet to deposit." : "Connect to deposit your planks."
-              : "No planks in the vault yet."
-          }
-        />
-
+      {/* hero: trade widget docks left, the big artwork grid fills the right */}
+      <div className="grid items-start gap-4 lg:grid-cols-[360px_minmax(0,1fr)] xl:grid-cols-[400px_minmax(0,1fr)]">
         <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
           {/* compact position strip above the widget */}
           <div className="grid grid-cols-3 gap-2">
@@ -306,16 +339,29 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
             onAfterTx={() => { setCart(new Set()); return refresh(); }}
           />
         </div>
+
+        <VaultPlankGrid
+          tokens={gridSource}
+          selected={cart}
+          selectable={gridSelectable}
+          onToggle={toggleCart}
+          loading={snap === null}
+          headerLabel={action === "deposit" ? "Your planks" : "In the vault"}
+          emptyMessage={
+            action === "deposit"
+              ? isConnected ? "No planks in your wallet to deposit." : "Connect to deposit your planks."
+              : "No planks in the vault yet."
+          }
+        />
       </div>
 
-      {/* demoted stats + odds — collapsed so the grid + widget own the fold */}
-      <details className="overflow-hidden rounded-xl border border-line bg-panel-strong">
-        <summary className="flex flex-wrap gap-1 border-b border-line bg-wood-950/60 p-1.5 cursor-pointer list-none">
+      {/* vault stats + odds — full-width band below the hero */}
+      <div className="overflow-hidden rounded-xl border border-line bg-panel-strong">
+        <div className="flex flex-wrap gap-1 border-b border-line bg-wood-950/60 p-1.5">
           {([["odds", "Redeem odds"], ["price", "Price"], ["activity", "Activity"], ["liquidity", "Liquidity"]] as [TabKey, string][]).map(([id, label]) => (
-            <button key={id} type="button" onClick={(e) => { e.preventDefault(); setTab(id); }} aria-pressed={tab === id} className={`min-h-11 rounded-lg px-3.5 py-2 text-[0.72rem] font-black ${tab === id ? "bg-gold-500/15 text-gold-300" : "text-cream-muted hover:text-cream"}`}>{label}</button>
+            <button key={id} type="button" onClick={() => setTab(id)} aria-pressed={tab === id} className={`min-h-11 rounded-lg px-3.5 py-2 text-[0.72rem] font-black ${tab === id ? "bg-gold-500/15 text-gold-300" : "text-cream-muted hover:text-cream"}`}>{label}</button>
           ))}
-          <span className="ml-auto flex items-center pr-2 text-[0.66rem] text-cream-muted">Vault stats &amp; odds</span>
-        </summary>
+        </div>
         <div className="p-4">
           {tab === "odds" && (
             <p className="text-[0.78rem] text-cream-muted">
@@ -326,13 +372,27 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
           )}
           {tab === "price" && (
             <div className="flex min-h-[3.5rem] items-center rounded-lg border border-line bg-wood-950 px-3 text-[0.75rem] text-cream-muted">
-              Share price {snap ? `${formatUnits(sharePrice, 5)} Ξ` : "…"} — price history streams in once V3 has trade volume.
+              Share price {snap ? `${formatUnits(sharePrice, 5)} Ξ` : "…"} — price history streams in once the vault sees trade volume.
             </div>
           )}
           {tab === "activity" && (
-            <div className="flex min-h-[3.5rem] items-center rounded-lg border border-line bg-wood-950 px-3 text-[0.78rem] text-cream-muted">
-              Recent V3 buys, sells, deposits and redeems land here — empty until the vault sees trades.
-            </div>
+            activityLoading && activity === null ? (
+              <div className="flex min-h-[3.5rem] items-center rounded-lg border border-line bg-wood-950 px-3 text-[0.78rem] text-cream-muted">Loading recent activity…</div>
+            ) : activity && activity.length > 0 ? (
+              <ul className="divide-y divide-line/60">
+                {activity.map((a) => (
+                  <li key={a.key} className="flex flex-wrap items-baseline gap-x-2 py-1.5 text-[0.75rem]">
+                    <span className="font-mono text-cream-muted">{a.who}</span>
+                    <span className="text-cream">{a.detail}</span>
+                    <span className="ml-auto tabular-nums text-[0.66rem] text-cream/40">#{a.block}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="flex min-h-[3.5rem] items-center rounded-lg border border-line bg-wood-950 px-3 text-[0.78rem] text-cream-muted">
+                No activity yet — buys, sells, deposits and redeems show here once the vault sees trades.
+              </div>
+            )
           )}
           {tab === "liquidity" && snap && (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -345,7 +405,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
             </div>
           )}
         </div>
-      </details>
+      </div>
     </section>
   );
 }

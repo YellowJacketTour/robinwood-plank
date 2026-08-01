@@ -228,9 +228,9 @@ export default function V3SwapPanel({
       )}
 
       <p className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-[0.72rem] text-sky-200">
-        {action === "buy" && <><b className="text-sky-100">Buy shares</b> — pay ETH, receive fungible V3 shares. To get a plank, use Redeem.</>}
+        {action === "buy" && <><b className="text-sky-100">Buy shares</b> — pay ETH, receive fungible vault shares. To get a plank, use Redeem.</>}
         {action === "sell" && <><b className="text-sky-100">Sell shares</b> — return shares to the pool for ETH.</>}
-        {action === "deposit" && <><b className="text-sky-100">Deposit</b> — tap your planks in the grid; each mints one V3 share for a flat {snap ? formatUnits(snap.mintFeeWei) : "…"} Ξ fee.</>}
+        {action === "deposit" && <><b className="text-sky-100">Deposit</b> — tap your planks in the grid; each mints one vault share for a flat {snap ? formatUnits(snap.mintFeeWei) : "…"} Ξ fee.</>}
         {action === "redeem" && redeemMode === "random" && <><b className="text-sky-100">Random redeem</b> — burn one share + {snap ? formatUnits(snap.redeemFeeWei) : "…"} Ξ for a plank drawn fairly via drand. Cheapest way out.</>}
         {action === "redeem" && redeemMode === "specific" && <><b className="text-sky-100">Targeted redeem</b> — tap the exact planks in the grid. Each burns one share + {snap ? formatUnits(snap.redeemFeeWei + snap.targetPremiumWei) : "…"} Ξ.</>}
         {action === "lp" && lpMode === "add" && <><b className="text-sky-100">Add liquidity</b> — supply ETH; shares are pulled to match the ratio. Earn the 0.30% swap fee.</>}

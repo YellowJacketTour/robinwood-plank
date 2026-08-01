@@ -480,3 +480,39 @@ export function formatUnits(wei: bigint, dp = 4): string {
   const frac = (wei % SHARE_UNIT).toString().padStart(18, "0").slice(0, dp);
   return `${whole}.${frac}`;
 }
+
+// ── Activity feed (recent vault events) ────────────────────────────────────
+export type V3Activity = { kind: string; detail: string; who: string; block: number; key: string };
+
+const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+/** Read the vault's recent trade events for the Activity tab. Lazy — call only
+ *  when the tab is opened. Bounded lookback so it stays cheap on a long chain. */
+export async function getV3Activity(addr?: string | null, lookback = 50_000): Promise<V3Activity[]> {
+  const v = reader(addr);
+  const p = provider();
+  const latest = await p.getBlockNumber();
+  const from = Math.max(0, latest - lookback);
+  const out: V3Activity[] = [];
+  const grab = async (name: string, fmt: (a: readonly unknown[]) => { detail: string; who: string }) => {
+    try {
+      const logs = await v.queryFilter(v.filters[name](), from, latest);
+      for (const log of logs) {
+        const args = ("args" in log ? (log.args as readonly unknown[]) : []) ?? [];
+        const { detail, who } = fmt(args);
+        out.push({ kind: name, detail, who, block: log.blockNumber, key: `${log.blockNumber}-${log.transactionIndex}-${name}` });
+      }
+    } catch {
+      /* event not present / node hiccup — skip */
+    }
+  };
+  await Promise.all([
+    grab("Bought", (a) => ({ who: String(a[0]), detail: `bought ${formatUnits(a[2] as bigint, 2)} shares for ${formatUnits(a[1] as bigint, 4)} Ξ` })),
+    grab("Sold", (a) => ({ who: String(a[0]), detail: `sold ${formatUnits(a[1] as bigint, 2)} shares for ${formatUnits(a[2] as bigint, 4)} Ξ` })),
+    grab("Deposited", (a) => ({ who: String(a[0]), detail: `deposited plank #${(a[1] as bigint).toString()}` })),
+    grab("Redeemed", (a) => ({ who: String(a[0]), detail: `redeemed plank #${(a[1] as bigint).toString()}${a[2] ? " (targeted)" : ""}` })),
+    grab("LiquidityAdded", (a) => ({ who: String(a[0]), detail: `added ${formatUnits(a[2] as bigint, 4)} Ξ liquidity` })),
+    grab("LiquidityRemoved", (a) => ({ who: String(a[0]), detail: `removed ${formatUnits(a[2] as bigint, 4)} Ξ liquidity` })),
+  ]);
+  return out.sort((x, y) => y.block - x.block).slice(0, 25).map((r) => ({ ...r, who: short(r.who) }));
+}
