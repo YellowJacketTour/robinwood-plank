@@ -20,9 +20,11 @@ import {
   getVaultByRole,
   shortVault,
   vaultColorKind,
+  vaultGeneration,
   vaultKindLabel,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
+import TokenPicker, { type PickerToken } from "@/components/market/TokenPicker";
 import {
   requestAndFinishRandomRedeem,
   finishRandomRedeem,
@@ -65,6 +67,8 @@ export default function MigrateView() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmForfeit, setConfirmForfeit] = useState<{ vault: string; requester: string } | null>(null);
+  // Planks the user has selected to (optionally) deposit into V3 — never forced.
+  const [selectedForDeposit, setSelectedForDeposit] = useState<Set<string>>(new Set());
   const runningRef = useRef(false);
 
   const run = useCallback(
@@ -111,72 +115,72 @@ export default function MigrateView() {
       forfeitExpiredRedeem(address!, requester, undefined, vault)
     );
 
-  const depositOwned = () =>
-    run(`Depositing your planks into ${primary?.version ?? "the current vault"}…`, async () => {
+  // OPTIONAL: deposit a user-chosen set of wallet planks into V3. Never forced,
+  // never all-or-nothing — the caller passes exactly the ids the user picked.
+  const depositPlanks = (ids: string[]) =>
+    run(`Depositing ${ids.length} plank${ids.length === 1 ? "" : "s"} into ${primary?.version ?? "the current vault"}…`, async () => {
       const isV3 = Boolean(primary && primary.feeModel === "eth");
       // V3 (ETH-fee) deposits must forward the mint fee via the V3 call layer —
       // the legacy depositForShares sends no value and reverts IncorrectFee.
       const snap = isV3 ? await getV3Snapshot(primary!.address, address!) : null;
-      const planks = [...pos.owned]; // snapshot: the list mutates as we mark each done
-      let skipped = 0;
-      let done = 0;
-      for (const p of planks) {
+      for (const id of ids) {
         try {
-          if (isV3) await v3Deposit(address!, p.tokenId, snap!, primary!.address);
-          else await depositForShares(address!, p.tokenId, undefined, primary?.address ?? null);
-          pos.markDeposited(p.tokenId); // optimistic: count ticks down immediately
-          done += 1;
+          if (isV3) await v3Deposit(address!, id, snap!, primary!.address);
+          else await depositForShares(address!, id, undefined, primary?.address ?? null);
+          pos.markDeposited(id); // optimistic: drops from the wallet list immediately
         } catch (e) {
-          // A plank already migrated (stale list) is benign — skip it, don't
+          // A plank already deposited (stale list) is benign — skip it, don't
           // abort the whole batch or flash a scary revert. Re-throw anything else.
           if (isAlreadyMigratedError(e)) {
-            pos.markDeposited(p.tokenId);
-            skipped += 1;
+            pos.markDeposited(id);
             continue;
           }
           throw e;
         }
       }
-      if (done === 0 && skipped > 0) {
-        // Everything in the (stale) list was already deposited — treat as success.
-        setStatus("Already migrated — nothing left to deposit.");
-      }
+      setSelectedForDeposit(new Set());
     });
 
   const sellDust = (vault: string, dust: bigint) =>
     run("Selling your dust for ETH…", () => sellShares(address!, dust, 200, undefined, vault));
 
   // ── Guided orchestration ──────────────────────────────────────────────────
-  // Collapse the whole migration into a single ordered path and a "what's next"
-  // so the page walks the user through it instead of showing a wall of buttons.
+  // The migration's ONLY goal is getting out of V1/V2 — once your value is
+  // redeemed to your wallet you're done and safe. Depositing into V3 is a
+  // separate, optional, plank-by-plank choice (below), never part of this path.
   const sources = pos.plan?.sources ?? [];
   const slotFreeFor = useCallback(
     (addr: string) => !(pos.slots[addr.toLowerCase()]?.busy ?? false),
     [pos.slots]
   );
 
+  // A pending redeem I own — even on a vault that now has no other value (so it
+  // isn't a "source"): still needs finishing. Look across ALL scanned slots.
+  const mineSlot = useMemo(() => {
+    const hit = Object.entries(pos.slots).find(([, s]) => s.mine);
+    if (!hit) return null;
+    const addr = hit[0];
+    return { address: addr, version: `V${vaultGeneration(addr)}` };
+  }, [pos.slots]);
+
   type NextAction =
-    | { kind: "finishMine"; s: SourcePlan }
+    | { kind: "finishMine"; address: string; version: string }
     | { kind: "withdrawLp"; s: SourcePlan }
     | { kind: "redeem"; s: SourcePlan }
-    | { kind: "deposit" }
     | { kind: "dust"; s: SourcePlan }
     | null;
 
-  // Ordered priority: finish any pending redeem I own → clear each source's LP →
-  // redeem its planks → deposit the planks now in the wallet into V3 → mop up
-  // dust. Sources are already V2→V1.
+  // Ordered priority: finish a pending redeem I own → clear each source's LP →
+  // redeem its planks → mop up dust. Sources are already V2→V1. NO deposit here.
   const nextAction: NextAction = useMemo(() => {
+    if (mineSlot) return { kind: "finishMine", address: mineSlot.address, version: mineSlot.version };
     for (const s of sources) {
-      const slot = pos.slots[s.address.toLowerCase()];
-      if (slot?.mine) return { kind: "finishMine", s }; // my burned share is mid-draw — finish it
       if (s.needsLpWithdraw && s.lpWithdrawCovered) return { kind: "withdrawLp", s };
       if (s.redeemableNfts > 0 && slotFreeFor(s.address)) return { kind: "redeem", s };
     }
-    if (pos.owned.length > 0) return { kind: "deposit" };
     for (const s of sources) if (s.hasDust) return { kind: "dust", s };
     return null;
-  }, [sources, pos.owned.length, pos.slots, slotFreeFor]);
+  }, [mineSlot, sources, slotFreeFor]);
 
   // Value remains but nothing is doable right now: another wallet holds the
   // redeem slot, or LP can't be withdrawn until the pool has reserve. NOT done.
@@ -190,33 +194,42 @@ export default function MigrateView() {
     [sources, pos.slots]
   );
 
+  // Truly out of V1/V2: no legacy shares/LP/dust anywhere and no pending redeem.
+  // Wallet planks (redeemed or pre-existing) do NOT keep this false — depositing
+  // them into V3 is optional and separate.
+  const outOfOldVaults = !nextAction && !anyBlocked;
+
+  // Latch: did this wallet ever have legacy value this session? Lets us show the
+  // "you're out of the old vaults 🎉" closure after the last redeem, without
+  // showing the migration card at all to someone who only ever held V3 planks.
+  const everHadLegacy = useRef(false);
+  if (sources.length > 0 || mineSlot) everHadLegacy.current = true;
+  const showMigrationCard = sources.length > 0 || mineSlot != null || anyBlocked || everHadLegacy.current;
+
   const nextLabel = (n: NextAction): string => {
     if (!n) return "All done";
-    if (n.kind === "finishMine") return `Finish your pending ${n.s.version} redeem`;
+    if (n.kind === "finishMine") return `Finish your pending ${n.version} redeem`;
     if (n.kind === "withdrawLp") return `Withdraw your ${n.s.version} liquidity`;
     if (n.kind === "redeem") return `Redeem a plank from ${n.s.version}`;
-    if (n.kind === "deposit") return `Deposit ${pos.owned.length} plank${pos.owned.length === 1 ? "" : "s"} into ${primary?.version ?? "V3"}`;
     return `Sell your ${n.s.version} dust for ETH`;
   };
 
   const doNext = useCallback(async () => {
     const n = nextAction;
     if (!n) return;
-    if (n.kind === "finishMine") await finishMine(n.s.address);
+    if (n.kind === "finishMine") await finishMine(n.address);
     else if (n.kind === "withdrawLp") await withdrawLp(n.s.address, n.s.lpShareCredit, n.s.lpEthCredit);
     else if (n.kind === "redeem") await redeemOne(n.s.address);
-    else if (n.kind === "deposit") await depositOwned();
     else if (n.kind === "dust") await sellDust(n.s.address, n.s.dustShares);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nextAction]);
 
-  // Ordered remaining steps, for the stepper checklist.
+  // Ordered remaining V1/V2-exit steps, for the stepper checklist (no deposit).
   const steps = useMemo(() => {
     const out: { key: string; label: string; sub: string }[] = [];
+    if (mineSlot)
+      out.push({ key: `fin-${mineSlot.address}`, label: `Finish your pending ${mineSlot.version} redeem`, sub: "the share is burned — claim the plank to free the slot" });
     for (const s of sources) {
-      const slot = pos.slots[s.address.toLowerCase()];
-      if (slot?.mine)
-        out.push({ key: `fin-${s.address}`, label: `Finish your pending ${s.version} redeem`, sub: "the share is burned — claim the plank to free the slot" });
       if (s.needsLpWithdraw)
         out.push({ key: `lp-${s.address}`, label: `Withdraw ${s.version} liquidity`, sub: `${formatShares(s.lpShareCredit, 2)} sh${s.lpEthCredit > BigInt(0) ? ` + ${formatShares(s.lpEthCredit, 4)} Ξ` : ""} back to shares` });
       for (let i = 0; i < s.redeemableNfts; i++)
@@ -224,11 +237,9 @@ export default function MigrateView() {
       if (s.stuckLpShares > BigInt(0) || s.stuckLpEth > BigInt(0))
         out.push({ key: `stuck-${s.address}`, label: `${s.version} liquidity is waiting`, sub: "the retiring pool can't cover the withdrawal yet — check back later" });
     }
-    if (pos.owned.length > 0)
-      out.push({ key: "dep", label: `Deposit ${pos.owned.length} plank${pos.owned.length === 1 ? "" : "s"} into ${primary?.version ?? "V3"}`, sub: `mints ${pos.owned.length} ${primary?.version ?? "V3"} share${pos.owned.length === 1 ? "" : "s"}` });
     for (const s of sources) if (s.hasDust) out.push({ key: `dust-${s.address}`, label: `Sell ${s.version} dust`, sub: `${formatShares(s.dustShares, 2)} sh → ETH` });
     return out;
-  }, [sources, pos.owned.length, pos.slots, primary?.version]);
+  }, [mineSlot, sources]);
 
   // ── Render ──────────────────────────────────────────────────────────────
 
@@ -238,10 +249,11 @@ export default function MigrateView() {
         <p className="text-[0.7rem] font-black uppercase tracking-[0.16em] text-cream-muted">
           Marketplank · Vault upgrade
         </p>
-        <h1 className="mt-1 font-display text-3xl text-gold-300">Move your planks to the current vault</h1>
+        <h1 className="mt-1 font-display text-3xl text-gold-300">Get out of the retiring vaults</h1>
         <p className="mt-1 max-w-[70ch] text-sm text-cream/80">
-          The old vaults are retiring. This page moves your value one plank at a time — redeem on the old
-          vault, deposit on the new. You sign when asked; we watch the chain in between.{" "}
+          V1 and V2 are winding down. This page walks you through redeeming your value out of them, one plank at
+          a time, into your own wallet — that&apos;s the migration. Putting those planks into V3 afterwards is
+          optional. You sign each step; we watch the chain in between.{" "}
           <b className="text-cream">Same fees as always — no migration tax.</b>
         </p>
       </header>
@@ -302,11 +314,12 @@ export default function MigrateView() {
               </div>
             )}
 
-            {/* Guided path — one clear next step, or run the whole thing */}
+            {/* Guided path — getting out of V1/V2 (deposit into V3 is separate) */}
+            {showMigrationCard && (
             <div className="rounded-xl border border-line bg-panel-strong p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h2 className="font-display text-xl text-gold-300">
-                  {nextAction ? "Your migration path" : anyBlocked ? "Almost there" : "Migration complete"}
+                  {nextAction ? "Your migration path" : anyBlocked ? "Almost there" : "You’re out of the old vaults"}
                 </h2>
                 {steps.length > 0 && (
                   <span className="text-[0.7rem] font-bold tabular-nums text-cream-muted">
@@ -368,20 +381,79 @@ export default function MigrateView() {
                 </div>
               ) : (
                 <div className="mt-3">
-                  <p className="text-sm text-emerald-300">Everything is migrated into {primary?.version ?? "V3"}. 🎉</p>
-                  <Link
-                    href="/market?tab=swap"
-                    className="mt-2 inline-flex min-h-[44px] items-center rounded-lg bg-gold-500 px-4 text-sm font-black text-[#261105]"
-                  >
-                    Open Instant Swap
-                  </Link>
+                  <p className="text-sm text-emerald-300">
+                    Your value is out of V1/V2 and sitting safely in your wallet as planks. 🎉
+                  </p>
+                  <p className="mt-1 text-[0.72rem] text-cream/60">
+                    That&apos;s the migration done. Putting planks into V3 is optional — do it below, or anytime on
+                    the swap page.
+                  </p>
                 </div>
               )}
-              <p className="mt-2 text-[0.66rem] text-cream/50">
-                You sign each on-chain step; redeems finish automatically via the relayer. Stopping anytime is
-                safe — redeemed planks sit in your wallet until you deposit them.
-              </p>
+              {nextAction && (
+                <p className="mt-2 text-[0.66rem] text-cream/50">
+                  Migrating just means getting out of V1/V2 — you sign each step, redeems finish automatically via
+                  the relayer, and stopping anytime is safe (redeemed planks stay in your wallet).
+                </p>
+              )}
             </div>
+            )}
+
+            {/* OPTIONAL — deposit chosen wallet planks into V3. Never forced. */}
+            {pos.owned.length > 0 && (
+              <div className="rounded-xl border border-line bg-panel-strong p-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-display text-lg text-gold-300">Optional: put planks into {primary?.version ?? "V3"}</h2>
+                  <span className="text-[0.66rem] text-cream-muted">{pos.owned.length} in your wallet</span>
+                </div>
+                <p className="mt-1 text-[0.72rem] text-cream/60">
+                  Depositing mints one {primary?.version ?? "V3"} share per plank (a flat ETH fee each). Pick the
+                  ones you want — the rest stay in your wallet. You can also do this on the swap page.
+                </p>
+                <div className="mt-3">
+                  <TokenPicker
+                    tokens={pos.owned.map((p): PickerToken => ({ tokenId: p.tokenId, imageUrl: p.image }))}
+                    selected={[...selectedForDeposit]}
+                    onSelect={(id) =>
+                      setSelectedForDeposit((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(id)) next.delete(id);
+                        else next.add(id);
+                        return next;
+                      })
+                    }
+                    emptyMessage="No planks in your wallet."
+                    allowManualEntry={false}
+                  />
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={busy || selectedForDeposit.size === 0}
+                    onClick={() => void depositPlanks([...selectedForDeposit])}
+                    className="inline-flex min-h-[44px] items-center rounded-lg bg-gold-500 px-4 text-sm font-black text-[#261105] disabled:opacity-50"
+                  >
+                    {busy
+                      ? "Working…"
+                      : selectedForDeposit.size === 0
+                        ? "Select planks to deposit"
+                        : `Deposit ${selectedForDeposit.size} into ${primary?.version ?? "V3"}`}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      setSelectedForDeposit((prev) =>
+                        prev.size === pos.owned.length ? new Set() : new Set(pos.owned.map((p) => p.tokenId))
+                      )
+                    }
+                    className="inline-flex min-h-[44px] items-center rounded-lg border border-line-strong bg-wood-950 px-4 text-sm font-bold text-cream disabled:opacity-50"
+                  >
+                    {selectedForDeposit.size === pos.owned.length ? "Clear selection" : "Select all"}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Per-vault detail + manual controls / rescue, tucked away */}
             {pos.plan?.sources.length ? (
