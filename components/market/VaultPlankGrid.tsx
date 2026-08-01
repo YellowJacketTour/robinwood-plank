@@ -64,7 +64,7 @@ export default function VaultPlankGrid({
       </div>
 
       {loading && tokens.length === 0 ? (
-        <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(170px,1fr))]">
+        <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
           {Array.from({ length: 8 }).map((_, i) => (
             <li key={i} className="aspect-square animate-pulse rounded-lg bg-wood-950" />
           ))}
@@ -74,7 +74,7 @@ export default function VaultPlankGrid({
           {emptyMessage}
         </div>
       ) : (
-        <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-[repeat(auto-fill,minmax(150px,1fr))] sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(170px,1fr))]">
+        <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
           {tokens.map((t) => {
             const isSelected = selected.has(t.tokenId);
             const r = rarity.get(t.tokenId);
@@ -118,7 +118,7 @@ export default function VaultPlankGrid({
                   )}
                   {r && (
                     <span
-                      className="tier-badge absolute left-1.5 top-1.5 rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide"
+                      className="tier-badge absolute left-2 top-2 rounded-full px-2 py-1 text-[0.55rem] font-black uppercase tracking-wide"
                       style={{ color: tierColor(r.tier) }}
                       title={`Rank #${r.rank} · ${r.percentile.toFixed(0)}th percentile`}
                     >
@@ -126,9 +126,9 @@ export default function VaultPlankGrid({
                     </span>
                   )}
                 </button>
-                <div className="flex flex-1 flex-col gap-0.5 p-2 leading-tight">
-                  <span className="truncate text-[0.6rem] font-bold text-foreground">{r?.name ?? `#${t.tokenId}`}</span>
-                  <span className="truncate text-[0.55rem] tabular-nums text-cream-muted">#{t.tokenId}{r ? ` · R${r.rank}` : ""}</span>
+                <div className="flex flex-1 flex-col gap-0.5 p-2.5 leading-tight sm:p-3">
+                  <span className="truncate text-[0.72rem] font-bold text-foreground">{r?.name ?? `Plank #${t.tokenId}`}</span>
+                  <span className="truncate text-[0.6rem] tabular-nums text-cream-muted">#{t.tokenId}{r ? ` · Rank ${r.rank}` : ""}</span>
                 </div>
               </li>
             );
