@@ -3,105 +3,36 @@ pragma solidity ^0.8.24;
 
 /**
  * ============================================================================
- *  UNAUDITED BY A THIRD PARTY. DO NOT DEPLOY WITH REAL VALUE UNTIL REVIEWED.
+ *        ______________________________________________________
+ *       /                                                     /|
+ *      /   M A R K E T P L A N K   V A U L T   ( vROBIN )    / |
+ *     /_____________________________________________________/ /
+ *     |_____________________________________________________|/
  *
- *  MarketplankVault V3 — the successor to the deployed V1 and V2 vaults.
- *  See docs/marketplank/AUDIT-2026-07-31-lp.md for why V2 is being retired.
+ *  Deposit an NFT, mint one fungible vault share. Trade shares against ETH on a
+ *  constant-product pool with a 30 bps swap fee. Provide liquidity for a
+ *  proportional claim on the pool. Redeem a share for an NFT — a specific one
+ *  for an ETH premium, or a random one via drand commit-reveal.
  *
- *  V2 added exactly two functions over V1 — contributeLiquidity /
- *  removeLiquidity — and they are a critical, flash-loanable drain:
- *  a one-sided contributeLiquidity moves the constant-product price,
- *  removeLiquidity returns the contribution at NOMINAL (never pro-rata,
- *  never price-aware), and sandwiching a trade between them extracts the
- *  entire reserve. Proven executable in test/contracts/VaultLp.audit.test.ts.
+ *  Design:
+ *    - Proportional LP: add/remove mint/burn against CURRENT reserves, so a
+ *      contributor absorbs any price move they cause. LP is internal and
+ *      NON-TRANSFERABLE.
+ *    - Explicit shareReserve / ethReserve (not live balances): a stray transfer
+ *      is inert dead capital, so donation-inflation is impossible; no receive().
+ *    - ETH-denominated flat fees kept in accruedFees, paid only to the immutable
+ *      treasury via withdrawFees() — never pushed inside deposit/redeem.
+ *    - Seed lock: openPool() mints L0 = sqrt(E*S) LP to address(0) forever, so
+ *      pool ETH is never withdrawable and reserves stay strictly positive.
+ *    - depositMany / redeemTargetMany for batches; VAULT_VERSION +
+ *      capabilities() / poolComposition() views.
  *
- *  V3 keeps V1/V2's deposit + drand commit-reveal random-redeem machinery
- *  BYTE-FOR-BYTE (two prior audit rounds hardened it against permutation
- *  sniping, third-party steering, and rerolling — see the V2 header and
- *  VaultRandomness.exploit.test.ts) and changes only:
+ *  Excluded: no oracle, no external AMM, no owner-mutable fees, no
+ *  upgradeability, no admin withdrawal of pool ETH, no pause.
  *
- *    1. PROPORTIONAL LP. lpShareCredit/lpEthCredit (absolute credits) are
- *       gone. Liquidity is now a proportional claim: addLiquidity mints LP
- *       units against current reserves, removeLiquidity burns them for a
- *       pro-rata slice of CURRENT reserves. A contributor therefore absorbs
- *       any price move they cause — which is exactly what the V2 attack
- *       exploited the absence of. LP bookkeeping is internal and
- *       NON-TRANSFERABLE (the vault is already the share ERC20 and cannot be
- *       the LP ERC20 too); there is deliberately no transferLp.
- *
- *    2. EXPLICIT shareReserve. The share side of the pool is now a tracked
- *       storage variable, not balanceOf(address(this)). Under proportional
- *       LP, using the live balance would let any raw ERC20 transfer into the
- *       vault silently become pool depth and re-price every LP unit (the
- *       donation-inflation vector). With explicit accounting a stray transfer
- *       is inert dead capital. There is deliberately no sync()/donateShares()
- *       to re-expose the balance. ETH is symmetric and already safe: there is
- *       no receive(), so only selfdestruct can force ETH in, and that only
- *       makes balance > ethReserve, never the reverse.
- *
- *    3. ETH-DENOMINATED FEES. deposit mints a full 1e18 share and charges a
- *       flat ETH fee; redeem burns exactly 1e18 and charges a flat ETH fee
- *       (plus an ETH premium for a targeted pick). This ends V1/V2's
- *       0.99-mint / 1.01-redeem asymmetry that stranded every single-deposit
- *       holder ~0.02 shares short of redeeming. Note this makes the solvency
- *       invariant STRICTLY SIMPLER, not more fragile: what keeps redemption
- *       from draining the vault is burning exactly one unit of backing per
- *       NFT — the fee was never load-bearing for solvency. Fee ETH accrues to
- *       a counter (accruedFees) and is pulled by a permissionless
- *       withdrawFees() that can only ever pay the immutable treasury; it is
- *       NEVER pushed inside deposit/redeem, because a contract treasury
- *       without a receive() would otherwise brick deposits — and, worse,
- *       could brick the single vault-wide redeem slot. Fees are immutable
- *       nominal wei (NOT priced off the AMM spot, which on a thin pool is
- *       sandwich-manipulable toward zero). A nominal fee decouples from floor
- *       price in both directions; that is accepted openly. The ETH redeem fee
- *       prices — but does not prevent — rarity churn; the real rate limiters
- *       are the single vault-wide slot and the ~6s drand round.
- *
- *    4. A 30 bps SWAP FEE. buyShares/sellShares keep the full input in the
- *       reserve while pricing the output on the fee-discounted input, so k
- *       grows on every trade and LPs (finally) earn something. Without it
- *       there is no economic reason to provide liquidity at all.
- *
- *    5. SEED / FIRST-LP FIX at openPool(). The treasury seed carries no LP
- *       claim (CAP-S2 forbids withdrawal of pool ETH), so if totalLpSupply
- *       were 0 while reserves were non-zero, the first LP would mint against
- *       a pool already holding the seed and could withdraw it pro-rata.
- *       openPool() therefore mints L0 = sqrt(ethReserve * shareReserve) LP
- *       units to a PERMANENTLY LOCKED balance (address(0)). Effects:
- *       totalLpSupply > 0 whenever reserves are, so every later mint is
- *       proportional; the seed becomes permanently donated liquidity that
- *       dilutes nobody; and CAP-S2 holds because the locked units are
- *       unredeemable. This also structurally prevents a pool-side brick:
- *       burnable LP is always < totalLpSupply, so floored pro-rata removal
- *       leaves both reserves strictly positive. The locked position accrues
- *       swap fees forever and they are stranded — that does NOT dilute real
- *       LPs (reserve-per-unit rises identically for all), so do not "fix" it
- *       by unlocking the seed.
- *
- *    6. TREASURY AS AN ORDINARY LP after open. Seeding the whole pool would
- *       lock all of it, pushing the treasury to seed thin (cheaper to
- *       attack). Instead seed the minimum pre-open, let openPool() lock that,
- *       and add the rest through the normal addLiquidity — the treasury then
- *       holds ordinary LP whose proportional withdrawal is the identical
- *       right every user has, not an admin privilege, so it does not violate
- *       CAP-S2.
- *
- *    7. depositMany / redeemTargetMany for cheap migration; a VAULT_VERSION
- *       constant + capabilities()/poolComposition() views so the client stops
- *       grepping deployed bytecode for selectors.
- *
- *  Deliberately excluded, exactly as V1/V2: no oracle, no external AMM
- *  dependency, no owner-mutable fees, no upgradeability, no admin withdrawal
- *  of pool ETH, no pause.
- *
- *  SOLVENCY INVARIANT, enforced after every NFT/share-moving call:
- *
- *      totalSupply() + pendingRedeemCount * SHARE_UNIT
- *          == heldTokenIds.length * SHARE_UNIT
- *
- *  ETH BACKING INVARIANT, enforced after every ETH-moving call:
- *
+ *  SOLVENCY INVARIANT (after every NFT/share-moving call):
+ *      totalSupply() + pendingRedeemCount * SHARE_UNIT == heldTokenIds.length * SHARE_UNIT
+ *  ETH BACKING INVARIANT (after every ETH-moving call):
  *      address(this).balance >= ethReserve + accruedFees
  * ============================================================================
  */
@@ -150,8 +81,8 @@ contract MarketplankVaultV3 is ERC20, ReentrancyGuard, IERC721Receiver {
     uint256 private constant BPS_DENOMINATOR = 10_000;
     uint256 private constant SHARE_UNIT = 1e18;
 
-    /// @dev Wei ceilings, mirroring V2's bps ceilings — a predatory-fee
-    /// deployment is impossible, not merely unintended.
+    /// @dev Wei fee ceilings — a predatory-fee deployment is impossible, not
+    /// merely unintended.
     uint256 private constant MAX_MINT_FEE_WEI = 0.05 ether;
     uint256 private constant MAX_REDEEM_FEE_WEI = 0.05 ether;
     uint256 private constant MAX_TARGET_PREMIUM_WEI = 0.1 ether;
@@ -299,8 +230,8 @@ contract MarketplankVaultV3 is ERC20, ReentrancyGuard, IERC721Receiver {
 
     /**
      * @notice Step 1 of a random redemption: burn one share now, draw later.
-     * Pay redeemFeeWei. See the V2 header for the commit-reveal rationale;
-     * this path is unchanged except the fee is ETH and the burn is exactly 1.
+     * Pay redeemFeeWei. The commit-reveal draws against a future drand round so
+     * the outcome cannot be predicted or ground at request time.
      */
     function requestRandomRedeem() external payable nonReentrant {
         if (msg.value != redeemFeeWei) revert IncorrectFee();
@@ -532,8 +463,8 @@ contract MarketplankVaultV3 is ERC20, ReentrancyGuard, IERC721Receiver {
 
     /**
      * @notice Remove liquidity: burn LP units for a pro-rata slice of CURRENT
-     * reserves on both sides. Pro-rata is the whole V2 fix — a contributor now
-     * absorbs the price move they caused.
+     * reserves on both sides. Pro-rata means a contributor absorbs the price
+     * move they caused, so add/remove can never extract value from the pool.
      */
     function removeLiquidity(uint256 lpIn, uint256 minEthOut, uint256 minSharesOut)
         external

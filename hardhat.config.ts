@@ -26,6 +26,24 @@ const config: HardhatUserConfig = {
     cache: "./.hardhat-cache",
     artifacts: "./.hardhat-artifacts",
   },
+  // Block-explorer (Blockscout) source verification for the Robinhood chains.
+  // Blockscout ignores the apiKey but hardhat-verify requires an entry.
+  etherscan: {
+    apiKey: {
+      robinhood: process.env.ROBINHOOD_EXPLORER_KEY || "blockscout",
+      "robinhood-testnet": process.env.ROBINHOOD_EXPLORER_KEY || "blockscout",
+    },
+    customChains: [
+      {
+        network: "robinhood-testnet",
+        chainId: 46630,
+        urls: {
+          apiURL: "https://explorer.testnet.chain.robinhood.com/api",
+          browserURL: "https://explorer.testnet.chain.robinhood.com",
+        },
+      },
+    ],
+  },
   networks: {
     // LOCAL ONLY. `npx hardhat node` serves this on 127.0.0.1:8545 (chainId
     // 31337); scripts/local-v3-setup.ts deploys the V3 dev stack here so the
