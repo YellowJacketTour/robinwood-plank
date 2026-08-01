@@ -21,6 +21,7 @@ import {
   v3RandomRedeem,
   v3AddLiquidity,
   v3RemoveLiquidity,
+  decodeV3Error,
   formatUnits,
   SHARE_UNIT,
   type V3Snapshot,
@@ -46,20 +47,6 @@ function toWei(s: string): bigint {
   }
 }
 
-/** Map raw revert/wallet errors to copy a user can act on. */
-function friendlyError(e: unknown): string {
-  const raw = (e instanceof Error ? e.message : String(e)) || "Transaction failed.";
-  const m = raw.toLowerCase();
-  if (m.includes("user rejected") || m.includes("user denied") || m.includes("action_rejected")) return "You rejected the request in your wallet.";
-  if (m.includes("insufficient funds")) return "Not enough ETH to cover the amount plus gas.";
-  if (m.includes("requestpending") || m.includes("request pending")) return "The vault's redeem slot is busy — someone else is mid-redeem. Try again in a moment.";
-  if (m.includes("slippage") || m.includes("mineth") || m.includes("minshares") || m.includes("minout") || m.includes("too little")) return "Price moved past your slippage tolerance. Raise it or retry.";
-  if (m.includes("poolclosed") || m.includes("pool closed") || m.includes("notopen")) return "The pool is closed — trading is paused.";
-  if (m.includes("incorrectfee")) return "Fee mismatch — reload and retry (the vault fee may have changed).";
-  if (m.includes("emptyvault")) return "The vault holds no planks to redeem right now.";
-  // Trim ABI noise from anything else.
-  return raw.replace(/\s*\(action=.*$/i, "").slice(0, 180);
-}
 
 export type V3PanelProps = {
   snap: V3Snapshot | null;
@@ -71,6 +58,8 @@ export type V3PanelProps = {
   ownedTokens: PickerToken[];
   heldTokens: PickerToken[];
   invLoading?: boolean;
+  /** True when another wallet holds the single redeem slot — random redeem would revert. */
+  redeemSlotBusy?: boolean;
   onConnect: () => void;
   onAfterTx: () => Promise<void> | void;
 };
@@ -84,6 +73,7 @@ export default function V3SwapPanel({
   ownedTokens,
   heldTokens,
   invLoading,
+  redeemSlotBusy,
   onConnect,
   onAfterTx,
 }: V3PanelProps) {
@@ -110,7 +100,7 @@ export default function V3SwapPanel({
       setTokenId("");
       await onAfterTx();
     } catch (e) {
-      setError(friendlyError(e));
+      setError(decodeV3Error(e));
     } finally {
       setBusy(false);
       setStatus(null);
@@ -175,9 +165,11 @@ export default function V3SwapPanel({
     }
     return null;
   }, [snap, tab, amtWei]);
+  // A random redeem into an occupied slot would revert (RequestPending) — block it.
+  const randomSlotBlocked = tab === "redeem" && redeemMode === "random" && Boolean(redeemSlotBusy);
   // Disable the CTA when the required plank hasn't been chosen or trading is paused.
   const needsPick = (tab === "deposit") || (tab === "redeem" && redeemMode === "specific");
-  const ctaDisabled = busy || tradingPaused || (needsPick && !tokenId) || (!isNftTab && amtWei <= BigInt(0));
+  const ctaDisabled = busy || tradingPaused || randomSlotBlocked || (needsPick && !tokenId) || (!isNftTab && amtWei <= BigInt(0));
   const payLabel =
     tab === "sell" ? "You sell (shares)" : tab === "lp" && lpMode === "remove" ? "Burn LP" : "You pay";
   const payToken = tab === "sell" ? "shares" : tab === "lp" && lpMode === "remove" ? "LP" : "◆ ETH";
@@ -293,10 +285,15 @@ export default function V3SwapPanel({
               />
             </>
           )}
-          {redeemMode === "random" && (
+          {redeemMode === "random" && !randomSlotBlocked && (
             <p className="rounded-lg border border-line bg-wood-950 px-3 py-2.5 text-[0.72rem] text-cream-muted">
               You’ll sign one request; the plank is drawn by drand and delivered automatically. The vault holds{" "}
-              <b className="text-gold-300">{snap?.held ?? 0}</b> planks — each equally likely.
+              <b className="text-gold-300">{snap?.availableCount ?? snap?.held ?? 0}</b> available planks — each equally likely.
+            </p>
+          )}
+          {randomSlotBlocked && (
+            <p className="rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2.5 text-[0.72rem] text-amber-200">
+              The vault’s single redeem slot is busy — another wallet is mid-redeem. It’ll clear shortly (see the banner above); requesting now would just revert.
             </p>
           )}
         </div>
@@ -403,6 +400,8 @@ export default function V3SwapPanel({
         <button type="button" disabled={ctaDisabled} onClick={submit} className="mt-3 min-h-[48px] w-full rounded-xl bg-gold-500 text-[0.92rem] font-black text-[#261105] disabled:opacity-50">
           {tradingPaused
             ? "Trading paused"
+            : randomSlotBlocked
+            ? "Redeem slot busy"
             : tab === "buy"
             ? "Buy shares"
             : tab === "sell"

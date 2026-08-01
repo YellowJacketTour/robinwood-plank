@@ -14,11 +14,17 @@ import { useWallet } from "@/lib/wallet-context";
 import { shortVault } from "@/lib/market/vault-registry";
 import {
   getV3Snapshot,
+  getV3Pending,
   getEthBalance,
   getPlankBalance,
+  v3ClaimRandomRedeem,
+  v3ClaimRandomRedeemFor,
+  v3ForfeitExpiredRedeem,
+  decodeV3Error,
   formatUnits,
   SHARE_UNIT,
   type V3Snapshot,
+  type V3Pending,
 } from "@/lib/market/vault-v3";
 import { useLegacyPosition } from "@/lib/market/useLegacyPosition";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
@@ -36,6 +42,9 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
   const [plankBal, setPlankBal] = useState<number | null>(null);
   const [owned, setOwned] = useState<PickerToken[]>([]);
   const [held, setHeld] = useState<PickerToken[]>([]);
+  const [pending, setPending] = useState<V3Pending | null>(null);
+  const [rescueBusy, setRescueBusy] = useState(false);
+  const [rescueMsg, setRescueMsg] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("price");
   const running = useRef(false);
 
@@ -49,8 +58,9 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
 
   const load = useCallback(async () => {
     try {
-      const [s, e, p, ownedIds, heldIds] = await Promise.all([
+      const [s, pend, e, p, ownedIds, heldIds] = await Promise.all([
         getV3Snapshot(vaultAddress, address),
+        getV3Pending(vaultAddress, address),
         address ? getEthBalance(address) : Promise.resolve(null),
         address ? getPlankBalance(address) : Promise.resolve(null),
         // On-chain enumeration (no indexer): a wallet's planks, and the vault's.
@@ -58,6 +68,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
         vaultAddress ? getOwnedTokenIds(NFT_CONTRACT_ADDRESS, vaultAddress, { force: true }) : Promise.resolve(new Set<string>()),
       ]);
       setSnap(s);
+      setPending(pend);
       setEthBal(e);
       setPlankBal(p);
       setOwned(toPickerTokens(ownedIds));
@@ -82,8 +93,27 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
     }
   }, [load]);
 
+  // Free the single vault-wide redeem slot: claim mine, settle another user's
+  // pinned draw for them, or forfeit an expired one. All permissionless.
+  const runRescue = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      if (!address) return;
+      setRescueBusy(true);
+      setRescueMsg(null);
+      try {
+        await fn();
+        await refresh();
+      } catch (e) {
+        setRescueMsg(decodeV3Error(e));
+      } finally {
+        setRescueBusy(false);
+      }
+    },
+    [address, refresh]
+  );
+
   const sharePrice = snap && snap.shareReserve > BigInt(0) ? (snap.ethReserve * SHARE_UNIT) / snap.shareReserve : BigInt(0);
-  const lockedLp = snap && snap.totalLpSupply > BigInt(0) ? snap.totalLpSupply - snap.lpBalance : BigInt(0);
+  const lockedLp = snap ? snap.lockedLp : BigInt(0);
   const poolShare = useMemo(() => {
     if (!snap || snap.totalLpSupply === BigInt(0)) return "0.0";
     return ((Number(snap.lpBalance) / Number(snap.totalLpSupply)) * 100).toFixed(1);
@@ -103,6 +133,39 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
           </span>
           <span className="inline-flex min-h-[40px] flex-none items-center rounded-lg bg-gold-500 px-4 text-sm font-black text-[#261105]">Migrate now →</span>
         </Link>
+      )}
+
+      {/* stuck-slot rescue — the vault has ONE redeem slot; surface it so a
+          walked-away request can't silently block everyone's trades. */}
+      {pending && pending.requester !== "0x0000000000000000000000000000000000000000" && (
+        <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="h-2.5 w-2.5 flex-none animate-pulse rounded-full bg-amber-400" />
+            <span className="min-w-0 flex-1 text-sm text-cream">
+              {pending.isMe ? (
+                <><b className="text-amber-200">Your random redeem is pending.</b> {pending.available ? "The draw is ready — claim your plank." : "Waiting for the drand round to land on-chain."}</>
+              ) : (
+                <><b className="text-amber-200">The redeem slot is busy</b> — another wallet is mid-redeem, so trades are paused until it clears. {pending.available ? "You can settle it for them." : "It’ll free automatically once their round lands, or can be forfeited once expired."}</>
+              )}
+            </span>
+            {isConnected && pending.isMe && pending.available && (
+              <button type="button" disabled={rescueBusy} onClick={() => runRescue(() => v3ClaimRandomRedeem(address!))} className="min-h-11 flex-none rounded-lg bg-gold-500 px-4 text-sm font-black text-[#261105] disabled:opacity-50">
+                Claim my plank
+              </button>
+            )}
+            {isConnected && !pending.isMe && (
+              <div className="flex flex-none gap-2">
+                <button type="button" disabled={rescueBusy || !pending.available} onClick={() => runRescue(() => v3ClaimRandomRedeemFor(address!, pending.requester, vaultAddress))} className="min-h-11 rounded-lg border border-line-strong bg-wood-950 px-3 text-sm font-bold text-cream disabled:opacity-40">
+                  Settle for them
+                </button>
+                <button type="button" disabled={rescueBusy} onClick={() => runRescue(() => v3ForfeitExpiredRedeem(address!, pending.requester, vaultAddress))} className="min-h-11 rounded-lg border border-line-strong bg-wood-950 px-3 text-sm font-bold text-cream disabled:opacity-40">
+                  Forfeit if expired
+                </button>
+              </div>
+            )}
+          </div>
+          {rescueMsg && <p className="mt-2 text-[0.72rem] text-rose-200">{rescueMsg}</p>}
+        </div>
       )}
 
       {/* single V3 vault line */}
@@ -134,6 +197,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
           ownedTokens={owned}
           heldTokens={held}
           invLoading={snap === null}
+          redeemSlotBusy={Boolean(pending && !pending.isMe && pending.requester !== "0x0000000000000000000000000000000000000000")}
           onConnect={() => void connect()}
           onAfterTx={refresh}
         />
@@ -188,8 +252,9 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
           )}
           {tab === "odds" && (
             <p className="text-[0.78rem] text-cream-muted">
-              A random redeem draws uniformly from the {snap?.held ?? 0} held planks — each currently has a{" "}
-              <b className="text-cream">{snap && snap.held > 0 ? (100 / snap.held).toFixed(1) : "—"}%</b> chance. Rarity-tier odds populate from the rarity snapshot on mainnet.
+              A random redeem draws uniformly from the {snap?.availableCount ?? 0} available planks
+              {snap && snap.pendingRedeemCount > 0 ? ` (${snap.pendingRedeemCount} reserved for an in-flight redeem)` : ""} — each currently has a{" "}
+              <b className="text-cream">{snap && snap.availableCount > 0 ? (100 / snap.availableCount).toFixed(1) : "—"}%</b> chance. Rarity-tier odds populate from the rarity snapshot on mainnet.
             </p>
           )}
           {tab === "activity" && (
