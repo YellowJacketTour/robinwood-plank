@@ -20,6 +20,7 @@ const ERC721 = new Interface([
   "function getApproved(uint256) view returns (address)",
   "function isApprovedForAll(address,address) view returns (bool)",
   "function approve(address,uint256)",
+  "function setApprovalForAll(address,bool)",
 ]);
 
 export const SHARE_UNIT = BigInt("1000000000000000000");
@@ -274,6 +275,44 @@ export async function v3Deposit(account: string, tokenId: string, s: V3Snapshot,
 
 export async function v3RedeemTarget(account: string, tokenId: string, s: V3Snapshot): Promise<string> {
   return send(account, V3.encodeFunctionData("redeemTarget", [tokenId]), s.redeemFeeWei + s.targetPremiumWei);
+}
+
+// ── Bulk (cart) ────────────────────────────────────────────────────────────
+// The vault exposes depositMany/redeemTargetMany (MAX_BATCH 50) with an exact
+// msg.value == fee*n. These back the NFTX-style multi-select cart.
+const MAX_BATCH = 50;
+
+/** Redeem a chosen set of held planks in one tx. value = (redeem+premium)*n. */
+export async function v3RedeemTargetMany(account: string, tokenIds: string[], s: V3Snapshot, addr?: string | null): Promise<string> {
+  if (tokenIds.length === 0 || tokenIds.length > MAX_BATCH) throw new Error(`Pick 1–${MAX_BATCH} planks.`);
+  const value = (s.redeemFeeWei + s.targetPremiumWei) * BigInt(tokenIds.length);
+  return send(account, V3.encodeFunctionData("redeemTargetMany", [tokenIds]), value, addr);
+}
+
+/** Deposit a chosen set of owned planks in one tx. value = mintFee*n. Uses a
+ *  single setApprovalForAll (depositMany pulls N NFTs — N approvals is wasteful). */
+export async function v3DepositMany(account: string, tokenIds: string[], s: V3Snapshot, addr?: string | null): Promise<string> {
+  if (tokenIds.length === 0 || tokenIds.length > MAX_BATCH) throw new Error(`Pick 1–${MAX_BATCH} planks.`);
+  const vaultAddr = vaultOr(addr);
+  const nft = NFT_CONTRACT_ADDRESS;
+  const injected = getEthereumProvider();
+  if (!injected) throw new Error("No wallet found.");
+  const allHex = (await injected.request({
+    method: "eth_call",
+    params: [{ to: nft, data: ERC721.encodeFunctionData("isApprovedForAll", [account, vaultAddr]) }, "latest"],
+  })) as string;
+  const approvedForAll = BigInt(allHex === "0x" ? 0 : allHex) !== BigInt(0);
+  if (!approvedForAll) {
+    const h = await sendTransaction({
+      to: nft,
+      from: account,
+      data: ERC721.encodeFunctionData("setApprovalForAll", [vaultAddr, true]),
+      kind: "vault",
+    });
+    await waitForTransaction(h, { label: "Approve deposits" });
+  }
+  const value = s.mintFeeWei * BigInt(tokenIds.length);
+  return send(account, V3.encodeFunctionData("depositMany", [tokenIds]), value, addr);
 }
 
 // ── Random redeem (two-step, commit-reveal via drand) ──────────────────────

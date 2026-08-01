@@ -28,12 +28,51 @@ import {
 } from "@/lib/market/vault-v3";
 import { useLegacyPosition } from "@/lib/market/useLegacyPosition";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
-import { getOwnedTokenIds } from "@/lib/market/inventory";
+import { getOwnedTokenIds, getOwnedInventory } from "@/lib/market/inventory";
+import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import type { PickerToken } from "@/components/market/TokenPicker";
-import V3SwapPanel from "@/components/market/V3SwapPanel";
+import V3SwapPanel, { type Action } from "@/components/market/V3SwapPanel";
+import VaultPlankGrid from "@/components/market/VaultPlankGrid";
 
 type TabKey = "price" | "odds" | "activity" | "liquidity";
+
+const toPicker = (ids: Set<string>): PickerToken[] =>
+  Array.from(ids).sort((a, b) => Number(a) - Number(b)).map((tokenId) => ({ tokenId }));
+
+/** The vault's held planks. Prefer the image-bearing indexer route (production);
+ *  fall back to on-chain enumeration (works locally / when the indexer is down,
+ *  but without artwork). */
+async function fetchHeld(vault?: string | null): Promise<PickerToken[]> {
+  try {
+    const q = vault ? `?vault=${encodeURIComponent(vault)}` : "";
+    const res = await fetch(`/api/market/vault/held${q}`);
+    if (res.ok) {
+      const j = (await res.json()) as { tokens?: { tokenId: string; imageUrl: string | null }[] };
+      if (Array.isArray(j.tokens) && j.tokens.length) {
+        return j.tokens.map((t) => ({ tokenId: String(t.tokenId), imageUrl: t.imageUrl ?? undefined }));
+      }
+    }
+  } catch {
+    /* fall through to on-chain */
+  }
+  const ids = vault ? await getOwnedTokenIds(NFT_CONTRACT_ADDRESS, vault, { force: true }) : new Set<string>();
+  return toPicker(ids);
+}
+
+/** The connected wallet's planks, with artwork where resolvable. */
+async function fetchOwned(account?: string | null): Promise<PickerToken[]> {
+  if (!account) return [];
+  try {
+    const inv = await getOwnedInventory(MARKET_COLLECTIONS, account);
+    const items = inv.flatMap((g) => g.items).map((i) => ({ tokenId: String(i.tokenId), imageUrl: i.imageUrl || undefined }));
+    if (items.length) return items;
+  } catch {
+    /* fall through to on-chain */
+  }
+  const ids = await getOwnedTokenIds(NFT_CONTRACT_ADDRESS, account, { force: true });
+  return toPicker(ids);
+}
 
 export default function V3SwapView({ vaultAddress, active = true }: { vaultAddress?: string | null; active?: boolean }) {
   const { address, isConnected, connect } = useWallet();
@@ -49,33 +88,47 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
   // Default to Redeem odds — the only tab with real computed data on a fresh
   // vault; Price/Activity have nothing to show until there's trade volume.
   const [tab, setTab] = useState<TabKey>("odds");
+  // Trade widget state, lifted here so the grid and the widget share it.
+  const [action, setAction] = useState<Action>("buy");
+  const [redeemMode, setRedeemMode] = useState<"random" | "specific">("random");
+  const [cart, setCart] = useState<Set<string>>(new Set());
   const running = useRef(false);
+
+  // The grid shows the vault's held planks for everything except Deposit (where
+  // you pick from your OWN planks). Selecting is only on the two picked actions.
+  const gridSource = action === "deposit" ? owned : held;
+  const gridSelectable = action === "deposit" || (action === "redeem" && redeemMode === "specific");
+  const toggleCart = useCallback((tokenId: string) => {
+    setCart((prev) => {
+      const next = new Set(prev);
+      if (next.has(tokenId)) next.delete(tokenId);
+      else next.add(tokenId);
+      return next;
+    });
+  }, []);
+  // Owned/held ids don't mix in one cart — clear it whenever the mode changes.
+  const changeAction = useCallback((a: Action) => { setAction(a); setCart(new Set()); }, []);
+  const changeRedeemMode = useCallback((m: "random" | "specific") => { setRedeemMode(m); setCart(new Set()); }, []);
 
   // Migration nudge only if the connected wallet holds a retiring vault.
   const legacy = useLegacyPosition(isConnected ? address : null, active);
 
-  const toPickerTokens = (ids: Set<string>): PickerToken[] =>
-    Array.from(ids)
-      .sort((a, b) => Number(a) - Number(b))
-      .map((tokenId) => ({ tokenId }));
-
   const load = useCallback(async () => {
     try {
-      const [s, pend, e, p, ownedIds, heldIds] = await Promise.all([
+      const [s, pend, e, p, ownedTokens, heldTokens] = await Promise.all([
         getV3Snapshot(vaultAddress, address),
         getV3Pending(vaultAddress, address),
         address ? getEthBalance(address) : Promise.resolve(null),
         address ? getPlankBalance(address) : Promise.resolve(null),
-        // On-chain enumeration (no indexer): a wallet's planks, and the vault's.
-        address ? getOwnedTokenIds(NFT_CONTRACT_ADDRESS, address, { force: true }) : Promise.resolve(new Set<string>()),
-        vaultAddress ? getOwnedTokenIds(NFT_CONTRACT_ADDRESS, vaultAddress, { force: true }) : Promise.resolve(new Set<string>()),
+        fetchOwned(address),
+        fetchHeld(vaultAddress),
       ]);
       setSnap(s);
       setPending(pend);
       setEthBal(e);
       setPlankBal(p);
-      setOwned(toPickerTokens(ownedIds));
-      setHeld(toPickerTokens(heldIds));
+      setOwned(ownedTokens);
+      setHeld(heldTokens);
       setLoadError(null);
     } catch (e) {
       // Don't fail silently (the old behavior left the page stuck on "…" with
@@ -83,6 +136,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
       console.error("V3 vault read failed", e);
       setLoadError(decodeV3Error(e));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vaultAddress, address]);
 
   useEffect(() => {
@@ -212,57 +266,56 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
         )}
       </div>
 
-      {/* hero: focal trade card (bounded band) + narrow identity/art rail */}
-      <div className="mx-auto grid max-w-6xl items-start gap-4 md:grid-cols-[minmax(0,1fr)_280px] lg:grid-cols-[minmax(420px,520px)_minmax(280px,340px)] xl:grid-cols-[minmax(460px,560px)_minmax(300px,380px)]">
-        <V3SwapPanel
-          snap={snap}
-          ethBal={ethBal}
-          address={address}
-          isConnected={isConnected}
-          vaultAddress={vaultAddress}
-          ownedTokens={owned}
-          heldTokens={held}
-          invLoading={snap === null}
-          redeemSlotBusy={Boolean(hasPending && pending && !pending.isMe)}
-          onConnect={() => void connect()}
-          onAfterTx={refresh}
+      {/* hero: big artwork grid leads, the full trade widget docks as a rail */}
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]">
+        <VaultPlankGrid
+          tokens={gridSource}
+          selected={cart}
+          selectable={gridSelectable}
+          onToggle={toggleCart}
+          loading={snap === null}
+          headerLabel={action === "deposit" ? "Your planks" : "In the vault"}
+          emptyMessage={
+            action === "deposit"
+              ? isConnected ? "No planks in your wallet to deposit." : "Connect to deposit your planks."
+              : "No planks in the vault yet."
+          }
         />
 
-        <div className="space-y-4">
-          <div className="rounded-xl border border-line bg-panel-strong p-4">
-            <h3 className="flex items-center gap-2 text-[0.7rem] font-black uppercase tracking-wide text-cream">
-              Your position <span className="ml-auto text-[0.6rem] font-bold text-cream-muted">on V3</span>
-            </h3>
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Tile label="Shares" value={snap ? formatUnits(snap.shareBalance, 2) : "—"} note="vROBIN" size="lg" tone="gold" />
-              <Tile label="Planks held" value={plankBal !== null ? String(plankBal) : "—"} note="in your wallet" size="lg" tone="ok" />
-              <Tile label="Your LP" value={snap ? formatUnits(snap.lpBalance, 2) : "—"} note={`${poolShare}% of pool`} size="lg" tone="ok" />
-            </div>
-            <PlankStrip label="Your planks" tokens={owned} emptyMessage={isConnected ? "Planks you own show here — redeem one to get a plank." : "Connect to see your planks."} />
-            {!isConnected && (
-              <button type="button" onClick={() => void connect()} className="mt-3 min-h-[44px] w-full rounded-lg border border-line-strong bg-wood-950 text-sm font-bold text-cream">
-                Connect to see your position
-              </button>
-            )}
+        <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+          {/* compact position strip above the widget */}
+          <div className="grid grid-cols-3 gap-2">
+            <Tile label="Shares" value={snap ? formatUnits(snap.shareBalance, 2) : "—"} note="vROBIN" size="lg" tone="gold" />
+            <Tile label="Planks held" value={plankBal !== null ? String(plankBal) : "—"} note="your wallet" size="lg" tone="ok" />
+            <Tile label="Your LP" value={snap ? formatUnits(snap.lpBalance, 2) : "—"} note={`${poolShare}% pool`} size="lg" tone="ok" />
           </div>
 
-          <div className="rounded-xl border border-line bg-panel-strong p-4">
-            <h3 className="flex items-center gap-2 text-[0.7rem] font-black uppercase tracking-wide text-cream">
-              In the vault <span className="ml-auto text-[0.6rem] font-bold text-cream-muted">{snap ? `${snap.held} planks` : "live"}</span>
-            </h3>
-            <PlankStrip label="Redeemable now" tokens={held} emptyMessage="No planks in the vault yet — deposit one to seed it." />
-          </div>
+          <V3SwapPanel
+            snap={snap}
+            ethBal={ethBal}
+            address={address}
+            isConnected={isConnected}
+            vaultAddress={vaultAddress}
+            action={action}
+            onActionChange={changeAction}
+            redeemMode={redeemMode}
+            onRedeemModeChange={changeRedeemMode}
+            cart={cart}
+            redeemSlotBusy={Boolean(hasPending && pending && !pending.isMe)}
+            onConnect={() => void connect()}
+            onAfterTx={() => { setCart(new Set()); return refresh(); }}
+          />
         </div>
       </div>
 
-      {/* supporting analytics band — full width below the hero, sized to the
-          (currently thin) data rather than made a hollow focal column */}
-      <div className="overflow-hidden rounded-xl border border-line bg-panel-strong">
-        <div className="flex flex-wrap gap-1 border-b border-line bg-wood-950/60 p-1.5">
+      {/* demoted stats + odds — collapsed so the grid + widget own the fold */}
+      <details className="overflow-hidden rounded-xl border border-line bg-panel-strong">
+        <summary className="flex flex-wrap gap-1 border-b border-line bg-wood-950/60 p-1.5 cursor-pointer list-none">
           {([["odds", "Redeem odds"], ["price", "Price"], ["activity", "Activity"], ["liquidity", "Liquidity"]] as [TabKey, string][]).map(([id, label]) => (
-            <button key={id} type="button" onClick={() => setTab(id)} aria-pressed={tab === id} className={`min-h-11 rounded-lg px-3.5 py-2 text-[0.72rem] font-black ${tab === id ? "bg-gold-500/15 text-gold-300" : "text-cream-muted hover:text-cream"}`}>{label}</button>
+            <button key={id} type="button" onClick={(e) => { e.preventDefault(); setTab(id); }} aria-pressed={tab === id} className={`min-h-11 rounded-lg px-3.5 py-2 text-[0.72rem] font-black ${tab === id ? "bg-gold-500/15 text-gold-300" : "text-cream-muted hover:text-cream"}`}>{label}</button>
           ))}
-        </div>
+          <span className="ml-auto flex items-center pr-2 text-[0.66rem] text-cream-muted">Vault stats &amp; odds</span>
+        </summary>
         <div className="p-4">
           {tab === "odds" && (
             <p className="text-[0.78rem] text-cream-muted">
@@ -292,7 +345,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
             </div>
           )}
         </div>
-      </div>
+      </details>
     </section>
   );
 }
@@ -325,45 +378,3 @@ function Tile({
   );
 }
 
-/**
- * A compact strip of plank artwork — the mockup's stated differentiator for the
- * context column. Shows the real NFT image when resolvable; falls back to the
- * token id on a fresh local vault whose mock art has no tokenURI.
- */
-function PlankStrip({ label, tokens, emptyMessage }: { label: string; tokens: PickerToken[]; emptyMessage?: string }) {
-  const MAX = 8;
-  const shown = tokens.slice(0, MAX);
-  const extra = tokens.length - shown.length;
-  return (
-    <div className="mt-3">
-      <div className="mb-1.5 text-[0.5rem] font-black uppercase tracking-wide text-cream-muted">{label}</div>
-      {shown.length === 0 ? (
-        <div className="flex min-h-9 items-center rounded-md border border-dashed border-line px-2.5 text-[0.6rem] text-cream/45">
-          {emptyMessage ?? "None yet."}
-        </div>
-      ) : (
-      <div className="flex flex-wrap gap-1.5">
-        {shown.map((t) => (
-          <span
-            key={t.tokenId}
-            title={`Plank #${t.tokenId}`}
-            className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-md border border-line bg-wood-900 text-[0.55rem] font-black tabular-nums text-cream/50"
-          >
-            {t.imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={t.imageUrl} alt={`Plank #${t.tokenId}`} className="h-full w-full object-cover" />
-            ) : (
-              <>#{t.tokenId}</>
-            )}
-          </span>
-        ))}
-        {extra > 0 && (
-          <span className="flex h-9 min-w-9 items-center justify-center rounded-md border border-line bg-wood-900 px-1.5 text-[0.55rem] font-black tabular-nums text-cream-muted">
-            +{extra}
-          </span>
-        )}
-      </div>
-      )}
-    </div>
-  );
-}
