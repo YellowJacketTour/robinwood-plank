@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useWallet } from "@/lib/wallet-context";
+import { shortAddress } from "@/lib/trade";
 import { BUTTON_PRIMARY, CARD, LABEL } from "./ui";
 import MusicSection from "./sections/MusicSection";
 import ContentSection from "./sections/ContentSection";
@@ -59,8 +60,37 @@ function sectionFromLocation(): SectionId {
 }
 
 export default function AdminConsole() {
-  const { address, isConnected, status, connect } = useWallet();
+  const { address, isConnected, status, openConnect } = useWallet();
   const [section, setSection] = useState<SectionId>("music");
+  // null = not yet checked. The console is management tooling, not a public
+  // page: it stays hidden until we know the connected wallet can actually use
+  // it. This is presentation only — every save is still verified by signature
+  // server-side, so a forged "true" here buys nothing.
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!address) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsAdmin(null);
+      return;
+    }
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/whoami?address=${encodeURIComponent(address)}`,
+          { signal: controller.signal, cache: "no-store" }
+        );
+        const data = (await res.json()) as { isAdmin?: boolean };
+        if (!controller.signal.aborted) setIsAdmin(Boolean(data.isAdmin));
+      } catch {
+        // Fail closed: an unreachable check shows the "not an admin" notice
+        // rather than the tools.
+        if (!controller.signal.aborted) setIsAdmin(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [address]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -97,21 +127,32 @@ export default function AdminConsole() {
         <section className={CARD}>
           <h2 className={LABEL}>Wallet</h2>
           <p className="mt-2 max-w-lg text-sm text-cream">
-            Connect the admin wallet to edit content and use the management
-            tools. Read-only panels work without it; every save from a
-            non-admin wallet is rejected by the server.
+            Connect the admin wallet to use the management console.
           </p>
           <button
             type="button"
             className={`${BUTTON_PRIMARY} mt-4`}
-            onClick={() => void connect().catch(() => {})}
+            onClick={openConnect}
             disabled={status === "connecting"}
           >
             {status === "connecting" ? "Connecting…" : "Connect wallet"}
           </button>
         </section>
+      ) : isAdmin === null ? (
+        <section className={CARD}>
+          <p className="text-sm text-cream-muted">Checking the allowlist…</p>
+        </section>
+      ) : !isAdmin ? (
+        <section className={CARD}>
+          <h2 className={LABEL}>Not an admin wallet</h2>
+          <p className="mt-2 max-w-lg text-sm text-cream">
+            {shortAddress(address ?? "")} is not on the admin allowlist.
+            Connect a wallet that is, and the console will appear.
+          </p>
+        </section>
       ) : null}
 
+      {isConnected && isAdmin ? (
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-[190px_1fr]">
         <nav aria-label="Admin sections" className="lg:sticky lg:top-24 lg:self-start">
           <ul className="flex gap-1.5 overflow-x-auto pb-1 lg:flex-col lg:gap-1 lg:overflow-visible lg:pb-0">
@@ -137,6 +178,7 @@ export default function AdminConsole() {
           <Active address={address} />
         </div>
       </div>
+      ) : null}
     </>
   );
 }

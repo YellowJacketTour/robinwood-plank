@@ -678,7 +678,7 @@ jobs:
           # is a shell-injection question, not a formatting one.
           printf '%s' "$ADMIN_ADDRESSES" \
             | grep -Eq '^0x[0-9a-fA-F]{40}(,0x[0-9a-fA-F]{40})*$'
-          echo "Allowlist entries: $(printf '%s' "$ADMIN_ADDRESSES" | tr ',' '\n' | wc -l)"
+          echo "Allowlist entries: $(printf '%s\n' "$ADMIN_ADDRESSES" | tr ',' '\n' | wc -l)"
 
       - name: Configure trusted SSH host
         shell: bash
@@ -745,7 +745,17 @@ jobs:
           set -euo pipefail
           url="${INMOTION_HEALTH_URL:-https://plank.love}"
           for attempt in $(seq 1 20); do
-            code="$(curl -sS -o /dev/null -w '%{http_code}' "$url/api/health" || true)"
+            # Same headers the deploy job's health check uses. A bare curl
+            # user-agent is refused at the edge, which reads as an outage when
+            # the app is in fact serving perfectly well.
+            code="$(
+              curl -sS -o /dev/null -w '%{http_code}' \
+                --connect-timeout 5 --max-time 15 \
+                --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                --header "Accept: application/json" \
+                --header "Cache-Control: no-cache" \
+                "$url/api/health?attempt=$attempt" || true
+            )"
             if [ "$code" = "200" ]; then
               echo "Healthy after restart (attempt $attempt)."
               exit 0
