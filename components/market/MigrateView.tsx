@@ -13,7 +13,7 @@
  * Redeemed planks are shown as their real NFT image (plank-character-art rule).
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@/lib/wallet-context";
 import {
@@ -146,6 +146,78 @@ export default function MigrateView() {
   const sellDust = (vault: string, dust: bigint) =>
     run("Selling your dust for ETH…", () => sellShares(address!, dust, 200, undefined, vault));
 
+  // ── Guided orchestration ──────────────────────────────────────────────────
+  // Collapse the whole migration into a single ordered path and a "what's next"
+  // so the page walks the user through it instead of showing a wall of buttons.
+  const sources = pos.plan?.sources ?? [];
+  const slotFreeFor = useCallback(
+    (addr: string) => !(pos.slots[addr.toLowerCase()]?.busy ?? false),
+    [pos.slots]
+  );
+
+  type NextAction =
+    | { kind: "withdrawLp"; s: SourcePlan }
+    | { kind: "redeem"; s: SourcePlan }
+    | { kind: "deposit" }
+    | { kind: "dust"; s: SourcePlan }
+    | null;
+
+  // Ordered priority: clear each source's LP → redeem its planks → deposit the
+  // planks now in the wallet into V3 → mop up dust. Sources are already V2→V1.
+  const nextAction: NextAction = useMemo(() => {
+    for (const s of sources) {
+      if (s.needsLpWithdraw && s.lpWithdrawCovered) return { kind: "withdrawLp", s };
+      if (s.redeemableNfts > 0 && slotFreeFor(s.address)) return { kind: "redeem", s };
+    }
+    if (pos.owned.length > 0) return { kind: "deposit" };
+    for (const s of sources) if (s.hasDust) return { kind: "dust", s };
+    return null;
+  }, [sources, pos.owned.length, slotFreeFor]);
+
+  const nextLabel = (n: NextAction): string => {
+    if (!n) return "All done";
+    if (n.kind === "withdrawLp") return `Withdraw your ${n.s.version} liquidity`;
+    if (n.kind === "redeem") return `Redeem a plank from ${n.s.version}`;
+    if (n.kind === "deposit") return `Deposit ${pos.owned.length} plank${pos.owned.length === 1 ? "" : "s"} into ${primary?.version ?? "V3"}`;
+    return `Sell your ${n.s.version} dust for ETH`;
+  };
+
+  const doNext = useCallback(async () => {
+    const n = nextAction;
+    if (!n) return;
+    if (n.kind === "withdrawLp") await withdrawLp(n.s.address, n.s.lpShareCredit, n.s.lpEthCredit);
+    else if (n.kind === "redeem") await redeemOne(n.s.address);
+    else if (n.kind === "deposit") await depositOwned();
+    else if (n.kind === "dust") await sellDust(n.s.address, n.s.dustShares);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextAction]);
+
+  // Auto-migrate: an effect drives one step at a time off fresh state (avoids a
+  // stale-closure loop). Stops on completion, on error, or if nothing is doable.
+  const [auto, setAuto] = useState(false);
+  useEffect(() => {
+    if (!auto) return;
+    if (error) { setAuto(false); return; }
+    if (busy) return;
+    if (!nextAction) { setAuto(false); return; }
+    void doNext();
+  }, [auto, busy, error, nextAction, doNext]);
+
+  // Ordered remaining steps, for the stepper checklist.
+  const steps = useMemo(() => {
+    const out: { key: string; label: string; sub: string }[] = [];
+    for (const s of sources) {
+      if (s.needsLpWithdraw)
+        out.push({ key: `lp-${s.address}`, label: `Withdraw ${s.version} liquidity`, sub: `${formatShares(s.lpShareCredit, 2)} sh${s.lpEthCredit > BigInt(0) ? ` + ${formatShares(s.lpEthCredit, 4)} Ξ` : ""} back to shares` });
+      for (let i = 0; i < s.redeemableNfts; i++)
+        out.push({ key: `rd-${s.address}-${i}`, label: `Redeem a plank from ${s.version}`, sub: "drand draw · relayer finishes it for you" });
+    }
+    if (pos.owned.length > 0)
+      out.push({ key: "dep", label: `Deposit ${pos.owned.length} plank${pos.owned.length === 1 ? "" : "s"} into ${primary?.version ?? "V3"}`, sub: `mints ${pos.owned.length} ${primary?.version ?? "V3"} share${pos.owned.length === 1 ? "" : "s"}` });
+    for (const s of sources) if (s.hasDust) out.push({ key: `dust-${s.address}`, label: `Sell ${s.version} dust`, sub: `${formatShares(s.dustShares, 2)} sh → ETH` });
+    return out;
+  }, [sources, pos.owned.length, primary?.version]);
+
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
@@ -218,59 +290,135 @@ export default function MigrateView() {
               </div>
             )}
 
-            {pos.plan?.sources.map((s) => (
-              <SourceCard
-                key={s.address}
-                s={s}
-                slot={pos.slots[s.address.toLowerCase()]}
-                busy={busy}
-                onWithdrawLp={() => withdrawLp(s.address, s.lpShareCredit, s.lpEthCredit)}
-                onRedeem={() => redeemOne(s.address)}
-                onSellDust={() => sellDust(s.address, s.dustShares)}
-                onFinishMine={() => finishMine(s.address)}
-                onSettleTheirs={(r) => settleTheirs(s.address, r)}
-                onForfeit={(r) => setConfirmForfeit({ vault: s.address, requester: r })}
-              />
-            ))}
-
-            {pos.owned.length > 0 && (
-              <div className="rounded-xl border border-line bg-panel-strong p-4">
-                <h3 className="text-sm font-extrabold text-cream">
-                  Planks in your wallet ({pos.owned.length}) — ready to deposit
-                </h3>
-                <p className="mt-1 text-[0.7rem] text-cream/60">
-                  Deposit these into {primary?.version ?? "the current vault"} to finish. Two signatures the
-                  first time (approve, then deposit).
-                </p>
-                {pos.owned.some((p) => p.image) && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {pos.owned.slice(0, 12).map((p) =>
-                      p.image ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          key={p.tokenId}
-                          src={p.image}
-                          alt={p.name ?? `Plank #${p.tokenId}`}
-                          className="h-14 w-14 rounded-md border border-line object-cover"
-                        />
-                      ) : null
-                    )}
-                  </div>
+            {/* Guided path — one clear next step, or run the whole thing */}
+            <div className="rounded-xl border border-line bg-panel-strong p-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="font-display text-xl text-gold-300">
+                  {nextAction ? "Your migration path" : "Migration complete"}
+                </h2>
+                {steps.length > 0 && (
+                  <span className="text-[0.7rem] font-bold tabular-nums text-cream-muted">
+                    {steps.length} step{steps.length === 1 ? "" : "s"} left
+                  </span>
                 )}
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => depositOwned()}
-                  className="mt-3 inline-flex min-h-[44px] items-center rounded-lg bg-gold-500 px-4 text-sm font-black text-[#261105] disabled:opacity-50"
-                >
-                  Deposit {pos.owned.length} plank{pos.owned.length === 1 ? "" : "s"} into{" "}
-                  {primary?.version ?? "the current vault"}
-                </button>
               </div>
-            )}
+
+              {steps.length > 0 && (
+                <ol className="mt-3 space-y-1.5">
+                  {steps.slice(0, 8).map((st, i) => (
+                    <li
+                      key={st.key}
+                      className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 ${
+                        i === 0 ? "border-gold-500/50 bg-gold-500/10" : "border-line bg-wood-950"
+                      }`}
+                    >
+                      <span
+                        className={`mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full text-[0.6rem] font-black tabular-nums ${
+                          i === 0 ? "bg-gold-500 text-[#261105]" : "border border-line-strong text-cream-muted"
+                        }`}
+                      >
+                        {i + 1}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-[0.8rem] font-bold text-cream">{st.label}</span>
+                        <span className="block text-[0.66rem] text-cream/55">{st.sub}</span>
+                        {i === 0 && status && (
+                          <span className="mt-1 block text-[0.66rem] text-gold-300">
+                            <span className="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-gold-400 align-middle" />
+                            {status}
+                          </span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                  {steps.length > 8 && (
+                    <li className="px-3 text-[0.66rem] text-cream/50">+{steps.length - 8} more…</li>
+                  )}
+                </ol>
+              )}
+
+              {nextAction ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void doNext()}
+                    className="inline-flex min-h-[44px] items-center rounded-lg bg-gold-500 px-4 text-sm font-black text-[#261105] disabled:opacity-50"
+                  >
+                    {busy ? "Working…" : `Continue — ${nextLabel(nextAction)}`}
+                  </button>
+                  {!auto ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setAuto(true)}
+                      className="inline-flex min-h-[44px] items-center rounded-lg border border-line-strong bg-wood-950 px-4 text-sm font-bold text-cream disabled:opacity-50"
+                    >
+                      Auto-migrate everything
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setAuto(false)}
+                      className="inline-flex min-h-[44px] items-center rounded-lg border border-amber-400/50 bg-amber-500/10 px-4 text-sm font-bold text-amber-200"
+                    >
+                      Pause auto-migrate
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-3">
+                  <p className="text-sm text-emerald-300">Everything is migrated into {primary?.version ?? "V3"}. 🎉</p>
+                  <Link
+                    href="/market?tab=swap"
+                    className="mt-2 inline-flex min-h-[44px] items-center rounded-lg bg-gold-500 px-4 text-sm font-black text-[#261105]"
+                  >
+                    Open Instant Swap
+                  </Link>
+                </div>
+              )}
+              <p className="mt-2 text-[0.66rem] text-cream/50">
+                You sign each on-chain step; redeems finish automatically via the relayer. Stopping anytime is
+                safe — redeemed planks sit in your wallet until you deposit them.
+              </p>
+            </div>
+
+            {/* Per-vault detail + manual controls / rescue, tucked away */}
+            {pos.plan?.sources.length ? (
+              <details className="overflow-hidden rounded-xl border border-line bg-panel-strong">
+                <summary className="cursor-pointer list-none px-4 py-3 text-[0.72rem] font-bold text-cream-muted hover:text-cream">
+                  Per-vault details &amp; manual controls
+                </summary>
+                <div className="space-y-4 border-t border-line p-4">
+                  {pos.plan.sources.map((s) => (
+                    <SourceCard
+                      key={s.address}
+                      s={s}
+                      slot={pos.slots[s.address.toLowerCase()]}
+                      busy={busy}
+                      onWithdrawLp={() => withdrawLp(s.address, s.lpShareCredit, s.lpEthCredit)}
+                      onRedeem={() => redeemOne(s.address)}
+                      onSellDust={() => sellDust(s.address, s.dustShares)}
+                      onFinishMine={() => finishMine(s.address)}
+                      onSettleTheirs={(r) => settleTheirs(s.address, r)}
+                      onForfeit={(r) => setConfirmForfeit({ vault: s.address, requester: r })}
+                    />
+                  ))}
+                </div>
+              </details>
+            ) : null}
           </div>
 
           <aside className="space-y-3">
+            <div className="rounded-xl border border-line bg-panel-strong p-4">
+              <h3 className="text-sm font-extrabold text-cream">The honest math</h3>
+              <ul className="mt-2 space-y-1.5 text-[0.72rem] text-cream/70">
+                <li><b className="text-cream">Redeem</b> on the old vault burns <b className="text-cream">1 share</b> + a flat ETH fee and hands you the plank.</li>
+                <li><b className="text-cream">Deposit</b> into {primary?.version ?? "V3"} mints <b className="text-cream">exactly 1 share</b> for the same flat ETH fee.</li>
+                <li>Round-trip cost is a little ETH in fees — <b className="text-cream">no migration tax</b>, no share haircut.</li>
+                <li>The old pools&apos; seed ETH is non-withdrawable by design and stays behind — migrating doesn&apos;t recover it.</li>
+              </ul>
+            </div>
             <div className="rounded-xl border border-line bg-panel-strong p-4">
               <h3 className="text-sm font-extrabold text-cream">What can never happen</h3>
               <ul className="mt-2 space-y-1.5 text-[0.72rem] text-cream/70">
