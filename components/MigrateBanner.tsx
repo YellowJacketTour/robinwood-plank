@@ -36,20 +36,19 @@ export default function MigrateBanner() {
     }
   }, []);
 
-  if (!MARKET_ENABLED || onMigrate || !isConnected || dismissed || !pos.hasValue) {
+  // Only nag when value is still stuck in a retiring vault — NOT when the wallet
+  // merely holds planks (those are the result of migrating, not a to-do).
+  if (!MARKET_ENABLED || onMigrate || !isConnected || dismissed || !pos.hasLegacyValue) {
     return null;
   }
 
   const totalShares =
     pos.plan?.sources.reduce((sum, s) => sum + s.totalShares, BigInt(0)) ?? BigInt(0);
-  const planks = pos.plan?.totalRedeemableNfts ?? 0;
 
   const detail =
     totalShares > BigInt(0)
       ? `Your wallet holds ${formatShares(totalShares, 2)} shares in a retiring vault`
-      : pos.owned.length > 0
-        ? `You have ${pos.owned.length} plank${pos.owned.length === 1 ? "" : "s"} to move into the current vault`
-        : "You have a pending redeem to finish";
+      : "You have a pending redeem to finish in a retiring vault";
 
   return (
     <div
@@ -59,8 +58,7 @@ export default function MigrateBanner() {
     >
       <span className="h-2.5 w-2.5 flex-none rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.7)]" />
       <p className="min-w-0 flex-1 text-sm text-cream">
-        <b className="text-gold-300">The old vaults are retiring.</b> {detail}
-        {planks > 0 ? ` — move your plank${planks === 1 ? "" : "s"} in a few clicks.` : "."}
+        <b className="text-gold-300">The old vaults are retiring.</b> {detail} — redeem it out in a few clicks.
       </p>
       <Link
         href="/migrate"
