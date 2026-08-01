@@ -1329,35 +1329,42 @@ export default function MarketView() {
               onSelect={setVaultAddr}
               active={tab === "swap"}
             />
-            <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-              {vaultGeneration(activeVault?.address ?? vaultAddr) >= 3 ? (
+            {vaultGeneration(activeVault?.address ?? vaultAddr) >= 3 ? (
+              // V3: just the trade card. The V2-only vault panels (living
+              // liquidity, dashboard, odds) can't read V3's shape, so they are
+              // omitted until the full V3 page (context column + tabs) lands.
+              <div className="max-w-md">
                 <V3SwapPanel
                   vaultAddress={activeVault?.address ?? vaultAddr}
                   active={tab === "swap"}
                 />
-              ) : (
-                <SwapPanel
-                  account={account}
-                  onConnect={handleConnect}
-                  active={tab === "swap"}
-                  collection={COLLECTION}
-                  vaultAddress={activeVault?.address ?? COLLECTION.vaultAddress ?? null}
-                  vaultLabel={
-                    activeVault?.role === "legacy"
-                      ? "legacy deposits"
-                      : "current vault"
-                  }
-                />
-              )}
-              <div className="space-y-3">
-                <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
-                <VaultDashboard vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
               </div>
-            </div>
-            <div className="grid items-start gap-3 md:grid-cols-2">
-              <NftPriceChart active={tab === "swap"} />
-              <RedeemOdds vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
-            </div>
+            ) : (
+              <>
+                <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                  <SwapPanel
+                    account={account}
+                    onConnect={handleConnect}
+                    active={tab === "swap"}
+                    collection={COLLECTION}
+                    vaultAddress={activeVault?.address ?? COLLECTION.vaultAddress ?? null}
+                    vaultLabel={
+                      activeVault?.role === "legacy"
+                        ? "legacy deposits"
+                        : "current vault"
+                    }
+                  />
+                  <div className="space-y-3">
+                    <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
+                    <VaultDashboard vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
+                  </div>
+                </div>
+                <div className="grid items-start gap-3 md:grid-cols-2">
+                  <NftPriceChart active={tab === "swap"} />
+                  <RedeemOdds vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
+                </div>
+              </>
+            )}
             {/* Trades stay dual-vault (V1 + V2) regardless of selection */}
             <VaultTradeHistory />
             {dualVaultMode() && (
