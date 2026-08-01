@@ -21,6 +21,11 @@ export const runtime = "nodejs";
  */
 const MAX_BODY_BYTES = 64 * 1024;
 
+// In dev-local mode the whole app points at a local node whose state changes as
+// you trade; serving reads from the rpc-cache would make the UI look stale right
+// after a swap. Bypass the cache entirely there (upstream is localhost anyway).
+const DEV_LOCAL = process.env.NEXT_PUBLIC_DEV_LOCAL_CHAIN === "1";
+
 type UpstreamRpc = { jsonrpc?: string; id?: unknown; result?: unknown; error?: unknown };
 
 /**
@@ -93,7 +98,7 @@ export async function POST(req: Request) {
     entries = null; // malformed; let upstream reject it
   }
 
-  if (entries && entries.every((e) => typeof e?.method === "string")) {
+  if (!DEV_LOCAL && entries && entries.every((e) => typeof e?.method === "string")) {
     const cached = entries.map((e) => peekRpcCache<unknown>(e.method!, e.params ?? []));
     const missIdx = cached.map((v, i) => (v === undefined ? i : -1)).filter((i) => i >= 0);
 

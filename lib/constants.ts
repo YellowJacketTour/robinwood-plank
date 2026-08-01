@@ -44,6 +44,19 @@ export const CHAIN = DEV_LOCAL_CHAIN
       uniswapSlug: "robinhood",
     } as const);
 
+/**
+ * RPC URL the browser read-provider should use — always the same-origin
+ * `/api/rpc` proxy, never the node directly. Both chains have a CORS problem
+ * that blocks direct browser reads: the public Robinhood RPC sends a malformed
+ * duplicate `Access-Control-Allow-Origin: *,*` header, and the local dev node's
+ * preflight omits POST. The proxy does the request server-side (where CORS does
+ * not apply) and is dev-aware via CLIENT_PROXY_RPC_URLS. `CHAIN.rpcUrls.default`
+ * stays the real node URL — that is what wallet_addEthereumChain seeds into
+ * MetaMask, and the wallet talks to the node directly, not subject to page CORS.
+ * Relative here; the read layer resolves it against window.origin.
+ */
+export const READ_RPC_URL = "/api/rpc";
+
 /** Native ETH sentinel used by the Uniswap Trading API. */
 export const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000";
 
