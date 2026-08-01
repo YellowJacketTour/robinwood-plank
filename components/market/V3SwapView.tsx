@@ -42,7 +42,7 @@ import type { PickerToken } from "@/components/market/TokenPicker";
 import V3SwapPanel, { type Action } from "@/components/market/V3SwapPanel";
 import VaultPlankGrid from "@/components/market/VaultPlankGrid";
 
-type TabKey = "price" | "odds" | "activity" | "liquidity";
+type TabKey = "vault" | "odds" | "price" | "activity" | "liquidity";
 
 const toPicker = (ids: Set<string>): PickerToken[] =>
   Array.from(ids).sort((a, b) => Number(a) - Number(b)).map((tokenId) => ({ tokenId }));
@@ -154,9 +154,8 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
   const [loadError, setLoadError] = useState<string | null>(null);
   const [rescueBusy, setRescueBusy] = useState(false);
   const [rescueMsg, setRescueMsg] = useState<string | null>(null);
-  // Default to Redeem odds — the only tab with real computed data on a fresh
-  // vault; Price/Activity have nothing to show until there's trade volume.
-  const [tab, setTab] = useState<TabKey>("odds");
+  // The unified tabbed panel leads with the plank grid ("In the vault").
+  const [tab, setTab] = useState<TabKey>("vault");
   const [activity, setActivity] = useState<V3Activity[] | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
   // Trade widget state, lifted here so the grid and the widget share it.
@@ -178,8 +177,17 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
     });
   }, []);
   // Owned/held ids don't mix in one cart — clear it whenever the mode changes.
-  const changeAction = useCallback((a: Action) => { setAction(a); setCart(new Set()); }, []);
-  const changeRedeemMode = useCallback((m: "random" | "specific") => { setRedeemMode(m); setCart(new Set()); }, []);
+  // Picking Deposit / targeted Redeem surfaces the grid tab so you can select.
+  const changeAction = useCallback((a: Action) => {
+    setAction(a);
+    setCart(new Set());
+    if (a === "deposit" || a === "redeem") setTab("vault");
+  }, []);
+  const changeRedeemMode = useCallback((m: "random" | "specific") => {
+    setRedeemMode(m);
+    setCart(new Set());
+    if (m === "specific") setTab("vault");
+  }, []);
 
   // Migration nudge only if the connected wallet holds a retiring vault.
   const legacy = useLegacyPosition(isConnected ? address : null, active);
@@ -267,7 +275,10 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
   const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
   const hasPending = Boolean(pending && pending.requester !== ZERO_ADDR);
   const sharePrice = snap && snap.shareReserve > BigInt(0) ? (snap.ethReserve * SHARE_UNIT) / snap.shareReserve : BigInt(0);
+  // Pool TVL in ETH: the ETH side plus the share side valued at the spot price.
+  const tvl = snap ? snap.ethReserve + (snap.shareReserve * sharePrice) / SHARE_UNIT : BigInt(0);
   const lockedLp = snap ? snap.lockedLp : BigInt(0);
+  const explorer = (kind: "address" | "tx", v: string) => `${CHAIN.blockExplorers.default.url}/${kind}/${v}`;
   const poolShare = useMemo(() => {
     if (!snap || snap.totalLpSupply === BigInt(0)) return "0.0";
     return ((Number(snap.lpBalance) / Number(snap.totalLpSupply)) * 100).toFixed(1);
@@ -337,26 +348,26 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
         </div>
       ) : null}
 
-      {/* single V3 vault line */}
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-line bg-panel-strong px-4 py-3">
-        <span className="inline-flex items-center gap-2">
-          <span className="text-sm font-extrabold text-cream">RobinWood Vault</span>
-          <span className="font-mono text-[0.66rem] text-cream-muted">{snap ? shortVault(snap.address) : "…"}</span>
-        </span>
+      {/* header: vault identity + status */}
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 className="font-display text-2xl text-gold-300">RobinWood Vault</h2>
+        <span className="font-mono text-[0.7rem] text-cream-muted">{snap ? shortVault(snap.address) : "…"}</span>
         {snap && (
-          <span className="flex flex-wrap gap-x-4 gap-y-1 text-[0.72rem] tabular-nums text-cream-muted sm:ml-auto">
-            <span className={snap.poolOpen ? "text-emerald-400" : "text-amber-400"}>● {snap.poolOpen ? "Open" : "Closed"}</span>
-            <span><b className="text-gold-300">{snap.held}</b> planks</span>
-            <span><b className="text-gold-300">{formatUnits(snap.ethReserve, 3)} Ξ</b> liquidity</span>
-            <span><b className="text-gold-300">{formatUnits(snap.shareReserve, 2)}</b> shares</span>
-            <span><b className="text-gold-300">{formatUnits(sharePrice, 5)} Ξ</b>/share</span>
-            <span><b className="text-gold-300">{formatUnits(snap.mintFeeWei)} Ξ</b> deposit/redeem</span>
-            <span><b className="text-gold-300">{(snap.swapFeeBps / 100).toFixed(2)}%</b> swap fee</span>
-          </span>
+          <span className={`text-[0.72rem] font-bold ${snap.poolOpen ? "text-emerald-400" : "text-amber-400"}`}>● {snap.poolOpen ? "Open" : "Closed"}</span>
         )}
       </div>
 
-      {/* hero: trade widget docks left, the big artwork grid fills the right */}
+      {/* NFTX-style stat row */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <BigStat label="TVL" value={snap ? `${formatUnits(tvl, 3)} Ξ` : "—"} />
+        <BigStat label="Circulating supply" value={snap ? formatUnits(snap.totalSupply, 2) : "—"} sub="vROBIN" />
+        <BigStat label="Swap fee" value={snap ? `${(snap.swapFeeBps / 100).toFixed(2)}%` : "—"} />
+        <BigStat label="Floor / share" value={snap ? `${formatUnits(sharePrice, 5)} Ξ` : "—"} />
+        <BigStat label="NFTs in vault" value={snap ? String(snap.held) : "—"} />
+        <BigStat label="Available" value={snap ? String(snap.availableCount) : "—"} sub="redeemable" />
+      </div>
+
+      {/* hero: trade widget + vault info dock left, the tabbed panel fills right */}
       <div className="grid items-start gap-4 lg:grid-cols-[360px_minmax(0,1fr)] xl:grid-cols-[400px_minmax(0,1fr)]">
         <div className="space-y-3 lg:sticky lg:top-4 lg:self-start">
           {/* compact position strip above the widget */}
@@ -381,31 +392,43 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
             onConnect={() => void connect()}
             onAfterTx={() => { setCart(new Set()); return refresh(); }}
           />
+
+          {/* Vault info */}
+          <div className="rounded-xl border border-line bg-panel-strong p-4">
+            <h3 className="text-[0.7rem] font-black uppercase tracking-wide text-cream">Vault info</h3>
+            <dl className="mt-2 space-y-1.5 text-[0.72rem]">
+              <InfoRow label="Token standard" value="ERC-20 shares · ERC-721 planks" />
+              <InfoRow label="Vault" value={snap ? shortVault(snap.address) : "…"} href={snap && hasExplorer ? explorer("address", snap.address) : undefined} />
+              <InfoRow label="Collection" value={shortVault(NFT_CONTRACT_ADDRESS)} href={hasExplorer ? explorer("address", NFT_CONTRACT_ADDRESS) : undefined} />
+              <InfoRow label="Swap fee" value={snap ? `${(snap.swapFeeBps / 100).toFixed(2)}% → LPs` : "…"} />
+              <InfoRow label="Deposit / redeem" value={snap ? `${formatUnits(snap.mintFeeWei)} Ξ → treasury` : "…"} />
+            </dl>
+          </div>
         </div>
 
-        <VaultPlankGrid
-          tokens={gridSource}
-          selected={cart}
-          selectable={gridSelectable}
-          onToggle={toggleCart}
-          loading={snap === null}
-          headerLabel={action === "deposit" ? "Your planks" : "In the vault"}
-          emptyMessage={
-            action === "deposit"
-              ? isConnected ? "No planks in your wallet to deposit." : "Connect to deposit your planks."
-              : "No planks in the vault yet."
-          }
-        />
-      </div>
-
-      {/* vault stats + odds — full-width band below the hero */}
-      <div className="overflow-hidden rounded-xl border border-line bg-panel-strong">
-        <div className="flex flex-wrap gap-1 border-b border-line bg-wood-950/60 p-1.5">
-          {([["odds", "Redeem odds"], ["price", "Price"], ["activity", "Activity"], ["liquidity", "Liquidity"]] as [TabKey, string][]).map(([id, label]) => (
-            <button key={id} type="button" onClick={() => setTab(id)} aria-pressed={tab === id} className={`min-h-11 rounded-lg px-3.5 py-2 text-[0.72rem] font-black ${tab === id ? "bg-gold-500/15 text-gold-300" : "text-cream-muted hover:text-cream"}`}>{label}</button>
-          ))}
-        </div>
-        <div className="p-4">
+        {/* unified tabbed panel: In the vault + Odds + Price + Activity + Liquidity */}
+        <div className="overflow-hidden rounded-xl border border-line bg-panel-strong">
+          <div className="flex flex-wrap gap-1 border-b border-line bg-wood-950/60 p-1.5">
+            {([["vault", "In the vault"], ["odds", "Redeem odds"], ["price", "Price"], ["activity", "Activity"], ["liquidity", "Liquidity"]] as [TabKey, string][]).map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setTab(id)} aria-pressed={tab === id} className={`min-h-11 rounded-lg px-3.5 py-2 text-[0.72rem] font-black ${tab === id ? "bg-gold-500/15 text-gold-300" : "text-cream-muted hover:text-cream"}`}>{label}</button>
+            ))}
+          </div>
+          <div className="p-4">
+            {tab === "vault" && (
+              <VaultPlankGrid
+                tokens={gridSource}
+                selected={cart}
+                selectable={gridSelectable}
+                onToggle={toggleCart}
+                loading={snap === null}
+                headerLabel={action === "deposit" ? "Your planks" : "In the vault"}
+                emptyMessage={
+                  action === "deposit"
+                    ? isConnected ? "No planks in your wallet to deposit." : "Connect to deposit your planks."
+                    : "No planks in the vault yet."
+                }
+              />
+            )}
           {tab === "odds" && (
             <p className="text-[0.78rem] text-cream-muted">
               A random redeem draws uniformly from the {snap?.availableCount ?? 0} available planks
@@ -488,9 +511,38 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
               <Tile label="Pool shares" value={formatUnits(snap.shareReserve, 2)} size="sm" tone="neutral" />
             </div>
           )}
+          </div>
         </div>
       </div>
     </section>
+  );
+}
+
+/** A prominent vault stat for the NFTX-style stat row (big value, small label). */
+function BigStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-xl border border-line bg-panel-strong px-3 py-2.5">
+      <div className="text-[0.56rem] font-black uppercase tracking-wide text-cream-muted">{label}</div>
+      <div className="font-mono text-xl font-black tabular-nums text-cream">{value}</div>
+      {sub && <div className="text-[0.56rem] text-cream/45">{sub}</div>}
+    </div>
+  );
+}
+
+/** A label/value row for the Vault info panel; value links out when href given. */
+function InfoRow({ label, value, href }: { label: string; value: string; href?: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <dt className="text-cream-muted">{label}</dt>
+      {href ? (
+        <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-mono tabular-nums text-gold-300 hover:underline">
+          {value}
+          <ExternalLink size={11} />
+        </a>
+      ) : (
+        <dd className="font-mono tabular-nums text-cream">{value}</dd>
+      )}
+    </div>
   );
 }
 

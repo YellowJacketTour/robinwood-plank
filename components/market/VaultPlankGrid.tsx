@@ -52,7 +52,7 @@ export default function VaultPlankGrid({
   }, []);
 
   return (
-    <div className="rounded-xl border border-line bg-panel-strong p-3 sm:p-4">
+    <div>
       <div className="mb-3 flex flex-wrap items-baseline gap-x-2">
         <h3 className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-cream">{headerLabel}</h3>
         <span className="text-[0.72rem] tabular-nums text-cream-muted">· {tokens.length} plank{tokens.length === 1 ? "" : "s"}</span>
