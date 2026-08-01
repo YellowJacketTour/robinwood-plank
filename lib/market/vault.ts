@@ -1,6 +1,6 @@
 import { BrowserProvider, Contract, Interface, JsonRpcProvider, parseEther } from "ethers";
 import vaultAbi from "@/lib/market/vault-abi.json";
-import { CHAIN, MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } from "@/lib/constants";
+import { CHAIN, MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES, READ_RPC_URL } from "@/lib/constants";
 import {
   collectionVaultAddresses,
   MARKET_COLLECTIONS,
@@ -76,6 +76,18 @@ function collectionAddress(): string {
   return c.contractAddress;
 }
 
+/** Resolve READ_RPC_URL to an absolute URL. A relative same-origin proxy path
+ *  ("/api/rpc") is resolved against the browser origin — these reads run client
+ *  side. Both the public Robinhood RPC and the local dev node block direct
+ *  browser reads via CORS; the proxy does the request server-side. */
+function readUrl(): string {
+  if (READ_RPC_URL.startsWith("/")) {
+    const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+    return origin + READ_RPC_URL;
+  }
+  return READ_RPC_URL;
+}
+
 /** Read-only contract handle (never used to send). */
 async function getVaultReader(vaultAddress?: string | null): Promise<Contract> {
   const address = requireVaultAddress(vaultAddress);
@@ -102,7 +114,7 @@ function getPublicVaultReader(vaultAddress?: string | null): Contract {
   const key = address.toLowerCase();
   const hit = publicVaultReaderCache.get(key);
   if (hit) return hit;
-  const provider = new JsonRpcProvider(CHAIN.rpcUrls.default, { chainId: CHAIN.id, name: CHAIN.name });
+  const provider = new JsonRpcProvider(readUrl(), { chainId: CHAIN.id, name: CHAIN.name });
   const c = new Contract(address, vaultAbi, provider);
   publicVaultReaderCache.set(key, c);
   return c;
@@ -809,7 +821,7 @@ export async function getVaultOnChainSnapshot(
 }
 
 async function getVaultBytecodeAt(addr: string): Promise<string> {
-  const res = await fetch(CHAIN.rpcUrls.default, {
+  const res = await fetch(readUrl(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
