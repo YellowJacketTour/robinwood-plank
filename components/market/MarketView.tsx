@@ -63,6 +63,28 @@ const loadSeaport = () => import("@/lib/market/seaport");
  * keccak + Seaport's MerkleTree) and only runs inside buy/accept handlers. */
 const loadOrderValidation = () => import("@/lib/market/order-validation");
 
+/**
+ * seaport-js runs a balance-and-approval pre-flight on the OFFERER (the
+ * seller, for a listing fulfillment) BEFORE the wallet ever opens, and
+ * throws these two bare strings verbatim
+ * (node_modules/@opensea/seaport-js/lib/utils/balanceAndApprovalCheck.js).
+ * Shown as-is they read like an accusation against the buyer's own wallet —
+ * "you don't have approval" — when they actually mean the seller moved the
+ * token or revoked approval after this page loaded (the 30s liveness cache
+ * in order-status.ts can't catch everything). Map them to the truth instead.
+ */
+const STALE_SELLER_ERRORS = new Set([
+  "The offerer does not have the amount needed to create or fulfill.",
+  "The offerer does not have the sufficient approvals.",
+]);
+
+function describeFulfillError(e: unknown): string {
+  if (e instanceof Error && STALE_SELLER_ERRORS.has(e.message)) {
+    return "This plank is no longer available — the seller's wallet changed since this page loaded.";
+  }
+  return e instanceof Error ? e.message : "Purchase failed.";
+}
+
 /** Fixed-height pulse placeholder — tab bodies stream in as their own
  * chunks, and the placeholder keeps the layout from jumping meanwhile. */
 function PanelSkeleton({ className = "min-h-64" }: { className?: string }) {
@@ -530,7 +552,14 @@ export default function MarketView() {
       setStatus("Purchase confirmed.");
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Purchase failed.");
+      // Console keeps the raw seaport-js string for debugging; the user only
+      // ever sees the mapped, blame-free copy.
+      console.error("Buy fulfillment failed:", e);
+      setError(describeFulfillError(e));
+      if (STALE_SELLER_ERRORS.has(e instanceof Error ? e.message : "")) {
+        setBuyTarget(null);
+        void refresh(); // the stale row disappears instead of staying clickable
+      }
     } finally {
       setStatus(null);
     }

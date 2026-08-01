@@ -916,8 +916,12 @@ export default function SwapPanel({
     }
   };
 
+  // SwapPanel only ever renders against a share-model (legacy) vault — see
+  // MarketView's generation branch, which routes V3 to V3SwapPanel instead —
+  // so these are never actually null in practice; the fallback is just to
+  // satisfy the shared (feeModel-aware) VaultStats type.
   const redeemCostForMode = stats
-    ? redeemCostWei(stats.redeemFeeBps, stats.targetPremiumBps, Boolean(tokenId))
+    ? redeemCostWei(stats.redeemFeeBps ?? 0, stats.targetPremiumBps ?? 0, Boolean(tokenId))
     : BigInt(0);
   const redeemInsufficient =
     mode === "redeem" && stats != null && shareBalance != null && shareBalance < redeemCostForMode;
@@ -1214,7 +1218,7 @@ export default function SwapPanel({
                     : mode === "redeem" && stats
                       ? `${formatTokenAmount(redeemCostForMode, 18, 4)} shares`
                       : mode === "deposit" && stats
-                        ? `${stats.mintFeeBps / 100}% mint fee`
+                        ? `${(stats.mintFeeBps ?? 0) / 100}% mint fee`
                         : "Live vault checks"}
                 </dd>
               </div>
@@ -1785,13 +1789,13 @@ export default function SwapPanel({
                 </div>
                 <p className="mt-1.5 text-[0.6rem] text-foreground/45">
                   One deposit mints ~{formatTokenAmount(
-                    BigInt(10) ** BigInt(18) - (BigInt(10) ** BigInt(18) * BigInt(stats.mintFeeBps)) / BigInt(10_000),
+                    BigInt(10) ** BigInt(18) - (BigInt(10) ** BigInt(18) * BigInt(stats.mintFeeBps ?? 0)) / BigInt(10_000),
                     18,
                     2
                   )}{" "}
-                  shares (mint fee {stats.mintFeeBps / 100}%). Random redeem needs{" "}
+                  shares (mint fee {(stats.mintFeeBps ?? 0) / 100}%). Random redeem needs{" "}
                   {formatTokenAmount(
-                    redeemCostWei(stats.redeemFeeBps, stats.targetPremiumBps, false),
+                    redeemCostWei(stats.redeemFeeBps ?? 0, stats.targetPremiumBps ?? 0, false),
                     18,
                     2
                   )}{" "}

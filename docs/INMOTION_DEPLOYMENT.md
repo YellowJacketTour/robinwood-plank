@@ -571,7 +571,7 @@ Before moving public traffic:
 - The Uniswap API key is not present in browser assets or responses.
 - `RPC_URL` is set to a private provider endpoint in `shared/.env.production`
   so server-side chain reads do not depend on the rate-limited public RPC.
-- V1 and V2 vault stats, held inventory, activity, and SSE update.
+- V1, V2, and V3 vault stats, held inventory, activity, and SSE update.
 - Random redemption is idle or settled with no actionable request.
 - Passenger logs show no restart loop or database-pool errors.
 - PostgreSQL is not remotely exposed.
