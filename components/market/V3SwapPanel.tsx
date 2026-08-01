@@ -195,7 +195,7 @@ export default function V3SwapPanel({
 
   return (
     <div className="rounded-2xl border border-line bg-panel-strong p-3.5">
-      <div className="grid grid-cols-5 gap-1 rounded-xl border border-line bg-wood-950 p-1">
+      <div className="grid grid-cols-3 gap-1 rounded-xl border border-line bg-wood-950 p-1 sm:grid-cols-5">
         {ACTIONS.map((a) => (
           <button
             key={a.id}
