@@ -69,11 +69,16 @@ jobs:
       PGPOOL_MAX: 4
       NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://plank.tanggang.life' }}
       NEXT_PUBLIC_MARKET_ENABLED: ${{ vars.NEXT_PUBLIC_MARKET_ENABLED || 'true' }}
-      # INTERIM: V1-only. V2 (0xc4B29D7a…) has a critical LP drain
-      # (docs/marketplank/AUDIT-2026-07-31-lp.md) and is kept OFF the frontend
-      # until V3 is deployed and users migrate. The LIVE value comes from the
-      # repo Variable; these defaults are the safety fallback — V1, never V2.
-      # At V3 deploy: set VAULT_ADDRESS=<V3> and LEGACY_ADDRESSES=<V1>,<V2>.
+      # As of 2026-08-01 V3 ("Premium Plank Liquidity") is live and the repo
+      # Variable NEXT_PUBLIC_MARKET_VAULT_ADDRESS points at it. V2/WormWood
+      # (0xc4B29D7a…) has a critical LP drain
+      # (docs/marketplank/AUDIT-2026-07-31-lp.md) and must never be
+      # recommended for new deposits or LP. The LIVE value comes from the
+      # repo Variable; the literal defaults below are only a CI safety
+      # fallback for if the Variable is ever unset — intentionally left at
+      # V1-only (never V2) rather than bumped to V3, so an unset Variable
+      # fails safe instead of silently reintroducing the live vault address
+      # into a build.
       NEXT_PUBLIC_MARKET_VAULT_ADDRESS: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_ADDRESS || '0xb2019Fd4cA24502e812C0C73b751Fa49979BF708' }}
       NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS || '' }}
       NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES || '' }}

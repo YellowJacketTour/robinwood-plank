@@ -1,5 +1,11 @@
 # V3 deploy runbook (Premium Plank Liquidity)
 
+**Status: executed.** MarketplankVaultV3 is live on Robinhood Chain mainnet at
+`0xacE28f72Fc3e15eA1671e689806694A9b0cE047D` (`VAULT_VERSION()==3`, share symbol
+`vROBIN`) since 2026-08-01, and the app cutover (Step 4) has been run — the repo
+variables now point at it. This runbook is retained as the operational record and
+as the procedure for any future vault generation.
+
 Automated, gated deploy + seed of `MarketplankVaultV3` to Robinhood Chain, then the
 app cutover. Everything below is executed by `.github/workflows/deploy-vault-v3.yml`
 (dispatch-only) + `scripts/deploy-and-seed-v3.ts`. The contract is **immutable** and
