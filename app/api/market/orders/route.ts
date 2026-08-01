@@ -117,9 +117,18 @@ export async function GET(req: Request) {
     try {
       const { getCollectionImageMap } = await import("@/lib/market/collection-index");
       const { NFT_CONTRACT_ADDRESS } = await import("@/lib/mint-contract");
+      const { resolveIpfsUrl } = await import("@/lib/ipfs");
       const map = await getCollectionImageMap(NFT_CONTRACT_ADDRESS);
+      // The index stores the RAW `ipfs://…` URI. A browser cannot load that, and
+      // a raw gateway URL in <img src> is blocked by ORB — so resolve to our
+      // same-origin proxy path here, exactly like our own listings do. Skipping
+      // this is what left every OpenSea row with a blank card in production.
+      // resolveIpfsUrl is idempotent, so an already-proxied value passes through.
       imageByTokenId = Object.fromEntries(
-        Object.entries(map ?? {}).map(([id, rec]) => [id, rec?.imageUri ?? ""])
+        Object.entries(map ?? {}).map(([id, rec]) => [
+          id,
+          rec?.imageUri ? resolveIpfsUrl(rec.imageUri) : "",
+        ])
       );
     } catch {
       // No index yet — cards fall back to the collection logo, as before.
