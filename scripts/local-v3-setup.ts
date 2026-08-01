@@ -106,7 +106,8 @@ async function main() {
   await nft.setApprovalForAll(v1Addr, true);
   await nft.setApprovalForAll(v2Addr, true);
 
-  // V1: 5 deposits (~4.95 sh), seed 2 sh + 0.3 ETH, open. Redeemable, no LP.
+  // V1: 5 deposits (=5.0 sh; the mint fee mints back to treasury==depositor),
+  //     seed 2 sh + 0.3 ETH, open. Leaves 3.0 redeemable shares, no LP.
   for (let id = 31; id <= 35; id++) await v1.deposit(id);
   await v1.seedShares(E("2"), { value: E("0.3") });
   await v1.openPool();

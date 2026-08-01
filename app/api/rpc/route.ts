@@ -125,7 +125,13 @@ export async function POST(req: Request) {
       if (cached[i] !== undefined) return { jsonrpc: "2.0", id: e.id ?? null, result: cached[i] };
       const k = missIdx.indexOf(i) + 1;
       const r = byId.get(k) ?? raws[missIdx.indexOf(i)];
-      if (r && r.error == null && r.result != null) {
+      // Upstream can return fewer batch entries than requested; never spread
+      // `undefined` (that ships a reply with neither result nor error, which
+      // ethers throws on) — synthesize a JSON-RPC error for the missing id.
+      if (!r) {
+        return { jsonrpc: "2.0", id: e.id ?? null, error: { code: -32603, message: "no response from upstream RPC" } };
+      }
+      if (r.error == null && r.result != null) {
         putRpcCache(e.method!, e.params ?? [], r.result);
       }
       return { ...r, id: e.id ?? null };

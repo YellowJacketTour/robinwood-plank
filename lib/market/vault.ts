@@ -483,7 +483,15 @@ export async function finishRandomRedeem(
   let available = false;
 
   while (Date.now() - started < timeoutMs) {
-    const who = (await getPendingRequester(vaultAddress)).toLowerCase();
+    // A transient read failure here must NOT abort the flow — the share is
+    // already burned on-chain. Skip this tick and retry rather than throwing.
+    let who: string | null = null;
+    try {
+      who = (await getPendingRequester(vaultAddress)).toLowerCase();
+    } catch {
+      await sleep(1_500);
+      continue;
+    }
     if (who === zero) {
       throw new Error(
         "No pending random redeem for your wallet — request may have already settled or failed."
@@ -494,9 +502,14 @@ export async function finishRandomRedeem(
         "Another wallet holds the vault redeem slot right now. Wait for them to finish, or use Settle for them if available."
       );
     }
-    const pend = await getPendingRound(vaultAddress);
-    round = pend.round;
-    available = pend.available;
+    try {
+      const pend = await getPendingRound(vaultAddress);
+      round = pend.round;
+      available = pend.available;
+    } catch {
+      await sleep(1_500);
+      continue;
+    }
     if (round > BigInt(0)) break;
     await sleep(1_500);
   }
@@ -635,13 +648,18 @@ export async function requestAndFinishRandomRedeem(
   while (Date.now() - started < timeoutMs) {
     const kick = await kickServerRandomSettle(vaultAddress, accountAddress);
     if (kick.ok && (kick.status === "settled" || kick.status === "forfeited" || kick.status === "idle")) {
-      // Confirm slot is free for us
-      const who = (await getPendingRequester(vaultAddress)).toLowerCase();
-      const me = accountAddress.toLowerCase();
-      const zero = "0x0000000000000000000000000000000000000000";
-      if (who === zero || who !== me) {
-        opts?.onProgress?.("Redeem complete — NFT delivered, slot free.");
-        return requestHash;
+      // Confirm slot is free for us — a transient read here shouldn't abort a
+      // flow whose request already committed; just re-poll next tick.
+      try {
+        const who = (await getPendingRequester(vaultAddress)).toLowerCase();
+        const me = accountAddress.toLowerCase();
+        const zero = "0x0000000000000000000000000000000000000000";
+        if (who === zero || who !== me) {
+          opts?.onProgress?.("Redeem complete — NFT delivered, slot free.");
+          return requestHash;
+        }
+      } catch {
+        /* transient — retry */
       }
     }
     if (kick.status === "no_key") break; // fall through to user gas

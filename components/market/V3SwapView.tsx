@@ -43,6 +43,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
   const [owned, setOwned] = useState<PickerToken[]>([]);
   const [held, setHeld] = useState<PickerToken[]>([]);
   const [pending, setPending] = useState<V3Pending | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [rescueBusy, setRescueBusy] = useState(false);
   const [rescueMsg, setRescueMsg] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("price");
@@ -73,8 +74,12 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
       setPlankBal(p);
       setOwned(toPickerTokens(ownedIds));
       setHeld(toPickerTokens(heldIds));
-    } catch {
-      /* keep last */
+      setLoadError(null);
+    } catch (e) {
+      // Don't fail silently (the old behavior left the page stuck on "…" with
+      // nothing logged). Keep the last good data, but surface a retry.
+      console.error("V3 vault read failed", e);
+      setLoadError(decodeV3Error(e));
     }
   }, [vaultAddress, address]);
 
@@ -121,6 +126,20 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
 
   return (
     <section data-market-shell className="space-y-4">
+      {/* couldn't read the vault at all — surface it instead of a forever "…" */}
+      {loadError && snap === null && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          <span className="min-w-0 flex-1">Couldn&apos;t reach the vault — {loadError}</span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="min-h-[40px] flex-none rounded-lg border border-rose-400/50 px-4 text-sm font-bold text-rose-100"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* migration nudge (hidden unless the wallet holds V1/V2) */}
       {isConnected && legacy.hasValue && (
         <Link
