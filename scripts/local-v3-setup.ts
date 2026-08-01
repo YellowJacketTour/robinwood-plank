@@ -70,6 +70,16 @@ async function main() {
   // Add real depth so the deployer also holds an ordinary LP position.
   await vault.addLiquidity(E("3"), 0, { value: E("0.4") });
 
+  // Optionally fund YOUR connected wallet so you can play with it directly
+  // (instead of importing a test key): PLAYER_ADDRESS=0x... hardhat run ...
+  const player = process.env.PLAYER_ADDRESS;
+  if (player && /^0x[0-9a-fA-F]{40}$/.test(player)) {
+    await deployer.sendTransaction({ to: player, value: E("100") });
+    for (let id = 25; id <= 30; id++) await nft.mint(player, id); // planks 25-30
+    await vault.transfer(player, E("1.5")); // 1.5 shares to trade/redeem/LP with
+    console.log("\n Funded PLAYER", player, "→ 100 ETH · planks 25-30 · 1.5 shares");
+  }
+
   const held: bigint = await vault.heldTokenCount();
   const eth: bigint = await vault.ethReserve();
   const shares: bigint = await vault.shareReserve();
