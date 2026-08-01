@@ -34,9 +34,17 @@ export type VaultStats = {
   heldTokenCount: number;
   heldTokenIds: string[];
   sharePriceWei: string | null;
-  mintFeeBps: number;
-  redeemFeeBps: number;
-  targetPremiumBps: number;
+  /** "share" (V1/V2, bps fees) vs "eth" (V3+, flat wei fees) — see
+   * lib/market/vault-registry.ts's feeModelForVault. Only the matching field
+   * group below is populated; the other is null, never coerced. */
+  feeModel: "share" | "eth";
+  mintFeeBps: number | null;
+  redeemFeeBps: number | null;
+  targetPremiumBps: number | null;
+  mintFeeWei: string | null;
+  redeemFeeWei: string | null;
+  targetPremiumWei: string | null;
+  swapFeeBps: number | null;
   ethUsd: number | null;
   aprPct: number | null;
   aprBasisHours: number | null;
