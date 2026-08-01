@@ -1,32 +1,84 @@
 /**
- * Dual-vault migrate registry.
+ * N-vault registry.
  *
- * PRIMARY  = where new Instant Swap / LP should go once V2 is live
- * LEGACY   = where existing deposits still redeem (V1)
+ * PRIMARY = the current-generation vault (V3) where new deposits / trades / LP
+ *           should go.
+ * LEGACY  = every older vault that still holds redeemable deposits (V2, V1).
  *
- * Never remove LEGACY from env until heldTokenCount on that vault is 0
- * (or operators accept stranding remaining holders).
+ * Selection is by ADDRESS, not by role: with more than one legacy, "the legacy"
+ * is ambiguous. Generation and fee model are derived per-vault so the migration
+ * UI can state both sides of a move honestly — a share-denominated legacy
+ * (V1/V2 burn 1.01 shares to redeem) versus the ETH-fee primary (V3 burns
+ * exactly 1.0 and charges ETH).
+ *
+ * Never remove a LEGACY from env until heldTokenCount on that vault is 0 — doing
+ * so bricks every call to it client-side ("Blocked unsafe vault target").
  */
 
 import {
   MARKET_VAULT_ADDRESS,
-  MARKET_VAULT_DUAL_MODE,
-  MARKET_VAULT_LEGACY_ADDRESS,
+  MARKET_VAULT_ADDRESSES,
+  MARKET_VAULT_LEGACY_ADDRESSES,
   MARKET_VAULT_V1_KNOWN,
+  MARKET_VAULT_V2_KNOWN,
 } from "@/lib/constants";
 
 export type VaultRole = "primary" | "legacy";
+/** How a vault denominates its mint/redeem fee. */
+export type FeeModel = "share" | "eth";
 
 export type VaultDescriptor = {
   role: VaultRole;
   address: string;
-  /** Short UI label */
+  /** 1 = oldest, 2 = middle, 3 = current. Internal identity for logic/tests — never shown to users. */
+  generation: number;
+  /** "Vn" — internal identity only; never rendered (we present pools by product name, not a version ladder). */
+  version: string;
+  /** Share-denominated (older pools) vs ETH-denominated (current) fees. */
+  feeModel: FeeModel;
+  /** Product name shown to users (Driftwood / WormWood / Premium Plank Liquidity). */
+  name: string;
+  /** Short UI label — same as `name`. */
   label: string;
-  /** One-line purpose */
+  /** One-line purpose. */
   purpose: string;
-  /** True when this is the historically first production vault */
+  /** True when this is the historically first production vault. */
   isV1: boolean;
 };
+
+/**
+ * Product names. We deliberately present each pool as its own product rather
+ * than a V1/V2/V3 ladder — the version framing reads as "the team shipped two
+ * mistakes before this one." These names reframe them as distinct, intentional
+ * pools. Keyed by generation; keep the generation logic (address-derived) as the
+ * stable internal identity.
+ */
+export const VAULT_NAMES: Record<number, string> = {
+  1: "Driftwood",
+  2: "WormWood",
+  3: "Premium Plank Liquidity",
+};
+
+/** Compact form for badges / activity tags where the full name won't fit. */
+export const VAULT_SHORT_NAMES: Record<number, string> = {
+  1: "Driftwood",
+  2: "WormWood",
+  3: "Premium Plank",
+};
+
+function nameForGen(gen: number): string {
+  return VAULT_NAMES[gen] ?? "Plank Vault";
+}
+
+/** Product name for a vault address (Driftwood / WormWood / Premium Plank Liquidity). */
+export function vaultName(addr: string | null | undefined): string {
+  return nameForGen(vaultGeneration(addr));
+}
+
+/** Compact product name for badges/tags. */
+export function vaultShortName(addr: string | null | undefined): string {
+  return VAULT_SHORT_NAMES[vaultGeneration(addr)] ?? "Vault";
+}
 
 export function isVaultAddress(addr: string | null | undefined): addr is string {
   return Boolean(addr && /^0x[0-9a-fA-F]{40}$/.test(addr));
@@ -36,94 +88,131 @@ export function shortVault(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-/** UI color coding: V1 legacy = orange, V2 primary = green. */
-export type VaultColorKind = "v1" | "v2" | "unknown";
+/**
+ * Generation from address. The two prior production vaults are known by
+ * address; anything else configured is the current generation (V3+, ETH fees).
+ * This is what lets the client stop grepping bytecode for selectors.
+ */
+export function vaultGeneration(addr: string | null | undefined): number {
+  if (!addr) return 0;
+  const lc = addr.toLowerCase();
+  if (lc === MARKET_VAULT_V1_KNOWN.toLowerCase()) return 1;
+  if (lc === MARKET_VAULT_V2_KNOWN.toLowerCase()) return 2;
+  return 3;
+}
+
+export function feeModelForVault(addr: string | null | undefined): FeeModel {
+  return vaultGeneration(addr) >= 3 ? "eth" : "share";
+}
+
+/** UI colour coding, keyed by generation. v3 primary = emerald (good). */
+export type VaultColorKind = "v1" | "v2" | "v3" | "unknown";
 
 export function vaultColorKind(
   roleOrAddr?: VaultRole | string | null
 ): VaultColorKind {
   if (!roleOrAddr) return "unknown";
-  if (roleOrAddr === "legacy") return "v1";
-  if (roleOrAddr === "primary") {
-    // Primary may still be V1 if dual mode is not live yet
-    if (
-      MARKET_VAULT_ADDRESS &&
-      MARKET_VAULT_ADDRESS.toLowerCase() === MARKET_VAULT_V1_KNOWN.toLowerCase()
-    ) {
-      return "v1";
-    }
-    return "v2";
+  if (roleOrAddr === "primary") return genKind(vaultGeneration(MARKET_VAULT_ADDRESS));
+  if (roleOrAddr === "legacy") {
+    // Ambiguous with multiple legacies; the oldest is the safe default label.
+    const oldest = [...MARKET_VAULT_LEGACY_ADDRESSES].sort(
+      (a, b) => vaultGeneration(a) - vaultGeneration(b)
+    )[0];
+    return genKind(vaultGeneration(oldest));
   }
-  const a = roleOrAddr.toLowerCase();
-  if (
-    MARKET_VAULT_LEGACY_ADDRESS &&
-    a === MARKET_VAULT_LEGACY_ADDRESS.toLowerCase()
-  ) {
-    return "v1";
-  }
-  if (a === MARKET_VAULT_V1_KNOWN.toLowerCase()) return "v1";
-  if (MARKET_VAULT_ADDRESS && a === MARKET_VAULT_ADDRESS.toLowerCase()) {
-    return MARKET_VAULT_ADDRESS.toLowerCase() === MARKET_VAULT_V1_KNOWN.toLowerCase()
-      ? "v1"
-      : "v2";
-  }
+  return genKind(vaultGeneration(roleOrAddr));
+}
+
+function genKind(gen: number): VaultColorKind {
+  if (gen === 1) return "v1";
+  if (gen === 2) return "v2";
+  if (gen >= 3) return "v3";
   return "unknown";
 }
 
-/** Tailwind classes for vault badges/labels. */
+/** Product name (compact) from a colour kind — for badges/tags. */
+export function vaultKindLabel(kind: VaultColorKind): string {
+  if (kind === "v1") return VAULT_SHORT_NAMES[1];
+  if (kind === "v2") return VAULT_SHORT_NAMES[2];
+  if (kind === "v3") return VAULT_SHORT_NAMES[3];
+  return "Vault";
+}
+
+/** Tailwind classes for vault badges/labels. V2 is demoted (it is retiring). */
 export const VAULT_LABEL_CLASS: Record<VaultColorKind, string> = {
   v1: "text-orange-400 border-orange-400/50 bg-orange-500/15",
-  v2: "text-emerald-400 border-emerald-400/50 bg-emerald-500/15",
+  v2: "text-amber-400 border-amber-400/50 bg-amber-500/15",
+  v3: "text-emerald-400 border-emerald-400/50 bg-emerald-500/15",
   unknown: "text-foreground/50 border-gold-500/25 bg-black/20",
 };
 
 export const VAULT_TEXT_CLASS: Record<VaultColorKind, string> = {
   v1: "text-orange-400",
-  v2: "text-emerald-400",
+  v2: "text-amber-400",
+  v3: "text-emerald-400",
   unknown: "text-gold-200",
 };
 
-/** All vaults the migrate UI and Instant Swap may target. */
+function describe(role: VaultRole, address: string): VaultDescriptor {
+  const generation = vaultGeneration(address);
+  const feeModel = feeModelForVault(address);
+  const version = generation > 0 ? `V${generation}` : "Vault"; // internal identity only — never rendered
+  const isV1 = generation === 1;
+  const name = nameForGen(generation);
+  let purpose: string;
+  if (role === "primary") {
+    purpose = "Deposit, redeem, Instant Swap, and provide liquidity";
+  } else if (generation === 2) {
+    purpose = `Withdraw liquidity and redeem here, then move to ${nameForGen(3)}`;
+  } else {
+    purpose = "Redeem existing deposits, then move over — don't abandon until empty";
+  }
+  return { role, address, generation, version, feeModel, name, label: name, purpose, isV1 };
+}
+
+/** All vaults the migrate UI and Instant Swap may target, primary first. */
 export function listVaults(): VaultDescriptor[] {
   const out: VaultDescriptor[] = [];
-  if (MARKET_VAULT_ADDRESS) {
-    const isV1 = MARKET_VAULT_ADDRESS.toLowerCase() === MARKET_VAULT_V1_KNOWN.toLowerCase();
-    out.push({
-      role: "primary",
-      address: MARKET_VAULT_ADDRESS,
-      label: MARKET_VAULT_DUAL_MODE ? (isV1 ? "Primary (still V1)" : "New vault (V2)") : "Vault",
-      purpose: MARKET_VAULT_DUAL_MODE
-        ? isV1
-          ? "Still the only vault — deposit / redeem / trade here"
-          : "Prefer for new deposits, Add LP, Remove LP"
-        : "Deposit, redeem, Instant Swap",
-      isV1,
-    });
-  }
-  if (MARKET_VAULT_LEGACY_ADDRESS) {
-    out.push({
-      role: "legacy",
-      address: MARKET_VAULT_LEGACY_ADDRESS,
-      label: "Legacy vault (V1 deposits)",
-      purpose: "Redeem existing deposits — do not abandon until empty",
-      isV1: MARKET_VAULT_LEGACY_ADDRESS.toLowerCase() === MARKET_VAULT_V1_KNOWN.toLowerCase(),
-    });
-  }
+  if (MARKET_VAULT_ADDRESS) out.push(describe("primary", MARKET_VAULT_ADDRESS));
+  for (const addr of MARKET_VAULT_LEGACY_ADDRESSES) out.push(describe("legacy", addr));
   return out;
 }
 
+/** Primary-first, then legacies oldest-last (V2 before V1). */
+export function listVaultsForDisplay(): VaultDescriptor[] {
+  const all = listVaults();
+  const primary = all.filter((v) => v.role === "primary");
+  const legacy = all
+    .filter((v) => v.role === "legacy")
+    .sort((a, b) => b.generation - a.generation);
+  return [...primary, ...legacy];
+}
+
+/** Selection primitive — address is the identity key, not role. */
+export function getVaultByAddress(addr: string | null | undefined): VaultDescriptor | null {
+  if (!addr) return null;
+  const lc = addr.toLowerCase();
+  return listVaults().find((v) => v.address.toLowerCase() === lc) ?? null;
+}
+
+/** Back-compat: the first vault in a role. Prefer getVaultByAddress. */
 export function getVaultByRole(role: VaultRole): VaultDescriptor | null {
   return listVaults().find((v) => v.role === role) ?? null;
 }
 
 export function dualVaultMode(): boolean {
-  return MARKET_VAULT_DUAL_MODE;
+  return MARKET_VAULT_ADDRESSES.length > 1;
+}
+
+/** True when there is at least one legacy to migrate out of. */
+export function multiVaultMode(): boolean {
+  return MARKET_VAULT_LEGACY_ADDRESSES.length > 0;
 }
 
 /**
- * Fee schedule used by V1 (and intended V2 defaults): 1% mint, 1% redeem,
- * 2.5% target premium. Live-checked in the migrate panel; these are the
- * known production defaults for walkthrough math.
+ * Legacy (V1/V2) share-denominated fee defaults: 1% mint, 1% redeem, 2.5%
+ * target premium. Live-checked in the migrate panel; these are the known
+ * production defaults for walkthrough math on the SHARE-model vaults.
  */
 export const VAULT_FEE_DEFAULTS = {
   mintFeeBps: 100,
@@ -147,8 +236,11 @@ export function mintSharesOut(mintFeeBps: number): bigint {
 }
 
 /**
- * Honest migration cost for one NFT round-trip on fee schedule:
- * deposit got mintSharesOut; redeem needs redeemCost; re-deposit on V2 gets mintSharesOut again.
+ * Honest migration cost for one NFT round-trip out of a SHARE-model legacy
+ * (V1/V2): deposit got mintSharesOut; redeem needs redeemCost. On the ETH-model
+ * destination (V3) a deposit mints exactly one share for a flat ETH fee, so
+ * there is no re-deposit share shortfall — the only friction on that side is the
+ * flat ETH fee, surfaced separately.
  */
 export function migrationFeeExplain(fees: {
   mintFeeBps: number;
@@ -159,9 +251,7 @@ export function migrationFeeExplain(fees: {
   sharesForRandomRedeem: string;
   sharesForTargetRedeem: string;
   shortfallAfterOneDeposit: string;
-  /** Extra shares needed to random-redeem after a single deposit */
   dustSharesNeeded: string;
-  /** Approximate "tax" of redeem + re-deposit (share units, not ETH) */
   roundTripShareFriction: string;
   summary: string;
 } {
@@ -169,7 +259,6 @@ export function migrationFeeExplain(fees: {
   const randomCost = redeemCostShares(fees.redeemFeeBps, fees.targetPremiumBps, false);
   const targetCost = redeemCostShares(fees.redeemFeeBps, fees.targetPremiumBps, true);
   const shortfall = randomCost > fromDeposit ? randomCost - fromDeposit : BigInt(0);
-  // After redeem you hold NFT; re-deposit mints fromDeposit again. Friction ≈ redeem fee + mint fee.
   const friction =
     (SHARE_UNIT * BigInt(fees.redeemFeeBps + fees.mintFeeBps)) / BigInt(10_000);
 
@@ -188,7 +277,7 @@ export function migrationFeeExplain(fees: {
     roundTripShareFriction: fmt(friction),
     summary:
       shortfall > BigInt(0)
-        ? `One deposit mints ~${fmt(fromDeposit)} shares but a random redeem burns ~${fmt(randomCost)}. You need ~${fmt(shortfall)} extra shares (buy dust on Instant Swap or deposit another plank) before you can exit. Migrating is optional — not a rug — but fees apply the same as any redeem/deposit.`
-        : `Redeem cost is covered by a single deposit's mint on this fee schedule.`,
+        ? `On this legacy vault a single deposit minted ~${fmt(fromDeposit)} shares but a redeem burns ~${fmt(randomCost)}, so a lone deposit is ~${fmt(shortfall)} short of redeeming. Buy the small difference on Instant Swap, or redeem across your other planks. The new vault does not have this gap — it mints and burns exactly one share and charges a flat ETH fee.`
+        : `A single deposit here covers a redeem on this fee schedule.`,
   };
 }

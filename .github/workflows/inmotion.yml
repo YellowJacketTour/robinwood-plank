@@ -69,8 +69,14 @@ jobs:
       PGPOOL_MAX: 4
       NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://plank.tanggang.life' }}
       NEXT_PUBLIC_MARKET_ENABLED: ${{ vars.NEXT_PUBLIC_MARKET_ENABLED || 'true' }}
-      NEXT_PUBLIC_MARKET_VAULT_ADDRESS: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_ADDRESS || '0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04' }}
-      NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS || '0xb2019Fd4cA24502e812C0C73b751Fa49979BF708' }}
+      # INTERIM: V1-only. V2 (0xc4B29D7a…) has a critical LP drain
+      # (docs/marketplank/AUDIT-2026-07-31-lp.md) and is kept OFF the frontend
+      # until V3 is deployed and users migrate. The LIVE value comes from the
+      # repo Variable; these defaults are the safety fallback — V1, never V2.
+      # At V3 deploy: set VAULT_ADDRESS=<V3> and LEGACY_ADDRESSES=<V1>,<V2>.
+      NEXT_PUBLIC_MARKET_VAULT_ADDRESS: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_ADDRESS || '0xb2019Fd4cA24502e812C0C73b751Fa49979BF708' }}
+      NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS || '' }}
+      NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES || '' }}
       NEXT_PUBLIC_MINT_START_AT: ${{ vars.NEXT_PUBLIC_MINT_START_AT }}
       NEXT_PUBLIC_ROBINHOOD_RPC_URL: ${{ vars.NEXT_PUBLIC_ROBINHOOD_RPC_URL || 'https://rpc.mainnet.chain.robinhood.com' }}
       NEXT_PUBLIC_RULES_RELAXED: ${{ vars.NEXT_PUBLIC_RULES_RELAXED || 'true' }}

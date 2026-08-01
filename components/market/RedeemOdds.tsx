@@ -8,6 +8,7 @@ import { TIER_ORDER } from "@/lib/rarity";
 import { useVaultBook } from "@/lib/market/useVaultBook";
 import {
   vaultColorKind,
+  vaultKindLabel,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
 import { swrJson } from "@/lib/market/swr-fetch";
@@ -142,7 +143,7 @@ export default function RedeemOdds({ vaultAddress = null, active = true }: Props
 
   const scoredHeld = heldCount - unscoredCount;
 
-  const vaultTag = colorKind === "v1" ? "V1" : colorKind === "v2" ? "V2" : null;
+  const vaultTag = colorKind === "unknown" ? null : vaultKindLabel(colorKind);
 
   return (
     <div className="space-y-2 rounded-xl border border-line bg-panel p-3">

@@ -21,6 +21,11 @@ export const runtime = "nodejs";
  */
 const MAX_BODY_BYTES = 64 * 1024;
 
+// In dev-local mode the whole app points at a local node whose state changes as
+// you trade; serving reads from the rpc-cache would make the UI look stale right
+// after a swap. Bypass the cache entirely there (upstream is localhost anyway).
+const DEV_LOCAL = process.env.NEXT_PUBLIC_DEV_LOCAL_CHAIN === "1";
+
 type UpstreamRpc = { jsonrpc?: string; id?: unknown; result?: unknown; error?: unknown };
 
 /**
@@ -93,7 +98,7 @@ export async function POST(req: Request) {
     entries = null; // malformed; let upstream reject it
   }
 
-  if (entries && entries.every((e) => typeof e?.method === "string")) {
+  if (!DEV_LOCAL && entries && entries.every((e) => typeof e?.method === "string")) {
     const cached = entries.map((e) => peekRpcCache<unknown>(e.method!, e.params ?? []));
     const missIdx = cached.map((v, i) => (v === undefined ? i : -1)).filter((i) => i >= 0);
 
@@ -120,7 +125,13 @@ export async function POST(req: Request) {
       if (cached[i] !== undefined) return { jsonrpc: "2.0", id: e.id ?? null, result: cached[i] };
       const k = missIdx.indexOf(i) + 1;
       const r = byId.get(k) ?? raws[missIdx.indexOf(i)];
-      if (r && r.error == null && r.result != null) {
+      // Upstream can return fewer batch entries than requested; never spread
+      // `undefined` (that ships a reply with neither result nor error, which
+      // ethers throws on) — synthesize a JSON-RPC error for the missing id.
+      if (!r) {
+        return { jsonrpc: "2.0", id: e.id ?? null, error: { code: -32603, message: "no response from upstream RPC" } };
+      }
+      if (r.error == null && r.result != null) {
         putRpcCache(e.method!, e.params ?? [], r.result);
       }
       return { ...r, id: e.id ?? null };

@@ -136,7 +136,7 @@ export default function FinanceSection() {
                 Vault treasury{" "}
                 <span className={`ml-1 ${LABEL}`}>
                   {treasury.source === "vault"
-                    ? "V2 vault ETH reserve"
+                    ? "WormWood vault ETH reserve"
                     : "fee-recipient fallback"}
                 </span>
               </h3>

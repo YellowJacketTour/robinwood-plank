@@ -26,6 +26,75 @@ const config: HardhatUserConfig = {
     cache: "./.hardhat-cache",
     artifacts: "./.hardhat-artifacts",
   },
+  // Block-explorer (Blockscout) source verification for the Robinhood chains.
+  // Blockscout ignores the apiKey but hardhat-verify requires an entry.
+  etherscan: {
+    apiKey: {
+      robinhood: process.env.ROBINHOOD_EXPLORER_KEY || "blockscout",
+      "robinhood-testnet": process.env.ROBINHOOD_EXPLORER_KEY || "blockscout",
+    },
+    customChains: [
+      {
+        network: "robinhood",
+        chainId: 4663,
+        urls: {
+          apiURL: "https://robinhoodchain.blockscout.com/api",
+          browserURL: "https://robinhoodchain.blockscout.com",
+        },
+      },
+      {
+        network: "robinhood-testnet",
+        chainId: 46630,
+        urls: {
+          apiURL: "https://explorer.testnet.chain.robinhood.com/api",
+          browserURL: "https://explorer.testnet.chain.robinhood.com",
+        },
+      },
+    ],
+  },
+  networks: {
+    // LOCAL ONLY. `npx hardhat node` serves this on 127.0.0.1:8545 (chainId
+    // 31337); scripts/local-v3-setup.ts deploys the V3 dev stack here so the
+    // frontend can be exercised without touching mainnet.
+    localhost: { url: "http://127.0.0.1:8545", chainId: 31337 },
+
+    // Robinhood networks appear ONLY when their RPC URL + DEPLOYER_PK are both
+    // present in the environment. Absent those env vars the keys below are
+    // simply not defined, so `--network robinhood` errors out — there is still
+    // NO one-command path to mainnet by accident (the anti-footgun invariant
+    // from this file's header). The deploy+seed workflow
+    // (.github/workflows/deploy-vault-v3.yml) injects them at dispatch time from
+    // GitHub secrets; DEPLOYER_PK is never committed and never enters the app
+    // build/runtime (same isolation as RELAYER_PRIVATE_KEY).
+    ...robinhoodNetworks(),
+  },
 };
+
+/**
+ * Build the Robinhood network map from env, omitting any network whose RPC/key
+ * is unset. `robinhood` = Arbitrum Orbit mainnet (chainId 4663);
+ * `robinhood-testnet` = the rehearsal chain (chainId from env). A deploy key is
+ * required for both — this repo has no read-only path to these chains, only a
+ * signed-deploy path, and only when explicitly configured.
+ */
+function robinhoodNetworks(): HardhatUserConfig["networks"] {
+  const key = process.env.DEPLOYER_PK;
+  const accounts = key ? [key.startsWith("0x") ? key : `0x${key}`] : [];
+  const nets: NonNullable<HardhatUserConfig["networks"]> = {};
+  if (accounts.length && process.env.ROBINHOOD_RPC_URL) {
+    nets.robinhood = { url: process.env.ROBINHOOD_RPC_URL, chainId: 4663, accounts };
+  }
+  if (accounts.length && process.env.ROBINHOOD_TESTNET_RPC_URL) {
+    nets["robinhood-testnet"] = {
+      url: process.env.ROBINHOOD_TESTNET_RPC_URL,
+      // Testnet chainId is env-driven — Orbit testnets don't share mainnet's id.
+      chainId: process.env.ROBINHOOD_TESTNET_CHAIN_ID
+        ? Number(process.env.ROBINHOOD_TESTNET_CHAIN_ID)
+        : undefined,
+      accounts,
+    };
+  }
+  return nets;
+}
 
 export default config;

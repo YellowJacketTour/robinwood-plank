@@ -642,7 +642,7 @@ spot ≈ ethReserve / shareReserve ≈ few thousandths ETH per share`}</Code>
         <H id="vault-migrate">17b. Dual vault migrate (existing depositors)</H>
         <P>
           The first production vault is immutable. New LP add/remove needs a second deploy. Safe
-          migrate never deletes V1 from the site until it is empty.
+          migrate never deletes Driftwood from the site until it is empty.
         </P>
         <H3>Operator setup</H3>
         <Code>{`# After V2 is deployed and openPool()'d:
@@ -655,18 +655,18 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
             <>Connect wallet on chain 4663.</>,
             <>If shares &lt; redeem cost (~1.01), buy dust shares or deposit another plank on LEGACY.</>,
             <>Random redeem on LEGACY (step 1 + claim) → NFT in your wallet.</>,
-            <>When V2 is live: Deposit that NFT into the NEW vault → new shares.</>,
-            <>On V2: Add LP / Remove LP / trade as normal.</>,
+            <>When WormWood is live: Deposit that NFT into the NEW vault → new shares.</>,
+            <>On WormWood: Add LP / Remove LP / trade as normal.</>,
           ]}
         />
         <H3>Will redemption rip me off?</H3>
         <P>
           <strong>No special migrate tax and no rug.</strong> Fees are the same for any redeem/deposit
-          (live V1: 1% mint, 1% redeem, 2.5% target premium). One deposit mints ~0.99 shares; random
-          redeem burns ~1.01 — so you may need ~0.02 dust shares before exit. Re-depositing to V2
+          (live Driftwood: 1% mint, 1% redeem, 2.5% target premium). One deposit mints ~0.99 shares; random
+          redeem burns ~1.01 — so you may need ~0.02 dust shares before exit. Re-depositing to WormWood
           charges mint fee again (~2% total share friction + gas for a full round trip). You receive
           the NFT on redeem; treasury fees are the designed protocol cost, not an optional migrate
-          surprise. Staying on V1 forever is valid — migrate only if you want V2 LP features.
+          surprise. Staying on Driftwood forever is valid — migrate only if you want WormWood LP features.
         </P>
         <P>
           UI: Market → Instant Swap → <strong>Safe migrate</strong> panel (

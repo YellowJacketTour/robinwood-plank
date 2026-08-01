@@ -6,6 +6,7 @@ import { usePendingVaultTx } from "@/lib/market/pendingVaultTx";
 import ScrollBox from "@/components/market/ScrollBox";
 import {
   vaultColorKind,
+  vaultKindLabel,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
 
@@ -62,8 +63,9 @@ function shortAddr(a: string) {
 function vaultTag(vaultAddress?: string): { text: string; className: string } | null {
   if (!vaultAddress) return null;
   const kind = vaultColorKind(vaultAddress);
-  if (kind === "v1") return { text: "V1", className: VAULT_LABEL_CLASS.v1 };
-  if (kind === "v2") return { text: "V2", className: VAULT_LABEL_CLASS.v2 };
+  if (kind !== "unknown") {
+    return { text: vaultKindLabel(kind), className: VAULT_LABEL_CLASS[kind] };
+  }
   return {
     text: shortAddr(vaultAddress),
     className: VAULT_LABEL_CLASS.unknown,
@@ -130,7 +132,7 @@ export default function VaultTradeHistory() {
     <div className="space-y-1.5 rounded-xl border border-line bg-panel p-3">
       <div className="flex items-center justify-between">
         <p className="text-[0.72rem] font-black text-foreground">
-          Live V1 + V2 vault trades
+          Live Driftwood + WormWood trades
         </p>
         <span
           className={`flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[0.55rem] font-bold uppercase ${live ? "text-emerald-300/70" : connected ? "text-gold-300/70" : "text-foreground/30"}`}
