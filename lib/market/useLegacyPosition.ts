@@ -74,34 +74,41 @@ export function useLegacyPosition(
       const positions: VaultPosition[] = [];
       const nextSlots: Record<string, SlotState> = {};
       for (const v of legacies) {
-        const [snap, lp, requester, round] = await Promise.all([
-          getVaultOnChainSnapshot(v.address, address),
-          getLpCredit(address, v.address).catch(() => ({
-            shareCredit: BigInt(0),
-            ethCredit: BigInt(0),
-          })),
-          getPendingRequester(v.address).catch(() => ZERO),
-          getPendingRound(v.address).catch(() => ({ round: BigInt(0), available: false })),
-        ]);
-        positions.push({
-          address: v.address,
-          generation: v.generation,
-          version: v.version,
-          walletShares: snap.shareBalance,
-          lpShareCredit: lp.shareCredit,
-          lpEthCredit: lp.ethCredit,
-          redeemCostShares: redeemCostShares(snap.redeemFeeBps),
-          poolShareReserve: snap.shareReserve,
-          poolEthReserve: snap.ethReserve,
-        });
-        const busy = requester !== ZERO;
-        nextSlots[v.address.toLowerCase()] = {
-          requester,
-          round: round.round,
-          available: round.available,
-          mine: busy && requester.toLowerCase() === address.toLowerCase(),
-          busy,
-        };
+        try {
+          // A single unreadable vault (no code at that address on the current
+          // chain, a node hiccup, a wrong-network read) must not crash the whole
+          // page — skip it and surface whatever else we could read.
+          const [snap, lp, requester, round] = await Promise.all([
+            getVaultOnChainSnapshot(v.address, address),
+            getLpCredit(address, v.address).catch(() => ({
+              shareCredit: BigInt(0),
+              ethCredit: BigInt(0),
+            })),
+            getPendingRequester(v.address).catch(() => ZERO),
+            getPendingRound(v.address).catch(() => ({ round: BigInt(0), available: false })),
+          ]);
+          positions.push({
+            address: v.address,
+            generation: v.generation,
+            version: v.version,
+            walletShares: snap.shareBalance,
+            lpShareCredit: lp.shareCredit,
+            lpEthCredit: lp.ethCredit,
+            redeemCostShares: redeemCostShares(snap.redeemFeeBps),
+            poolShareReserve: snap.shareReserve,
+            poolEthReserve: snap.ethReserve,
+          });
+          const busy = requester !== ZERO;
+          nextSlots[v.address.toLowerCase()] = {
+            requester,
+            round: round.round,
+            available: round.available,
+            mine: busy && requester.toLowerCase() === address.toLowerCase(),
+            busy,
+          };
+        } catch {
+          /* vault unreadable this tick — skip it, keep the others */
+        }
       }
       setPlan(buildMigrationPlan(positions));
       setSlots(nextSlots);

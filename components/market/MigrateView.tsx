@@ -13,7 +13,7 @@
  * Redeemed planks are shown as their real NFT image (plank-character-art rule).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@/lib/wallet-context";
 import {
@@ -192,17 +192,6 @@ export default function MigrateView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nextAction]);
 
-  // Auto-migrate: an effect drives one step at a time off fresh state (avoids a
-  // stale-closure loop). Stops on completion, on error, or if nothing is doable.
-  const [auto, setAuto] = useState(false);
-  useEffect(() => {
-    if (!auto) return;
-    if (error) { setAuto(false); return; }
-    if (busy) return;
-    if (!nextAction) { setAuto(false); return; }
-    void doNext();
-  }, [auto, busy, error, nextAction, doNext]);
-
   // Ordered remaining steps, for the stepper checklist.
   const steps = useMemo(() => {
     const out: { key: string; label: string; sub: string }[] = [];
@@ -338,7 +327,7 @@ export default function MigrateView() {
               )}
 
               {nextAction ? (
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3">
                   <button
                     type="button"
                     disabled={busy}
@@ -347,24 +336,6 @@ export default function MigrateView() {
                   >
                     {busy ? "Working…" : `Continue — ${nextLabel(nextAction)}`}
                   </button>
-                  {!auto ? (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => setAuto(true)}
-                      className="inline-flex min-h-[44px] items-center rounded-lg border border-line-strong bg-wood-950 px-4 text-sm font-bold text-cream disabled:opacity-50"
-                    >
-                      Auto-migrate everything
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setAuto(false)}
-                      className="inline-flex min-h-[44px] items-center rounded-lg border border-amber-400/50 bg-amber-500/10 px-4 text-sm font-bold text-amber-200"
-                    >
-                      Pause auto-migrate
-                    </button>
-                  )}
                 </div>
               ) : (
                 <div className="mt-3">
