@@ -156,26 +156,43 @@ export default function MigrateView() {
   );
 
   type NextAction =
+    | { kind: "finishMine"; s: SourcePlan }
     | { kind: "withdrawLp"; s: SourcePlan }
     | { kind: "redeem"; s: SourcePlan }
     | { kind: "deposit" }
     | { kind: "dust"; s: SourcePlan }
     | null;
 
-  // Ordered priority: clear each source's LP → redeem its planks → deposit the
-  // planks now in the wallet into V3 → mop up dust. Sources are already V2→V1.
+  // Ordered priority: finish any pending redeem I own → clear each source's LP →
+  // redeem its planks → deposit the planks now in the wallet into V3 → mop up
+  // dust. Sources are already V2→V1.
   const nextAction: NextAction = useMemo(() => {
     for (const s of sources) {
+      const slot = pos.slots[s.address.toLowerCase()];
+      if (slot?.mine) return { kind: "finishMine", s }; // my burned share is mid-draw — finish it
       if (s.needsLpWithdraw && s.lpWithdrawCovered) return { kind: "withdrawLp", s };
       if (s.redeemableNfts > 0 && slotFreeFor(s.address)) return { kind: "redeem", s };
     }
     if (pos.owned.length > 0) return { kind: "deposit" };
     for (const s of sources) if (s.hasDust) return { kind: "dust", s };
     return null;
-  }, [sources, pos.owned.length, slotFreeFor]);
+  }, [sources, pos.owned.length, pos.slots, slotFreeFor]);
+
+  // Value remains but nothing is doable right now: another wallet holds the
+  // redeem slot, or LP can't be withdrawn until the pool has reserve. NOT done.
+  const anyBlocked = useMemo(
+    () =>
+      sources.some((s) => {
+        const slot = pos.slots[s.address.toLowerCase()];
+        const othersSlotBusy = Boolean(slot?.busy && !slot?.mine);
+        return (s.redeemableNfts > 0 && othersSlotBusy) || s.stuckLpShares > BigInt(0) || s.stuckLpEth > BigInt(0);
+      }),
+    [sources, pos.slots]
+  );
 
   const nextLabel = (n: NextAction): string => {
     if (!n) return "All done";
+    if (n.kind === "finishMine") return `Finish your pending ${n.s.version} redeem`;
     if (n.kind === "withdrawLp") return `Withdraw your ${n.s.version} liquidity`;
     if (n.kind === "redeem") return `Redeem a plank from ${n.s.version}`;
     if (n.kind === "deposit") return `Deposit ${pos.owned.length} plank${pos.owned.length === 1 ? "" : "s"} into ${primary?.version ?? "V3"}`;
@@ -185,7 +202,8 @@ export default function MigrateView() {
   const doNext = useCallback(async () => {
     const n = nextAction;
     if (!n) return;
-    if (n.kind === "withdrawLp") await withdrawLp(n.s.address, n.s.lpShareCredit, n.s.lpEthCredit);
+    if (n.kind === "finishMine") await finishMine(n.s.address);
+    else if (n.kind === "withdrawLp") await withdrawLp(n.s.address, n.s.lpShareCredit, n.s.lpEthCredit);
     else if (n.kind === "redeem") await redeemOne(n.s.address);
     else if (n.kind === "deposit") await depositOwned();
     else if (n.kind === "dust") await sellDust(n.s.address, n.s.dustShares);
@@ -196,16 +214,21 @@ export default function MigrateView() {
   const steps = useMemo(() => {
     const out: { key: string; label: string; sub: string }[] = [];
     for (const s of sources) {
+      const slot = pos.slots[s.address.toLowerCase()];
+      if (slot?.mine)
+        out.push({ key: `fin-${s.address}`, label: `Finish your pending ${s.version} redeem`, sub: "the share is burned — claim the plank to free the slot" });
       if (s.needsLpWithdraw)
         out.push({ key: `lp-${s.address}`, label: `Withdraw ${s.version} liquidity`, sub: `${formatShares(s.lpShareCredit, 2)} sh${s.lpEthCredit > BigInt(0) ? ` + ${formatShares(s.lpEthCredit, 4)} Ξ` : ""} back to shares` });
       for (let i = 0; i < s.redeemableNfts; i++)
         out.push({ key: `rd-${s.address}-${i}`, label: `Redeem a plank from ${s.version}`, sub: "drand draw · relayer finishes it for you" });
+      if (s.stuckLpShares > BigInt(0) || s.stuckLpEth > BigInt(0))
+        out.push({ key: `stuck-${s.address}`, label: `${s.version} liquidity is waiting`, sub: "the retiring pool can't cover the withdrawal yet — check back later" });
     }
     if (pos.owned.length > 0)
       out.push({ key: "dep", label: `Deposit ${pos.owned.length} plank${pos.owned.length === 1 ? "" : "s"} into ${primary?.version ?? "V3"}`, sub: `mints ${pos.owned.length} ${primary?.version ?? "V3"} share${pos.owned.length === 1 ? "" : "s"}` });
     for (const s of sources) if (s.hasDust) out.push({ key: `dust-${s.address}`, label: `Sell ${s.version} dust`, sub: `${formatShares(s.dustShares, 2)} sh → ETH` });
     return out;
-  }, [sources, pos.owned.length, primary?.version]);
+  }, [sources, pos.owned.length, pos.slots, primary?.version]);
 
   // ── Render ──────────────────────────────────────────────────────────────
 
@@ -242,7 +265,7 @@ export default function MigrateView() {
         <div className="rounded-xl border border-line bg-panel-strong p-5 text-sm text-cream/70">
           Scanning the retiring vaults for your position…
         </div>
-      ) : pos.plan && !pos.plan.hasValue && pos.owned.length === 0 ? (
+      ) : pos.plan && !pos.hasValue ? (
         <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 p-5">
           <span className="rounded border border-emerald-400/50 bg-emerald-500/15 px-2 py-0.5 text-[0.6rem] font-black uppercase tracking-wide text-emerald-400">
             Nothing to migrate
@@ -283,7 +306,7 @@ export default function MigrateView() {
             <div className="rounded-xl border border-line bg-panel-strong p-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h2 className="font-display text-xl text-gold-300">
-                  {nextAction ? "Your migration path" : "Migration complete"}
+                  {nextAction ? "Your migration path" : anyBlocked ? "Almost there" : "Migration complete"}
                 </h2>
                 {steps.length > 0 && (
                   <span className="text-[0.7rem] font-bold tabular-nums text-cream-muted">
@@ -336,6 +359,12 @@ export default function MigrateView() {
                   >
                     {busy ? "Working…" : `Continue — ${nextLabel(nextAction)}`}
                   </button>
+                </div>
+              ) : anyBlocked ? (
+                <div className="mt-3 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2.5 text-[0.78rem] text-amber-200">
+                  Value is still here, but there&apos;s nothing to sign right now — another wallet holds a redeem
+                  slot, or a retiring pool can&apos;t cover a liquidity withdrawal yet. It clears on its own; check
+                  back, or use the per-vault controls below to settle a stuck slot.
                 </div>
               ) : (
                 <div className="mt-3">

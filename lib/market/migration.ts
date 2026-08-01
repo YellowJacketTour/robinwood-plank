@@ -42,7 +42,10 @@ export type SourcePlan = {
   lpEthCredit: bigint;
   /** Can the pool cover the LP withdrawal right now? (credits <= reserves.) */
   lpWithdrawCovered: boolean;
-  /** Wallet shares plus LP share credit — what you can redeem with post-withdraw. */
+  /** LP share/ETH credit that the pool CANNOT cover yet — not redeemable now. */
+  stuckLpShares: bigint;
+  stuckLpEth: bigint;
+  /** Wallet shares plus full LP share credit — the total position, for display. */
   totalShares: bigint;
   /** floor(totalShares / redeemCostShares). */
   redeemableNfts: number;
@@ -61,15 +64,28 @@ export type MigrationPlan = {
 
 function planSource(p: VaultPosition): SourcePlan | null {
   const needsLpWithdraw = p.lpShareCredit > BigInt(0) || p.lpEthCredit > BigInt(0);
-  const totalShares = p.walletShares + p.lpShareCredit;
-  const hasValue = totalShares > BigInt(0) || p.lpEthCredit > BigInt(0);
+  const lpWithdrawCovered =
+    p.lpShareCredit <= p.poolShareReserve && p.lpEthCredit <= p.poolEthReserve;
+
+  // A redeem only ever spends the wallet's actual ERC-20 share balance. LP
+  // share credit is separate and only becomes spendable AFTER removeLiquidity —
+  // and only if the pool currently has the reserve to cover it. So fold LP
+  // credit into what's redeemable ONLY when it's withdrawable; otherwise
+  // redeemable is off the wallet balance alone and the stuck LP is surfaced
+  // separately. (Folding uncovered LP in produced a redeem that always reverts
+  // with no withdraw step offered — an inescapable loop.)
+  const coveredLpShares = lpWithdrawCovered ? p.lpShareCredit : BigInt(0);
+  const spendableShares = p.walletShares + coveredLpShares;
+  const stuckLpShares = lpWithdrawCovered ? BigInt(0) : p.lpShareCredit;
+  const stuckLpEth = lpWithdrawCovered ? BigInt(0) : p.lpEthCredit;
+
+  const totalShares = p.walletShares + p.lpShareCredit; // full position, for display
+  const hasValue = spendableShares > BigInt(0) || stuckLpShares > BigInt(0) || p.lpEthCredit > BigInt(0);
   if (!hasValue) return null;
 
   const cost = p.redeemCostShares > BigInt(0) ? p.redeemCostShares : SHARE_UNIT;
-  const redeemableNfts = Number(totalShares / cost);
-  const dustShares = totalShares - BigInt(redeemableNfts) * cost;
-  const lpWithdrawCovered =
-    p.lpShareCredit <= p.poolShareReserve && p.lpEthCredit <= p.poolEthReserve;
+  const redeemableNfts = Number(spendableShares / cost);
+  const dustShares = spendableShares - BigInt(redeemableNfts) * cost;
 
   return {
     address: p.address,
@@ -78,6 +94,8 @@ function planSource(p: VaultPosition): SourcePlan | null {
     lpShareCredit: p.lpShareCredit,
     lpEthCredit: p.lpEthCredit,
     lpWithdrawCovered,
+    stuckLpShares,
+    stuckLpEth,
     totalShares,
     redeemableNfts,
     dustShares,

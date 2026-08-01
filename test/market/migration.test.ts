@@ -69,6 +69,24 @@ test("LP withdrawal is flagged uncovered when credits exceed reserves", () => {
   assert.equal(plan.sources[0].lpWithdrawCovered, false);
 });
 
+test("uncovered LP is NOT counted as redeemable (no doomed redeem loop)", () => {
+  // 0.5 wallet shares + 2.0 LP credit the pool can't cover. Folding LP in would
+  // report redeemableNfts >= 1 and offer a redeem that reverts (insufficient
+  // wallet balance) with no withdraw step available — an inescapable loop.
+  const plan = buildMigrationPlan([
+    base({
+      walletShares: SHARE_UNIT / 2n, // 0.5 — below one redeem on its own
+      lpShareCredit: 2n * SHARE_UNIT,
+      poolShareReserve: 1n * SHARE_UNIT, // < credit → uncovered
+    }),
+  ]);
+  const s = plan.sources[0];
+  assert.equal(s.lpWithdrawCovered, false);
+  assert.equal(s.redeemableNfts, 0); // off the 0.5 wallet balance alone, not 2.5
+  assert.equal(s.stuckLpShares, 2n * SHARE_UNIT); // surfaced separately
+  assert.equal(plan.sources.length, 1); // still "has value" (LP is stuck, not gone)
+});
+
 test("multiple sources are ordered V2 before V1 and summed", () => {
   const v1 = base({ generation: 1, version: "V1", address: "0xv1", walletShares: (SHARE_UNIT * 202n) / 100n });
   const v2 = base({ generation: 2, version: "V2", address: "0xv2", walletShares: (SHARE_UNIT * 101n) / 100n });

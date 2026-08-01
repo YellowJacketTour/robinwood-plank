@@ -377,8 +377,15 @@ export async function v3RandomRedeem(
   // Give the relay a few rounds to inject randomness and claim for us.
   while (Date.now() - started < 60_000) {
     const relayStatus = await kickDevRelay(vaultAddr, account);
-    const pend = await getV3Pending(addr, account);
-    if (!pend.isMe) {
+    // A transient read blip must NOT abort here — the request already committed
+    // on-chain; treat an unreadable poll as "still pending" and keep going.
+    let pend: V3Pending | null = null;
+    try {
+      pend = await getV3Pending(addr, account);
+    } catch {
+      /* transient — retry next tick */
+    }
+    if (pend && !pend.isMe) {
       // Slot cleared for us → the NFT was delivered.
       onProgress?.("Redeem complete — plank delivered.");
       return requestHash;
@@ -396,8 +403,11 @@ export async function v3RandomRedeem(
 
 export async function v3AddLiquidity(account: string, ethWei: bigint, s: V3Snapshot, slipBps = 100): Promise<string> {
   const { sharesUsed, lpMinted } = quoteAddLiquidity(ethWei, s);
-  // Cap pulled shares a touch above the quote for rounding; floor LP for slippage.
-  const maxShares = (sharesUsed * BigInt(10000 + 50)) / BPS + BigInt(1);
+  // maxSharesIn is an upper BOUND (the contract pulls exactly ceilDiv(value·S/E)
+  // from current reserves and reverts only if that exceeds this cap). The quote
+  // is off a client-cached snapshot, so give it real headroom for reserve drift
+  // between quote and submit — otherwise an active pool reverts InsufficientOutput.
+  const maxShares = (sharesUsed * BigInt(10000 + 300)) / BPS + BigInt(1);
   const minLp = applySlip(lpMinted, slipBps);
   return send(account, V3.encodeFunctionData("addLiquidity", [maxShares, minLp]), ethWei);
 }

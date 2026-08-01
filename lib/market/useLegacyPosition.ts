@@ -122,6 +122,11 @@ export function useLegacyPosition(
         }))
       );
       setOwned(planks);
+    } catch (e) {
+      // Every await inside is individually guarded, so this is a backstop: if a
+      // future edit adds an unguarded await, make the failure visible (a
+      // fire-and-forget scan() would otherwise become a silent rejection).
+      console.error("legacy position scan failed", e);
     } finally {
       setLoading(false);
     }
