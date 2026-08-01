@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { X } from "lucide-react";
+import { ExternalLink, X } from "lucide-react";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
@@ -486,14 +486,33 @@ export default function ItemDetail({
         </div>
 
         <div className="flex shrink-0 flex-col gap-2 border-t border-line px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:flex-wrap sm:px-5">
-          {listing && onBuy && (
-            <button
-              type="button"
-              onClick={() => onBuy(listing)}
-              className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-gold-500 px-4 py-3 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
+          {listing && listing.venue === "opensea" ? (
+            /**
+             * Foreign listing: no rawOrder to fulfil, so this can only ever
+             * link out — same affordance and copy as ListingCard's "View" so
+             * a buyer doesn't hit a working Buy button on the grid and a dead
+             * one here for the identical listing.
+             */
+            <a
+              href={listing.externalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-12 flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#58BDF0]/40 px-4 py-3 text-sm font-bold text-[#58BDF0] transition hover:border-[#58BDF0]"
             >
-              Buy
-            </button>
+              View on OpenSea
+              <ExternalLink size={14} strokeWidth={2.5} aria-hidden />
+            </a>
+          ) : (
+            listing &&
+            onBuy && (
+              <button
+                type="button"
+                onClick={() => onBuy(listing)}
+                className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-gold-500 px-4 py-3 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
+              >
+                Buy
+              </button>
+            )
           )}
           {onOffer && (
             <button

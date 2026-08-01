@@ -1,11 +1,13 @@
 # Marketplank — Engineering & UI/UX Spec
 
-Status: **The Seaport marketplace and dual-vault Instant Swap interface are
-deployed and enabled.** V2 is the primary LP-capable vault and V1 remains
-available for legacy positions. The application is deployed from `inmotion` to
-InMotion Passenger with PostgreSQL. The custom vault code has extensive
-internal audit evidence and regression tests but has not received an
-independent third-party audit.
+Status: **The Seaport marketplace and Instant Swap interface are deployed and
+enabled.** MarketplankVaultV3 ("Premium Plank Liquidity") is live on mainnet
+(2026-08-01) and is the primary, LP-capable vault; V1 (Driftwood) and V2
+(WormWood) are legacy, redeem-only — WormWood must never be recommended for
+new deposits or LP given its LP-drain (`docs/marketplank/AUDIT-2026-07-31-lp.md`).
+The application is deployed from `inmotion` to InMotion Passenger with
+PostgreSQL. The custom vault code has extensive internal audit evidence and
+regression tests but has not received an independent third-party audit.
 
 This specification began as a pre-launch plan. Sections below describe the
 current implementation where updated and retain explicit historical decisions
@@ -23,7 +25,7 @@ One route, tabbed, not five separate pages:
 ```
 plank.love/market
 ├── Buy & Sell     (Seaport listings + offers — Phase 1)
-├── Instant Swap   (V2 primary + V1 legacy vault)
+├── Instant Swap   (Premium Plank Liquidity primary + Driftwood/WormWood legacy vaults)
 ├── Offers         (token, trait, rarity, and combination bids)
 ├── Activity       (collection and vault activity)
 ├── My NFTs        (wallet inventory and listing)
@@ -53,7 +55,7 @@ lib/market/
 ├── signature.ts           — Seaport EIP-712 and EIP-1271 verification
 ├── orders-store.ts        — indexed PostgreSQL orders; KV-compatible alternatives
 ├── durable-kv.ts          — PostgreSQL, Redis/Valkey, and Upstash adapter
-├── vault-registry.ts      — V2 primary and V1 legacy selection
+├── vault-registry.ts      — V3 primary and V1/V2 legacy selection
 ├── vault*.ts              — vault reads, writes, activity, inventory, and caches
 └── seaport.ts             — listing, offer, fulfillment, cancel, revoke, and sweep
 
@@ -65,7 +67,7 @@ components/market/
 ├── ItemDetail.tsx         — owner, traits, rarity, history, and actions
 ├── OfferForm.tsx          — token, trait, rarity, and combination bids
 ├── SwapPanel.tsx          — buy, sell, LP, deposit, and redeem
-├── VaultMigrate.tsx       — optional V1-to-V2 holder migration
+├── VaultMigrate.tsx       — optional legacy (V1/V2) holder migration into V3
 ├── MyNfts/MyPositions     — wallet inventory and active positions
 └── ActivityFeed.tsx       — collection and market activity
 ```
@@ -135,11 +137,12 @@ This is the NFTX pattern from the scoping doc, scoped initially to the RobinWood
 only — a second collection only gets a vault once there's real demand for one, not
 speculatively.
 
-**Status:** V1 and V2 are deployed. V2 adds public LP contribution/removal and
-is the primary book; V1 remains reachable for legacy positions. Random
-redemption targets a future drand round verified by `DrandBeacon`, then the
-relayer pins and settles the request. The contracts are immutable and are not
-independently audited.
+**Status:** V1, V2, and V3 are all deployed. V3 ("Premium Plank Liquidity") is
+the primary, public LP-capable book; V1 (Driftwood) and V2 (WormWood) remain
+reachable only for legacy redeem — WormWood must not be used for new deposits
+or LP (see the LP-drain audit above). Random redemption targets a future
+drand round verified by `DrandBeacon`, then the relayer pins and settles the
+request. The contracts are immutable and are not independently audited.
 
 ## 7. Launch record and remaining gates
 
@@ -172,7 +175,7 @@ still real risks rather than pre-launch blockers:
 |---|---|
 | Seaport + ConduitController on Robinhood Chain | ✅ Confirmed live, verified — no action needed |
 | Deployer wallet funded with ETH | ✅ Confirmed — owner has ETH ready |
-| Vault contracts written + tested | ✅ V1 and V2 deployed; contract regression suite runs in CI |
+| Vault contracts written + tested | ✅ V1, V2, and V3 deployed; contract regression suite runs in CI |
 | Deploy tooling | ✅ Wallet-signed standalone tool retained for operator-controlled deploys |
 | Order-relay persistence | ✅ cPanel PostgreSQL uses indexed live-order rows; Redis/Valkey and Upstash remain migration-compatible; the file fallback is local-only |
 | Marketplace fee model (Seaport listings/offers) | ✅ Decided 2026-07-27: $PLANK always 0%, other collections default 0.5%, toggleable per-collection — see §9 |

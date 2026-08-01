@@ -15,7 +15,12 @@ import {
   waitForTransaction,
 } from "@/lib/wallet";
 
-const V3 = new Interface(v3Abi);
+/** Exported so server-side readers (lib/market/vault-stats.ts) can encode/decode
+ *  V3 calls through the ethCallMany batching/failover layer instead of this
+ *  file's browser-oriented ethers.Contract reader. Same ABI, same Interface —
+ *  just reused rather than re-built. */
+export const V3_IFACE = new Interface(v3Abi);
+const V3 = V3_IFACE;
 const ERC721 = new Interface([
   "function getApproved(uint256) view returns (address)",
   "function isApprovedForAll(address,address) view returns (bool)",

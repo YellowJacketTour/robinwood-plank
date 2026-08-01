@@ -270,10 +270,10 @@ export const SEAPORT_ADDRESS = "0x0000000000000068F116a894984e2DB1123eB395";
 export const CONDUIT_CONTROLLER_ADDRESS = "0x00000000F9490004C11Cef243f5400493c00Ad63";
 
 /**
- * NFTX-style vault/AMM contract for the RobinWood collection — unset until
- * deployed. This one MUST stay env-configurable (it is a real deploy output),
- * but a malformed value fails closed at module load instead of silently
- * pointing every vault call at garbage.
+ * NFTX-style vault/AMM contract for the RobinWood collection. This one MUST
+ * stay env-configurable (it is a real deploy output), but a malformed value
+ * fails closed at module load instead of silently pointing every vault call
+ * at garbage.
  */
 function parseOptionalAddress(raw: string | undefined, envName: string): string | null {
   const v = raw?.trim();
@@ -285,8 +285,10 @@ function parseOptionalAddress(raw: string | undefined, envName: string): string 
 }
 
 /**
- * Primary Instant Swap vault — preferred for new deposits / LP after a V2
- * migrate. Until V2 is deployed this is the live V1 address.
+ * Primary Instant Swap vault — preferred for new deposits / LP. As of
+ * 2026-08-01 this is MarketplankVaultV3 ("Premium Plank Liquidity"); V1
+ * (Driftwood) and V2 (WormWood) are legacy, redeem-only (see
+ * MARKET_VAULT_LEGACY_ADDRESSES below).
  */
 export const MARKET_VAULT_ADDRESS: string | null = parseOptionalAddress(
   process.env.NEXT_PUBLIC_MARKET_VAULT_ADDRESS,

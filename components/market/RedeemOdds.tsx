@@ -111,11 +111,16 @@ export default function RedeemOdds({ vaultAddress = null, active = true }: Props
   }, [rarity, heldTokenIds, heldCount]);
 
   /** ETH equivalent of one random redeem (share price + redeem fee) — the
-   * headline cost is denominated in shares; this is only the parenthetical. */
+   * headline cost is denominated in shares; this is only the parenthetical.
+   * Share-model: fee is bps of one share. Eth-model (V3+): fee is already a
+   * flat wei amount, added straight to the share price. */
   const redeemCostWei = useMemo(() => {
     if (!stats?.sharePriceWei) return null;
     const base = BigInt(stats.sharePriceWei);
-    const bps = BigInt(stats.redeemFeeBps);
+    if (stats.feeModel === "eth") {
+      return base + BigInt(stats.redeemFeeWei ?? "0");
+    }
+    const bps = BigInt(stats.redeemFeeBps ?? 0);
     return base + (base * bps) / BigInt(10_000);
   }, [stats]);
 
@@ -196,9 +201,17 @@ export default function RedeemOdds({ vaultAddress = null, active = true }: Props
       )}
 
       <div className="space-y-0.5 border-t border-line pt-1.5 text-[0.6rem] text-foreground/40">
-        {stats && (
+        {stats && stats.feeModel === "eth" && (
           <p>
-            Random cost ≈ {(1 + stats.redeemFeeBps / 10_000).toFixed(2)} shares
+            Random cost ≈ 1.00 share
+            {redeemCostWei != null
+              ? ` + fee (≈ ${formatTokenAmount(redeemCostWei, 18, 4)} Ξ)`
+              : ""}
+          </p>
+        )}
+        {stats && stats.feeModel === "share" && (
+          <p>
+            Random cost ≈ {(1 + (stats.redeemFeeBps ?? 0) / 10_000).toFixed(2)} shares
             {redeemCostWei != null
               ? ` (≈ ${formatTokenAmount(redeemCostWei, 18, 4)} Ξ)`
               : ""}

@@ -215,7 +215,7 @@ the variable is unset, verified against `lib/constants.ts`,
 
 | Flag | Gates | Default when unset | Source |
 | --- | --- | --- | --- |
-| `NEXT_PUBLIC_MARKET_ENABLED` | Whether `/market` renders `MarketView` or `ComingSoonGate` (no order-relay API, listing contract, or vault contract exists until every SPEC.md §7 gate is satisfied) | `false` (off) | `lib/constants.ts:184` |
+| `NEXT_PUBLIC_MARKET_ENABLED` | Whether `/market` renders `MarketView` or `ComingSoonGate` | `false` (off) | `lib/constants.ts:184` |
 | `NEXT_PUBLIC_TRADE_PAUSED` | Hard pause on the on-site Uniswap widget (countdown shows STAND BY) | `false` (open) | `lib/constants.ts:71` |
 | `NEXT_PUBLIC_TRADE_OPENS_AT` | ISO 8601 time the widget unlocks | `2026-07-25T21:20:00.000Z` | `lib/constants.ts:62` |
 | `NEXT_PUBLIC_RULES_RELAXED` | Whether off-site venue deep-links (Uniswap.app etc.) are treated as safe post-launch | `false` (site widget is the only sanctioned venue) | `lib/constants.ts:84` |
@@ -223,8 +223,8 @@ the variable is unset, verified against `lib/constants.ts`,
 | `NEXT_PUBLIC_CROSSCHAIN_ENABLED` | Uniswap-routed "Buy from another chain" panel (CHAINED/BRIDGE routing via Across) | `false` (off) | `lib/crosschain-constants.ts:18` |
 | `NEXT_PUBLIC_ZEROX_ENABLED` | 0x same-chain price-comparison quoting | `false` (off) | `lib/zerox-server.ts:29` |
 | `NEXT_PUBLIC_ZEROX_CROSSCHAIN_ENABLED` | 0x true one-step cross-chain buy into $PLANK | `false` (off) | `lib/zerox-server.ts:32` |
-| `NEXT_PUBLIC_MARKET_VAULT_ADDRESS` | Primary V2 Marketplank vault address | `null` (vault sends disabled) | `lib/constants.ts:228` |
-| `NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS` | Legacy V1 vault, dual-vault mode | `null` (single/no vault) | `lib/constants.ts:238` |
+| `NEXT_PUBLIC_MARKET_VAULT_ADDRESS` | Primary Marketplank vault address (V3 / Premium Plank Liquidity as of 2026-08-01) | `null` (vault sends disabled) | `lib/constants.ts:291` |
+| `NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES` / `..._LEGACY_ADDRESS` | Legacy (redeem-only) vaults — currently V1 Driftwood and V2 WormWood | `null`/empty (no legacy vault) | `lib/constants.ts:324` |
 | `NEXT_PUBLIC_ROBINHOOD_RPC_URL` | Browser RPC for chain reads that don't go through `/api/rpc` (e.g. mint contract) | falls back to public Robinhood Chain RPC | `lib/mint-contract.ts:9` |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | Reown/WalletConnect project ID for QR pairing | empty (WalletConnect QR path unusable until set, user can paste one client-side as a fallback) | `lib/wallet-connect.ts:65` |
 | `NEXT_PUBLIC_SITE_URL` | Canonical origin used in metadata/OG tags | `https://plank.love`-shaped fallback in `lib/public-json.ts` | `lib/public-json.ts:51` |
