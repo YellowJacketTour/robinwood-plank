@@ -25,6 +25,61 @@ const ERC721 = new Interface([
 export const SHARE_UNIT = BigInt("1000000000000000000");
 const BPS = BigInt(10000);
 
+/** Readable copy for V3's custom errors — the analog of vault.ts's map. */
+const V3_ERROR_MESSAGES: Record<string, string> = {
+  RequestPending: "The vault's redeem slot is busy — someone else is mid-redeem. Try again shortly.",
+  PoolNotOpen: "The pool is closed — trading is paused. Deposit and redeem still work.",
+  PoolAlreadyOpen: "The pool is already open.",
+  EmptyVault: "The vault holds no planks to redeem right now.",
+  ReservedForPendingRedeem: "That plank is reserved for an in-flight random redeem. Try another.",
+  TokenNotHeld: "The vault no longer holds that plank — it was just taken. Pick another.",
+  IncorrectFee: "Fee mismatch — reload and retry (the vault fee may have changed).",
+  InsufficientOutput: "Price moved past your slippage tolerance. Raise it or retry.",
+  InsufficientLiquidity: "Not enough liquidity in the pool for that size.",
+  RandomnessNotAvailable: "The drand round for your redeem isn't on-chain yet — wait a few seconds and claim again.",
+  RandomnessExpired: "Your redeem's drand round expired. You can forfeit it for a refund and retry.",
+  DrawNotPinned: "The random draw hasn't been pinned yet — wait a moment and retry.",
+  NoRequest: "There's no pending redeem for that wallet.",
+  TooSoon: "Too soon — the request hasn't expired yet.",
+  AlreadyHeld: "The vault already holds that plank.",
+  SolvencyBroken: "The vault refused the trade to protect solvency. Reload and retry.",
+  EthBackingBroken: "The vault refused the trade to protect its ETH backing. Reload and retry.",
+  TransferFailed: "A token/ETH transfer failed. Check balances and retry.",
+  NotTreasury: "Only the treasury can do that.",
+};
+
+/**
+ * Decode a V3 revert into readable copy, mirroring vault.ts's decodeVaultError
+ * for V3's custom-error set. Falls back to the wallet's short message.
+ */
+export function decodeV3Error(err: unknown): string {
+  const e = err as {
+    message?: string;
+    shortMessage?: string;
+    data?: unknown;
+    error?: { data?: unknown; message?: string };
+    info?: { error?: { data?: unknown; message?: string } };
+    cause?: { data?: unknown; message?: string };
+  };
+  const msg = (e?.message || "").toLowerCase();
+  if (msg.includes("user rejected") || msg.includes("user denied") || msg.includes("action_rejected")) {
+    return "You rejected the request in your wallet.";
+  }
+  if (msg.includes("insufficient funds")) return "Not enough ETH to cover the amount plus gas.";
+  const candidates = [e?.data, e?.error?.data, e?.info?.error?.data, e?.cause?.data];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string" || !candidate.startsWith("0x") || candidate.length < 10) continue;
+    try {
+      const parsed = V3.parseError(candidate);
+      if (parsed && V3_ERROR_MESSAGES[parsed.name]) return V3_ERROR_MESSAGES[parsed.name];
+      if (parsed) return `Reverted: ${parsed.name}.`;
+    } catch {
+      /* not a V3-ABI error — try the next candidate */
+    }
+  }
+  return (e?.shortMessage || e?.message || e?.error?.message || e?.info?.error?.message || "Transaction failed.").replace(/\s*\(action=.*$/i, "").slice(0, 180);
+}
+
 function vaultOr(addr?: string | null): string {
   const a = addr ?? MARKET_VAULT_ADDRESS;
   if (!a) throw new Error("No V3 vault configured.");
@@ -66,27 +121,38 @@ export type V3Snapshot = {
   redeemFeeWei: bigint;
   targetPremiumWei: bigint;
   swapFeeBps: number;
+  /** planks free to redeem right now (held minus any pending random draw). */
+  availableCount: number;
+  /** outstanding random-redeem requests (the single vault-wide slot). */
+  pendingRedeemCount: number;
+  /** permanently-locked seed LP at address(0) — not any user's, never withdrawable. */
+  lockedLp: bigint;
   /** account-specific (0 when no account) */
   shareBalance: bigint;
   lpBalance: bigint;
 };
 
+const ZERO = "0x0000000000000000000000000000000000000000";
+
 export async function getV3Snapshot(addr?: string | null, account?: string | null): Promise<V3Snapshot> {
   const v = reader(addr);
-  const [held, totalSupply, ethReserve, shareReserve, totalLpSupply, accruedFees, poolOpen, mintFeeWei, redeemFeeWei, targetPremiumWei, swapFeeBps] =
+  const [held, available, pendingCount, totalSupply, ethReserve, shareReserve, totalLpSupply, lockedLp, accruedFees, poolOpen, mintFeeWei, redeemFeeWei, targetPremiumWei, swapFeeBps] =
     (await Promise.all([
       v.heldTokenCount(),
+      v.availableTokenCount(),
+      v.pendingRedeemCount(),
       v.totalSupply(),
       v.ethReserve(),
       v.shareReserve(),
       v.totalLpSupply(),
+      v.lpBalance(ZERO), // the locked seed position
       v.accruedFees(),
       v.poolOpen(),
       v.mintFeeWei(),
       v.redeemFeeWei(),
       v.targetPremiumWei(),
       v.swapFeeBps(),
-    ])) as [bigint, bigint, bigint, bigint, bigint, bigint, boolean, bigint, bigint, bigint, bigint];
+    ])) as [bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, boolean, bigint, bigint, bigint, bigint];
 
   let shareBalance = BigInt(0);
   let lpBalance = BigInt(0);
@@ -100,6 +166,9 @@ export async function getV3Snapshot(addr?: string | null, account?: string | nul
   return {
     address: vaultOr(addr),
     held: Number(held),
+    availableCount: Number(available),
+    pendingRedeemCount: Number(pendingCount),
+    lockedLp,
     totalSupply,
     ethReserve,
     shareReserve,
@@ -242,6 +311,22 @@ export async function v3ClaimRandomRedeem(account: string): Promise<string> {
   return send(account, V3.encodeFunctionData("claimRandomRedeem", []));
 }
 
+// ── Stuck-slot rescue (the analog of legacy StuckRedeemRelay/PendingRedeemClaim).
+// The vault has ONE redeem slot; if a requester walks away between request and
+// claim, everyone's trades block until it clears. These permissionless calls let
+// anyone free it: settle-and-deliver to the requester once their round is on
+// chain, or forfeit an expired-and-never-pinned request. No fee — paid at request.
+
+/** Permissionlessly settle someone else's pinned redeem, delivering to them. */
+export async function v3ClaimRandomRedeemFor(account: string, requester: string, addr?: string | null): Promise<string> {
+  return send(account, V3.encodeFunctionData("claimRandomRedeemFor", [requester]), undefined, addr);
+}
+
+/** Permissionlessly forfeit an expired, never-pinned request to free the slot. */
+export async function v3ForfeitExpiredRedeem(account: string, requester: string, addr?: string | null): Promise<string> {
+  return send(account, V3.encodeFunctionData("forfeitExpiredRedeem", [requester]), undefined, addr);
+}
+
 /**
  * Kick the dev relay to finish a pending random redeem without a second wallet
  * prompt: it injects the mock beacon's randomness for the pinned round and
@@ -259,11 +344,16 @@ async function kickDevRelay(vaultAddr: string, requester: string): Promise<strin
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ vault: vaultAddr, requester }),
     });
-    if (!res.ok) return null;
+    // A 404 (route disabled outside dev) or any non-OK response means there is no
+    // relayer here — signal that explicitly so the caller stops polling a dead
+    // endpoint for the full timeout instead of treating it as "still working".
+    if (res.status === 404) return "no_relay";
+    if (!res.ok) return "no_relay";
     const data = (await res.json()) as { status?: string };
-    return data.status ?? null;
+    return data.status ?? "no_relay";
   } catch {
-    return null;
+    // Network failure reaching the relay — same as no relay.
+    return "no_relay";
   }
 }
 
