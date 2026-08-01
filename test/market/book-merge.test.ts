@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { mergeBook } from "../../lib/market/book";
 import { normaliseOpenSeaListings } from "../../lib/market/opensea";
+import { resolveIpfsUrl } from "../../lib/ipfs";
 import type { Listing } from "../../lib/market/types";
 
 /**
@@ -94,6 +95,34 @@ test("our own resolved image wins over the index", () => {
 test("a missing index entry is not a broken image URL", () => {
   const book = mergeBook([], [theirs("42", "1000000000000000")], "robinwood", { "1": "x" });
   assert.equal(book[0].imageUrl, undefined, "absent, so the card falls back cleanly");
+});
+
+test("the index image reaches the card as a LOADABLE url, not a raw ipfs:// uri", () => {
+  // Regression: the artwork lookup shipped passing `rec.imageUri` straight from
+  // the collection index into the book. The index stores raw `ipfs://…`, which
+  // no browser can render, so every OpenSea row went out with an unloadable src
+  // and the grid was blank in production — the same symptom the lookup was
+  // added to fix. The route must resolve through our proxy first; this pins
+  // that contract, since mergeBook itself will carry any string you hand it.
+  const fromIndex = "ipfs://bafyexample/PopeWood.png";
+  const book = mergeBook(
+    [],
+    [theirs("99", "3000000000000000")],
+    "robinwood",
+    { "99": resolveIpfsUrl(fromIndex) }
+  );
+
+  const src = book[0].imageUrl ?? "";
+  assert.ok(
+    src.startsWith("/api/ipfs/image?"),
+    `expected a same-origin proxy path, got ${src}`
+  );
+  assert.ok(!src.startsWith("ipfs://"), "a raw ipfs:// uri cannot load in an <img>");
+});
+
+test("resolveIpfsUrl is idempotent, so re-resolving an index entry is safe", () => {
+  const once = resolveIpfsUrl("ipfs://bafyexample/PopeWood.png");
+  assert.equal(resolveIpfsUrl(once), once, "must never double-wrap the proxy path");
 });
 
 test("a foreign listing never carries fulfilment material", () => {

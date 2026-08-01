@@ -1,6 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { Fragment } from "react";
+
+import { CHAIN } from "@/lib/constants";
+import { listVaultsForDisplay, shortVault } from "@/lib/market/vault-registry";
 
 /**
  * Full product + platform tutorial. Structured for humans and for AI tools
@@ -9,6 +13,18 @@ import { Fragment } from "react";
  * Canonical manual: every user-facing surface, on-chain dependency, and
  * infra hop is documented in tutorial order. Prefer this page over inventing
  * addresses, LP withdraw paths, or L1 bridges.
+ *
+ * Two rules this file must keep obeying:
+ *
+ * 1. NEVER print a vault version number in user-facing copy. Pools are named
+ *    products (Driftwood / WormWood / Premium Plank Liquidity) resolved from
+ *    `lib/market/vault-registry.ts`. See DESIGN.md "Vault naming".
+ * 2. The configured pools are read LIVE from the registry, not typed in here.
+ *    Hardcoding an address in a manual is how a manual starts lying.
+ *
+ * Section `id`s are CMS keys — `app/learn/page.tsx` passes admin `hidden` and
+ * `overrides` maps keyed by them. Renaming an id silently orphans an admin's
+ * override, so ids are append-only: repurpose the body, keep the key.
  */
 
 export const TOC = [
@@ -27,21 +43,24 @@ export const TOC = [
   { id: "listings", label: "12. Listings (buy & sell)" },
   { id: "offers-bids", label: "13. Offers & criteria bids" },
   { id: "sweep-fences", label: "14. Sweep, floors & fences" },
-  { id: "vault-layers", label: "15. Vault: two layers" },
-  { id: "vault-math", label: "16. Vault math (57 vs 4.94)" },
-  { id: "vault-lp", label: "17. Add & Remove LP" },
-  { id: "vault-migrate", label: "17b. Dual vault migrate" },
-  { id: "deposit-redeem", label: "18. Deposit & redeem" },
-  { id: "instant-swap", label: "19. Instant Swap modes" },
-  { id: "random-redeem", label: "20. Random redeem & drand" },
-  { id: "activity", label: "21. Activity & sales" },
-  { id: "art-cache", label: "22. Art, IPFS & cache" },
-  { id: "seaport", label: "23. Seaport / OpenSea-class" },
-  { id: "wallets", label: "24. Wallets & safety" },
-  { id: "infra", label: "25. Infra we rely on" },
-  { id: "tutorials", label: "26. End-to-end tutorials" },
-  { id: "faq", label: "27. FAQ" },
-  { id: "ai-summary", label: "28. AI machine summary" },
+  { id: "pools", label: "15. The pools" },
+  { id: "vault-layers", label: "16. A pool has two layers" },
+  { id: "vault-math", label: "17. Why held ≫ tradeable depth" },
+  { id: "fees", label: "18. Fees: two different models" },
+  { id: "deposit-redeem", label: "19. Deposit & redeem" },
+  { id: "instant-swap", label: "20. Instant Swap modes" },
+  { id: "vault-lp", label: "21. Providing liquidity" },
+  { id: "random-redeem", label: "22. Random redeem & drand" },
+  { id: "vault-migrate", label: "23. Moving out of an old pool" },
+  { id: "floorboards", label: "24. Under the floorboards" },
+  { id: "activity", label: "25. Activity & sales" },
+  { id: "art-cache", label: "26. Art, IPFS & cache" },
+  { id: "seaport", label: "27. Seaport / OpenSea-class" },
+  { id: "wallets", label: "28. Wallets & safety" },
+  { id: "infra", label: "29. Infra we rely on" },
+  { id: "tutorials", label: "30. End-to-end tutorials" },
+  { id: "faq", label: "31. FAQ" },
+  { id: "ai-summary", label: "32. AI machine summary" },
 ] as const;
 
 function H({ id, children }: { id: string; children: React.ReactNode }) {
@@ -104,6 +123,63 @@ function Ul({ items }: { items: React.ReactNode[] }) {
   );
 }
 
+/**
+ * The configured pools, read live from the registry so this manual cannot drift
+ * from what the site is actually pointed at.
+ */
+function PoolTable() {
+  const vaults = listVaultsForDisplay();
+  if (vaults.length === 0) {
+    return (
+      <Note>
+        No pool is configured on this deployment, so Instant Swap is off. Marketplank listings and
+        offers still work — they do not depend on a pool.
+      </Note>
+    );
+  }
+  const explorer = CHAIN.blockExplorers.default.url;
+  return (
+    <div className="mt-4 overflow-x-auto rounded-lg border border-gold-500/20">
+      <table className="w-full min-w-[34rem] text-left text-sm">
+        <thead className="bg-black/30 text-[0.7rem] uppercase tracking-wide text-foreground/50">
+          <tr>
+            <th className="px-3 py-2 font-semibold">Pool</th>
+            <th className="px-3 py-2 font-semibold">Status</th>
+            <th className="px-3 py-2 font-semibold">Fees</th>
+            <th className="px-3 py-2 font-semibold">Address</th>
+          </tr>
+        </thead>
+        <tbody className="text-foreground/80">
+          {vaults.map((v) => (
+            <tr key={v.address} className="border-t border-gold-500/15">
+              <td className="px-3 py-2 font-semibold text-foreground">{v.name}</td>
+              <td className="px-3 py-2">
+                {v.role === "primary" ? "Active — new deposits and trades" : "Older — redeem only"}
+              </td>
+              <td className="px-3 py-2">{v.feeModel === "eth" ? "Flat ETH" : "Paid in shares"}</td>
+              <td className="px-3 py-2">
+                <a
+                  className="font-mono text-xs text-gold-300 underline"
+                  href={`${explorer}/address/${v.address}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {shortVault(v.address)}
+                </a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Product name of the pool currently taking deposits, for use in prose. */
+function activePoolName(): string {
+  return listVaultsForDisplay().find((v) => v.role === "primary")?.name ?? "the active pool";
+}
+
 const SECTIONS: { id: string; body: React.ReactNode }[] = [
   {
     id: "start-here",
@@ -126,15 +202,22 @@ const SECTIONS: { id: string; body: React.ReactNode }[] = [
             <>Trade $PLANK only through the site Trade widget when open (official pair path).</>,
             <>List or bid on Marketplank (Seaport orders) for peer-to-peer NFT trade.</>,
             <>
-              Or <strong>Deposit</strong> into the vault → hold / Sell / <strong>Add LP</strong>{" "}
-              shares → redeem later.
+              Or <strong>Deposit</strong> a plank into the pool → hold, trade, or provide liquidity
+              with the shares → redeem a plank later.
             </>,
           ]}
         />
         <Note>
-          <strong>Mental model:</strong> Market listings are peer-to-peer (someone else must fill).
-          Instant Swap is a shared vault + AMM so you can trade against the pool without waiting for
-          a counterparty. $PLANK is a separate ERC-20 AMM path (Uniswap), not the vault.
+          <strong>Mental model:</strong> Market listings are peer-to-peer — someone else has to fill
+          them. Instant Swap is a shared pool, so you trade against inventory instead of waiting for
+          a counterparty. $PLANK is a separate ERC-20 on Uniswap and has nothing to do with the pool.
+        </Note>
+        <Note>
+          <strong>Three words you will see everywhere.</strong> A <strong>plank</strong> is a
+          RobinWood NFT. A <strong>share</strong> (ticker <code className="font-mono text-xs">vROBIN</code>)
+          is the fungible token a pool mints when you deposit a plank — one share is a claim on one
+          plank from that pool&apos;s inventory. <strong>Liquidity</strong> is share-plus-ETH depth
+          you lend the pool so other people can trade instantly.
         </Note>
       </>
     ),
@@ -148,7 +231,7 @@ const SECTIONS: { id: string; body: React.ReactNode }[] = [
         <Code>{`User wallet (RH chain 4663)
   ├─ RobinWood NFT (ERC-721)
   ├─ $PLANK (ERC-20)
-  ├─ Vault shares (ERC-20 minted by MarketplankVault)
+  ├─ Pool shares — vROBIN (ERC-20, one per pool)
   └─ WETH (for Seaport offers / bids)
 
 plank.love routes
@@ -156,23 +239,25 @@ plank.love routes
   ├─ /market           Marketplank (listings, offers, Instant Swap, activity)
   ├─ /gallery          Full collection browser
   ├─ /mint · /launch   Mint-focused surfaces
+  ├─ /migrate          Guided exit from an older pool
+  ├─ /floorboards      Quiet bargain cellar on the oldest pool
   └─ /learn            This manual (humans + AI)
 
 On-chain (Robinhood 4663)
   ├─ RobinWood NFT
   ├─ $PLANK
   ├─ Seaport 1.6 + ConduitController (OpenSea-class protocol)
-  ├─ MarketplankVault (deposit/redeem + CPAMM + optional contributeLiquidity)
+  ├─ Marketplank pools (deposit/redeem + constant-product AMM)
   ├─ DrandBeacon (random-redeem randomness)
   ├─ WETH (offer currency)
   └─ Uniswap Universal Router + Permit2 ($PLANK swaps)
 
 Off-site / infra
   ├─ Blockscout explorer + REST indexes
-  ├─ Public / site RPC (rate-limited)
+  ├─ Private RPC provider, with the public RPC as fallback
   ├─ IPFS (metadata + art CIDs)
-  ├─ Durable store (PostgreSQL)
-  ├─ Cloudflare Workers (OpenNext host)
+  ├─ PostgreSQL (order relay + caches)
+  ├─ InMotion Apache + Passenger (app host), Cloudflare as the edge
   ├─ Uniswap Trading API (server-side quotes)
   └─ drand public randomness network`}</Code>
       </>
@@ -191,8 +276,8 @@ Off-site / infra
               allocation, airdrop checker, distribution, roadmap, trust facts.
             </>,
             <>
-              <strong>/market</strong> — Marketplank: Buy & Sell, Offers, Instant Swap, Activity, My
-              NFTs / listings. Requires market enabled flag + vault address when Instant Swap is live.
+              <strong>/market</strong> — Marketplank: Buy &amp; Sell, Offers, Instant Swap, Activity,
+              My NFTs / listings. Instant Swap needs the market flag and a configured pool.
             </>,
             <>
               <strong>/gallery</strong> — Browse all planks, traits, rarity; same image proxy as Market.
@@ -202,12 +287,20 @@ Off-site / infra
               wallet connect, mint txs).
             </>,
             <>
+              <strong>/migrate</strong> — Step-by-step exit from an older pool. Only worth opening if
+              you have value in one; the site banners you when you do. See §23.
+            </>,
+            <>
+              <strong>/floorboards</strong> — &quot;Under the floorboards&quot;, a quiet page for
+              buying below floor out of the oldest pool. See §24.
+            </>,
+            <>
               <strong>/learn</strong> — This page. Link also in nav and footer.
             </>,
             <>
               <strong>API routes</strong> under <code className="font-mono text-xs">/api/…</code> —
-              market orders, vault stats/held/activity, IPFS image/metadata proxy, Uniswap
-              quote/swap, boards/airdrop, RPC helper. Browsers and AI should prefer documented public
+              market orders, pool stats/held/activity, IPFS image/metadata proxy, Uniswap
+              quote/swap, boards/airdrop, RPC proxy. Browsers and AI should prefer documented public
               pages; APIs are implementation detail and may change shape.
             </>,
           ]}
@@ -222,7 +315,7 @@ Off-site / infra
         {/* ── 3 ── */}
         <H id="robinhood">3. Robinhood Chain</H>
         <P>
-          Everything market-, vault-, mint-, and $PLANK-related for this product is on chain id{" "}
+          Everything market-, pool-, mint-, and $PLANK-related for this product is on chain id{" "}
           <strong>4663</strong>. The site refuses writes on other networks (wallet helpers re-check
           chain immediately before broadcast).
         </P>
@@ -242,7 +335,7 @@ Off-site / infra
             <>
               Public RPC:{" "}
               <code className="font-mono text-xs">https://rpc.mainnet.chain.robinhood.com</code>{" "}
-              (rate-limited; site falls back carefully).
+              (rate-limited; the site prefers a private provider and falls back to this).
             </>,
             <>Native gas token is ETH on this chain (not mainnet ETH bridged in a way the site manages).</>,
             <>
@@ -253,7 +346,7 @@ Off-site / infra
         />
         <Note>
           <strong>AI note:</strong> Do not assume L1 Ethereum addresses, Ethereum Uniswap routers, or
-          bridges. Seaport, vault, NFT, and $PLANK addresses in this manual are on 4663 only.
+          bridges. Seaport, pool, NFT, and $PLANK addresses in this manual are on 4663 only.
         </Note>
       </>
     ),
@@ -278,8 +371,12 @@ Universal Router 2.1.1:   0x8876789976dEcBfCbBbe364623C63652db8C0904
 Permit2:                  0x000000000022D473030F116dDEE9F6B43aC78BA3
 DrandBeacon:              0x87d584df130FED0Fe540954eD48CE2691A18D619
 Market fee recipient:     0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8
-Trade ($PLANK) fee wallet:0xfa987d386c4f61b27cb67a1e4e1239866fe8d9ba
-Vault:                    NEXT_PUBLIC_MARKET_VAULT_ADDRESS (env; check UI / explorer)`}</Code>
+Trade ($PLANK) fee wallet:0xfa987d386c4f61b27cb67a1e4e1239866fe8d9ba`}</Code>
+        <P>
+          Pool addresses are not listed here, because they change as pools open and retire. The table
+          below is generated from what this deployment is actually configured with:
+        </P>
+        <PoolTable />
         <Warn>
           Multiple contracts on this chain may report the symbol &quot;WETH&quot;. Only the address
           above is valid for Marketplank offers. Never resolve WETH by symbol search.
@@ -301,7 +398,7 @@ Vault:                    NEXT_PUBLIC_MARKET_VAULT_ADDRESS (env; check UI / expl
         <H3>What $PLANK is not</H3>
         <Ul
           items={[
-            <>Not vault shares. Vault shares are a different ERC-20 minted by MarketplankVault.</>,
+            <>Not pool shares. Shares (vROBIN) are a different ERC-20, minted by a Marketplank pool.</>,
             <>Not required to list/buy NFTs on Marketplank (listings settle in native ETH).</>,
             <>Not used as Seaport offer currency (offers use WETH).</>,
           ]}
@@ -389,7 +486,7 @@ Vault:                    NEXT_PUBLIC_MARKET_VAULT_ADDRESS (env; check UI / expl
     body: (
       <>
         {/* ── 9 ── */}
-        <H id="gallery">9. Gallery & rarity</H>
+        <H id="gallery">9. Gallery &amp; rarity</H>
         <P>
           Gallery loads token metadata (client cache + IPFS proxy) and shows rarity rank/tier. Same
           image pipeline as Market so art caches stay consistent. Use Gallery to explore traits; use
@@ -403,7 +500,7 @@ Vault:                    NEXT_PUBLIC_MARKET_VAULT_ADDRESS (env; check UI / expl
     body: (
       <>
         {/* ── 10 ── */}
-        <H id="airdrop">10. Airdrop & boards</H>
+        <H id="airdrop">10. Airdrop &amp; boards</H>
         <P>
           Home airdrop checker + boards APIs scan holder state / eligibility against published airdrop
           data (CSV/JSON under public exports where applicable). Wood List is the social wallet drop
@@ -422,7 +519,7 @@ Vault:                    NEXT_PUBLIC_MARKET_VAULT_ADDRESS (env; check UI / expl
                 @RobinWoodPlank
               </a>
             </>,
-            <>Boards/airdrop routes are read-heavy; do not confuse them with vault deposit.</>,
+            <>Boards/airdrop routes are read-heavy; do not confuse them with a pool deposit.</>,
           ]}
         />
       </>
@@ -435,7 +532,7 @@ Vault:                    NEXT_PUBLIC_MARKET_VAULT_ADDRESS (env; check UI / expl
         {/* ── 11 ── */}
         <H id="marketplank">11. Marketplank overview</H>
         <P>
-          Peer-to-peer NFT marketplace on Seaport 1.6 plus an optional Instant Swap vault. Sellers
+          Peer-to-peer NFT marketplace on Seaport 1.6 plus an optional Instant Swap pool. Sellers
           list; buyers fulfill signed orders. Prices and token IDs come from signatures / on-chain
           fulfillment, not trusted client JSON alone. Order book is stored off-chain (relay) and
           validated on fill.
@@ -443,16 +540,16 @@ Vault:                    NEXT_PUBLIC_MARKET_VAULT_ADDRESS (env; check UI / expl
         <H3>Market tabs</H3>
         <Ul
           items={[
-            <><strong>Buy & Sell</strong> — listings grid, filters, sweep, rarity floors, item detail.</>,
+            <><strong>Buy &amp; Sell</strong> — listings grid, filters, sweep, rarity floors, item detail.</>,
             <><strong>Offers</strong> — item bids + trait/rarity/combo criteria bids (WETH).</>,
-            <><strong>Instant Swap</strong> — vault Buy / Sell / Add LP / Deposit / Redeem.</>,
-            <><strong>Activity</strong> — collection transfers + priced sales; vault trade history on Instant Swap.</>,
+            <><strong>Instant Swap</strong> — trade against the pool: Buy, Sell, Liquidity, Deposit, Redeem.</>,
+            <><strong>Activity</strong> — collection transfers + priced sales; pool trade history on Instant Swap.</>,
             <><strong>My NFTs / My Listings</strong> — inventory, list, cancel.</>,
           ]}
         />
         <P>
-          Fee model: RobinWood / $PLANK path market fee is 0% by design for this collection;
-          other future collections may use a default (e.g. 0.5%) to the market fee recipient.
+          Fee model: the RobinWood marketplace fee is 0% by design for this collection; other future
+          collections may use a default (e.g. 0.5%) to the market fee recipient.
         </P>
       </>
     ),
@@ -462,14 +559,14 @@ Vault:                    NEXT_PUBLIC_MARKET_VAULT_ADDRESS (env; check UI / expl
     body: (
       <>
         {/* ── 12 ── */}
-        <H id="listings">12. Listings (buy & sell)</H>
+        <H id="listings">12. Listings (buy &amp; sell)</H>
         <H3>List (sell)</H3>
         <Ol
           items={[
             <>Own the plank; connect wallet on 4663.</>,
             <>Approve Seaport/conduit for the NFT if needed (prefer limited approvals).</>,
             <>Set price in ETH; sign Seaport listing; POST to order relay.</>,
-            <>Listing appears in Buy & Sell until cancelled or filled.</>,
+            <>Listing appears in Buy &amp; Sell until cancelled or filled.</>,
           ]}
         />
         <H3>Buy</H3>
@@ -488,7 +585,7 @@ Vault:                    NEXT_PUBLIC_MARKET_VAULT_ADDRESS (env; check UI / expl
     body: (
       <>
         {/* ── 13 ── */}
-        <H id="offers-bids">13. Offers & criteria bids</H>
+        <H id="offers-bids">13. Offers &amp; criteria bids</H>
         <P>
           Item offers name one <code className="font-mono text-xs">tokenId</code>. Criteria offers
           commit to a Merkle set of token IDs for a trait, rarity tier, or AND-combo. The server
@@ -499,7 +596,7 @@ Vault:                    NEXT_PUBLIC_MARKET_VAULT_ADDRESS (env; check UI / expl
           items={[
             <>Offers are denominated in <strong>WETH</strong> (Seaport cannot pull native ETH from offerer at fill).</>,
             <>Wrap ETH → WETH and approve Seaport/conduit before offering.</>,
-            <>Trait index is built from metadata and stored (e.g. KV); if empty, criteria UX degrades until reseeded.</>,
+            <>The trait index is built from metadata and stored in the database; if empty, criteria UX degrades until reseeded.</>,
           ]}
         />
       </>
@@ -510,7 +607,7 @@ Vault:                    NEXT_PUBLIC_MARKET_VAULT_ADDRESS (env; check UI / expl
     body: (
       <>
         {/* ── 14 ── */}
-        <H id="sweep-fences">14. Sweep, floors & fences</H>
+        <H id="sweep-fences">14. Sweep, floors &amp; fences</H>
         <Ul
           items={[
             <><strong>Rarity floors</strong> — lowest listing per tier (Legendary…Common) for quick orientation.</>,
@@ -522,26 +619,112 @@ Vault:                    NEXT_PUBLIC_MARKET_VAULT_ADDRESS (env; check UI / expl
     ),
   },
   {
-    id: "vault-layers",
+    id: "pools",
     body: (
       <>
         {/* ── 15 ── */}
-        <H id="vault-layers">15. Vault: two layers</H>
-        <P>The Instant Swap vault is two systems sharing one contract:</P>
-        <Code>{`LAYER A — Inventory (backing)
-  deposit NFT  → mint shares to YOUR wallet
-  redeem shares → burn shares, get NFT out
-  totalSupply ≈ number of NFTs held (minus fee accounting)
-
-LAYER B — AMM pool (Instant Swap book)
-  buyShares:  ETH in  → shares out of the pool
-  sellShares: shares in → ETH out of the pool
-  contributeLiquidity / transfer shares into vault → deepen book
-  ethReserve and balanceOf(vault) are the two sides of the book`}</Code>
+        <H id="pools">15. The pools</H>
         <P>
-          Deposit does <em>not</em> put shares into the AMM. It puts shares in your wallet. That is
-          why you can see many NFTs held but only a few shares in the pool.
+          Instant Swap runs on a <em>pool</em>: a contract that custodies planks, mints a fungible
+          share for each one, and runs a constant-product market between those shares and ETH.
         </P>
+        <P>
+          There is more than one, and that is deliberate. A pool contract is{" "}
+          <strong>immutable</strong> — no proxy, no upgrade, no admin switch. Improving the design
+          means deploying a new pool, not patching the old one. So each is presented as its own
+          product rather than a version ladder, and an older pool is never deleted from the site while
+          it still holds someone&apos;s plank.
+        </P>
+        <PoolTable />
+        <H3>Driftwood</H3>
+        <P>
+          The first pool. Deposit, redeem, and trade shares against ETH. It has no liquidity feature at
+          all — nothing to add, nothing to withdraw — which is exactly why it is safe to leave open
+          indefinitely. It is also where <Link className="text-gold-300 underline" href="/floorboards">the
+          floorboards</Link> shop (§24).
+        </P>
+        <H3>WormWood</H3>
+        <P>
+          The second pool added a liquidity feature, and that feature has a flaw: the way it credits
+          and returns a contribution lets a trader extract the pool&apos;s ETH. It was found in an
+          internal audit before it was ever recommended to holders.
+        </P>
+        <Warn>
+          <strong>Do not deposit into WormWood and do not add liquidity to it.</strong> If you already
+          have planks or shares there, get them out — <Link className="text-gold-300 underline" href="/migrate">/migrate</Link>{" "}
+          walks you through it step by step (§23). The pool stays listed on the site for exactly one
+          reason: so existing depositors can still redeem. Removing it from the site would strand them.
+        </Warn>
+        <H3>Premium Plank Liquidity</H3>
+        <P>
+          The current design, and the one to use. It keeps the drand random-redeem machinery unchanged
+          and fixes the two things the older pools got wrong:
+        </P>
+        <Ul
+          items={[
+            <>
+              <strong>Liquidity is proportional.</strong> You add ETH and matching shares at the
+              pool&apos;s current ratio, and you withdraw a pro-rata slice of whatever the reserves are
+              worth at that moment. There is no one-sided contribution, so nobody can move the price
+              with a deposit and hand the bill to everyone else.
+            </>,
+            <>
+              <strong>Fees are flat ETH, not a slice of your shares.</strong> A deposit mints exactly
+              one whole share and a redeem burns exactly one. That kills the old trap where one
+              deposit did not quite cover one redeem (§18).
+            </>,
+            <>
+              Trading pays a <strong>30 bps</strong> swap fee that stays in the pool, so liquidity
+              providers earn from volume.
+            </>,
+            <>
+              The opening seed is locked permanently, so the pool can never be emptied down to nothing
+              and reserves stay positive.
+            </>,
+          ]}
+        />
+        <P>
+          It has no oracle, no external AMM dependency, no owner-adjustable fees, no upgrade path, no
+          pause switch, and no admin route to withdraw pool ETH. Fee ceilings are fixed in the
+          constructor, so a high-fee deployment is impossible rather than merely unintended.
+        </P>
+        <Note>
+          <strong>Solvency, in one line:</strong> every share that exists — plus every share burned for
+          a redeem that has not been claimed yet — is backed one-for-one by a plank the pool is
+          holding. The contract asserts that after every call that moves a plank or a share, and
+          asserts separately that its ETH balance always covers the reserves plus unpaid fees.
+        </Note>
+      </>
+    ),
+  },
+  {
+    id: "vault-layers",
+    body: (
+      <>
+        {/* ── 16 ── */}
+        <H id="vault-layers">16. A pool has two layers</H>
+        <P>One contract, two systems that people constantly confuse:</P>
+        <Code>{`LAYER A — Inventory (what backs the shares)
+  deposit plank  → mint one share to YOUR wallet
+  redeem share   → burn the share, a plank comes out
+  shares outstanding == planks held (that is the solvency invariant)
+
+LAYER B — The pool (what you trade against)
+  buy shares:  ETH in  → shares out of the reserves
+  sell shares: shares in → ETH out of the reserves
+  add liquidity → deepen both sides, earn a slice of swap fees
+  price ≈ ethReserve / shareReserve`}</Code>
+        <P>
+          Depositing does <em>not</em> put your shares into the tradeable pool. It puts them in your
+          wallet. That is why a pool can hold many planks while only a few shares are actually
+          available to trade against.
+        </P>
+        <Note>
+          On Premium Plank Liquidity the reserves are tracked as explicit numbers, not as whatever the
+          contract happens to be holding. Sending shares or ETH to the pool address directly does not
+          add liquidity, does not credit you, and does not move the price — it just sits there, dead.
+          Use the Liquidity tab.
+        </Note>
       </>
     ),
   },
@@ -549,129 +732,73 @@ LAYER B — AMM pool (Instant Swap book)
     id: "vault-math",
     body: (
       <>
-        {/* ── 16 ── */}
-        <H id="vault-math">16. Vault math (held 57 vs pool ~4.94)</H>
-        <P>Example live shape (numbers change; re-read Instant Swap stats):</P>
-        <Code>{`held NFTs              = 57
-totalSupply (shares)   ≈ 57
-share reserve (in pool)= ~4.94   ← only these trade vs ETH
-shares in wallets      ≈ 52      ← depositors "sitting liquid"
-ethReserve             ≈ 0.024 ETH
-spot ≈ ethReserve / shareReserve ≈ few thousandths ETH per share`}</Code>
-        <P>
-          <strong>Solvency:</strong> every share outstanding is backed by vault inventory (plus
-          pending random-redeem accounting). The pool can be thin while inventory is deep. Adding LP
-          moves wallet shares into the share reserve without minting new shares or depositing new NFTs.
-        </P>
-      </>
-    ),
-  },
-  {
-    id: "vault-lp",
-    body: (
-      <>
         {/* ── 17 ── */}
-        <H id="vault-lp">17. Add &amp; Remove LP</H>
+        <H id="vault-math">17. Why held planks ≫ tradeable depth</H>
+        <P>An illustrative shape — read the live numbers off Instant Swap, not these:</P>
+        <Code>{`planks held            = 57
+shares outstanding     = 57      ← one per plank, always
+share reserve (pool)   = ~4.94   ← only these trade against ETH
+shares in wallets      = ~52     ← depositors holding, not trading
+eth reserve            = ~0.024 ETH
+price ≈ ethReserve / shareReserve`}</Code>
         <P>
-          After deposit you hold vault shares. To put them into the Instant Swap book without selling
-          for ETH, use <strong>LP → Add LP</strong>. To pull that depth back later, use{" "}
-          <strong>LP → Remove LP</strong>.
+          <strong>Deep inventory, thin book is normal.</strong> It does not mean the pool is insolvent
+          or that depositors are stuck — every one of those 57 shares can still be redeemed for a
+          plank. It means most depositors are holding rather than providing liquidity. Adding
+          liquidity is what moves shares from &quot;sitting in a wallet&quot; to &quot;tradeable&quot;.
         </P>
-        <H3>Add LP</H3>
-        <Ol
-          items={[
-            <>Deposit planks → receive shares to your wallet (mint fee may apply, e.g. ~0.99 per NFT).</>,
-            <>Open Market → Instant Swap → <strong>LP</strong> → <strong>Add LP</strong>.</>,
-            <>Enter share amount (Max uses your balance). Optionally enter ETH if the vault supports full contributeLiquidity.</>,
-            <>
-              Confirm. Shares move into <code className="font-mono text-xs">balanceOf(vault)</code>{" "}
-              (pool ask). Optional ETH increases <code className="font-mono text-xs">ethReserve</code>{" "}
-              (pool bid). Your address is credited{" "}
-              <code className="font-mono text-xs">lpShareCredit</code> /{" "}
-              <code className="font-mono text-xs">lpEthCredit</code> for later removal.
-            </>,
-          ]}
-        />
-        <H3>Remove LP</H3>
-        <Ol
-          items={[
-            <>Open Instant Swap → <strong>LP</strong> → <strong>Remove LP</strong>.</>,
-            <>Enter shares and/or ETH up to your displayed credit (Max buttons use credit).</>,
-            <>Confirm. Shares return to your wallet; ETH is sent to you and ethReserve decreases.</>,
-          ]}
-        />
-        <Note>
-          <strong>Not Uniswap V2 LP tokens.</strong> Credits are absolute share/ETH amounts from{" "}
-          <code className="font-mono text-xs">contributeLiquidity</code> only. Removal is capped by
-          (1) your credit and (2) live reserves — if traders emptied a side, remove a smaller amount
-          or wait. <strong>Treasury seed</strong> never mints credit (treasury cannot rug seed ETH via
-          Remove LP). Raw share transfers into the vault also mint no credit.
-        </Note>
-        <H3>Sell vs Add LP vs Remove LP</H3>
-        <Ul
-          items={[
-            <><strong>Sell</strong> — trade: you get ETH, price impact, no credit change.</>,
-            <><strong>Add LP</strong> — deepen book; track credit; no trade price.</>,
-            <><strong>Remove LP</strong> — reverse Add LP for your credit (not a market sell of others&apos; depth).</>,
-          ]}
-        />
-        <H3>Live vs upgraded vault</H3>
-        <Ul
-          items={[
-            <>
-              <strong>Older live vault:</strong> share-side add may work as a plain transfer (no remove
-              credit). UI shows upgrade notices for ETH add and Remove LP.
-            </>,
-            <>
-              <strong>Upgraded vault:</strong>{" "}
-              <code className="font-mono text-xs">contributeLiquidity</code> (selector{" "}
-              <code className="font-mono text-xs">0xc1244a5c</code>) +{" "}
-              <code className="font-mono text-xs">removeLiquidity</code> (selector{" "}
-              <code className="font-mono text-xs">0x9d7de6b3</code>) with per-address credits.
-            </>,
-          ]}
-        />
+        <P>
+          A thin book also means <strong>price impact</strong>: buying a meaningful number of shares
+          against a small reserve moves the price a lot. Check the quote and your slippage setting
+          before confirming, and prefer Redeem over Buy when what you actually want is a plank.
+        </P>
       </>
     ),
   },
   {
-    id: "vault-migrate",
+    id: "fees",
     body: (
       <>
         {/* ── 18 ── */}
-        <H id="vault-migrate">17b. Dual vault migrate (existing depositors)</H>
+        <H id="fees">18. Fees: the two models</H>
         <P>
-          The first production vault is immutable. New LP add/remove needs a second deploy. Safe
-          migrate never deletes Driftwood from the site until it is empty.
+          Older pools and the current one charge in fundamentally different currencies. Quoting one
+          model&apos;s numbers at the other is the single most common mistake in reading this system.
         </P>
-        <H3>Operator setup</H3>
-        <Code>{`# After V2 is deployed and openPool()'d:
-NEXT_PUBLIC_MARKET_VAULT_ADDRESS=<V2 address>
-NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF708
-# Redeploy site. Instant Swap can target either; migrate panel walks holders through.`}</Code>
-        <H3>User walkthrough (dead simple)</H3>
-        <Ol
+        <Code>{`OLDER POOLS (Driftwood, WormWood) — you pay in SHARES
+  deposit a plank  → you receive ~0.99 shares   (1% mint fee)
+  redeem a plank   → burns ~1.01 shares         (1% redeem fee)
+  pick a specific plank → +2.5% premium
+  ⇒ one deposit does NOT cover one redeem. You end up ~0.02 short.
+
+CURRENT POOL (Premium Plank Liquidity) — you pay in ETH
+  deposit a plank  → you receive exactly 1.000 share, plus a flat ETH fee
+  redeem a plank   → burns exactly 1.000 share, plus a flat ETH fee
+  pick a specific plank → flat ETH premium
+  ⇒ one deposit always covers one redeem. No shortfall, ever.`}</Code>
+        <H3>The old shortfall, and how to clear it</H3>
+        <P>
+          On an older pool, depositing one plank and immediately trying to redeem one fails — you are
+          roughly 0.02 shares short. That is not a bug and not a migration tax; it is the same fee any
+          deposit and any redeem has always paid. Three ways out: buy the small difference on Instant
+          Swap, redeem across several planks at once so the fees round in your favour, or sell the
+          leftover dust for ETH. <Link className="text-gold-300 underline" href="/migrate">/migrate</Link>{" "}
+          calculates your exact shortfall and offers these.
+        </P>
+        <P>
+          The exact fee numbers are fixed in each pool at deployment and can never be changed by
+          anyone, including us. The site reads them live — trust the number in the UI over the
+          illustrative ones above.
+        </P>
+        <H3>Other fees on the site</H3>
+        <Ul
           items={[
-            <>Connect wallet on chain 4663.</>,
-            <>If shares &lt; redeem cost (~1.01), buy dust shares or deposit another plank on LEGACY.</>,
-            <>Random redeem on LEGACY (step 1 + claim) → NFT in your wallet.</>,
-            <>When WormWood is live: Deposit that NFT into the NEW vault → new shares.</>,
-            <>On WormWood: Add LP / Remove LP / trade as normal.</>,
+            <><strong>Marketplank listings and offers</strong> — 0% marketplace fee for RobinWood.</>,
+            <><strong>$PLANK trade widget</strong> — 0.4207% integrator fee (§6).</>,
+            <><strong>Pool swaps</strong> — 30 bps on Premium Plank Liquidity, kept in the pool for liquidity providers.</>,
+            <><strong>Creator royalty</strong> — EIP-2981 on marketplace fills where the venue pays it.</>,
           ]}
         />
-        <H3>Will redemption rip me off?</H3>
-        <P>
-          <strong>No special migrate tax and no rug.</strong> Fees are the same for any redeem/deposit
-          (live Driftwood: 1% mint, 1% redeem, 2.5% target premium). One deposit mints ~0.99 shares; random
-          redeem burns ~1.01 — so you may need ~0.02 dust shares before exit. Re-depositing to WormWood
-          charges mint fee again (~2% total share friction + gas for a full round trip). You receive
-          the NFT on redeem; treasury fees are the designed protocol cost, not an optional migrate
-          surprise. Staying on Driftwood forever is valid — migrate only if you want WormWood LP features.
-        </P>
-        <P>
-          UI: Market → Instant Swap → <strong>Safe migrate</strong> panel (
-          <code className="font-mono text-xs">/market?tab=swap</code>).
-        </P>
       </>
     ),
   },
@@ -679,36 +806,40 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
     id: "deposit-redeem",
     body: (
       <>
-        <H id="deposit-redeem">18. Deposit & redeem (happy path = not stuck)</H>
+        {/* ── 19 ── */}
+        <H id="deposit-redeem">19. Deposit &amp; redeem</H>
         <H3>Deposit</H3>
         <P>
-          Path: approve vault for that tokenId if needed →{" "}
-          <code className="font-mono text-xs">deposit(tokenId)</code>. Atomic: either NFT is indexed
-          and shares mint, or the whole tx reverts. Your NFT is not stuck if deposit fails.
+          Approve the pool for that token id if needed, then{" "}
+          <code className="font-mono text-xs">deposit(tokenId)</code>. It is atomic: either the plank
+          is indexed and your share mints, or the whole transaction reverts and you still own the
+          plank. A failed deposit never strands an NFT. Premium Plank Liquidity also takes a batch
+          (<code className="font-mono text-xs">depositMany</code>) so several planks go in one
+          transaction.
         </P>
         <Warn>
-          <strong>Danger:</strong> Never raw-transfer an NFT to the vault address. Only use Deposit.
-          Untracked transfers are not redeemable on the current vault (no rescue path for raw
-          transfers).
+          <strong>Never send a plank to a pool address as a plain transfer.</strong> Only the Deposit
+          button works. A raw transfer is not indexed, mints you nothing, and there is no rescue path
+          — the plank is simply gone.
         </Warn>
         <H3>Redeem</H3>
         <Ul
           items={[
             <>
-              <strong>Targeted</strong> — one tx; pay redeem fee + target premium; get that tokenId if
-              held.
+              <strong>Targeted</strong> — one transaction. Pay the redeem fee plus the targeting
+              premium, get that exact token id if the pool holds it. Batched as{" "}
+              <code className="font-mono text-xs">redeemTargetMany</code> on the current pool.
             </>,
             <>
-              <strong>Random</strong> — step 1 burns shares and locks a drand round; step 2 claims the
-              pinned NFT. Only one random redeem vault-wide at a time. Anyone can relay randomness,
-              settle for the requester, or forfeit expired unpinned requests so the slot cannot brick
-              forever.
+              <strong>Random</strong> — two steps, using public randomness. Step one burns the share
+              and locks a future drand round; step two claims the plank you were pinned to. Cheaper
+              than targeting, but you do not choose. See §22.
             </>,
           ]}
         />
         <P>
-          Fees mean one deposit (~0.99 shares) may not cover one redeem (~1.01+ shares). Buy more
-          shares or deposit more if the UI says insufficient.
+          If the UI says you have insufficient shares on an older pool, that is the fee shortfall from
+          §18, not a failure.
         </P>
       </>
     ),
@@ -717,21 +848,85 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
     id: "instant-swap",
     body: (
       <>
-        {/* ── 19 ── */}
-        <H id="instant-swap">19. Instant Swap modes</H>
+        {/* ── 20 ── */}
+        <H id="instant-swap">20. Instant Swap modes</H>
         <Ul
           items={[
-            <><strong>Buy</strong> — ETH → vault shares from the pool (slippage protected; min-out required).</>,
-            <><strong>Sell</strong> — shares → ETH from the pool (slippage protected).</>,
-            <><strong>LP</strong> — Add LP (credit) or Remove LP (up to credit + reserves); see §17.</>,
-            <><strong>Deposit</strong> — NFT → shares in your wallet (picker from owned inventory).</>,
-            <><strong>Redeem</strong> — shares → NFT (random or specific from vault held set).</>,
+            <><strong>Buy</strong> — ETH → shares out of the pool. Slippage protected; a minimum-out is enforced at submission.</>,
+            <><strong>Sell</strong> — shares → ETH out of the pool. Slippage protected the same way.</>,
+            <><strong>Liquidity</strong> — add or withdraw pool depth; see §21.</>,
+            <><strong>Deposit</strong> — plank → share in your wallet (picker from owned inventory).</>,
+            <><strong>Redeem</strong> — share → plank, random or targeted.</>,
           ]}
         />
+        <Warn>
+          <strong>Buy does not get you a plank.</strong> Buy gets you shares. Planks come out through
+          Redeem. Buying a share and redeeming it are two separate transactions, and the site never
+          merges them into one button.
+        </Warn>
         <P>
-          Trade history on Instant Swap is the <em>vault</em> event stream (deposit/redeem/buy/sell
-          shares), not OpenSea-style NFT sales. NFT sales live under Activity.
+          The tab also carries a price chart, a liquidity dashboard, and the pool&apos;s own trade
+          history — deposits, redeems, buys, and sells. That is the <em>pool</em> event stream. NFT
+          sales between people live under Activity (§25).
         </P>
+      </>
+    ),
+  },
+  {
+    id: "vault-lp",
+    body: (
+      <>
+        {/* ── 21 ── */}
+        <H id="vault-lp">21. Providing liquidity</H>
+        <P>
+          Liquidity is how the pool gets deep enough for other people to trade against. You lend it
+          shares and ETH; you earn a cut of the 30 bps swap fee; you can withdraw later.
+        </P>
+        <H3>How it works on Premium Plank Liquidity</H3>
+        <Ol
+          items={[
+            <>Hold shares (deposit a plank, or buy shares) and some ETH.</>,
+            <>
+              Instant Swap → <strong>Liquidity</strong>. You enter ETH; the pool pulls the matching
+              amount of shares at the current ratio. Both sides always go in together.
+            </>,
+            <>
+              You are credited a <strong>proportional position</strong> — a percentage of the pool, not
+              a fixed quantity of tokens.
+            </>,
+            <>
+              Withdraw whenever. You get back that percentage of whatever the reserves hold at that
+              moment, including the swap fees earned while you were in.
+            </>,
+          ]}
+        />
+        <H3>What proportional means for you</H3>
+        <P>
+          Your position is a share of the pool, so its composition drifts with trading. If people buy
+          shares out of the pool, you end up holding relatively more ETH and fewer shares when you
+          withdraw — the standard behaviour of any constant-product AMM, sometimes called impermanent
+          loss. In exchange you collect fees the whole time. It also means the price you cause by
+          adding is a price you absorb yourself, which is precisely the property the older design
+          lacked.
+        </P>
+        <Note>
+          The position is internal bookkeeping, not a transferable LP token. There is no LP NFT and
+          nothing to sell on a secondary market. The opening seed is locked forever and belongs to
+          nobody, so it can never be withdrawn — by us or anyone.
+        </Note>
+        <Warn>
+          <strong>The older pools are not a place to provide liquidity.</strong> Driftwood has no
+          liquidity feature at all. WormWood&apos;s is the flawed one from §15 — do not use it, and if
+          you have a position there, withdraw it via <Link className="text-gold-300 underline" href="/migrate">/migrate</Link>.
+        </Warn>
+        <H3>Sell, versus provide liquidity</H3>
+        <Ul
+          items={[
+            <><strong>Sell</strong> — a trade. You get ETH now, you pay price impact, you are out.</>,
+            <><strong>Provide liquidity</strong> — not a trade. No price impact at the current ratio, you earn fees, and you are exposed to the pool until you withdraw.</>,
+            <><strong>Withdraw liquidity</strong> — takes back your own share of the reserves. It is not a sale, and it is not a claim on anyone else&apos;s depth.</>,
+          ]}
+        />
       </>
     ),
   },
@@ -739,21 +934,115 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
     id: "random-redeem",
     body: (
       <>
-        {/* ── 20 ── */}
-        <H id="random-redeem">20. Random redeem & drand</H>
+        {/* ── 22 ── */}
+        <H id="random-redeem">22. Random redeem &amp; drand</H>
         <Ol
           items={[
-            <>Request random redeem — burns shares, sets pending requester + round.</>,
-            <>Wait for drand round; site may relay signature on-chain via DrandBeacon.</>,
-            <>Claim (or anyone can claim for you) — NFT delivers to requester.</>,
-            <>If abandoned past expiry, forfeit path frees the global slot.</>,
+            <>Request a random redeem. Your share burns and the request pins to a specific future drand round.</>,
+            <>Wait for that round. Anyone — including the site&apos;s relayer — can publish the signature on-chain.</>,
+            <>Claim. The plank is delivered to the requester. Anyone can push the claim for you.</>,
+            <>If a request is abandoned past expiry, anyone can forfeit it so the slot frees up.</>,
           ]}
         />
         <P>
-          Drand is a public randomness network; the on-chain beacon verifies signatures so the vault
-          cannot be steered by the site alone. Do not close the tab after step 1 without planning to
-          claim — the UI keeps claim/settle controls visible for pending requests.
+          drand is a public randomness network and the on-chain beacon verifies its signatures, so the
+          outcome cannot be steered by us. Only one random redeem can be pending pool-wide at a time,
+          which is why the settle and forfeit paths are permissionless — a stalled request must never
+          be able to block everyone else.
         </P>
+        <Note>
+          Do not close the tab after step one and forget about it. The UI keeps claim and settle
+          controls visible for any pending request, and the shares are already burned. Nothing is lost,
+          but nothing arrives until someone claims.
+        </Note>
+      </>
+    ),
+  },
+  {
+    id: "vault-migrate",
+    body: (
+      <>
+        {/* ── 23 ── */}
+        <H id="vault-migrate">23. Moving out of an older pool</H>
+        <P>
+          If you have planks or shares in Driftwood or WormWood,{" "}
+          <Link className="text-gold-300 underline" href="/migrate">/migrate</Link> is a guided,
+          step-by-step exit. The site shows a banner when it detects a position; if you have none, the
+          page has nothing to do and will not nag you.
+        </P>
+        <H3>What migrating actually means</H3>
+        <P>
+          <strong>Migrating means getting your value OUT of the old pool.</strong> That is the whole
+          goal. Putting it into {activePoolName()} afterwards is an{" "}
+          <strong>optional second step</strong> that you choose per plank. Nothing is moved
+          automatically and nothing is deposited on your behalf.
+        </P>
+        <H3>The steps</H3>
+        <Ol
+          items={[
+            <>Connect on chain 4663. The page reads your position in every older pool.</>,
+            <>
+              <strong>Withdraw liquidity first</strong>, if you have a position in WormWood. Shares
+              tied up as liquidity cannot be spent on a redeem until they are back in your wallet.
+            </>,
+            <>
+              <strong>Cover the fee shortfall</strong> if you are short (§18). The page computes the
+              exact amount and offers to buy the difference.
+            </>,
+            <><strong>Redeem your planks</strong> out of the old pool, one per share you hold.</>,
+            <>
+              <strong>Optionally deposit</strong> the recovered planks into {activePoolName()}. Select
+              which ones — or none. Planks already migrated are skipped automatically.
+            </>,
+          ]}
+        />
+        <H3>Will I get ripped off?</H3>
+        <P>
+          <strong>There is no migration tax.</strong> You pay the pool&apos;s normal redeem fee, which
+          is the same fee any redeem has always paid, plus gas. You receive your plank. If you then
+          deposit into {activePoolName()}, you pay that pool&apos;s flat ETH deposit fee — and because
+          it mints a whole share, you do not lose a slice of share value the way a re-deposit into an
+          older pool would.
+        </P>
+        <Note>
+          <strong>If the pool cannot cover your liquidity withdrawal right now</strong> — because
+          traders have drawn one side down — the page says so and shows that portion as stuck rather
+          than pretending it is redeemable. Withdraw what is covered, and come back for the rest.
+        </Note>
+        <P>
+          Staying in Driftwood is a legitimate choice; it works, and it will not be switched off. There
+          is no rush and no deadline. WormWood is the one worth leaving (§15).
+        </P>
+      </>
+    ),
+  },
+  {
+    id: "floorboards",
+    body: (
+      <>
+        {/* ── 24 ── */}
+        <H id="floorboards">24. Under the floorboards</H>
+        <P>
+          <Link className="text-gold-300 underline" href="/floorboards">/floorboards</Link> is a quiet page
+          for bargain hunting in the Driftwood pool. When its shares trade below what a plank is worth
+          on the open market, you can buy a share cheaply and redeem a specific plank with it.
+        </P>
+        <Ol
+          items={[
+            <>Open /floorboards and browse the planks Driftwood is currently holding.</>,
+            <>Buy enough shares on that pool to cover a targeted redeem (share price + fees).</>,
+            <>Redeem the specific plank you want. It lands in your wallet.</>,
+          ]}
+        />
+        <P>
+          It is deliberately understated — a footer link and a hint on the swap tab, not a headline
+          feature. Driftwood has no liquidity feature to exploit, so leaving it open for this is safe.
+          The page also carries the recovery controls for a stuck or pending random redeem on that pool.
+        </P>
+        <Note>
+          This is shopping, not migrating. If your goal is to get an existing position out of an old
+          pool, use <Link className="text-gold-300 underline" href="/migrate">/migrate</Link> (§23) instead.
+        </Note>
       </>
     ),
   },
@@ -761,14 +1050,14 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
     id: "activity",
     body: (
       <>
-        {/* ── 21 ── */}
-        <H id="activity">21. Activity & sales history</H>
+        {/* ── 25 ── */}
+        <H id="activity">25. Activity &amp; sales history</H>
         <Ul
           items={[
-            <><strong>Vault trades</strong> — Deposited, Redeemed, Bought, Sold logs (+ seeded KV merge).</>,
+            <><strong>Pool trades</strong> — Deposited, Redeemed, Bought, Sold, per pool.</>,
             <><strong>Collection activity</strong> — ERC-721 transfers; sales priced via marketplace methods + royalty-aware catalog.</>,
             <><strong>Highest sale</strong> — marketplace fills where collection royalty was paid (EIP-2981), any venue on this chain — not raw transfer noise or non-royalty internal moves.</>,
-            <><strong>Price charts</strong> — merge sales-history endpoints; empty charts usually mean indexer lag, not “no market forever.”</>,
+            <><strong>Price charts</strong> — merge sales-history endpoints; an empty chart usually means indexer lag, not &quot;no market forever&quot;.</>,
           ]}
         />
       </>
@@ -778,8 +1067,8 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
     id: "art-cache",
     body: (
       <>
-        {/* ── 22 ── */}
-        <H id="art-cache">22. Art, IPFS & local cache</H>
+        {/* ── 26 ── */}
+        <H id="art-cache">26. Art, IPFS &amp; local cache</H>
         <P>
           Metadata and art are content-addressed on IPFS. The site never puts raw third-party gateway
           URLs directly in <code className="font-mono text-xs">&lt;img&gt;</code> (browser ORB /
@@ -790,8 +1079,8 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
   → browser HTTP cache + Cache API + optional service worker (sw-art.js)
   → IndexedDB catalog of tokenId → imageUrl`}</Code>
         <P>
-          Vault held boards warm into local cache after first paint so return visits feel instant.
-          Broken images are almost always proxy allowlist/redirect issues, not “deleted” art.
+          Planks held by a pool warm into local cache after first paint so return visits feel instant.
+          Broken images are almost always proxy allowlist/redirect issues, not &quot;deleted&quot; art.
         </P>
       </>
     ),
@@ -800,13 +1089,13 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
     id: "seaport",
     body: (
       <>
-        {/* ── 23 ── */}
-        <H id="seaport">23. Seaport / OpenSea-class</H>
+        {/* ── 27 ── */}
+        <H id="seaport">27. Seaport / OpenSea-class</H>
         <P>
           Seaport 1.6 is shared protocol infrastructure (CREATE2 address identical across chains).
           Marketplank is a frontend + order relay. Other frontends can fill the same Seaport address;
-          we only label a fill “Marketplank” when the order hash matches an order our relay stored.
-          Royalties use EIP-2981 on the NFT when the fulfillment path pays them.
+          we only label a fill &quot;Marketplank&quot; when the order hash matches an order our relay
+          stored. Royalties use EIP-2981 on the NFT when the fulfillment path pays them.
         </P>
       </>
     ),
@@ -815,16 +1104,17 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
     id: "wallets",
     body: (
       <>
-        {/* ── 24 ── */}
-        <H id="wallets">24. Wallets & safety</H>
+        {/* ── 28 ── */}
+        <H id="wallets">28. Wallets &amp; safety</H>
         <Ul
           items={[
             <>Chain must be 4663 before send; re-checked immediately pre-broadcast.</>,
-            <>Market / vault / swap destinations are allowlisted (malformed constants fail startup).</>,
-            <>Simulated eth_call before popup for market/vault/swap (not bare approve alone).</>,
+            <>Market, pool, and swap destinations are allowlisted (malformed constants fail startup).</>,
+            <>Simulated eth_call before the wallet popup for market/pool/swap actions.</>,
             <>Prefer single-token approve for deposit; avoid unnecessary unlimited approvals.</>,
             <>Robinhood wallet / browser wallets both work if they support custom chain 4663.</>,
             <>Never paste seed phrases into the site; the site never needs them.</>,
+            <>Verify the pool address in your wallet against the table in §4 before a large approval.</>,
           ]}
         />
       </>
@@ -834,8 +1124,8 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
     id: "infra",
     body: (
       <>
-        {/* ── 25 ── */}
-        <H id="infra">25. Extended platforms we rely on</H>
+        {/* ── 29 ── */}
+        <H id="infra">29. Extended platforms we rely on</H>
         <Ul
           items={[
             <><strong>Robinhood Chain</strong> — settlement, gas, contracts.</>,
@@ -843,9 +1133,9 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
             <><strong>Uniswap</strong> — Trading API quotes + Universal Router + Permit2 for $PLANK.</>,
             <><strong>Seaport + ConduitController</strong> — NFT order protocol.</>,
             <><strong>drand + DrandBeacon</strong> — unbiased random redeem.</>,
-            <><strong>IPFS gateways</strong> — metadata/art content; proxied by site.</>,
-            <><strong>Cloudflare Workers / OpenNext</strong> — host Next.js edge deployment.</>,
-            <><strong>Durable storage</strong> — PostgreSQL on cPanel, for trait indexes, sales/activity snapshots, and vault caches.</>,
+            <><strong>IPFS gateways</strong> — metadata/art content; proxied by the site.</>,
+            <><strong>InMotion Apache + Passenger</strong> — hosts the application; Cloudflare is the DNS/TLS/WAF edge in front of it, not the runtime.</>,
+            <><strong>PostgreSQL</strong> — signed-order relay, trait indexes, sales/activity snapshots, and pool caches. It is the only datastore.</>,
             <><strong>X (Twitter)</strong> — official announcements / Wood List social coordination.</>,
           ]}
         />
@@ -856,8 +1146,8 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
     id: "tutorials",
     body: (
       <>
-        {/* ── 26 ── */}
-        <H id="tutorials">26. End-to-end tutorials</H>
+        {/* ── 30 ── */}
+        <H id="tutorials">30. End-to-end tutorials</H>
         <H3>A. First plank from mint</H3>
         <Ol
           items={[
@@ -869,40 +1159,49 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
         <H3>B. Buy a listing</H3>
         <Ol
           items={[
-            <>Market → Buy & Sell; filter if needed.</>,
-            <>Buy or Sweep; confirm Seaport fulfill.</>,
+            <>Market → Buy &amp; Sell; filter if needed.</>,
+            <>Buy or Sweep; confirm the Seaport fulfill.</>,
           ]}
         />
-        <H3>C. Deposit → Add LP → Remove LP</H3>
+        <H3>C. Deposit a plank, then provide liquidity</H3>
         <Ol
           items={[
-            <>Market → Instant Swap → Deposit; pick owned plank; confirm.</>,
-            <>Note share balance (mint fee reduced amount).</>,
-            <>LP → Add LP; enter shares (and ETH if enabled); confirm — credit appears.</>,
-            <>Watch pool share reserve rise; held NFT count unchanged by LP alone.</>,
-            <>Later: LP → Remove LP; Max credit; confirm — shares/ETH return (if reserves allow).</>,
+            <>Market → Instant Swap → Deposit; pick an owned plank; confirm. You receive one share.</>,
+            <>Instant Swap → Liquidity. Enter the ETH you want to commit.</>,
+            <>The matching shares are pulled at the current ratio; confirm. You now hold a percentage of the pool.</>,
+            <>Watch the pool depth rise. Planks held is unchanged — liquidity is layer B, not layer A.</>,
+            <>Later: Liquidity → withdraw. You get your percentage of current reserves, fees included.</>,
           ]}
         />
-        <H3>D. Instant buy shares then redeem random</H3>
+        <H3>D. Buy shares, then redeem a random plank</H3>
         <Ol
           items={[
-            <>Buy shares with ETH (set slippage).</>,
-            <>Redeem random step 1; wait; claim step 2.</>,
-            <>If stuck pending, use settle/forfeit controls documented in UI.</>,
+            <>Instant Swap → Buy shares with ETH; check the quote and set slippage.</>,
+            <>Redeem → Random. Step one burns the share and pins a drand round.</>,
+            <>Wait for the round, then claim. If it stalls, use the settle or forfeit control shown in the UI.</>,
           ]}
         />
-        <H3>E. Criteria bid on a trait</H3>
+        <H3>E. Exit an older pool</H3>
+        <Ol
+          items={[
+            <>Open /migrate; connect. Your position in each older pool is listed.</>,
+            <>Withdraw liquidity if you have any; cover the fee shortfall if the page reports one.</>,
+            <>Redeem your planks out.</>,
+            <>Optionally deposit them into {activePoolName()} — your choice, per plank.</>,
+          ]}
+        />
+        <H3>F. Criteria bid on a trait</H3>
         <Ol
           items={[
             <>Wrap ETH to WETH; approve as prompted.</>,
             <>Offers → choose trait/rarity/combo; set price; sign.</>,
-            <>Holders of matching planks can accept; ensure you fund WETH for the offer amount.</>,
+            <>Holders of matching planks can accept; keep the WETH funded for the offer amount.</>,
           ]}
         />
-        <H3>F. Trade $PLANK</H3>
+        <H3>G. Trade $PLANK</H3>
         <Ol
           items={[
-            <>Home → Trade; only official widget while rules are strict.</>,
+            <>Home → Trade; use the official widget while rules are strict.</>,
             <>Quote → approve if needed → swap via Universal Router.</>,
           ]}
         />
@@ -913,47 +1212,57 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
     id: "faq",
     body: (
       <>
-        {/* ── 27 ── */}
-        <H id="faq">27. FAQ</H>
-        <H3>Why 57 held but only ~5 pool shares?</H3>
+        {/* ── 31 ── */}
+        <H id="faq">31. FAQ</H>
+        <H3>Why does the pool hold 57 planks but only ~5 shares are tradeable?</H3>
         <P>
-          Deposit mints shares to wallets. Only shares moved into the vault address (sell or Add LP)
-          sit in the AMM. Inventory can be deep while the book is thin.{" "}
-          <strong>Existing depositors are not stuck:</strong> their vROBIN shares remain in their
-          wallets and Redeem / Sell / Deposit still target the same vault address.
+          Depositing mints shares to wallets, not into the pool. Only shares that were sold in or
+          committed as liquidity sit in the tradeable reserve. Inventory can be deep while the book is
+          thin, and every outstanding share is still redeemable for a plank. See §17.
         </P>
-        <H3>If we add Remove LP, do existing deposits move?</H3>
+        <H3>Why are there several pools instead of one upgraded one?</H3>
         <P>
-          The live vault is immutable (not a proxy). New LP add/remove functions require a{" "}
-          <em>new</em> vault deploy. We must not silently change{" "}
-          <code className="font-mono text-xs">NEXT_PUBLIC_MARKET_VAULT_ADDRESS</code> or every current
-          depositor would look empty until they redeem from the old address. Safe path: keep the live
-          address for deposit/redeem forever (or until holders migrate), or run a dual-vault period
-          where legacy redeem stays available.
+          Because a pool is immutable by design — no proxy, no admin upgrade. That is a safety
+          property, not an oversight: nobody can change the rules under your deposit. The cost is that
+          a better design means a new contract, and older pools stay open until they are empty. See §15.
         </P>
-        <H3>Can I withdraw Add LP?</H3>
+        <H3>Can I withdraw liquidity?</H3>
         <P>
-          Yes on upgraded vaults: <strong>Remove LP</strong> up to your{" "}
-          <code className="font-mono text-xs">lpShareCredit</code> /{" "}
-          <code className="font-mono text-xs">lpEthCredit</code> and live reserves. Not a Uniswap LP
-          NFT. Treasury seed still cannot be pulled. If you only have shares from deposit (not Add
-          LP), use Sell or Redeem — there is no credit to remove.
+          On Premium Plank Liquidity, yes — you hold a proportional position and withdraw a pro-rata
+          slice of current reserves whenever you like. Driftwood has no liquidity feature at all. For
+          WormWood, withdraw via <Link className="text-gold-300 underline" href="/migrate">/migrate</Link> and
+          do not add more. If your shares came from a deposit rather than from providing liquidity,
+          there is no position to withdraw — use Sell or Redeem instead.
+        </P>
+        <H3>I deposited one plank and cannot redeem one. Why?</H3>
+        <P>
+          You are on an older pool, where fees are paid in shares: one deposit mints ~0.99 and one
+          redeem burns ~1.01. Buy the small difference, or redeem across several planks at once. The
+          current pool does not have this gap — it mints and burns exactly one. See §18.
         </P>
         <H3>Did my deposit get stuck?</H3>
         <P>
-          If you used Deposit and the tx reverted, you still own the NFT. If the tx succeeded, you own
-          shares. Stuck inventory almost always means raw transfer without deposit, or an unfinished
-          random redeem (use claim/settle/forfeit).
+          If the transaction reverted, you still own the plank — deposits are atomic. If it succeeded,
+          you own a share. Genuinely stuck almost always means a raw transfer to the pool address
+          instead of using Deposit (no rescue path), or an unfinished random redeem (use
+          claim/settle/forfeit).
+        </P>
+        <H3>Is my plank safe if I do nothing?</H3>
+        <P>
+          Yes. Shares stay in your wallet, redeem stays available, and an older pool is never removed
+          from the site while it still holds planks. The one active recommendation is: do not put new
+          value into WormWood, and withdraw any liquidity position you have there. See §15.
         </P>
         <H3>Is Marketplank OpenSea?</H3>
         <P>
           Same Seaport protocol class; different frontend and order relay. Fills on Seaport from other
           UIs may still appear as collection activity.
         </P>
-        <H3>Where is the vault address?</H3>
+        <H3>Which pool am I using, and what is its address?</H3>
         <P>
-          Set at deploy via env; surface it from Instant Swap UI / explorer once live. Do not invent a
-          mainnet address.
+          The table in §4 is generated from this deployment&apos;s live configuration, and Instant Swap
+          shows the pool with a link to the explorer. Verify there rather than trusting an address
+          pasted anywhere else, including by an AI.
         </P>
       </>
     ),
@@ -962,8 +1271,8 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
     id: "ai-summary",
     body: (
       <>
-        {/* ── 28 ── */}
-        <H id="ai-summary">28. AI machine summary</H>
+        {/* ── 32 ── */}
+        <H id="ai-summary">32. AI machine summary</H>
         <Code>{`{
   "site": "https://plank.love",
   "docs": "https://plank.love/learn",
@@ -976,7 +1285,8 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
   "tokens": {
     "PLANK": "0x69420eaf0eBF43E08F621B014f25cEfDfA7e2DDc",
     "RobinWood_NFT": "0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156",
-    "WETH_offers": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73"
+    "WETH_offers": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+    "pool_shares": "vROBIN, one ERC-20 per pool, address varies"
   },
   "protocols": {
     "seaport": "0x0000000000000068F116a894984e2DB1123eB395",
@@ -985,51 +1295,58 @@ NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS=0xb2019Fd4cA24502e812C0C73b751Fa49979BF7
     "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
     "drand_beacon": "0x87d584df130FED0Fe540954eD48CE2691A18D619"
   },
-  "products": {
-    "nft": "RobinWood ERC-721",
-    "token": "$PLANK ERC-20",
-    "market": "Marketplank Seaport 1.6 relay",
-    "vault": "MarketplankVault deposit/redeem + CPAMM",
-    "trade_widget": "Uniswap Trading API + Universal Router"
+  "pools": {
+    "note": "Pools are immutable, named products. Addresses change as pools open and retire; read the live table in section 4 of /learn, never a memorised address.",
+    "Driftwood":  { "generation": 1, "fees": "shares", "liquidity": "none",         "status": "older, redeem only, safe" },
+    "WormWood":   { "generation": 2, "fees": "shares", "liquidity": "flawed",       "status": "older, EXIT ONLY, do not deposit or add liquidity" },
+    "Premium Plank Liquidity": { "generation": 3, "fees": "flat ETH", "liquidity": "proportional", "status": "current, use this" }
   },
-  "vault_invariants": {
-    "shares_total_approx_held_nfts": true,
-    "pool_share_reserve_is_not_total_supply": true,
+  "pool_invariants": {
+    "shares_outstanding_equals_planks_held": true,
+    "pool_reserve_is_not_total_supply": true,
     "deposit_mints_to_wallet_not_pool": true,
-    "add_lp_credits_address": true,
-    "remove_lp_up_to_credit_and_reserves": true,
+    "current_pool_deposit_mints_exactly_one_share": true,
+    "current_pool_liquidity_is_proportional_and_non_transferable": true,
+    "current_pool_reserves_are_explicit_not_balances": true,
+    "raw_nft_transfer_to_pool_not_credited_and_unrecoverable": true,
     "no_uniswap_style_lp_nft": true,
-    "treasury_seed_has_no_lp_credit": true,
-    "eth_reserve_only_via_buy_seed_or_contribute": true,
-    "raw_nft_transfer_to_vault_not_credited": true
+    "seed_liquidity_locked_forever_and_unwithdrawable": true,
+    "pools_are_immutable_no_proxy_no_admin_fee_change_no_pause": true,
+    "older_pools_charge_fees_in_shares_so_one_deposit_underfunds_one_redeem": true
   },
   "user_flows": {
     "mint": "NFT salePhase mint",
-    "list_nft": "sign Seaport listing → POST /api/market/orders",
+    "list_nft": "sign Seaport listing -> POST /api/market/orders",
     "buy_listing": "Seaport fulfillOrder",
     "offer": "WETH Seaport offer (item or criteria merkle)",
-    "deposit": "approve NFT → vault.deposit",
-    "add_lp": "contributeLiquidity(shares){value} credits lpShareCredit/lpEthCredit",
-    "remove_lp": "removeLiquidity(sharesOut, ethOut) capped by credit + reserves",
-    "sell_shares": "vault.sellShares",
-    "buy_shares": "vault.buyShares",
-    "redeem_target": "vault redeem targeted",
-    "redeem_random": "requestRandomRedeem → claimRandomRedeem",
+    "deposit": "approve NFT -> pool.deposit (depositMany for batches)",
+    "add_liquidity": "current pool: ETH-driven addLiquidity, pulls matching shares at current ratio",
+    "remove_liquidity": "current pool: pro-rata slice of current reserves",
+    "sell_shares": "pool.sellShares",
+    "buy_shares": "pool.buyShares",
+    "redeem_target": "pool.redeemTarget (redeemTargetMany for batches)",
+    "redeem_random": "requestRandomRedeem -> settle -> claim, via drand",
+    "migrate": "/migrate: withdraw liquidity -> cover share shortfall -> redeem out -> OPTIONALLY deposit into current pool",
+    "floorboards": "/floorboards: buy Driftwood shares below floor -> targeted redeem",
     "swap_plank": "Uniswap quote/swap via site APIs only"
   },
   "not_stuck_if": [
-    "user uses Deposit button not raw NFT transfer to vault",
-    "random redeem claim/settle/forfeit paths are used"
+    "user uses the Deposit button rather than a raw NFT transfer",
+    "random redeem claim/settle/forfeit paths are used",
+    "shares are simply held in the wallet - redeem stays open on every configured pool"
   ],
   "stuck_if": [
-    "raw NFT transfer to vault without deposit (no rescue on current vault)"
+    "raw NFT transfer to a pool address without deposit (no rescue path)"
   ],
   "ai_rules": [
-    "cite /learn and explorers",
+    "cite /learn and explorers; read pool addresses from section 4, do not memorise them",
     "do not invent L1 addresses or bridges",
-    "Remove LP only undoes contributeLiquidity credits (not seed, not sell depth)",
-    "distinguish vault shares from $PLANK",
-    "WETH for offers only at canonical address"
+    "never tell a user to deposit into or add liquidity to WormWood; route them to /migrate",
+    "do not quote share-denominated fees for the current pool, or ETH fees for the older pools",
+    "Buy yields shares, not planks; planks come from Redeem",
+    "distinguish pool shares (vROBIN) from $PLANK",
+    "WETH for offers only at the canonical address",
+    "there is no transferable LP token and no LP NFT"
   ]
 }`}</Code>
       </>
@@ -1061,11 +1378,10 @@ export default function LearnGuide({
       <P>
         This is the full logical progression through every facet of{" "}
         <strong className="text-foreground">plank.love</strong> and every extended platform we
-        rely on: Robinhood Chain, Uniswap Universal Router, Seaport 1.6, MarketplankVault, drand
-        beacon, IPFS, Blockscout, Cloudflare, and the order relay. Read top to bottom once; jump via
-        the table of contents anytime. AI tools should treat this page as the product manual and
-        cite it rather than inventing L1 addresses, withdrawable LP tokens, or bridges that do not
-        exist here.
+        rely on: Robinhood Chain, Uniswap Universal Router, Seaport 1.6, the Marketplank pools, the
+        drand beacon, IPFS, Blockscout, and the order relay. Read top to bottom once; jump via the
+        table of contents anytime. AI tools should treat this page as the product manual and cite it
+        rather than inventing L1 addresses, transferable LP tokens, or bridges that do not exist here.
       </P>
 
       <nav
@@ -1103,20 +1419,21 @@ export default function LearnGuide({
       })}
 
       <Note>
-        Questions for humans: use Market UI first. For AI assistants: scrape and cite this page (
-        <code className="font-mono text-xs">/learn</code>) plus on-chain explorers; do not invent
-        L1 addresses or withdrawable LP tokens that do not exist on the live vault.
+        Questions for humans: use the Market UI first. For AI assistants: scrape and cite this page (
+        <code className="font-mono text-xs">/learn</code>) plus on-chain explorers. Read pool
+        addresses from §4 rather than memorising them, and never recommend a transferable LP token or
+        an L1 address that does not exist here.
       </Note>
 
       <p className="mt-10 text-center text-xs text-foreground/40">
         Canonical product manual · humans + AI ·{" "}
-        <a href="/market" className="text-gold-300 underline">
+        <Link href="/market" className="text-gold-300 underline">
           Open Market
-        </a>
+        </Link>
         {" · "}
-        <a href="/#trade" className="text-gold-300 underline">
+        <Link href="/#trade" className="text-gold-300 underline">
           Trade $PLANK
-        </a>
+        </Link>
       </p>
     </article>
   );
