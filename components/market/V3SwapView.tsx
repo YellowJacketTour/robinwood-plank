@@ -23,6 +23,7 @@ import {
   v3ClaimRandomRedeemFor,
   v3ForfeitExpiredRedeem,
   getV3Activity,
+  quoteRemoveLiquidity,
   decodeV3Error,
   formatUnits,
   SHARE_UNIT,
@@ -501,16 +502,59 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
               </div>
             )
           )}
-          {tab === "liquidity" && snap && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <Tile label="Total LP" value={formatUnits(snap.totalLpSupply, 3)} size="sm" tone="neutral" />
-              <Tile label="Locked seed LP" value={formatUnits(lockedLp, 3)} size="sm" tone="neutral" />
-              <Tile label="Your LP" value={formatUnits(snap.lpBalance, 3)} size="sm" tone="neutral" />
-              <Tile label="Accrued fees" value={`${formatUnits(snap.accruedFees, 4)} Ξ`} size="sm" tone="neutral" />
-              <Tile label="Pool ETH" value={`${formatUnits(snap.ethReserve, 3)} Ξ`} size="sm" tone="neutral" />
-              <Tile label="Pool shares" value={formatUnits(snap.shareReserve, 2)} size="sm" tone="neutral" />
-            </div>
-          )}
+          {tab === "liquidity" && snap && (() => {
+            const hasLp = snap.lpBalance > BigInt(0);
+            const under = quoteRemoveLiquidity(snap.lpBalance, snap);
+            return (
+              <div className="space-y-4">
+                {/* Your liquidity position */}
+                <div className="rounded-lg border border-line bg-wood-950 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-[0.72rem] font-black uppercase tracking-wide text-cream">Your liquidity</h4>
+                    <button
+                      type="button"
+                      onClick={() => setAction("lp")}
+                      className="min-h-9 rounded-lg bg-gold-500 px-3.5 text-[0.72rem] font-black text-[#261105]"
+                    >
+                      {hasLp ? "Add / remove →" : "Provide liquidity →"}
+                    </button>
+                  </div>
+                  {hasLp ? (
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <Tile label="Your LP" value={formatUnits(snap.lpBalance, 3)} size="lg" tone="ok" />
+                      <Tile label="Pool share" value={`${poolShare}%`} size="lg" tone="ok" note="of the pool" />
+                      <Tile label="≈ ETH" value={`${formatUnits(under.ethOut, 4)} Ξ`} size="lg" tone="gold" note="on withdraw" />
+                      <Tile label="≈ Shares" value={formatUnits(under.sharesOut, 2)} size="lg" tone="gold" note="on withdraw" />
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-[0.78rem] text-cream-muted">
+                      You have no liquidity here. Provide ETH (shares are pulled to match) to earn the{" "}
+                      <b className="text-emerald-300">{(snap.swapFeeBps / 100).toFixed(2)}% swap fee</b> on every buy and sell, proportional to your share.
+                    </p>
+                  )}
+                </div>
+
+                {/* Pool composition */}
+                <div>
+                  <h4 className="mb-2 text-[0.72rem] font-black uppercase tracking-wide text-cream">Pool</h4>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    <Tile label="TVL" value={`${formatUnits(tvl, 3)} Ξ`} size="sm" tone="neutral" />
+                    <Tile label="Pool ETH" value={`${formatUnits(snap.ethReserve, 3)} Ξ`} size="sm" tone="neutral" />
+                    <Tile label="Pool shares" value={formatUnits(snap.shareReserve, 2)} size="sm" tone="neutral" />
+                    <Tile label="Total LP" value={formatUnits(snap.totalLpSupply, 3)} size="sm" tone="neutral" />
+                    <Tile label="Locked seed LP" value={formatUnits(lockedLp, 3)} size="sm" tone="neutral" note="never withdrawable" />
+                    <Tile label="Accrued fees" value={`${formatUnits(snap.accruedFees, 4)} Ξ`} size="sm" tone="neutral" note="to treasury" />
+                  </div>
+                </div>
+
+                <p className="text-[0.72rem] text-cream/55">
+                  LP is proportional (Uniswap-V2 style): you always withdraw your exact share of the current ETH + share
+                  reserves. The {(snap.swapFeeBps / 100).toFixed(2)}% swap fee stays in the pool, growing every LP unit; the
+                  locked seed position earns fees too but can never be withdrawn, so it dilutes no one.
+                </p>
+              </div>
+            );
+          })()}
           </div>
         </div>
       </div>
