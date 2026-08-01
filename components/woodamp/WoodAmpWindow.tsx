@@ -418,14 +418,32 @@ export default function WoodAmpWindow() {
                           {rowInner}
                         </a>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => selectTrack(i)}
-                          aria-current={i === index ? "true" : undefined}
-                          className={rowClass}
-                        >
-                          {rowInner}
-                        </button>
+                        // A credited track keeps its source reachable beside the
+                        // row: we host the audio, but the post it came from is
+                        // the community's. Sibling of the play button, never
+                        // nested inside it.
+                        <div className="flex items-center">
+                          <button
+                            type="button"
+                            onClick={() => selectTrack(i)}
+                            aria-current={i === index ? "true" : undefined}
+                            className={`${rowClass} min-w-0 flex-1`}
+                          >
+                            {rowInner}
+                          </button>
+                          {t.link ? (
+                            <a
+                              href={t.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Original post for ${t.title}`}
+                              title="Original post"
+                              className="flex h-11 shrink-0 items-center px-2.5 text-[0.68rem] text-cream-muted hover:bg-gold-500/10 hover:text-gold-300"
+                            >
+                              ↗
+                            </a>
+                          ) : null}
+                        </div>
                       )}
                     </li>
                   );
