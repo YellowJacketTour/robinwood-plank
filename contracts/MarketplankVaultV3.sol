@@ -3,11 +3,18 @@ pragma solidity ^0.8.24;
 
 /**
  * ============================================================================
- *        ______________________________________________________
- *       /                                                     /|
- *      /   M A R K E T P L A N K   V A U L T   ( vROBIN )    / |
- *     /_____________________________________________________/ /
- *     |_____________________________________________________|/
+ *    ____   _         _    _   _  _  __           .---.__
+ *   |  _ \ | |       / \  | \ | || |/ /          | O   O `.
+ *   | |_) || |      / _ \ |  \| || ' /           |  |  |  |
+ *   |  __/ | |___  / ___ \| |\  || . \           |  \__/  |
+ *   |_|    |_____|/_/   \_\_| \_||_|\_\           |  | |   |
+ *                                                | .| | |. |
+ *                                                |  | | |  |
+ *                                                |  | | |  |
+ *                                                |__|_|_|__|
+ *
+ *   Premium Plank Liquidity  ·  share token: vROBIN
+ *   "it's just a plank — but it makes a market."
  *
  *  Deposit an NFT, mint one fungible vault share. Trade shares against ETH on a
  *  constant-product pool with a 30 bps swap fee. Provide liquidity for a
