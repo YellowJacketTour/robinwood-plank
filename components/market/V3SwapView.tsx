@@ -141,7 +141,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
       )}
 
       {/* migration nudge (hidden unless the wallet holds V1/V2) */}
-      {isConnected && legacy.hasValue && (
+      {isConnected && legacy.hasLegacyValue && (
         <Link
           href="/migrate"
           className="flex flex-wrap items-center gap-3 rounded-xl border border-line-strong bg-gradient-to-r from-gold-500/15 to-transparent px-4 py-2.5 transition hover:border-gold-500/60"

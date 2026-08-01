@@ -45,8 +45,13 @@ export type LegacyPosition = {
   owned: OwnedPlank[];
   /** Redeem-slot state keyed by lowercased vault address. */
   slots: Record<string, SlotState>;
-  /** True when this wallet has any legacy shares, LP, owned planks, or a slot. */
+  /** True when this wallet has anything to show on /migrate — legacy value OR
+   *  wallet planks (the optional V3 deposit). Drives the migrate page content. */
   hasValue: boolean;
+  /** True ONLY when value is still stuck in a retiring vault (shares / LP / a
+   *  pending redeem). Wallet planks do NOT count — they're the RESULT of
+   *  migrating, not something to migrate. Drives the banner + swap-page nudge. */
+  hasLegacyValue: boolean;
   loading: boolean;
   refresh: () => Promise<void>;
   /** Optimistically drop a plank from `owned` the instant its deposit confirms,
@@ -154,7 +159,8 @@ export function useLegacyPosition(
   }, [address, active, scan]);
 
   const anySlotMine = Object.values(slots).some((s) => s.mine);
-  const hasValue = Boolean(plan?.hasValue) || owned.length > 0 || anySlotMine;
+  const hasLegacyValue = Boolean(plan?.hasValue) || anySlotMine;
+  const hasValue = hasLegacyValue || owned.length > 0;
 
-  return { plan, owned, slots, hasValue, loading, refresh, markDeposited };
+  return { plan, owned, slots, hasValue, hasLegacyValue, loading, refresh, markDeposited };
 }
