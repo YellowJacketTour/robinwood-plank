@@ -44,7 +44,7 @@ Robinhood Chain
       |
       +-- $PLANK and RobinWood NFT
       +-- canonical Seaport 1.6
-      +-- Marketplank V1 and V2 vaults
+      +-- Marketplank vaults (V1, V2 retired-in-place, V3 primary)
       +-- DrandBeacon
 ```
 
@@ -148,11 +148,105 @@ deployment runbook for how the cutover was performed.
 If no backend is configured, orders fall back to `.data/market-orders.json`
 and process memory. That path is for local development only.
 
+### Vault generations and the N-vault registry
+
+Marketplank is not a single vault, and it is not a hardcoded V1/V2 pair. It is a
+registry of *N* vaults resolved by address:
+
+| Generation | Product name | Fee model | Role |
+| --- | --- | --- | --- |
+| V1 | Driftwood | Share-denominated | Legacy — redeem only |
+| V2 | WormWood | Share-denominated | Legacy — **withdraw and leave** |
+| V3 | Premium Plank Liquidity | ETH-denominated | Primary — deposit, trade, LP |
+
+`lib/market/vault-registry.ts` is the single resolution point. Two rules follow
+from it and are load-bearing:
+
+- **Selection is by address, not by role.** With more than one legacy, "the
+  legacy vault" is ambiguous. `getVaultByAddress()` is the primitive;
+  `getVaultByRole()` exists only for back-compat.
+- **Generation is derived from the address**, by comparing against the two known
+  production deployments (`MARKET_VAULT_V1_KNOWN`, `MARKET_VAULT_V2_KNOWN`).
+  Anything else configured is current-generation. This is what let the client
+  stop grepping deployed bytecode for function selectors.
+
+Version numbers are internal identity and are never rendered. Users see the
+product names above, because a `V1 → V2 → V3` ladder reads to a holder as "two
+prior mistakes" rather than three distinct pools.
+
+A legacy vault must stay configured in
+`NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES` until its `heldTokenCount` reaches
+zero. Removing it early makes the client reject the address as an unsafe target
+and strands every remaining depositor.
+
+### Why V3 exists
+
+V2's only addition over V1 — `contributeLiquidity` / `removeLiquidity` with
+*absolute* LP credits — is a flash-loanable drain. A one-sided contribution moves
+the constant-product price, removal returns the contribution at nominal, and
+sandwiching a trade between the two extracts the entire ETH reserve atomically.
+`nonReentrant` does not help (the legs are sequential calls, not reentrancy), and
+no fee level mitigates it. This is proven by an executable exploit in
+`test/contracts/VaultLp.audit.test.ts` and written up in
+[`docs/marketplank/AUDIT-2026-07-31-lp.md`](docs/marketplank/AUDIT-2026-07-31-lp.md).
+
+`contracts/MarketplankVaultV3.sol` closes it and fixes the fee model, keeping the
+drand commit-reveal random-redeem machinery unchanged:
+
+- **Proportional LP.** `addLiquidity` is ETH-driven and pulls matching shares at
+  the current ratio; there is no one-sided contribution primitive.
+  `removeLiquidity` pays pro-rata of *current* reserves, so a contributor absorbs
+  any price move they cause. LP bookkeeping is internal and non-transferable.
+- **Explicit `shareReserve` / `ethReserve`,** not live balances. A raw transfer
+  into the vault is inert dead capital, which closes donation-inflation. There is
+  no `receive()`.
+- **ETH-denominated flat fees.** Deposit mints exactly `1e18`; redeem burns
+  exactly `1e18`. This ends the V1/V2 `0.99` / `1.01` dust trap where a lone
+  deposit could never fund its own redeem. Fees accrue to a counter drained by a
+  permissionless `withdrawFees()` that can only pay the immutable treasury — a
+  reverting treasury bricks that one call, never deposits or the redeem slot.
+- **Seed lock.** `openPool()` mints `sqrt(E*S)` LP to `address(0)` permanently,
+  so reserves stay strictly positive and removal can never brick the pool.
+- **Fee ceilings are enforced in wei at construction**, so a predatory-fee
+  deployment is impossible rather than merely unintended.
+- No oracle, no external AMM, no owner-mutable fees, no upgradeability, no admin
+  withdrawal of pool ETH, no pause.
+
+Two invariants are asserted after every relevant call:
+
+```text
+solvency:    totalSupply() + pendingRedeemCount * SHARE_UNIT
+                 == heldTokenIds.length * SHARE_UNIT
+ETH backing: address(this).balance >= ethReserve + accruedFees
+```
+
+`capabilities()` and `poolComposition()` views plus a `VAULT_VERSION` marker
+exist so the client reads capability from the contract instead of sniffing it.
+
+### Migration out of the legacy vaults
+
+`lib/market/migration.ts` is a pure planner — no chain calls, no React — so the
+economics are unit-testable. Given a wallet's position across the legacy vaults
+it computes, per source and ordered newest-first (V2 before V1, since V2 carries
+the live drain exposure):
+
+1. whether a V2 LP position must be withdrawn first, and whether current pool
+   reserves can actually cover that withdrawal;
+2. LP credit the pool *cannot* cover yet, surfaced separately as stuck rather
+   than folded into the redeemable total — folding it in produced a redeem that
+   always reverted with no withdraw step offered, an inescapable loop;
+3. how many NFTs the spendable share balance can redeem; and
+4. leftover dust below one redeem's worth.
+
+Migration is defined as *exiting* V1/V2. Depositing the recovered NFTs into V3 is
+optional and user-selected, not forced. The user-facing flow is `app/migrate`,
+with a site-wide banner driven by `lib/market/useLegacyPosition.ts`.
+
 ### Random-redemption relayer
 
 Random redemption requests target an exact future drand round. The relayer:
 
-1. reads both V1 and V2 vault states;
+1. reads every configured vault's state;
 2. waits when a requested round is not yet available;
 3. fetches and validates the exact drand round;
 4. submits or reuses the beacon round;
@@ -198,9 +292,17 @@ so relay integrity and liveness still matter.
 
 ### Instant Swap
 
-Vault reads and transactions go directly to the configured V2 or legacy V1
-contract. PostgreSQL caches expensive inventory, rarity, activity, and sales
-reads, but contract storage and receipts decide the result.
+Vault reads and transactions go directly to whichever configured vault the user
+selected, resolved by address through the registry above. Browser reads route
+through the same-origin `/api/rpc` proxy, including reads of legacy vaults.
+PostgreSQL caches expensive inventory, rarity, activity, and sales reads, but
+contract storage and receipts decide the result.
+
+On the primary (V3) vault the surface is: deposit an NFT for exactly one share,
+trade shares against ETH on the constant-product pool at a 30 bps swap fee,
+provide liquidity for a proportional claim, and redeem a share for an NFT —
+targeted for an ETH premium, or random via drand commit-reveal. `depositMany` and
+`redeemTargetMany` batch up to `MAX_BATCH` per transaction.
 
 ### Uniswap trade widget
 
@@ -265,6 +367,13 @@ must be assumed readable by every visitor.
 - Schema migrations are append-only and forward-only.
 - Release directories are immutable after activation.
 - Vault contract and deployment-address changes require a separate security
-  review and are outside routine application releases.
+  review and are outside routine application releases. Vault deployment runs
+  through its own workflow (`.github/workflows/deploy-vault-v3.yml`) and the
+  [V3 deploy runbook](docs/marketplank/DEPLOY-V3-RUNBOOK.md), not the InMotion
+  application pipeline.
+- A legacy vault stays configured until it holds zero tokens. Vault
+  configuration is append-and-retire, not replace.
+- No user may be migrated into V2. It is drainable by design and exists in the
+  registry only so existing depositors can get out.
 - Private keys must never be printed, committed, placed in Passenger's env, or
   included in release archives.

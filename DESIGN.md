@@ -153,6 +153,8 @@ build toward it — do not design from scratch.**
 | --- | --- |
 | Landing page (`/`) | `docs/mockups/landing-redesign/finalized.html` |
 | Marketplank (`/market`) and the dense trading surfaces | `docs/mockups/market-redesign/finalized.html` |
+| Instant Swap on the current vault | `docs/mockups/swap-redesign/mockup.html` |
+| Legacy-vault migration (`/migrate`) | `docs/mockups/nft-pool-migration/` |
 
 They are static HTML — open the file directly or serve the directory. A mockup can
 be *out of date on facts* (the collection is minted out, the homepage trade section
@@ -255,6 +257,20 @@ The Plank artwork may texture the masthead, but it must not lower text contrast.
 
 This is a hard rule, not a style preference — it's the one visual element that makes RobinWood read as itself rather than a generic crypto template.
 
+## Vault naming — brand rule
+
+**Never render a vault version number.** `V1`, `V2`, `V3` are internal identity for logic and tests only. A visible version ladder tells a holder "the team shipped two mistakes before this one"; each pool is presented instead as its own product:
+
+| Generation | Product name | Compact form (badges, tags) |
+| --- | --- | --- |
+| 1 | Driftwood | Driftwood |
+| 2 | WormWood | WormWood |
+| 3 | Premium Plank Liquidity | Premium Plank |
+
+These strings live in `VAULT_NAMES` / `VAULT_SHORT_NAMES` in `lib/market/vault-registry.ts` and are resolved from a vault **address** — never hardcoded in a component, and never selected by role, because with more than one legacy vault "the legacy one" is ambiguous.
+
+Color coding is keyed by generation and is the one place the version concept survives, as a token name rather than as text: `v1` orange, `v2` amber (demoted — it is retiring), `v3` emerald (current). Use `VAULT_LABEL_CLASS` and `VAULT_TEXT_CLASS`; do not hand-pick a different shade per component.
+
 ## Shapes
 
 Primary page containers use 12–16 px radii. Controls use 6–9 px radii. Pills are reserved for compact categorical state such as rarity, verification, floor, network, status, and live-count badges.
@@ -351,17 +367,25 @@ Collection-wide offers stay unavailable until their Seaport criteria resolver is
 
 ### Marketplank Activity information contract
 
-Retain Sales, Mints, and Transfers; evidence-based venue filters and attribution; artwork, token, rarity/rank, price, parties, time, and explorer links; filtered count; collection statistics; 24-hour and total volume analytics; average and priced-sale counts; sales chart; and the separate live V1/V2 vault trade ledger.
+Retain Sales, Mints, and Transfers; evidence-based venue filters and attribution; artwork, token, rarity/rank, price, parties, time, and explorer links; filtered count; collection statistics; 24-hour and total volume analytics; average and priced-sale counts; sales chart; and the separate live per-vault trade ledger covering every configured vault.
 
 On desktop, the event feed leads and analytics form a supporting rail. On mobile, the feed remains ahead of the chart so current evidence is not pushed below multiple summary surfaces. The sales chart exposes 24H, 7D, and ALL ranges.
 
 ### Marketplank Instant Swap information contract
 
-Retain both V1 and V2 vault identities and explorer links, Living Liquidity, Seed Vault, actionable V1-to-V2 migration, Buy, Sell, LP, Deposit, and Redeem modes, wallet balances, quotes and slippage, NFT pickers, random and targeted redemption, pending-request recovery, vault dashboard, NFT price chart, redeem odds, dual-vault trade history, and treasury controls.
+Retain every configured vault's identity and explorer link, Living Liquidity, Seed Vault, an actionable route into the legacy-vault migration flow, Buy, Sell, LP, Deposit, and Redeem modes, wallet balances, quotes and slippage, NFT pickers, random and targeted redemption, pending-request recovery, vault dashboard, NFT price chart, redeem odds, per-vault trade history, and treasury controls.
 
 Buy means ETH to vault shares. NFTs are acquired through Redeem. Copy may never blur those two actions.
 
-Vault selection is followed immediately by the actionable Swap workbench. Living Liquidity supports it beside the workbench on desktop and follows it on mobile; charts, ledgers, migration, recovery, seed, and treasury modules come afterward. Buy and Sell reviews show both the current expected output and the minimum implied by the selected slippage, while making clear that the enforced value is recomputed at submission.
+The tab leads with the trade widget beside the artwork rail, then the stat row and vault info; Price, Liquidity, and Activity are unified tabs beneath it. The Price tab shows a real price chart and the Liquidity tab a full LP dashboard — both live, never a decorative stand-in. Living Liquidity supports the workbench beside it on desktop and follows it on mobile; charts, ledgers, migration, recovery, seed, and treasury modules come afterward. Buy and Sell reviews show both the current expected output and the minimum implied by the selected slippage, while making clear that the enforced value is recomputed at submission.
+
+The current vault charges flat **ETH** fees and mints/burns exactly one share, while the legacy vaults charge share-denominated fees. Any copy that states a cost must state it in that vault's own denomination — never present one fee model as if it applied to all of them.
+
+### Legacy-vault migration information contract
+
+`/migrate` is a guided, step-by-step flow, not explanatory copy, and it is reachable from a site-wide banner whenever a wallet holds legacy value. Retain: per-vault position breakdown, the LP-withdraw step where one is required, LP credit the pool cannot currently cover shown as stuck rather than silently folded into the redeemable total, redeemable NFT count, dust below one redeem's worth with an honest explanation of how to clear it, and per-plank skip for anything already migrated.
+
+Migration means **exiting** the legacy vaults. Depositing the recovered planks into the current vault is an optional, user-selected follow-on step and must never be presented as mandatory or performed automatically. The flow must not nag when only wallet-held planks remain — there is nothing left to migrate at that point.
 
 ### Marketplank wallet workspaces
 
@@ -394,3 +418,6 @@ Disconnected My NFTs and My Listings use an explanatory wallet gate. Connected v
 - Do not broaden global typography or component overrides to achieve the market layout — use `data-market-shell` instead.
 - Do not invent a second background component or grain gradient; reuse `PlankBackground`/`AppBackdrop`/`.site-footer-surface`.
 - Do not represent the RobinWood brand character with an abstract shape or with NFT collection art — see "Plank character art" above.
+- Do not render `V1`, `V2`, `V3`, or any version ladder in user-facing copy — use the product names from the vault registry, see "Vault naming" above.
+- Do not hardcode a vault name, address, or fee model in a component, or select a vault by role instead of by address.
+- Do not present migration as automatic or mandatory, or state a fee in the wrong vault's denomination.
