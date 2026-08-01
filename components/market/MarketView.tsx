@@ -19,6 +19,7 @@ import {
   dualVaultMode,
   getVaultByAddress,
   getVaultByRole,
+  vaultGeneration,
 } from "@/lib/market/vault-registry";
 import VaultTradeHistory from "@/components/market/VaultTradeHistory";
 import LivingLiquidityViz from "@/components/market/LivingLiquidityViz";
@@ -80,6 +81,10 @@ const gridLoading = () => <ListingSkeleton />;
 // default Buy & Sell view needs (ListingGrid, FilterBar, scaffold) stays
 // static; these mount when their tab is first visited (or pre-warmed).
 const SwapPanel = dynamic(() => import("@/components/market/SwapPanel"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const V3SwapPanel = dynamic(() => import("@/components/market/V3SwapPanel"), {
   ssr: false,
   loading: panelLoading,
 });
@@ -1325,18 +1330,25 @@ export default function MarketView() {
               active={tab === "swap"}
             />
             <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-              <SwapPanel
-                account={account}
-                onConnect={handleConnect}
-                active={tab === "swap"}
-                collection={COLLECTION}
-                vaultAddress={activeVault?.address ?? COLLECTION.vaultAddress ?? null}
-                vaultLabel={
-                  activeVault?.role === "legacy"
-                    ? "legacy deposits"
-                    : "current vault"
-                }
-              />
+              {vaultGeneration(activeVault?.address ?? vaultAddr) >= 3 ? (
+                <V3SwapPanel
+                  vaultAddress={activeVault?.address ?? vaultAddr}
+                  active={tab === "swap"}
+                />
+              ) : (
+                <SwapPanel
+                  account={account}
+                  onConnect={handleConnect}
+                  active={tab === "swap"}
+                  collection={COLLECTION}
+                  vaultAddress={activeVault?.address ?? COLLECTION.vaultAddress ?? null}
+                  vaultLabel={
+                    activeVault?.role === "legacy"
+                      ? "legacy deposits"
+                      : "current vault"
+                  }
+                />
+              )}
               <div className="space-y-3">
                 <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
                 <VaultDashboard vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
