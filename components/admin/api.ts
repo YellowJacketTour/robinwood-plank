@@ -68,6 +68,59 @@ export function saveContentDoc(
   );
 }
 
+export type XImportOutcome =
+  | {
+      ok: true;
+      upload: { name: string; url: string; bytes: number };
+      post: { author: string; text: string; durationMs: number | null };
+    }
+  | { ok: false; message: string };
+
+/**
+ * Rip an X post's audio and host it here. The signed payload is the post URL,
+ * so the proof authorizes exactly one post — the server resolves the media
+ * URL itself and never accepts one from the client.
+ */
+export async function importXTrack(
+  postUrl: string,
+  address: string
+): Promise<XImportOutcome> {
+  try {
+    const timestamp = Date.now();
+    const signature = await signMessage(
+      address,
+      adminMessage("music-import-x", timestamp, adminPayloadHash(postUrl))
+    );
+    const res = await fetch("/api/music/import-x", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: postUrl,
+        auth: { address, timestamp, signature },
+      }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      message?: string;
+      upload?: { name: string; url: string; bytes: number };
+      post?: { author: string; text: string; durationMs: number | null };
+    };
+    if (!res.ok || !data.ok || !data.upload) {
+      return { ok: false, message: data.message || "Import rejected." };
+    }
+    return {
+      ok: true,
+      upload: data.upload,
+      post: data.post ?? { author: "", text: "", durationMs: null },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : "Import failed.",
+    };
+  }
+}
+
 /** Sign-and-upload a media file. The signed payload is the file's sha256. */
 export async function uploadMediaFile(
   file: File,

@@ -198,6 +198,26 @@ chmod 600 "$HOME/plank.tanggang.life/shared/.env.production"
 
 CI does not upload or overwrite that file.
 
+### Admin allowlist
+
+`PLANK_ADMIN_ADDRESSES` gates every `/admin` mutation. It is read at request
+time, not baked into the bundle, so it belongs in `.env.production` and **not**
+in the workflow's build env or a repository variable — it is deliberately not a
+`NEXT_PUBLIC_*` value.
+
+```bash
+printf 'PLANK_ADMIN_ADDRESSES=0xAAA…,0xBBB…\n' \
+  >> "$HOME/plank.tanggang.life/shared/.env.production"
+touch "$HOME/plank.tanggang.life/tmp/restart.txt"
+```
+
+Comma-separated, case-insensitive, no spaces required. Passenger picks it up on
+the restart; no redeploy is needed to add or revoke a wallet.
+
+Leaving it unset is not "no admins": `lib/admin-auth.ts` falls back to the two
+treasury wallets from `lib/constants.ts`. Setting it explicitly is what lets a
+signer be added or removed without a code change.
+
 ## 7. Passenger application
 
 In **cPanel → Setup Node.js App**:

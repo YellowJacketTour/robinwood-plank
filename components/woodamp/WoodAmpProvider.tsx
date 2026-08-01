@@ -102,7 +102,7 @@ export default function WoodAmpProvider({
   const [playing, setPlaying] = useState(false);
   // Only ever read localStorage after mount — reading during render would
   // mismatch server markup and trip a hydration warning.
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(false);
   const [volume, setVolumeState] = useState(0.8);
   const [shuffle, setShuffle] = useState(false);
   // Repeat defaults ON: the pre-WoodAmp player looped its single track, and
@@ -117,9 +117,12 @@ export default function WoodAmpProvider({
   // --- initial state from storage + ambient muted autoplay ---------------
   useEffect(() => {
     const storedMute = window.localStorage.getItem(MUTE_STORAGE_KEY);
-    // Absent key = first-ever visit = stay muted (the actual "start on
-    // mute" default). Any stored value is the visitor's remembered choice.
-    const initialMuted = storedMute === null ? true : storedMute === "true";
+    // Absent key = first-ever visit = start UNMUTED. Muting by default was
+    // correct only while the player autoplayed on load: it kept a visitor from
+    // being ambushed by sound. Autoplay is gone, so the only way audio starts
+    // is someone pressing play — and answering that with silence reads as a
+    // broken player. Any stored value is still the visitor's own choice.
+    const initialMuted = storedMute === null ? false : storedMute === "true";
     // One-time hydration of client-only localStorage state — the same
     // pattern (and suppression) as MarketView's stored-tab restore.
     // eslint-disable-next-line react-hooks/set-state-in-effect
