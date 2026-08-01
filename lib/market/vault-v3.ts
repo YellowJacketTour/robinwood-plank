@@ -6,7 +6,7 @@
  */
 import { Contract, Interface, JsonRpcProvider } from "ethers";
 import v3Abi from "@/lib/market/vault-v3-abi.json";
-import { CHAIN, MARKET_VAULT_ADDRESS } from "@/lib/constants";
+import { CHAIN, MARKET_VAULT_ADDRESS, READ_RPC_URL } from "@/lib/constants";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import {
   ensureRobinhoodChain,
@@ -31,12 +31,26 @@ function vaultOr(addr?: string | null): string {
   return a;
 }
 
-let cachedProvider: JsonRpcProvider | null = null;
-function reader(addr?: string | null): Contract {
-  if (!cachedProvider) {
-    cachedProvider = new JsonRpcProvider(CHAIN.rpcUrls.default, { chainId: CHAIN.id, name: CHAIN.name });
+/** Resolve READ_RPC_URL to an absolute URL. A relative dev-proxy path ("/api/…")
+ *  is resolved against the browser origin — reads only ever run client-side. */
+function readUrl(): string {
+  if (READ_RPC_URL.startsWith("/")) {
+    const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+    return origin + READ_RPC_URL;
   }
-  return new Contract(vaultOr(addr), v3Abi, cachedProvider);
+  return READ_RPC_URL;
+}
+
+let cachedProvider: JsonRpcProvider | null = null;
+function provider(): JsonRpcProvider {
+  if (!cachedProvider) {
+    cachedProvider = new JsonRpcProvider(readUrl(), { chainId: CHAIN.id, name: CHAIN.name });
+  }
+  return cachedProvider;
+}
+
+function reader(addr?: string | null): Contract {
+  return new Contract(vaultOr(addr), v3Abi, provider());
 }
 
 export type V3Snapshot = {
@@ -193,6 +207,103 @@ export async function v3RedeemTarget(account: string, tokenId: string, s: V3Snap
   return send(account, V3.encodeFunctionData("redeemTarget", [tokenId]), s.redeemFeeWei + s.targetPremiumWei);
 }
 
+// ── Random redeem (two-step, commit-reveal via drand) ──────────────────────
+// Step 1 burns one share now and pins a future drand round; step 2 claims the
+// NFT once that round's randomness is on-chain. The claim is permissionless, so
+// a relayer can finish for the user (no second wallet popup). See the contract
+// header for the anti-sniping rationale.
+
+export type V3Pending = { requester: string; round: bigint; available: boolean; isMe: boolean };
+const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
+
+/** The vault holds ONE redeem slot at a time; read who owns it and its round. */
+export async function getV3Pending(addr?: string | null, account?: string | null): Promise<V3Pending> {
+  const v = reader(addr);
+  const requester = (await v.pendingRequester()) as string;
+  if (requester === ZERO_ADDR) {
+    return { requester, round: BigInt(0), available: false, isMe: false };
+  }
+  const [round, available] = (await v.pendingRound()) as [bigint, boolean];
+  return {
+    requester,
+    round,
+    available,
+    isMe: Boolean(account) && requester.toLowerCase() === account!.toLowerCase(),
+  };
+}
+
+/** Step 1: burn a share, request a random draw. Pays redeemFeeWei only. */
+export async function v3RequestRandomRedeem(account: string, s: V3Snapshot): Promise<string> {
+  return send(account, V3.encodeFunctionData("requestRandomRedeem", []), s.redeemFeeWei);
+}
+
+/** Step 2 (user-paid fallback): claim the NFT the request was pinned to. */
+export async function v3ClaimRandomRedeem(account: string): Promise<string> {
+  return send(account, V3.encodeFunctionData("claimRandomRedeem", []));
+}
+
+/**
+ * Kick the dev relay to finish a pending random redeem without a second wallet
+ * prompt: it injects the mock beacon's randomness for the pinned round and
+ * claims on the requester's behalf. DEV-LOCAL ONLY — 404s in a real build.
+ *
+ * PRODUCTION (Phase B): this is where the gas-sponsored settle-random relayer
+ * takes over, exactly as it does for V1/V2 — but the relayer's vault list must
+ * include the V3 address first, or a random redeem would strand at step 2. Until
+ * that wiring lands, the finish path below falls back to a user-paid claim.
+ */
+async function kickDevRelay(vaultAddr: string, requester: string): Promise<string | null> {
+  try {
+    const res = await fetch("/api/dev-relay", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ vault: vaultAddr, requester }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { status?: string };
+    return data.status ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One-shot random redeem: the user signs ONLY the request; the finish is
+ * relayed. Falls back to a user-paid claim if no relayer is available. Resolves
+ * when the NFT has been delivered and the slot is free.
+ */
+export async function v3RandomRedeem(
+  account: string,
+  s: V3Snapshot,
+  addr?: string | null,
+  onProgress?: (m: string) => void
+): Promise<string> {
+  const vaultAddr = vaultOr(addr);
+  onProgress?.("Requesting random redeem (one signature)…");
+  const requestHash = await v3RequestRandomRedeem(account, s);
+
+  onProgress?.("Drawing your plank via drand…");
+  const started = Date.now();
+  // Give the relay a few rounds to inject randomness and claim for us.
+  while (Date.now() - started < 60_000) {
+    const relayStatus = await kickDevRelay(vaultAddr, account);
+    const pend = await getV3Pending(addr, account);
+    if (!pend.isMe) {
+      // Slot cleared for us → the NFT was delivered.
+      onProgress?.("Redeem complete — plank delivered.");
+      return requestHash;
+    }
+    if (relayStatus === "no_relay") break; // no sponsor here — user finishes
+    await new Promise((r) => setTimeout(r, 2_000));
+  }
+
+  // Fallback: user pays for the claim themselves (needs the round on-chain).
+  onProgress?.("Finishing with your wallet…");
+  await v3ClaimRandomRedeem(account);
+  onProgress?.("Redeem complete — plank delivered.");
+  return requestHash;
+}
+
 export async function v3AddLiquidity(account: string, ethWei: bigint, s: V3Snapshot, slipBps = 100): Promise<string> {
   const { sharesUsed, lpMinted } = quoteAddLiquidity(ethWei, s);
   // Cap pulled shares a touch above the quote for rounding; floor LP for slippage.
@@ -211,10 +322,18 @@ export async function v3RemoveLiquidity(account: string, lpIn: bigint, s: V3Snap
 
 /** The connected account's native ETH balance on the configured chain. */
 export async function getEthBalance(account: string): Promise<bigint> {
-  if (!cachedProvider) {
-    cachedProvider = new JsonRpcProvider(CHAIN.rpcUrls.default, { chainId: CHAIN.id, name: CHAIN.name });
+  return provider().getBalance(account);
+}
+
+const ERC721_BAL = new Interface(["function balanceOf(address) view returns (uint256)"]);
+/** How many collection planks the account holds (redeemed / not yet deposited). */
+export async function getPlankBalance(account: string): Promise<number> {
+  const c = new Contract(NFT_CONTRACT_ADDRESS, ERC721_BAL, provider());
+  try {
+    return Number((await c.balanceOf(account)) as bigint);
+  } catch {
+    return 0;
   }
-  return cachedProvider.getBalance(account);
 }
 
 export function formatUnits(wei: bigint, dp = 4): string {

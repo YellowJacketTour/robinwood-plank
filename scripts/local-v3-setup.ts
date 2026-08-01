@@ -12,7 +12,10 @@
  * Localhost network to your wallet (RPC http://127.0.0.1:8545, chainId 31337),
  * and import the printed test key. NEVER used against real value.
  */
-import { ethers } from "hardhat";
+// Node 24 runs this .ts file with its native (ESM) loader, so `hardhat` (a
+// CommonJS module) can only be default-imported, not named-imported.
+import hardhat from "hardhat";
+const { ethers } = hardhat as unknown as { ethers: typeof import("ethers") & Record<string, unknown> };
 
 const E = (n: string) => ethers.parseEther(n);
 
@@ -26,7 +29,8 @@ async function main() {
   const SWAP_BPS = 30;
 
   // ── contracts ──────────────────────────────────────────────────────────
-  const Nft = await ethers.getContractFactory("MockRobinWoodNft");
+  // Enumerable so the frontend can walk holdings on-chain (no indexer locally).
+  const Nft = await ethers.getContractFactory("MockRobinWoodNftEnumerable");
   const nft = await Nft.deploy();
   await nft.waitForDeployment();
   const nftAddr = await nft.getAddress();

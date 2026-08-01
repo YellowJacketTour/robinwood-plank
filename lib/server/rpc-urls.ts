@@ -1,6 +1,16 @@
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 
 /**
+ * DEV-ONLY: when NEXT_PUBLIC_DEV_LOCAL_CHAIN=1 the whole app talks to a local
+ * Hardhat/anvil node instead of Robinhood Chain, so every RPC list below must
+ * short-circuit to that node — otherwise browser reads (inventory pickers,
+ * vault stats) would silently answer from the production chain while writes hit
+ * the local one. Never set in a real build.
+ */
+const DEV_LOCAL = process.env.NEXT_PUBLIC_DEV_LOCAL_CHAIN === "1";
+const DEV_LOCAL_RPC = process.env.NEXT_PUBLIC_DEV_LOCAL_RPC || "http://127.0.0.1:8545";
+
+/**
  * Ordered RPC list for SERVER-side callers only: the private provider
  * endpoint first (RPC_URL — e.g. a keyed Alchemy URL; the public endpoint
  * is rate-limited and documented "not recommended for production"), then
@@ -11,13 +21,15 @@ import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
  * undefined there and the list degrades to the public URLs — the key
  * itself cannot ship because it is not NEXT_PUBLIC_.)
  */
-export const SERVER_RPC_URLS: string[] = Array.from(
-  new Set(
-    [process.env.RPC_URL?.trim(), ...ROBINHOOD_RPC_URLS].filter(
-      (url): url is string => Boolean(url && url.length > 0)
-    )
-  )
-);
+export const SERVER_RPC_URLS: string[] = DEV_LOCAL
+  ? [DEV_LOCAL_RPC]
+  : Array.from(
+      new Set(
+        [process.env.RPC_URL?.trim(), ...ROBINHOOD_RPC_URLS].filter(
+          (url): url is string => Boolean(url && url.length > 0)
+        )
+      )
+    );
 
 /**
  * Ordered RPC list for the /api/rpc browser proxy — public endpoint FIRST,
@@ -54,7 +66,9 @@ export const SERVER_RPC_URLS: string[] = Array.from(
  * silently escalating onto a metered endpoint under load is how a rate-limit
  * incident turns into a billing one.
  */
-export const FREE_RPC_URLS: string[] = Array.from(new Set(ROBINHOOD_RPC_URLS));
+export const FREE_RPC_URLS: string[] = DEV_LOCAL
+  ? [DEV_LOCAL_RPC]
+  : Array.from(new Set(ROBINHOOD_RPC_URLS));
 
 /**
  * True when this URL is the metered provider, i.e. calls to it cost compute
@@ -67,10 +81,12 @@ export function isMeteredRpcUrl(url: string): boolean {
   return Boolean(keyed && url === keyed);
 }
 
-export const CLIENT_PROXY_RPC_URLS: string[] = Array.from(
-  new Set(
-    [...ROBINHOOD_RPC_URLS, process.env.RPC_URL?.trim()].filter(
-      (url): url is string => Boolean(url && url.length > 0)
-    )
-  )
-);
+export const CLIENT_PROXY_RPC_URLS: string[] = DEV_LOCAL
+  ? [DEV_LOCAL_RPC]
+  : Array.from(
+      new Set(
+        [...ROBINHOOD_RPC_URLS, process.env.RPC_URL?.trim()].filter(
+          (url): url is string => Boolean(url && url.length > 0)
+        )
+      )
+    );
