@@ -22,6 +22,7 @@ import {
   v3RedeemTarget,
   v3AddLiquidity,
   v3RemoveLiquidity,
+  getEthBalance,
   formatUnits,
   SHARE_UNIT,
   type V3Snapshot,
@@ -50,6 +51,7 @@ function toWei(s: string): bigint {
 export default function V3SwapPanel({ vaultAddress, active = true }: { vaultAddress?: string | null; active?: boolean }) {
   const { address, isConnected, connect } = useWallet();
   const [snap, setSnap] = useState<V3Snapshot | null>(null);
+  const [ethBal, setEthBal] = useState<bigint | null>(null);
   const [tab, setTab] = useState<Action>("buy");
   const [amount, setAmount] = useState("");
   const [tokenId, setTokenId] = useState("");
@@ -61,7 +63,12 @@ export default function V3SwapPanel({ vaultAddress, active = true }: { vaultAddr
 
   const load = useCallback(async () => {
     try {
-      setSnap(await getV3Snapshot(vaultAddress, address));
+      const [s, e] = await Promise.all([
+        getV3Snapshot(vaultAddress, address),
+        address ? getEthBalance(address) : Promise.resolve(null),
+      ]);
+      setSnap(s);
+      setEthBal(e);
     } catch {
       /* keep last */
     }
@@ -148,6 +155,23 @@ export default function V3SwapPanel({ vaultAddress, active = true }: { vaultAddr
         ))}
       </div>
 
+      {isConnected && snap && (
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-lg border border-line bg-wood-950 py-1.5">
+            <div className="text-[0.52rem] font-black uppercase tracking-wide text-cream-muted">Your shares</div>
+            <div className="font-mono text-base font-black text-gold-300">{formatUnits(snap.shareBalance, 2)}</div>
+          </div>
+          <div className="rounded-lg border border-line bg-wood-950 py-1.5">
+            <div className="text-[0.52rem] font-black uppercase tracking-wide text-cream-muted">Your LP</div>
+            <div className="font-mono text-base font-black text-emerald-400">{formatUnits(snap.lpBalance, 2)}</div>
+          </div>
+          <div className="rounded-lg border border-line bg-wood-950 py-1.5">
+            <div className="text-[0.52rem] font-black uppercase tracking-wide text-cream-muted">Your ETH</div>
+            <div className="font-mono text-base font-black text-cream">{ethBal !== null ? formatUnits(ethBal, 3) : "—"}</div>
+          </div>
+        </div>
+      )}
+
       {tab === "lp" && (
         <div className="mt-3 flex gap-2">
           {(["add", "remove"] as const).map((m) => (
@@ -198,7 +222,7 @@ export default function V3SwapPanel({ vaultAddress, active = true }: { vaultAddr
                     ? `${formatUnits(snap.shareBalance, 2)} sh`
                     : tab === "lp" && lpMode === "remove"
                       ? `${formatUnits(snap.lpBalance, 2)} LP`
-                      : "ETH"}
+                      : `${ethBal !== null ? formatUnits(ethBal, 3) : "…"} Ξ`}
                 </span>
               )}
             </span>
