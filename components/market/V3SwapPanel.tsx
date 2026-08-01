@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * V3 Instant Swap — the trade card from docs/mockups/swap-redesign. Five actions
- * in one segmented control, wired to lib/market/vault-v3.ts. Data (snapshot, ETH
- * balance, account) is owned by V3SwapView and passed in, so the whole page polls
- * once and stays consistent.
+ * V3 Instant Swap trade widget. Five actions in one segmented control. The
+ * active action + redeem mode + the plank cart are OWNED by V3SwapView (so the
+ * big artwork grid and this widget share one selection): Deposit and targeted
+ * Redeem read the cart the user builds by tapping the grid; Buy/Sell/Liquidity
+ * stay amount-based here. Data (snapshot, ETH balance, account) is passed in.
  */
 
 import { useMemo, useRef, useState } from "react";
@@ -16,8 +17,8 @@ import {
   quoteRemoveLiquidity,
   v3Buy,
   v3Sell,
-  v3Deposit,
-  v3RedeemTarget,
+  v3DepositMany,
+  v3RedeemTargetMany,
   v3RandomRedeem,
   v3AddLiquidity,
   v3RemoveLiquidity,
@@ -26,9 +27,8 @@ import {
   SHARE_UNIT,
   type V3Snapshot,
 } from "@/lib/market/vault-v3";
-import TokenPicker, { type PickerToken } from "@/components/market/TokenPicker";
 
-type Action = "buy" | "sell" | "deposit" | "redeem" | "lp";
+export type Action = "buy" | "sell" | "deposit" | "redeem" | "lp";
 const ACTIONS: { id: Action; label: string }[] = [
   { id: "buy", label: "Buy" },
   { id: "sell", label: "Sell" },
@@ -47,17 +47,19 @@ function toWei(s: string): bigint {
   }
 }
 
-
 export type V3PanelProps = {
   snap: V3Snapshot | null;
   ethBal: bigint | null;
   address: string | null;
   isConnected: boolean;
   vaultAddress?: string | null;
-  /** Planks in the connected wallet (for Deposit) and in the vault (for Redeem). */
-  ownedTokens: PickerToken[];
-  heldTokens: PickerToken[];
-  invLoading?: boolean;
+  /** Controlled by V3SwapView — shared with the artwork grid. */
+  action: Action;
+  onActionChange: (a: Action) => void;
+  redeemMode: "random" | "specific";
+  onRedeemModeChange: (m: "random" | "specific") => void;
+  /** Planks the user tapped in the grid (deposit source / targeted-redeem set). */
+  cart: Set<string>;
   /** True when another wallet holds the single redeem slot — random redeem would revert. */
   redeemSlotBusy?: boolean;
   onConnect: () => void;
@@ -70,17 +72,16 @@ export default function V3SwapPanel({
   address,
   isConnected,
   vaultAddress,
-  ownedTokens,
-  heldTokens,
-  invLoading,
+  action,
+  onActionChange,
+  redeemMode,
+  onRedeemModeChange,
+  cart,
   redeemSlotBusy,
   onConnect,
   onAfterTx,
 }: V3PanelProps) {
-  const [tab, setTab] = useState<Action>("buy");
   const [amount, setAmount] = useState("");
-  const [tokenId, setTokenId] = useState("");
-  const [redeemMode, setRedeemMode] = useState<"random" | "specific">("random");
   const [lpMode, setLpMode] = useState<"add" | "remove">("add");
   const [slipBps, setSlipBps] = useState(100); // 1.00% default
   const [busy, setBusy] = useState(false);
@@ -97,7 +98,6 @@ export default function V3SwapPanel({
     try {
       await fn();
       setAmount("");
-      setTokenId("");
       await onAfterTx();
     } catch (e) {
       setError(decodeV3Error(e));
@@ -109,89 +109,87 @@ export default function V3SwapPanel({
   };
 
   const amtWei = toWei(amount);
+  const cartIds = useMemo(() => [...cart], [cart]);
 
   const quote = useMemo(() => {
     if (!snap) return null;
-    if (tab === "buy") return { out: quoteBuy(amtWei, snap), unit: "shares" };
-    if (tab === "sell") return { out: quoteSell(amtWei, snap), unit: "ETH" };
-    if (tab === "lp" && lpMode === "add") {
+    if (action === "buy") return { out: quoteBuy(amtWei, snap), unit: "shares" };
+    if (action === "sell") return { out: quoteSell(amtWei, snap), unit: "ETH" };
+    if (action === "lp" && lpMode === "add") {
       const { sharesUsed, lpMinted } = quoteAddLiquidity(amtWei, snap);
       return { out: lpMinted, unit: "LP", sharesUsed };
     }
-    if (tab === "lp" && lpMode === "remove") {
+    if (action === "lp" && lpMode === "remove") {
       const { ethOut, sharesOut } = quoteRemoveLiquidity(amtWei, snap);
       return { out: ethOut, unit: "ETH", sharesOut };
     }
     return null;
-  }, [snap, tab, amtWei, lpMode]);
+  }, [snap, action, amtWei, lpMode]);
+
+  // Per-plank + total cost of the cart for the picked actions.
+  const feeEach = snap
+    ? action === "deposit"
+      ? snap.mintFeeWei
+      : snap.redeemFeeWei + snap.targetPremiumWei
+    : BigInt(0);
+  const cartTotal = feeEach * BigInt(cart.size);
 
   const submit = () => {
     if (!snap || !address) return;
-    if (tab === "buy") return run(() => v3Buy(address, amtWei, snap, slipBps));
-    if (tab === "sell") return run(() => v3Sell(address, amtWei, snap, slipBps));
-    if (tab === "deposit") return run(() => v3Deposit(address, tokenId.trim(), snap, vaultAddress));
-    if (tab === "redeem") {
+    if (action === "buy") return run(() => v3Buy(address, amtWei, snap, slipBps));
+    if (action === "sell") return run(() => v3Sell(address, amtWei, snap, slipBps));
+    if (action === "deposit") return run(() => v3DepositMany(address, cartIds, snap, vaultAddress));
+    if (action === "redeem") {
       if (redeemMode === "random") return run(() => v3RandomRedeem(address, snap, vaultAddress, setStatus));
-      return run(() => v3RedeemTarget(address, tokenId.trim(), snap));
+      return run(() => v3RedeemTargetMany(address, cartIds, snap, vaultAddress));
     }
-    if (tab === "lp" && lpMode === "add") return run(() => v3AddLiquidity(address, amtWei, snap, slipBps));
-    if (tab === "lp" && lpMode === "remove") return run(() => v3RemoveLiquidity(address, amtWei, snap, slipBps));
+    if (action === "lp" && lpMode === "add") return run(() => v3AddLiquidity(address, amtWei, snap, slipBps));
+    if (action === "lp" && lpMode === "remove") return run(() => v3RemoveLiquidity(address, amtWei, snap, slipBps));
   };
 
-  // Actions that need a picked plank rather than an ETH/share amount.
-  const isNftTab = tab === "deposit" || tab === "redeem";
-  const redeemFeeWei = snap ? (redeemMode === "random" ? snap.redeemFeeWei : snap.redeemFeeWei + snap.targetPremiumWei) : BigInt(0);
-  // AMM trades (buy/sell/LP) are the only actions gated by an open pool; deposit
-  // and redeem keep working while trading is paused, per the design contract.
-  const isAmmTab = tab === "buy" || tab === "sell" || tab === "lp";
+  const isAmmTab = action === "buy" || action === "sell" || action === "lp";
+  const usesCart = action === "deposit" || (action === "redeem" && redeemMode === "specific");
   const tradingPaused = Boolean(snap && !snap.poolOpen && isAmmTab);
-  // Slippage-aware "you receive" figures for the summary.
   const minReceived = useMemo(() => {
     if (!quote || quote.out <= BigInt(0)) return BigInt(0);
     return (quote.out * BigInt(10000 - slipBps)) / BigInt(10000);
   }, [quote, slipBps]);
-  // Price impact vs the current mid price (buy/sell only), in bps.
   const priceImpactPct = useMemo(() => {
     if (!snap || amtWei <= BigInt(0) || snap.ethReserve === BigInt(0) || snap.shareReserve === BigInt(0)) return null;
-    if (tab === "buy") {
-      const mid = Number(snap.shareReserve) / Number(snap.ethReserve); // shares per ETH
+    if (action === "buy") {
+      const mid = Number(snap.shareReserve) / Number(snap.ethReserve);
       const eff = Number(quoteBuy(amtWei, snap)) / Number(amtWei);
       return mid > 0 ? Math.max(0, (1 - eff / mid) * 100) : null;
     }
-    if (tab === "sell") {
-      const mid = Number(snap.ethReserve) / Number(snap.shareReserve); // ETH per share
+    if (action === "sell") {
+      const mid = Number(snap.ethReserve) / Number(snap.shareReserve);
       const eff = Number(quoteSell(amtWei, snap)) / Number(amtWei);
       return mid > 0 ? Math.max(0, (1 - eff / mid) * 100) : null;
     }
     return null;
-  }, [snap, tab, amtWei]);
-  // A random redeem into an occupied slot would revert (RequestPending) — block it.
-  const randomSlotBlocked = tab === "redeem" && redeemMode === "random" && Boolean(redeemSlotBusy);
-  // Disable the CTA when the required plank hasn't been chosen or trading is paused.
-  const needsPick = (tab === "deposit") || (tab === "redeem" && redeemMode === "specific");
-  const ctaDisabled = busy || tradingPaused || randomSlotBlocked || (needsPick && !tokenId) || (!isNftTab && amtWei <= BigInt(0));
-  const payLabel =
-    tab === "sell" ? "You sell (shares)" : tab === "lp" && lpMode === "remove" ? "Burn LP" : "You pay";
-  const payToken = tab === "sell" ? "shares" : tab === "lp" && lpMode === "remove" ? "LP" : "◆ ETH";
+  }, [snap, action, amtWei]);
+  const randomSlotBlocked = action === "redeem" && redeemMode === "random" && Boolean(redeemSlotBusy);
+  const ctaDisabled = busy || tradingPaused || randomSlotBlocked || (usesCart && cart.size === 0) || (isAmmTab && amtWei <= BigInt(0));
+  const payLabel = action === "sell" ? "You sell (shares)" : action === "lp" && lpMode === "remove" ? "Burn LP" : "You pay";
+  const payToken = action === "sell" ? "shares" : action === "lp" && lpMode === "remove" ? "LP" : "◆ ETH";
   const payBal = !snap
     ? ""
-    : tab === "sell"
+    : action === "sell"
       ? `${formatUnits(snap.shareBalance, 2)} sh`
-      : tab === "lp" && lpMode === "remove"
+      : action === "lp" && lpMode === "remove"
         ? `${formatUnits(snap.lpBalance, 2)} LP`
         : `${ethBal !== null ? formatUnits(ethBal, 3) : "…"} Ξ`;
-  // Full-precision "Max" value for the active pay field (ETH tabs keep a gas buffer).
   const maxAmount = useMemo(() => {
     if (!snap) return null;
-    if (tab === "sell") return snap.shareBalance > BigInt(0) ? formatUnits(snap.shareBalance, 18) : null;
-    if (tab === "lp" && lpMode === "remove") return snap.lpBalance > BigInt(0) ? formatUnits(snap.lpBalance, 18) : null;
-    if ((tab === "buy" || (tab === "lp" && lpMode === "add")) && ethBal !== null) {
+    if (action === "sell") return snap.shareBalance > BigInt(0) ? formatUnits(snap.shareBalance, 18) : null;
+    if (action === "lp" && lpMode === "remove") return snap.lpBalance > BigInt(0) ? formatUnits(snap.lpBalance, 18) : null;
+    if ((action === "buy" || (action === "lp" && lpMode === "add")) && ethBal !== null) {
       const buf = parseEther("0.001");
       const usable = ethBal > buf ? ethBal - buf : BigInt(0);
       return usable > BigInt(0) ? formatUnits(usable, 18) : null;
     }
     return null;
-  }, [snap, tab, lpMode, ethBal]);
+  }, [snap, action, lpMode, ethBal]);
 
   return (
     <div className="rounded-2xl border border-line bg-panel-strong p-3.5">
@@ -200,10 +198,10 @@ export default function V3SwapPanel({
           <button
             key={a.id}
             type="button"
-            onClick={() => { setTab(a.id); setAmount(""); setTokenId(""); setError(null); }}
-            aria-pressed={tab === a.id}
+            onClick={() => { onActionChange(a.id); setAmount(""); setError(null); }}
+            aria-pressed={action === a.id}
             className={`min-h-11 rounded-lg py-2 text-[0.72rem] font-black tracking-wide transition ${
-              tab === a.id ? "bg-gold-500 text-[#261105]" : "text-cream-muted hover:text-cream"
+              action === a.id ? "bg-gold-500 text-[#261105]" : "text-cream-muted hover:text-cream"
             }`}
           >
             {a.label}
@@ -211,7 +209,7 @@ export default function V3SwapPanel({
         ))}
       </div>
 
-      {tab === "lp" && (
+      {action === "lp" && (
         <div className="mt-3 flex gap-2">
           {(["add", "remove"] as const).map((m) => (
             <button
@@ -230,13 +228,13 @@ export default function V3SwapPanel({
       )}
 
       <p className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-[0.72rem] text-sky-200">
-        {tab === "buy" && <><b className="text-sky-100">Buy shares</b> — pay ETH, receive fungible V3 shares. To get a plank, use Redeem.</>}
-        {tab === "sell" && <><b className="text-sky-100">Sell shares</b> — return shares to the pool for ETH.</>}
-        {tab === "deposit" && <><b className="text-sky-100">Deposit</b> a plank you own → exactly one V3 share, for a flat {snap ? formatUnits(snap.mintFeeWei) : "…"} Ξ fee.</>}
-        {tab === "redeem" && redeemMode === "random" && <><b className="text-sky-100">Random redeem</b> — burn one share + {snap ? formatUnits(snap.redeemFeeWei) : "…"} Ξ for a plank drawn fairly via drand. Cheapest way out.</>}
-        {tab === "redeem" && redeemMode === "specific" && <><b className="text-sky-100">Targeted redeem</b> — pick the exact plank. Burns one share + {snap ? formatUnits(snap.redeemFeeWei + snap.targetPremiumWei) : "…"} Ξ (a {snap ? formatUnits(snap.targetPremiumWei) : "…"} Ξ premium over random).</>}
-        {tab === "lp" && lpMode === "add" && <><b className="text-sky-100">Add liquidity</b> — supply ETH; shares are pulled to match the ratio. Earn the 0.30% swap fee.</>}
-        {tab === "lp" && lpMode === "remove" && <><b className="text-sky-100">Remove liquidity</b> — burn LP for a pro-rata slice of the pool.</>}
+        {action === "buy" && <><b className="text-sky-100">Buy shares</b> — pay ETH, receive fungible V3 shares. To get a plank, use Redeem.</>}
+        {action === "sell" && <><b className="text-sky-100">Sell shares</b> — return shares to the pool for ETH.</>}
+        {action === "deposit" && <><b className="text-sky-100">Deposit</b> — tap your planks in the grid; each mints one V3 share for a flat {snap ? formatUnits(snap.mintFeeWei) : "…"} Ξ fee.</>}
+        {action === "redeem" && redeemMode === "random" && <><b className="text-sky-100">Random redeem</b> — burn one share + {snap ? formatUnits(snap.redeemFeeWei) : "…"} Ξ for a plank drawn fairly via drand. Cheapest way out.</>}
+        {action === "redeem" && redeemMode === "specific" && <><b className="text-sky-100">Targeted redeem</b> — tap the exact planks in the grid. Each burns one share + {snap ? formatUnits(snap.redeemFeeWei + snap.targetPremiumWei) : "…"} Ξ.</>}
+        {action === "lp" && lpMode === "add" && <><b className="text-sky-100">Add liquidity</b> — supply ETH; shares are pulled to match the ratio. Earn the 0.30% swap fee.</>}
+        {action === "lp" && lpMode === "remove" && <><b className="text-sky-100">Remove liquidity</b> — burn LP for a pro-rata slice of the pool.</>}
       </p>
 
       {tradingPaused && (
@@ -245,58 +243,50 @@ export default function V3SwapPanel({
         </p>
       )}
 
-      {tab === "deposit" ? (
-        <div className="mt-3 space-y-2">
-          <p className="text-[0.62rem] font-bold uppercase tracking-wide text-cream-muted">Choose a plank to deposit</p>
-          <TokenPicker
-            tokens={ownedTokens}
-            loading={invLoading}
-            selected={tokenId || null}
-            onSelect={setTokenId}
-            emptyMessage={address ? "No eligible planks in this wallet." : "Connect a wallet to see your planks."}
-          />
+      {action === "redeem" && (
+        <div className="mt-3 grid grid-cols-2 gap-1 rounded-xl border border-line bg-wood-950 p-1">
+          {(["random", "specific"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => onRedeemModeChange(m)}
+              aria-pressed={redeemMode === m}
+              className={`min-h-11 rounded-lg text-[0.72rem] font-black tracking-wide transition ${
+                redeemMode === m ? "bg-gold-500 text-[#261105]" : "text-cream-muted hover:text-cream"
+              }`}
+            >
+              {m === "random" ? `Random · ${snap ? formatUnits(snap.redeemFeeWei, 3) : "…"} Ξ` : `Specific · ${snap ? formatUnits(snap.redeemFeeWei + snap.targetPremiumWei, 3) : "…"} Ξ`}
+            </button>
+          ))}
         </div>
-      ) : tab === "redeem" ? (
-        <div className="mt-3 space-y-2">
-          <div className="grid grid-cols-2 gap-1 rounded-xl border border-line bg-wood-950 p-1">
-            {(["random", "specific"] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => { setRedeemMode(m); setTokenId(""); setError(null); }}
-                aria-pressed={redeemMode === m}
-                className={`min-h-11 rounded-lg text-[0.72rem] font-black tracking-wide transition ${
-                  redeemMode === m ? "bg-gold-500 text-[#261105]" : "text-cream-muted hover:text-cream"
-                }`}
-              >
-                {m === "random" ? `Random · ${snap ? formatUnits(snap.redeemFeeWei, 3) : "…"} Ξ` : `Specific · ${snap ? formatUnits(snap.redeemFeeWei + snap.targetPremiumWei, 3) : "…"} Ξ`}
-              </button>
-            ))}
-          </div>
-          {redeemMode === "specific" && (
-            <>
-              <p className="text-[0.62rem] font-bold uppercase tracking-wide text-cream-muted">Pick the plank to redeem</p>
-              <TokenPicker
-                tokens={heldTokens}
-                loading={invLoading}
-                selected={tokenId || null}
-                onSelect={setTokenId}
-                emptyMessage="The vault isn't holding any planks right now."
-              />
-            </>
-          )}
-          {redeemMode === "random" && !randomSlotBlocked && (
-            <p className="rounded-lg border border-line bg-wood-950 px-3 py-2.5 text-[0.72rem] text-cream-muted">
-              You’ll sign one request; the plank is drawn by drand and delivered automatically. The vault holds{" "}
-              <b className="text-gold-300">{snap?.availableCount ?? snap?.held ?? 0}</b> available planks — each equally likely.
+      )}
+
+      {/* CART summary (deposit / targeted redeem) — planks come from the grid */}
+      {usesCart ? (
+        <div className="mt-3 rounded-xl border border-line bg-wood-950 p-3">
+          {cart.size === 0 ? (
+            <p className="text-[0.72rem] text-cream-muted">
+              Tap planks in the {action === "deposit" ? "grid of your planks" : "vault grid"} — your selection shows here.
             </p>
-          )}
-          {randomSlotBlocked && (
-            <p className="rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2.5 text-[0.72rem] text-amber-200">
-              The vault’s single redeem slot is busy — another wallet is mid-redeem. It’ll clear shortly (see the banner above); requesting now would just revert.
-            </p>
+          ) : (
+            <div className="space-y-1 text-[0.72rem] text-cream-muted">
+              <div className="flex justify-between"><span>Selected</span><b className="tabular-nums text-cream">{cart.size} plank{cart.size === 1 ? "" : "s"}</b></div>
+              <div className="flex justify-between"><span>Fee each</span><b className="tabular-nums text-cream">{formatUnits(feeEach, 4)} Ξ</b></div>
+              <div className="flex justify-between"><span>Total</span><b className="tabular-nums text-gold-300">{formatUnits(cartTotal, 4)} Ξ</b></div>
+            </div>
           )}
         </div>
+      ) : action === "redeem" ? (
+        randomSlotBlocked ? (
+          <p className="mt-3 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2.5 text-[0.72rem] text-amber-200">
+            The vault’s single redeem slot is busy — another wallet is mid-redeem. It’ll clear shortly (see the banner above); requesting now would just revert.
+          </p>
+        ) : (
+          <p className="mt-3 rounded-lg border border-line bg-wood-950 px-3 py-2.5 text-[0.72rem] text-cream-muted">
+            You’ll sign one request; the plank is drawn by drand and delivered automatically. The vault holds{" "}
+            <b className="text-gold-300">{snap?.availableCount ?? snap?.held ?? 0}</b> available planks — each equally likely.
+          </p>
+        )
       ) : (
         <>
           <label className="mt-3 block rounded-xl border border-line bg-wood-950 px-3.5 py-3">
@@ -368,10 +358,10 @@ export default function V3SwapPanel({
 
       {snap && (
         <div className="mt-3 space-y-1 text-[0.72rem] text-cream-muted">
-          {(tab === "buy" || tab === "sell") && (
+          {(action === "buy" || action === "sell") && (
             <div className="flex justify-between"><span>Swap fee</span><b className="tabular-nums text-emerald-400">{(snap.swapFeeBps / 100).toFixed(2)}% → LPs</b></div>
           )}
-          {(tab === "buy" || tab === "sell") && priceImpactPct !== null && (
+          {(action === "buy" || action === "sell") && priceImpactPct !== null && (
             <div className="flex justify-between">
               <span>Price impact</span>
               <b className={`tabular-nums ${priceImpactPct >= 3 ? "text-amber-400" : "text-cream"}`}>{priceImpactPct < 0.01 ? "<0.01" : priceImpactPct.toFixed(2)}%</b>
@@ -382,12 +372,6 @@ export default function V3SwapPanel({
               <span>Minimum received ({(slipBps / 100).toFixed(slipBps % 100 ? 1 : 0)}% slip.)</span>
               <b className="tabular-nums text-cream">{formatUnits(minReceived, 4)} {quote.unit}</b>
             </div>
-          )}
-          {tab === "deposit" && (
-            <div className="flex justify-between"><span>Deposit fee</span><b className="tabular-nums text-cream">{formatUnits(snap.mintFeeWei, 4)} Ξ → treasury</b></div>
-          )}
-          {tab === "redeem" && (
-            <div className="flex justify-between"><span>Redeem fee</span><b className="tabular-nums text-cream">{formatUnits(redeemFeeWei, 4)} Ξ → treasury</b></div>
           )}
           <div className="flex justify-between"><span>Share price</span><b className="tabular-nums text-cream">{formatUnits(snap.shareReserve > BigInt(0) ? (snap.ethReserve * SHARE_UNIT) / snap.shareReserve : BigInt(0), 6)} Ξ</b></div>
         </div>
@@ -402,14 +386,14 @@ export default function V3SwapPanel({
             ? "Trading paused"
             : randomSlotBlocked
             ? "Redeem slot busy"
-            : tab === "buy"
+            : action === "buy"
             ? "Buy shares"
-            : tab === "sell"
+            : action === "sell"
               ? "Sell shares"
-              : tab === "deposit"
-                ? tokenId ? `Approve & deposit #${tokenId}` : "Select a plank"
-                : tab === "redeem"
-                  ? redeemMode === "random" ? "Redeem a random plank" : tokenId ? `Redeem #${tokenId}` : "Select a plank"
+              : action === "deposit"
+                ? cart.size ? `Deposit ${cart.size} plank${cart.size === 1 ? "" : "s"} · ${formatUnits(cartTotal, 4)} Ξ` : "Select planks to deposit"
+                : action === "redeem"
+                  ? redeemMode === "random" ? "Redeem a random plank" : cart.size ? `Redeem ${cart.size} plank${cart.size === 1 ? "" : "s"} · ${formatUnits(cartTotal, 4)} Ξ` : "Select planks to redeem"
                   : lpMode === "add" ? "Add liquidity" : "Remove liquidity"}
         </button>
       ) : (
