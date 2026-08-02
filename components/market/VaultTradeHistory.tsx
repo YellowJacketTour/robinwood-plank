@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { formatTokenAmount } from "@/lib/trade";
-import { useVaultLive, type VaultTradeEvent, type VaultTradeKind } from "@/lib/market/useVaultLive";
+import { useVaultLive, type VaultTradeKind } from "@/lib/market/useVaultLive";
 import { usePendingVaultTx } from "@/lib/market/pendingVaultTx";
 import ScrollBox from "@/components/market/ScrollBox";
 import {
@@ -10,7 +10,7 @@ import {
   vaultKindLabel,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
-import { MARKET_VAULT_V1_KNOWN, MARKET_VAULT_V2_KNOWN } from "@/lib/constants";
+import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { SkeletonRows, SkeletonStatus } from "@/components/Skeleton";
 
 const KIND_LABEL: Record<VaultTradeKind, string> = {
@@ -94,34 +94,17 @@ function timeAgo(iso: string | null) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-/** Merge the two legacy feeds into one time-ordered ticker — same dedupe key
- * shape as useVaultLive's internal mergeActivity, since both legs can
- * independently receive the same log via REST + SSE races. */
-function mergeLegacyActivity(a: VaultTradeEvent[], b: VaultTradeEvent[]): VaultTradeEvent[] {
-  const map = new Map<string, VaultTradeEvent>();
-  for (const e of [...a, ...b]) {
-    const key = `${e.vaultAddress ?? ""}|${e.txHash}|${e.logIndex ?? ""}|${e.kind}|${e.tokenId ?? ""}`;
-    const prev = map.get(key);
-    if (!prev || (!prev.timestamp && e.timestamp)) map.set(key, e);
-  }
-  return Array.from(map.values()).sort((x, y) => {
-    const bx = x.blockNumber ?? 0;
-    const by = y.blockNumber ?? 0;
-    if (bx !== by) return by - bx;
-    return (y.logIndex ?? 0) - (x.logIndex ?? 0);
-  });
-}
 
 /**
  * Vault share + NFT inventory ticker (buy/sell, deposit/redeem, add/remove LP).
  * NFT marketplace sales (Seaport/OpenSea) live on the Activity tab, not here.
  *
- * Deliberately Driftwood (V1) + WormWood (V2) only, not Premium Plank
- * Liquidity (V3) — V3's Instant Swap tab has its own scoped activity table
- * (components/market/V3SwapView.tsx), so this legacy ticker stays focused on
- * the two retiring pools it's titled for. useVaultLive is single-vault
- * scoped, so this calls it once per legacy vault and merges the two feeds
- * client-side rather than asking for an unscoped "everything" feed.
+ * Scoped to the primary pool — Premium Plank Liquidity — because that is the
+ * pool the product tracks. This was briefly a Driftwood + WormWood ticker,
+ * which put the only vault feed a visitor can actually reach (it renders on
+ * the Activity tab, not behind the legacy gate) on the two RETIRING pools
+ * while omitting the live one. Legacy positions are still surfaced where they
+ * are actionable: /migrate and /floorboards.
  *
  * Rows this tab just submitted appear instantly as "Pending" (see
  * lib/market/pendingVaultTx.ts) — before confirmation, let alone before the
@@ -137,16 +120,10 @@ export default function VaultTradeHistory() {
   // pair of shared per-vault buckets (lib/market/useVaultLive.ts) — they can
   // never actually show different data; the badge flicker was the only
   // thing that ever made them look out of sync.
-  const v1 = useVaultLive(MARKET_VAULT_V1_KNOWN);
-  const v2 = useVaultLive(MARKET_VAULT_V2_KNOWN);
-  const activity = useMemo(
-    () => mergeLegacyActivity(v1.activity, v2.activity).slice(0, 100),
-    [v1.activity, v2.activity]
-  );
-  // Optimistic OR: this ticker reads as "live" as long as either leg is
-  // fresh, since it's a combined view of both pools, not a single vault.
-  const live = v1.live || v2.live;
-  const connected = v1.connected || v2.connected;
+  const primary = useVaultLive(MARKET_VAULT_ADDRESS);
+  const activity = useMemo(() => primary.activity.slice(0, 100), [primary.activity]);
+  const live = primary.live;
+  const connected = primary.connected;
   const pending = usePendingVaultTx();
   const confirmedHashes = new Set(activity.map((e) => e.txHash));
   const visiblePending = pending.filter((p) => !confirmedHashes.has(p.txHash));
@@ -169,7 +146,7 @@ export default function VaultTradeHistory() {
     <div className="space-y-1.5 rounded-xl border border-line bg-panel p-3">
       <div className="flex items-center justify-between">
         <p className="text-[0.72rem] font-black text-foreground">
-          Live Driftwood + WormWood trades
+          Live Premium Plank Liquidity trades
         </p>
         <span
           className={`flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[0.55rem] font-bold uppercase ${live ? "text-emerald-300/70" : connected ? "text-gold-300/70" : "text-foreground/30"}`}
