@@ -89,8 +89,16 @@ export type ApprovalSpoof = { owner: string; token: string; operator: string };
  * once per order in the batch — each covering a potentially different
  * (owner, token) pair — and every read seaport-js performs during that one
  * `getSeaport()` session shares this one wrapped provider. A single-order
- * fill just passes a one-element list. Each entry was independently
- * confirmed by computeApprovalSpoof before it ever reaches here.
+ * fill just passes a one-element list.
+ *
+ * GRAIN, and it matters: an entry is (owner, collection, operator), because
+ * that is all `isApprovedForAll` takes — there is no tokenId in it. Each entry
+ * is confirmed against ONE token's `getApproved`, so within a batch the
+ * confirmation is per-token while the enforcement is per-collection. A caller
+ * passing several orders from the SAME owner and collection must therefore
+ * only pass a spoof for that pair when EVERY such order was confirmed —
+ * otherwise a confirmed sibling would answer `true` for an unapproved one.
+ * sweepFloor does exactly that grouping; see the comment there.
  *
  * This spoof lets seaport-js's OWN vetted transaction-building code run
  * completely unmodified — fulfillBasicOrder vs fulfillStandardOrder vs
@@ -597,9 +605,47 @@ export async function sweepFloor(
   const orders = items.map(
     (item) => item.listing.rawOrder as Parameters<Seaport["fulfillOrder"]>[0]["order"]
   );
-  const approvalSpoofs = (
-    await Promise.all(orders.map((order) => computeApprovalSpoof(order, accountAddress)))
-  ).filter((spoof): spoof is ApprovalSpoof => spoof !== null);
+  // A spoof is keyed by (owner, collection, operator) because that is all
+  // isApprovedForAll takes — it is collection-wide, with no tokenId. Each one is
+  // confirmed against ONE token's getApproved, so inside a batch the
+  // confirmation is per-token but the enforcement is per-collection. If the same
+  // seller has two planks in one sweep and only one is approved, the confirmed
+  // one's spoof would answer `true` for the unapproved one as well.
+  //
+  // So: fail closed per (owner, collection). A spoof survives only when EVERY
+  // order in this batch from that seller and collection was independently
+  // confirmed. One unconfirmed plank withdraws the spoof for that whole group,
+  // and those orders take the normal seaport-js path and its real error.
+  // Seaport skips orders it cannot execute and refunds the unspent value, so the
+  // cost of failing closed is a smaller sweep — never a wrong charge.
+  const perOrder = await Promise.all(
+    orders.map((order) => computeApprovalSpoof(order, accountAddress))
+  );
+  const groupKey = (s: ApprovalSpoof) =>
+    `${s.owner.toLowerCase()}|${s.token.toLowerCase()}|${s.operator.toLowerCase()}`;
+  const confirmed = new Map<string, ApprovalSpoof>();
+  const unconfirmedOwners = new Set<string>();
+  for (let i = 0; i < perOrder.length; i += 1) {
+    const spoof = perOrder[i];
+    if (spoof) {
+      confirmed.set(groupKey(spoof), spoof);
+      continue;
+    }
+    // Unconfirmed: record the (offerer, token) it would have belonged to so any
+    // sibling order's spoof cannot cover for it.
+    const params = (orders[i] as { parameters?: { offerer?: string; offer?: Array<{ token?: string }> } })
+      ?.parameters;
+    const offerer = params?.offerer;
+    const token = params?.offer?.[0]?.token;
+    if (offerer && token) {
+      unconfirmedOwners.add(
+        `${offerer.toLowerCase()}|${token.toLowerCase()}|${SEAPORT_ADDRESS.toLowerCase()}`
+      );
+    }
+  }
+  const approvalSpoofs = [...confirmed.entries()]
+    .filter(([key]) => !unconfirmedOwners.has(key))
+    .map(([, spoof]) => spoof);
 
   const seaport = await getSeaport(approvalSpoofs);
   const { actions } = await seaport.fulfillOrders({
