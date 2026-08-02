@@ -1030,10 +1030,10 @@ jobs:
           # its CPU budget. 600 indexed + 400 backfilled = the 1,000-token
           # snapshot that made this job fail its own check. Each further pass
           # fills another slice, so loop until the snapshot stops growing.
-          run_refresh --purge --rarity --traits --collection
+          run_refresh --purge --metadata --rarity --traits --collection
           prev=0
           for attempt in 1 2 3 4 5 6; do
-            out="$(run_refresh --rarity --traits --collection 2>&1)"
+            out="$(run_refresh --metadata --rarity --traits --collection 2>&1)"
             printf '%s\n' "$out"
             scored="$(printf '%s' "$out" | sed -n 's/.*rarity: \([0-9]*\)\/.*/\1/p' | head -1)"
             : "${scored:=0}"
