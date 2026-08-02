@@ -137,6 +137,18 @@ components:
     borderColor: "{colors.gold-500}"
     mobileHeight: 58px
     desktopHeight: 68px
+  # Layout constants. These lived only as prose, which meant nothing could
+  # check them and the 42.4px filter trigger drifted under the 44px rule
+  # unnoticed. Expressed as components so they are machine-readable like the
+  # colors are.
+  touch-target:
+    height: 44px          # hard minimum for ANY interactive element
+  filter-rail:
+    width: 248px          # desktop Buy & Sell sticky rail
+  filter-sheet:
+    width: 100%           # below 960px the rail becomes a bottom sheet
+  viewport-checks:
+    size: 390px           # the width every surface must be verified at first
   site-footer:
     backgroundColor: ".site-footer-surface (app/globals.css)"
     textColor: "{colors.cream-muted}"
@@ -148,7 +160,14 @@ components:
 
 RobinWood is a hand-drawn woodland product world, not a generic crypto template. Every page should feel related through warm wood surfaces, parchment text, gold hardware, character art, and storybook display type while adapting density and hierarchy to the job of that surface.
 
-This file is the site-wide source of truth for the landing page, Trade, Mint, Gallery, Learn, Airdrop, Marketplank, and future RobinWood experiences. Marketplank is the first surface implemented against it; its more detailed information contract below is intentionally additive, not the boundary of the system.
+**This file is the design language, not a catalogue of pages.** It should let you
+build any surface in this system — a page that does not exist yet included —
+without being told what that page contains. Tokens, type, colour, surfaces,
+spacing, elevation, and the rules that hold everywhere.
+
+What each existing surface must behaviourally retain lives separately, in
+[`docs/surface-contracts.md`](docs/surface-contracts.md). If you are about to add
+a paragraph here describing what a specific page shows, it belongs there.
 
 Visual redesigns are enhancement layers around production behavior. Decorative mockup content must never replace live data, an executable workflow, a safety disclosure, or a recovery state.
 
@@ -232,7 +251,7 @@ This is the correct, intentional background for the homepage (`app/page.tsx`) an
 
 ### 2. App-page backdrop — the quiet wood texture
 
-`components/AppBackdrop.tsx` renders a `fixed inset-0 -z-10` div using the `.site-footer-surface` texture (solid wood base + soft directional wash + the same plank-grain hairlines as the footer) from `app/globals.css`. It is mounted at the top of `app/trade/page.tsx`, `app/market/page.tsx`, and `app/gallery/page.tsx`, immediately before `<Nav />`.
+`components/AppBackdrop.tsx` renders a `fixed inset-0 -z-10` div using the `.site-footer-surface` texture (solid wood base + soft directional wash + the same plank-grain hairlines as the footer) from `app/globals.css`. It is mounted at the top of six routes, immediately before `<Nav />`: `app/trade`, `app/market`, `app/gallery`, `app/admin`, `app/floorboards`, and `app/migrate`. (Verified 2026-08-02 — this list previously named only the first three.)
 
 Because it is `fixed` and opaque, it sits between the viewport and the marketing background described above and visually replaces it on these three routes — without touching `PlankBackground` or the global `body` CSS. Both this and the corrected marketing background above are now pure CSS with no JS sizing logic at all.
 
@@ -248,9 +267,27 @@ Do not add a second background component, a second grain gradient recipe, or a p
 
 This exists because the marketing clamps were silently repainting dense, mockup-accurate UI (forcing gold text, oversized type, forced text-shadows) inside Trade and Marketplank, which are built to their own tighter, denser typographic spec. It has broken component styling more than once when a new dense surface didn't know to opt in.
 
-**Where it's applied today:**
-- `components/market/MarketScaffold.tsx` — the root `<section>` of the entire Marketplank workspace.
-- `app/trade/page.tsx` — the root content wrapper on `/trade`.
+**Where it's applied today** — ten files, verified 2026-08-02. This list previously
+named only the first two, and that omission was load-bearing: it read as though
+the escape hatch were rare and exceptional, when it is in fact the standard
+treatment for every dense surface on the site.
+
+| File | Surface |
+| --- | --- |
+| `components/market/MarketScaffold.tsx` | the Marketplank workspace root |
+| `app/trade/page.tsx` | `/trade` content wrapper |
+| `app/admin/page.tsx` | admin console |
+| `components/Gallery.tsx` | gallery grid and its detail view |
+| `components/market/FloorboardsView.tsx` | `/floorboards` |
+| `components/market/MigrateView.tsx` | `/migrate` (two wrappers) |
+| `components/market/V3SwapView.tsx` | Instant Swap on the current pool |
+| `components/MigrateBanner.tsx` | site-wide migrate banner |
+| `components/SiteBanner.tsx` | site-wide banner |
+| `components/woodamp/WoodAmpWindow.tsx` | the WoodAmp player window |
+
+Keep this table honest when you add a surface. It is the only inventory of which
+parts of the site are exempt from the global clamps, and a stale one sends the
+next person hunting for a bug that is actually documented behaviour.
 
 **Rule: any new dense/app-style page or panel that is fighting the marketing clamps (text going gold when it shouldn't, sizes jumping, unwanted text-shadow) should add `data-market-shell` to its outermost wrapper, the same way Trade and Market do — not add more `!important` overrides to fight the global rule.** Conversely, never add `data-market-shell` to a marketing page/section; that would silently turn off the legibility clamps needed over the character art.
 
@@ -329,14 +366,6 @@ WoodAmp (`components/woodamp/`) is the site's single audio system — a Winamp-i
 - Track sources (classified authoritatively by `classifyTrackUrl` in `lib/woodamp-playlist.ts`): `hosted` (our files, including `/api/media/…` admin uploads) and `remote` (direct audio URLs; CSP `media-src` allows `https:`) play through the shared `<audio>`; `embed-youtube` / `embed-soundcloud` play through the provider's official iframe player (`WoodAmpEmbed`, postMessage-driven, CSP `frame-src` allows exactly those hosts) **inside the popout only** — YouTube's terms require a visible player, so the chip-only ambient rotation skips embeds; `external` (X/Twitter, Spotify, unembeddable pages) never plays — those rows are community showcase links that open on the platform. The play control disables for embed tracks (the provider's own controls apply) and the seek bar renders only for `<audio>` tracks.
 - The EQ bars and marquees pause when nothing is audible and are frozen by the global reduced-motion rule. Fake data is not displayed: no hardcoded bitrates or invented track stats.
 
-### Admin console
-
-`/admin` (`app/admin/page.tsx` + `components/admin/AdminConsole.tsx` + `components/admin/sections/`) is the owner's management surface. It is a sectioned shell — a left menu rail (horizontal scroll rail below `lg`) with one component per section under `components/admin/sections/`, deep-linked via `?section=`: Music (Planklist editor + media uploads), Content (Learn section visibility, intro phrase rotation, announcement banner), Collections (live list read-only + database-staged entries), Flags (baked env values read-only + the runtime trade-pause override), Finance (read-only on-chain treasury balances), Analytics (aggregated from the live market/trade APIs), and System (storage/RPC/relayer-cron status + the admin action log). New tools register one menu entry + one section component; shared card classes live in `components/admin/ui.ts` and the sign-and-save scaffolding in `components/admin/sections/contentDocCard.tsx`.
-
-It is an app-style page: `AppBackdrop`, `data-market-shell`, `bg-panel` cards with `border-line`, gold primary / dark secondary buttons at 44 px, `noindex`, and no navigation link. Authorization is per-mutation wallet signatures verified server-side (`lib/admin-auth.ts`) — there is no session, and connecting a non-admin wallet simply gets its saves rejected; the wallet gate explains that before asking to connect. Every verified save is recorded to the admin action log (`lib/admin-log.ts`) and shown in System.
-
-The CMS layer (`lib/content-docs.ts` sanitizers + `lib/content-store.ts` database-backed docs, served by `/api/content/[slug]`) is an override layer, not a source of truth: every doc has a hardcoded fallback, so an empty or unreachable store never blanks a public surface. Learn content stays single-sourced in `LearnGuide.tsx` (the doc stores visibility only — no drift by construction); the intro phrase rotation caches in `localStorage` so the splash always paints on the first frame.
-
 ### Shared footer
 
 The footer (`components/Footer.tsx`) is one global information surface, not a promotional card. It uses `.site-footer-surface` (dark restrained wood grain — the same texture `AppBackdrop` reuses), a thin gold top rule, and three desktop responsibilities that stack in the same reading order on mobile:
@@ -347,64 +376,31 @@ The footer (`components/Footer.tsx`) is one global information surface, not a pr
 
 The current copyright remains below a subtle divider. The address may wrap but is never truncated, footer links meet the 44 px touch target, and internal destinations use client navigation.
 
-### Marketplank collection masthead
+### Product surfaces
 
-Shows the real collection asset, Robinhood Chain context, Marketplank title, verification state, concise product promise, and the RobinWood NFT contract link. The contract address is always sourced from the collection configuration and opens Blockscout. Implemented in `components/market/MarketScaffold.tsx` / `.module.css`, whose `--market-*` custom properties (`--market-ink`, `--market-muted`, `--market-gold`, `--market-gold-soft`, `--market-border`, `--market-panel`, `--market-panel-strong`) are explicit aliases of this file's `cream`/`cream-muted`/`gold-500`/`gold-300`/`border-line`/`bg-panel`/`bg-panel-strong` tokens — never restate a hex there; alias the `@theme` token.
+The per-surface behavioural requirements — what Buy & Sell, Offers, Activity,
+Instant Swap, the wallet workspaces, `/migrate` and `/floorboards` must each
+retain — live in [`docs/surface-contracts.md`](docs/surface-contracts.md).
 
-### Marketplank tab rail and panels
+They are deliberately not here. This file is the design language: it should let
+you build anything in this system without knowing which page you are on. A
+catalogue of page contents crowds that out and goes stale the moment a feature
+moves.
 
-The six labels and runtime IDs are fixed:
+## Known deviations — the punch list
 
-- Buy & Sell — `buy-sell`
-- Instant Swap — `swap`
-- Offers — `offers`
-- Activity — `activity`
-- My NFTs — `my-nfts`
-- My Listings — `positions`
+This file is the spec a design pass builds *from*, so it has to be honest about where the code currently disagrees with it. Everything below is real, verified, and deliberately not silently "corrected" in the prose — a document that describes an intention the code does not honour is how two regressions survived review on 2026-08-01.
 
-Tabs retain `?tab=` deep links, `?item=` item links, browser Back/Forward behavior, active-tab scroll positioning, keyboard arrow/Home/End navigation, and lazy-then-sticky mounting after first visit.
+| Deviation | Where | Why it matters |
+| --- | --- | --- |
+| A wall of global `!important` overrides forces colors, sizes and weights on `dt`, `dd`, `button`, `a.rounded-*`, `.text-forest-600`, and any `text-foreground/NN` | `app/globals.css` | This is what `data-market-shell` exists to escape. It repaints component styling site-wide and flattens hierarchy — muted text renders at body weight because `body [class*="text-foreground/"]` forces one colour. Use `cream`/`cream-muted` tokens instead of `text-foreground/NN` until this is unwound. |
+| Buttons and links forced to `font-weight: 900 !important` | `app/globals.css` | No component can opt out without `data-market-shell`. |
+| `MarketScaffold.module.css` uses bespoke radii (8.8px, 12.8px) matching neither the token scale nor Tailwind's | market surface | Radii drift; the `rounded` tokens above are not actually authoritative there yet. |
+| Mobile filter-trigger is 42.4px tall against the 44px rule below | Buy & Sell filter bar | A real, if small, touch-target miss. |
+| Most components write `text-wood-950` on gold fills; a global rule repaints them to `on-gold` | `app/globals.css` | The token layer records what renders, but the call sites disagree with it. Both pass AA. |
+| Listing-card columns documented as "four or five" | Buy & Sell grid | The grid is `auto-fill` fluid with 180–200px tracks, so the count is viewport-derived, not fixed. |
 
-### Marketplank Buy & Sell information contract
-
-Retain the highest-sale event strip; Floor, Listed, Items, Best offer, and Highest sale; every rarity floor including Common; incoming matching bids; token ID, price, and multi-select rarity filters; result count; all four sorts; criteria bids; every sweep scope/preset/confirmation; loading and empty states; item detail; and verified Buy, Offer, and acceptance confirmations. Multiple selected rarity tiers use OR semantics; price and token filters continue to combine with them using AND semantics.
-
-Cards retain NFT art, name, token ID, rank, rarity, maker, price, floor badge, trust badge, Buy, Offer, and keyboard/touch item-detail entry.
-
-### Marketplank Offers information contract
-
-Retain criteria quick starts, dynamic trait/rank/combo clauses with AND semantics, qualifying population and floor, WETH amount, duration, fee, signing state, incoming bids a wallet can accept, criteria rows, single-token offers, ownership-based disabled states, verified net proceeds, token choice for criteria acceptance, and all empty states.
-
-Rank criteria use explicit top-N thresholds against the verified collection rarity snapshot. They fail closed when that snapshot is unavailable and are re-resolved by the server before an order is published.
-
-The criteria builder remains visible when disconnected so the Offers tab keeps its working hierarchy. Wallet connection gates review and signing, not the user's ability to understand the workflow.
-
-Collection-wide offers stay unavailable until their Seaport criteria resolver is implemented and verified.
-
-### Marketplank Activity information contract
-
-Retain Sales, Mints, and Transfers; evidence-based venue filters and attribution; artwork, token, rarity/rank, price, parties, time, and explorer links; filtered count; collection statistics; 24-hour and total volume analytics; average and priced-sale counts; sales chart; and the separate live per-vault trade ledger covering every configured vault.
-
-On desktop, the event feed leads and analytics form a supporting rail. On mobile, the feed remains ahead of the chart so current evidence is not pushed below multiple summary surfaces. The sales chart exposes 24H, 7D, and ALL ranges.
-
-### Marketplank Instant Swap information contract
-
-Retain every configured vault's identity and explorer link, Living Liquidity, Seed Vault, an actionable route into the legacy-vault migration flow, Buy, Sell, LP, Deposit, and Redeem modes, wallet balances, quotes and slippage, NFT pickers, random and targeted redemption, pending-request recovery, vault dashboard, NFT price chart, redeem odds, per-vault trade history, and treasury controls.
-
-Buy means ETH to vault shares. NFTs are acquired through Redeem. Copy may never blur those two actions.
-
-The tab leads with the trade widget beside the artwork rail, then the stat row and vault info; Price, Liquidity, and Activity are unified tabs beneath it. The Price tab shows a real price chart and the Liquidity tab a full LP dashboard — both live, never a decorative stand-in. Living Liquidity supports the workbench beside it on desktop and follows it on mobile; charts, ledgers, migration, recovery, seed, and treasury modules come afterward. Buy and Sell reviews show both the current expected output and the minimum implied by the selected slippage, while making clear that the enforced value is recomputed at submission.
-
-The current vault charges flat **ETH** fees and mints/burns exactly one share, while the legacy vaults charge share-denominated fees. Any copy that states a cost must state it in that vault's own denomination — never present one fee model as if it applied to all of them.
-
-### Legacy-vault migration information contract
-
-`/migrate` is a guided, step-by-step flow, not explanatory copy, and it is reachable from a site-wide banner whenever a wallet holds legacy value. Retain: per-vault position breakdown, the LP-withdraw step where one is required, LP credit the pool cannot currently cover shown as stuck rather than silently folded into the redeemable total, redeemable NFT count, dust below one redeem's worth with an honest explanation of how to clear it, and per-plank skip for anything already migrated.
-
-Migration means **exiting** the legacy vaults. Depositing the recovered planks into the current vault is an optional, user-selected follow-on step and must never be presented as mandatory or performed automatically. The flow must not nag when only wallet-held planks remain — there is nothing left to migrate at that point.
-
-### Marketplank wallet workspaces
-
-Disconnected My NFTs and My Listings use an explanatory wallet gate. Connected views always render the existing functional inventory, send, list, accept, cancel, progress, partial-failure, and approval-management components; they are never replaced with static showcase cards.
+A redesign pass should treat this table as its scope, and empty it.
 
 ## Do's and Don'ts
 
