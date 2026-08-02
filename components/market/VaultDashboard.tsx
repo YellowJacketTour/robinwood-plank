@@ -9,6 +9,7 @@ import {
   vaultKindLabel,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
+import { SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 
 type Props = {
   /** Selected Instant Swap vault — stats follow this address. */
@@ -46,7 +47,12 @@ export default function VaultDashboard({ vaultAddress = null, active = true }: P
   const colorKind = vaultColorKind(vaultAddress);
 
   if (!stats) {
-    return <p className="py-4 text-center text-xs text-foreground/45">Reading vault dashboard…</p>;
+    return (
+      <>
+        <SkeletonStatus>Loading vault dashboard</SkeletonStatus>
+        <SkeletonStats count={7} />
+      </>
+    );
   }
 
   const vaultBadge =

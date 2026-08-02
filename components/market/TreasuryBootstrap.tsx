@@ -7,6 +7,7 @@ import { getAvgSalePriceWei } from "@/lib/market/pricing";
 import { getOwnedInventory } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import TokenPicker, { type PickerToken } from "@/components/market/TokenPicker";
+import { SkeletonBlock, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 
 type Props = {
   account: string;
@@ -150,8 +151,15 @@ export default function TreasuryBootstrap({ account }: Props) {
 
   if (loading || !status) {
     return (
-      <div className="rounded-xl border border-line bg-panel-strong p-4 text-sm text-foreground/70">
-        Loading seed interface (NFT picker + ETH)…
+      <div className="space-y-3 rounded-xl border border-line bg-panel-strong p-3">
+        <SkeletonStatus>Loading the treasury seed interface</SkeletonStatus>
+        <SkeletonStats count={4} className="sm:grid-cols-2 lg:grid-cols-4" />
+        <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <SkeletonBlock key={i} className="aspect-square" />
+          ))}
+        </div>
+        <SkeletonBlock className="h-11 w-full" />
       </div>
     );
   }

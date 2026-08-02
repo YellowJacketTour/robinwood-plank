@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { SkeletonRows, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 import { ExplorerAddress } from "../ExplorerAddress";
 import { BUTTON_SECONDARY, CARD, LABEL } from "../ui";
 
@@ -83,7 +84,10 @@ export default function SystemSection() {
         {failed ? (
           <p className="mt-4 text-sm text-rose-400">Status endpoint unreachable.</p>
         ) : status === null ? (
-          <p className="mt-4 text-sm text-cream-muted">Checking…</p>
+          <div className="mt-4">
+            <SkeletonStatus>Checking deployment, storage, and chain status</SkeletonStatus>
+            <SkeletonStats count={6} />
+          </div>
         ) : (
           <dl className="mt-4 grid gap-2 rounded-md bg-panel-strong p-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
             <div>
@@ -193,9 +197,14 @@ export default function SystemSection() {
         <h2 className="font-display text-xl text-gold-300">Action log</h2>
         <p className={`mt-1 ${LABEL}`}>Every signed admin save, newest first</p>
         {status === null ? (
-          <p className="mt-4 text-sm text-cream-muted">
-            {failed ? "Unavailable." : "Loading…"}
-          </p>
+          failed ? (
+            <p className="mt-4 text-sm text-cream-muted">Unavailable.</p>
+          ) : (
+            <div className="mt-4 overflow-hidden rounded-md border border-line bg-panel-strong">
+              <SkeletonStatus>Loading the admin action log</SkeletonStatus>
+              <SkeletonRows rows={5} columns={["w-28", "w-20", "w-40", "w-16"]} />
+            </div>
+          )
         ) : status.log.length === 0 ? (
           <p className="mt-4 text-sm text-cream-muted">No admin actions yet.</p>
         ) : (

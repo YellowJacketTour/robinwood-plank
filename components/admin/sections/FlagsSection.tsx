@@ -8,6 +8,7 @@ import {
 } from "@/lib/constants";
 import { CROSSCHAIN_ENABLED } from "@/lib/crosschain-constants";
 import { sanitizeFlags, type FlagsDoc } from "@/lib/content-docs";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 import { CardChrome, useContentDocCard } from "./contentDocCard";
 import { CARD, LABEL, NOTE_MUTED } from "../ui";
 
@@ -138,7 +139,19 @@ export default function FlagsSection({ address }: { address: string | null }) {
         canSave={!!address && doc !== null}
       >
         {doc === null ? (
-          <p className="mt-3 text-sm text-cream-muted">Loading…</p>
+          <div className="mt-3">
+            <SkeletonStatus>Loading runtime overrides</SkeletonStatus>
+            {[0, 1].map((i) => (
+              <div key={i} className="mt-4">
+                <SkeletonBlock className="h-2.5 w-24" />
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <SkeletonBlock className="h-11 w-40 rounded-md" />
+                  <SkeletonBlock className="h-11 w-28 rounded-md" />
+                  <SkeletonBlock className="h-11 w-24 rounded-md" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
           <>
             <OverrideRow

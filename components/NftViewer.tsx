@@ -17,6 +17,7 @@ import {
   type Eip1193Provider,
 } from "ethers";
 import Reveal from "@/components/Reveal";
+import { SkeletonCardGrid } from "@/components/Skeleton";
 import {
   fetchNftMetadata,
   ipfsGatewayCandidates,
@@ -1120,22 +1121,8 @@ export default function NftViewer() {
               style={{ WebkitOverflowScrolling: "touch" }}
             >
               {loading && nfts.length === 0 && (
-                <div
-                  className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3 p-3 sm:gap-4 sm:p-4"
-                  aria-hidden="true"
-                >
-                  {Array.from({ length: 8 }).map((_, index) => (
-                    <div
-                      key={index}
-                      className="animate-pulse overflow-hidden rounded-xl border border-gold-500/20 bg-wood-950/60"
-                    >
-                      <div className="aspect-square bg-wood-950/70" />
-                      <div className="space-y-2 p-3">
-                        <div className="h-4 w-3/4 rounded bg-gold-500/15" />
-                        <div className="h-3 w-1/3 rounded bg-gold-500/10" />
-                      </div>
-                    </div>
-                  ))}
+                <div className="p-3 sm:p-4">
+                  <SkeletonCardGrid count={8} />
                 </div>
               )}
 

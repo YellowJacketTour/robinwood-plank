@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import NftImage from "@/components/NftImage";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 import { getMintReadClient, touchMintReadClient } from "@/lib/robinhood-provider";
 import { fetchNftMetadata } from "@/lib/ipfs";
 import {
@@ -169,7 +170,14 @@ export default function GalleryTeaser() {
           })}
         </div>
       ) : (
-        <p className="flex-1 py-8 text-center text-sm text-cream-muted">Loading minted art…</p>
+        <>
+          <SkeletonStatus>Loading minted art</SkeletonStatus>
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5" aria-hidden="true">
+            {Array.from({ length: PREVIEW_COUNT }, (_, i) => (
+              <SkeletonBlock key={i} className="aspect-square w-full" />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

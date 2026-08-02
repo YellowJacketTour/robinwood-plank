@@ -18,6 +18,7 @@ import ScrollBox from "@/components/market/ScrollBox";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import { invalidateSwr, swrJson } from "@/lib/market/swr-fetch";
 import { withImageWidth } from "@/lib/ipfs";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 
 type Venue = { kind: "marketplank" | "seaport" | "vault" | "other"; contract: string } | null;
 
@@ -140,22 +141,24 @@ function VenueValue({ venue }: { venue: Venue }) {
 
 function FeedSkeleton() {
   return (
-    <div className="space-y-1.5" aria-label="Loading market activity" role="status">
-      {Array.from({ length: 5 }).map((_, index) => (
-        <div
-          key={index}
-          className="grid animate-pulse grid-cols-[3.5rem_minmax(0,1fr)_3rem] items-center gap-3 rounded-lg border border-line bg-panel-strong p-2"
-          aria-hidden="true"
-        >
-          <div className="h-14 w-14 rounded-lg bg-gold-500/10" />
-          <div className="space-y-2">
-            <div className="h-3 w-2/3 rounded bg-gold-500/10" />
-            <div className="h-2.5 w-1/2 rounded bg-foreground/10" />
+    <>
+      <SkeletonStatus>Loading market activity</SkeletonStatus>
+      <div className="space-y-1.5">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <div
+            key={index}
+            className="grid grid-cols-[3.5rem_minmax(0,1fr)_3rem] items-center gap-3 rounded-lg border border-line bg-panel-strong p-2"
+          >
+            <SkeletonBlock className="h-14 w-14" />
+            <div className="space-y-2">
+              <SkeletonBlock className="h-3 w-2/3" />
+              <SkeletonBlock className="h-2.5 w-1/2" />
+            </div>
+            <SkeletonBlock className="h-3" />
           </div>
-          <div className="h-3 rounded bg-foreground/10" />
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </>
   );
 }
 

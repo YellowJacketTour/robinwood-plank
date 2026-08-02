@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 import { ExplorerAddress } from "../ExplorerAddress";
 import { BUTTON_SECONDARY, CARD, LABEL } from "../ui";
 
@@ -76,6 +77,26 @@ function fromWei(wei: string | null | undefined, decimals = 18, dp = 4): string 
   }
 }
 
+// One placeholder finance card — mirrors the wallet/pool card frame (title,
+// address line, 3-column dl of label/value pairs) so the skeleton lines up
+// with the real card instead of a generic block.
+function FinanceCardSkeleton() {
+  return (
+    <div className="rounded-md border border-line bg-panel-strong p-3">
+      <SkeletonBlock className="h-4 w-32" />
+      <SkeletonBlock className="mt-2 h-3 w-40" />
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i}>
+            <SkeletonBlock className="h-2.5 w-12" />
+            <SkeletonBlock className="mt-1 h-4 w-14" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Read-only — ignores the shell's `address` prop.
 export default function FinanceSection() {
   const [finance, setFinance] = useState<Finance | null>(null);
@@ -117,7 +138,19 @@ export default function FinanceSection() {
           Could not read balances — RPC may be unavailable. Retry.
         </p>
       ) : finance === null ? (
-        <p className="mt-4 text-sm text-cream-muted">Reading the chain…</p>
+        <div className="mt-4">
+          <SkeletonStatus>Reading treasury balances from the chain</SkeletonStatus>
+          <p className={LABEL}>Fee wallets</p>
+          <div className="mt-2 grid gap-3 lg:grid-cols-2">
+            <FinanceCardSkeleton />
+            <FinanceCardSkeleton />
+          </div>
+          <p className={`mt-4 ${LABEL}`}>Instant Swap pools</p>
+          <div className="mt-2 grid gap-3 lg:grid-cols-2">
+            <FinanceCardSkeleton />
+            <FinanceCardSkeleton />
+          </div>
+        </div>
       ) : (
         <>
           <p className={`mt-4 ${LABEL}`}>Fee wallets</p>

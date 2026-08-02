@@ -9,6 +9,7 @@ import {
   vaultKindLabel,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
+import { SkeletonRows, SkeletonStatus } from "@/components/Skeleton";
 
 const KIND_LABEL: Record<VaultTradeKind, string> = {
   buy: "Buy shares",
@@ -144,10 +145,12 @@ export default function VaultTradeHistory() {
         </span>
       </div>
       {loading ? (
-        <div className="space-y-1">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-7 animate-pulse rounded bg-panel" />
-          ))}
+        <div className="overflow-hidden rounded-lg border border-line bg-wood-950">
+          <SkeletonStatus>Loading vault trade history</SkeletonStatus>
+          <SkeletonRows
+            rows={4}
+            columns={["w-16", "w-20", "w-16", "w-20", "w-12 ml-auto"]}
+          />
         </div>
       ) : activity.length === 0 && visiblePending.length === 0 ? (
         <p className="rounded-lg border border-line bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">

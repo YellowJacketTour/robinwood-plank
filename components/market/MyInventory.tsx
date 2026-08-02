@@ -19,6 +19,7 @@ import { getRarityMap, tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import type { MarketCollection } from "@/lib/market/types";
 import { withImageWidth } from "@/lib/ipfs";
+import { SkeletonCardGrid, SkeletonStatus } from "@/components/Skeleton";
 
 type Props = {
   account: string;
@@ -214,9 +215,10 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
   }
   if (inventory === null) {
     return (
-      <p className="rounded-xl border border-line bg-panel px-4 py-8 text-center text-sm text-cream-muted">
-        Reading your planks from chain…
-      </p>
+      <>
+        <SkeletonStatus>Loading your planks</SkeletonStatus>
+        <SkeletonCardGrid columns="grid-cols-[repeat(auto-fill,minmax(140px,1fr))]" />
+      </>
     );
   }
 

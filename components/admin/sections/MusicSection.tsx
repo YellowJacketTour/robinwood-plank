@@ -12,6 +12,7 @@ import {
 import { adminMessage, adminPayloadHash } from "@/lib/admin-auth";
 import { signMessage } from "@/lib/wallet";
 import { importXTrack, uploadMediaFile, type XImportOutcome } from "../api";
+import { SkeletonBlock, SkeletonRows, SkeletonStatus } from "@/components/Skeleton";
 import {
   BUTTON_PRIMARY,
   BUTTON_SECONDARY,
@@ -247,7 +248,28 @@ function PlaylistManager({ address }: { address: string | null }) {
       ) : null}
 
       {tracks === null && !loadError ? (
-        <p className="mt-4 text-sm text-cream-muted">Loading…</p>
+        <div className="mt-4">
+          <SkeletonStatus>Loading the Planklist</SkeletonStatus>
+          <ol className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <li key={i} className="rounded-md border border-line bg-panel-soft p-3">
+                <div className="flex flex-wrap items-start gap-3">
+                  <SkeletonBlock className="mt-2 h-3 w-4" />
+                  <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
+                    <SkeletonBlock className="h-11 w-full rounded-md" />
+                    <SkeletonBlock className="h-11 w-full rounded-md" />
+                    <SkeletonBlock className="h-11 w-full rounded-md sm:col-span-2" />
+                  </div>
+                  <div className="flex gap-2">
+                    <SkeletonBlock className="h-11 w-11 rounded-md" />
+                    <SkeletonBlock className="h-11 w-11 rounded-md" />
+                    <SkeletonBlock className="h-11 w-11 rounded-md" />
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
       ) : null}
 
       {tracks ? (
@@ -751,7 +773,10 @@ function UploadsManager({ address }: { address: string | null }) {
       ) : null}
 
       {uploads === null ? (
-        <p className="mt-4 text-sm text-cream-muted">Loading…</p>
+        <div className="mt-4 overflow-hidden rounded-md border border-line bg-panel-strong">
+          <SkeletonStatus>Loading uploaded files</SkeletonStatus>
+          <SkeletonRows rows={4} columns={["w-56", "w-12", "w-20"]} />
+        </div>
       ) : uploads.length === 0 ? (
         <p className="mt-4 text-sm text-cream-muted">No uploads yet.</p>
       ) : (
