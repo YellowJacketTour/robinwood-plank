@@ -834,28 +834,49 @@ jobs:
       # which cost a smaller rate-limit budget rather than failing.
       MEMES_VAULT_API: ${{ secrets.MEMES_VAULT_API }}
     steps:
-      - name: Validate the token is present and well formed
+      - name: Validate whichever secrets are present
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${DISPATCH_TOKEN:-}" ]; then
-            echo "::error::secrets.VAULT_DISPATCH_TOKEN is not set. Note the name: GitHub refuses any secret starting with GITHUB_, so the app's GITHUB_DISPATCH_TOKEN is stored here as VAULT_DISPATCH_TOKEN."
+          # This job installs every runtime secret the app reads per request.
+          # Each is INDEPENDENTLY optional — the features degrade rather than
+          # break (no dispatch token: the vault deploy card renders disabled;
+          # no meme key: /memes falls back to unauthenticated reads). So it
+          # must not refuse to install one because another is unset, which is
+          # what it did: an absent VAULT_DISPATCH_TOKEN aborted the run before
+          # it reached MEMES_VAULT_API. Fail only when there is nothing to do.
+          if [ -z "${DISPATCH_TOKEN:-}" ] && [ -z "${MEMES_VAULT_API:-}" ]; then
+            echo "::error::Nothing to install — neither secrets.VAULT_DISPATCH_TOKEN nor secrets.MEMES_VAULT_API is set. Note the naming: GitHub refuses any secret starting with GITHUB_, so the app's GITHUB_DISPATCH_TOKEN is stored here as VAULT_DISPATCH_TOKEN."
             exit 1
           fi
-          # Shape only, never the value. A fine-grained PAT is github_pat_*;
-          # a classic one is ghp_*. Anything else is probably a paste error,
-          # and a bad token silently disables the deploy card rather than
-          # failing loudly, so catch it here.
-          case "$DISPATCH_TOKEN" in
-            github_pat_*|ghp_*) ;;
-            *) echo "::error::Token does not look like a GitHub PAT (expected github_pat_* or ghp_*)."; exit 1 ;;
-          esac
-          # An env file is parsed line by line; a newline in the value would
-          # truncate it and leave the rest as a stray line.
-          case "$DISPATCH_TOKEN" in
-            *[$'\n\r']*) echo "::error::Token contains a newline."; exit 1 ;;
-          esac
-          echo "Token present, ${#DISPATCH_TOKEN} characters."
+
+          if [ -n "${DISPATCH_TOKEN:-}" ]; then
+            # Shape only, never the value. A fine-grained PAT is github_pat_*;
+            # a classic one is ghp_*. Anything else is probably a paste error,
+            # and a bad token silently disables the deploy card rather than
+            # failing loudly, so catch it here.
+            case "$DISPATCH_TOKEN" in
+              github_pat_*|ghp_*) ;;
+              *) echo "::error::VAULT_DISPATCH_TOKEN does not look like a GitHub PAT (expected github_pat_* or ghp_*)."; exit 1 ;;
+            esac
+            # An env file is parsed line by line; a newline in the value would
+            # truncate it and leave the rest as a stray line.
+            case "$DISPATCH_TOKEN" in
+              *[$'\n\r']*) echo "::error::VAULT_DISPATCH_TOKEN contains a newline."; exit 1 ;;
+            esac
+            echo "Dispatch token present, ${#DISPATCH_TOKEN} characters."
+          else
+            echo "No VAULT_DISPATCH_TOKEN — skipping it; the vault deploy card stays disabled."
+          fi
+
+          if [ -n "${MEMES_VAULT_API:-}" ]; then
+            case "$MEMES_VAULT_API" in
+              *[$'\n\r']*) echo "::error::MEMES_VAULT_API contains a newline."; exit 1 ;;
+            esac
+            echo "Meme vault key present, ${#MEMES_VAULT_API} characters."
+          else
+            echo "No MEMES_VAULT_API — skipping it; /memes uses unauthenticated reads."
+          fi
 
       - name: Configure trusted SSH host
         shell: bash
@@ -890,7 +911,9 @@ jobs:
           # an empty line and `read` returns non-zero on it — under set -e that
           # would abort the whole install over an optional value.
           IFS= read -r memes_key || memes_key=""
-          test -n "$token"
+          # Neither is required on its own — see the validate step. At least
+          # one is guaranteed non-empty by the time we get here.
+          test -n "$token" -o -n "$memes_key"
           case "$app_dir" in
             /home/*/plank.tanggang.life) ;;
             *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
@@ -905,27 +928,45 @@ jobs:
           cp -p "$env_file" "$backup"
           chmod 600 "$backup"
 
+          # Strip ONLY what we are about to rewrite. Stripping unconditionally
+          # and rewriting conditionally would delete a previously-installed
+          # value whenever its secret happened to be unset on this run — so
+          # installing the meme key would have wiped the dispatch token, and
+          # vice versa. A partial run must never be destructive.
           tmp="$env_file.next.$$"
-          grep -v '^[[:space:]]*GITHUB_DISPATCH_TOKEN=' "$env_file" \
-            | grep -v '^[[:space:]]*GITHUB_DISPATCH_REPO=' \
-            | grep -v '^[[:space:]]*GITHUB_DISPATCH_REF=' \
-            | grep -v '^[[:space:]]*MEMES_VAULT_API=' > "$tmp"
-          printf 'GITHUB_DISPATCH_TOKEN=%s\n' "$token" >> "$tmp"
-          [ -n "$repo" ] && printf 'GITHUB_DISPATCH_REPO=%s\n' "$repo" >> "$tmp"
-          [ -n "$memes_key" ] && printf 'MEMES_VAULT_API=%s\n' "$memes_key" >> "$tmp"
-          [ -n "$ref" ] && printf 'GITHUB_DISPATCH_REF=%s\n' "$ref" >> "$tmp"
+          cp "$env_file" "$tmp"
+          strip_key() {
+            grep -v "^[[:space:]]*$1=" "$tmp" > "$tmp.s" && mv -f "$tmp.s" "$tmp"
+          }
+          if [ -n "$token" ]; then
+            strip_key GITHUB_DISPATCH_TOKEN
+            strip_key GITHUB_DISPATCH_REPO
+            strip_key GITHUB_DISPATCH_REF
+            printf 'GITHUB_DISPATCH_TOKEN=%s\n' "$token" >> "$tmp"
+            [ -n "$repo" ] && printf 'GITHUB_DISPATCH_REPO=%s\n' "$repo" >> "$tmp"
+            [ -n "$ref" ] && printf 'GITHUB_DISPATCH_REF=%s\n' "$ref" >> "$tmp"
+          fi
+          if [ -n "$memes_key" ]; then
+            strip_key MEMES_VAULT_API
+            printf 'MEMES_VAULT_API=%s\n' "$memes_key" >> "$tmp"
+          fi
           chmod 600 "$tmp"
           mv -f "$tmp" "$env_file"
 
-          # Exactly one definition survived. Compare lengths, never contents —
-          # echoing the line would put the token in the Actions log.
-          test "$(grep -c '^GITHUB_DISPATCH_TOKEN=' "$env_file")" -eq 1
+          # Exactly one definition of whatever we wrote. Compare counts, never
+          # contents — echoing the line would put the secret in the Actions log.
+          if [ -n "$token" ]; then
+            test "$(grep -c '^GITHUB_DISPATCH_TOKEN=' "$env_file")" -eq 1
+          fi
+          if [ -n "$memes_key" ]; then
+            test "$(grep -c '^MEMES_VAULT_API=' "$env_file")" -eq 1
+          fi
           # The password line must still be there — a botched rewrite that
           # dropped it would take the site down on restart.
           test "$(grep -c '^PGPASSWORD=' "$env_file")" -eq 1
 
           touch "$app_dir/tmp/restart.txt"
-          echo "Dispatch token installed; backup kept at $backup"
+          echo "Installed:${token:+ GITHUB_DISPATCH_TOKEN}${memes_key:+ MEMES_VAULT_API}; backup kept at $backup"
           REMOTE
 
       - name: Confirm the app came back up and the card reports configured
