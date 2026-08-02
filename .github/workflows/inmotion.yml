@@ -1016,9 +1016,44 @@ jobs:
 
           # Share the cron's lock. Without it a purge racing the 15-minute
           # incremental run could write a half-built snapshot over a good one.
-          /usr/bin/flock -w 300 "$app_dir/shared/market-refresh.lock" \
-            "$node_bin" --env-file="$env_file" "$script" \
-            --purge --rarity --traits --collection
+          run_refresh() {
+            /usr/bin/flock -w 600 "$app_dir/shared/market-refresh.lock" \
+              "$node_bin" --env-file="$env_file" "$script" "$@"
+          }
+
+          # One purge, then repeat rebuilds.
+          #
+          # A single pass is NOT enough and the script says so ("re-run to
+          # fill"). Blockscout rate-limits this host hard — a real run 429'd
+          # after 600 of 1,542 instances — and the IPFS backfill that covers
+          # the rest is capped per run (MAX_BACKFILL) so a Worker cannot blow
+          # its CPU budget. 600 indexed + 400 backfilled = the 1,000-token
+          # snapshot that made this job fail its own check. Each further pass
+          # fills another slice, so loop until the snapshot stops growing.
+          run_refresh --purge --rarity --traits --collection
+          prev=0
+          for attempt in 1 2 3 4 5 6; do
+            out="$(run_refresh --rarity --traits --collection 2>&1)"
+            printf '%s\n' "$out"
+            scored="$(printf '%s' "$out" | sed -n 's/.*rarity: \([0-9]*\)\/.*/\1/p' | head -1)"
+            : "${scored:=0}"
+            echo "pass $attempt: $scored scored"
+            [ "$scored" -ge 1542 ] && break
+            # No progress two passes running means retrying will not help —
+            # stop rather than hammer a rate-limited upstream for nothing.
+            if [ "$scored" -le "$prev" ]; then
+              echo "pass $attempt made no progress ($prev -> $scored); stopping"
+              break
+            fi
+            prev="$scored"
+            sleep 30
+          done
+
+          # The app caches these snapshots in process memory, so a rebuilt KV
+          # value is invisible to a running Passenger worker. Without this the
+          # data is fixed in the database and unchanged on the site.
+          touch "$app_dir/tmp/restart.txt"
+          echo "rebuild finished; Passenger restarted"
           REMOTE
 
       - name: Report the rebuilt collection
@@ -1030,9 +1065,19 @@ jobs:
           url="${INMOTION_HEALTH_URL:-https://plank.love}"
           # Confirm the rebuild actually landed rather than trusting exit 0:
           # count how many tokens still carry the pre-reveal Status stub.
-          body="$(
-            curl -sS --connect-timeout 5 --max-time 120 \
+          # Passenger was just restarted; give it a moment to come back before
+          # reading, or this reads a connection error as "0 entries".
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
               --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+              "$url/api/health" || true)"
+            [ "$code" = "200" ] && break
+            sleep 6
+          done
+          body="$(
+            curl -sS --connect-timeout 5 --max-time 180 \
+              --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+              --header "Cache-Control: no-cache" \
               "$url/api/market/collection-index" || true
           )"
           stubs="$(printf '%s' "$body" | grep -o '"Unrevealed"' | wc -l | tr -d ' ')"
