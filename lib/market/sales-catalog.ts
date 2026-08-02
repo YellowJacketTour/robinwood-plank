@@ -9,7 +9,7 @@ import {
   fetchTxTokenTransfers,
   fetchTransaction,
 } from "@/lib/market/blockscout";
-import { ethCall } from "@/lib/market/fetch-rpc";
+import { ethCallDisplay } from "@/lib/market/fetch-rpc";
 
 /**
  * Royalty-aware marketplace sales catalog for RobinWood.
@@ -82,7 +82,7 @@ export async function resolveRoyaltyConfig(): Promise<RoyaltyConfig> {
       ROYALTY_INFO_SELECTOR +
       BigInt(1).toString(16).padStart(64, "0") +
       ONE_ETH.toString(16).padStart(64, "0");
-    const raw = await ethCall(NFT_CONTRACT_ADDRESS, encoded);
+    const raw = await ethCallDisplay(NFT_CONTRACT_ADDRESS, encoded);
     const body = raw.startsWith("0x") ? raw.slice(2) : raw;
     if (body.length < 128) throw new Error("short royaltyInfo response");
     const receiver = `0x${body.slice(24, 64)}`.toLowerCase();

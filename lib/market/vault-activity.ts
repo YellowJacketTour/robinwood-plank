@@ -5,11 +5,14 @@ import {
 } from "@/lib/market/durable-kv";
 import { MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } from "@/lib/constants";
 import vaultAbi from "@/lib/market/vault-abi.json";
+import vaultV3Abi from "@/lib/market/vault-v3-abi.json";
 import { BLOCKSCOUT_BASE, fetchAddressLogs } from "@/lib/market/blockscout";
-import { ethBlockNumber, ethGetLogs, rpcCall } from "@/lib/market/fetch-rpc";
+import { ethBlockNumberDisplay, ethGetLogsDisplay, rpcCall } from "@/lib/market/fetch-rpc";
+import { SERVER_DISPLAY_RPC_URLS } from "@/lib/server/rpc-urls";
 import { logScanBudget } from "@/lib/market/rpc-budget";
 
 const IFACE = new Interface(vaultAbi);
+const V3_IFACE = new Interface(vaultV3Abi);
 
 export type VaultTradeKind =
   | "buy"
@@ -33,6 +36,20 @@ export type VaultTradeEvent = {
   vaultAddress?: string;
 };
 
+/**
+ * Topic hashes, keyed by event, across BOTH pool generations.
+ *
+ * The trade events are byte-identical between the two ABIs — Bought, Sold,
+ * Deposited and Redeemed all hash the same — so one entry covers every pool and
+ * the ticker never missed those.
+ *
+ * The liquidity events are not. The current pool renamed
+ * LiquidityContributed to LiquidityAdded, and its LiquidityRemoved carries an
+ * extra `lpBurned` argument, which changes the signature and therefore the
+ * hash. Decoding only the legacy hashes meant every add/remove on the current
+ * pool fell through the filter silently — no error, just an LP history that
+ * looked empty. Keep both.
+ */
 const TOPICS = {
   Bought: IFACE.getEvent("Bought")!.topicHash.toLowerCase(),
   Sold: IFACE.getEvent("Sold")!.topicHash.toLowerCase(),
@@ -40,9 +57,14 @@ const TOPICS = {
   Redeemed: IFACE.getEvent("Redeemed")!.topicHash.toLowerCase(),
   LiquidityContributed: IFACE.getEvent("LiquidityContributed")!.topicHash.toLowerCase(),
   LiquidityRemoved: IFACE.getEvent("LiquidityRemoved")!.topicHash.toLowerCase(),
+  /** Current generation — proportional LP. */
+  LiquidityAddedV3: V3_IFACE.getEvent("LiquidityAdded")!.topicHash.toLowerCase(),
+  LiquidityRemovedV3: V3_IFACE.getEvent("LiquidityRemoved")!.topicHash.toLowerCase(),
 };
 
-const VAULT_TOPIC_SET = new Set(Object.values(TOPICS));
+/** Exported so a test can prove both generations' events are covered — a
+ *  missing topic here fails silently as an empty feed, never as an error. */
+export const VAULT_TOPIC_SET = new Set(Object.values(TOPICS));
 /** v3 = dual-vault + Add/Remove LP (LiquidityContributed / LiquidityRemoved). */
 const KV_KEY = "plank:market:vault-activity-v3";
 const STORED_HISTORY_LIMIT = 500;
@@ -167,6 +189,32 @@ function decodeLog(
     }
     if (topic0 === TOPICS.LiquidityRemoved) {
       const parsed = IFACE.decodeEventLog("LiquidityRemoved", data, topics);
+      return {
+        ...base,
+        kind: "remove_lp",
+        address: String(parsed.to),
+        ethWei: parsed.ethOut.toString(),
+        sharesWei: parsed.sharesOut.toString(),
+        tokenId: null,
+      };
+    }
+    // Current generation. Same shape to the UI as the legacy pair — the extra
+    // lpMinted/lpBurned argument is proportional-LP bookkeeping the trade
+    // ticker has no column for, so it is decoded and dropped rather than
+    // widening VaultTradeEvent for one generation.
+    if (topic0 === TOPICS.LiquidityAddedV3) {
+      const parsed = V3_IFACE.decodeEventLog("LiquidityAdded", data, topics);
+      return {
+        ...base,
+        kind: "add_lp",
+        address: String(parsed.from),
+        ethWei: parsed.ethIn.toString(),
+        sharesWei: parsed.sharesIn.toString(),
+        tokenId: null,
+      };
+    }
+    if (topic0 === TOPICS.LiquidityRemovedV3) {
+      const parsed = V3_IFACE.decodeEventLog("LiquidityRemoved", data, topics);
       return {
         ...base,
         kind: "remove_lp",
@@ -387,15 +435,12 @@ async function fromEthRpc(
   limit: number,
   full: boolean
 ): Promise<VaultTradeEvent[]> {
-  const topics = [
-    TOPICS.Bought,
-    TOPICS.Sold,
-    TOPICS.Deposited,
-    TOPICS.Redeemed,
-    TOPICS.LiquidityContributed,
-    TOPICS.LiquidityRemoved,
-  ];
-  const latest = await ethBlockNumber();
+  // Derived from the same set the decoder filters on, so a topic can never be
+  // decodable but unqueried (or the reverse). Listing them by hand here is what
+  // let the current pool's renamed liquidity events go missing: they were added
+  // to one list and not the other.
+  const topics = [...VAULT_TOPIC_SET];
+  const latest = await ethBlockNumberDisplay();
   const { chunkBlocks, maxChunks } = logScanBudget();
   const chunks = full ? Math.max(maxChunks, 15) : maxChunks;
   const rawLogs: Array<{
@@ -407,7 +452,7 @@ async function fromEthRpc(
   }> = [];
 
   const getLogs = (fromBlock: number, toBlock: number) =>
-    ethGetLogs({
+    ethGetLogsDisplay({
       address: vault,
       topics: [topics],
       fromBlock: "0x" + fromBlock.toString(16),
@@ -479,6 +524,7 @@ async function fromEthRpc(
       try {
         const block = await rpcCall<{ timestamp?: string }>("eth_getBlockByNumber", [bn, false], {
           timeoutMs: 4_000,
+          urls: SERVER_DISPLAY_RPC_URLS,
         });
         if (block?.timestamp) blockTimeByNumber.set(bn, Number(BigInt(block.timestamp)));
       } catch {
