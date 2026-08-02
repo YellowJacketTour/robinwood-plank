@@ -68,8 +68,17 @@ const TYPES: Array<{ id: TypeFilter; label: string }> = [
   { id: "video", label: "Video" },
 ];
 
+/**
+ * Which `type` to ask upstream for. GIF asks for NOTHING on purpose.
+ *
+ * Measured against the live API: unfiltered returns 7 assets including one
+ * image/gif, while `type=image` returns 6 and excludes it — so upstream does
+ * not classify a GIF as an image. Asking for `type=image` and then narrowing
+ * to GIFs, which is what this did, could only ever return zero. GIFs are
+ * therefore selected from the unfiltered feed.
+ */
 const upstreamType = (t: TypeFilter): "image" | "video" | null =>
-  t === "video" ? "video" : t === "all" ? null : "image";
+  t === "video" ? "video" : t === "image" ? "image" : null;
 
 const isGif = (a: MemeAsset) =>
   a.mimeType === "image/gif" || /\.gif($|\?)/i.test(a.mediaUrl ?? "");

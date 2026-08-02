@@ -31,11 +31,13 @@ const PROJECT = "plank";
  * combination (type × search × page) is its own entry and a handful of people
  * changing filters can outspend the budget between them.
  *
- * Five minutes is generous for a moderated, newest-first feed — a meme
- * approved upstream shows up within one cache cycle — and it bounds the worst
- * case to 12 upstream reads per hour per distinct query.
+ * 90 seconds, not the 5 minutes this started at: the vault is small and
+ * newly-approved memes are the whole point of visiting, so a five-minute lag
+ * was long enough to show 3 when the project page showed 7. At 90s a distinct
+ * query costs at most 40 upstream reads per hour, and there are only a handful
+ * of distinct queries, so this stays far inside the 1,000/hour budget.
  */
-const TTL_MS = 5 * 60_000;
+const TTL_MS = 90_000;
 /** Bounded so a crafted query string cannot grow this without limit. */
 const MAX_ENTRIES = 200;
 const cache = new Map<string, { at: number; payload: unknown }>();
@@ -92,9 +94,10 @@ export async function GET(req: Request) {
         Accept: "application/json",
         ...(key ? { Authorization: `Bearer ${key}` } : {}),
       },
-      // Their feed is moderated and newest-first; a minute of staleness is
-      // invisible to a visitor and keeps us well inside their budget.
-      next: { revalidate: 60 },
+      // Our own 90s cache above is the throttle. Next must not add a second,
+      // independent staleness window on top of it — two caches in series made
+      // the real lag longer than either one advertised.
+      cache: "no-store",
     });
 
     if (res.status === 429) {
