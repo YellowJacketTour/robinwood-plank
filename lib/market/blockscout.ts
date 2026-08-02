@@ -172,6 +172,32 @@ export async function fetchTokenTransfers(
   );
 }
 
+/**
+ * Every transfer of ONE token, mint included, newest first.
+ *
+ * The item-detail panel used to derive its history by filtering a recent
+ * collection-wide activity scan, which only ever contained whatever had moved
+ * lately — so a plank that had not traded since it was minted showed "No
+ * transfers recorded", and one that had shown only its most recent move with
+ * the mint missing. Measured 2026-08-02: #1533 and #1542 each have exactly one
+ * real transfer (their mint) and rendered as empty; #1466 has two and rendered
+ * one.
+ *
+ * This is the per-instance endpoint, so it returns that token's complete
+ * lineage regardless of how long ago it last moved. One page is plenty — a
+ * single plank has a handful of transfers, not hundreds — and keeping it to one
+ * request matters because Blockscout rate-limits hard.
+ */
+export async function fetchTokenInstanceTransfers(
+  tokenAddress: string,
+  tokenId: string
+): Promise<BlockscoutTokenTransfer[]> {
+  const d = await bsGet<{ items?: BlockscoutTokenTransfer[] }>(
+    `/api/v2/tokens/${tokenAddress}/instances/${encodeURIComponent(tokenId)}/transfers`
+  );
+  return d.items || [];
+}
+
 export async function fetchAddressLogs(
   address: string,
   opts?: { maxPages?: number }

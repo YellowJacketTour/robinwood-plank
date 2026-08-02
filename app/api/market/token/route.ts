@@ -3,6 +3,7 @@ import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
 import { getOwnerFromIndex } from "@/lib/market/owner-index";
 import { robinwoodTokenUri, resolveTokenImage } from "@/lib/market/token-image";
 import { fetchActivity } from "@/lib/market/activity";
+import { fetchTokenInstanceTransfers } from "@/lib/market/blockscout";
 import { compactRarityFor, getRaritySnapshot } from "@/lib/market/rarity-snapshot";
 import { cachedPublicJson } from "@/lib/http-cache";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
@@ -87,15 +88,40 @@ export async function GET(req: Request) {
       attributes = [];
     }
 
-    // History is optional and expensive (collection log walk). Item detail
-    // can pass history=1; fence/image callers skip it for fast art resolve.
+    // History is optional. Item detail passes history=1; fence/image callers
+    // skip it for a fast art resolve.
     let history: unknown[] = [];
     if (wantHistory) {
+      // Ask for THIS token's transfers directly. Filtering a collection-wide
+      // recent-activity scan (what this did before) only ever saw what had
+      // moved lately — so a plank that hadn't traded since it was minted showed
+      // "No transfers recorded", and one that had moved recently showed that
+      // move with its mint missing. Measured 2026-08-02: #1533 and #1542 each
+      // have exactly one real transfer (their mint) and rendered as empty.
       try {
-        const all = await fetchActivity(200);
-        history = all.filter((e) => e.tokenId === tokenId).slice(0, 12);
+        const transfers = await fetchTokenInstanceTransfers(NFT_CONTRACT_ADDRESS, tokenId);
+        history = transfers.slice(0, 12).map((t) => ({
+          // A mint comes from the zero address; Blockscout labels the call that
+          // produced it (publicMint / freeMint / allowlistMint), which is more
+          // detail than the panel needs.
+          kind: /^0x0{40}$/i.test(t.from?.hash ?? "") ? "mint" : t.method || "transfer",
+          // This endpoint carries no price. Sales still show their price in the
+          // Activity feed, which prices fills from the marketplace method.
+          priceEth: null,
+          txHash: t.transaction_hash ?? "",
+          timestamp: t.timestamp ?? null,
+          from: t.from?.hash ?? "",
+          to: t.to?.hash ?? "",
+        }));
       } catch {
-        history = [];
+        // Blockscout rate-limits hard. Fall back to the old collection scan
+        // rather than showing nothing — partial history beats none.
+        try {
+          const all = await fetchActivity(200);
+          history = all.filter((e) => e.tokenId === tokenId).slice(0, 12);
+        } catch {
+          history = [];
+        }
       }
     }
 
