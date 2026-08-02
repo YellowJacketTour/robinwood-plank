@@ -236,7 +236,7 @@ boundaries, relayer logic, CI, and secrets as security-sensitive.
 - Internal audits are documented under [`docs/marketplank`](docs/marketplank).
   They are not a substitute for an independent third-party audit.
 - The current dependency posture is recorded in
-  [Dependabot status for `inmotion`](docs/DEPENDABOT_INMOTION.md).
+  [Dependabot status](docs/DEPENDABOT_INMOTION.md), last verified 2026-07-30.
 
 ## Contracts and addresses
 

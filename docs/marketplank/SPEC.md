@@ -5,7 +5,7 @@ enabled.** MarketplankVaultV3 ("Premium Plank Liquidity") is live on mainnet
 (2026-08-01) and is the primary, LP-capable vault; V1 (Driftwood) and V2
 (WormWood) are legacy, redeem-only — WormWood must never be recommended for
 new deposits or LP given its LP-drain (`docs/marketplank/AUDIT-2026-07-31-lp.md`).
-The application is deployed from `inmotion` to InMotion Passenger with
+The application is deployed from `master` to InMotion Passenger with
 PostgreSQL. The custom vault code has extensive internal audit evidence and
 regression tests but has not received an independent third-party audit.
 
@@ -166,7 +166,7 @@ still real risks rather than pre-launch blockers:
    the order-relay API. The Fable passes in this repository are internal
    adversarial reviews, not independent third-party audits. No independent
    report is recorded here.
-4. `NEXT_PUBLIC_MARKET_ENABLED` is currently `true` on the `inmotion`
+4. `NEXT_PUBLIC_MARKET_ENABLED` is currently `true` on the `master`
    deployment.
 
 ### Readiness checklist (updated 2026-07-27)

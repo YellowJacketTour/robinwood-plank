@@ -1,5 +1,9 @@
 # Dependabot status for `inmotion`
 
+> `inmotion` was the deployment branch at the time of this audit; the
+> deployment branch has been `master` since 2026-08-02. The findings below
+> describe the lockfile as it stood on the date noted.
+
 Last verified against GitHub alerts and the `inmotion` lockfile: **2026-07-30**.
 
 This branch remediates every open Dependabot advisory that has a compatible

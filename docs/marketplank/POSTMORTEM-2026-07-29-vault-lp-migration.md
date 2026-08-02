@@ -3,7 +3,7 @@
 
 > [!NOTE]
 > Historical incident record. Cloudflare Worker constraints described here
-> apply to the earlier hosting model. The canonical `inmotion` branch now
+> apply to the earlier hosting model. The canonical `master` branch now
 > deploys the application to InMotion Passenger with PostgreSQL; Cloudflare is
 > the DNS/proxy/WAF edge. The dual-vault facts and corrective actions remain
 > relevant.

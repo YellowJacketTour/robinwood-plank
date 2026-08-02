@@ -1,5 +1,9 @@
 # Release notes — 2026-07-30 (inmotion)
 
+> `inmotion` was the deployment branch at the time these notes were written;
+> the deployment branch has been `master` since 2026-08-02. Branch and SHA
+> references below describe the repository as it stood on 2026-07-30.
+
 This file documents everything that landed on `inmotion` around 2026-07-30:
 what is already deployed in production (pushed to `origin/inmotion` at
 `7edda9e`), and what is committed locally on `inmotion` but **not yet pushed**

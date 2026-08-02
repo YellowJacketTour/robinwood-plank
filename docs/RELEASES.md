@@ -1,6 +1,7 @@
 # Release and versioning policy
 
-This policy applies to the canonical `inmotion` branch.
+This policy applies to the canonical `master` branch, the deployment branch.
+Development happens on `dev`; merging `dev` into `master` ships.
 
 This document is the branch/versioning policy. For a dated record of what
 actually shipped in a given window, see the dated release-notes files, e.g.
@@ -10,15 +11,15 @@ actually shipped in a given window, see the dated release-notes files, e.g.
 
 | Branch | Purpose |
 | --- | --- |
-| `inmotion` | Source of truth for development, releases, and InMotion deploys. |
-| `master` | Legacy branch. It is not the InMotion deployment source. |
-| Feature/fix branches | Short-lived branches that open pull requests into `inmotion`. |
+| `master` | Deployment branch. Source of truth for what is live; a push here builds and deploys to InMotion. |
+| `dev` | Working branch. Development and feature/fix pull requests land here first. |
+| Feature/fix branches | Short-lived branches that open pull requests into `dev`. |
 
-The GitHub repository should use `inmotion` as its default branch when the
-owner is ready to make the repository setting match this policy. Until then,
-contributors must select `inmotion` explicitly as the pull-request base.
+`master` is the repository's default branch, so GitHub pre-fills it as the
+pull-request base. Feature work is not a release: select `dev` explicitly as
+the base unless the pull request is itself the merge that ships.
 
-Recommended ruleset for `inmotion`:
+Recommended ruleset for `master`:
 
 - require a pull request;
 - require the `InMotion Passenger CI/CD / build` check;
@@ -81,9 +82,9 @@ normally requires a MAJOR version.
 
 ## Pull-request release gate
 
-Before merging to `inmotion`:
+Before merging to `master`:
 
-1. Pull-request base is `inmotion`.
+1. Pull-request base is `master` (feature/fix work merges to `dev` first).
 2. CI is green at the exact head SHA.
 3. Security-sensitive diffs have focused tests.
 4. Public-variable changes are documented and reviewed as a rebuild.
@@ -95,7 +96,7 @@ Before merging to `inmotion`:
 
 ## Automatic deployment
 
-When `INMOTION_DEPLOY_ENABLED=true`, a push to `inmotion`:
+When `INMOTION_DEPLOY_ENABLED=true`, a push to `master`:
 
 1. runs the full build job;
 2. creates `passenger-<SHA>.tgz`;
@@ -116,12 +117,12 @@ The `InMotion Passenger CI/CD` workflow supports:
 
 | Operation | Purpose | Confirmation |
 | --- | --- | --- |
-| `deploy` | Rebuild and deploy the selected `inmotion` SHA. | None |
+| `deploy` | Rebuild and deploy the selected `master` SHA. | None |
 | `provision-relayer` | Install the cron-only key, verify one run, and manage the cron entry. | None |
 | `verify-relayer` | Prove 24 hours of InMotion health, then disable the GitHub fallback schedule. | `DISABLE_GITHUB_RELAY` |
 
-Manual operations must run from `inmotion`. Do not dispatch them from
-`master`.
+Manual operations must run from `master`. Do not dispatch them from
+`dev`.
 
 ## Database compatibility
 
@@ -161,8 +162,8 @@ directory move.
 After the selected SHA has deployed and passed production checks:
 
 ```bash
-git switch inmotion
-git pull --ff-only origin inmotion
+git switch master
+git pull --ff-only origin master
 
 # Update package.json/package-lock.json version in a reviewed PR first.
 git tag -s vX.Y.Z <DEPLOYED_SHA>
