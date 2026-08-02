@@ -36,7 +36,7 @@ export const TOC = [
   { id: "plank-token", label: "5. $PLANK token" },
   { id: "trade-widget", label: "6. Trade widget (Uniswap)" },
   { id: "robinwood-nft", label: "7. RobinWood NFT" },
-  { id: "mint", label: "8. Mint phases" },
+  { id: "mint", label: "8. Minting is finished" },
   { id: "gallery", label: "9. Gallery & rarity" },
   { id: "airdrop", label: "10. Airdrop & boards" },
   { id: "marketplank", label: "11. Marketplank overview" },
@@ -57,7 +57,7 @@ export const TOC = [
   { id: "art-cache", label: "26. Art, IPFS & cache" },
   { id: "seaport", label: "27. Seaport / OpenSea-class" },
   { id: "wallets", label: "28. Wallets & safety" },
-  { id: "infra", label: "29. Infra we rely on" },
+  { id: "infra", label: "29. What this depends on" },
   { id: "tutorials", label: "30. End-to-end tutorials" },
   { id: "faq", label: "31. FAQ" },
   { id: "ai-summary", label: "32. AI machine summary" },
@@ -198,8 +198,11 @@ const SECTIONS: { id: string; body: React.ReactNode }[] = [
         <Ol
           items={[
             <>Connect a wallet on Robinhood Chain (never Ethereum mainnet for these contracts).</>,
-            <>Mint or buy a RobinWood plank (home Mint / Gallery / Market).</>,
-            <>Trade $PLANK only through the site Trade widget when open (official pair path).</>,
+            <>
+              Get a plank — buy a listing, or redeem one out of a pool. The collection is minted out,
+              so there is nothing left to mint (§8).
+            </>,
+            <>Trade $PLANK through the site Trade widget (the official pair path).</>,
             <>List or bid on Marketplank (Seaport orders) for peer-to-peer NFT trade.</>,
             <>
               Or <strong>Deposit</strong> a plank into the pool → hold, trade, or provide liquidity
@@ -238,7 +241,7 @@ plank.love routes
   ├─ /                 Home: Trade, Mint, Gallery, Airdrop, Roadmap
   ├─ /market           Marketplank (listings, offers, Instant Swap, activity)
   ├─ /gallery          Full collection browser
-  ├─ /mint · /launch   Mint-focused surfaces
+  ├─ /mint · /launch   Record of the mint (minted out)
   ├─ /migrate          Guided exit from an older pool
   ├─ /floorboards      Quiet bargain cellar on the oldest pool
   └─ /learn            This manual (humans + AI)
@@ -272,7 +275,7 @@ Off-site / infra
         <Ul
           items={[
             <>
-              <strong>/ (home)</strong> — Hero, Trade ($PLANK), Mint info, Gallery strip, NFT viewer,
+              <strong>/ (home)</strong> — Hero, Trade ($PLANK), collection info, Gallery strip, NFT viewer,
               allocation, airdrop checker, distribution, roadmap, trust facts.
             </>,
             <>
@@ -283,8 +286,8 @@ Off-site / infra
               <strong>/gallery</strong> — Browse all planks, traits, rarity; same image proxy as Market.
             </>,
             <>
-              <strong>/mint</strong> and <strong>/launch</strong> — Mint-focused pages (sale phases,
-              wallet connect, mint txs).
+              <strong>/mint</strong> and <strong>/launch</strong> — kept as a record of the mint.
+              The collection is minted out (§8), so there is nothing to buy here.
             </>,
             <>
               <strong>/migrate</strong> — Step-by-step exit from an older pool. Only worth opening if
@@ -434,8 +437,13 @@ Trade ($PLANK) fee wallet:0xfa987d386c4f61b27cb67a1e4e1239866fe8d9ba`}</Code>
               Gas reserve: keep ~0.004 ETH free after a buy so the wallet can still submit later txs.
             </>,
             <>
-              Early phase may hard-lock the widget until a community open time, or pause with STAND
-              BY. Off-site Uniswap UIs can be discouraged while rules are strict (fake pairs / limits).
+              Trading is open. The widget can still be paused from the admin console if something
+              looks wrong with the route — if you see STAND BY, that is deliberate, and it is the one
+              case where waiting beats routing around it.
+            </>,
+            <>
+              Several tokens on this chain use lookalike names and symbols. Use the widget, or check
+              the $PLANK address in §4 against the pair you are about to trade.
             </>,
           ]}
         />
@@ -462,22 +470,34 @@ Trade ($PLANK) fee wallet:0xfa987d386c4f61b27cb67a1e4e1239866fe8d9ba`}</Code>
     body: (
       <>
         {/* ── 8 ── */}
-        <H id="mint">8. Mint phases</H>
+        <H id="mint">8. Minting is finished</H>
         <P>
-          Mint is driven by the NFT contract sale phase (community / allowlist / paid / free windows as
-          configured on-chain). The site reads{" "}
-          <code className="font-mono text-xs">salePhase()</code>, remaining supply helpers, and{" "}
-          <code className="font-mono text-xs">mintPrice()</code>, then sends the appropriate mint call
-          with correct value.
+          <strong className="text-foreground">The collection is minted out.</strong> All{" "}
+          <strong>1,542</strong> planks exist and are owned. It is verifiable on-chain: the NFT
+          contract&apos;s <code className="font-mono text-xs">totalSupply()</code> equals its{" "}
+          <code className="font-mono text-xs">MAX_SUPPLY()</code>. There is no supply left to mint at
+          any price, and there will not be more.
         </P>
-        <Ol
+        <P>There are three ways to get a plank now, and none of them is minting:</P>
+        <Ul
           items={[
-            <>Connect on 4663; ensure enough ETH for price + gas.</>,
-            <>If allowlist/proof required, site supplies Merkle proof from published proofs.</>,
-            <>Confirm mint; token appears in wallet; metadata may lag until IPFS/gateway warm.</>,
-            <>View in Gallery or Market → My NFTs.</>,
+            <>
+              <strong>Buy a listing</strong> from someone who owns one — see §12.
+            </>,
+            <>
+              <strong>Redeem one out of a pool</strong>: targeted if you want a specific plank, random
+              if you do not mind which — see §19.
+            </>,
+            <>
+              <strong>Make an offer</strong> on a plank or on a trait, and wait for a holder to accept
+              — see §13.
+            </>,
           ]}
         />
+        <Warn>
+          Because the supply is fixed and provably exhausted, any &quot;mint&quot; offering new
+          RobinWood planks is not ours. Verify the NFT contract address in §4 before signing anything.
+        </Warn>
       </>
     ),
   },
@@ -734,18 +754,20 @@ LAYER B — The pool (what you trade against)
       <>
         {/* ── 17 ── */}
         <H id="vault-math">17. Why held planks ≫ tradeable depth</H>
-        <P>An illustrative shape — read the live numbers off Instant Swap, not these:</P>
-        <Code>{`planks held            = 57
-shares outstanding     = 57      ← one per plank, always
-share reserve (pool)   = ~4.94   ← only these trade against ETH
-shares in wallets      = ~52     ← depositors holding, not trading
-eth reserve            = ~0.024 ETH
+        <P>
+          The shape, not the numbers — Instant Swap shows the live figures and these move constantly:
+        </P>
+        <Code>{`planks held            = N        ← the pool's inventory
+shares outstanding     = N        ← one per plank, always
+share reserve (pool)   = a slice  ← only THESE trade against ETH
+shares in wallets      = the rest ← depositors holding, not trading
+eth reserve            = the other side of the book
 price ≈ ethReserve / shareReserve`}</Code>
         <P>
           <strong>Deep inventory, thin book is normal.</strong> It does not mean the pool is insolvent
-          or that depositors are stuck — every one of those 57 shares can still be redeemed for a
-          plank. It means most depositors are holding rather than providing liquidity. Adding
-          liquidity is what moves shares from &quot;sitting in a wallet&quot; to &quot;tradeable&quot;.
+          or that depositors are stuck — every outstanding share can still be redeemed for a plank.
+          It means most depositors are holding rather than providing liquidity. Adding liquidity is
+          what moves shares from &quot;sitting in a wallet&quot; to &quot;tradeable&quot;.
         </P>
         <P>
           A thin book also means <strong>price impact</strong>: buying a meaningful number of shares
@@ -1125,20 +1147,28 @@ CURRENT POOL (Premium Plank Liquidity) — you pay in ETH
     body: (
       <>
         {/* ── 29 ── */}
-        <H id="infra">29. Extended platforms we rely on</H>
+        <H id="infra">29. What this product depends on</H>
+        <P>
+          The parts that decide whether your plank or your money moves are all public protocols you can
+          verify yourself. That is the list worth publishing:
+        </P>
         <Ul
           items={[
-            <><strong>Robinhood Chain</strong> — settlement, gas, contracts.</>,
-            <><strong>Blockscout</strong> — explorer UI, REST token/transfer indexes, optional eth-rpc fallback.</>,
-            <><strong>Uniswap</strong> — Trading API quotes + Universal Router + Permit2 for $PLANK.</>,
-            <><strong>Seaport + ConduitController</strong> — NFT order protocol.</>,
-            <><strong>drand + DrandBeacon</strong> — unbiased random redeem.</>,
-            <><strong>IPFS gateways</strong> — metadata/art content; proxied by the site.</>,
-            <><strong>InMotion Apache + Passenger</strong> — hosts the application; Cloudflare is the DNS/TLS/WAF edge in front of it, not the runtime.</>,
-            <><strong>PostgreSQL</strong> — signed-order relay, trait indexes, sales/activity snapshots, and pool caches. It is the only datastore.</>,
-            <><strong>X (Twitter)</strong> — official announcements / Wood List social coordination.</>,
+            <><strong>Robinhood Chain</strong> — settlement, gas, and every contract in §4.</>,
+            <><strong>Seaport 1.6 + ConduitController</strong> — the order protocol behind listings and offers.</>,
+            <><strong>drand + DrandBeacon</strong> — public randomness for random redeem, so we cannot steer a draw.</>,
+            <><strong>Uniswap</strong> — Universal Router and Permit2 for $PLANK swaps.</>,
+            <><strong>IPFS</strong> — content-addressed metadata and art, served through our own proxy.</>,
+            <><strong>Blockscout</strong> — the explorer to check any of the above against.</>,
+            <><strong>X (Twitter)</strong> — official announcements, <a className="text-gold-300 underline" href="https://x.com/RobinWoodPlank" target="_blank" rel="noreferrer">@RobinWoodPlank</a>.</>,
           ]}
         />
+        <Note>
+          Where the site itself is hosted, what it caches, and how it is deployed are deliberately not
+          listed here. None of it can move an asset — every transfer is a signed transaction settled by
+          the contracts above — so it is operational detail rather than something a holder needs, and
+          publishing an inventory of it only helps someone probing for a way in.
+        </Note>
       </>
     ),
   },
@@ -1148,7 +1178,7 @@ CURRENT POOL (Premium Plank Liquidity) — you pay in ETH
       <>
         {/* ── 30 ── */}
         <H id="tutorials">30. End-to-end tutorials</H>
-        <H3>A. First plank from mint</H3>
+        <H3>A. Your first plank</H3>
         <Ol
           items={[
             <>Add Robinhood Chain 4663 to wallet; fund gas ETH.</>,
@@ -1315,7 +1345,7 @@ CURRENT POOL (Premium Plank Liquidity) — you pay in ETH
     "older_pools_charge_fees_in_shares_so_one_deposit_underfunds_one_redeem": true
   },
   "user_flows": {
-    "mint": "NFT salePhase mint",
+    "mint": "CLOSED - collection minted out, totalSupply == MAX_SUPPLY == 1542",
     "list_nft": "sign Seaport listing -> POST /api/market/orders",
     "buy_listing": "Seaport fulfillOrder",
     "offer": "WETH Seaport offer (item or criteria merkle)",
