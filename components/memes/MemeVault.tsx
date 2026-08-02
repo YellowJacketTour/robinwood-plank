@@ -27,10 +27,30 @@ type MemeAsset = {
   mediaType?: "image" | "video" | string;
   mimeType?: string;
   createdAt?: string;
+  description?: string;
+  sourceUrl?: string;
   mediaUrl?: string;
   downloadUrl?: string;
+  /** The asset's own page upstream. */
+  url?: string;
+  /** The project's page upstream. */
+  projectUrl?: string;
+  /** Removed upstream in favour of `url` — kept so an older response, or a
+   *  cached one written before the change, still resolves. */
   pageUrl?: string;
 };
+
+/**
+ * Where a card should send you: the meme's own detail page first.
+ *
+ * `pageUrl` was removed upstream and replaced by `url`, so the old
+ * `pageUrl || mediaUrl` chain silently degraded to linking the raw media
+ * file — a bare image with no title, creator or context. Falling all the way
+ * back to the media URL is still better than a dead link, but it is the last
+ * resort, not the default it had quietly become.
+ */
+const detailHref = (a: MemeAsset): string | null =>
+  a.url || a.pageUrl || a.projectUrl || a.mediaUrl || null;
 
 type Attribution = { text?: string; url?: string; required?: boolean } | null;
 /**
@@ -254,10 +274,11 @@ export default function MemeVault() {
               {showing.map((a) => (
                 <li key={a.id} className="dense-card overflow-hidden p-0">
                   <a
-                    href={a.pageUrl || a.mediaUrl || "#"}
+                    href={detailHref(a) ?? "#"}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="group block"
+                    title={a.description || a.title || undefined}
                   >
                     <div className="relative aspect-square w-full overflow-hidden bg-wood-950">
                       {a.mediaType === "video" ? (
@@ -299,11 +320,18 @@ export default function MemeVault() {
                       <p className="truncate text-xs font-bold text-cream">
                         {a.title || "Untitled"}
                       </p>
-                      {a.creatorName && (
-                        <p className="truncate text-[0.68rem] text-foreground/60">
-                          by {a.creatorName}
-                        </p>
-                      )}
+                      <p className="flex items-center gap-1 truncate text-[0.68rem] text-foreground/60">
+                        {a.creatorName ? <span className="truncate">by {a.creatorName}</span> : null}
+                        {/* Says the card opens a PAGE, not the raw file. The
+                            distinction matters now that these link to the
+                            asset's own detail page upstream. */}
+                        <ExternalLink
+                          size={10}
+                          strokeWidth={2.5}
+                          aria-hidden="true"
+                          className="ml-auto shrink-0 opacity-0 transition-opacity group-hover:opacity-70"
+                        />
+                      </p>
                     </div>
                   </a>
                 </li>
