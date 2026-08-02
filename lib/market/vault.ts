@@ -966,6 +966,33 @@ export async function contributeLiquidity(
   if (sharesIn <= BigInt(0) && ethInWei <= BigInt(0)) {
     throw new Error("Enter shares and/or ETH to add to the pool.");
   }
+
+  // Guardrail: never add NEW liquidity to a pool that is not the current one.
+  //
+  // The absolute-credit LP primitive on the second-generation pool (selector
+  // 0xc1244a5c) is a proven, flash-loanable drain — see
+  // docs/marketplank/AUDIT-2026-07-31-lp.md, and the rule in AGENTS.md. Nothing
+  // enforced that in code until 2026-08-02: the Instant Swap vault switcher
+  // lists every configured pool, and this function targeted whichever one was
+  // selected, so a connected user was a few clicks from funding a contract we
+  // know can be emptied. The only warning lived in prose on /learn, a page they
+  // need never open.
+  //
+  // Guarded HERE rather than in SwapPanel because a warning is not a control
+  // and the panel is not guaranteed to stay the only caller.
+  //
+  // Scope is deliberately narrow — ADDING liquidity only:
+  //   - removeLiquidity() is untouched, so /migrate can still withdraw an
+  //     existing position. Getting OUT must never be blocked.
+  //   - /floorboards is unaffected; the oldest pool has no LP path at all.
+  //   - deposit / redeem / buy / sell on older pools all still work.
+  const target = requireVaultAddress(vaultAddress);
+  if (vaultGeneration(target) < 3) {
+    throw new Error(
+      "This is an older pool and no longer accepts liquidity. Add liquidity on the current pool instead — and if you already have a position here, withdraw it from the Migrate page."
+    );
+  }
+
   const vault = await getVaultReader(vaultAddress);
   await assertVaultWrapsOurCollection(vault);
   const open = (await vault.poolOpen()) as boolean;

@@ -33,8 +33,12 @@ import { listVaultsForDisplay, shortVault } from "@/lib/market/vault-registry";
  * Two rules this file must keep obeying:
  *
  * 1. NEVER print a vault version number in user-facing copy. Pools are named
- *    products (Driftwood / WormWood / Premium Plank Liquidity) resolved from
- *    `lib/market/vault-registry.ts`. See DESIGN.md "Vault naming".
+ *    products resolved from `lib/market/vault-registry.ts` (see `VAULT_NAMES`).
+ *    See DESIGN.md "Vault naming". Older-pool product names/addresses are
+ *    intentionally NOT printed on this page at all (by name or address) — the
+ *    only page that names and addresses individual older pools is /migrate,
+ *    where a holder is actually looking for them. This page speaks only in
+ *    "an older pool" / "the older pools" generically.
  * 2. The configured pools and their addresses are read LIVE from the
  *    registry, not typed in here. Hardcoding an address in a safety page is
  *    how a safety page starts lying.
@@ -90,8 +94,8 @@ function Note({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Carries the page's must-not-skim facts — the WormWood warning and the
- * never-raw-transfer rule chief among them. Kept visually louder than Note
+/** Carries the page's must-not-skim facts — the older-pool liquidity warning
+ * and the never-raw-transfer rule chief among them. Kept visually louder than Note
  * on purpose: amber, not gold, so it reads as "stop and read this" rather
  * than "helpful aside" even to someone speed-scrolling on a phone. */
 function Warn({ children }: { children: React.ReactNode }) {
@@ -299,43 +303,6 @@ function PoolTable() {
           ))}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-/**
- * The older pools, listed HERE rather than in "Stay safe" — a holder with value
- * stuck in one needs the address to check it, but a visitor confirming a
- * deposit target does not, and mixing them made three rows where only one is
- * ever the right answer. Read live from the registry like everything else.
- */
-function LegacyPoolList() {
-  const legacy = listVaultsForDisplay().filter((v) => v.role !== "primary");
-  if (legacy.length === 0) return null;
-  const explorer = CHAIN.blockExplorers.default.url;
-  return (
-    <div className="mt-4 rounded-lg border border-line bg-panel-strong px-4 py-3">
-      <p className="text-[0.7rem] font-bold uppercase tracking-wide text-cream-muted">
-        The older pools
-      </p>
-      <ul className="mt-2 space-y-2">
-        {legacy.map((v) => (
-          <li key={v.address} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
-            <span className="font-bold text-cream">{v.name}</span>
-            <a
-              className="break-all font-mono text-xs text-gold-300 underline"
-              href={`${explorer}/address/${v.address}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {v.address}
-            </a>
-          </li>
-        ))}
-      </ul>
-      <p className="mt-2 text-xs text-cream-muted">
-        Redeem-only. Neither takes new deposits, and nothing on the site should send you to one.
-      </p>
     </div>
   );
 }
@@ -568,9 +535,10 @@ const SECTIONS: { id: string; body: React.ReactNode }[] = [
           your share of the reserves is worth at that moment, whenever you choose.
         </P>
         <Warn>
-          <strong>Only the current pool is a place to add liquidity.</strong> Driftwood has no
-          liquidity feature at all, and WormWood&apos;s has a known flaw — do not deposit into it or
-          add to it. If you already have a position there, withdraw it via{" "}
+          <strong>Only {activePoolName()} is a place to add liquidity.</strong> The older pools
+          are not — one has no liquidity feature at all, and another has a known flaw. Do not
+          deposit into or add liquidity to an older pool. If you already have a position in one,
+          withdraw it via{" "}
           <Link className="text-gold-300 underline" href="/migrate">
             /migrate
           </Link>
@@ -585,14 +553,14 @@ const SECTIONS: { id: string; body: React.ReactNode }[] = [
       <>
         <H id="migrate">Moving out of an old pool</H>
         <P>
-          If you have planks or shares in Driftwood or WormWood,{" "}
+          If you hold planks, shares, or a liquidity position in an older pool,{" "}
           <Link className="text-gold-300 underline" href="/migrate">
             /migrate
           </Link>{" "}
-          is a guided, step-by-step exit. The site shows a banner when it detects a position; if you
-          have none, there&apos;s nothing to do here.
+          is a guided, step-by-step exit — it names and checks every older pool for your wallet.
+          The site shows a banner when it detects a position; if you have none, there&apos;s
+          nothing to do here.
         </P>
-        <LegacyPoolList />
         <H3>What migrating actually means</H3>
         <P>
           <strong>Migrating means getting your value OUT of the old pool.</strong> That&apos;s the
@@ -604,8 +572,8 @@ const SECTIONS: { id: string; body: React.ReactNode }[] = [
           items={[
             <>Connect your wallet. The page reads your position in every older pool.</>,
             <>
-              <strong>Withdraw liquidity first</strong>, if you have any in WormWood — those shares
-              can&apos;t be redeemed until they&apos;re back in your wallet.
+              <strong>Withdraw liquidity first</strong>, if you have any in an older pool — those
+              shares can&apos;t be redeemed until they&apos;re back in your wallet.
             </>,
             <>
               <strong>Cover the fee shortfall</strong> if you&apos;re short. The page computes the
@@ -630,8 +598,13 @@ const SECTIONS: { id: string; body: React.ReactNode }[] = [
           what&apos;s covered now and come back for the rest later.
         </Note>
         <P>
-          Staying in Driftwood is a legitimate choice — it works, and it won&apos;t be switched off.
-          There&apos;s no deadline. WormWood is the one worth leaving.
+          Staying in an older pool is fine for deposits you&apos;re waiting to redeem — nothing is
+          switched off while it still holds value, and there&apos;s no deadline. Liquidity
+          positions are different: one older pool has a known flaw (see{" "}
+          <a className="text-gold-300 underline" href="#liquidity">
+            Providing liquidity
+          </a>{" "}
+          above) — if you have a liquidity position there, don&apos;t wait; withdraw it via /migrate.
         </P>
       </>
     ),
@@ -666,7 +639,8 @@ const SECTIONS: { id: string; body: React.ReactNode }[] = [
           <P>
             Yes. Shares stay in your wallet, redeeming stays available, and an older pool is never
             removed from the site while it still holds planks. The one thing worth acting on: don&apos;t
-            put new value into WormWood, and withdraw any liquidity position you have there.
+            add liquidity to an older pool, and withdraw any liquidity position you already have
+            there via /migrate.
           </P>
         </FaqItem>
         <FaqItem q="Why are there several pools instead of one upgraded one?">
