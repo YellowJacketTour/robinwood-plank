@@ -1,6 +1,6 @@
 # Documentation index
 
-The canonical branch is `inmotion`. Current operating documents are listed
+The deployment branch is `master`; work happens on `dev`. Current operating documents are listed
 first. Dated audit and incident files are evidence records and may describe an
 earlier hosting or contract state.
 
@@ -22,7 +22,7 @@ earlier hosting or contract state.
 - [InMotion deployment](INMOTION_DEPLOYMENT.md): cPanel, Passenger,
   PostgreSQL, GitHub Actions, domain cutover, and cron.
 - [Dependabot status](DEPENDABOT_INMOTION.md): alert-by-alert resolution on
-  `inmotion`.
+  the deployed branch.
 - [Marketplank engineering specification](marketplank/SPEC.md): current
   marketplace and vault design plus historical decisions.
 - [Vault deployment tool](../scripts/deploy-tool/README.md): retired
@@ -39,5 +39,5 @@ earlier hosting or contract state.
 - [Remilia/Milady research note](marketplank/RESEARCH-remilia-milady.md)
 
 Historical documents are not deployment runbooks. When they conflict with
-current code or operations, use the current documents and the `inmotion`
+current code or operations, use the current documents and the `master`
 branch.

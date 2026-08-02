@@ -1,6 +1,6 @@
 # RobinWood ($PLANK)
 
-[![InMotion Passenger CI/CD](https://github.com/YellowJacketTour/robinwood-plank/actions/workflows/inmotion.yml/badge.svg?branch=inmotion)](https://github.com/YellowJacketTour/robinwood-plank/actions/workflows/inmotion.yml)
+[![InMotion Passenger CI/CD](https://github.com/YellowJacketTour/robinwood-plank/actions/workflows/inmotion.yml/badge.svg?branch=master)](https://github.com/YellowJacketTour/robinwood-plank/actions/workflows/inmotion.yml)
 [![Node.js 22](https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 
 The official RobinWood NFT collection and `$PLANK` application for
@@ -10,9 +10,9 @@ trade widget, and Marketplank, a Seaport marketplace with a multi-vault Instant
 Swap experience.
 
 > [!IMPORTANT]
-> `inmotion` is the canonical development, release, and deployment branch.
-> Open pull requests against `inmotion`. The legacy `master` branch does not
-> deploy the InMotion application and must not receive InMotion-only changes.
+> `master` is the deployment branch — a push to it builds and deploys the
+> InMotion application. `dev` is the working branch: open pull requests
+> against `dev`, and merge `dev` into `master` to ship.
 
 ## What is in this repository
 
@@ -129,8 +129,8 @@ npm test               # both test suites
 npm run build          # production standalone build
 ```
 
-Pull requests to `inmotion` run the full CI gate. A successful push to
-`inmotion` deploys when `INMOTION_DEPLOY_ENABLED=true`.
+Pull requests to `dev` and `master` run the full CI gate. A successful push to
+`master` deploys when `INMOTION_DEPLOY_ENABLED=true`.
 
 ## Configuration
 

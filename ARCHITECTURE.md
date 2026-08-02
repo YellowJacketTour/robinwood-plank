@@ -1,7 +1,7 @@
 # Architecture
 
-This document describes the runtime and release architecture of the canonical
-`inmotion` branch. It separates data that belongs in PostgreSQL from data that
+This document describes the runtime and release architecture of the
+deployment branch, `master`. It separates data that belongs in PostgreSQL from data that
 is authoritative on Robinhood Chain.
 
 ## System view
@@ -35,8 +35,8 @@ InMotion Apache + Passenger
 
 GitHub Actions
       |
-      +-- tests and builds on every PR to inmotion
-      +-- immutable SHA releases on pushes to inmotion
+      +-- tests and builds on every PR to dev or master
+      +-- immutable SHA releases on pushes to master
       +-- SSH upload, migrations, activation, health, rollback
       +-- manual migration and relayer operations
 
@@ -314,13 +314,13 @@ scope are enforced before send.
 ## Release architecture
 
 ```text
-PR -> inmotion
+PR -> dev
       |
       v
 lint + typecheck + migrations + tests + build + relayer bundle
       |
       v
-push to inmotion
+merge dev -> master
       |
       v
 passenger-<SHA>.tgz
@@ -362,7 +362,8 @@ must be assumed readable by every visitor.
 
 ## Design constraints
 
-- `inmotion` is the branch of record. `master` is not a deployment source.
+- `master` is the deployment source and the branch of record. `dev` is where
+  work lands before a release.
 - Production writes require a durable backend.
 - Schema migrations are append-only and forward-only.
 - Release directories are immutable after activation.

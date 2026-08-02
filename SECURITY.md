@@ -4,14 +4,13 @@
 
 | Branch or release | Supported |
 | --- | --- |
-| `inmotion` and the SHA currently deployed from it | Yes |
+| `master` and the SHA currently deployed from it | Yes |
 | Older immutable InMotion releases used for rollback | Only until replaced |
-| `master` | No |
+| `dev` and other working branches | No |
 | Local forks and modified deployments | No |
 
-Security fixes for the hosted application must target `inmotion`. The
-repository's default branch may still be `master`, so verify the pull-request
-base before sharing a patch.
+Security fixes for the hosted application land on `dev` and ship by merging
+into `master`, which is what deploys.
 
 ## Report a vulnerability privately
 

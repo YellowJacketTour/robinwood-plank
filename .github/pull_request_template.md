@@ -4,8 +4,8 @@ Describe what changes for users or operators.
 
 ## Scope
 
-- [ ] The PR targets `inmotion`, not `master`.
-- [ ] The branch is current with `origin/inmotion`.
+- [ ] The PR targets `dev` (or `master` only if this is a release).
+- [ ] The branch is current with `origin/dev`.
 - [ ] Unrelated changes are excluded.
 
 ## Risk and rollback
