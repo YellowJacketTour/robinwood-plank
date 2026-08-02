@@ -246,11 +246,17 @@ function SecondaryAddressList() {
 }
 
 /**
- * The configured pools, read live from the registry so this page cannot
- * drift from what the site is actually pointed at.
+ * The pool a visitor should be checking, read live from the registry so this
+ * page cannot drift from what the site is actually pointed at.
+ *
+ * Deliberately ONLY the active pool. This sits in "Stay safe", whose whole job
+ * is letting someone confirm an address before they sign — and a table of three
+ * pools where two cannot be deposited into adds exactly the ambiguity that
+ * section exists to remove. The older pools are named in "Moving out of an old
+ * pool", where a holder with value in one is actually looking for them.
  */
 function PoolTable() {
-  const vaults = listVaultsForDisplay();
+  const vaults = listVaultsForDisplay().filter((v) => v.role === "primary");
   if (vaults.length === 0) {
     return (
       <Note>
@@ -293,6 +299,43 @@ function PoolTable() {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/**
+ * The older pools, listed HERE rather than in "Stay safe" — a holder with value
+ * stuck in one needs the address to check it, but a visitor confirming a
+ * deposit target does not, and mixing them made three rows where only one is
+ * ever the right answer. Read live from the registry like everything else.
+ */
+function LegacyPoolList() {
+  const legacy = listVaultsForDisplay().filter((v) => v.role !== "primary");
+  if (legacy.length === 0) return null;
+  const explorer = CHAIN.blockExplorers.default.url;
+  return (
+    <div className="mt-4 rounded-lg border border-line bg-panel-strong px-4 py-3">
+      <p className="text-[0.7rem] font-bold uppercase tracking-wide text-cream-muted">
+        The older pools
+      </p>
+      <ul className="mt-2 space-y-2">
+        {legacy.map((v) => (
+          <li key={v.address} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
+            <span className="font-bold text-cream">{v.name}</span>
+            <a
+              className="break-all font-mono text-xs text-gold-300 underline"
+              href={`${explorer}/address/${v.address}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {v.address}
+            </a>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-xs text-cream-muted">
+        Redeem-only. Neither takes new deposits, and nothing on the site should send you to one.
+      </p>
     </div>
   );
 }
@@ -366,6 +409,46 @@ const SECTIONS: { id: string; body: React.ReactNode }[] = [
             </>,
           ]}
         />
+        <H3>What&apos;s on the site</H3>
+        <Ul
+          items={[
+            <>
+              <Link className="text-gold-300 underline" href="/market">
+                Marketplank
+              </Link>{" "}
+              — buy and sell planks, make offers, and trade the pool on Instant Swap.
+            </>,
+            <>
+              <Link className="text-gold-300 underline" href="/trade">
+                Trade
+              </Link>{" "}
+              — swap $PLANK against ETH through the official route.
+            </>,
+            <>
+              <Link className="text-gold-300 underline" href="/gallery">
+                Gallery
+              </Link>{" "}
+              — browse all 1,542 planks and their traits.
+            </>,
+            <>
+              <Link className="text-gold-300 underline" href="/floorboards">
+                Under the floorboards
+              </Link>{" "}
+              — a quiet corner for buying out of the oldest pool when its shares trade below what a
+              plank is worth.
+            </>,
+            <>
+              <Link className="text-gold-300 underline" href="/migrate">
+                Migrate
+              </Link>{" "}
+              — only worth opening if you hold value in an older pool. It tells you if you don&apos;t.
+            </>,
+            <>
+              <strong>WoodAmp</strong> — the player in the header. Community tracks, keeps playing as
+              you move around the site. It never starts on its own.
+            </>,
+          ]}
+        />
       </>
     ),
   },
@@ -382,8 +465,20 @@ const SECTIONS: { id: string; body: React.ReactNode }[] = [
         </P>
         <CoreAddressCard />
         <SecondaryAddressList />
-        <P>Pool addresses aren&apos;t listed above because they change as pools open and retire. This table is generated live from what this deployment is actually configured with:</P>
+        <P>
+          The pool has its own address, and it changes as pools open and retire — so it is read live
+          from what this deployment is actually configured with, never typed in:
+        </P>
         <PoolTable />
+        <Note>
+          This is the <strong>only</strong> pool taking deposits. Older pools still exist so their
+          depositors can redeem, but nothing should send you to one — if a link or a prompt points at
+          a different pool address, stop. Their addresses are in{" "}
+          <a className="text-gold-300 underline" href="#migrate">
+            Moving out of an old pool
+          </a>{" "}
+          if you need to check one.
+        </Note>
         <H3>Before you approve anything</H3>
         <Ul
           items={[
@@ -497,6 +592,7 @@ const SECTIONS: { id: string; body: React.ReactNode }[] = [
           is a guided, step-by-step exit. The site shows a banner when it detects a position; if you
           have none, there&apos;s nothing to do here.
         </P>
+        <LegacyPoolList />
         <H3>What migrating actually means</H3>
         <P>
           <strong>Migrating means getting your value OUT of the old pool.</strong> That&apos;s the
@@ -633,10 +729,10 @@ export default function LearnGuide({
       <p className="mt-14 border-t border-line pt-6 text-center text-xs text-cream-muted">
         Still stuck?{" "}
         <Link href="/market" className="text-gold-300 underline">
-          Open Market
+          Open Marketplank
         </Link>
         {" · "}
-        <Link href="/#trade" className="text-gold-300 underline">
+        <Link href="/trade" className="text-gold-300 underline">
           Trade $PLANK
         </Link>
       </p>
