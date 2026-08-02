@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { vaultShortName } from "@/lib/market/vault-registry";
+import { SkeletonBlock, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 import { BUTTON_SECONDARY, CARD, LABEL } from "../ui";
 
 /**
@@ -96,6 +97,10 @@ export default function AnalyticsSection() {
   const [activity, setActivity] = useState<Activity | null>(null);
   const [vault, setVault] = useState<VaultStats | null>(null);
   const [loading, setLoading] = useState(true);
+  // Distinguishes the first, cold load (nothing to show yet — skeleton) from
+  // a Refresh click (stale tiles already on screen — keep them, just mark
+  // the button busy).
+  const [loadedOnce, setLoadedOnce] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,6 +125,7 @@ export default function AnalyticsSection() {
     setActivity(a);
     setVault(v);
     setLoading(false);
+    setLoadedOnce(true);
   }, []);
 
   useEffect(() => {
@@ -144,13 +150,29 @@ export default function AnalyticsSection() {
             Aggregated from the live market &amp; trade APIs
           </p>
         </div>
-        <button type="button" className={BUTTON_SECONDARY} onClick={() => void load()}>
-          Refresh
+        <button
+          type="button"
+          className={BUTTON_SECONDARY}
+          onClick={() => void load()}
+          disabled={loading}
+        >
+          {loading && loadedOnce ? "Refreshing…" : "Refresh"}
         </button>
       </div>
 
-      {loading ? (
-        <p className="mt-4 text-sm text-cream-muted">Loading…</p>
+      {loading && !loadedOnce ? (
+        <div className="mt-4">
+          <SkeletonStatus>Loading marketplace and vault analytics</SkeletonStatus>
+          <SkeletonStats count={9} />
+          <div className="mt-3 rounded-md border border-line bg-panel-strong p-3">
+            <SkeletonBlock className="h-2.5 w-56" />
+            <div className="mt-2 flex flex-wrap gap-2">
+              {Array.from({ length: 4 }, (_, i) => (
+                <SkeletonBlock key={i} className="h-6 w-24 rounded-full" />
+              ))}
+            </div>
+          </div>
+        </div>
       ) : (
         <>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

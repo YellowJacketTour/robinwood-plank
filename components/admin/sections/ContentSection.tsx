@@ -10,6 +10,7 @@ import {
   type LearnDoc,
 } from "@/lib/content-docs";
 import { TOC } from "@/components/learn/LearnGuide";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 import { CardChrome, useContentDocCard } from "./contentDocCard";
 import { BUTTON_SECONDARY, INPUT, LABEL } from "../ui";
 
@@ -84,7 +85,21 @@ function LearnVisibilityCard({ address }: { address: string | null }) {
         drift silently.
       </p>
       {doc === null ? (
-        <p className="mt-3 text-sm text-cream-muted">Loading…</p>
+        <div className="mt-3">
+          <SkeletonStatus>Loading Learn section visibility</SkeletonStatus>
+          <div className="space-y-1">
+            {TOC.map((entry) => (
+              <div
+                key={entry.id}
+                className="flex items-center gap-2 rounded-md border border-line bg-panel-soft px-3 py-1.5"
+              >
+                <SkeletonBlock className="h-3 flex-1" />
+                <SkeletonBlock className="h-8 w-20 rounded-md" />
+                <SkeletonBlock className="h-8 w-20 rounded-md" />
+              </div>
+            ))}
+          </div>
+        </div>
       ) : (
         <ul className="mt-3 space-y-1">
           {TOC.map((entry) => {
@@ -184,7 +199,19 @@ function IntroPhrasesCard({ address }: { address: string | null }) {
         a local cache so it can paint instantly).
       </p>
       {doc === null ? (
-        <p className="mt-3 text-sm text-cream-muted">Loading…</p>
+        <div className="mt-3 space-y-3">
+          <SkeletonStatus>Loading intro phrases</SkeletonStatus>
+          {[0, 1].map((i) => (
+            <div key={i} className="rounded-md border border-line bg-panel-soft p-3">
+              <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <SkeletonBlock className="h-11 w-full rounded-md" />
+                <SkeletonBlock className="h-11 w-full rounded-md" />
+                <SkeletonBlock className="h-11 w-11 rounded-md" />
+                <SkeletonBlock className="h-11 w-full rounded-md sm:col-span-3" />
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <>
           <ol className="mt-3 space-y-3">
@@ -297,7 +324,12 @@ function BannerCard({ address }: { address: string | null }) {
       canSave={!!address && doc !== null}
     >
       {doc === null ? (
-        <p className="mt-3 text-sm text-cream-muted">Loading…</p>
+        <div className="mt-3 grid gap-2">
+          <SkeletonStatus>Loading the announcement banner</SkeletonStatus>
+          <SkeletonBlock className="h-11 w-48 rounded-md" />
+          <SkeletonBlock className="h-11 w-full rounded-md" />
+          <SkeletonBlock className="h-11 w-full rounded-md" />
+        </div>
       ) : (
         <div className="mt-3 grid gap-2">
           <button

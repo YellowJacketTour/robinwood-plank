@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useWallet } from "@/lib/wallet-context";
+import { SkeletonStatus, SkeletonText } from "@/components/Skeleton";
 import { ExplorerAddress } from "./ExplorerAddress";
 import { BUTTON_PRIMARY, CARD, LABEL } from "./ui";
 import MusicSection from "./sections/MusicSection";
@@ -140,7 +141,8 @@ export default function AdminConsole() {
         </section>
       ) : isAdmin === null ? (
         <section className={CARD}>
-          <p className="text-sm text-cream-muted">Checking the allowlist…</p>
+          <SkeletonStatus>Checking the admin allowlist</SkeletonStatus>
+          <SkeletonText lines={2} className="max-w-lg" />
         </section>
       ) : !isAdmin ? (
         <section className={CARD}>

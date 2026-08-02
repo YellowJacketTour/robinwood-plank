@@ -50,6 +50,7 @@ import { useWallet } from "@/lib/wallet-context";
 import { getOwnedTokenIds } from "@/lib/market/inventory";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
 import RarityInsights from "@/components/RarityInsights";
+import { SkeletonCardGrid } from "@/components/Skeleton";
 import {
   ensureNftCacheHydrated,
   getCachedSupply,
@@ -1398,26 +1399,10 @@ export default function Gallery() {
                 <>
                 {totalMinted === 0 && status.startsWith("Connecting") && (
                   // Cold, no-cache visit: the dataset request is still in
-                  // flight. Same card frame as a loaded grid (dense-card +
-                  // the identical pulse treatment makePlaceholder cards
-                  // already use below) so this reads as "loading", not a
-                  // different design.
-                  <ul
-                    className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2 sm:gap-2.5"
-                    aria-hidden="true"
-                  >
-                    {Array.from({ length: INITIAL_STAGE }, (_, i) => (
-                      <li key={i} className="dense-card overflow-hidden p-0">
-                        <div className="flex aspect-square w-full animate-pulse items-center justify-center bg-wood-950/80 text-xl">
-                          🪵
-                        </div>
-                        <div className="space-y-1.5 p-2">
-                          <div className="h-3 w-3/4 animate-pulse rounded bg-wood-900" />
-                          <div className="h-2 w-1/2 animate-pulse rounded bg-wood-900" />
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                  // flight. Same shape as the loaded grid — one shared
+                  // implementation (components/Skeleton.tsx) instead of this
+                  // file rolling its own card markup.
+                  <SkeletonCardGrid count={INITIAL_STAGE} />
                 )}
 
                 {totalMinted === 0 && !status.startsWith("Connecting") && (

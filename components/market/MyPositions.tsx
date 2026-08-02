@@ -13,6 +13,7 @@ import {
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { formatTokenAmount } from "@/lib/trade";
 import type { Listing, Offer } from "@/lib/market/types";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 
 type Props = {
   account: string;
@@ -272,8 +273,11 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
           approval that was granted while creating it, so surface + revoke
           them here (audit 2026-07-27). */}
       {approvalLoading ? (
-        <div className="rounded-xl border border-line bg-panel p-3 text-xs text-cream-muted">
-          Reading marketplace approvals…
+        <div className="space-y-2 rounded-xl border border-line bg-panel p-3">
+          <SkeletonStatus>Loading marketplace approvals</SkeletonStatus>
+          <SkeletonBlock className="h-4 w-48" />
+          <SkeletonBlock className="h-9 w-full" />
+          <SkeletonBlock className="h-9 w-full" />
         </div>
       ) : approvalError ? (
         <div

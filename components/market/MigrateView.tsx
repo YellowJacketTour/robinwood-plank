@@ -38,6 +38,7 @@ import {
 import { getV3Snapshot, v3Deposit } from "@/lib/market/vault-v3";
 import { useLegacyPosition, type SlotState } from "@/lib/market/useLegacyPosition";
 import { formatShares, type SourcePlan } from "@/lib/market/migration";
+import { SkeletonBlock, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 
 /**
  * True when a deposit reverted because the plank is no longer the sender's to
@@ -275,8 +276,18 @@ export default function MigrateView() {
           </button>
         </div>
       ) : pos.loading && !pos.plan ? (
-        <div className="rounded-xl border border-line bg-panel-strong p-5 text-sm text-cream/70">
-          Scanning the retiring vaults for your position…
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_316px]">
+          <div className="space-y-4">
+            <SkeletonStatus>Scanning the retiring vaults for your position</SkeletonStatus>
+            <div className="space-y-3 rounded-xl border border-line bg-panel-strong p-4">
+              <SkeletonBlock className="h-5 w-56" />
+              <SkeletonStats count={4} />
+            </div>
+          </div>
+          <div className="space-y-3">
+            <SkeletonBlock className="h-24 w-full rounded-xl" />
+            <SkeletonBlock className="h-24 w-full rounded-xl" />
+          </div>
         </div>
       ) : pos.plan && !pos.hasValue ? (
         <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/10 p-5">

@@ -6,6 +6,7 @@ import { Check } from "lucide-react";
 import { getRarityMap, tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { withImageWidth } from "@/lib/ipfs";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 
 export type PickerToken = {
   tokenId: string;
@@ -55,11 +56,14 @@ export default function TokenPicker({
 
   if (loading) {
     return (
-      <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="aspect-square animate-pulse rounded-lg bg-panel" />
-        ))}
-      </div>
+      <>
+        <SkeletonStatus>Loading tokens</SkeletonStatus>
+        <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <SkeletonBlock key={i} className="aspect-square" />
+          ))}
+        </div>
+      </>
     );
   }
 

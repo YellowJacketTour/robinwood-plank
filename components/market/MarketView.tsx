@@ -31,6 +31,7 @@ import SweepConfirm from "@/components/market/SweepConfirm";
 import RarityFloorStrip from "@/components/market/RarityFloorStrip";
 import IncomingBids from "@/components/market/IncomingBids";
 import ListingSkeleton from "@/components/market/ListingSkeleton";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 import ItemDetail from "@/components/market/ItemDetail";
 import WalletChip from "@/components/market/WalletChip";
 import WethBalance from "@/components/market/WethBalance";
@@ -99,13 +100,16 @@ function describeFulfillError(e: unknown): string {
 }
 
 /** Fixed-height pulse placeholder — tab bodies stream in as their own
- * chunks, and the placeholder keeps the layout from jumping meanwhile. */
+ * chunks, and the placeholder keeps the layout from jumping meanwhile. Every
+ * dynamic-imported tab body has its own internal shape once it mounts, so
+ * this stays a generic block rather than pretending to know it in advance —
+ * SkeletonBlock is exactly that primitive. */
 function PanelSkeleton({ className = "min-h-64" }: { className?: string }) {
   return (
-    <div
-      aria-hidden
-      className={`${className} animate-pulse rounded-xl border border-line bg-wood-900/60`}
-    />
+    <>
+      <SkeletonStatus>Loading this tab</SkeletonStatus>
+      <SkeletonBlock className={`${className} border border-line`} />
+    </>
   );
 }
 

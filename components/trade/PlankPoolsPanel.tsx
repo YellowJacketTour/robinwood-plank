@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { PlankPool } from "@/lib/plank-price-types";
+import { SkeletonRows } from "@/components/Skeleton";
 
 type ApiResponse = {
   pools: PlankPool[];
@@ -108,11 +109,7 @@ export default function PlankPoolsPanel({ active = true }: { active?: boolean } 
           Could not load the $PLANK pool list.
         </p>
       ) : isLoading ? (
-        <div className="space-y-1.5">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-10 animate-pulse rounded-lg bg-wood-950" />
-          ))}
-        </div>
+        <SkeletonRows rows={3} columns={["w-20", "w-14", "w-14", "w-10"]} />
       ) : isEmpty ? (
         <p className="rounded-lg border border-line bg-wood-950 px-3 py-6 text-center text-xs text-cream-muted">
           No $PLANK pools found.

@@ -12,6 +12,7 @@ import {
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
 import { swrJson } from "@/lib/market/swr-fetch";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 
 type TierRow = {
   tier: RarityTier;
@@ -124,24 +125,26 @@ export default function RedeemOdds({ vaultAddress = null, active = true }: Props
     return base + (base * bps) / BigInt(10_000);
   }, [stats]);
 
-  if (!stats && heldCount === 0) {
+  if ((!stats && heldCount === 0) || rarity.size === 0) {
     return (
-      <p className="rounded-lg border border-line bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
-        Loading vault odds…
-      </p>
+      <div className="space-y-2 rounded-xl border border-line bg-panel p-3">
+        <SkeletonStatus>Loading redeem odds</SkeletonStatus>
+        <SkeletonBlock className="h-3 w-40" />
+        <div className="space-y-1.5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="space-y-0.5">
+              <SkeletonBlock className="h-2.5 w-24" />
+              <SkeletonBlock className="h-1.5 w-full" />
+            </div>
+          ))}
+        </div>
+      </div>
     );
   }
   if (heldCount === 0) {
     return (
       <p className="rounded-lg border border-line bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
         Vault holds nothing to draw from right now.
-      </p>
-    );
-  }
-  if (rarity.size === 0) {
-    return (
-      <p className="rounded-lg border border-line bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
-        Loading rarity map for redeem odds…
       </p>
     );
   }

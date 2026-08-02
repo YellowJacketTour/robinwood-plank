@@ -5,6 +5,7 @@ import { tierColor, tierGlow } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import CachedNftImage from "@/components/CachedNftImage";
 import { warmArtOnce } from "@/lib/art-warm-global";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 
 type HeldToken = { tokenId: string; imageUrl: string | null };
 
@@ -129,11 +130,14 @@ export default function PlankFence({
 
   if (!held) {
     return (
-      <div className="flex h-full items-center justify-center gap-1 px-3">
-        {Array.from({ length: 10 }).map((_, i) => (
-          <div key={i} className="h-4/5 w-6 animate-pulse rounded-sm bg-panel" />
-        ))}
-      </div>
+      <>
+        <SkeletonStatus>Loading the vault fence</SkeletonStatus>
+        <div className="flex h-full items-center justify-center gap-1 px-3">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <SkeletonBlock key={i} className="h-4/5 w-6 rounded-sm" />
+          ))}
+        </div>
+      </>
     );
   }
 

@@ -18,6 +18,7 @@ import { withImageWidth } from "@/lib/ipfs";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import type { PickerToken } from "@/components/market/TokenPicker";
 import ItemDetail from "@/components/market/ItemDetail";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 
 const COLLECTION = MARKET_COLLECTIONS[0]; // RobinWood — the only vault collection
 
@@ -64,11 +65,20 @@ export default function VaultPlankGrid({
       </div>
 
       {loading && tokens.length === 0 ? (
-        <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <li key={i} className="aspect-square animate-pulse rounded-lg bg-wood-950" />
-          ))}
-        </ul>
+        <>
+          <SkeletonStatus>Loading {headerLabel}</SkeletonStatus>
+          <ul className="grid grid-cols-2 gap-2.5 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-3 xl:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <li key={i} className="dense-card overflow-hidden p-0">
+                <SkeletonBlock className="aspect-square w-full" />
+                <div className="space-y-1.5 p-2.5 sm:p-3">
+                  <SkeletonBlock className="h-3 w-2/3" />
+                  <SkeletonBlock className="h-2.5 w-1/2" />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
       ) : tokens.length === 0 ? (
         <div className="flex min-h-[8rem] items-center justify-center rounded-lg border border-dashed border-line px-4 text-center text-sm text-cream-muted">
           {emptyMessage}

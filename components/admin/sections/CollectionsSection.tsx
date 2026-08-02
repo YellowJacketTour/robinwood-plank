@@ -20,6 +20,7 @@ import {
 import { useContentDocCard, CardChrome } from "./contentDocCard";
 import { ExplorerAddress } from "../ExplorerAddress";
 import { dispatchVaultDeploy, vaultDeployConfigured } from "../api";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 import {
   BUTTON_PRIMARY,
   BUTTON_SECONDARY,
@@ -898,7 +899,25 @@ function StagedCollectionsCard({ address }: { address: string | null }) {
         release that promotes it a copy-paste with the decisions already made.
       </p>
       {doc === null ? (
-        <p className="mt-3 text-sm text-cream-muted">Loading…</p>
+        <div className="mt-3">
+          <SkeletonStatus>Loading staged collections</SkeletonStatus>
+          {[0, 1].map((i) => (
+            <div
+              key={i}
+              className="mt-2 flex flex-wrap items-start gap-2 rounded-md border border-line bg-panel-soft p-3"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <SkeletonBlock className="h-4 w-28" />
+                  <SkeletonBlock className="h-4 w-16 rounded-full" />
+                  <SkeletonBlock className="h-4 w-20 rounded-full" />
+                </div>
+                <SkeletonBlock className="mt-2 h-3 w-64" />
+              </div>
+              <SkeletonBlock className="h-11 w-11 rounded-md" />
+            </div>
+          ))}
+        </div>
       ) : (
         <>
           {doc.staged.length === 0 ? (
