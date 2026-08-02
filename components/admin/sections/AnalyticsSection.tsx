@@ -223,8 +223,8 @@ export default function AnalyticsSection() {
               // fabricated-APR bug this endpoint was fixed to stop doing.
               label={
                 typeof vault?.aprPct === "number" && typeof vault?.aprBasisHours === "number"
-                  ? `Instant Swap LP APR (swap fees, ${vault.aprBasisHours.toFixed(1)}h basis)`
-                  : "Instant Swap LP APR (swap fees)"
+                  ? `Instant Swap LP APR (${vault.aprBasisHours.toFixed(1)}h basis)`
+                  : "Instant Swap LP APR"
               }
               value={typeof vault?.aprPct === "number" ? `${vault.aprPct.toFixed(1)}%` : "—"}
               source="/api/market/vault/stats"

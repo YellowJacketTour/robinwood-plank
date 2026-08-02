@@ -34,6 +34,14 @@ on:
         description: "NFT collection (RobinWood). IMMUTABLE."
         type: string
         default: "0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156"
+      share_name:
+        description: "ERC20 share token name. IMMUTABLE. Default reproduces the live RobinWood deploy byte-for-byte — change it for any other collection."
+        type: string
+        default: "Marketplank RobinWood Vault V3"
+      share_symbol:
+        description: "ERC20 share token symbol. IMMUTABLE. Default reproduces the live RobinWood deploy byte-for-byte — change it for any other collection."
+        type: string
+        default: "vROBIN"
       mint_fee_wei:
         description: "mintFeeWei (IMMUTABLE, must be > 0; <= 0.05 ETH)"
         type: string
@@ -103,30 +111,58 @@ jobs:
       - run: npm ci
 
       - name: Guardrails (mainnet confirmation + non-zero fees)
+        # SECURITY: every ${{ inputs.* }} used to be interpolated directly into
+        # this shell script — GitHub substitutes it into the script TEXT before
+        # the shell ever runs, so a dispatched value containing shell
+        # metacharacters (e.g. confirmation=`"; curl ...; #`) would execute in
+        # this step, which has DEPLOYER_PK in scope one step later. Every input
+        # below is passed through env: instead and referenced as a quoted shell
+        # variable, so it is always data, never parsed as script. Do the same
+        # for any future input used inside a run: block — ${{ }} is safe in
+        # env:/if:, not inside run:.
+        env:
+          DEPLOYER_PK: ${{ inputs.network == 'robinhood' && secrets.DEPLOYER_PK || secrets.DEPLOYER_PK_TESTNET }}
+          NETWORK: ${{ inputs.network }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          MINT_FEE_WEI: ${{ inputs.mint_fee_wei }}
+          REDEEM_FEE_WEI: ${{ inputs.redeem_fee_wei }}
+          SHARE_NAME: ${{ inputs.share_name }}
+          SHARE_SYMBOL: ${{ inputs.share_symbol }}
         run: |
           set -euo pipefail
-          if [ "${{ inputs.network }}" = "robinhood" ] && [ "${{ inputs.confirmation }}" != "DEPLOY_V3_MAINNET" ]; then
+          if [ "$NETWORK" = "robinhood" ] && [ "$CONFIRMATION" != "DEPLOY_V3_MAINNET" ]; then
             echo "::error::Mainnet deploy requires confirmation=DEPLOY_V3_MAINNET"; exit 1
           fi
           # Audit Low-1: zero fees nullify the redeem-slot rate limiter. Refuse.
-          if [ "${{ inputs.mint_fee_wei }}" = "0" ] || [ "${{ inputs.redeem_fee_wei }}" = "0" ]; then
+          if [ "$MINT_FEE_WEI" = "0" ] || [ "$REDEEM_FEE_WEI" = "0" ]; then
             echo "::error::mint_fee_wei and redeem_fee_wei must be > 0 (audit AUDIT-2026-08-01 Low-1)"; exit 1
+          fi
+          # An explicitly blank name/symbol is a mistake, not a request for the
+          # RobinWood default — the default only applies when the input is
+          # omitted entirely, not when it's dispatched as an empty string.
+          if [ -z "$SHARE_NAME" ] || [ -z "$SHARE_SYMBOL" ]; then
+            echo "::error::share_name and share_symbol must not be blank"; exit 1
           fi
           if [ -z "${DEPLOYER_PK:-}" ]; then
             echo "::error::deploy key not set — add secrets.DEPLOYER_PK_TESTNET (testnet) or secrets.DEPLOYER_PK (mainnet) first"; exit 1
           fi
-        env:
-          DEPLOYER_PK: ${{ inputs.network == 'robinhood' && secrets.DEPLOYER_PK || secrets.DEPLOYER_PK_TESTNET }}
 
       - name: Deploy + seed (+ open if confirm_open)
         env:
           DEPLOYER_PK: ${{ inputs.network == 'robinhood' && secrets.DEPLOYER_PK || secrets.DEPLOYER_PK_TESTNET }}
+          # NETWORK feeds the run: command line below — kept as an env var and
+          # referenced as "$NETWORK", not interpolated with ${{ }} directly
+          # into the shell command, for the same reason as the Guardrails step
+          # above (a run: line is script text, not a safe interpolation site).
+          NETWORK: ${{ inputs.network }}
           ROBINHOOD_RPC_URL: ${{ vars.NEXT_PUBLIC_ROBINHOOD_RPC_URL }}
           ROBINHOOD_TESTNET_RPC_URL: ${{ vars.ROBINHOOD_TESTNET_RPC_URL }}
           ROBINHOOD_TESTNET_CHAIN_ID: ${{ vars.ROBINHOOD_TESTNET_CHAIN_ID }}
           # Testnet self-provisions a mock ERC721 (mainnet collection isn't on testnet).
           DEPLOY_MOCK_COLLECTION: ${{ inputs.network == 'robinhood-testnet' && '1' || '' }}
           MARKET_COLLECTION_ADDRESS: ${{ inputs.collection }}
+          MARKET_SHARE_NAME: ${{ inputs.share_name }}
+          MARKET_SHARE_SYMBOL: ${{ inputs.share_symbol }}
           MARKET_DRAND_BEACON_ADDRESS: ${{ vars.DRAND_BEACON_ADDRESS }}
           MARKET_FEE_RECIPIENT: ${{ inputs.treasury }}
           MARKET_MINT_FEE_WEI: ${{ inputs.mint_fee_wei }}
@@ -136,7 +172,7 @@ jobs:
           SEED_TOKEN_IDS: ${{ inputs.seed_token_ids }}
           SEED_ETH_WEI: ${{ inputs.seed_eth_wei }}
           CONFIRM_OPEN: ${{ inputs.confirm_open && '1' || '' }}
-        run: npx hardhat run scripts/deploy-and-seed-v3.ts --network ${{ inputs.network }}
+        run: npx hardhat run scripts/deploy-and-seed-v3.ts --network "$NETWORK"
 
       - name: Upload deploy record
         if: always()

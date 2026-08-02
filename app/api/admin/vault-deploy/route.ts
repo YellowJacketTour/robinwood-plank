@@ -1,6 +1,8 @@
 import { verifyAdminProof, type AdminProof } from "@/lib/admin-auth";
 import { logAdminAction } from "@/lib/admin-log";
 import {
+  DEFAULT_SHARE_NAME,
+  DEFAULT_SHARE_SYMBOL,
   validateVaultDeployInput,
   type VaultDeployInput,
 } from "@/lib/market/vault-deploy-v3";
@@ -71,6 +73,12 @@ function normalizeInput(raw: Partial<VaultDeployInput> | undefined): VaultDeploy
     confirmation: typeof raw?.confirmation === "string" ? raw.confirmation.trim() : "",
     treasury: typeof raw?.treasury === "string" ? raw.treasury.trim() : "",
     collection: typeof raw?.collection === "string" ? raw.collection.trim() : "",
+    // Missing entirely -> the RobinWood default (matches the script's own
+    // strEnv fallback); present-but-blank stays blank so validation rejects
+    // it rather than silently substituting that default.
+    shareName: typeof raw?.shareName === "string" ? raw.shareName.trim() : DEFAULT_SHARE_NAME,
+    shareSymbol:
+      typeof raw?.shareSymbol === "string" ? raw.shareSymbol.trim() : DEFAULT_SHARE_SYMBOL,
     mintFeeWei: typeof raw?.mintFeeWei === "string" ? raw.mintFeeWei.trim() : "",
     redeemFeeWei: typeof raw?.redeemFeeWei === "string" ? raw.redeemFeeWei.trim() : "",
     targetPremiumWei:
@@ -190,6 +198,8 @@ export async function POST(req: Request) {
             confirmation: input.confirmation,
             treasury: input.treasury,
             collection: input.collection,
+            share_name: input.shareName,
+            share_symbol: input.shareSymbol,
             mint_fee_wei: input.mintFeeWei,
             redeem_fee_wei: input.redeemFeeWei,
             target_premium_wei: input.targetPremiumWei,
@@ -219,6 +229,7 @@ export async function POST(req: Request) {
       verdict.address,
       "vault-deploy-dispatch",
       `Dispatched deploy-vault-v3.yml: network=${input.network} collection=${input.collection} ` +
+        `share="${input.shareName}" (${input.shareSymbol}) ` +
         `treasury=${input.treasury || "(signer default)"} confirmOpen=${input.confirmOpen}`
     );
 

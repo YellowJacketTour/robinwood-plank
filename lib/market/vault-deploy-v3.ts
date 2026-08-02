@@ -33,6 +33,15 @@ export const MAX_SWAP_FEE_BPS = 100;
 /** The literal string the workflow requires as `confirmation` for a mainnet run. */
 export const MAINNET_CONFIRMATION = "DEPLOY_V3_MAINNET";
 
+/** The exact name/symbol that deployed the live RobinWood pool — also the
+ * workflow's and the script's own defaults (scripts/deploy-and-seed-v3.ts).
+ * Kept here so the form can start with the same values without having to
+ * special-case "RobinWood" anywhere in its logic. */
+export const DEFAULT_SHARE_NAME = "Marketplank RobinWood Vault V3";
+export const DEFAULT_SHARE_SYMBOL = "vROBIN";
+const MAX_SHARE_NAME_LENGTH = 64;
+const MAX_SHARE_SYMBOL_LENGTH = 11;
+
 /** Every `workflow_dispatch` input the workflow accepts, as strings (GitHub
  * Actions inputs are always strings/booleans over the REST API). */
 export type VaultDeployInput = {
@@ -40,6 +49,8 @@ export type VaultDeployInput = {
   confirmation: string;
   treasury: string;
   collection: string;
+  shareName: string;
+  shareSymbol: string;
   mintFeeWei: string;
   redeemFeeWei: string;
   targetPremiumWei: string;
@@ -54,6 +65,10 @@ export const EMPTY_VAULT_DEPLOY_INPUT: VaultDeployInput = {
   confirmation: "",
   treasury: "",
   collection: "",
+  // Same defaults as the workflow/script — a dispatch with these values
+  // unchanged reproduces the live RobinWood deploy byte-for-byte.
+  shareName: DEFAULT_SHARE_NAME,
+  shareSymbol: DEFAULT_SHARE_SYMBOL,
   mintFeeWei: "",
   redeemFeeWei: "",
   targetPremiumWei: "",
@@ -130,6 +145,34 @@ export function validateVaultDeployInput(
     });
   } else if (input.collection.trim() && !HEX_ADDRESS.test(input.collection.trim())) {
     problems.push({ field: "collection", message: "Not a valid 0x address." });
+  }
+
+  // Constructor args, immutable on success — a blank field is a mistake,
+  // not a request for the RobinWood default (see EMPTY_VAULT_DEPLOY_INPUT's
+  // comment); the workflow's own guardrail rejects a blank dispatch too.
+  const name = input.shareName.trim();
+  if (!name) {
+    problems.push({ field: "shareName", message: "Required — cannot be blank." });
+  } else if (name.length > MAX_SHARE_NAME_LENGTH) {
+    problems.push({
+      field: "shareName",
+      message: `Keep it to ${MAX_SHARE_NAME_LENGTH} characters or fewer.`,
+    });
+  }
+
+  const symbol = input.shareSymbol.trim();
+  if (!symbol) {
+    problems.push({ field: "shareSymbol", message: "Required — cannot be blank." });
+  } else if (symbol.length > MAX_SHARE_SYMBOL_LENGTH) {
+    problems.push({
+      field: "shareSymbol",
+      message: `Keep it to ${MAX_SHARE_SYMBOL_LENGTH} characters or fewer.`,
+    });
+  } else if (!/^[A-Z0-9]+$/.test(symbol)) {
+    problems.push({
+      field: "shareSymbol",
+      message: "Uppercase letters and digits only, by convention (e.g. vROBIN).",
+    });
   }
 
   const mint = parseWei(input.mintFeeWei);

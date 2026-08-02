@@ -28,6 +28,12 @@
  *   MARKET_MINT_FEE_WEI=... MARKET_REDEEM_FEE_WEI=... MARKET_TARGET_PREMIUM_WEI=... MARKET_SWAP_FEE_BPS=... \
  *   MARKET_FEE_RECIPIENT=0x<treasury==deployer> SEED_TOKEN_IDS=1,2 SEED_ETH_WEI=... CONFIRM_OPEN=1 \
  *   npx hardhat run scripts/deploy-and-seed-v3.ts --network robinhood-testnet
+ *
+ * MARKET_SHARE_NAME / MARKET_SHARE_SYMBOL are optional — unset reproduces the
+ * live RobinWood deploy byte-for-byte ("Marketplank RobinWood Vault V3" /
+ * "vROBIN"). Set both for any other collection so its share token isn't
+ * immutably branded as RobinWood's. An explicitly blank value is rejected
+ * rather than silently falling back to that default.
  */
 import hardhat from "hardhat";
 import { writeFileSync, mkdirSync } from "node:fs";
@@ -37,6 +43,11 @@ const SHARE_UNIT = 10n ** 18n;
 const DEFAULT_TREASURY = "0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8";
 const V1_ADDRESS = "0xb2019Fd4cA24502e812C0C73b751Fa49979BF708";
 const V2_ADDRESS = "0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04";
+// This exact pair deployed the live RobinWood pool — keep them as the
+// defaults so a re-run with MARKET_SHARE_NAME/MARKET_SHARE_SYMBOL unset stays
+// byte-identical to that deploy.
+const DEFAULT_SHARE_NAME = "Marketplank RobinWood Vault V3";
+const DEFAULT_SHARE_SYMBOL = "vROBIN";
 
 function req(name: string): string {
   const v = process.env[name];
@@ -45,6 +56,16 @@ function req(name: string): string {
 }
 function feeWei(name: string, def: bigint): bigint {
   return process.env[name] ? BigInt(process.env[name] as string) : def;
+}
+// Distinct from feeWei's "unset falls back to default": an explicitly BLANK
+// value here is a mistake to catch, not a request for the RobinWood default
+// (the workflow's own guardrail step also refuses a blank dispatch input —
+// this is defense in depth for anyone running the script directly).
+function strEnv(name: string, def: string): string {
+  const v = process.env[name];
+  if (v === undefined) return def;
+  if (v.trim() === "") throw new Error(`${name} is set but blank — unset it to use the default, or provide a value.`);
+  return v;
 }
 const eqAddr = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -55,6 +76,8 @@ async function main() {
   const isMainnet = net.chainId === 4663n;
 
   const beaconAddr = req("MARKET_DRAND_BEACON_ADDRESS");
+  const shareName = strEnv("MARKET_SHARE_NAME", DEFAULT_SHARE_NAME);
+  const shareSymbol = strEnv("MARKET_SHARE_SYMBOL", DEFAULT_SHARE_SYMBOL);
   const mintFeeWei = feeWei("MARKET_MINT_FEE_WEI", ethers.parseEther("0.001"));
   const redeemFeeWei = feeWei("MARKET_REDEEM_FEE_WEI", ethers.parseEther("0.001"));
   const targetPremiumWei = feeWei("MARKET_TARGET_PREMIUM_WEI", ethers.parseEther("0.002"));
@@ -91,6 +114,7 @@ async function main() {
   console.log(" signer          :", signerAddr);
   console.log(" treasury        :", treasury);
   console.log(" collection      :", collectionAddr);
+  console.log(" share token     :", shareName, `(${shareSymbol})`);
   console.log(" beacon          :", beaconAddr);
   console.log(" fees (wei)      : mint", mintFeeWei.toString(), "redeem", redeemFeeWei.toString(),
     "premium", targetPremiumWei.toString(), "swapBps", swapFeeBps);
@@ -107,7 +131,7 @@ async function main() {
   // ── 1. deploy ────────────────────────────────────────────────────────────
   const Vault = await ethers.getContractFactory("MarketplankVaultV3");
   const vault = await Vault.deploy(
-    collectionAddr, "Marketplank RobinWood Vault V3", "vROBIN",
+    collectionAddr, shareName, shareSymbol,
     mintFeeWei, redeemFeeWei, targetPremiumWei, swapFeeBps, treasury, beaconAddr
   );
   await vault.waitForDeployment();
@@ -121,6 +145,8 @@ async function main() {
     ["collection", eqAddr(await vault.collection(), collectionAddr)],
     ["treasury", eqAddr(await vault.treasury(), treasury)],
     ["beacon", eqAddr(await vault.beacon(), beaconAddr)],
+    ["name", (await vault.name()) === shareName],
+    ["symbol", (await vault.symbol()) === shareSymbol],
     ["mintFeeWei", (await vault.mintFeeWei()) === mintFeeWei],
     ["redeemFeeWei", (await vault.redeemFeeWei()) === redeemFeeWei],
     ["targetPremiumWei", (await vault.targetPremiumWei()) === targetPremiumWei],
@@ -130,7 +156,7 @@ async function main() {
   console.log(" verified        : VAULT_VERSION=3, all immutables match input ✓");
 
   if (deployOnly) {
-    writeOut({ address, chainId: net.chainId, treasury, collectionAddr, beaconAddr, mintFeeWei, redeemFeeWei, targetPremiumWei, swapFeeBps, opened: false });
+    writeOut({ address, chainId: net.chainId, treasury, collectionAddr, beaconAddr, shareName, shareSymbol, mintFeeWei, redeemFeeWei, targetPremiumWei, swapFeeBps, opened: false });
     console.log("\n DEPLOY_ONLY set — stopping before seed. Vault is CLOSED (not tradeable).");
     return;
   }
@@ -167,7 +193,7 @@ async function main() {
 
   // ── 5. openPool — ONE-WAY ────────────────────────────────────────────────
   if (!confirmOpen) {
-    writeOut({ address, chainId: net.chainId, treasury, collectionAddr, beaconAddr, mintFeeWei, redeemFeeWei, targetPremiumWei, swapFeeBps, opened: false });
+    writeOut({ address, chainId: net.chainId, treasury, collectionAddr, beaconAddr, shareName, shareSymbol, mintFeeWei, redeemFeeWei, targetPremiumWei, swapFeeBps, opened: false });
     console.log("\n Seeded + checklist GREEN, but CONFIRM_OPEN != 1 — NOT opening the pool.");
     console.log(" openPool() is ONE-WAY and locks the seed forever. Re-run with CONFIRM_OPEN=1 to finalize.");
     console.log(" (Note: re-running redeploys a NEW vault; only set CONFIRM_OPEN=1 when you mean it.)");
@@ -187,7 +213,7 @@ async function main() {
   }
 
   // ── 7. artifact ──────────────────────────────────────────────────────────
-  writeOut({ address, chainId: net.chainId, treasury, collectionAddr, beaconAddr, mintFeeWei, redeemFeeWei, targetPremiumWei, swapFeeBps, opened: true });
+  writeOut({ address, chainId: net.chainId, treasury, collectionAddr, beaconAddr, shareName, shareSymbol, mintFeeWei, redeemFeeWei, targetPremiumWei, swapFeeBps, opened: true });
 
   console.log("\n=== Client env (V3 primary; V1 AND V2 stay as redeem-only legacies) ===");
   console.log("  NEXT_PUBLIC_MARKET_VAULT_ADDRESS =", address);
@@ -197,6 +223,7 @@ async function main() {
 
 function writeOut(o: {
   address: string; chainId: bigint; treasury: string; collectionAddr: string; beaconAddr: string;
+  shareName: string; shareSymbol: string;
   mintFeeWei: bigint; redeemFeeWei: bigint; targetPremiumWei: bigint; swapFeeBps: number; opened: boolean;
 }) {
   mkdirSync("deploy-out", { recursive: true });
@@ -206,6 +233,8 @@ function writeOut(o: {
     treasury: o.treasury,
     collection: o.collectionAddr,
     beacon: o.beaconAddr,
+    shareName: o.shareName,
+    shareSymbol: o.shareSymbol,
     mintFeeWei: o.mintFeeWei.toString(),
     redeemFeeWei: o.redeemFeeWei.toString(),
     targetPremiumWei: o.targetPremiumWei.toString(),

@@ -95,18 +95,23 @@ export default function VaultDashboard({ vaultAddress = null, active = true }: P
           // aprPct docstring in lib/market/vault-stats.ts). This vault's
           // fee model decides whether there's anything to show at all: V1/V2
           // buyShares/sellShares apply no fee, so this is always "—" here —
-          // not a stale replay, a real "there is nothing to measure."
-          "LP APR (swap fees)",
+          // not a stale replay, a real "there is nothing to measure." The
+          // basis in the label is whatever window was actually measured,
+          // never an asserted 24h.
+          stats.aprPct != null && stats.aprBasisHours != null
+            ? `LP APR (${stats.aprBasisHours.toFixed(1)}h basis)`
+            : "LP APR",
           stats.aprPct != null
             ? `${stats.aprPct >= 1000 ? stats.aprPct.toFixed(0) : stats.aprPct.toFixed(1)}%`
             : "—",
-          stats.aprPct != null && stats.aprBasisHours != null
-            ? `est. · ${stats.aprBasisHours.toFixed(1)}h swap volume`
+          stats.aprPct != null
+            ? "swap fees"
             : stats.feeModel === "share"
               ? "no swap fee on this pool"
-              : stats.aprBasisHours != null
-                ? `${stats.aprBasisHours.toFixed(1)}h swap history`
-                : "no swap history"
+              // Not "no swap history" — a pool can have traded and still be
+              // too new or too thin to annualize. Permanent absence and
+              // "too early to say" are different facts to an LP.
+              : "not enough trading history yet"
         )}
       </div>
 
