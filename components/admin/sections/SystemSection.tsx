@@ -86,7 +86,7 @@ export default function SystemSection() {
         ) : status === null ? (
           <div className="mt-4">
             <SkeletonStatus>Checking deployment, storage, and chain status</SkeletonStatus>
-            <SkeletonStats count={6} />
+            <SkeletonStats count={6} columns="sm:grid-cols-2 lg:grid-cols-3" />
           </div>
         ) : (
           <dl className="mt-4 grid gap-2 rounded-md bg-panel-strong p-3 text-sm sm:grid-cols-2 lg:grid-cols-3">

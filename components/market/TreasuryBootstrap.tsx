@@ -153,7 +153,7 @@ export default function TreasuryBootstrap({ account }: Props) {
     return (
       <div className="space-y-3 rounded-xl border border-line bg-panel-strong p-3">
         <SkeletonStatus>Loading the treasury seed interface</SkeletonStatus>
-        <SkeletonStats count={4} className="sm:grid-cols-2 lg:grid-cols-4" />
+        <SkeletonStats count={4} columns="grid-cols-2" />
         <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => (
             <SkeletonBlock key={i} className="aspect-square" />

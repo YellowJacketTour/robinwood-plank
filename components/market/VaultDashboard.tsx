@@ -50,7 +50,7 @@ export default function VaultDashboard({ vaultAddress = null, active = true }: P
     return (
       <>
         <SkeletonStatus>Loading vault dashboard</SkeletonStatus>
-        <SkeletonStats count={7} />
+        <SkeletonStats count={7} columns="grid-cols-2 sm:grid-cols-3" />
       </>
     );
   }

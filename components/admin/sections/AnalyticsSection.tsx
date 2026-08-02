@@ -163,7 +163,7 @@ export default function AnalyticsSection() {
       {loading && !loadedOnce ? (
         <div className="mt-4">
           <SkeletonStatus>Loading marketplace and vault analytics</SkeletonStatus>
-          <SkeletonStats count={9} />
+          <SkeletonStats count={9} columns="sm:grid-cols-2 lg:grid-cols-3" />
           <div className="mt-3 rounded-md border border-line bg-panel-strong p-3">
             <SkeletonBlock className="h-2.5 w-56" />
             <div className="mt-2 flex flex-wrap gap-2">
