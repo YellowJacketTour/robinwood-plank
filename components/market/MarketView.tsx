@@ -606,6 +606,7 @@ export default function MarketView() {
       setStatus("Sweep confirmed.");
       await refresh();
     } catch (e) {
+      console.error("Sweep failed:", e);
       setError(e instanceof Error ? e.message : "Sweep failed.");
     } finally {
       setSweeping(false);
@@ -731,6 +732,7 @@ export default function MarketView() {
       setStatus("Offer accepted.");
       await refresh();
     } catch (e) {
+      console.error("Accept trait offer failed:", e);
       setError(e instanceof Error ? e.message : "Could not accept offer.");
     } finally {
       setAccepting(false);
@@ -753,6 +755,7 @@ export default function MarketView() {
       setStatus("Offer accepted.");
       await refresh();
     } catch (e) {
+      console.error("Accept offer failed:", e);
       setError(e instanceof Error ? e.message : "Could not accept offer.");
     } finally {
       setAccepting(false);
@@ -902,7 +905,11 @@ export default function MarketView() {
               <h3 className="font-display text-lg text-gold-300">Accept trait offer</h3>
               <button
                 type="button"
-                onClick={() => !accepting && setAcceptTraitTarget(null)}
+                onClick={() => {
+                  if (accepting) return;
+                  setError(null);
+                  setAcceptTraitTarget(null);
+                }}
                 aria-label="Cancel"
                 className="flex h-8 w-8 items-center justify-center rounded-full text-foreground/60 hover:text-gold-300"
               >
@@ -946,6 +953,15 @@ export default function MarketView() {
               Amount and qualifying set verified against the buyer&apos;s signed order in this
               browser. Plus network gas.
             </p>
+            {error && (
+              <p
+                role="alert"
+                className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100"
+              >
+                {error}
+              </p>
+            )}
+
             <button
               type="button"
               disabled={accepting}
@@ -972,7 +988,11 @@ export default function MarketView() {
               <h3 className="font-display text-lg text-gold-300">Accept offer</h3>
               <button
                 type="button"
-                onClick={() => !accepting && setAcceptTarget(null)}
+                onClick={() => {
+                  if (accepting) return;
+                  setError(null);
+                  setAcceptTarget(null);
+                }}
                 aria-label="Cancel"
                 className="flex h-8 w-8 items-center justify-center rounded-full text-foreground/60 hover:text-gold-300"
               >
@@ -993,6 +1013,15 @@ export default function MarketView() {
             <p className="text-center text-[0.6rem] text-foreground/40">
               Amount verified against the buyer&apos;s signed order in this browser. Plus network gas.
             </p>
+            {error && (
+              <p
+                role="alert"
+                className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100"
+              >
+                {error}
+              </p>
+            )}
+
             <button
               type="button"
               disabled={accepting}
@@ -1035,8 +1064,13 @@ export default function MarketView() {
           collection={COLLECTION}
           verifiedTotalWei={sweepTarget.totalWei}
           busy={sweeping}
+          // Surface the failure in the dialog the sweeper is actually looking at.
+          error={error}
           onConfirm={confirmSweep}
-          onCancel={() => setSweepTarget(null)}
+          onCancel={() => {
+            setError(null);
+            setSweepTarget(null);
+          }}
         />
       )}
 

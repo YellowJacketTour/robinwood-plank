@@ -82,6 +82,7 @@ export default function MigrateView() {
         await fn();
         await pos.refresh();
       } catch (e) {
+        console.error(`${label} failed:`, e);
         setError(decodeVaultError(e));
       } finally {
         setBusy(false);
@@ -309,7 +310,10 @@ export default function MigrateView() {
               </div>
             )}
             {error && (
-              <div className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+              <div
+                role="alert"
+                className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200"
+              >
                 {error}
               </div>
             )}

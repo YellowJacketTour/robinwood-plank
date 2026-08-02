@@ -100,6 +100,7 @@ export default function V3SwapPanel({
       setAmount("");
       await onAfterTx();
     } catch (e) {
+      console.error("V3 swap action failed:", e);
       setError(decodeV3Error(e));
     } finally {
       setBusy(false);
@@ -378,7 +379,14 @@ export default function V3SwapPanel({
       )}
 
       {status && <p className="mt-3 rounded-lg border border-gold-500/40 bg-gold-500/10 px-3 py-2 text-[0.75rem] text-cream"><span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-gold-400 align-middle" />{status}</p>}
-      {error && <p className="mt-3 break-words rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-[0.72rem] text-rose-200">{error}</p>}
+      {error && (
+        <p
+          role="alert"
+          className="mt-3 break-words rounded-lg border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-[0.72rem] text-rose-200"
+        >
+          {error}
+        </p>
+      )}
 
       {isConnected ? (
         <button type="button" disabled={ctaDisabled} onClick={submit} className="mt-3 min-h-[48px] w-full rounded-xl bg-gold-500 text-[0.92rem] font-black text-[#261105] disabled:opacity-50">

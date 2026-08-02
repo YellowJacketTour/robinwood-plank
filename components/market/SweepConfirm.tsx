@@ -11,6 +11,8 @@ type Props = {
   /** Sum of the items' signature-derived prices — re-checked again at send. */
   verifiedTotalWei: string;
   busy: boolean;
+  /** Why the last attempt failed, shown inside this dialog — see BuyConfirm. */
+  error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -26,6 +28,7 @@ export default function SweepConfirm({
   collection,
   verifiedTotalWei,
   busy,
+  error,
   onConfirm,
   onCancel,
 }: Props) {
@@ -84,6 +87,15 @@ export default function SweepConfirm({
           Prices verified against each signed order in this browser. A plank sold mid-sweep is
           skipped, not charged. Plus network gas — keep ~{BUY_GAS_RESERVE_ETH} Ξ free.
         </p>
+
+        {error && (
+          <p
+            role="alert"
+            className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100"
+          >
+            {error}
+          </p>
+        )}
 
         <button
           type="button"

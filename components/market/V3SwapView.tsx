@@ -266,6 +266,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
         await fn();
         await refresh();
       } catch (e) {
+        console.error("V3 rescue action failed:", e);
         setRescueMsg(decodeV3Error(e));
       } finally {
         setRescueBusy(false);
@@ -330,7 +331,11 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
                   </div>
                 )}
               </div>
-              {rescueMsg && <p className="mt-2 text-[0.72rem] text-rose-200">{rescueMsg}</p>}
+              {rescueMsg && (
+                <p role="alert" className="mt-2 text-[0.72rem] text-rose-200">
+                  {rescueMsg}
+                </p>
+              )}
             </div>
           )}
 

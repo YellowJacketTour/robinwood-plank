@@ -161,6 +161,7 @@ export default function OfferForm({
       setSuccess("Bid published. The open offers list is refreshing.");
       onSubmitted();
     } catch (e) {
+      console.error("Offer failed:", e);
       setError(e instanceof Error ? e.message : "Offer failed.");
     } finally {
       setBusy(false);
@@ -226,8 +227,12 @@ export default function OfferForm({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setReviewOpen(false)}
-                  className="flex h-10 w-10 items-center justify-center rounded-md border border-line text-foreground/65 hover:text-gold-300"
+                  disabled={busy}
+                  onClick={() => {
+                    setError(null);
+                    setReviewOpen(false);
+                  }}
+                  className="flex h-10 w-10 items-center justify-center rounded-md border border-line text-foreground/65 hover:text-gold-300 disabled:opacity-40"
                   aria-label="Close review"
                 >
                   <X size={14} strokeWidth={2.5} />
@@ -282,23 +287,35 @@ export default function OfferForm({
                 WETH balance, allowance, expiry, and the order payload are checked before
                 signing. The server re-resolves the criteria snapshot before publication.
               </p>
+
+              {error && (
+                <p
+                  role="alert"
+                  className="mt-3 rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100"
+                >
+                  {error}
+                </p>
+              )}
+
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => setReviewOpen(false)}
-                  className="min-h-11 rounded-lg border border-line text-sm text-foreground/75 hover:text-gold-300"
+                  disabled={busy}
+                  onClick={() => {
+                    setError(null);
+                    setReviewOpen(false);
+                  }}
+                  className="min-h-11 rounded-lg border border-line text-sm text-foreground/75 hover:text-gold-300 disabled:opacity-40"
                 >
                   Back
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setReviewOpen(false);
-                    void submit();
-                  }}
-                  className="min-h-11 rounded-lg bg-gold-500 text-sm font-bold text-wood-950 hover:bg-gold-400"
+                  disabled={busy}
+                  onClick={() => void submit()}
+                  className="min-h-11 rounded-lg bg-gold-500 text-sm font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50"
                 >
-                  Continue to wallet
+                  {busy ? "Confirm in wallet…" : "Continue to wallet"}
                 </button>
               </div>
             </div>

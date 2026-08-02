@@ -291,6 +291,7 @@ export function StuckRedeemRelay({
         setStatus("Slot freed (expired request forfeited).");
       }
     } catch (e) {
+      console.error("Stuck redeem relay action failed:", e);
       setError(decodeVaultError(e));
       setStatus(null);
     } finally {
@@ -360,7 +361,11 @@ export function StuckRedeemRelay({
         </details>
       ) : null}
       {status && <p className="text-xs text-emerald-200/90">{status}</p>}
-      {error && <p className="text-xs text-red-300">{error}</p>}
+      {error && (
+        <p className="text-xs text-red-300" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -480,6 +485,7 @@ export function PendingRedeemClaim({
       setIsPending(false);
       setStep(null);
     } catch (e) {
+      console.error("Pending redeem claim failed:", e);
       setError(decodeVaultError(e));
       setStep(null);
     } finally {
@@ -528,7 +534,11 @@ export function PendingRedeemClaim({
       >
         {busy ? step ?? "Working…" : "Retry relay + claim NFT"}
       </button>
-      {error && <p className="text-xs text-red-300">{error}</p>}
+      {error && (
+        <p className="text-xs text-red-300" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -909,6 +919,7 @@ export default function SwapPanel({
       void refreshEthBalance();
       void refreshLpCredit();
     } catch (e) {
+      console.error(`${label} failed:`, e);
       setError(decodeVaultError(e));
     } finally {
       setBusy(false);

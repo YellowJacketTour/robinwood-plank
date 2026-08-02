@@ -214,6 +214,11 @@ export function decodeVaultError(err: unknown): string {
     info?: { error?: { data?: unknown; message?: string } };
     cause?: { data?: unknown; message?: string };
   };
+  const msg = (e?.message || "").toLowerCase();
+  if (msg.includes("user rejected") || msg.includes("user denied") || msg.includes("action_rejected")) {
+    return "You rejected the request in your wallet.";
+  }
+  if (msg.includes("insufficient funds")) return "Not enough ETH to cover the amount plus gas.";
   const candidates = [e?.data, e?.error?.data, e?.info?.error?.data, e?.cause?.data];
   for (const candidate of candidates) {
     if (typeof candidate !== "string" || !candidate.startsWith("0x") || candidate.length < 10) continue;

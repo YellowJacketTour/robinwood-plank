@@ -179,6 +179,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
           setStatuses([{ key: localKey, state: "sent", txHash: hash }]);
           setSelected(new Map());
         } catch (e) {
+          console.error("Send NFT failed:", e);
           setStatuses([
             {
               key: localKey,
@@ -219,6 +220,7 @@ export default function MyNfts({ account, collections, alreadyListed }: Props) {
       }
       refresh();
     } catch (e) {
+      console.error("Batch send failed:", e);
       setError(
         e instanceof Error
           ? e.message
