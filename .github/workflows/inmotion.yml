@@ -896,12 +896,22 @@ jobs:
         run: |
           set -euo pipefail
           port="${INMOTION_PORT:-2222}"
-          # The token goes over stdin, NOT as an argument — arguments are
-          # visible in ps output on the remote host for the life of the call.
-          # The repo/ref are non-secret and passed normally.
-          printf '%s\n%s\n' "$DISPATCH_TOKEN" "${MEMES_VAULT_API:-}" | ssh -i "$HOME/.ssh/inmotion" -p "$port" \
-            "${INMOTION_USER}@${INMOTION_HOST}" \
-            bash -s -- "$INMOTION_APP_DIR" "${DISPATCH_REPO:-}" "${DISPATCH_REF:-}" <<'REMOTE'
+          # TWO ssh calls on purpose, and this is the whole reason:
+          #
+          # The previous version piped the secrets into ssh AND attached the
+          # script as a heredoc. Both target stdin, and the heredoc wins — so
+          # ssh's stdin was the script, `bash -s` read the script from it, and
+          # the script's own `read token` then consumed the NEXT LINES OF
+          # ITSELF. The secrets never left the runner. That is why an install
+          # reported success while the app still saw nothing, and why the
+          # summary line named keys it had not written.
+          #
+          # So: ship the script first, then run it with the secrets as its
+          # stdin. Secrets stay off the argument list (visible in ps) and off
+          # disk; only the script is written, and it is removed after.
+          remote_script="/tmp/plank-install-secrets.$$.sh"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" "cat > $remote_script" <<'REMOTE'
           set -euo pipefail
           app_dir="$1"
           # `${2:-}` not `$2`. ssh does not pass an argv — it joins the command
@@ -911,11 +921,17 @@ jobs:
           # it on $2, before it could install anything.
           repo="${2:-}"
           ref="${3:-}"
-          IFS= read -r token
-          # Second stdin line. `|| memes_key=""` because an unset secret sends
-          # an empty line and `read` returns non-zero on it — under set -e that
-          # would abort the whole install over an optional value.
-          IFS= read -r memes_key || memes_key=""
+          # Named pairs, not anonymous positional lines: with two bare lines a
+          # single missing value silently shifts every later one, which is
+          # exactly the class of failure that hid the bug above.
+          token=""
+          memes_key=""
+          while IFS= read -r line; do
+            case "$line" in
+              DISPATCH_TOKEN=*) token="${line#DISPATCH_TOKEN=}" ;;
+              MEMES_VAULT_API=*) memes_key="${line#MEMES_VAULT_API=}" ;;
+            esac
+          done
           # Neither is required on its own — see the validate step. At least
           # one is guaranteed non-empty by the time we get here.
           test -n "$token" -o -n "$memes_key"
@@ -973,6 +989,16 @@ jobs:
           touch "$app_dir/tmp/restart.txt"
           echo "Installed:${token:+ GITHUB_DISPATCH_TOKEN}${memes_key:+ MEMES_VAULT_API}; backup kept at $backup"
           REMOTE
+
+          # Now run it, with ONLY the secrets on stdin. Named pairs so a
+          # missing value cannot shift the others.
+          {
+            [ -n "${DISPATCH_TOKEN:-}" ] && printf 'DISPATCH_TOKEN=%s\n' "$DISPATCH_TOKEN"
+            [ -n "${MEMES_VAULT_API:-}" ] && printf 'MEMES_VAULT_API=%s\n' "$MEMES_VAULT_API"
+            true
+          } | ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            "bash $remote_script '$INMOTION_APP_DIR' '${DISPATCH_REPO:-}' '${DISPATCH_REF:-}'; rc=\$?; rm -f $remote_script; exit \$rc"
 
       - name: Confirm the app came back up and the card reports configured
         shell: bash
