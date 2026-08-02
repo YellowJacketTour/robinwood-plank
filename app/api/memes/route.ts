@@ -114,6 +114,11 @@ export async function GET(req: Request) {
       page?: number;
       hasMore?: boolean;
       attribution?: { text?: string; url?: string; required?: boolean };
+      // Upstream reports whether OUR key was accepted. Passed through because
+      // a key that is merely present is not a key that works: reads succeed
+      // unauthenticated, so without this a revoked or mistyped key looks
+      // identical to a good one right up until a submission fails.
+      authenticated?: boolean;
     };
 
     // Attribution is flagged `required: true` upstream and is passed through
@@ -123,6 +128,7 @@ export async function GET(req: Request) {
       page: data.page ?? 1,
       hasMore: Boolean(data.hasMore),
       attribution: data.attribution ?? null,
+      authenticated: Boolean(data.authenticated),
     };
     // Never cache an empty success — that is the shape that poisoned the
     // marketplace order book and the vault history before it.
