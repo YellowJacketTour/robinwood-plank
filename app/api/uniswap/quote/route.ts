@@ -1,14 +1,17 @@
 import { CHAIN, CONTRACT_ADDRESS, PERMIT2_ADDRESS } from "@/lib/constants";
+import { INDICATIVE_SWAPPER } from "@/lib/uniswap-types";
 import { isSniperCaptureActive } from "@/lib/boards";
 import { classifyWallet, recordWidgetActivity } from "@/lib/boards-store";
 import {
-  AMM_PROTOCOLS,
   assertAllowedPair,
   assertNoClientFeeOrRouteOverride,
   assertTradeOpen,
   attachPublicFeeMeta,
+  chooseProtocols,
   extractAmountOut,
   getIntegratorFees,
+  isDutchRouting,
+  isGaslessEnabled,
   resolveTokens,
   TradeApiError,
   uniswapFetch,
@@ -30,6 +33,11 @@ type Body = {
   amount?: unknown;
   swapper?: unknown;
   slippageTolerance?: unknown;
+  counterToken?: unknown;
+  /** Opt-in only: request a UniswapX (gasless) route when available. Ignored
+   * entirely unless GASLESS_SWAPS_ENABLED is on server-side — this cannot
+   * unlock anything by itself. */
+  gasless?: unknown;
 };
 
 export async function POST(req: Request) {
@@ -45,7 +53,7 @@ export async function POST(req: Request) {
 
     const direction: SwapDirection = body.direction === "sell" ? "sell" : "buy";
     const amount = typeof body.amount === "string" ? body.amount.trim() : "";
-    const swapper = typeof body.swapper === "string" ? body.swapper.trim() : "";
+    const requestedSwapper = typeof body.swapper === "string" ? body.swapper.trim() : "";
     const slippageTolerance =
       typeof body.slippageTolerance === "number" &&
       body.slippageTolerance > 0 &&
@@ -56,12 +64,19 @@ export async function POST(req: Request) {
     if (!amount || !/^\d+$/.test(amount) || amount === "0") {
       throw new TradeApiError(400, "BAD_AMOUNT", "amount must be a positive integer in base units.");
     }
-    if (!swapper || !/^0x[a-fA-F0-9]{40}$/.test(swapper)) {
+    // Price quotes don't need a wallet: an omitted swapper produces an
+    // INDICATIVE quote priced against the burn address. A present-but-
+    // malformed swapper is still rejected — silent substitution there
+    // would price against a different account than the one that executes.
+    if (requestedSwapper && !/^0x[a-fA-F0-9]{40}$/.test(requestedSwapper)) {
       throw new TradeApiError(400, "BAD_SWAPPER", "swapper must be a valid wallet address.");
     }
+    const indicative = !requestedSwapper;
+    const swapper = indicative ? INDICATIVE_SWAPPER : requestedSwapper;
 
-    // Only block Bad Boards during active death trap (not free community trade)
-    if (isSniperCaptureActive()) {
+    // Only block Bad Boards during active death trap (not free community
+    // trade). Indicative quotes skip this — there is no wallet to classify.
+    if (!indicative && isSniperCaptureActive()) {
       const board = await classifyWallet(swapper);
       if (board.side === "bad_boards" || board.side === "fallen") {
         throw new TradeApiError(
@@ -72,11 +87,38 @@ export async function POST(req: Request) {
       }
     }
 
-    const { tokenIn, tokenOut } = resolveTokens(direction);
-    assertAllowedPair(tokenIn, tokenOut, CHAIN.id);
+    // Optional counter token (the non-PLANK side). Absent → native ETH,
+    // exactly the pre-feature behavior. Validated against the server-side
+    // allowlist — never trusted from the client.
+    const counterRaw = typeof body.counterToken === "string" ? body.counterToken.trim() : "";
+    let counter: { address: string; decimals: number } | undefined;
+    if (counterRaw) {
+      if (!/^0x[a-fA-F0-9]{40}$/.test(counterRaw)) {
+        throw new TradeApiError(400, "BAD_TOKEN", "counterToken must be a token address.");
+      }
+      const { resolveCounterToken } = await import("@/lib/uniswap-tokenlist");
+      const entry = await resolveCounterToken(counterRaw);
+      if (!entry) {
+        throw new TradeApiError(
+          400,
+          "BAD_TOKEN",
+          "That token is not on the allowed list, and does not look like a valid ERC-20 on this chain."
+        );
+      }
+      counter = { address: entry.address, decimals: entry.decimals };
+    }
+
+    const { tokenIn, tokenOut } = resolveTokens(direction, counter);
+    await assertAllowedPair(tokenIn, tokenOut, CHAIN.id);
 
     // Spec-accurate fee payload (empty array when site fee disabled — full output to buyer)
     const integratorFees = getIntegratorFees();
+
+    // Gasless opt-in: client asks, server decides. isGaslessEnabled() is the
+    // real gate — a client sending gasless:true when the flag is off just
+    // gets ordinary AMM protocols back, same as omitting it.
+    const wantsGasless = body.gasless === true;
+    const protocols = chooseProtocols(wantsGasless);
 
     // Checksum-safe lower swapper; BEST_PRICE for execution quality vs Uniswap UI
     const quoteBody: Record<string, unknown> = {
@@ -84,14 +126,17 @@ export async function POST(req: Request) {
       tokenOut,
       tokenInChainId: CHAIN.id,
       tokenOutChainId: CHAIN.id,
+      // EXACT_INPUT only — this is what pins integratorFees to the output
+      // token for every quote here (sells fee in ETH/USDG, buys fee in
+      // PLANK). See the FEE-LEG CONSTRAINT block on getIntegratorFees in
+      // lib/uniswap-server.ts before changing this.
       type: "EXACT_INPUT",
       amount,
       swapper: swapper.toLowerCase(),
       slippageTolerance,
       // Auto permit amount helps sell path match Uniswap.app
       permitAmount: "EXACT",
-      // AMM only → CLASSIC quotes → /swap (not UniswapX /order)
-      protocols: [...AMM_PROTOCOLS],
+      protocols: [...protocols],
       routingPreference: "BEST_PRICE",
     };
     // Only attach fee field when non-empty — some API builds mishandle empty/zero fees
@@ -149,11 +194,16 @@ export async function POST(req: Request) {
     }
 
     const routing = typeof data.routing === "string" ? data.routing : "";
-    if (routing && !["CLASSIC", "WRAP", "UNWRAP"].includes(routing)) {
+    const routingOk =
+      ["CLASSIC", "WRAP", "UNWRAP"].includes(routing) ||
+      (wantsGasless && isGaslessEnabled() && isDutchRouting(routing));
+    if (routing && !routingOk) {
       throw new TradeApiError(
         502,
         "BAD_ROUTING",
-        `Unexpected routing "${routing}". Retry — official widget requires AMM (CLASSIC).`
+        `Unexpected routing "${routing}". Retry — official widget requires AMM (CLASSIC)${
+          isGaslessEnabled() ? " or UniswapX" : ""
+        }.`
       );
     }
 
@@ -180,6 +230,19 @@ export async function POST(req: Request) {
           "Quote approval target is not Permit2 or the $PLANK contract. Blocked for safety."
         );
       }
+    }
+
+    if (indicative) {
+      // Price-only quote: no widget-activity credit, no board classification
+      // (there is no real wallet), and the client must re-quote with the
+      // connected wallet before executing.
+      return publicJson(
+        attachPublicFeeMeta({
+          ...data,
+          amountOut,
+          indicative: true,
+        })
+      );
     }
 
     // Official widget path — keep this wallet off Bad Boards auto-list

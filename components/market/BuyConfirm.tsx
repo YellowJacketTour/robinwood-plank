@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { withImageWidth } from "@/lib/ipfs";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { BUY_GAS_RESERVE_ETH } from "@/lib/constants";
 import type { Listing, MarketCollection } from "@/lib/market/types";
@@ -11,6 +12,11 @@ type Props = {
   /** Price re-derived from the signed order, not the listing metadata. */
   verifiedPriceWei: string;
   busy: boolean;
+  /** Why the last attempt failed, shown inside this dialog. A buyer whose
+   *  purchase fails is looking HERE, not at the page behind the modal — a real
+   *  one hit an error, found nothing on screen, and only saw the reason by
+   *  opening the browser console. */
+  error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -28,10 +34,18 @@ export default function BuyConfirm({
   collection,
   verifiedPriceWei,
   busy,
+  error,
   onConfirm,
   onCancel,
 }: Props) {
-  const image = listing.imageUrl || collection.image;
+  // Ask the proxy for a thumbnail tier, and skip Next's optimizer, exactly as
+  // ListingCard/ItemDetail/MyNfts do. `/api/ipfs/image?…` is a route, not a
+  // static asset: routing it through /_next/image returns 400 ("url" parameter
+  // is not allowed), which rendered a broken thumbnail on the one screen where
+  // a buyer is confirming they want to spend money. Every other Image call site
+  // in the market already pairs withImageWidth with unoptimized; this was the
+  // only one that did not.
+  const image = withImageWidth(listing.imageUrl, 64) || collection.image;
 
   return (
     <div
@@ -61,6 +75,7 @@ export default function BuyConfirm({
               fill
               sizes="64px"
               className="object-cover"
+              unoptimized={Boolean(listing.imageUrl)}
             />
           </div>
           <div className="min-w-0">
@@ -73,7 +88,7 @@ export default function BuyConfirm({
           </div>
         </div>
 
-        <dl className="space-y-1 rounded-lg border border-gold-500/20 bg-wood-900/90 px-3 py-2 text-xs">
+        <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
           <div className="flex justify-between">
             <dt className="text-foreground/60">Price</dt>
             <dd className="tabular-nums text-foreground">
@@ -88,7 +103,7 @@ export default function BuyConfirm({
                 : "None"}
             </dd>
           </div>
-          <div className="flex justify-between border-t border-gold-500/15 pt-1">
+          <div className="flex justify-between border-t border-line pt-1">
             <dt className="font-bold text-foreground">You pay</dt>
             <dd className="font-display tabular-nums text-gold-300">
               {formatTokenAmount(verifiedPriceWei, 18, 6)} Ξ
@@ -99,6 +114,15 @@ export default function BuyConfirm({
         <p className="text-center text-[0.6rem] text-foreground/40">
           Plus network gas. Keep ~{BUY_GAS_RESERVE_ETH} Ξ free.
         </p>
+
+        {error && (
+          <p
+            role="alert"
+            className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100"
+          >
+            {error}
+          </p>
+        )}
 
         <button
           type="button"

@@ -1,9 +1,13 @@
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 import { fetchNftMetadata } from "@/lib/ipfs";
 import type { NftAttribute } from "@/lib/ipfs";
 import { fetchTokenInstances } from "@/lib/market/blockscout";
 import { robinwoodTokenUri } from "@/lib/market/token-image";
 import type { MarketCollection } from "@/lib/market/types";
+import { getRaritySnapshot } from "@/lib/market/rarity-snapshot";
 import {
   resolveCriteriaTokenIds,
   type CriteriaClause,
@@ -17,7 +21,8 @@ import {
  *  - fire-and-forget background scans (isolate freezes after the response)
  *
  * So this mirrors rarity-snapshot: Blockscout REST + IPFS backfill, durable
- * Upstash KV, in-request build with inflight dedupe.
+ * Durable storage (PostgreSQL), in-request build with inflight
+ * dedupe.
  *
  * FAIL CLOSED: trait bids only when complete (every token successfully
  * attributed, failed empty). Partial indexes never leave the API as traits.
@@ -58,7 +63,7 @@ function g(): Record<string, BuildState> {
 }
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
 }
 
 function kvKey(slug: string): string {
@@ -320,7 +325,19 @@ export async function getVerifiedCriteriaTokenIds(
 ): Promise<{ tokenIds: string[] } | null> {
   const { index, complete } = await getTraitIndex(collection);
   if (!index || !complete || clauses.length === 0) return null;
-  const tokenIds = resolveCriteriaTokenIds(index.traits, clauses);
+  let rankings: Record<string, number> | null = null;
+  if (clauses.some((clause) => clause.kind === "rank")) {
+    try {
+      const rarity = await getRaritySnapshot();
+      rankings = {};
+      for (const [tokenId, item] of rarity.byTokenId) {
+        rankings[String(tokenId)] = item.rank;
+      }
+    } catch {
+      return null;
+    }
+  }
+  const tokenIds = resolveCriteriaTokenIds(index.traits, clauses, rankings);
   if (tokenIds.length === 0) return null;
   return { tokenIds };
 }

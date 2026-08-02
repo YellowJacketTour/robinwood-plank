@@ -16,7 +16,8 @@ export type TraitPair = { traitType: string; value: string };
 
 export type CriteriaClause =
   | { kind: "trait"; traitType: string; value: string }
-  | { kind: "rarity"; tier: RarityTier };
+  | { kind: "rarity"; tier: RarityTier }
+  | { kind: "rank"; maxRank: number };
 
 /** Minimal index shape (client response or server TraitIndex.traits). */
 export type TraitMap = Record<string, Record<string, string[]>>;
@@ -69,9 +70,19 @@ export function tokenIdsForRarityTier(traits: TraitMap, tier: RarityTier): strin
   return unionTokenIdLists(values.map((v) => traits["Background"]?.[v] ?? []));
 }
 
-export function tokenIdsForClause(traits: TraitMap, clause: CriteriaClause): string[] {
+export function tokenIdsForClause(
+  traits: TraitMap,
+  clause: CriteriaClause,
+  rankings?: Readonly<Record<string, number>> | null
+): string[] {
   if (clause.kind === "rarity") {
     return tokenIdsForRarityTier(traits, clause.tier);
+  }
+  if (clause.kind === "rank") {
+    if (!rankings) return [];
+    return Object.entries(rankings)
+      .filter(([, rank]) => Number.isInteger(rank) && rank > 0 && rank <= clause.maxRank)
+      .map(([tokenId]) => tokenId);
   }
   return traits[clause.traitType]?.[clause.value] ?? [];
 }
@@ -82,10 +93,11 @@ export function tokenIdsForClause(traits: TraitMap, clause: CriteriaClause): str
  */
 export function resolveCriteriaTokenIds(
   traits: TraitMap | null | undefined,
-  clauses: readonly CriteriaClause[]
+  clauses: readonly CriteriaClause[],
+  rankings?: Readonly<Record<string, number>> | null
 ): string[] {
   if (!traits || clauses.length === 0) return [];
-  const lists = clauses.map((c) => tokenIdsForClause(traits, c));
+  const lists = clauses.map((c) => tokenIdsForClause(traits, c, rankings));
   if (lists.some((l) => l.length === 0)) return [];
   return intersectTokenIdLists(lists);
 }
@@ -95,7 +107,11 @@ export function formatCriteriaLabel(clauses: readonly CriteriaClause[]): string 
   if (clauses.length === 0) return "any plank";
   return clauses
     .map((c) =>
-      c.kind === "rarity" ? `Rarity: ${c.tier}` : `${c.traitType}: ${c.value}`
+      c.kind === "rarity"
+        ? `Rarity: ${c.tier}`
+        : c.kind === "rank"
+          ? `Rank: top ${c.maxRank}`
+          : `${c.traitType}: ${c.value}`
     )
     .join(" · ");
 }
@@ -112,9 +128,12 @@ export function clausesToTraitLabels(clauses: readonly CriteriaClause[]): TraitP
   for (const c of clauses) {
     if (c.kind === "trait") {
       out.push({ traitType: c.traitType, value: c.value });
-    } else {
+    } else if (c.kind === "rarity") {
       // Display-only label; server re-resolves via rarityTier field.
       out.push({ traitType: "Rarity", value: c.tier });
+    } else {
+      // Display-only label; server re-resolves via rankMax field.
+      out.push({ traitType: "Rank", value: `Top ${c.maxRank}` });
     }
   }
   return out;
@@ -133,7 +152,11 @@ export function parseCriteriaFromBody(input: {
     if (typeof input.criteria !== "object") {
       return { clauses: [], error: "Malformed criteria." };
     }
-    const c = input.criteria as { traits?: unknown; rarityTier?: unknown };
+    const c = input.criteria as {
+      traits?: unknown;
+      rarityTier?: unknown;
+      rankMax?: unknown;
+    };
     if (c.traits !== undefined) {
       if (!Array.isArray(c.traits)) return { clauses: [], error: "Malformed criteria.traits." };
       for (const t of c.traits) {
@@ -145,6 +168,13 @@ export function parseCriteriaFromBody(input: {
     if (c.rarityTier !== undefined && c.rarityTier !== null && c.rarityTier !== "") {
       if (!isRarityTier(c.rarityTier)) return { clauses: [], error: "Unknown rarity tier." };
       clauses.push({ kind: "rarity", tier: c.rarityTier });
+    }
+    if (c.rankMax !== undefined && c.rankMax !== null && c.rankMax !== "") {
+      const maxRank = Number(c.rankMax);
+      if (!Number.isInteger(maxRank) || maxRank < 1 || maxRank > 1542) {
+        return { clauses: [], error: "Rank must be between 1 and 1542." };
+      }
+      clauses.push({ kind: "rank", maxRank });
     }
   }
 
@@ -184,6 +214,9 @@ export function parseCriteriaFromBody(input: {
   // One rarity max
   if (clauses.filter((c) => c.kind === "rarity").length > 1) {
     return { clauses: [], error: "Only one rarity tier per bid." };
+  }
+  if (clauses.filter((c) => c.kind === "rank").length > 1) {
+    return { clauses: [], error: "Only one rank threshold per bid." };
   }
 
   // One value per trait type (AND of two Bases is always empty)

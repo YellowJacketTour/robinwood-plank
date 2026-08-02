@@ -13,6 +13,8 @@ export type MarketFilters = {
   /** "all" or one of the site's shared rarity tiers (lib/rarity.ts) — the
    * SAME six-tier scale shown everywhere else, never a second scheme. */
   tier: RarityTier | "all";
+  /** Desktop/mobile sidebar can combine tiers with OR semantics. */
+  tiers?: RarityTier[];
 };
 
 export const EMPTY_FILTERS: MarketFilters = { query: "", minEth: "", maxEth: "", tier: "all" };
@@ -24,11 +26,139 @@ type Props = {
   resultCount: number;
   /** Omit to hide the tier filter entirely (e.g. rarity data not loaded yet). */
   rarityAvailable?: boolean;
+  orientation?: "inline" | "sidebar";
+  /** Listed count per tier — shown beside each rarity checkbox (mockup). */
+  tierCounts?: Partial<Record<RarityTier, number>>;
 };
 
-export default function FilterBar({ filters, onChange, resultCount, rarityAvailable }: Props) {
+export default function FilterBar({
+  filters,
+  onChange,
+  resultCount,
+  rarityAvailable,
+  orientation = "inline",
+  tierCounts,
+}: Props) {
   const dirty =
-    filters.query !== "" || filters.minEth !== "" || filters.maxEth !== "" || filters.tier !== "all";
+    filters.query !== "" ||
+    filters.minEth !== "" ||
+    filters.maxEth !== "" ||
+    filters.tier !== "all" ||
+    Boolean(filters.tiers?.length);
+
+  if (orientation === "sidebar") {
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[0.68rem] font-black uppercase tracking-wider text-foreground/60">
+            {resultCount} items
+          </span>
+          <button
+            type="button"
+            onClick={() => onChange(EMPTY_FILTERS)}
+            disabled={!dirty}
+            className="min-h-9 rounded-md border border-line px-3 text-xs text-gold-300 transition disabled:cursor-not-allowed disabled:opacity-35"
+          >
+            Clear all
+          </button>
+        </div>
+        <div>
+          <label
+            htmlFor="market-token-filter"
+            className="mb-2 block text-[0.62rem] font-black uppercase tracking-wider text-gold-300"
+          >
+            Find a plank
+          </label>
+          <input
+            id="market-token-filter"
+            type="search"
+            inputMode="numeric"
+            value={filters.query}
+            onChange={(e) => onChange({ ...filters, query: e.target.value })}
+            placeholder="Token ID"
+            className="min-h-11 w-full rounded-md border border-line bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
+          />
+        </div>
+
+        <fieldset>
+          <legend className="mb-2 text-[0.62rem] font-black uppercase tracking-wider text-gold-300">
+            Price in ETH
+          </legend>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              type="text"
+              inputMode="decimal"
+              value={filters.minEth}
+              onChange={(e) => onChange({ ...filters, minEth: e.target.value })}
+              placeholder="Min"
+              aria-label="Minimum price in ETH"
+              className="min-h-11 min-w-0 rounded-md border border-line bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
+            />
+            <input
+              type="text"
+              inputMode="decimal"
+              value={filters.maxEth}
+              onChange={(e) => onChange({ ...filters, maxEth: e.target.value })}
+              placeholder="Max"
+              aria-label="Maximum price in ETH"
+              className="min-h-11 min-w-0 rounded-md border border-line bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
+            />
+          </div>
+        </fieldset>
+
+        {rarityAvailable && (
+          <fieldset>
+            <legend className="mb-2 text-[0.62rem] font-black uppercase tracking-wider text-gold-300">
+              Rarity
+            </legend>
+            <div className="space-y-1">
+              {(["all", ...TIER_ORDER] as Array<MarketFilters["tier"]>).map((tier) => (
+                <label
+                  key={tier}
+                  className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-xs text-foreground/75 hover:bg-gold-500/10"
+                >
+                  <input
+                    type="checkbox"
+                    value={tier}
+                    checked={
+                      tier === "all"
+                        ? !filters.tiers?.length && filters.tier === "all"
+                        : (filters.tiers ?? (filters.tier === "all" ? [] : [filters.tier])).includes(
+                            tier
+                          )
+                    }
+                    onChange={() => {
+                      if (tier === "all") {
+                        onChange({ ...filters, tier: "all", tiers: [] });
+                        return;
+                      }
+                      const current =
+                        filters.tiers ?? (filters.tier === "all" ? [] : [filters.tier]);
+                      const next = current.includes(tier)
+                        ? current.filter((selected) => selected !== tier)
+                        : [...current, tier];
+                      onChange({
+                        ...filters,
+                        tiers: next,
+                        tier: next.length === 1 ? next[0]! : "all",
+                      });
+                    }}
+                    className="accent-[#d9a441]"
+                  />
+                  <span className="flex-1">{tier === "all" ? "All rarities" : tier}</span>
+                  {tier !== "all" && tierCounts?.[tier] !== undefined && (
+                    <span className="rounded-full bg-foreground/10 px-1.5 py-0.5 text-[0.58rem] tabular-nums text-foreground/55">
+                      {tierCounts[tier]}
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-1 flex-wrap items-center gap-1.5">
@@ -39,7 +169,7 @@ export default function FilterBar({ filters, onChange, resultCount, rarityAvaila
         onChange={(e) => onChange({ ...filters, query: e.target.value })}
         placeholder="Token ID"
         aria-label="Search by token ID"
-        className="min-h-9 min-w-0 flex-1 rounded-md border border-gold-500/30 bg-wood-950 px-2.5 text-xs text-foreground placeholder:text-foreground/30 sm:max-w-[10rem]"
+        className="min-h-9 min-w-0 flex-1 rounded-md border border-line bg-wood-950 px-2.5 text-xs text-foreground placeholder:text-foreground/30 sm:max-w-[10rem]"
       />
       <input
         type="text"
@@ -48,7 +178,7 @@ export default function FilterBar({ filters, onChange, resultCount, rarityAvaila
         onChange={(e) => onChange({ ...filters, minEth: e.target.value })}
         placeholder="Min Ξ"
         aria-label="Minimum price in ETH"
-        className="min-h-9 w-[4.5rem] rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground placeholder:text-foreground/30"
+        className="min-h-9 w-[4.5rem] rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground placeholder:text-foreground/30"
       />
       <input
         type="text"
@@ -57,15 +187,22 @@ export default function FilterBar({ filters, onChange, resultCount, rarityAvaila
         onChange={(e) => onChange({ ...filters, maxEth: e.target.value })}
         placeholder="Max Ξ"
         aria-label="Maximum price in ETH"
-        className="min-h-9 w-[4.5rem] rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground placeholder:text-foreground/30"
+        className="min-h-9 w-[4.5rem] rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground placeholder:text-foreground/30"
       />
       {rarityAvailable && (
         <label className="flex items-center gap-1.5">
           <span className="sr-only">Filter by rarity tier</span>
           <select
             value={filters.tier}
-            onChange={(e) => onChange({ ...filters, tier: e.target.value as MarketFilters["tier"] })}
-            className="min-h-9 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
+            onChange={(e) => {
+              const tier = e.target.value as MarketFilters["tier"];
+              onChange({
+                ...filters,
+                tier,
+                tiers: tier === "all" ? [] : [tier],
+              });
+            }}
+            className="min-h-9 rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground"
           >
             <option value="all">Any rarity</option>
             {TIER_ORDER.map((t) => (
@@ -80,7 +217,7 @@ export default function FilterBar({ filters, onChange, resultCount, rarityAvaila
         <button
           type="button"
           onClick={() => onChange(EMPTY_FILTERS)}
-          className="min-h-9 rounded-md border border-gold-500/30 px-2.5 text-xs text-foreground/60 transition hover:border-gold-400"
+          className="min-h-9 rounded-md border border-line px-2.5 text-xs text-foreground/60 transition hover:border-gold-400"
         >
           Clear
         </button>
@@ -119,11 +256,17 @@ export function applyFilters<T extends { tokenId?: string; priceWei: string }>(
     }
     if (min !== null && price < min) return false;
     if (max !== null && price > max) return false;
-    if (filters.tier !== "all") {
+    const selectedTiers =
+      filters.tiers && filters.tiers.length > 0
+        ? filters.tiers
+        : filters.tier === "all"
+          ? []
+          : [filters.tier];
+    if (selectedTiers.length > 0) {
       // A collection-wide item (no tokenId) has no rarity to match — excluded
       // under any specific tier filter, same as it would be under a search.
       const r = item.tokenId ? rarityMap?.get(item.tokenId) : undefined;
-      if (!r || r.tier !== filters.tier) return false;
+      if (!r || !selectedTiers.includes(r.tier)) return false;
     }
     return true;
   });

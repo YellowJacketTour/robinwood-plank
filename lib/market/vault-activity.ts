@@ -1,12 +1,18 @@
 import { Interface } from "ethers";
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 import { MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } from "@/lib/constants";
 import vaultAbi from "@/lib/market/vault-abi.json";
+import vaultV3Abi from "@/lib/market/vault-v3-abi.json";
 import { BLOCKSCOUT_BASE, fetchAddressLogs } from "@/lib/market/blockscout";
-import { ethBlockNumber, ethGetLogs, rpcCall } from "@/lib/market/fetch-rpc";
+import { ethBlockNumberDisplay, ethGetLogsDisplay, rpcCall } from "@/lib/market/fetch-rpc";
+import { SERVER_DISPLAY_RPC_URLS } from "@/lib/server/rpc-urls";
 import { logScanBudget } from "@/lib/market/rpc-budget";
 
 const IFACE = new Interface(vaultAbi);
+const V3_IFACE = new Interface(vaultV3Abi);
 
 export type VaultTradeKind =
   | "buy"
@@ -30,6 +36,20 @@ export type VaultTradeEvent = {
   vaultAddress?: string;
 };
 
+/**
+ * Topic hashes, keyed by event, across BOTH pool generations.
+ *
+ * The trade events are byte-identical between the two ABIs — Bought, Sold,
+ * Deposited and Redeemed all hash the same — so one entry covers every pool and
+ * the ticker never missed those.
+ *
+ * The liquidity events are not. The current pool renamed
+ * LiquidityContributed to LiquidityAdded, and its LiquidityRemoved carries an
+ * extra `lpBurned` argument, which changes the signature and therefore the
+ * hash. Decoding only the legacy hashes meant every add/remove on the current
+ * pool fell through the filter silently — no error, just an LP history that
+ * looked empty. Keep both.
+ */
 const TOPICS = {
   Bought: IFACE.getEvent("Bought")!.topicHash.toLowerCase(),
   Sold: IFACE.getEvent("Sold")!.topicHash.toLowerCase(),
@@ -37,15 +57,41 @@ const TOPICS = {
   Redeemed: IFACE.getEvent("Redeemed")!.topicHash.toLowerCase(),
   LiquidityContributed: IFACE.getEvent("LiquidityContributed")!.topicHash.toLowerCase(),
   LiquidityRemoved: IFACE.getEvent("LiquidityRemoved")!.topicHash.toLowerCase(),
+  /** Current generation — proportional LP. */
+  LiquidityAddedV3: V3_IFACE.getEvent("LiquidityAdded")!.topicHash.toLowerCase(),
+  LiquidityRemovedV3: V3_IFACE.getEvent("LiquidityRemoved")!.topicHash.toLowerCase(),
 };
 
-const VAULT_TOPIC_SET = new Set(Object.values(TOPICS));
+/** Exported so a test can prove both generations' events are covered — a
+ *  missing topic here fails silently as an empty feed, never as an error. */
+export const VAULT_TOPIC_SET = new Set(Object.values(TOPICS));
 /** v3 = dual-vault + Add/Remove LP (LiquidityContributed / LiquidityRemoved). */
 const KV_KEY = "plank:market:vault-activity-v3";
-const KV_TTL = 6 * 60 * 60;
+const STORED_HISTORY_LIMIT = 500;
+
+/**
+ * Highest block already covered by an eth_getLogs scan, per vault. Without
+ * this every refresh re-walked the same 12 x 50k-block windows from the chain
+ * head backwards — a fixed 12 eth_getLogs per vault per refresh, forever, on a
+ * vault that had not emitted an event in weeks. Recording where the last scan
+ * finished turns the steady state into a single forward window.
+ */
+const SCAN_HEAD_KV_KEY = "plank:market:vault-scan-head-v1";
+
+/**
+ * Both the SSE stream (getVaultActivity(40)) and estimateApr inside
+ * getVaultStats (getVaultActivity(80)) run on every stream refresh, in the same
+ * Promise.all. They were each paying for a full multi-source rebuild. Scanning
+ * once at a shared cap and slicing serves both from one pass.
+ */
+const MEMO_MS = 30_000;
+const MEMO_MIN_CAP = 100;
+
+let memo: { at: number; full: boolean; cap: number; events: VaultTradeEvent[] } | null = null;
+let memoInflight: { full: boolean; cap: number; promise: Promise<VaultTradeEvent[]> } | null = null;
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
 }
 
 function normalizeTopics(raw: unknown): string[] {
@@ -152,6 +198,32 @@ function decodeLog(
         tokenId: null,
       };
     }
+    // Current generation. Same shape to the UI as the legacy pair — the extra
+    // lpMinted/lpBurned argument is proportional-LP bookkeeping the trade
+    // ticker has no column for, so it is decoded and dropped rather than
+    // widening VaultTradeEvent for one generation.
+    if (topic0 === TOPICS.LiquidityAddedV3) {
+      const parsed = V3_IFACE.decodeEventLog("LiquidityAdded", data, topics);
+      return {
+        ...base,
+        kind: "add_lp",
+        address: String(parsed.from),
+        ethWei: parsed.ethIn.toString(),
+        sharesWei: parsed.sharesIn.toString(),
+        tokenId: null,
+      };
+    }
+    if (topic0 === TOPICS.LiquidityRemovedV3) {
+      const parsed = V3_IFACE.decodeEventLog("LiquidityRemoved", data, topics);
+      return {
+        ...base,
+        kind: "remove_lp",
+        address: String(parsed.to),
+        ethWei: parsed.ethOut.toString(),
+        sharesWei: parsed.sharesOut.toString(),
+        tokenId: null,
+      };
+    }
   } catch {
     return null;
   }
@@ -168,7 +240,9 @@ function dedupeKey(e: VaultTradeEvent): string {
   return `${(e.vaultAddress || "").toLowerCase()}:${e.txHash}:${e.logIndex}:${e.kind}`;
 }
 
-function mergeEvents(...lists: VaultTradeEvent[][]): VaultTradeEvent[] {
+export function mergeVaultActivityHistory(
+  ...lists: VaultTradeEvent[][]
+): VaultTradeEvent[] {
   const map = new Map<string, VaultTradeEvent>();
   for (const list of lists) {
     for (const e of list) {
@@ -194,9 +268,38 @@ async function readKv(): Promise<VaultTradeEvent[]> {
 async function writeKv(events: VaultTradeEvent[]): Promise<void> {
   if (!hasKv() || events.length === 0) return;
   try {
-    // Cap stored history
-    const trimmed = events.slice(0, 500);
-    await kv.set(KV_KEY, trimmed, { ex: KV_TTL });
+    // Keep the last known-good history indefinitely. A current short scan
+    // merges new events into this lineage; upstream outages must not erase
+    // the only fast copy or force a full-chain cold walk.
+    const trimmed = events.slice(0, STORED_HISTORY_LIMIT);
+    await kv.set(KV_KEY, trimmed);
+  } catch {
+    /* */
+  }
+}
+
+async function readScanHeads(): Promise<Record<string, number>> {
+  if (!hasKv()) return {};
+  try {
+    const v = await kv.get<Record<string, number>>(SCAN_HEAD_KV_KEY);
+    if (v && typeof v === "object") return v;
+  } catch {
+    /* */
+  }
+  return {};
+}
+
+/**
+ * Only ever advances. A lower value would re-scan blocks we already have, and
+ * a concurrent Passenger worker holding a staler head must not walk it back.
+ */
+async function writeScanHead(vault: string, block: number): Promise<void> {
+  if (!hasKv() || !Number.isFinite(block) || block <= 0) return;
+  try {
+    const heads = await readScanHeads();
+    const key = vault.toLowerCase();
+    if ((heads[key] ?? 0) >= block) return;
+    await kv.set(SCAN_HEAD_KV_KEY, { ...heads, [key]: block });
   } catch {
     /* */
   }
@@ -332,15 +435,12 @@ async function fromEthRpc(
   limit: number,
   full: boolean
 ): Promise<VaultTradeEvent[]> {
-  const topics = [
-    TOPICS.Bought,
-    TOPICS.Sold,
-    TOPICS.Deposited,
-    TOPICS.Redeemed,
-    TOPICS.LiquidityContributed,
-    TOPICS.LiquidityRemoved,
-  ];
-  const latest = await ethBlockNumber();
+  // Derived from the same set the decoder filters on, so a topic can never be
+  // decodable but unqueried (or the reverse). Listing them by hand here is what
+  // let the current pool's renamed liquidity events go missing: they were added
+  // to one list and not the other.
+  const topics = [...VAULT_TOPIC_SET];
+  const latest = await ethBlockNumberDisplay();
   const { chunkBlocks, maxChunks } = logScanBudget();
   const chunks = full ? Math.max(maxChunks, 15) : maxChunks;
   const rawLogs: Array<{
@@ -350,27 +450,64 @@ async function fromEthRpc(
     transactionHash: string;
     logIndex: string;
   }> = [];
-  let toBlock = latest;
-  for (
-    let chunk = 0;
-    chunk < chunks && toBlock >= 0 && (full || rawLogs.length < limit * 3);
-    chunk += 1
-  ) {
-    const fromBlock = Math.max(0, toBlock - chunkBlocks);
-    try {
-      const found = await ethGetLogs({
-        address: vault,
-        topics: [topics],
-        fromBlock: "0x" + fromBlock.toString(16),
-        toBlock: "0x" + toBlock.toString(16),
-      });
-      rawLogs.push(...found);
-    } catch {
-      break;
+
+  const getLogs = (fromBlock: number, toBlock: number) =>
+    ethGetLogsDisplay({
+      address: vault,
+      topics: [topics],
+      fromBlock: "0x" + fromBlock.toString(16),
+      toBlock: "0x" + toBlock.toString(16),
+    });
+
+  // A full/backfill request always re-walks from the head; the incremental
+  // path is only for the routine live refresh.
+  const head = full ? 0 : (await readScanHeads())[vault.toLowerCase()] ?? 0;
+
+  if (head > 0 && head < latest) {
+    // Steady state: one forward window covering only new blocks. Advance the
+    // stored head to the last block actually covered, so a partial scan (chain
+    // moved further than maxChunks allows, or a window threw) resumes rather
+    // than silently skipping the gap.
+    let from = head + 1;
+    let scannedTo = head;
+    for (let chunk = 0; chunk < maxChunks && from <= latest; chunk += 1) {
+      const to = Math.min(latest, from + chunkBlocks - 1);
+      try {
+        rawLogs.push(...(await getLogs(from, to)));
+      } catch {
+        break;
+      }
+      scannedTo = to;
+      from = to + 1;
     }
-    if (fromBlock === 0) break;
-    toBlock = fromBlock - 1;
+    // Awaited, not fire-and-forget: a short-lived process (the refresh cron)
+    // can exit before a floating write lands, which would silently throw away
+    // the head and make the next run repeat the full cold walk.
+    if (scannedTo > head) await writeScanHead(vault, scannedTo);
+  } else {
+    // Cold start (or explicit full backfill): walk backwards from the head.
+    let toBlock = latest;
+    let completed = true;
+    for (
+      let chunk = 0;
+      chunk < chunks && toBlock >= 0 && (full || rawLogs.length < limit * 3);
+      chunk += 1
+    ) {
+      const fromBlock = Math.max(0, toBlock - chunkBlocks);
+      try {
+        rawLogs.push(...(await getLogs(fromBlock, toBlock)));
+      } catch {
+        completed = false;
+        break;
+      }
+      if (fromBlock === 0) break;
+      toBlock = fromBlock - 1;
+    }
+    // Only claim coverage up to `latest` if no window failed — otherwise the
+    // next run would skip the blocks this one never actually read.
+    if (completed) await writeScanHead(vault, latest);
   }
+
   if (rawLogs.length === 0) return [];
 
   rawLogs.sort((a, b) => {
@@ -387,6 +524,7 @@ async function fromEthRpc(
       try {
         const block = await rpcCall<{ timestamp?: string }>("eth_getBlockByNumber", [bn, false], {
           timeoutMs: 4_000,
+          urls: SERVER_DISPLAY_RPC_URLS,
         });
         if (block?.timestamp) blockTimeByNumber.set(bn, Number(BigInt(block.timestamp)));
       } catch {
@@ -426,11 +564,11 @@ async function scanVault(
   } catch {
     /* */
   }
-  let merged = mergeEvents(...parts);
+  let merged = mergeVaultActivityHistory(...parts);
   if (merged.length < Math.min(cap, 25) || full) {
     try {
       parts.push(await fromBlockscoutTxMethods(vault, full ? cap : 30));
-      merged = mergeEvents(...parts);
+      merged = mergeVaultActivityHistory(...parts);
     } catch {
       /* */
     }
@@ -438,7 +576,7 @@ async function scanVault(
   if (merged.length < Math.min(cap, 15) || full) {
     try {
       parts.push(await fromEthRpc(vault, cap, full));
-      merged = mergeEvents(...parts);
+      merged = mergeVaultActivityHistory(...parts);
     } catch {
       /* */
     }
@@ -457,6 +595,40 @@ export async function getVaultActivity(
   if (!MARKET_VAULT_ADDRESS && MARKET_VAULT_ADDRESSES.length === 0) return [];
   const full = opts?.full ?? false;
   const cap = full ? 400 : limit;
+
+  // Scan at a shared cap so the stream's limit=40 and estimateApr's limit=80
+  // resolve to the same pass instead of two independent rebuilds.
+  const scanCap = full ? 400 : Math.max(cap, MEMO_MIN_CAP);
+
+  if (memo && memo.full === full && memo.cap >= cap && Date.now() - memo.at < MEMO_MS) {
+    return memo.events.slice(0, cap);
+  }
+  if (memoInflight && memoInflight.full === full && memoInflight.cap >= cap) {
+    return (await memoInflight.promise).slice(0, cap);
+  }
+
+  const run = buildVaultActivity(scanCap, full).then(
+    (events) => {
+      memo = { at: Date.now(), full, cap: scanCap, events };
+      return events;
+    },
+    (err) => {
+      // Don't cache a failure — the next caller should be free to retry.
+      throw err;
+    }
+  );
+  memoInflight = { full, cap: scanCap, promise: run };
+  try {
+    return (await run).slice(0, cap);
+  } finally {
+    if (memoInflight?.promise === run) memoInflight = null;
+  }
+}
+
+async function buildVaultActivity(
+  cap: number,
+  full: boolean
+): Promise<VaultTradeEvent[]> {
   const vaults =
     MARKET_VAULT_ADDRESSES.length > 0
       ? [...MARKET_VAULT_ADDRESSES]
@@ -465,6 +637,15 @@ export async function getVaultActivity(
         : [];
 
   const kvEvents = await readKv();
+  // Full lineage is a read-heavy chart/history request. Once PostgreSQL has a
+  // verified lineage, serve it immediately instead of repeating the expensive
+  // multi-source full-chain walk in every Passenger process. The normal
+  // activity request still performs a bounded live scan and merges new events
+  // into this durable history.
+  if (full && kvEvents.length > 0) {
+    return kvEvents.slice(0, cap);
+  }
+
   // Per-vault budget so dual mode still has room for V1 redeems.
   const perVault = Math.max(20, Math.ceil(cap / Math.max(1, vaults.length)));
 
@@ -472,7 +653,7 @@ export async function getVaultActivity(
     vaults.map((v) => scanVault(v, perVault, full).catch(() => [] as VaultTradeEvent[]))
   );
 
-  let merged = mergeEvents(kvEvents, ...scanned);
+  const merged = mergeVaultActivityHistory(kvEvents, ...scanned);
 
   if (merged.length === 0 && kvEvents.length > 0) {
     return kvEvents.slice(0, cap);
@@ -481,8 +662,15 @@ export async function getVaultActivity(
   const out = merged.slice(0, cap);
   const headKv = kvEvents[0]?.blockNumber ?? 0;
   const headOut = out[0]?.blockNumber ?? 0;
-  if (out.length > 0 && (out.length > kvEvents.length || headOut > headKv)) {
-    void writeKv(out);
+  const durableHistory = merged.slice(0, STORED_HISTORY_LIMIT);
+  if (
+    durableHistory.length > 0 &&
+    (durableHistory.length > kvEvents.length || headOut > headKv)
+  ) {
+    // Persist the full merged lineage, not the caller's short response. The
+    // old behavior truncated a 400-event history back to 80 whenever a new
+    // event arrived through the normal live endpoint.
+    void writeKv(durableHistory);
   }
   return out;
 }

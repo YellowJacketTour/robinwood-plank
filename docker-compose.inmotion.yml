@@ -1,0 +1,155 @@
+name: plank-love
+
+services:
+  app:
+    image: ${PLANK_IMAGE:-plank-love-inmotion:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DEPLOYMENT_VERSION: ${DEPLOYMENT_VERSION:-local}
+        NEXT_PUBLIC_MARKET_ENABLED: ${NEXT_PUBLIC_MARKET_ENABLED:-false}
+        NEXT_PUBLIC_MARKET_VAULT_ADDRESS: ${NEXT_PUBLIC_MARKET_VAULT_ADDRESS:-}
+        NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS: ${NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS:-}
+        NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES: ${NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES:-}
+        NEXT_PUBLIC_MINT_START_AT: ${NEXT_PUBLIC_MINT_START_AT:-}
+        NEXT_PUBLIC_ROBINHOOD_RPC_URL: ${NEXT_PUBLIC_ROBINHOOD_RPC_URL:-}
+        NEXT_PUBLIC_RULES_RELAXED: ${NEXT_PUBLIC_RULES_RELAXED:-false}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://plank.tanggang.life}
+        NEXT_PUBLIC_TRADE_OPENS_AT: ${NEXT_PUBLIC_TRADE_OPENS_AT:-}
+        NEXT_PUBLIC_TRADE_PAUSED: ${NEXT_PUBLIC_TRADE_PAUSED:-false}
+        NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID:-}
+    init: true
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DURABLE_KV_BACKEND: postgres
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-plank}
+      PGUSER: ${POSTGRES_USER:-plankapp}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Docker env file}
+      PGPOOL_MAX: ${PGPOOL_MAX:-4}
+      UNISWAP_API_KEY: ${UNISWAP_API_KEY:-}
+      RELAYER_PRIVATE_KEY: ${RELAYER_PRIVATE_KEY:-}
+      CRON_SECRET: ${CRON_SECRET:-}
+      RPC_URL: ${RPC_URL:-https://rpc.mainnet.chain.robinhood.com}
+      BEACON_ADDRESS: ${BEACON_ADDRESS:-0x87d584df130FED0Fe540954eD48CE2691A18D619}
+      AIRDROP_TOTAL_SUPPLY: ${AIRDROP_TOTAL_SUPPLY:-}
+      AIRDROP_POOL_TOKENS: ${AIRDROP_POOL_TOKENS:-}
+      AIRDROP_PERCENT_OF_SUPPLY: ${AIRDROP_PERCENT_OF_SUPPLY:-}
+      AIRDROP_EXTRA: ${AIRDROP_EXTRA:-}
+      GOOD_WOOD_EXTRA: ${GOOD_WOOD_EXTRA:-}
+    ports:
+      - "${PLANK_BIND_ADDRESS:-127.0.0.1}:${PLANK_APP_PORT:-3000}:3000"
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    volumes:
+      - next_cache:/app/.next/cache
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    networks:
+      - frontend
+      - data
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-plank}
+      POSTGRES_USER: ${POSTGRES_USER:-plankapp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Docker env file}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    ports:
+      - "127.0.0.1:${PLANK_DB_PORT:-54329}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - frontend
+      - data
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  db-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tools
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-plank}
+      PGUSER: ${POSTGRES_USER:-plankapp}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Docker env file}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - node
+      - scripts/migrate-postgres.mjs
+    networks:
+      - data
+
+  # Rebuilds the market data snapshots (sales catalog, vault activity, and on
+  # --full the rarity/trait/collection indexes). Mirrors the production cron;
+  # see §13 of docs/INMOTION_DEPLOYMENT.md.
+  market-refresh:
+    profiles:
+      - tools
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tools
+    environment:
+      DURABLE_KV_BACKEND: postgres
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-plank}
+      PGUSER: ${POSTGRES_USER:-plankapp}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the Docker env file}
+      RPC_URL: ${RPC_URL:-}
+      NEXT_PUBLIC_MARKET_VAULT_ADDRESS: ${NEXT_PUBLIC_MARKET_VAULT_ADDRESS:-}
+      NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS: ${NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS:-}
+      NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES: ${NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES:-}
+    command:
+      - npx
+      - tsx
+      - scripts/refresh-market-data.ts
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    networks:
+      - frontend
+      - data
+
+networks:
+  frontend:
+  data:
+    internal: true
+
+volumes:
+  postgres_data:
+  next_cache:

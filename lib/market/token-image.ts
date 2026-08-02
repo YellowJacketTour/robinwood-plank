@@ -1,5 +1,5 @@
 import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
-import { ethCall } from "@/lib/market/fetch-rpc";
+import { ethCallDisplay } from "@/lib/market/fetch-rpc";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 
 /**
@@ -45,8 +45,9 @@ export async function resolveTokenImage(
 
   try {
     const idHex = BigInt(tokenId).toString(16).padStart(64, "0");
-    // tokenURI(uint256) selector 0xc87b56dd
-    const result = await ethCall(to, `0xc87b56dd${idHex}`);
+    // tokenURI(uint256) selector 0xc87b56dd. Artwork resolution is a pure
+    // display read (never gates a decision), so it uses the public-first list.
+    const result = await ethCallDisplay(to, `0xc87b56dd${idHex}`);
     if (!result || result.length < 130) return undefined;
 
     const hex = result.slice(2);

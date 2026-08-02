@@ -11,6 +11,8 @@ type Props = {
   /** Sum of the items' signature-derived prices — re-checked again at send. */
   verifiedTotalWei: string;
   busy: boolean;
+  /** Why the last attempt failed, shown inside this dialog — see BuyConfirm. */
+  error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -26,6 +28,7 @@ export default function SweepConfirm({
   collection,
   verifiedTotalWei,
   busy,
+  error,
   onConfirm,
   onCancel,
 }: Props) {
@@ -49,7 +52,7 @@ export default function SweepConfirm({
           </button>
         </div>
 
-        <ul className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-gold-500/20 bg-wood-900/90 px-3 py-2 text-xs">
+        <ul className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-line bg-panel px-3 py-2 text-xs">
           {items.map((item) => (
             <li key={item.listing.id} className="flex items-center justify-between gap-2">
               <span className="truncate text-foreground">
@@ -65,14 +68,14 @@ export default function SweepConfirm({
           ))}
         </ul>
 
-        <dl className="space-y-1 rounded-lg border border-gold-500/20 bg-wood-900/90 px-3 py-2 text-xs">
+        <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
           <div className="flex justify-between">
             <dt className="text-foreground/60">
               {items.length} plank{items.length === 1 ? "" : "s"}
             </dt>
             <dd className="tabular-nums text-foreground">{collection.name}</dd>
           </div>
-          <div className="flex justify-between border-t border-gold-500/15 pt-1">
+          <div className="flex justify-between border-t border-line pt-1">
             <dt className="font-bold text-foreground">You pay</dt>
             <dd className="font-display tabular-nums text-gold-300">
               {formatTokenAmount(verifiedTotalWei, 18, 6)} Ξ
@@ -84,6 +87,15 @@ export default function SweepConfirm({
           Prices verified against each signed order in this browser. A plank sold mid-sweep is
           skipped, not charged. Plus network gas — keep ~{BUY_GAS_RESERVE_ETH} Ξ free.
         </p>
+
+        {error && (
+          <p
+            role="alert"
+            className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100"
+          >
+            {error}
+          </p>
+        )}
 
         <button
           type="button"

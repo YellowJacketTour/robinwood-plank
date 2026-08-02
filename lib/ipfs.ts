@@ -71,6 +71,22 @@ export function resolveIpfsUrl(
   return `/api/ipfs/image?uri=${encodeURIComponent(target)}`;
 }
 
+/**
+ * Ask the image proxy for a width-tiered thumbnail (256 / 512 / 1024 — the
+ * route rounds up and ignores anything else). Only applies to our own
+ * /api/ipfs/image URLs; data: URIs, static assets, and raw URLs pass
+ * through untouched. Full-res art in a ~200px grid cell was the single
+ * biggest transfer cost on /market.
+ */
+export function withImageWidth(url: string | null | undefined, width: number): string {
+  if (!url) return url ?? "";
+  if (!url.startsWith("/api/ipfs/image?")) return url;
+  // cv is a cache generation: responses are cached immutable for a year, so
+  // when a resize bug ships broken bytes (cv=2 busted the SharedArrayBuffer
+  // incident), bumping it re-keys every client cache at once.
+  return `${url}&w=${width}&cv=2`;
+}
+
 export function ipfsGatewayCandidates(uri: string): string[] {
   if (!uri) return [];
   if (uri.startsWith("data:")) return [uri];

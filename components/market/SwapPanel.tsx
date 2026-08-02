@@ -6,6 +6,7 @@ import { MARKET_FEE_RECIPIENT, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { getNativeBalance } from "@/lib/wallet";
 import TreasuryBootstrap from "@/components/market/TreasuryBootstrap";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
+import type { MarketCollection } from "@/lib/market/types";
 import {
   buyShares,
   claimRandomRedeemFor,
@@ -29,12 +30,7 @@ import {
   vaultSupportsContributeLiquidity,
   vaultSupportsRemoveLiquidity,
 } from "@/lib/market/vault";
-import {
-  shortVault,
-  vaultColorKind,
-  VAULT_LABEL_CLASS,
-  VAULT_TEXT_CLASS,
-} from "@/lib/market/vault-registry";
+import { shortVault, vaultColorKind, vaultKindLabel } from "@/lib/market/vault-registry";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
@@ -43,6 +39,8 @@ import TokenPicker, { type PickerToken } from "@/components/market/TokenPicker";
 import { addPendingVaultTx } from "@/lib/market/pendingVaultTx";
 import { useVaultBook } from "@/lib/market/useVaultBook";
 import { relayDrandRound } from "@/lib/market/drand";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
+import { withImageWidth } from "@/lib/ipfs";
 
 type Mode = "buy" | "sell" | "deposit" | "redeem" | "lp";
 type LpDirection = "add" | "remove";
@@ -102,15 +100,15 @@ function TokenPreviewCard({ tokenId }: { tokenId: string }) {
   if (!tokenId) return null;
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-gold-500/20 bg-wood-950/90 px-3 py-2.5">
+    <div className="flex items-center gap-3 rounded-lg border border-line bg-panel-strong px-3 py-2.5">
       <div
         className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-wood-900"
         style={
-          preview?.rarity ? { boxShadow: `0 0 0 2px ${tierColor(preview.rarity.tier as RarityTier)}` } : undefined
+          preview?.rarity ? { boxShadow: `0 0 0 1px ${tierColor(preview.rarity.tier as RarityTier)}` } : undefined
         }
       >
         {preview?.image ? (
-          <Image src={preview.image} alt={`#${tokenId}`} fill sizes="48px" className="object-cover" unoptimized />
+          <Image src={withImageWidth(preview.image, 256)} alt={`#${tokenId}`} fill sizes="48px" className="object-cover" unoptimized />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-[0.55rem] text-foreground/30">
             {loading ? "…" : "?"}
@@ -142,8 +140,15 @@ type Props = {
   onConnect: () => void;
   /** Target vault for Instant Swap txs (primary V2 or legacy V1). */
   vaultAddress?: string | null;
+  /** The collection this swap surface serves. Falls back to the first
+   * configured collection; its vaultAddress is the vault fallback when no
+   * explicit vault is passed (per-collection vault wiring). */
+  collection?: MarketCollection;
   /** Short UI label for the active vault (e.g. "V2 — new Instant Swap"). */
   vaultLabel?: string | null;
+  /** False while the Instant Swap tab is mounted but not on screen — pauses
+   * the idle polling loops without losing panel state. */
+  active?: boolean;
 };
 
 /**
@@ -167,12 +172,14 @@ type Props = {
  * can relay, settle (claimFor), or forfeit an expired unpinned request so
  * deposits/redeems cannot be bricked by abandonment.
  */
-function StuckRedeemRelay({
+export function StuckRedeemRelay({
   account,
   vaultAddress,
+  active = true,
 }: {
   account: string | null;
   vaultAddress?: string | null;
+  active?: boolean;
 }) {
   const [requester, setRequester] = useState<string | null>(null);
   const [round, setRound] = useState<bigint | null>(null);
@@ -182,35 +189,45 @@ function StuckRedeemRelay({
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
+    // No polling while the Instant Swap tab is backgrounded — this check
+    // costs a settle kick + two eth_calls every cycle.
+    if (!active) return;
     let cancelled = false;
     const check = async () => {
+      const zero = "0x0000000000000000000000000000000000000000";
+      let pending = false;
       try {
-        // Always try sponsored settle first when anything is pending — free for users.
-        await kickServerRandomSettle(vaultAddress);
-      } catch {
-        /* ignore */
-      }
-      try {
+        // Read state first. These two go to the public RPC; the settle kick
+        // below goes to the keyed provider, so kicking unconditionally every
+        // 6s billed a sponsored-settle round-trip on every idle tab.
         const [who, r] = await Promise.all([
           getPendingRequester(vaultAddress),
           getPendingRound(vaultAddress),
         ]);
         if (cancelled) return;
-        const zero = "0x0000000000000000000000000000000000000000";
-        setRequester(who && who.toLowerCase() !== zero ? who : null);
+        pending = Boolean(who && who.toLowerCase() !== zero);
+        setRequester(pending ? who : null);
         setRound(r.round > BigInt(0) ? r.round : null);
         setAvailable(r.available);
       } catch {
         /* */
       }
+      if (!pending || cancelled) return;
+      try {
+        // Sponsored settle — free for users, so try it whenever a draw is
+        // actually waiting.
+        await kickServerRandomSettle(vaultAddress);
+      } catch {
+        /* ignore */
+      }
     };
     void check();
-    const interval = setInterval(() => void check(), 6_000);
+    const stop = startVisibleInterval(() => void check(), 6_000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop();
     };
-  }, [vaultAddress]);
+  }, [vaultAddress, active]);
 
   if (!requester) return null;
 
@@ -274,6 +291,7 @@ function StuckRedeemRelay({
         setStatus("Slot freed (expired request forfeited).");
       }
     } catch (e) {
+      console.error("Stuck redeem relay action failed:", e);
       setError(decodeVaultError(e));
       setStatus(null);
     } finally {
@@ -282,7 +300,7 @@ function StuckRedeemRelay({
   };
 
   return (
-    <div className="space-y-2 rounded-lg border border-sky-400/40 bg-sky-400/10 p-3">
+    <div className="space-y-2 rounded-lg border border-line bg-panel bg-[image:linear-gradient(90deg,rgba(103,200,255,0.08),transparent)] p-3">
       <p className="text-xs font-bold uppercase tracking-wide text-sky-300">
         Vault redeem slot is busy
       </p>
@@ -343,7 +361,11 @@ function StuckRedeemRelay({
         </details>
       ) : null}
       {status && <p className="text-xs text-emerald-200/90">{status}</p>}
-      {error && <p className="text-xs text-red-300">{error}</p>}
+      {error && (
+        <p className="text-xs text-red-300" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -353,12 +375,14 @@ function StuckRedeemRelay({
  * requestRandomRedeem; without this panel those shares were stuck. Polls
  * pendingRequester so a claim survives refresh / new device.
  */
-function PendingRedeemClaim({
+export function PendingRedeemClaim({
   account,
   vaultAddress,
+  active = true,
 }: {
   account: string | null;
   vaultAddress?: string | null;
+  active?: boolean;
 }) {
   const [isPending, setIsPending] = useState(false);
   const [round, setRound] = useState<bigint | null>(null);
@@ -374,6 +398,9 @@ function PendingRedeemClaim({
       autoOnce.current = false;
       return;
     }
+    // Idle check only — skip while the tab is backgrounded. Once a redeem is
+    // actually pending, the 3s watcher below keeps running regardless of tab.
+    if (!active && !isPending) return;
     let cancelled = false;
 
     const check = () => {
@@ -388,12 +415,12 @@ function PendingRedeemClaim({
     };
 
     check();
-    const interval = setInterval(check, 5_000);
+    const stop = startVisibleInterval(check, 5_000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop();
     };
-  }, [account, vaultAddress]);
+  }, [account, vaultAddress, active, isPending]);
 
   useEffect(() => {
     if (!isPending) {
@@ -413,10 +440,13 @@ function PendingRedeemClaim({
         .catch(() => {});
     };
     poll();
-    const interval = setInterval(poll, 3_000);
+    // In-flight redeem watcher: deliberately NOT gated on the market tab
+    // (a user who switches tabs mid-redeem still gets confirmation state),
+    // but paused while the whole page is hidden.
+    const stop = startVisibleInterval(poll, 3_000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      stop();
     };
   }, [isPending, vaultAddress]);
 
@@ -455,6 +485,7 @@ function PendingRedeemClaim({
       setIsPending(false);
       setStep(null);
     } catch (e) {
+      console.error("Pending redeem claim failed:", e);
       setError(decodeVaultError(e));
       setStep(null);
     } finally {
@@ -473,7 +504,7 @@ function PendingRedeemClaim({
   if (!isPending) return null;
 
   return (
-    <div className="space-y-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3">
+    <div className="space-y-2 rounded-lg border border-line bg-panel bg-[image:linear-gradient(90deg,rgba(255,189,74,0.1),transparent)] p-3">
       <p className="text-xs font-bold uppercase tracking-wide text-amber-300">
         Finishing your random redeem
       </p>
@@ -503,7 +534,11 @@ function PendingRedeemClaim({
       >
         {busy ? step ?? "Working…" : "Retry relay + claim NFT"}
       </button>
-      {error && <p className="text-xs text-red-300">{error}</p>}
+      {error && (
+        <p className="text-xs text-red-300" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -518,13 +553,16 @@ export default function SwapPanel({
   account,
   onConnect,
   vaultAddress: vaultAddressProp,
+  collection: collectionProp,
   vaultLabel,
+  active = true,
 }: Props) {
-  const collection = MARKET_COLLECTIONS[0];
-  const vaultAddress = vaultAddressProp ?? MARKET_VAULT_ADDRESS;
+  const collection = collectionProp ?? MARKET_COLLECTIONS[0];
+  const vaultAddress =
+    vaultAddressProp ?? collection.vaultAddress ?? MARKET_VAULT_ADDRESS;
   const hasVault = vaultAddress !== null;
   // Per-selected-vault book (V1 or V2) — not the dual trade feed.
-  const { stats: bookStats } = useVaultBook(vaultAddress);
+  const { stats: bookStats } = useVaultBook(vaultAddress, { active });
   const stats = bookStats;
 
   const [mode, setMode] = useState<Mode>("buy");
@@ -538,6 +576,7 @@ export default function SwapPanel({
   /** Max slippage, percent. Converted to bps; vault trades REFUSE min-out of 0. */
   const [slippagePct, setSlippagePct] = useState("1");
   const [busy, setBusy] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lpFull, setLpFull] = useState<boolean | null>(null);
@@ -835,9 +874,9 @@ export default function SwapPanel({
 
   if (!hasVault) {
     return (
-      <div className="wood-frame overflow-hidden rounded-2xl bg-wood-900/95">
+      <div className="overflow-hidden rounded-xl border border-line bg-panel">
         <div className="relative flex flex-col items-center gap-4 px-6 py-10 text-center">
-          <div className="relative h-20 w-20 overflow-hidden rounded-2xl border-2 border-gold-500/40 shadow-[0_0_24px_-4px_rgba(248,217,138,0.5)]">
+          <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-line-strong">
             <Image
               src={collection?.image ?? "/images/plank-logo.webp"}
               alt={collection?.name ?? "Collection"}
@@ -880,6 +919,7 @@ export default function SwapPanel({
       void refreshEthBalance();
       void refreshLpCredit();
     } catch (e) {
+      console.error(`${label} failed:`, e);
       setError(decodeVaultError(e));
     } finally {
       setBusy(false);
@@ -887,8 +927,12 @@ export default function SwapPanel({
     }
   };
 
+  // SwapPanel only ever renders against a share-model (legacy) vault — see
+  // MarketView's generation branch, which routes V3 to V3SwapPanel instead —
+  // so these are never actually null in practice; the fallback is just to
+  // satisfy the shared (feeModel-aware) VaultStats type.
   const redeemCostForMode = stats
-    ? redeemCostWei(stats.redeemFeeBps, stats.targetPremiumBps, Boolean(tokenId))
+    ? redeemCostWei(stats.redeemFeeBps ?? 0, stats.targetPremiumBps ?? 0, Boolean(tokenId))
     : BigInt(0);
   const redeemInsufficient =
     mode === "redeem" && stats != null && shareBalance != null && shareBalance < redeemCostForMode;
@@ -899,6 +943,10 @@ export default function SwapPanel({
     if (!Number.isFinite(pct) || pct < 0 || pct >= 100) return null;
     return Math.round(pct * 100);
   })();
+  const minimumOutputPreview =
+    quote !== null && slippageBps !== null
+      ? (quote * BigInt(10_000 - slippageBps)) / BigInt(10_000)
+      : null;
 
   const submit = () => {
     if (!account) return; // run() reconnects, but every path below needs it typed
@@ -1053,99 +1101,188 @@ export default function SwapPanel({
 
   const activeMode = MODES.find((m) => m.id === mode)!;
 
+  const openReview = () => {
+    setError(null);
+    if (!account) {
+      onConnect();
+      return;
+    }
+    if ((mode === "buy" || mode === "sell") && slippageBps === null) {
+      setError("Enter a slippage between 0 and 99%.");
+      return;
+    }
+    if (mode === "buy" || mode === "sell") {
+      const wei = parseTokenAmount(amount, 18);
+      if (wei === null || wei <= BigInt(0)) {
+        setError(mode === "buy" ? "Enter an ETH amount." : "Enter a share amount.");
+        return;
+      }
+    }
+    if (mode === "lp") {
+      const sharesWei = parseTokenAmount(amount, 18) ?? BigInt(0);
+      const ethWei = parseTokenAmount(lpEth, 18) ?? BigInt(0);
+      if (sharesWei <= BigInt(0) && ethWei <= BigInt(0)) {
+        setError(
+          lpDirection === "remove"
+            ? "Enter shares and/or ETH to remove from the pool."
+            : "Enter shares and/or ETH to add to the pool."
+        );
+        return;
+      }
+      if (lpDirection === "remove" && lpRemove === false) {
+        setError(
+          "Remove LP needs the vault upgrade (removeLiquidity). Until then use Sell to trade shares for ETH."
+        );
+        return;
+      }
+    }
+    if (mode === "deposit" && !tokenId) {
+      setError("Choose a Plank to deposit.");
+      return;
+    }
+    if (mode === "redeem" && redeemInsufficient) {
+      setError(
+        `You need ${formatTokenAmount(redeemCostForMode, 18, 4)} shares to redeem${tokenId ? " that specific plank" : ""}.`
+      );
+      return;
+    }
+    setReviewOpen(true);
+  };
+
   const activeKind = vaultColorKind(vaultAddress);
-  const activeTag = activeKind === "v1" ? "V1" : activeKind === "v2" ? "V2" : "Vault";
-  const activeLabel =
-    vaultLabel ??
-    (activeKind === "v1" ? "V1 vault" : activeKind === "v2" ? "V2 vault" : "Vault");
+  const activeTag = vaultKindLabel(activeKind);
+  // Vault identity lives in the chooser cards; the tag re-appears only in the
+  // review modal as a signing safeguard. `vaultLabel` stays a prop for callers.
+  void vaultLabel;
 
   return (
-    <div className="wood-frame relative overflow-hidden rounded-2xl bg-wood-900/95">
-      {/* Corner confirmation: which vault this swap widget is bound to. */}
-      <div
-        className={`pointer-events-none absolute right-2 top-2 z-10 rounded-md border px-2 py-1 text-[0.65rem] font-extrabold uppercase tracking-wide shadow-lg ${VAULT_LABEL_CLASS[activeKind]}`}
-        title={vaultAddress ? `All actions target ${vaultAddress}` : "Vault"}
-      >
-        {activeTag} · live
-      </div>
-      {/* Header: collection art leads, same "visually dominant" rule as
-          every other surface — this used to be a bare form with no branding
-          or context at all. */}
-      <div className="flex items-center gap-3 border-b border-gold-500/20 bg-wood-950/90 px-4 py-3 pr-20">
-        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-gold-500/30">
-          <Image
-            src={collection?.image ?? "/images/plank-logo.webp"}
-            alt={collection?.name ?? "Collection"}
-            fill
-            sizes="40px"
-            className="object-cover"
-            unoptimized
-          />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate font-display text-base text-foreground">
-            {collection?.name ?? "Collection"} ·{" "}
-            <span className="inline-flex items-center gap-1.5">
-              <span
-                className={`rounded border px-1.5 py-0.5 text-[0.65rem] font-extrabold uppercase tracking-wide ${VAULT_LABEL_CLASS[activeKind]}`}
-              >
-                {activeTag}
-              </span>
-              <span className={VAULT_TEXT_CLASS[activeKind]}>{activeLabel}</span>
-            </span>
-          </p>
-          <p className="text-[0.65rem] text-foreground/50">
-            {activeMode.hint}
-            {vaultAddress ? (
-              <>
-                {" "}
-                ·{" "}
-                <span className="font-mono text-foreground/40">{shortVault(vaultAddress)}</span>
-              </>
-            ) : null}
-          </p>
-        </div>
-      </div>
-
-      <div className="space-y-3 p-3">
-        {/* Existing deposits: shares live in the wallet on this vault address.
-            Never strand them by switching MARKET_VAULT_ADDRESS without redeem. */}
-        {account && (
-          <div className="rounded-lg border border-gold-500/25 bg-wood-950/90 px-3 py-2 text-[0.7rem] leading-relaxed text-foreground/75">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                <span>
-                  <span className="font-bold uppercase tracking-wide text-foreground/45">Your shares </span>
-                  <span className="font-mono text-gold-200">
-                    {shareBalance != null ? formatTokenAmount(shareBalance, 18, 4) : "…"}
-                  </span>
-                  <span className="text-foreground/45"> vROBIN</span>
-                </span>
-                <span>
-                  <span className="font-bold uppercase tracking-wide text-foreground/45">ETH </span>
-                  <span className="font-mono text-gold-200">
-                    {ethBalance != null ? formatTokenAmount(ethBalance, 18, 4) : "…"}
-                  </span>
-                  <span className="text-foreground/45"> Ξ</span>
-                </span>
-              </p>
-              {stats && (
-                <p className="text-foreground/45">
-                  Vault holds {stats.heldTokenCount} planks · pool{" "}
-                  {formatTokenAmount(stats.shareReserveWei, 18, 2)} sh /{" "}
-                  {formatTokenAmount(stats.ethReserveWei, 18, 4)} Ξ
+    <div className="relative overflow-hidden rounded-xl border border-line bg-panel">
+      {reviewOpen && (
+        <div
+          className="fixed inset-0 z-[70] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="swap-review-title"
+        >
+          <div className="w-full max-w-lg rounded-t-xl border border-line bg-panel p-4 sm:rounded-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[0.65rem] font-black uppercase tracking-[0.14em] text-gold-300/75">
+                  Verify before signing
                 </p>
-              )}
+                <h3 id="swap-review-title" className="mt-1 font-display text-2xl text-gold-300">
+                  Review {mode === "lp" ? `${lpDirection} liquidity` : activeMode.label.toLowerCase()}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReviewOpen(false)}
+                className="flex h-10 w-10 items-center justify-center rounded-md border border-line text-foreground/65 hover:text-gold-300"
+                aria-label="Close review"
+              >
+                ✕
+              </button>
             </div>
-            <p className="mt-1 text-[0.65rem] text-foreground/55">
-              Deposits already on this vault stay here. Use <strong className="text-foreground/80">Redeem</strong>{" "}
-              to get an NFT back, <strong className="text-foreground/80">Sell</strong> for ETH, or{" "}
-              <strong className="text-foreground/80">LP</strong> to deepen the pool. Your shares are not stuck
-              just because the AMM pool is smaller than total deposits.
-            </p>
-          </div>
-        )}
 
+            <dl className="mt-4 grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-line bg-panel-strong p-3">
+                <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">Vault</dt>
+                <dd className="mt-1 text-sm text-foreground" title={vaultAddress ?? undefined}>
+                  {activeTag} · {vaultAddress ? shortVault(vaultAddress) : "Unavailable"}
+                </dd>
+              </div>
+              <div className="rounded-lg border border-line bg-panel-strong p-3">
+                <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">Action</dt>
+                <dd className="mt-1 text-sm capitalize text-foreground">
+                  {mode === "lp" ? `${lpDirection} liquidity` : activeMode.label}
+                </dd>
+              </div>
+              <div className="rounded-lg border border-line bg-panel-strong p-3">
+                <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                  {mode === "deposit" || mode === "redeem" ? "Selection" : "Input"}
+                </dt>
+                <dd className="mt-1 text-sm text-foreground">
+                  {mode === "buy"
+                    ? `${amount} ETH`
+                    : mode === "sell"
+                      ? `${amount} shares`
+                      : mode === "lp"
+                        ? `${amount || "0"} shares + ${lpEth || "0"} ETH`
+                        : mode === "deposit"
+                          ? `Plank #${tokenId}`
+                          : tokenId
+                            ? `Specific Plank #${tokenId}`
+                            : "Random Plank"}
+                </dd>
+              </div>
+              <div className="rounded-lg border border-line bg-panel-strong p-3">
+                <dt className="text-[0.65rem] uppercase tracking-wide text-foreground/45">
+                  {mode === "buy" || mode === "sell" ? "Expected output" : "Fee / protection"}
+                </dt>
+                <dd className="mt-1 text-sm text-foreground">
+                  {mode === "buy" || mode === "sell"
+                    ? quote !== null
+                      ? `${formatTokenAmount(quote, 18, mode === "buy" ? 4 : 6)} ${
+                          mode === "buy" ? "shares" : "ETH"
+                        }`
+                      : "Quote will be rechecked"
+                    : mode === "redeem" && stats
+                      ? `${formatTokenAmount(redeemCostForMode, 18, 4)} shares`
+                      : mode === "deposit" && stats
+                        ? `${(stats.mintFeeBps ?? 0) / 100}% mint fee`
+                        : "Live vault checks"}
+                </dd>
+              </div>
+            </dl>
+
+            {(mode === "buy" || mode === "sell") && (
+              <div className="mt-3 rounded-lg border border-line bg-black/20 px-3 py-2 text-xs text-foreground/65">
+                <p>
+                  Minimum at the current quote:{" "}
+                  <strong className="text-foreground">
+                    {minimumOutputPreview !== null
+                      ? `${formatTokenAmount(
+                          minimumOutputPreview,
+                          18,
+                          mode === "buy" ? 4 : 6
+                        )} ${mode === "buy" ? "shares" : "ETH"}`
+                      : "waiting for quote"}
+                  </strong>
+                </p>
+                <p className="mt-1">
+                  Maximum slippage: {slippagePct}%. The quote and enforced minimum are
+                  recomputed immediately before the transaction is built.
+                </p>
+              </div>
+            )}
+            <p className="mt-3 text-xs leading-5 text-foreground/55">
+              Your wallet shows the final destination and gas estimate. No transaction is sent
+              until you confirm there.
+            </p>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setReviewOpen(false)}
+                className="min-h-11 rounded-lg border border-line text-sm text-foreground/75 hover:text-gold-300"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setReviewOpen(false);
+                  void submit();
+                }}
+                className="min-h-11 rounded-lg border border-[#f3ca6f] bg-gradient-to-b from-[#f1c665] to-[#dba53f] text-sm font-black text-[#251509] shadow-[inset_0_1px_rgba(255,255,255,0.28)] hover:brightness-105"
+              >
+                Confirm in wallet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="space-y-3 p-3">
         {/* Only show bootstrap while the pool is still closed. Once open
             (stats.poolOpen), never mount it — even for the treasury wallet —
             so Instant Swap doesn't keep a bootstrap/loading chrome on screen. */}
@@ -1155,17 +1292,17 @@ export default function SwapPanel({
           <TreasuryBootstrap account={account} />
         )}
 
-        <StuckRedeemRelay account={account} vaultAddress={vaultAddress} />
-        <PendingRedeemClaim account={account} vaultAddress={vaultAddress} />
+        <StuckRedeemRelay account={account} vaultAddress={vaultAddress} active={active} />
+        <PendingRedeemClaim account={account} vaultAddress={vaultAddress} active={active} />
 
-        <div className="grid grid-cols-3 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/90 p-1 sm:grid-cols-5">
+        <div className="grid grid-cols-3 gap-1 rounded-[9px] bg-wood-950 p-1 sm:grid-cols-5">
           {MODES.map((m) => (
             <button
               key={m.id}
               type="button"
               onClick={() => setMode(m.id)}
-              className={`min-h-9 rounded-md text-xs font-bold uppercase transition-colors ${
-                mode === m.id ? "bg-gold-500 text-wood-950" : "text-foreground/65 hover:text-gold-300"
+              className={`min-h-9 rounded-lg text-[0.72rem] font-black transition-colors ${
+                mode === m.id ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
               }`}
             >
               {m.label}
@@ -1173,14 +1310,42 @@ export default function SwapPanel({
           ))}
         </div>
 
+        {/* Always-visible one-line mode explainer — same job as the mockup's
+            .callout: what this action does, in the vault's own words. */}
+        <p className="rounded-lg border border-line bg-panel bg-[image:linear-gradient(90deg,rgba(103,200,255,0.08),transparent)] px-3 py-2 text-[0.68rem] leading-[1.45] text-foreground/70">
+          {mode === "buy" ? (
+            <>
+              <strong className="text-[#67c8ff]">Buy shares:</strong> pay ETH and receive fungible
+              vault shares. To get an NFT, use Redeem.
+            </>
+          ) : mode === "sell" ? (
+            <>
+              <strong className="text-[#67c8ff]">Sell shares:</strong> receive ETH from the pool at
+              the quoted rate.
+            </>
+          ) : mode === "lp" ? (
+            <>
+              <strong className="text-[#67c8ff]">LP:</strong> add or remove pool depth (shares +
+              ETH together).
+            </>
+          ) : mode === "deposit" ? (
+            <>
+              <strong className="text-[#67c8ff]">Deposit:</strong> lock a Plank into the vault and
+              mint shares.
+            </>
+          ) : (
+            <>
+              <strong className="text-[#67c8ff]">Redeem:</strong> burn shares to pull an NFT off
+              the fence — random draw or targeted.
+            </>
+          )}
+        </p>
+
         {(mode === "buy" || mode === "sell") && (
-          <div className="rounded-lg border border-gold-500/30 bg-wood-900/90 p-2.5">
-            <div className="flex items-center justify-between gap-2 text-[0.6rem] font-bold uppercase tracking-wide text-foreground/45">
+          <div className="rounded-xl border border-line bg-wood-950 p-3.5">
+            <div className="flex items-center justify-between gap-2 text-[0.66rem] text-[#a99c82]">
               <span>You pay</span>
-              <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 font-normal normal-case">
-                <span className="font-bold uppercase tracking-wide text-foreground/45">
-                  {mode === "buy" ? "ETH" : "Vault share"}
-                </span>
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
                 {account && (
                   <>
                     <span className="font-mono text-foreground/70">
@@ -1198,7 +1363,7 @@ export default function SwapPanel({
                     </span>
                     <button
                       type="button"
-                      className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                      className="text-[0.68rem] font-black text-gold-400 hover:text-gold-300"
                       onClick={() => {
                         if (mode === "buy") {
                           if (ethBalance == null || ethBalance <= BigInt(0)) return;
@@ -1221,27 +1386,24 @@ export default function SwapPanel({
               </span>
             </div>
             <div className="mt-1 flex items-center gap-2">
-              <span
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-black text-wood-950"
-                style={{ backgroundColor: "#f8d98a" }}
-              >
-                {mode === "buy" ? "Ξ" : "S"}
-              </span>
               <input
                 type="text"
                 inputMode="decimal"
                 placeholder="0.0"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
-                className="min-w-0 flex-1 bg-transparent py-1 text-2xl font-semibold text-foreground outline-none"
+                className="min-w-0 flex-1 bg-transparent py-1 font-display text-[1.55rem] font-normal text-foreground outline-none"
               />
+              <span className="shrink-0 rounded-full border border-line bg-wood-800 px-2.5 py-1.5 text-[0.7rem] font-black text-gold-300">
+                {mode === "buy" ? "ETH" : `${activeTag} shares`}
+              </span>
             </div>
           </div>
         )}
 
         {mode === "lp" && (
           <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-1 rounded-lg border border-gold-500/20 bg-wood-950/90 p-1">
+            <div className="grid grid-cols-2 gap-1 rounded-[9px] bg-wood-950 p-1">
               <button
                 type="button"
                 onClick={() => {
@@ -1250,8 +1412,8 @@ export default function SwapPanel({
                   setLpEth("");
                   setError(null);
                 }}
-                className={`min-h-8 rounded-md text-xs font-bold uppercase ${
-                  lpDirection === "add" ? "bg-gold-500 text-wood-950" : "text-foreground/65 hover:text-gold-300"
+                className={`min-h-8 rounded-lg text-[0.72rem] font-black ${
+                  lpDirection === "add" ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
                 }`}
               >
                 Add LP
@@ -1264,8 +1426,8 @@ export default function SwapPanel({
                   setLpEth("");
                   setError(null);
                 }}
-                className={`min-h-8 rounded-md text-xs font-bold uppercase ${
-                  lpDirection === "remove" ? "bg-gold-500 text-wood-950" : "text-foreground/65 hover:text-gold-300"
+                className={`min-h-8 rounded-lg text-[0.72rem] font-black ${
+                  lpDirection === "remove" ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
                 }`}
               >
                 Remove LP
@@ -1274,12 +1436,12 @@ export default function SwapPanel({
             <p className="text-[0.7rem] text-foreground/65">
               {lpFull === false || lpRemove === false ? (
                 <>
-                  <strong className="text-foreground/85">Full Add/Remove LP is on V2 only.</strong> This
-                  vault build (usually <span className="font-semibold text-orange-300">V1</span>) supports{" "}
-                  <strong className="text-foreground/85">Deposit</strong> and{" "}
-                  <strong className="text-foreground/85">Redeem</strong>, but not tracked LP credits. Switch
-                  the vault picker above to <span className="font-semibold text-emerald-300">V2</span> to Add
-                  LP / Remove LP. On V1 use Sell if you want ETH for shares.
+                  <strong className="text-foreground/85">This vault does not support Add/Remove LP.</strong>{" "}
+                  It supports <strong className="text-foreground/85">Deposit</strong> and{" "}
+                  <strong className="text-foreground/85">Redeem</strong>, but not liquidity provision. Switch
+                  the vault picker above to the{" "}
+                  <span className="font-semibold text-emerald-300">current vault</span> to Add LP / Remove LP.
+                  Here, use Sell if you want ETH for shares.
                 </>
               ) : lpDirection === "add" ? (
                 <>
@@ -1302,13 +1464,13 @@ export default function SwapPanel({
               )}
             </p>
             {lpCredit && (lpCredit.shareCredit > BigInt(0) || lpCredit.ethCredit > BigInt(0)) && (
-              <p className="rounded-md border border-gold-500/20 bg-wood-950/90 px-2 py-1.5 text-[0.65rem] text-gold-200/90">
+              <p className="rounded-md border border-line bg-panel-strong px-2 py-1.5 text-[0.65rem] text-gold-200/90">
                 Your LP credit: {formatTokenAmount(lpCredit.shareCredit, 18, 4)} shares ·{" "}
                 {formatTokenAmount(lpCredit.ethCredit, 18, 5)} Ξ
               </p>
             )}
-            <div className="rounded-xl border border-gold-500/30 bg-wood-900/90 px-3 py-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
+            <div className="rounded-xl border border-line bg-wood-950 px-3 py-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.66rem] text-[#a99c82]">
                 <span>{lpDirection === "remove" ? "Shares to remove" : "Shares to add"}</span>
                 <span className="flex flex-wrap items-center gap-2 font-normal normal-case">
                   {account && shareBalance != null && lpDirection === "add" && (
@@ -1323,7 +1485,7 @@ export default function SwapPanel({
                   {lpDirection === "add" && shareBalance != null && shareBalance > BigInt(0) && (
                     <button
                       type="button"
-                      className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                      className="text-[0.68rem] font-black text-gold-400 hover:text-gold-300"
                       onClick={maxLpSharesAdd}
                     >
                       Max
@@ -1332,7 +1494,7 @@ export default function SwapPanel({
                   {lpDirection === "remove" && lpCredit && lpCredit.shareCredit > BigInt(0) && (
                     <button
                       type="button"
-                      className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                      className="text-[0.68rem] font-black text-gold-400 hover:text-gold-300"
                       onClick={() => {
                         setLpEditSide("shares");
                         setAmount(formatTokenAmount(lpCredit.shareCredit, 18, 6));
@@ -1353,11 +1515,11 @@ export default function SwapPanel({
                     ? onLpSharesChange(e.target.value)
                     : setAmount(e.target.value.replace(/[^0-9.]/g, ""))
                 }
-                className="mt-1 w-full bg-transparent text-xl font-semibold text-foreground outline-none"
+                className="mt-1 w-full bg-transparent font-display text-[1.35rem] font-normal text-foreground outline-none"
               />
             </div>
-            <div className="rounded-xl border border-gold-500/30 bg-wood-900/90 px-3 py-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
+            <div className="rounded-xl border border-line bg-wood-950 px-3 py-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[0.66rem] text-[#a99c82]">
                 <span>
                   {lpDirection === "remove"
                     ? "ETH to remove"
@@ -1381,7 +1543,7 @@ export default function SwapPanel({
                     ethBalance > BigInt(0) && (
                       <button
                         type="button"
-                        className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                        className="text-[0.68rem] font-black text-gold-400 hover:text-gold-300"
                         onClick={maxLpEthAdd}
                       >
                         Max
@@ -1390,7 +1552,7 @@ export default function SwapPanel({
                   {lpDirection === "remove" && lpCredit && lpCredit.ethCredit > BigInt(0) ? (
                     <button
                       type="button"
-                      className="rounded border border-gold-500/35 px-1.5 py-0.5 text-[0.6rem] font-bold uppercase text-gold-300 hover:border-gold-400 hover:bg-gold-500/10"
+                      className="text-[0.68rem] font-black text-gold-400 hover:text-gold-300"
                       onClick={() => {
                         setLpEditSide("eth");
                         setLpEth(formatTokenAmount(lpCredit.ethCredit, 18, 6));
@@ -1423,7 +1585,7 @@ export default function SwapPanel({
                     ? onLpEthChange(e.target.value)
                     : setLpEth(e.target.value.replace(/[^0-9.]/g, ""))
                 }
-                className="mt-1 w-full bg-transparent text-xl font-semibold text-foreground outline-none disabled:opacity-40"
+                className="mt-1 w-full bg-transparent font-display text-[1.35rem] font-normal text-foreground outline-none disabled:opacity-40"
               />
             </div>
             {lpDirection === "add" && lpFull && lpPoolRatio && (
@@ -1479,12 +1641,19 @@ export default function SwapPanel({
         )}
 
         {(mode === "buy" || mode === "sell") && (
-          <div className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-2.5 py-2">
-            <div className="flex items-center justify-between gap-2 text-[0.6rem] font-bold uppercase tracking-wide text-foreground/45">
+          <>
+          <div
+            aria-hidden="true"
+            className="relative z-10 mx-auto -my-4 grid h-[34px] w-[34px] place-items-center rounded-full border-4 border-[rgba(30,19,11,0.94)] bg-wood-800 text-gold-300"
+          >
+            ↓
+          </div>
+          <div className="rounded-xl border border-line bg-wood-950 p-3.5">
+            <div className="flex items-center justify-between gap-2 text-[0.66rem] text-[#a99c82]">
               <span>You receive</span>
-              <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 font-normal normal-case">
-                <span className="font-bold uppercase tracking-wide text-foreground/45">
-                  {mode === "buy" ? "Vault share" : "ETH"}
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
+                <span className="rounded-full border border-line bg-wood-800 px-2.5 py-1 text-[0.62rem] font-black text-gold-300">
+                  {mode === "buy" ? `${activeTag} shares` : "ETH"}
                 </span>
                 {account && (
                   <span className="font-mono text-foreground/70">
@@ -1504,7 +1673,7 @@ export default function SwapPanel({
                 )}
               </span>
             </div>
-            <p className="mt-0.5 font-display text-lg text-gold-300">
+            <p className="mt-1 font-display text-[1.55rem] leading-tight text-foreground">
               {!amount
                 ? "—"
                 : quoting
@@ -1515,30 +1684,29 @@ export default function SwapPanel({
                       }`
                     : "Quote unavailable — try a smaller amount"}
             </p>
-            {stats?.sharePriceWei && (
-              <p className="mt-0.5 text-[0.6rem] text-foreground/45">
-                Pool mid ≈ {formatTokenAmount(stats.sharePriceWei, 18, 5)} Ξ / share · reserve{" "}
-                {formatTokenAmount(stats.ethReserveWei, 18, 4)} Ξ
-              </p>
-            )}
           </div>
-        )}
-
-        {(mode === "buy" || mode === "sell") && (
-          <label className="flex items-center justify-between gap-2 rounded-lg border border-gold-500/20 bg-wood-900/90 px-2.5 py-2">
-            <span className="text-[0.7rem] text-foreground/60">Max slippage</span>
+          {/* Quiet estimate strip — pool mid on the left, slippage on the
+              right, same rhythm as the mockup's .swap-estimate line. */}
+          <label className="flex flex-wrap items-center justify-between gap-2 px-1 text-[0.66rem] text-[#a99c82]">
+            <span>
+              {stats?.sharePriceWei
+                ? `Pool mid ≈ ${formatTokenAmount(stats.sharePriceWei, 18, 5)} Ξ/share · reserve ${formatTokenAmount(stats.ethReserveWei, 18, 4)} Ξ`
+                : "Pool mid —"}
+            </span>
             <span className="flex items-center gap-1">
+              <span>Max slippage</span>
               <input
                 type="text"
                 inputMode="decimal"
                 value={slippagePct}
                 onChange={(e) => setSlippagePct(e.target.value.replace(/[^0-9.]/g, ""))}
-                className="w-14 rounded-md border border-gold-500/30 bg-wood-950 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-gold-400"
+                className="w-12 rounded-md border border-line bg-wood-950 px-1.5 py-1 text-right text-xs text-foreground outline-none focus:border-gold-400"
                 aria-label="Max slippage percent"
               />
               <span className="text-xs font-bold text-gold-300">%</span>
             </span>
           </label>
+          </>
         )}
 
         {mode === "deposit" && (
@@ -1563,12 +1731,12 @@ export default function SwapPanel({
 
         {mode === "redeem" && (
           <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-1 rounded-lg border border-gold-500/20 bg-wood-900/90 p-1">
+            <div className="grid grid-cols-2 gap-1 rounded-[9px] bg-wood-950 p-1">
               <button
                 type="button"
                 onClick={() => setTokenId("")}
-                className={`min-h-9 rounded-md text-[0.65rem] font-bold uppercase transition ${
-                  !tokenId ? "bg-gold-500 text-wood-950" : "text-foreground/60 hover:text-gold-300"
+                className={`min-h-9 rounded-lg text-[0.7rem] font-black transition ${
+                  !tokenId ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
                 }`}
               >
                 Random
@@ -1578,8 +1746,8 @@ export default function SwapPanel({
                 onClick={() => {
                   /* keep current pick if any; user selects from grid */
                 }}
-                className={`min-h-9 rounded-md text-[0.65rem] font-bold uppercase transition ${
-                  tokenId ? "bg-gold-500 text-wood-950" : "text-foreground/60 hover:text-gold-300"
+                className={`min-h-9 rounded-lg text-[0.7rem] font-black transition ${
+                  tokenId ? "bg-gold-500 text-wood-950" : "text-[#a99c84] hover:text-gold-300"
                 }`}
               >
                 Specific plank
@@ -1615,7 +1783,7 @@ export default function SwapPanel({
                 className={`rounded-lg border px-2.5 py-2 text-[0.65rem] ${
                   redeemInsufficient
                     ? "border-red-500/40 bg-red-500/10 text-red-200"
-                    : "border-gold-500/20 bg-wood-950/90 text-foreground/60"
+                    : "border-line bg-wood-950 text-foreground/60"
                 }`}
               >
                 <div className="flex items-center justify-between">
@@ -1632,13 +1800,13 @@ export default function SwapPanel({
                 </div>
                 <p className="mt-1.5 text-[0.6rem] text-foreground/45">
                   One deposit mints ~{formatTokenAmount(
-                    BigInt(10) ** BigInt(18) - (BigInt(10) ** BigInt(18) * BigInt(stats.mintFeeBps)) / BigInt(10_000),
+                    BigInt(10) ** BigInt(18) - (BigInt(10) ** BigInt(18) * BigInt(stats.mintFeeBps ?? 0)) / BigInt(10_000),
                     18,
                     2
                   )}{" "}
-                  shares (mint fee {stats.mintFeeBps / 100}%). Random redeem needs{" "}
+                  shares (mint fee {(stats.mintFeeBps ?? 0) / 100}%). Random redeem needs{" "}
                   {formatTokenAmount(
-                    redeemCostWei(stats.redeemFeeBps, stats.targetPremiumBps, false),
+                    redeemCostWei(stats.redeemFeeBps ?? 0, stats.targetPremiumBps ?? 0, false),
                     18,
                     2
                   )}{" "}
@@ -1674,7 +1842,7 @@ export default function SwapPanel({
           <button
             type="button"
             onClick={onConnect}
-            className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
+            className="min-h-12 w-full rounded-lg border border-[#f3ca6f] bg-gradient-to-b from-[#f1c665] to-[#dba53f] text-sm font-black text-[#251509] shadow-[inset_0_1px_rgba(255,255,255,0.28)] transition hover:brightness-105"
           >
             Connect wallet
           </button>
@@ -1682,8 +1850,8 @@ export default function SwapPanel({
           <button
             type="button"
             disabled={busy || redeemInsufficient}
-            onClick={submit}
-            className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
+            onClick={openReview}
+            className="min-h-12 w-full rounded-lg border border-[#f3ca6f] bg-gradient-to-b from-[#f1c665] to-[#dba53f] text-sm font-black text-[#251509] shadow-[inset_0_1px_rgba(255,255,255,0.28)] transition hover:brightness-105 disabled:opacity-50"
           >
             {busy
               ? (status ?? "Working…")
@@ -1691,13 +1859,17 @@ export default function SwapPanel({
                 ? "Not enough shares"
                 : mode === "redeem"
                   ? tokenId
-                    ? "Redeem this plank"
-                    : "Random redeem (1 signature)"
+                    ? "Review specific redeem"
+                    : "Review random redeem"
                   : mode === "lp"
                     ? lpDirection === "remove"
-                      ? "Remove LP"
-                      : "Add LP"
-                    : activeMode.label}
+                      ? "Review LP removal"
+                      : "Review liquidity"
+                    : mode === "buy"
+                      ? "Review share purchase"
+                      : mode === "sell"
+                        ? "Review share sale"
+                        : "Review deposit"}
           </button>
         )}
 

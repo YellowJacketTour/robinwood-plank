@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { SNIPER_TRAP_MINUTES, TRADE_PAUSED } from "@/lib/constants";
 import { getCountdownParts, getTradeOpensAt, type CountdownParts } from "@/lib/trade";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 
 function pad(n: number) {
   return n.toString().padStart(2, "0");
@@ -66,10 +67,10 @@ export default function CountdownTimer({ onOpenChange, className = "" }: Props) 
       }
     }
     sync();
-    const syncId = window.setInterval(sync, 12_000);
+    const stop = startVisibleInterval(() => void sync(), 12_000);
     return () => {
       cancelled = true;
-      window.clearInterval(syncId);
+      stop();
     };
   }, []);
 

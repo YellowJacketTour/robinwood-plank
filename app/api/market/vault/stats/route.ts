@@ -1,4 +1,5 @@
 import { MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } from "@/lib/constants";
+import { collectionVaultAddresses } from "@/lib/market/collections";
 import { getVaultStats } from "@/lib/market/vault-stats";
 import {
   isFreshEnough,
@@ -19,14 +20,17 @@ const KV_FAST_MS = 25_000;
 function parseVaultParam(req: Request): string | null {
   const raw = new URL(req.url).searchParams.get("vault");
   if (!raw || !/^0x[0-9a-fA-F]{40}$/.test(raw)) return null;
-  const hit = MARKET_VAULT_ADDRESSES.find((a) => a.toLowerCase() === raw.toLowerCase());
-  return hit ?? null;
+  const lc = raw.toLowerCase();
+  const hit = MARKET_VAULT_ADDRESSES.find((a) => a.toLowerCase() === lc);
+  if (hit) return hit;
+  // Per-collection vaults (collection entries ship with releases).
+  return collectionVaultAddresses().includes(lc) ? raw : null;
 }
 
 /**
  * Public read-only vault dashboard data.
  * Optional `?vault=0x…` (must be a configured vault) — Instant Swap V1/V2 switch.
- * Layers: isolate memory → Upstash (fast path) → chain → stale KV fallback.
+ * Layers: isolate memory → PostgreSQL (fast path) → chain → stale DB fallback.
  */
 export async function GET(req: Request) {
   const limited = rateLimit(req, { key: "vault-stats", limit: 60, windowMs: 60_000 });

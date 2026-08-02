@@ -3,9 +3,7 @@ import {
   CONTRACT_ADDRESS,
   DRAND_BEACON_ADDRESS,
   MARKET_OFFER_CURRENCY,
-  MARKET_VAULT_ADDRESS,
   MARKET_VAULT_ADDRESSES,
-  MARKET_VAULT_LEGACY_ADDRESS,
   PERMIT2_ADDRESS,
   SEAPORT_ADDRESS,
   UNIVERSAL_ROUTER_ADDRESS,
@@ -472,10 +470,16 @@ const MARKET_DESTINATIONS = new Set([
   ...MARKET_COLLECTIONS.map((c) => c.contractAddress.toLowerCase()),
 ]);
 
-/** Vault sends: any configured vault (primary + legacy), plus collection approvals. */
+/** Vault sends: any configured vault (primary + legacy + per-collection
+ * vaultAddress entries), plus collection approvals. Still a build-time
+ * constant set — collection entries ship with releases, never from runtime
+ * data. */
 function vaultDestinations(): Set<string> {
   const set = new Set(MARKET_COLLECTIONS.map((c) => c.contractAddress.toLowerCase()));
   for (const v of MARKET_VAULT_ADDRESSES) set.add(v.toLowerCase());
+  for (const c of MARKET_COLLECTIONS) {
+    if (c.vaultAddress) set.add(c.vaultAddress.toLowerCase());
+  }
   return set;
 }
 
@@ -505,7 +509,7 @@ export function assertSafeSwapDestination(to: string, kind: string) {
     return;
   }
   if (kind === "vault") {
-    if (!MARKET_VAULT_ADDRESS && !MARKET_VAULT_LEGACY_ADDRESS) {
+    if (MARKET_VAULT_ADDRESSES.length === 0) {
       throw new Error("No liquidity vault deployed — vault transactions are disabled.");
     }
     if (!vaultDestinations().has(to.toLowerCase())) {
@@ -821,6 +825,32 @@ export async function signTypedData(
     return (await provider.request({
       method: "eth_signTypedData_v4",
       params: [address, payload],
+    })) as string;
+  } catch (err) {
+    const msg = (err as { message?: string })?.message || "Signature rejected.";
+    if (/user rejected|denied|4001/i.test(msg)) {
+      throw new Error("Signature cancelled in wallet.");
+    }
+    throw new Error(msg);
+  }
+}
+
+/**
+ * personal_sign (EIP-191) over a plain string — used by the /admin console to
+ * authorize management mutations (see lib/admin-auth.ts). Note the argument
+ * order: personal_sign takes [message, address], the reverse of
+ * eth_signTypedData_v4 above.
+ */
+export async function signMessage(
+  address: string,
+  message: string
+): Promise<string> {
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+  try {
+    return (await provider.request({
+      method: "personal_sign",
+      params: [message, address],
     })) as string;
   } catch (err) {
     const msg = (err as { message?: string })?.message || "Signature rejected.";

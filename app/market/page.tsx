@@ -1,34 +1,52 @@
-import type { Metadata } from "next";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
+import AppBackdrop from "@/components/AppBackdrop";
 import MarketView from "@/components/market/MarketView";
 import ComingSoonGate from "@/components/market/ComingSoonGate";
-import { MARKET_ENABLED, SITE_URL } from "@/lib/constants";
+import { MARKET_ENABLED } from "@/lib/constants";
+import { getContent } from "@/lib/content-store";
+import type { FlagsDoc } from "@/lib/content-docs";
+import { createPageMetadata } from "@/lib/seo";
 
-/** Short ISR so dual-vault Instant Swap UI is not stuck behind year-long HTML cache. */
-export const revalidate = 30;
+/**
+ * Marketplank is a live application shell, not publish-once content. Keeping
+ * the route dynamic prevents Next.js and the hosting proxy from carrying an
+ * old layout across an immutable release switch.
+ */
+export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "Marketplank — RobinWood NFT Marketplace",
-  description: "List, buy, sell, and make offers on RobinWood — and eventually any Robinhood Chain collection.",
-  openGraph: {
-    title: "Marketplank",
-    description: "The RobinWood NFT marketplace on Robinhood Chain.",
-    url: `${SITE_URL}/market`,
-  },
-};
+export const metadata = createPageMetadata({
+  title: "Marketplank NFT Marketplace",
+  description:
+    "Browse, list, buy, sell, make offers, and use Instant Swap for RobinWood NFTs on Robinhood Chain.",
+  path: "/market",
+  keywords: ["Marketplank", "RobinWood marketplace", "Robinhood Chain NFT marketplace"],
+});
 
-export default function MarketPage() {
+export default async function MarketPage() {
+  // Admin runtime override (/admin → Flags): null = the baked env flag
+  // stands. This is a server component on a force-dynamic route, so both
+  // directions (kill switch AND enable) work without a deployment.
+  const flags = (await getContent("flags").catch(() => null)) as FlagsDoc | null;
+  const marketEnabled =
+    flags && flags.marketEnabled !== null ? flags.marketEnabled : MARKET_ENABLED;
+
   return (
     <>
+      <AppBackdrop />
       <Nav />
-      <main className="flex-1 px-3 py-10 sm:px-5">
-        {/* Browsing a listing grid benefits from real desktop width — the
-            site-wide 64rem prose column (.site-shell) is right for the
-            marketing/coming-soon state but starves the grid on wide
-            monitors once the market is live. */}
-        <div className={MARKET_ENABLED ? "mx-auto w-full max-w-[1800px]" : "site-shell"}>
-          {MARKET_ENABLED ? <MarketView /> : <ComingSoonGate />}
+      <main
+        id="main-content"
+        tabIndex={-1}
+        data-deployment={process.env.DEPLOYMENT_VERSION || "unknown"}
+        className="flex-1 px-3 pb-10 pt-0 sm:px-5 sm:py-6 lg:py-10"
+      >
+        {/* Finalized mockup shell: min(1440px, 100% - 32px). Wider than the
+            site's 64rem prose column so the grid gets desktop room, but
+            capped — at ultrawide widths an uncapped workspace inflated every
+            panel far past the approved composition. */}
+        <div className={marketEnabled ? "mx-auto w-full max-w-[1440px]" : "site-shell"}>
+          {marketEnabled ? <MarketView /> : <ComingSoonGate />}
         </div>
       </main>
       <Footer />

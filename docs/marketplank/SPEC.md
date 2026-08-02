@@ -1,8 +1,17 @@
 # Marketplank — Engineering & UI/UX Spec
 
-Status: **Phase 1 built and audited internally; nothing deployed with real value.** The
-exchange layer runs against the already-audited Seaport deployment. The Phase 2 vault is
-written and tested but NOT deployed and NOT third-party audited. See "Go-live gates".
+Status: **The Seaport marketplace and Instant Swap interface are deployed and
+enabled.** MarketplankVaultV3 ("Premium Plank Liquidity") is live on mainnet
+(2026-08-01) and is the primary, LP-capable vault; V1 (Driftwood) and V2
+(WormWood) are legacy, redeem-only — WormWood must never be recommended for
+new deposits or LP given its LP-drain (`docs/marketplank/AUDIT-2026-07-31-lp.md`).
+The application is deployed from `inmotion` to InMotion Passenger with
+PostgreSQL. The custom vault code has extensive internal audit evidence and
+regression tests but has not received an independent third-party audit.
+
+This specification began as a pre-launch plan. Sections below describe the
+current implementation where updated and retain explicit historical decisions
+where they explain the product.
 
 Background/competitive research lives in the scoping artifact from the planning session
 (OpenSea/Seaport, Blur/Blend, Magic Eden, NFTX, Sudoswap, NFT-lending field, Remilia/Milady).
@@ -16,9 +25,11 @@ One route, tabbed, not five separate pages:
 ```
 plank.love/market
 ├── Buy & Sell     (Seaport listings + offers — Phase 1)
-├── Offers         (collection/trait bids you've made or received — Phase 1)
-├── Instant Swap   (NFTX-style vault buy/sell — Phase 2)
-└── My Listings    (your active listings/offers/vault positions — Phase 1)
+├── Instant Swap   (Premium Plank Liquidity primary + Driftwood/WormWood legacy vaults)
+├── Offers         (token, trait, rarity, and combination bids)
+├── Activity       (collection and vault activity)
+├── My NFTs        (wallet inventory and listing)
+└── My Listings    (active listings, offers, approvals, and actions)
 ```
 
 `Lend` is not a tab yet. It does not appear in navigation until Phase 3 has its own audit —
@@ -28,34 +39,37 @@ mistake this project already made once (the pre-fix Trade section); not repeatin
 ## 2. Information architecture
 
 - Same Next.js app, same layout, same nav — no subdomain (rationale in the scoping doc).
-- `/market` is a client route; tab state is local (`useState`), not yet synced to the URL —
-  a `?tab=` query param is a small follow-up, not done in the initial build.
+- `/market` is a client route. `?tab=` and `?item=` make tabs and item details
+  shareable and keep browser Back/Forward navigation coherent.
 - Collection scope starts as an allowlist (`lib/market/collections.ts`): RobinWood only at
   first, expandable by editing that file — not a database, not an admin panel, until Stage B
   (chain-wide permissionless) is actually funded and scoped as its own project.
 
 ## 3. Component tree
 
-Built (real, functioning against the live network — gated behind `MARKET_ENABLED`):
+Current major components:
 
 ```
 lib/market/
-├── types.ts               — Listing / Offer / MarketCollection shapes
-├── collections.ts         — curated allowlist (Stage A)
-├── seaport.ts              — seaport-js wrapper: buildListing, buildOffer, fulfillOrder
-└── orders-store.ts         — file+memory store for signed orders (see §5 caveat)
+├── order-validation.ts    — derives user-visible values from signed orders
+├── signature.ts           — Seaport EIP-712 and EIP-1271 verification
+├── orders-store.ts        — indexed PostgreSQL orders; KV-compatible alternatives
+├── durable-kv.ts          — PostgreSQL, Redis/Valkey, and Upstash adapter
+├── vault-registry.ts      — V3 primary and V1/V2 legacy selection
+├── vault*.ts              — vault reads, writes, activity, inventory, and caches
+└── seaport.ts             — listing, offer, fulfillment, cancel, revoke, and sweep
 
 app/api/market/orders/route.ts  — GET (list orders) / POST (store a signed order)
 
 components/market/
-├── MarketNav.tsx          — tab strip, mirrors CountdownTimer's compact style
-├── ListingGrid.tsx        — responsive grid, 2-col mobile → 5-col desktop (matches Gallery.tsx)
-├── ListingCard.tsx        — image, name, price, "Buy" / "Make offer" — dense-card style
-├── ListForm.tsx           — token ID + price + duration, signs and publishes a listing
-├── MarketView.tsx         — ties the above together: fetches orders, wires buy/list actions
-├── SwapPanel.tsx          — Phase 2 vault buy/sell, reuses SwapWidget's tab pattern
-├── MyPositions.tsx        — active listings/offers/vault shares for the connected wallet
-└── ComingSoonGate.tsx     — the only thing rendered until contracts are live
+├── MarketView.tsx         — URL state, data loading, validation, and actions
+├── ListingGrid/Card       — responsive listing and offer surfaces
+├── ItemDetail.tsx         — owner, traits, rarity, history, and actions
+├── OfferForm.tsx          — token, trait, rarity, and combination bids
+├── SwapPanel.tsx          — buy, sell, LP, deposit, and redeem
+├── VaultMigrate.tsx       — optional legacy (V1/V2) holder migration into V3
+├── MyNfts/MyPositions     — wallet inventory and active positions
+└── ActivityFeed.tsx       — collection and market activity
 ```
 
 All of it reuses existing primitives rather than inventing new ones: `dense-card`,
@@ -86,7 +100,7 @@ Seller lists  →  EIP-712 signed order (off-chain, no gas)
              →  stored via a lightweight order-relay API (app/api/market/orders)
              →  buyer fetches via GET, fulfills on-chain through Seaport directly
 
-Offer made   →  same signing flow, criteria-based order for collection/trait offers
+Offer made   →  same signing flow, token or snapshotted criteria order
              →  seller fulfills against the standing offer whenever they choose
 ```
 
@@ -95,14 +109,14 @@ forge one) — not a custody system, not a matching engine. It exists because Se
 need *somewhere* to live before they're fulfilled on-chain; OpenSea's own "orderbook" plays the
 identical role.
 
-**Status:** the full Phase 1 loop is built and functional against the live Seaport deployment —
-list (`ListForm.tsx`), buy, make an item or collection-wide offer (`OfferForm.tsx`), accept an
-offer, and cancel an active listing/offer (`MyPositions.tsx`, via `seaport.cancelOrders`), all
-wired through `lib/market/seaport.ts` and the order-relay API. Verified locally end-to-end
-(tabs, empty states, wallet-gated actions) with no console errors.
+**Status:** the full Phase 1 loop is deployed: list, buy, sweep, make token or
+criteria offers, accept, cancel, and revoke approvals. The browser independently
+re-validates signed orders before fulfillment.
 
-Orders are stored in Vercel KV / Upstash when `KV_REST_API_URL` and `KV_REST_API_TOKEN` are
-set, falling back to an ephemeral file + memory store otherwise. Production is KV-backed.
+Orders use indexed rows in local PostgreSQL on cPanel Passenger. The smaller cache primitives
+continue through `lib/market/durable-kv.ts`, which supports PostgreSQL, Redis/Valkey, and
+Upstash/Vercel KV. With no durable backend configured, the app falls back to an ephemeral file
++ memory store that is only suitable for local development.
 
 Every displayed field is re-derived from the signed order rather than taken from the client
 (`lib/market/order-validation.ts`) — see the audit for why that distinction is the difference
@@ -123,16 +137,18 @@ This is the NFTX pattern from the scoping doc, scoped initially to the RobinWood
 only — a second collection only gets a vault once there's real demand for one, not
 speculatively.
 
-**Status:** `contracts/MarketplankVault.sol` is written and compiles clean (Hardhat,
-`npx hardhat compile`) — deposit/mint, buy/sell shares via a constant-product AMM, and
-random/targeted redemption are all implemented, with a hard ceiling on fees baked into the
-constructor so no deploy can accidentally set a predatory rate. It is explicitly marked
-UNAUDITED in its own header and is not deployed anywhere. This is the one piece of the whole
-build that's genuinely new, unaudited code — see gate 3 below before it goes near mainnet.
+**Status:** V1, V2, and V3 are all deployed. V3 ("Premium Plank Liquidity") is
+the primary, public LP-capable book; V1 (Driftwood) and V2 (WormWood) remain
+reachable only for legacy redeem — WormWood must not be used for new deposits
+or LP (see the LP-drain audit above). Random redemption targets a future
+drand round verified by `DrandBeacon`, then the relayer pins and settles the
+request. The contracts are immutable and are not independently audited.
 
-## 7. Go-live gates
+## 7. Launch record and remaining gates
 
-Nothing above ships to mainnet with real value until, in order:
+The marketplace and vaults were launched after the original checklist was
+written. The checklist is retained as a decision record; outstanding items are
+still real risks rather than pre-launch blockers:
 
 1. ~~Seaport 1.6 is deployed by us on Robinhood Chain~~ — **confirmed unnecessary.** Verified
    2026-07-27 via direct RPC (`eth_getCode`) and Blockscout (`is_verified: true`,
@@ -144,18 +160,14 @@ Nothing above ships to mainnet with real value until, in order:
    OpenZeppelin/Trail of Bits/Code4rena audits genuinely apply. This gate is satisfied for the
    exchange contract itself; what remains is integration testing (real testnet orders end to
    end), not a deployment.
-2. The vault/AMM contract (Phase 2) is deployed and its parameters (fees, redemption premium)
-   are fixed and published before any deposit is accepted. This one **is** a fresh deployment
-   and does not inherit anyone else's audit — see gate 3.
-3. **An independent third-party audit** covers the vault/AMM contract and the order-relay API
-   (the two pieces that are genuinely new code, unlike Seaport). Confirmed 2026-07-27: this will
-   be run via Fable at project completion, once every other piece below is finished and stable —
-   not a rolling review mid-build. This is non-negotiable per the standing project rule
-   established after the swap-widget incident, and it doesn't move regardless of how much of the
-   rest of the build is done.
-4. `MARKET_ENABLED` (see `lib/constants.ts`) flips from `false` to `true`. Until then, every
-   route in this spec renders `ComingSoonGate` and nothing else — same pattern as
-   `TRADE_PAUSED` gating the existing Trade section.
+2. The vault/AMM contracts are deployed with immutable parameters. They do not
+   inherit Seaport's audit.
+3. **An independent third-party audit** should cover the vault/AMM contract and
+   the order-relay API. The Fable passes in this repository are internal
+   adversarial reviews, not independent third-party audits. No independent
+   report is recorded here.
+4. `NEXT_PUBLIC_MARKET_ENABLED` is currently `true` on the `inmotion`
+   deployment.
 
 ### Readiness checklist (updated 2026-07-27)
 
@@ -163,15 +175,15 @@ Nothing above ships to mainnet with real value until, in order:
 |---|---|
 | Seaport + ConduitController on Robinhood Chain | ✅ Confirmed live, verified — no action needed |
 | Deployer wallet funded with ETH | ✅ Confirmed — owner has ETH ready |
-| Vault contract written + tested | ✅ 6/6 tests passing, EVM-target bug (Cancun `mcopy`) caught and fixed |
-| Deploy script | ✅ Written (`scripts/deploy-vault.ts`), not executed |
-| Order-relay persistence | ✅ KV-backed (`@vercel/kv`) with file fallback — needs `KV_REST_API_URL`/`KV_REST_API_TOKEN` from a real Upstash/Vercel KV instance before production traffic should trust it |
+| Vault contracts written + tested | ✅ V1, V2, and V3 deployed; contract regression suite runs in CI |
+| Deploy tooling | ✅ Wallet-signed standalone tool retained for operator-controlled deploys |
+| Order-relay persistence | ✅ cPanel PostgreSQL uses indexed live-order rows; Redis/Valkey and Upstash remain migration-compatible; the file fallback is local-only |
 | Marketplace fee model (Seaport listings/offers) | ✅ Decided 2026-07-27: $PLANK always 0%, other collections default 0.5%, toggleable per-collection — see §9 |
 | Vault fee parameters (mint/redeem/premium bps) + fee recipient | ✅ Updated in `scripts/deploy-vault.ts`: 1% / 1% / 2.5%, treasury wallet |
 | Initial pool liquidity (ETH + NFTs to seed) | ✅ Decided 2026-07-27: funded from the fee treasury, not the owner's capital — see §9 for the threshold |
 | Partner collections beyond RobinWood | ⏳ None added — `lib/market/collections.ts` is RobinWood-only until told otherwise |
-| Internal adversarial review | ✅ Two passes, 2026-07-27 — 16 findings (2 critical, 6 high) found, fixed, and pinned by 36 regression tests. See `AUDIT-2026-07-27.md` |
-| Third-party audit | ⏳ **Still required.** The internal review found serious defects precisely because it went looking adversarially, but it was the same author reviewing their own code and shares its blind spots. Blocks `MARKET_ENABLED=true` regardless of everything else on this list. |
+| Internal adversarial review | ✅ Multiple documented passes with regression tests. See both audit records. |
+| Third-party audit | ⏳ **Still absent.** Internal review does not replace an independent audit; limit exposure accordingly. |
 | Legal/compliance review of the vault as a financial product | ⏳ Not assessed — flagged, not resolved, by design (outside what an AI assistant can sign off on) |
 
 ## 8. What Remilia/Milady contributed to this design

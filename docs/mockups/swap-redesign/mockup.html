@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instant Swap — V3 redesign mockup (RobinWood)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Uncial+Antiqua&family=Nunito+Sans:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  /* Tokens mirror app/globals.css @theme — the real build uses those classes,
+     never this block. Present here only so the mockup renders standalone. */
+  :root{
+    --gold-500:#E9B43F; --gold-400:#EEC164; --gold-300:#F8D98A; --gold-600:#AF761D;
+    --wood-950:#1B120A; --wood-900:#2A1A0F; --wood-850:#302013; --wood-800:#3D2513;
+    --cream:#FFF2CF; --cream-muted:#C9B58A;
+    --line:rgba(233,180,63,0.24); --line-strong:rgba(233,180,63,0.5);
+    --panel:rgba(28,16,8,0.94); --panel-soft:rgba(41,26,15,0.88); --panel-strong:rgba(17,10,5,0.97);
+    --page-bg:#14100B; --on-gold:#261105;
+    --ok:#34D399; --warn:#FBBF24; --bad:#FB7185; --v3:#34D399;
+    --font-display:'Uncial Antiqua',serif; --font-body:'Nunito Sans',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--page-bg);color:var(--cream);font-family:var(--font-body);font-size:.875rem;font-weight:700;line-height:1.35;padding:28px 20px 100px}
+  .grain{
+    background-color:#160e08;
+    background-image:
+      linear-gradient(180deg, rgba(10,6,3,.18), rgba(10,6,3,.62)),
+      repeating-linear-gradient(92deg, rgba(233,180,63,.05) 0, rgba(233,180,63,.05) 1px, transparent 1px, transparent 11px),
+      linear-gradient(120deg, #24160c, #171008 62%, #100b07);
+  }
+  .wrap{max-width:1180px;margin:0 auto}
+  h1{font-family:var(--font-display);font-weight:400;color:var(--gold-300);font-size:2rem;line-height:1.05;margin-bottom:6px}
+  .sub{color:var(--cream-muted);font-weight:400;max-width:80ch;margin-bottom:8px}
+  .sub code{color:var(--gold-300);font-size:.78rem}
+  .seclabel{font-size:.6875rem;font-weight:900;letter-spacing:.12em;text-transform:uppercase;color:var(--cream-muted);margin:40px 0 14px;display:flex;align-items:center;gap:10px}
+  .seclabel::after{content:"";flex:1;height:1px;background:var(--line)}
+  .mono{font-variant-numeric:tabular-nums}
+
+  .frame{border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .nav{height:58px;background:rgba(27,18,10,.92);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:0 20px}
+  .nav .brand{display:flex;align-items:center;gap:9px;font-family:var(--font-display);color:var(--gold-300);font-size:1.05rem;white-space:nowrap}
+  .nav .brand img{height:30px;width:auto;display:block}
+  .nav .links{display:flex;gap:2px;font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:rgba(255,242,207,.7)}
+  .nav .links span{padding:8px 10px;border-radius:8px}
+  .nav .links .on{background:rgba(233,180,63,.16);color:var(--gold-300)}
+  .nav .connect{margin-left:auto;background:var(--gold-500);color:var(--on-gold);border-radius:9px;padding:9px 14px;font-size:.75rem;font-weight:900}
+  .body{padding:22px 22px 26px;background:radial-gradient(1100px 300px at 50% -60px, rgba(233,180,63,.05), transparent), var(--page-bg)}
+
+  .kicker{font-size:.625rem;font-weight:900;letter-spacing:.16em;text-transform:uppercase;color:var(--gold-600)}
+  h2{font-family:var(--font-display);font-weight:400;color:var(--gold-300);font-size:1.7rem;margin:2px 0 4px}
+  .lede{color:var(--cream-muted);font-weight:400;max-width:72ch;font-size:.82rem}
+
+  /* migration nudge — only when the connected wallet holds a retiring vault */
+  .mig{margin-top:14px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;border:1px solid var(--line-strong);border-radius:12px;background:linear-gradient(90deg,rgba(233,180,63,.15),rgba(233,180,63,.04));padding:10px 14px}
+  .mig .dot{width:9px;height:9px;border-radius:50%;background:var(--warn);flex:none;box-shadow:0 0 8px rgba(251,191,36,.6)}
+  .mig .msg{flex:1;min-width:0;font-size:.82rem}
+  .mig .msg b{color:var(--gold-300)}
+  .mig .cta{flex:none;background:var(--gold-500);color:var(--on-gold);border-radius:9px;padding:9px 14px;font-weight:900;font-size:.76rem}
+
+  /* V3 vault identity — single vault, no switcher */
+  .vaultbar{margin-top:16px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);padding:11px 15px}
+  .vid{display:inline-flex;align-items:center;gap:9px}
+  .vid .tag{font-size:.56rem;font-weight:900;letter-spacing:.08em;padding:2px 7px;border-radius:6px;color:var(--v3);border:1px solid rgba(52,211,153,.5);background:rgba(52,211,153,.14)}
+  .vid .name{font-weight:900;font-size:.86rem;color:var(--cream)}
+  .vid .addr{font-family:var(--font-body);font-size:.66rem;color:var(--cream-muted)}
+  .vmeta{display:flex;gap:16px;flex-wrap:wrap;color:var(--cream-muted);font-size:.72rem;margin-left:auto}
+  .vmeta b{color:var(--gold-300);font-weight:900}
+  .vmeta .open{color:var(--v3)}
+
+  .hero{margin-top:14px;display:grid;grid-template-columns:minmax(0,440px) minmax(0,1fr);gap:14px;align-items:start}
+  @media(max-width:880px){.hero{grid-template-columns:1fr}.vmeta{margin-left:0}}
+
+  .card{border:1px solid var(--line);border-radius:14px;background:var(--panel-strong);padding:16px}
+  .card.trade{padding:14px}
+
+  .seg{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:var(--wood-950);border:1px solid var(--line);border-radius:11px;padding:4px}
+  .seg button{appearance:none;border:0;background:transparent;color:var(--cream-muted);font-family:var(--font-body);font-weight:900;font-size:.72rem;padding:9px 4px;border-radius:8px;cursor:pointer;letter-spacing:.02em}
+  .seg button.on{background:var(--gold-500);color:var(--on-gold)}
+
+  .hint{margin-top:12px;border:1px solid rgba(96,165,250,.35);background:rgba(37,99,235,.1);border-radius:9px;padding:9px 11px;font-size:.72rem;color:#cfe0ff}
+  .hint b{color:#eaf1ff}
+
+  .field{margin-top:10px;border:1px solid var(--line);border-radius:11px;background:var(--wood-950);padding:12px 13px}
+  .field .top{display:flex;justify-content:space-between;font-size:.66rem;color:var(--cream-muted);font-weight:800}
+  .field .top .max{color:var(--gold-300);cursor:pointer}
+  .field .in{display:flex;align-items:center;justify-content:space-between;margin-top:6px}
+  .field .in .amt{font-size:1.5rem;font-weight:900;color:var(--cream)}
+  .field .in .amt.dim{color:rgba(255,242,207,.4)}
+  .field .in .token{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-strong);border-radius:999px;background:var(--wood-900);padding:5px 11px;font-weight:900;font-size:.78rem;color:var(--gold-300)}
+  .field .in .token img{width:18px;height:18px;border-radius:4px;object-fit:cover}
+  .swapicon{width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:var(--wood-900);display:flex;align-items:center;justify-content:center;margin:-8px auto;position:relative;z-index:2;color:var(--gold-300)}
+  .plusicon{width:26px;height:26px;border-radius:50%;border:1px solid var(--line);background:var(--wood-900);display:flex;align-items:center;justify-content:center;margin:-6px auto;position:relative;z-index:2;color:var(--gold-300);font-weight:900}
+
+  .summary{margin-top:12px;display:flex;flex-direction:column;gap:5px;font-size:.72rem}
+  .summary .r{display:flex;justify-content:space-between;color:var(--cream-muted)}
+  .summary .r b{color:var(--cream);font-weight:800}
+  .summary .r.total{border-top:1px solid var(--line);padding-top:6px;margin-top:2px}
+  .summary .r.total b{color:var(--gold-300)}
+  .summary .r .fee{color:var(--v3)}
+
+  .cta{margin-top:14px;width:100%;min-height:48px;border:0;border-radius:11px;background:var(--gold-500);color:var(--on-gold);font-family:var(--font-body);font-weight:900;font-size:.92rem;cursor:pointer}
+
+  .ctx{display:flex;flex-direction:column;gap:14px}
+  .yourpos{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .stat{border:1px solid var(--line);border-radius:11px;background:var(--wood-950);padding:10px 12px}
+  .stat .k{font-size:.55rem;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:var(--cream-muted)}
+  .stat .v{font-size:1.15rem;font-weight:900;color:var(--gold-300);margin-top:3px}
+  .stat .v.ok{color:var(--v3)}
+  .stat .n{font-size:.55rem;color:rgba(255,242,207,.5)}
+
+  .card h3, .snap h3{font-size:.7rem;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:var(--cream);display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .card h3 .side, .snap h3 .side{margin-left:auto;font-size:.6rem;font-weight:800;color:var(--cream-muted)}
+  .snapgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .snapgrid .cell{border:1px solid var(--line);border-radius:10px;background:var(--wood-950);padding:9px 10px}
+  .snapgrid .cell .k{font-size:.52rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--cream-muted)}
+  .snapgrid .cell .v{font-size:.92rem;font-weight:900;color:var(--cream);margin-top:2px}
+
+  .planks{display:flex;gap:6px;margin-top:11px}
+  .plk{width:44px;height:44px;border-radius:9px;flex:none;border:1px solid var(--line-strong);object-fit:cover;background:var(--wood-900)}
+  .plk.more{display:flex;align-items:center;justify-content:center;color:var(--cream-muted);font-size:.66rem;font-weight:900;background:var(--wood-900)}
+
+  /* inventory strip (vault holdings) */
+  .invstrip{display:flex;gap:6px;margin-top:11px;overflow:hidden}
+  .invstrip img{width:40px;height:40px;border-radius:8px;flex:none;border:1px solid var(--line);object-fit:cover}
+  .invstrip .ghost{width:40px;height:40px;border-radius:8px;flex:none;border:1px dashed var(--line);background:rgba(233,180,63,.03)}
+
+  .tabs{margin-top:18px;border:1px solid var(--line);border-radius:14px;background:var(--panel-strong);overflow:hidden}
+  .tabhead{display:flex;gap:2px;border-bottom:1px solid var(--line);padding:6px 8px;background:rgba(27,18,10,.6)}
+  .tabhead span{padding:8px 13px;border-radius:8px;font-size:.72rem;font-weight:900;color:var(--cream-muted);cursor:pointer}
+  .tabhead span.on{background:rgba(233,180,63,.14);color:var(--gold-300)}
+  .tabbody{padding:16px}
+  .chartph{height:150px;border-radius:10px;border:1px solid var(--line);background:linear-gradient(180deg, rgba(233,180,63,.05), transparent), var(--wood-950);position:relative;overflow:hidden}
+  .chartph svg{position:absolute;inset:0;width:100%;height:100%}
+
+  .odds{display:flex;flex-direction:column;gap:7px}
+  .odds .row{display:flex;align-items:center;gap:10px;font-size:.75rem}
+  .odds .row .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .odds .row .bar{flex:1;height:7px;border-radius:4px;background:var(--wood-900);overflow:hidden}
+  .odds .row .bar i{display:block;height:100%;border-radius:4px}
+  .odds .row .pct{width:52px;text-align:right;color:var(--cream-muted);font-weight:800}
+
+  .note{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:14px 16px;font-size:.78rem;color:var(--cream-muted)}
+  .note h3{font-size:.9rem;color:var(--gold-300);margin-bottom:8px;font-family:var(--font-display);font-weight:400}
+  .note p{margin-bottom:9px}
+  .note b{color:var(--cream)}
+  .note code{color:var(--gold-300);font-size:.72rem}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}.seg{grid-template-columns:repeat(3,1fr)}.yourpos{grid-template-columns:1fr 1fr}}
+
+  .statecard{border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);padding:14px}
+  .statecard .tag{font-size:.56rem;font-weight:900;letter-spacing:.1em;text-transform:uppercase;color:var(--gold-600);margin-bottom:6px}
+  .statecard h4{font-size:.92rem;color:var(--cream);margin-bottom:5px}
+  .statecard p{font-size:.74rem;color:var(--cream-muted)}
+  .lpbadge{display:inline-block;font-size:.55rem;font-weight:900;letter-spacing:.06em;color:var(--v3);border:1px solid rgba(52,211,153,.5);background:rgba(52,211,153,.12);border-radius:5px;padding:1px 6px;margin-left:6px}
+</style>
+</head>
+<body class="grain">
+<div class="wrap">
+  <h1>Instant Swap — the V3 page</h1>
+  <p class="sub">A re-envisioning of <code>/market?tab=swap</code>, built for <b>V3 only</b>: flat ETH fees and proportional LP. V1/V2 are never shown here — a wallet holding them is caught by the migration prompt at the top and sent to <code>/migrate</code>. Real logo + real plank art. Tokens are the production <code>app/globals.css</code> ones. Nothing here is code.</p>
+
+  <div class="seclabel">A · The V3 swap page (connected · Buy)</div>
+  <div class="frame">
+    <div class="nav">
+      <span class="brand"><img src="assets/plank-logo.webp" alt="RobinWood">RobinWood</span>
+      <span class="links"><span>Market</span><span class="on">Instant Swap</span><span>Trade</span><span>Mint</span><span>Gallery</span></span>
+      <span class="connect">0x15…e2ae · 1.42 Ξ</span>
+    </div>
+    <div class="body">
+      <div class="kicker">Marketplank · Trade shares, redeem planks</div>
+      <h2>Instant Swap</h2>
+      <p class="lede">Buy or sell vault shares against ETH, provide liquidity, deposit a plank for a share, or redeem a share for a plank. One vault — V3.</p>
+
+      <!-- migration prompt: only rendered when the connected wallet holds V1/V2 -->
+      <div class="mig">
+        <span class="dot"></span>
+        <span class="msg"><b>You hold planks in a retiring vault.</b> V1/V2 are being wound down — move your value to V3 in a few clicks. This is the only place the old vaults appear.</span>
+        <span class="cta">Migrate now →</span>
+      </div>
+
+      <!-- single V3 vault identity, no switcher -->
+      <div class="vaultbar">
+        <span class="vid"><span class="tag">V3</span><span class="name">RobinWood Vault</span><span class="addr">0x… · latest</span></span>
+        <span class="vmeta"><span class="open">● Open</span><span><b>12</b> planks</span><span><b>0.50 Ξ</b> liquidity</span><span><b>12.4</b> shares</span><span><b>0.0403 Ξ</b>/share</span></span>
+      </div>
+
+      <div class="hero">
+        <div class="card trade">
+          <div class="seg">
+            <button class="on">Buy</button><button>Sell</button><button>Deposit</button><button>Redeem</button><button>Liquidity</button>
+          </div>
+          <div class="hint"><b>Buy shares</b> — pay ETH, receive fungible V3 shares. To get an actual plank, use <b>Redeem</b>.</div>
+
+          <div class="field">
+            <div class="top"><span>You pay</span><span>bal 1.42 Ξ · <span class="max">Max</span></span></div>
+            <div class="in"><span class="amt mono">0.25</span><span class="token">◆ ETH</span></div>
+          </div>
+          <div class="swapicon">↓</div>
+          <div class="field">
+            <div class="top"><span>You receive</span><span>≈ $27.30</span></div>
+            <div class="in"><span class="amt mono">6.12</span><span class="token"><img src="assets/plank-logo.webp" alt="">V3 shares</span></div>
+          </div>
+
+          <div class="summary">
+            <div class="r"><span>Rate</span><b class="mono">0.0403 Ξ / share</b></div>
+            <div class="r"><span>Swap fee (0.30%) <span class="lpbadge">to LPs</span></span><b class="mono fee">0.00075 Ξ</b></div>
+            <div class="r"><span>Price impact</span><b class="mono" style="color:var(--ok)">1.9%</b></div>
+            <div class="r total"><span>Minimum received (1% slip.)</span><b class="mono">6.06 shares</b></div>
+          </div>
+          <button class="cta">Review share purchase</button>
+        </div>
+
+        <div class="ctx">
+          <div class="card">
+            <h3>Your position <span class="side">on V3</span></h3>
+            <div class="yourpos">
+              <div class="stat"><div class="k">Shares</div><div class="v mono">2.00</div><div class="n">≈ 2 planks</div></div>
+              <div class="stat"><div class="k">Planks held</div><div class="v mono ok">3</div><div class="n">in your wallet</div></div>
+              <div class="stat"><div class="k">Your LP</div><div class="v mono ok">1.24</div><div class="n">4.9% of pool</div></div>
+            </div>
+            <div class="planks">
+              <img class="plk" src="assets/plank-knightwood.png" alt="Knightwood">
+              <img class="plk" src="assets/plank-bobawood.png" alt="Bobawood">
+              <img class="plk" src="assets/plank-is-this-art.png" alt="Is This Art">
+            </div>
+          </div>
+
+          <div class="card snap">
+            <h3>Vault at a glance <span class="side">live · V3</span></h3>
+            <div class="snapgrid">
+              <div class="cell"><div class="k">Planks</div><div class="v mono">12</div></div>
+              <div class="cell"><div class="k">ETH liquidity</div><div class="v mono">0.50 Ξ</div></div>
+              <div class="cell"><div class="k">Share liq.</div><div class="v mono">12.4</div></div>
+              <div class="cell"><div class="k">Share price</div><div class="v mono">$4.40</div></div>
+              <div class="cell"><div class="k">Deposit / redeem</div><div class="v mono">0.001 Ξ</div></div>
+              <div class="cell"><div class="k">Swap fee</div><div class="v mono">0.30%</div></div>
+            </div>
+            <div class="invstrip">
+              <img src="assets/plank-redacted.png" alt=""><img src="assets/plank-insidertrader.png" alt="">
+              <img src="assets/plank-knightwood.png" alt=""><img src="assets/plank-bobawood.png" alt="">
+              <img src="assets/plank-is-this-art.png" alt=""><span class="ghost"></span><span class="ghost"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <div class="tabhead"><span class="on">Price</span><span>Redeem odds</span><span>Activity</span><span>Liquidity</span></div>
+        <div class="tabbody">
+          <div class="chartph"><svg viewBox="0 0 600 150" preserveAspectRatio="none"><polyline fill="none" stroke="#E9B43F" stroke-width="2" points="0,120 60,110 120,118 180,90 240,96 300,70 360,80 420,55 480,62 540,40 600,48"/></svg></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="seclabel">B · The V3 differentiator — Liquidity (Add), proportional</div>
+  <p class="sub" style="margin-bottom:12px">V3's whole reason to exist. Add ETH + shares <b>at the current pool ratio</b> and receive an LP position; remove burns it pro-rata for a slice of current reserves. This is the tab that did not exist safely before.</p>
+  <div class="grid2">
+    <div class="card trade" style="max-width:440px">
+      <div class="seg"><button>Buy</button><button>Sell</button><button>Deposit</button><button>Redeem</button><button class="on">Liquidity</button></div>
+      <div class="hint"><b>Add liquidity</b> — supply ETH and shares at the pool ratio, earn the 0.30% swap fee on every trade. Withdraw any time, pro-rata.</div>
+      <div class="field">
+        <div class="top"><span>Deposit</span><span>bal 1.42 Ξ · <span class="max">Max</span></span></div>
+        <div class="in"><span class="amt mono">0.10</span><span class="token">◆ ETH</span></div>
+      </div>
+      <div class="plusicon">+</div>
+      <div class="field">
+        <div class="top"><span>Paired shares (auto)</span><span>bal 2.00 sh</span></div>
+        <div class="in"><span class="amt mono">2.48</span><span class="token"><img src="assets/plank-logo.webp" alt="">V3 shares</span></div>
+      </div>
+      <div class="summary">
+        <div class="r"><span>Pool ratio</span><b class="mono">0.0403 Ξ / share</b></div>
+        <div class="r"><span>LP received</span><b class="mono ok">0.986 LP</b></div>
+        <div class="r total"><span>Your pool share after</span><b class="mono">7.8%</b></div>
+      </div>
+      <button class="cta">Review add liquidity</button>
+    </div>
+    <div class="note" style="align-self:start">
+      <h3>Why this is safe now</h3>
+      <p>The old V2 tracked LP as flat credits, which let a one-sided add + a trade + a withdraw drain the pool. <b>V3 mints proportional LP</b> against the current reserves — a contributor absorbs any price move they cause, so there is nothing to extract.</p>
+      <p><b>Shares are pulled to match your ETH</b> at the live ratio, so you never over- or under-supply a side. The slippage guard (<code>minLpOut</code>) protects large adds — the UI fills it from the live quote automatically.</p>
+      <p><b>Remove</b> burns your LP for a pro-rata slice of whatever the reserves are then — including your share of accrued swap fees.</p>
+    </div>
+  </div>
+
+  <div class="seclabel">C · The five actions (all V3)</div>
+  <div class="grid2">
+    <div class="statecard"><div class="tag">Buy / Sell</div><h4>ETH ⇄ shares</h4><p>Constant-product swap with a <b>0.30% fee that goes to LPs</b> (grows the pool). Rate, fee, price impact and minimum-received shown before the CTA.</p></div>
+    <div class="statecard"><div class="tag">Deposit / Redeem</div><h4>Plank ⇄ share <span class="lpbadge">flat ETH fee</span></h4><p>Deposit a plank → exactly <b>one</b> share for a flat ETH fee. Redeem a share → a plank (random via drand, or targeted for an ETH premium). No 0.99/1.01 dust — V3 mints and burns whole shares.</p></div>
+    <div class="statecard"><div class="tag">Liquidity</div><h4>Add / remove <span class="lpbadge">proportional</span></h4><p>The section B card. Proportional LP tokens, pro-rata withdrawal, LPs earn the swap fee. The reason to hold liquidity at all.</p></div>
+    <div class="statecard"><div class="tag">Migration</div><h4>V1/V2 never appear here</h4><p>The swap page is V3-only. A wallet holding a retiring vault sees the prompt at the top and the site-wide banner, both routing to <code>/migrate</code>. Nothing on this page promotes the old vaults.</p></div>
+  </div>
+
+  <div class="seclabel">D · States</div>
+  <div class="grid2">
+    <div class="statecard"><div class="tag">Disconnected</div><h4>Connect to trade</h4><p>The form is disabled with a single "Connect wallet" CTA; vault-at-a-glance and analytics still render from public reads. No wall of empty boxes.</p></div>
+    <div class="statecard"><div class="tag">Loading</div><h4>Skeletons, not blanks</h4><p>Fixed-height pulse skeletons so the first paint has structure — the current page's worst tell is large empty bordered boxes while RPC resolves.</p></div>
+    <div class="statecard"><div class="tag">Pool closed / empty</div><h4>Honest empty state</h4><p>Before <code>openPool()</code>, or if a side is empty, the card says so instead of a dead form. Deposit/redeem still work when trading doesn't.</p></div>
+    <div class="statecard"><div class="tag">Holds V1/V2</div><h4>Migration-first</h4><p>The top prompt is shown and persists until the wallet's legacy balance is zero; the swap actions still target V3 underneath.</p></div>
+  </div>
+
+  <div class="seclabel">E · Why this beats today</div>
+  <div class="note">
+    <p><b>Today:</b> a ten-panel vertical stack (dual-vault switcher, swap panel, the big living-liquidity circle, vault book, price chart, redeem odds, trade history, migrate details, seed, treasury), mostly dense data fighting for attention, with large empty boxes while it loads — and it promotes the drained V2.</p>
+    <p><b>This:</b> a single <b>V3 vault line</b>, a <b>focused trade card</b> with the five actions in one control, a <b>context column</b> (your position + vault-at-a-glance, both with real plank art), and <b>one tabbed area</b> for chart / odds / activity / liquidity. Operator tools (seed, treasury) move behind an "Operator" disclosure, off the trading path. V1/V2 are gone from the page entirely — only the migration prompt references them.</p>
+  </div>
+</div>
+</body>
+</html>

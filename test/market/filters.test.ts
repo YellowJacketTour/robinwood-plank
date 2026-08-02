@@ -75,6 +75,20 @@ test("tier filter combines with price/search — the actual point of a combined 
   assert.deepEqual(rareAndExpensive.map((i) => i.tokenId), ["234"]);
 });
 
+test("multiple rarity tiers combine with OR semantics", () => {
+  const rarity = new Map([
+    ["1", { name: "One", tier: "Rare" as const, rank: 1, percentile: 99 }],
+    ["12", { name: "Two", tier: "Epic" as const, rank: 2, percentile: 98 }],
+    ["234", { name: "Three", tier: "Common" as const, rank: 3, percentile: 97 }],
+  ]);
+  const filtered = applyFilters(
+    items,
+    { ...EMPTY_FILTERS, tiers: ["Rare", "Epic"] },
+    rarity
+  );
+  assert.deepEqual(filtered.map((item) => item.tokenId), ["1", "12"]);
+});
+
 test("tier filter excludes items with no rarity data, and no rarityMap means every tier filter excludes everything (fail closed, never fail open into showing the wrong tier)", () => {
   assert.equal(applyFilters(items, { ...EMPTY_FILTERS, tier: "Rare" }).length, 0);
   const partialMap = new Map([["1", { tier: "Rare" as const, rank: 1, percentile: 90 }]]);

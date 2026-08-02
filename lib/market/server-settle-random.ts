@@ -36,6 +36,20 @@ const VAULT_ABI = [
 const DEFAULT_RPC = "https://rpc.mainnet.chain.robinhood.com";
 const DRAND_API = "https://api.drand.sh";
 
+/**
+ * A fresh JsonRpcProvider per request re-resolved the network every time,
+ * costing an extra eth_chainId on every settle poll. The chain is fixed, so
+ * pin it with staticNetwork and reuse the provider across requests.
+ */
+let providerCache: { rpc: string; provider: JsonRpcProvider } | null = null;
+
+function getProvider(rpc: string): JsonRpcProvider {
+  if (providerCache?.rpc === rpc) return providerCache.provider;
+  const provider = new JsonRpcProvider(rpc, undefined, { staticNetwork: true });
+  providerCache = { rpc, provider };
+  return provider;
+}
+
 export type SettleVaultResult = {
   vault: string;
   status:
@@ -111,7 +125,7 @@ export async function settleRandomRedeems(opts?: {
     };
   }
 
-  const provider = new JsonRpcProvider(rpc);
+  const provider = getProvider(rpc);
   const wallet = new Wallet(key, provider);
   const beacon = new Contract(beaconAddr, BEACON_ABI, wallet);
   const results: SettleVaultResult[] = [];

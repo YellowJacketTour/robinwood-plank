@@ -14,6 +14,8 @@ export type TraitIndexResponse = {
   scanned: number;
   /** traitType → value → token-id list; null until the scan completes. */
   traits: Record<string, Record<string, string[]>> | null;
+  /** Token id → verified collection rank; null if rarity data is unavailable. */
+  rankings: Record<string, number> | null;
 };
 
 export async function fetchTraitIndex(

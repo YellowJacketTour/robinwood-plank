@@ -1,8 +1,43 @@
-# Vault deploy tool — you sign, I never touch a key
+# Vault deploy tool — RETIRED (2026-08-02)
 
-Standalone page. Not part of the Next.js app, never shipped to plank.love.
+**Do not use this tool for new deployments.** It builds and deploys
+`contracts/MarketplankVault.sol` — the pre-Premium-Plank-Liquidity share-fee
+design whose LP primitive is a proven flash-loanable drain (see
+`docs/marketplank/AUDIT-2026-07-31-lp.md` and the "Do not migrate users into
+V2" rule in `AGENTS.md`). Its constructor shape
+(`mintFeeBps`/`redeemFeeBps`/`targetPremiumBps`) also does not match
+`MarketplankVaultV3.sol`'s (`mintFeeWei`/`redeemFeeWei`/`targetPremiumWei`/
+`swapFeeBps`), so this tool cannot deploy the current vault generation even if
+you retargeted the artifact copy step.
 
-## Before you touch this
+**What replaced it:** `.github/workflows/deploy-vault-v3.yml`, a
+`workflow_dispatch` that already deployed RobinWood's own V3 vault to
+mainnet. It CI-gates tests before deploying, holds the deploy key as a repo
+secret (`DEPLOYER_PK`) instead of a browser wallet, and requires typing
+`DEPLOY_V3_MAINNET` to touch real value. Full procedure:
+`docs/marketplank/DEPLOY-V3-RUNBOOK.md`.
+
+**Why not just update this tool to V3 instead:** the trust model this tool
+offers — the treasury signs bytecode it can verify against source, on its own
+machine, and no key ever touches a server — is real and was worth building.
+But re-targeting it safely means matching V3's different constructor
+(wei-denominated fees, a swap-fee-bps parameter, and the contract's own
+fee-ceiling reverts), plus its beacon-reuse and seeding flow, in a hand-rolled
+browser tool with no test harness — on a contract where a bad deploy costs
+real, unrecoverable mainnet gas. That was judged more likely to introduce a
+bug than to add safety over the already-proven, CI-tested workflow, so it was
+retired rather than half-migrated. If the workflow's `DEPLOYER_PK`-in-secrets
+trust model ever becomes the actual blocker (not a hypothetical one), rebuild
+this tool from scratch against `MarketplankVaultV3.sol`'s real ABI rather than
+patching the old form.
+
+The code below is left as-is (not deleted) as a historical/reference
+implementation of the wallet-connect + verify-on-chain flow. Do not run it
+against real value.
+
+---
+
+## Before you touch this (historical — describes the retired V1/V2 flow)
 
 1. Read `docs/marketplank/AUDIT-2026-07-27-fable.md`. No independent
    third-party audit has happened. That's your call to make, not this tool's.
@@ -68,5 +103,9 @@ on-chain. When you personally decide it's ready, come back to Step 6 and call
 is public forever and seeding is dead forever, for everyone, you included.
 There is no contract-enforced minimum — that judgment call is entirely yours.
 
-Then: start `scripts/relay-drand.ts` so redemptions actually resolve, and set
-`NEXT_PUBLIC_MARKET_VAULT_ADDRESS` before flipping `NEXT_PUBLIC_MARKET_ENABLED`.
+Then: verify the deployed addresses and configure them through a reviewed
+`inmotion` release. Production random-redemption settlement is performed by
+the standalone relayer packaged in each Passenger release and scheduled by the
+cPanel cron. `scripts/relay-drand.ts` remains the source/manual diagnostic, not
+the long-running production command. Follow the
+[InMotion drand relayer runbook](../../docs/INMOTION_DEPLOYMENT.md#12-inmotion-drand-relayer).

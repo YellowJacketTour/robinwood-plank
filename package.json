@@ -5,29 +5,65 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:relayer": "esbuild scripts/relay-drand.ts --bundle --platform=node --format=esm --target=node22 --outfile=.next/standalone/ops/drand-relayer/relay-drand.mjs",
+    "build:market-refresh": "esbuild scripts/refresh-market-data.ts --bundle --platform=node --format=esm --target=node22 --external:pg --external:pg-native --outfile=.next/standalone/scripts/refresh-market-data.mjs",
     "start": "next start",
     "lint": "eslint",
+    "lint:inmotion": "eslint app/api/health/route.ts lib/postgres.ts lib/public-json.ts lib/boards-store.ts lib/market/durable-kv.ts lib/market/orders-store.ts lib/market/served-orders.ts lib/market/rarity-snapshot.ts lib/market/vault-activity.ts lib/market/sales-catalog.ts lib/market/fetch-rpc.ts lib/market/rpc-budget.ts lib/market/rpc-cache.ts lib/market/rpc-meter.ts app/api/rpc/route.ts app/api/market/rpc-usage/route.ts scripts/refresh-market-data.ts test/market/durable-kv.test.ts test/market/sales-catalog-durability.test.ts test/market/rpc-cache.test.ts test/market/order-liveness.test.ts lib/market/order-status.ts lib/market/opensea.ts lib/market/book.ts lib/market/robinhood-assets.ts lib/market/token-registry.ts app/api/uniswap/tokens/route.ts lib/uniswap-tokenlist.ts app/api/uniswap/token-search/route.ts test/market/book-merge.test.ts app/api/market/orders/route.ts test/market/opensea-key.test.ts test/market/vault-activity-cache.test.ts test/market/relay-drand.test.ts test/market/verify-relayer-log.test.ts scripts/migrate-postgres.mjs scripts/backup-postgres.mjs scripts/snapshot-vault-state.mjs scripts/postgres-maintenance.mjs scripts/verify-relayer-log.mjs scripts/verify-postgres-storage.ts scripts/relay-drand.ts deploy/inmotion/passenger.cjs lib/plank-valuation.ts lib/plank-supply.ts app/api/trade/valuation/route.ts components/trade/PlankValuation.tsx test/market/plank-valuation.test.ts lib/market/alchemy-nft.ts lib/market/owner-index.ts app/api/market/token/route.ts lib/market/vault-stats.ts lib/market/vault-held.ts test/market/owner-index.test.ts test/market/vault-immutable-config.test.ts next.config.ts lib/admin-auth.ts lib/admin-log.ts lib/content-docs.ts lib/content-store.ts lib/uploads.ts lib/woodamp-playlist.ts lib/woodamp-playlist-store.ts app/api/music/playlist/route.ts app/api/music/upload/route.ts app/api/media/[name]/route.ts app/api/content/[slug]/route.ts app/api/admin/status/route.ts app/api/admin/finance/route.ts app/admin/page.tsx components/admin/**/*.tsx components/admin/**/*.ts test/market/woodamp-playlist.test.ts test/market/admin-console.test.ts lib/x-media.ts app/api/music/import-x/route.ts test/market/x-media.test.ts lib/track-meta.ts app/api/music/track-meta/route.ts app/api/admin/whoami/route.ts components/admin/AdminConsole.tsx lib/wallet-context.tsx components/Nav.tsx components/WalletLookupCard.tsx components/woodamp/WoodAmpProvider.tsx",
     "test:contracts": "cross-env TS_NODE_PROJECT=tsconfig.hardhat.json hardhat test",
     "test:market": "tsx --test test/market/*.test.ts",
+    "test:postgres": "tsx scripts/verify-postgres-storage.ts",
     "test": "npm run test:market && npm run test:contracts",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "upload": "opennextjs-cloudflare build && opennextjs-cloudflare upload",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "db:migrate": "node scripts/migrate-postgres.mjs",
+    "db:maintenance": "node scripts/postgres-maintenance.mjs",
+    "market:refresh": "tsx scripts/refresh-market-data.ts",
+    "market:refresh:full": "tsx scripts/refresh-market-data.ts --full"
+  },
+  "engines": {
+    "node": ">=20.9.0"
   },
   "dependencies": {
     "@opensea/seaport-js": "^4.1.5",
-    "@vercel/kv": "^3.0.0",
+    "@reown/appkit": "1.8.23",
+    "@reown/appkit-adapter-ethers": "1.8.23",
     "ethers": "^6.17.0",
     "lightweight-charts": "^5.2.0",
+    "lucide-react": "^1.28.0",
     "next": "^16.2.12",
+    "pg": "^8.22.0",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "sharp": "^0.35.0"
   },
   "overrides": {
     "postcss": "^8.5.20",
-    "sharp": "^0.35.0"
+    "sharp": "^0.35.0",
+    "hardhat": {
+      "adm-zip": "0.6.0",
+      "undici": "6.27.0",
+      "uuid": "11.1.1",
+      "lodash": "4.18.1",
+      "@sentry/node": {
+        "cookie": "0.7.2"
+      },
+      "solc": {
+        "tmp": "0.2.6"
+      }
+    },
+    "@nomicfoundation/hardhat-verify": {
+      "undici": "6.27.0"
+    },
+    "@nomicfoundation/ignition-core": {
+      "lodash": "4.18.1"
+    },
+    "mocha": {
+      "serialize-javascript": "7.0.5"
+    }
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
@@ -40,11 +76,13 @@
     "@types/chai": "^4.3.20",
     "@types/mocha": "^10.0.10",
     "@types/node": "^20",
+    "@types/pg": "^8.20.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "chai": "^4.5.0",
     "cross-env": "^10.1.0",
+    "esbuild": "^0.28.1",
     "eslint": "^9",
     "eslint-config-next": "^16.2.12",
     "hardhat": "^2.29.0",

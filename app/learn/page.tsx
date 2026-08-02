@@ -1,28 +1,28 @@
-import type { Metadata } from "next";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import LearnGuide from "@/components/learn/LearnGuide";
-import { SITE_URL } from "@/lib/constants";
+import { createPageMetadata } from "@/lib/seo";
+import { getContent } from "@/lib/content-store";
+import type { LearnDoc } from "@/lib/content-docs";
 
-export const metadata: Metadata = {
-  title: "Learn — RobinWood, Marketplank, Vault & Platforms",
+export const dynamic = "force-dynamic";
+
+export const metadata = createPageMetadata({
+  title: "Learn",
   description:
-    "Tutorial-level guide to plank.love: mint, market, Instant Swap vault math, LP, Seaport, Robinhood Chain, and how every system fits together. Written for humans and AI readers.",
-  openGraph: {
-    title: "Learn RobinWood & Marketplank",
-    description: "Complete logical progression through every facet of plank.love and its dependencies.",
-    url: `${SITE_URL}/learn`,
-  },
-};
+    "Learn how RobinWood minting, $PLANK trading, Marketplank, Seaport orders, Instant Swap vaults, and Robinhood Chain fit together.",
+  path: "/learn",
+  keywords: ["RobinWood guide", "Marketplank guide", "Robinhood Chain tutorial"],
+});
 
-export default function LearnPage() {
+export default async function LearnPage() {
+  const learn = (await getContent("learn")) as LearnDoc;
+
   return (
     <>
       <Nav />
-      <main className="flex-1 px-3 py-10 sm:px-5">
-        <div className="mx-auto w-full max-w-3xl lg:max-w-4xl">
-          <LearnGuide />
-        </div>
+      <main id="main-content" tabIndex={-1} className="flex-1 px-3 py-10 sm:px-5">
+        <LearnGuide hidden={learn.hidden} overrides={learn.overrides} />
       </main>
       <Footer />
     </>

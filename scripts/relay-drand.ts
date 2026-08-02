@@ -1,47 +1,28 @@
 /**
- * relay-drand.ts — push published drand rounds on-chain + free vault redeem slots.
+ * Permissionless drand relay and random-redemption settlement for both vaults.
  *
- * THIS IS OPTIONAL CONVENIENCE INFRASTRUCTURE, NOT A TRUST DEPENDENCY.
- *
- * DrandBeacon.submitRound is permissionless and verifies the BLS signature
- * on-chain. This script has no privilege whatsoever: it fetches a round that
- * drand already published to the whole world over plain HTTP and forwards it.
- * Anyone can run it — the vault owner as a cron job, a user waiting on their
- * own redemption, a random bot, a competitor. If nobody runs it, a pending
- * redemption simply waits (and can be forfeited after ~24h); if a hundred
- * people run it, the first valid submission wins and the rest are cheap
- * no-ops. It cannot influence the value it relays, and a wrong or forged
- * value is rejected by the contract, not by this script.
- *
- * After relaying, it also walks each configured vault and, if a random
- * redeem is pending and the target round is on-chain, permissionlessly
- * settles via claimRandomRedeemFor so one abandoned wallet cannot clog
- * deposit/redeem for everyone.
- *
- * The signer is a LOW-PRIVILEGE relayer identity: any wallet with a little gas
- * works. Never point this at a deploy or treasury key — it does not need one
- * and there is no reason to expose one.
- *
- *   RELAYER_PRIVATE_KEY=0x...        # throwaway, gas-only
- *   RPC_URL=https://...              # Robinhood Chain RPC (chainId 4663)
- *   BEACON_ADDRESS=0x...             # deployed DrandBeacon
- *   DRAND_CHAIN_HASH=...             # hex, no 0x, e.g. the evmnet chain hash
- *   DRAND_API=https://api.drand.sh   # optional; mirrors: api2/api3.drand.sh
- *   ROUND=12345                      # optional; default = latest
- *   VAULT_ADDRESSES=0x…,0x…          # optional; settle pending redeems
- *   WATCH=1                          # optional; keep relaying every period
- *
- * Usage:
- *   npx tsx scripts/relay-drand.ts
+ * The signer must be a dedicated gas-only wallet. It has no vault privilege:
+ * DrandBeacon verifies every signature on-chain and all settlement methods are
+ * permissionless.
  */
-import { JsonRpcProvider, Wallet, Contract, ZeroAddress } from "ethers";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import {
+  Contract,
+  JsonRpcProvider,
+  Wallet,
+  ZeroAddress,
+  type TransactionReceipt,
+  type TransactionResponse,
+} from "ethers";
 
 const BEACON_ABI = [
   "function submitRound(uint64 round, uint256[2] signature)",
   "function isRoundAvailable(uint64 round) view returns (bool)",
+  "function currentRoundAt(uint256 timestamp) view returns (uint64)",
   "function period() view returns (uint256)",
 ];
-
 const VAULT_ABI = [
   "function pendingRequester() view returns (address)",
   "function pendingRound() view returns (uint64 round, bool available)",
@@ -49,226 +30,414 @@ const VAULT_ABI = [
   "function claimRandomRedeemFor(address requester) returns (uint256 tokenId)",
   "function forfeitExpiredRedeem(address requester)",
 ];
+const ROUND_EXPIRY = BigInt(28_800);
 
-type DrandRound = { round: number; signature: string; randomness?: string };
+export type DrandRound = {
+  round: number;
+  signature: string;
+  randomness?: string;
+};
+export type VaultState =
+  | "idle"
+  | "waiting"
+  | "settled"
+  | "forfeited"
+  | "error";
+export type VaultResult = {
+  vault: string;
+  state: VaultState;
+  actionable: boolean;
+  requester?: string;
+  round?: string;
+  detail?: string;
+};
+export type VaultRelayPort = {
+  pendingRequester(): Promise<string>;
+  pendingRound(): Promise<{ round: bigint; available: boolean }>;
+  latestDrandRound(): Promise<bigint>;
+  relayExactRound(round: bigint): Promise<void>;
+  isRoundAvailable(round: bigint): Promise<boolean>;
+  currentDrandRound(): Promise<bigint>;
+  pin(requester: string): Promise<void>;
+  claim(requester: string): Promise<void>;
+  forfeit(requester: string): Promise<void>;
+};
+
+export class DrandRoundUnavailableError extends Error {
+  constructor(round: bigint | string) {
+    super(`drand round ${round.toString()} is not published`);
+    this.name = "DrandRoundUnavailableError";
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function required(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required env var ${name}`);
-  return v;
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`Missing required env var ${name}`);
+  return value;
 }
 
-/**
- * drand's BN254 beacon serialises a G1 signature as 64 bytes: x || y, each a
- * 32-byte big-endian field element. (Some drand beacons use compressed points;
- * if the hex is 32 bytes long you are talking to a compressed-G1 beacon and
- * this needs a decompression step — fail loudly rather than guess.)
- */
-function parseG1(hex: string): [bigint, bigint] {
-  const h = hex.startsWith("0x") ? hex.slice(2) : hex;
-  if (h.length !== 128) {
+export function parseG1(hex: string): [bigint, bigint] {
+  const value = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (!/^[0-9a-fA-F]{128}$/.test(value)) {
     throw new Error(
-      `Expected an uncompressed 64-byte G1 signature (128 hex chars), got ${h.length}. ` +
-        `This beacon may use point compression — decompress before submitting; do not guess.`
+      `Expected an uncompressed 64-byte G1 signature; got ${value.length} hex characters.`
     );
   }
-  return [BigInt("0x" + h.slice(0, 64)), BigInt("0x" + h.slice(64))];
+  return [
+    BigInt(`0x${value.slice(0, 64)}`),
+    BigInt(`0x${value.slice(64)}`),
+  ];
 }
 
-async function fetchRound(api: string, chainHash: string, round?: string): Promise<DrandRound> {
-  const suffix = round ? round : "latest";
-  const url = `${api.replace(/\/$/, "")}/${chainHash}/public/${suffix}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`drand API ${url} returned ${res.status}`);
-  return (await res.json()) as DrandRound;
+export async function fetchRound(
+  api: string,
+  chainHash: string,
+  round: bigint | "latest"
+): Promise<DrandRound> {
+  const url = `${api.replace(/\/$/, "")}/${chainHash}/public/${round.toString()}`;
+  const response = await fetch(url, {
+    headers: { accept: "application/json" },
+    cache: "no-store",
+    redirect: "error",
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (response.status === 404) {
+    throw new DrandRoundUnavailableError(round);
+  }
+  if (!response.ok) {
+    throw new Error(`drand API returned HTTP ${response.status}`);
+  }
+  const value = (await response.json()) as DrandRound;
+  if (
+    !Number.isSafeInteger(value.round) ||
+    value.round <= 0 ||
+    typeof value.signature !== "string"
+  ) {
+    throw new Error("drand API returned an invalid round payload");
+  }
+  return value;
+}
+
+function result(
+  vault: string,
+  state: VaultState,
+  actionable: boolean,
+  fields: Omit<VaultResult, "vault" | "state" | "actionable"> = {}
+): VaultResult {
+  return { vault, state, actionable, ...fields };
+}
+
+async function confirmCleared(
+  port: VaultRelayPort,
+  vault: string,
+  successState: "settled" | "forfeited",
+  requester: string,
+  round: bigint
+): Promise<VaultResult> {
+  const remaining = await port.pendingRequester();
+  if (remaining.toLowerCase() === ZeroAddress.toLowerCase()) {
+    return result(vault, successState, false, {
+      requester,
+      round: round.toString(),
+    });
+  }
+  const detail =
+    remaining.toLowerCase() === requester.toLowerCase()
+      ? "occupied redemption slot remained after confirmed transaction"
+      : `a replacement request is already pending for ${remaining}`;
+  return result(vault, "error", true, {
+    requester: remaining,
+    round: round.toString(),
+    detail,
+  });
+}
+
+async function racedOrError(
+  port: VaultRelayPort,
+  vault: string,
+  requester: string,
+  round: bigint,
+  action: string,
+  error: unknown
+): Promise<VaultResult> {
+  try {
+    const remaining = await port.pendingRequester();
+    if (remaining.toLowerCase() === ZeroAddress.toLowerCase()) {
+      return result(vault, "settled", false, {
+        requester,
+        round: round.toString(),
+        detail: `${action} lost an idempotent race; slot was cleared by another relayer`,
+      });
+    }
+  } catch {
+    // Preserve the original actionable error below.
+  }
+  return result(vault, "error", true, {
+    requester,
+    round: round.toString(),
+    detail: `${action} failed: ${errorMessage(error)}`,
+  });
+}
+
+export async function settleVault(
+  vault: string,
+  port: VaultRelayPort
+): Promise<VaultResult> {
+  let requester: string;
+  let pending: { round: bigint; available: boolean };
+  try {
+    requester = await port.pendingRequester();
+    if (!requester || requester.toLowerCase() === ZeroAddress.toLowerCase()) {
+      return result(vault, "idle", false);
+    }
+    pending = await port.pendingRound();
+  } catch (error) {
+    return result(vault, "error", true, {
+      detail: `vault state read failed: ${errorMessage(error)}`,
+    });
+  }
+
+  const round = pending.round;
+  const fields = { requester, round: round.toString() };
+  if (round <= BigInt(0)) {
+    return result(vault, "error", true, {
+      ...fields,
+      detail: "pending requester has no target drand round",
+    });
+  }
+
+  if (!pending.available) {
+    let latest: bigint;
+    try {
+      latest = await port.latestDrandRound();
+    } catch (error) {
+      return result(vault, "error", true, {
+        ...fields,
+        detail: `latest drand round read failed: ${errorMessage(error)}`,
+      });
+    }
+    if (round > latest) {
+      return result(vault, "waiting", false, {
+        ...fields,
+        detail: `latest published drand round is ${latest.toString()}`,
+      });
+    }
+
+    try {
+      await port.relayExactRound(round);
+    } catch (error) {
+      if (error instanceof DrandRoundUnavailableError) {
+        const current = await port.currentDrandRound();
+        if (current > round && current - round > ROUND_EXPIRY) {
+          try {
+            await port.forfeit(requester);
+            return await confirmCleared(
+              port,
+              vault,
+              "forfeited",
+              requester,
+              round
+            );
+          } catch (forfeitError) {
+            return await racedOrError(
+              port,
+              vault,
+              requester,
+              round,
+              "forfeit",
+              forfeitError
+            );
+          }
+        }
+      }
+      return await racedOrError(
+        port,
+        vault,
+        requester,
+        round,
+        "exact-round relay",
+        error
+      );
+    }
+
+    try {
+      if (!(await port.isRoundAvailable(round))) {
+        return result(vault, "error", true, {
+          ...fields,
+          detail: "exact round submission confirmed but the beacon still reports unavailable",
+        });
+      }
+    } catch (error) {
+      return result(vault, "error", true, {
+        ...fields,
+        detail: `round confirmation failed: ${errorMessage(error)}`,
+      });
+    }
+  }
+
+  try {
+    await port.pin(requester);
+  } catch (error) {
+    return await racedOrError(port, vault, requester, round, "pin", error);
+  }
+  try {
+    await port.claim(requester);
+  } catch (error) {
+    return await racedOrError(port, vault, requester, round, "claim", error);
+  }
+  return await confirmCleared(port, vault, "settled", requester, round);
 }
 
 function parseVaultAddresses(): string[] {
   const raw = process.env.VAULT_ADDRESSES || "";
-  return raw
+  const values = raw
     .split(/[\s,]+/)
-    .map((s) => s.trim())
-    .filter((s) => /^0x[a-fA-F0-9]{40}$/.test(s));
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (values.some((value) => !/^0x[a-fA-F0-9]{40}$/.test(value))) {
+    throw new Error("VAULT_ADDRESSES contains an invalid address");
+  }
+  return [...new Set(values.map((value) => value.toLowerCase()))];
 }
 
-async function relayRound(
-  beacon: Contract,
-  api: string,
-  chainHash: string,
-  roundHint?: string
-): Promise<number | null> {
-  const data = await fetchRound(api, chainHash, roundHint);
-  const sig = parseG1(data.signature);
-
-  if (await beacon.isRoundAvailable(data.round)) {
-    console.log(`round ${data.round} already on-chain — nothing to do`);
-    return data.round;
+async function waitFor(tx: TransactionResponse, action: string): Promise<void> {
+  console.log(`${action} submitted tx=${tx.hash}`);
+  const receipt = (await tx.wait()) as TransactionReceipt | null;
+  if (!receipt || receipt.status !== 1) {
+    throw new Error(`${action} transaction did not succeed`);
   }
-  // The chain, not this script, decides whether the signature is real. A bad
-  // one reverts here and writes nothing.
-  const tx = await beacon.submitRound(data.round, sig);
-  console.log(`submitting round ${data.round} in ${tx.hash} …`);
-  const receipt = await tx.wait();
-  console.log(`round ${data.round} verified on-chain (block ${receipt?.blockNumber})`);
-  return data.round;
+  console.log(`${action} confirmed tx=${tx.hash} block=${receipt.blockNumber}`);
 }
 
-/**
- * Free the single vault-wide random-redeem slot when possible:
- * relay target round if needed, pin, then claimFor the requester.
- * Forfeit only if the contract says the request expired unpinned.
- */
-async function settlePendingVault(
-  wallet: Wallet,
-  beacon: Contract,
-  api: string,
-  chainHash: string,
-  vaultAddr: string
-): Promise<void> {
-  const vault = new Contract(vaultAddr, VAULT_ABI, wallet);
-  let requester: string;
-  try {
-    requester = (await vault.pendingRequester()) as string;
-  } catch (err) {
-    console.log(`vault ${vaultAddr}: no pendingRequester() — skip (${(err as Error).message})`);
-    return;
-  }
-  if (!requester || requester.toLowerCase() === ZeroAddress.toLowerCase()) {
-    console.log(`vault ${vaultAddr}: no pending redeem`);
-    return;
-  }
-
-  let round = BigInt(0);
-  let available = false;
-  try {
-    const pend = (await vault.pendingRound()) as { round: bigint; available: boolean } | [bigint, boolean];
-    if (Array.isArray(pend)) {
-      round = pend[0];
-      available = pend[1];
-    } else {
-      round = pend.round;
-      available = pend.available;
-    }
-  } catch (err) {
-    console.log(`vault ${vaultAddr}: pendingRound() failed — ${(err as Error).message}`);
-    return;
-  }
-
-  console.log(
-    `vault ${vaultAddr}: pending requester ${requester} round ${round.toString()} available=${available}`
-  );
-
-  if (round > BigInt(0) && !available) {
-    try {
-      await relayRound(beacon, api, chainHash, round.toString());
-      available = Boolean(await beacon.isRoundAvailable(round));
-    } catch (err) {
-      console.error(`vault ${vaultAddr}: relay target round failed — ${(err as Error).message}`);
-    }
-  }
-
-  // Try pin then settle. claimRandomRedeemFor pins internally on settle path
-  // in current vault builds; pin first is cheap when already pinned.
-  try {
-    const pinTx = await vault.pinPendingDraw();
-    console.log(`vault ${vaultAddr}: pinPendingDraw ${pinTx.hash}`);
-    await pinTx.wait();
-  } catch (err) {
-    // Expected when round not yet available or already pinned / no request.
-    console.log(`vault ${vaultAddr}: pin skipped — ${(err as Error).message?.slice(0, 120)}`);
-  }
-
-  try {
-    const claimTx = await vault.claimRandomRedeemFor(requester);
-    console.log(`vault ${vaultAddr}: claimRandomRedeemFor ${claimTx.hash}`);
-    const rc = await claimTx.wait();
-    console.log(`vault ${vaultAddr}: settled for ${requester} (block ${rc?.blockNumber})`);
-    return;
-  } catch (err) {
-    console.log(`vault ${vaultAddr}: claimFor not ready — ${(err as Error).message?.slice(0, 160)}`);
-  }
-
-  // Last resort: expired unpinned requests (should be rare with a live relayer).
-  try {
-    const forfeitTx = await vault.forfeitExpiredRedeem(requester);
-    console.log(`vault ${vaultAddr}: forfeitExpiredRedeem ${forfeitTx.hash}`);
-    await forfeitTx.wait();
-    console.log(`vault ${vaultAddr}: forfeited expired request for ${requester}`);
-  } catch (err) {
-    console.log(`vault ${vaultAddr}: forfeit not applicable — ${(err as Error).message?.slice(0, 120)}`);
-  }
-}
-
-async function main() {
+async function main(): Promise<void> {
   const provider = new JsonRpcProvider(required("RPC_URL"));
   const wallet = new Wallet(required("RELAYER_PRIVATE_KEY"), provider);
   const beacon = new Contract(required("BEACON_ADDRESS"), BEACON_ABI, wallet);
-  const api = process.env.DRAND_API || "https://api.drand.sh";
+  const api = process.env.DRAND_API?.trim() || "https://api.drand.sh";
   const chainHash = required("DRAND_CHAIN_HASH").replace(/^0x/, "");
-  const watch = process.env.WATCH === "1";
   const vaults = parseVaultAddresses();
 
-  const bal = await provider.getBalance(wallet.address);
-  console.log(`relayer ${wallet.address} balance ${Number(bal) / 1e18} ETH`);
-  if (bal < BigInt("100000000000000")) {
-    // 0.0001 ETH
-    console.warn("WARNING: relayer balance very low — fund gas-only wallet soon");
-  }
+  const balance = await provider.getBalance(wallet.address);
+  console.log(
+    `RELAYER_GAS=${JSON.stringify({
+      timestamp: new Date().toISOString(),
+      address: wallet.address,
+      balanceWei: balance.toString(),
+      low: balance < BigInt("100000000000000"),
+    })}`
+  );
 
-  const tick = async () => {
-    // Gas-saving: only act when a vault has a pending redeem. Idle = free.
-    // (Optional ROUND= forces a push for manual ops.)
-    if (process.env.ROUND) {
-      await relayRound(beacon, api, chainHash, process.env.ROUND);
+  const relayExactRound = async (round: bigint): Promise<void> => {
+    if (await beacon.isRoundAvailable(round)) return;
+    const data = await fetchRound(api, chainHash, round);
+    if (BigInt(data.round) !== round) {
+      throw new Error(
+        `drand returned round ${data.round} when ${round.toString()} was requested`
+      );
     }
-
-    if (vaults.length === 0) {
-      // No vaults configured — keep previous behavior of pushing latest.
-      await relayRound(beacon, api, chainHash, process.env.ROUND);
-      return;
-    }
-
-    let anyPending = false;
-    for (const v of vaults) {
-      try {
-        const vault = new Contract(v, VAULT_ABI, wallet);
-        const who = (await vault.pendingRequester()) as string;
-        if (who && who.toLowerCase() !== ZeroAddress.toLowerCase()) {
-          anyPending = true;
-          await settlePendingVault(wallet, beacon, api, chainHash, v);
-        } else {
-          console.log(`vault ${v}: idle (no gas)`);
-        }
-      } catch (err) {
-        console.error(`vault ${v}: settle error — ${(err as Error).message}`);
-      }
-    }
-    if (!anyPending && !process.env.ROUND) {
-      console.log("all vaults idle — skipped beacon submit (saved gas)");
-    }
+    await waitFor(
+      await beacon.submitRound(round, parseG1(data.signature)),
+      `beacon.submitRound(${round.toString()})`
+    );
   };
 
-  if (!watch) {
-    await tick();
+  if (process.env.ROUND) {
+    const manualRound = BigInt(process.env.ROUND);
+    await relayExactRound(manualRound);
+    if (!(await beacon.isRoundAvailable(manualRound))) {
+      throw new Error(`manual round ${manualRound.toString()} did not confirm`);
+    }
+  }
+
+  if (vaults.length === 0) {
+    if (!process.env.ROUND) {
+      const latest = await fetchRound(api, chainHash, "latest");
+      await relayExactRound(BigInt(latest.round));
+    }
     return;
   }
 
-  const periodMs = Number(await beacon.period()) * 1000;
-  console.log(`watching; relaying every ${periodMs}ms. Ctrl-C to stop.`);
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
+  const tick = async (): Promise<void> => {
+    const statuses: VaultResult[] = [];
+    for (const address of vaults) {
+      const vault = new Contract(address, VAULT_ABI, wallet);
+      const port: VaultRelayPort = {
+        pendingRequester: async () => (await vault.pendingRequester()) as string,
+        pendingRound: async () => {
+          const pending = await vault.pendingRound();
+          return { round: BigInt(pending[0]), available: Boolean(pending[1]) };
+        },
+        latestDrandRound: async () =>
+          BigInt((await fetchRound(api, chainHash, "latest")).round),
+        relayExactRound,
+        isRoundAvailable: async (round) =>
+          Boolean(await beacon.isRoundAvailable(round)),
+        currentDrandRound: async () => {
+          const block = await provider.getBlock("latest");
+          if (!block) throw new Error("latest block was unavailable");
+          return BigInt(await beacon.currentRoundAt(block.timestamp));
+        },
+        pin: async (requester) =>
+          waitFor(await vault.pinPendingDraw(), `vault ${address} pin ${requester}`),
+        claim: async (requester) =>
+          waitFor(
+            await vault.claimRandomRedeemFor(requester),
+            `vault ${address} claim ${requester}`
+          ),
+        forfeit: async (requester) =>
+          waitFor(
+            await vault.forfeitExpiredRedeem(requester),
+            `vault ${address} forfeit ${requester}`
+          ),
+      };
+      statuses.push(await settleVault(address, port));
+    }
+    console.log(
+      `RELAYER_STATUS=${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        vaults: statuses,
+      })}`
+    );
+    if (statuses.some((status) => status.state === "error")) {
+      throw new Error("one or more vaults retain an actionable or unreadable slot");
+    }
+  };
+
+  if (process.env.WATCH !== "1") {
+    await tick();
+    return;
+  }
+  const periodMs = Number(await beacon.period()) * 1_000;
+  for (;;) {
     try {
       await tick();
-    } catch (err) {
-      // A relayer losing a race or hitting a transient API blip is normal and
-      // must never stop the loop.
-      console.error("relay attempt failed:", (err as Error).message);
+    } catch (error) {
+      console.error(`RELAYER_ERROR=${JSON.stringify({ detail: errorMessage(error) })}`);
     }
-    await new Promise((r) => setTimeout(r, periodMs));
+    await new Promise((resolve) => setTimeout(resolve, periodMs));
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+let invokedDirectly = false;
+try {
+  invokedDirectly =
+    Boolean(process.argv[1]) &&
+    realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+} catch {
+  invokedDirectly = false;
+}
+if (invokedDirectly) {
+  main().catch((error) => {
+    console.error(
+      `RELAYER_FATAL=${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        detail: errorMessage(error),
+      })}`
+    );
+    process.exitCode = 1;
+  });
+}

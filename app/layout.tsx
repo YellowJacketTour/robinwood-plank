@@ -1,12 +1,16 @@
 import type { Metadata, Viewport } from "next";
 import { Uncial_Antiqua, Nunito_Sans } from "next/font/google";
 import "./globals.css";
-import { SITE_URL } from "@/lib/constants";
 import PlankBackground from "@/components/PlankBackground";
-import AudioPlayer from "@/components/AudioPlayer";
+import WoodAmpProvider from "@/components/woodamp/WoodAmpProvider";
+import WoodAmpWindow from "@/components/woodamp/WoodAmpWindow";
 import HoloField from "@/lib/holo";
 import SplashIntro from "@/components/SplashIntro";
+import SiteBanner from "@/components/SiteBanner";
+import MigrateBanner from "@/components/MigrateBanner";
 import ArtServiceWorker from "@/components/ArtServiceWorker";
+import { rootMetadata } from "@/lib/seo";
+import { WalletProvider } from "@/lib/wallet-context";
 
 const stencil = Uncial_Antiqua({
   variable: "--font-stencil",
@@ -19,39 +23,7 @@ const body = Nunito_Sans({
   subsets: ["latin"],
 });
 
-const title = "RobinWood ($PLANK) — Robinhood Chain Mint & Trade";
-const description = "Mint RobinWood, trade $PLANK on Uniswap. Robinhood Chain.";
-
-export const metadata: Metadata = {
-  metadataBase: new URL(SITE_URL),
-  title,
-  description,
-  keywords: ["RobinWood", "PLANK", "Robinhood Chain", "meme coin", "NFT mint", "crypto"],
-  openGraph: {
-    title,
-    description,
-    url: SITE_URL,
-    siteName: "RobinWood ($PLANK)",
-    type: "website",
-    images: [
-      {
-        url: "https://plank.love/plank-social.jpg",
-        width: 1280,
-        height: 719,
-        alt: "RobinWood Plank check",
-      },
-    ],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title,
-    description,
-    images: ["https://plank.love/plank-social.jpg"],
-  },
-  icons: {
-    icon: "/favicon.ico",
-  },
-};
+export const metadata: Metadata = rootMetadata;
 
 export const viewport: Viewport = {
   themeColor: "#14100b",
@@ -70,12 +42,24 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${stencil.variable} ${body.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
-        <SplashIntro />
-        <ArtServiceWorker />
-        <PlankBackground />
-        <AudioPlayer />
-        <HoloField />
-        {children}
+        <WalletProvider>
+          {/* WoodAmp owns the site's single audio element; it lives here in
+              the root layout so playback survives client-side navigation
+              (route links in Nav use <Link> for exactly this reason). */}
+          <WoodAmpProvider>
+            <SplashIntro />
+            <ArtServiceWorker />
+            <PlankBackground />
+            <HoloField />
+            {/* Admin-managed announcement — renders nothing unless enabled */}
+            <SiteBanner />
+            {/* Wallet-detected vault-migration reminder — renders nothing unless
+                a connected wallet holds legacy value and isn't on /migrate */}
+            <MigrateBanner />
+            {children}
+            <WoodAmpWindow />
+          </WoodAmpProvider>
+        </WalletProvider>
       </body>
     </html>
   );

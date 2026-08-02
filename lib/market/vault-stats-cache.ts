@@ -4,10 +4,13 @@
  * Cloudflare Workers share no module memory between isolates, and the public
  * Robinhood RPC rate-limits CF egress (HTTP 429). Without a durable cache,
  * Instant Swap's live panels go blank after the first successful read.
- * Upstash (KV_REST_API_*) is already wired for market orders.
+ * The shared durable adapter is backed by PostgreSQL.
  */
 
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import type { VaultStats } from "@/lib/market/vault-stats";
 
@@ -20,7 +23,7 @@ function kvKey(vaultAddress?: string | null): string {
 }
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
 }
 
 type Blob = { at: number; stats: VaultStats };

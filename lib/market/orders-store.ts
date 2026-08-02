@@ -1,7 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  durableKvBackend,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 import type { Listing, Offer } from "@/lib/market/types";
+import { postgresQuery } from "@/lib/postgres";
 
 /**
  * Store-and-forward for signed Seaport orders — not custody, not a matching
@@ -10,10 +15,9 @@ import type { Listing, Offer } from "@/lib/market/types";
  * lib/market/signature.ts), so the server cannot forge or alter one; it can
  * only lose or serve them.
  *
- * Backend: Vercel KV when KV_REST_API_URL / KV_REST_API_TOKEN are set (the
- * durable, cross-instance-safe path). Falls back to a file + in-memory
- * globalThis cache otherwise — fine for local dev, not durable on Vercel's
- * serverless filesystem in production.
+ * Backend: indexed PostgreSQL rows on cPanel Passenger — the only datastore.
+ * Falls back to a file + in-memory globalThis cache when unconfigured, which is
+ * fine for local dev and not durable in production.
  *
  * CONCURRENCY (audit finding 6): the old design stored the whole book under a
  * single KV key and did read-modify-write with no compare-and-set, so two
@@ -40,7 +44,11 @@ const KV_LISTINGS = "plank:market:listings";
 const KV_OFFERS = "plank:market:offers";
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
+}
+
+function hasPostgres(): boolean {
+  return durableKvBackend() === "postgres";
 }
 
 function emptyState(): OrdersState {
@@ -99,11 +107,73 @@ function withFileLock<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-// --- Vercel KV backend (per-field hashes) ------------------------------
+// --- Durable KV backend (per-field hashes) -----------------------------
 
 async function kvGetAll<T>(hashKey: string): Promise<Record<string, T>> {
   const all = await kv.hgetall<Record<string, T>>(hashKey);
   return all ?? {};
+}
+
+// --- PostgreSQL backend (indexed marketplace rows) ---------------------
+
+type PostgresOrderRow<T> = { payload: T };
+
+async function postgresReadOrders<T>(
+  kind: "listing" | "offer",
+  collectionSlug?: string
+): Promise<T[]> {
+  const values: unknown[] = [kind];
+  let collectionClause = "";
+  if (collectionSlug) {
+    values.push(collectionSlug);
+    collectionClause = "AND collection_slug = $2";
+  }
+  const result = await postgresQuery<PostgresOrderRow<T>>(
+    `SELECT payload
+       FROM market_orders
+      WHERE order_kind = $1
+        ${collectionClause}
+        AND expires_at > NOW()
+      ORDER BY created_at DESC`,
+    values
+  );
+  return result.rows.map((row) => row.payload);
+}
+
+async function postgresPutOrder(
+  kind: "listing" | "offer",
+  value: StoredListing | StoredOffer
+): Promise<void> {
+  await postgresQuery(
+    `INSERT INTO market_orders
+       (id, order_kind, collection_slug, maker, token_id, price_wei,
+        payload, expires_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5::numeric, $6::numeric, $7::jsonb, $8, NOW())
+     ON CONFLICT (id) DO UPDATE
+       SET payload = EXCLUDED.payload,
+           expires_at = EXCLUDED.expires_at,
+           updated_at = NOW()`,
+    [
+      value.id,
+      kind,
+      value.collectionSlug,
+      value.maker.toLowerCase(),
+      value.tokenId ?? null,
+      value.priceWei,
+      JSON.stringify(value),
+      value.expiresAt,
+    ]
+  );
+}
+
+async function postgresRawOrder(id: string): Promise<unknown | null> {
+  const result = await postgresQuery<{ raw_order: unknown }>(
+    `SELECT payload -> 'rawOrder' AS raw_order
+       FROM market_orders
+      WHERE id = $1 AND expires_at > NOW()`,
+    [id]
+  );
+  return result.rows[0]?.raw_order ?? null;
 }
 
 // --- Backend-agnostic read helpers -------------------------------------
@@ -128,6 +198,9 @@ function liveValues<T extends { expiresAt: string }>(rec: Record<string, T>): T[
 export async function getListings(
   collectionSlug?: string
 ): Promise<Array<Listing & { rawOrder: unknown }>> {
+  if (hasPostgres()) {
+    return postgresReadOrders<StoredListing>("listing", collectionSlug);
+  }
   const all = liveValues(await readListings());
   return collectionSlug ? all.filter((l) => l.collectionSlug === collectionSlug) : all;
 }
@@ -135,12 +208,21 @@ export async function getListings(
 export async function getOffers(
   collectionSlug?: string
 ): Promise<Array<Offer & { rawOrder: unknown }>> {
+  if (hasPostgres()) {
+    return postgresReadOrders<StoredOffer>("offer", collectionSlug);
+  }
   const all = liveValues(await readOffers());
   return collectionSlug ? all.filter((o) => o.collectionSlug === collectionSlug) : all;
 }
 
 /** Total live orders across both books — used to cap storage growth. */
 export async function totalOrderCount(): Promise<number> {
+  if (hasPostgres()) {
+    const result = await postgresQuery<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM market_orders WHERE expires_at > NOW()"
+    );
+    return Number(result.rows[0]?.count ?? 0);
+  }
   const [listings, offers] = await Promise.all([readListings(), readOffers()]);
   return liveValues(listings).length + liveValues(offers).length;
 }
@@ -148,6 +230,15 @@ export async function totalOrderCount(): Promise<number> {
 /** Live orders from one maker — used to stop a single wallet flooding the book. */
 export async function countOrdersByMaker(maker: string): Promise<number> {
   const m = maker.toLowerCase();
+  if (hasPostgres()) {
+    const result = await postgresQuery<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+         FROM market_orders
+        WHERE maker = $1 AND expires_at > NOW()`,
+      [m]
+    );
+    return Number(result.rows[0]?.count ?? 0);
+  }
   const [listings, offers] = await Promise.all([readListings(), readOffers()]);
   const l = liveValues(listings).filter((x) => x.maker.toLowerCase() === m).length;
   const o = liveValues(offers).filter((x) => x.maker.toLowerCase() === m).length;
@@ -156,6 +247,10 @@ export async function countOrdersByMaker(maker: string): Promise<number> {
 
 export async function putListing(listing: Listing, rawOrder: unknown): Promise<void> {
   const value: StoredListing = { ...listing, rawOrder };
+  if (hasPostgres()) {
+    await postgresPutOrder("listing", value);
+    return;
+  }
   if (hasKv()) {
     // Per-field write: independent of any concurrent write to another id.
     await kv.hset(KV_LISTINGS, { [listing.id]: value });
@@ -170,6 +265,10 @@ export async function putListing(listing: Listing, rawOrder: unknown): Promise<v
 
 export async function putOffer(offer: Offer, rawOrder: unknown): Promise<void> {
   const value: StoredOffer = { ...offer, rawOrder };
+  if (hasPostgres()) {
+    await postgresPutOrder("offer", value);
+    return;
+  }
   if (hasKv()) {
     await kv.hset(KV_OFFERS, { [offer.id]: value });
     return;
@@ -182,6 +281,7 @@ export async function putOffer(offer: Offer, rawOrder: unknown): Promise<void> {
 }
 
 export async function getListingRawOrder(id: string): Promise<unknown | null> {
+  if (hasPostgres()) return postgresRawOrder(id);
   if (hasKv()) {
     const v = await kv.hget<StoredListing>(KV_LISTINGS, id);
     return v?.rawOrder ?? null;
@@ -191,6 +291,7 @@ export async function getListingRawOrder(id: string): Promise<unknown | null> {
 }
 
 export async function getOfferRawOrder(id: string): Promise<unknown | null> {
+  if (hasPostgres()) return postgresRawOrder(id);
   if (hasKv()) {
     const v = await kv.hget<StoredOffer>(KV_OFFERS, id);
     return v?.rawOrder ?? null;
@@ -199,7 +300,40 @@ export async function getOfferRawOrder(id: string): Promise<unknown | null> {
   return state.offers[id]?.rawOrder ?? null;
 }
 
+/**
+ * Retire an order that is provably unfillable on-chain.
+ *
+ * Expires rather than deletes: every read already filters `expires_at > NOW()`,
+ * so the order disappears from the book at once and — crucially — *stays* gone.
+ * Merely hiding it at read time meant a seller who reacquired the token would
+ * have their old listing quietly go live again at a price that may be far below
+ * the current market. The daily postgres-maintenance cron sweeps the row later,
+ * which leaves a short window to inspect what was retired and why.
+ *
+ * Only ever called with on-chain evidence (see lib/market/order-status.ts), so
+ * this cannot be used to grief someone else's listing.
+ */
+export async function retireOrder(id: string): Promise<void> {
+  if (hasPostgres()) {
+    await postgresQuery(
+      "UPDATE market_orders SET expires_at = NOW(), updated_at = NOW() WHERE id = $1",
+      [id]
+    );
+    return;
+  }
+  // Non-Postgres stores have no expiry column; removal is the equivalent.
+  await removeListing(id);
+  await removeOffer(id);
+}
+
 export async function removeListing(id: string): Promise<void> {
+  if (hasPostgres()) {
+    await postgresQuery(
+      "DELETE FROM market_orders WHERE id = $1 AND order_kind = 'listing'",
+      [id]
+    );
+    return;
+  }
   if (hasKv()) {
     await kv.hdel(KV_LISTINGS, id);
     return;
@@ -212,6 +346,13 @@ export async function removeListing(id: string): Promise<void> {
 }
 
 export async function removeOffer(id: string): Promise<void> {
+  if (hasPostgres()) {
+    await postgresQuery(
+      "DELETE FROM market_orders WHERE id = $1 AND order_kind = 'offer'",
+      [id]
+    );
+    return;
+  }
   if (hasKv()) {
     await kv.hdel(KV_OFFERS, id);
     return;

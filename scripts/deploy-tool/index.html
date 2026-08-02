@@ -53,6 +53,17 @@
 
 <h1>Marketplank Vault — owner-signed deployment</h1>
 
+<div class="warn" style="border-color:#e8c25f;">
+  <strong>RETIRED (2026-08-02) — do not use for new deployments.</strong>
+  This deploys <code>contracts/MarketplankVault.sol</code>, the pre-Premium-
+  Plank-Liquidity share-fee design (proven flash-loanable drain — see
+  <code>docs/marketplank/AUDIT-2026-07-31-lp.md</code>), and its constructor
+  doesn't even match <code>MarketplankVaultV3.sol</code>. New vaults deploy
+  through <code>.github/workflows/deploy-vault-v3.yml</code> — see
+  <code>scripts/deploy-tool/README.md</code> and
+  <code>docs/marketplank/DEPLOY-V3-RUNBOOK.md</code>.
+</div>
+
 <div class="warn">
   <strong>This page runs entirely in your browser.</strong> It never asks for a
   private key. Every transaction is built here and sent to <code>window.ethereum</code>

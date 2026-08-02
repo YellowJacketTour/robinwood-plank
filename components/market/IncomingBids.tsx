@@ -74,24 +74,32 @@ export default function IncomingBids({
 
   if (!ownedTokenIds) {
     return (
-      <p className={`text-[0.65rem] text-foreground/45 ${className ?? ""}`}>
-        Connect a wallet to see bids on your planks.
-      </p>
+      <div
+        className={`rounded-lg border border-dashed border-line bg-panel-strong px-3 py-2 ${className ?? ""}`}
+      >
+        <p className="text-[0.65rem] text-foreground/45">
+          Connect a wallet to see bids on your planks.
+        </p>
+      </div>
     );
   }
 
   if (ownedTokenIds.size === 0) {
     return (
-      <p className={`text-[0.65rem] text-foreground/45 ${className ?? ""}`}>
-        No planks in this wallet — bids you can accept will show here.
-      </p>
+      <div
+        className={`rounded-lg border border-dashed border-line bg-panel-strong px-3 py-2 ${className ?? ""}`}
+      >
+        <p className="text-[0.65rem] text-foreground/45">
+          No planks in this wallet — bids you can accept will show here.
+        </p>
+      </div>
     );
   }
 
   if (actionable.length === 0) {
     return (
       <div
-        className={`rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-2 ${className ?? ""}`}
+        className={`rounded-lg border border-dashed border-line bg-panel-strong px-3 py-2 ${className ?? ""}`}
       >
         <p className="text-[0.7rem] font-bold text-foreground/55">Bids on your planks</p>
         <p className="text-[0.65rem] text-foreground/40">
@@ -106,16 +114,18 @@ export default function IncomingBids({
       className={`space-y-1.5 rounded-lg border border-emerald-500/30 bg-forest-900/40 ${dense ? "p-2" : "p-3"} ${className ?? ""}`}
     >
       <div className="flex items-baseline justify-between gap-2">
-        <p className="text-[0.7rem] font-bold uppercase tracking-wide text-emerald-300/90">
+        <p className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-emerald-300/90">
           Bids you can accept
         </p>
-        <p className="text-[0.58rem] text-foreground/45">{actionable.length} matching</p>
+        <span className="inline-flex items-center rounded-full border border-emerald-500/30 bg-wood-950 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
+          {actionable.length} matching
+        </span>
       </div>
       <ul className="space-y-1.5">
         {actionable.map(({ offer, kind, matchCount }) => (
           <li
             key={offer.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-gold-500/20 bg-wood-950/90 px-2.5 py-2"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-line bg-panel-strong px-2.5 py-2"
           >
             <div className="min-w-0">
               <p className="truncate text-sm font-bold text-foreground">
