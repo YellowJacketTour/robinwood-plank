@@ -12,6 +12,11 @@ type Props = {
   /** Price re-derived from the signed order, not the listing metadata. */
   verifiedPriceWei: string;
   busy: boolean;
+  /** Why the last attempt failed, shown inside this dialog. A buyer whose
+   *  purchase fails is looking HERE, not at the page behind the modal — a real
+   *  one hit an error, found nothing on screen, and only saw the reason by
+   *  opening the browser console. */
+  error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -29,6 +34,7 @@ export default function BuyConfirm({
   collection,
   verifiedPriceWei,
   busy,
+  error,
   onConfirm,
   onCancel,
 }: Props) {
@@ -108,6 +114,15 @@ export default function BuyConfirm({
         <p className="text-center text-[0.6rem] text-foreground/40">
           Plus network gas. Keep ~{BUY_GAS_RESERVE_ETH} Ξ free.
         </p>
+
+        {error && (
+          <p
+            role="alert"
+            className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100"
+          >
+            {error}
+          </p>
+        )}
 
         <button
           type="button"
