@@ -90,19 +90,23 @@ export default function VaultDashboard({ vaultAddress = null, active = true }: P
         )}
         {statCell("Held", String(stats.heldTokenCount))}
         {statCell(
-          "APR",
+          // "LP APR", not "APR" — swap-fee yield to liquidity providers,
+          // never mint/redeem fee revenue (that pays the treasury — see the
+          // aprPct docstring in lib/market/vault-stats.ts). This vault's
+          // fee model decides whether there's anything to show at all: V1/V2
+          // buyShares/sellShares apply no fee, so this is always "—" here —
+          // not a stale replay, a real "there is nothing to measure."
+          "LP APR (swap fees)",
           stats.aprPct != null
             ? `${stats.aprPct >= 1000 ? stats.aprPct.toFixed(0) : stats.aprPct.toFixed(1)}%`
             : "—",
-          stats.aprPct != null
-            ? stats.aprBasisHours != null
-              ? `est. · ${stats.aprBasisHours.toFixed(1)}h fees`
-              : "est. from mint/redeem fees"
-            : stats.aprBasisHours != null
-              ? `${stats.aprBasisHours.toFixed(1)}h history`
-              : stats.depositCount > 0
-                ? "computing…"
-                : "no fee history"
+          stats.aprPct != null && stats.aprBasisHours != null
+            ? `est. · ${stats.aprBasisHours.toFixed(1)}h swap volume`
+            : stats.feeModel === "share"
+              ? "no swap fee on this pool"
+              : stats.aprBasisHours != null
+                ? `${stats.aprBasisHours.toFixed(1)}h swap history`
+                : "no swap history"
         )}
       </div>
 

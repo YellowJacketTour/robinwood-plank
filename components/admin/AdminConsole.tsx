@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useWallet } from "@/lib/wallet-context";
-import { shortAddress } from "@/lib/trade";
+import { ExplorerAddress } from "./ExplorerAddress";
 import { BUTTON_PRIMARY, CARD, LABEL } from "./ui";
 import MusicSection from "./sections/MusicSection";
 import ContentSection from "./sections/ContentSection";
@@ -146,8 +146,9 @@ export default function AdminConsole() {
         <section className={CARD}>
           <h2 className={LABEL}>Not an admin wallet</h2>
           <p className="mt-2 max-w-lg text-sm text-cream">
-            {shortAddress(address ?? "")} is not on the admin allowlist.
-            Connect a wallet that is, and the console will appear.
+            {address ? <ExplorerAddress address={address} short /> : "This wallet"} is
+            not on the admin allowlist. Connect a wallet that is, and the
+            console will appear.
           </p>
         </section>
       ) : null}

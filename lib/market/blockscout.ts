@@ -198,6 +198,29 @@ export async function fetchTokenInstanceTransfers(
   return d.items || [];
 }
 
+export type BlockscoutTokenBalance = {
+  token?: {
+    address_hash?: string;
+    symbol?: string;
+    name?: string;
+    decimals?: string;
+    type?: string;
+  };
+  value?: string;
+};
+
+/**
+ * Every token an address actually holds (ERC-20 by far the common case,
+ * ERC-721/1155 also returned) — one call, not a fixed probe list. This is
+ * what caught the admin Finance dashboard silently missing USDG on the swap
+ * fee wallet: it only ever checked $PLANK and WETH by address, so anything
+ * else that landed there was invisible. Not paginated by Blockscout for this
+ * endpoint — one response has every token.
+ */
+export async function fetchTokenBalances(address: string): Promise<BlockscoutTokenBalance[]> {
+  return bsGet<BlockscoutTokenBalance[]>(`/api/v2/addresses/${address}/token-balances`, 8_000);
+}
+
 export async function fetchAddressLogs(
   address: string,
   opts?: { maxPages?: number }

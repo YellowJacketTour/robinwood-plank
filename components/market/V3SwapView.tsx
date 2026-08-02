@@ -43,6 +43,16 @@ import type { PickerToken } from "@/components/market/TokenPicker";
 import V3SwapPanel, { type Action } from "@/components/market/V3SwapPanel";
 import VaultPlankGrid from "@/components/market/VaultPlankGrid";
 import V3PriceChart from "@/components/market/V3PriceChart";
+import { swrJson } from "@/lib/market/swr-fetch";
+
+/** The LP-APR fields off /api/market/vault/stats — see the aprPct docstring
+ *  in lib/market/vault-stats.ts. Only the two APR fields are needed here;
+ *  everything else on this page already comes from the live getV3Snapshot
+ *  read above, which has no history and so can't compute this itself. */
+type VaultAprStats = {
+  aprPct: number | null;
+  aprBasisHours: number | null;
+};
 
 type TabKey = "vault" | "odds" | "price" | "activity" | "liquidity";
 
@@ -154,6 +164,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
   const [held, setHeld] = useState<PickerToken[]>([]);
   const [pending, setPending] = useState<V3Pending | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [aprStats, setAprStats] = useState<VaultAprStats | null>(null);
   const [rescueBusy, setRescueBusy] = useState(false);
   const [rescueMsg, setRescueMsg] = useState<string | null>(null);
   // The unified tabbed panel leads with the plank grid ("In the vault").
@@ -225,6 +236,34 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
     const stop = active ? startVisibleInterval(() => { if (!running.current) void load(); }, 15_000) : null;
     return () => stop?.();
   }, [load, active]);
+
+  // LP APR is a real event-replay figure (Bought/Sold swap volume over the
+  // real observed window — see lib/market/vault-stats.ts), not something
+  // getV3Snapshot's plain contract read can compute. Its own poll, separate
+  // from the 15s snapshot cycle above: it changes slowly, and it must never
+  // make a slow/failed history scan block the trade widget's core reads.
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    const fetchApr = () => {
+      const url = vaultAddress
+        ? `/api/market/vault/stats?vault=${encodeURIComponent(vaultAddress)}`
+        : "/api/market/vault/stats";
+      swrJson<VaultAprStats | null>(url, { ttlMs: 20_000 })
+        .then((s) => {
+          if (!cancelled) setAprStats(s ? { aprPct: s.aprPct, aprBasisHours: s.aprBasisHours } : null);
+        })
+        .catch(() => {
+          /* keep last good value on a transient failure */
+        });
+    };
+    fetchApr();
+    const stop = startVisibleInterval(fetchApr, 30_000);
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [vaultAddress, active]);
 
   // Lazy-load the activity feed the first time the tab is opened, resolving a
   // plank thumbnail for each deposit/redeem row.
@@ -365,13 +404,27 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
       </div>
 
       {/* NFTX-style stat row */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
         <BigStat label="TVL" value={snap ? `${formatUnits(tvl, 3)} Ξ` : "—"} />
         <BigStat label="Circulating supply" value={snap ? formatUnits(snap.totalSupply, 2) : "—"} sub="vROBIN" />
         <BigStat label="Swap fee" value={snap ? `${(snap.swapFeeBps / 100).toFixed(2)}%` : "—"} />
         <BigStat label="Floor / share" value={snap ? `${formatUnits(sharePrice, 5)} Ξ` : "—"} />
         <BigStat label="NFTs in vault" value={snap ? String(snap.held) : "—"} />
         <BigStat label="Available" value={snap ? String(snap.availableCount) : "—"} sub="redeemable" />
+        {/* LP yield from real swap volume — never mint/redeem fee revenue,
+            which pays the treasury, not LPs (see the aprPct docstring in
+            lib/market/vault-stats.ts). Basis is whatever window was actually
+            measured; "—" means there isn't enough swap history yet, not a
+            broken read. */}
+        <BigStat
+          label="LP APR"
+          value={aprStats?.aprPct != null ? `${aprStats.aprPct >= 1000 ? aprStats.aprPct.toFixed(0) : aprStats.aprPct.toFixed(1)}%` : "—"}
+          sub={
+            aprStats?.aprPct != null && aprStats.aprBasisHours != null
+              ? `swap fees · ${aprStats.aprBasisHours.toFixed(1)}h`
+              : "swap fees · no history yet"
+          }
+        />
       </div>
 
       {/* hero: trade widget + vault info dock left, the tabbed panel fills right */}

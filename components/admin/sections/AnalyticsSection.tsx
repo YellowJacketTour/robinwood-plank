@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
+import { vaultShortName } from "@/lib/market/vault-registry";
 import { BUTTON_SECONDARY, CARD, LABEL } from "../ui";
 
 /**
@@ -21,13 +23,34 @@ type Pools = {
   stale?: boolean;
 };
 
+// /api/trade/price-history's actual shape nests the window changes under
+// priceChangePct (h1/h6/h24) — a flat top-level `changePct` never existed,
+// so reading that field always rendered "—" regardless of live data.
 type PriceHistory = {
-  stats?: { last?: number; changePct?: number } | null;
+  stats?: {
+    priceUsd?: number;
+    priceChangePct?: { h1?: number; h6?: number; h24?: number };
+  } | null;
   candles?: unknown[];
   stale?: boolean;
 };
 
 type Activity = { events?: { kind: string }[] };
+
+// The primary Instant Swap vault's live dashboard numbers — the same data
+// the public /market Swap tab shows, surfaced here since deposits/redeems/
+// reserves are otherwise invisible to admin despite the vault being the
+// site's second trading surface.
+type VaultStats = {
+  ethReserveWei?: string;
+  heldTokenCount?: number;
+  depositCount?: number;
+  redeemCount?: number;
+  aprPct?: number | null;
+  aprBasisHours?: number | null;
+  vaultFeeRevenueWei?: string;
+  poolOpen?: boolean;
+};
 
 function fromWei(wei: string | null | undefined, dp = 3): string {
   if (!wei) return "—";
@@ -71,6 +94,7 @@ export default function AnalyticsSection() {
   const [pools, setPools] = useState<Pools | null>(null);
   const [price, setPrice] = useState<PriceHistory | null>(null);
   const [activity, setActivity] = useState<Activity | null>(null);
+  const [vault, setVault] = useState<VaultStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -83,16 +107,18 @@ export default function AnalyticsSection() {
         return null;
       }
     };
-    const [s, p, ph, a] = await Promise.all([
+    const [s, p, ph, a, v] = await Promise.all([
       grab<SalesStats>("/api/market/sales-stats"),
       grab<Pools>("/api/trade/pools"),
       grab<PriceHistory>("/api/trade/price-history?range=24H"),
       grab<Activity>("/api/market/activity"),
+      grab<VaultStats>("/api/market/vault/stats"),
     ]);
     setSales(s);
     setPools(p);
     setPrice(ph);
     setActivity(a);
+    setVault(v);
     setLoading(false);
   }, []);
 
@@ -156,11 +182,60 @@ export default function AnalyticsSection() {
             <Tile
               label="$PLANK 24h change"
               value={
-                typeof price?.stats?.changePct === "number"
-                  ? `${price.stats.changePct > 0 ? "+" : ""}${price.stats.changePct.toFixed(2)}%`
+                typeof price?.stats?.priceChangePct?.h24 === "number"
+                  ? `${price.stats.priceChangePct.h24 > 0 ? "+" : ""}${price.stats.priceChangePct.h24.toFixed(2)}%`
                   : "—"
               }
               source="/api/trade/price-history"
+            />
+            <Tile
+              label={`${vaultShortName(MARKET_VAULT_ADDRESS)} ETH reserve`}
+              value={vault ? `${fromWei(vault.ethReserveWei)} ETH` : "—"}
+              source="/api/market/vault/stats"
+            />
+            <Tile
+              label="Instant Swap NFTs held"
+              value={
+                vault
+                  ? `${vault.heldTokenCount?.toLocaleString() ?? "0"}${
+                      vault.poolOpen === false ? " (pool closed)" : ""
+                    }`
+                  : "—"
+              }
+              source="/api/market/vault/stats"
+            />
+            <Tile
+              label="Instant Swap deposits / redeems"
+              value={
+                vault
+                  ? `${vault.depositCount?.toLocaleString() ?? "0"} / ${vault.redeemCount?.toLocaleString() ?? "0"}`
+                  : "—"
+              }
+              source="/api/market/vault/stats"
+            />
+            <Tile
+              // "LP APR", not "APR" — this is specifically swap-fee yield to
+              // liquidity providers (see the aprPct docstring in
+              // lib/market/vault-stats.ts for the contract-level proof that
+              // mint/redeem fees pay the treasury, not LPs). The basis is
+              // whatever window the replay actually measured, not a fixed
+              // 24h — asserting an unmeasured window is exactly the
+              // fabricated-APR bug this endpoint was fixed to stop doing.
+              label={
+                typeof vault?.aprPct === "number" && typeof vault?.aprBasisHours === "number"
+                  ? `Instant Swap LP APR (swap fees, ${vault.aprBasisHours.toFixed(1)}h basis)`
+                  : "Instant Swap LP APR (swap fees)"
+              }
+              value={typeof vault?.aprPct === "number" ? `${vault.aprPct.toFixed(1)}%` : "—"}
+              source="/api/market/vault/stats"
+            />
+            <Tile
+              // Real mint/redeem fee revenue — but it pays the treasury, not
+              // LPs. Named for what it is rather than folded into the LP APR
+              // tile above.
+              label="Instant Swap treasury revenue (mint/redeem fees)"
+              value={vault ? `${fromWei(vault.vaultFeeRevenueWei)} ETH` : "—"}
+              source="/api/market/vault/stats"
             />
           </div>
 

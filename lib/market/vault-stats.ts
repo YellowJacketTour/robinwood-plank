@@ -6,7 +6,7 @@ import { feeModelForVault, type FeeModel } from "@/lib/market/vault-registry";
 import { getVaultHeldTokenIds } from "@/lib/market/vault-held";
 import { getEthUsdPrice } from "@/lib/eth-price";
 import { fetchActivity } from "@/lib/market/activity";
-import { getVaultActivity } from "@/lib/market/vault-activity";
+import { getVaultActivity, type VaultTradeEvent } from "@/lib/market/vault-activity";
 import { MARKET_DEFAULT_FEE_BPS } from "@/lib/constants";
 import { withTimeout } from "@/lib/market/rpc-budget";
 import { ethCallManyDisplay } from "@/lib/market/fetch-rpc";
@@ -163,8 +163,11 @@ async function getFeeSchedule(vault: string, feeModel: FeeModel): Promise<FeeSch
 
 /** The four values that can actually change, read with the ABI that matches
  *  this vault's generation. Immutable fee/premium getters never belong in
- *  this batch — see getFeeSchedule / the two config caches above. */
-async function readCoreVaultState(
+ *  this batch — see getFeeSchedule / the two config caches above.
+ *  Exported: this is the cheap 4-call read (no held-token-id / APR / activity
+ *  scan) that a per-vault summary — e.g. the admin Finance dashboard —
+ *  should use instead of the much heavier getVaultStats. */
+export async function readCoreVaultState(
   vault: string,
   feeModel: FeeModel
 ): Promise<{
@@ -205,8 +208,8 @@ async function readCoreVaultState(
   // LIVE_BATCH_END
 }
 
-/** Below this many hours of observed fee events, annualized APR is noisy.
- * Young vaults still get a number once we have ≥1h of deposit/redeem history
+/** Below this many hours of observed swap events, annualized APR is noisy.
+ * Young pools still get a number once we have ≥1h of real Bought/Sold history
  * so Instant Swap isn't stuck on "—" after a day of real volume. */
 const MIN_HOURS_FOR_APR = 1;
 
@@ -228,34 +231,6 @@ function feePerRedeemWei(schedule: FeeSchedule, sharePriceWei: bigint | null): b
   if (sharePriceWei == null) return BigInt(0);
   const feeShares = (SHARE_UNIT * BigInt(schedule.redeemFeeBps)) / BigInt(10_000);
   return feeEthFromShares(feeShares, sharePriceWei);
-}
-
-function mintFeeLowerBoundApr(
-  ethReserveWei: bigint,
-  feePerDeposit: bigint,
-  heldTokenCount: number
-): {
-  aprPct: number | null;
-  aprBasisHours: number;
-  depositCount: number;
-  redeemCount: number;
-  feeRevenueWei: bigint;
-} {
-  const feeRevenueWei = feePerDeposit * BigInt(heldTokenCount);
-  const hours = 24;
-  const revenueNum = Number(feeRevenueWei) / 1e18;
-  const tvlNum = Number(ethReserveWei) / 1e18;
-  const aprPct =
-    tvlNum > 0 && revenueNum > 0
-      ? Math.min(((revenueNum / hours) * 24 * 365) / tvlNum * 100, 9_999)
-      : null;
-  return {
-    aprPct,
-    aprBasisHours: hours,
-    depositCount: heldTokenCount,
-    redeemCount: 0,
-    feeRevenueWei,
-  };
 }
 
 export type VaultStats = {
@@ -285,18 +260,38 @@ export type VaultStats = {
    * has no separate swap fee. */
   swapFeeBps: number | null;
   ethUsd: number | null;
-  /** Annualized, computed from real Deposited/Redeemed fee events over
-   * however much history actually exists — null when there isn't enough
-   * of it to mean anything (see MIN_HOURS_FOR_APR), never a fabricated
-   * placeholder number. */
+  /**
+   * LP yield, annualized from real AMM swap-fee revenue — NOT mint/redeem
+   * fee revenue. Verified against the contracts: mint/redeem fees always do
+   * `accruedFees += msg.value` and pay out ONLY to the immutable treasury
+   * via withdrawFees() — they never reach liquidity providers (see
+   * MarketplankVaultV3.sol lines 298/317/332/418/452). The swap fee is the
+   * only thing that grows the pool for LPs (line 478: "k strictly grows and
+   * LPs earn the fee") — buyShares/sellShares discount the traded side by
+   * swapFeeBps before pricing the AMM output, and the FULL (undiscounted)
+   * amount still joins the reserve, so that discount is exactly the LP's
+   * take. Computed by computeLpApr() below, over the real observed window
+   * of Bought/Sold events for this vault — null when there isn't enough of
+   * it to mean anything (see MIN_HOURS_FOR_APR), never a fabricated
+   * placeholder number and never asserting a window nobody measured.
+   *
+   * Legacy (share-fee, V1/V2) vaults always report null here: their
+   * buyShares/sellShares apply no fee at all (no swapFeeBps on that
+   * contract — see contracts/MarketplankVault.sol), so k is exactly
+   * conserved and LPs earn nothing from swap volume on those pools. There
+   * is no LP-fee APR to compute for them, not an unmeasured one.
+   */
   aprPct: number | null;
   aprBasisHours: number | null;
   depositCount: number;
   redeemCount: number;
-  /** Vault mint/redeem fee revenue actually observed over the same replay
-   * window as aprBasisHours, valued at the current share price. Not the
-   * lifetime total (the replay only walks back MAX_CHUNKS * CHUNK_BLOCKS)
-   * — a lower bound on real fees collected, never fabricated. */
+  /**
+   * Mint/redeem fee revenue actually observed over the same replay window
+   * as depositCount/redeemCount, valued at the current share price. This is
+   * TREASURY income (see aprPct's docs above for why) — a lower bound on
+   * real fees collected, not the lifetime total, never fabricated, and
+   * never to be presented as LP yield/APR on a public trading surface.
+   */
   vaultFeeRevenueWei: string;
   /** Marketplace (Seaport) listing/offer fee revenue — ESTIMATED as
    * MARKET_DEFAULT_FEE_BPS of observed sale volume from the same recent
@@ -353,44 +348,50 @@ export async function getVaultStats(
   const depositFeeWei = feePerDepositWei(feeSchedule, sharePriceWei);
   const redeemFeeWeiPerEvent = feePerRedeemWei(feeSchedule, sharePriceWei);
 
-  // Always seed APR from inventory × mint fee so the dashboard never shows
-  // "—" when the pool has held NFTs. Activity scan can refine counts/window.
-  const baselineApr =
-    sharePriceWei != null && ethReserveWei > BigInt(0) && heldTokenCount > 0 && depositFeeWei > BigInt(0)
-      ? mintFeeLowerBoundApr(ethReserveWei, depositFeeWei, heldTokenCount)
-      : {
-          aprPct: null as number | null,
-          aprBasisHours: null as number | null,
-          depositCount: 0,
-          redeemCount: 0,
-          feeRevenueWei: BigInt(0),
-        };
+  // No baseline seed: a pool's heldTokenCount is not the same thing as its
+  // deposit count (NFTs can enter via LP contribution, which pays no mint
+  // fee, not just via deposit()) — inferring "N deposits, all in the last
+  // 24h" from inventory alone is exactly the fabricated-APR bug this file's
+  // docstring warns against. Until the activity replay below reports a real
+  // observed window, both the treasury-revenue counters and LP APR stay at
+  // this null/zero shape.
+  const noTreasury = { depositCount: 0, redeemCount: 0, feeRevenueWei: BigInt(0) };
+  const noLpApr = { aprPct: null as number | null, aprBasisHours: null as number | null };
 
   // Best-effort enrichment — never let history scans fail the whole stats payload.
+  // Deposit/redeem (treasury revenue) and Bought/Sold (LP APR) are two
+  // different questions over the SAME event replay, so it is fetched once
+  // here and split below rather than scanned twice.
   let heldTokenIds: string[] = [];
-  let aprPart = baselineApr;
+  let treasuryPart = noTreasury;
+  let lpAprPart = noLpApr;
   let marketplaceFeeRevenueEstWei = BigInt(0);
   try {
-    const [held, apr, mkt] = await Promise.all([
+    const [held, events, mkt] = await Promise.all([
       withTimeout(getVaultHeldTokenIds(vault), 20_000, [] as string[], "vault-held"),
-      withTimeout(
-        estimateApr(depositFeeWei, redeemFeeWeiPerEvent, ethReserveWei, heldTokenCount, vault),
-        8_000,
-        baselineApr,
-        "vault-apr"
-      ),
+      withTimeout(getVaultActivity(80), 8_000, [] as VaultTradeEvent[], "vault-activity"),
       withTimeout(estimateMarketplaceFeeRevenue(), 4_000, BigInt(0), "vault-mkt-fees"),
     ]);
     heldTokenIds = held;
-    aprPart = apr.aprPct != null ? apr : baselineApr;
+    treasuryPart = computeTreasuryFeeActivity(events, depositFeeWei, redeemFeeWeiPerEvent, vault);
+    // Legacy (share-fee) vaults have no swapFeeBps on-contract at all — see
+    // the aprPct docs on VaultStats above — so there is no LP-fee APR to
+    // compute for them, not merely an unmeasured one. Only ask for it when
+    // this vault actually speaks the eth-fee model.
+    lpAprPart =
+      feeSchedule.model === "eth"
+        ? computeLpApr(events, ethReserveWei, feeSchedule.swapFeeBps, vault)
+        : noLpApr;
     marketplaceFeeRevenueEstWei = mkt;
   } catch {
     heldTokenIds = [];
-    aprPart = baselineApr;
+    treasuryPart = noTreasury;
+    lpAprPart = noLpApr;
     marketplaceFeeRevenueEstWei = BigInt(0);
   }
 
-  const { aprPct, aprBasisHours, depositCount, redeemCount, feeRevenueWei } = aprPart;
+  const { depositCount, redeemCount, feeRevenueWei } = treasuryPart;
+  const { aprPct, aprBasisHours } = lpAprPart;
 
   return {
     poolOpen,
@@ -434,109 +435,141 @@ function feeEthFromShares(feeShares: bigint, sharePriceWei: bigint): bigint {
   return (feeShares * sharePriceWei) / SHARE_UNIT;
 }
 
+/** Annualizes real observed revenue against a pool-value denominator over a
+ *  real observed window. Generic over what "revenue" and "poolValue" mean —
+ *  callers are responsible for making sure both are the same kind of money
+ *  (e.g. LP swap-fee revenue against the LP's pool value, never treasury
+ *  revenue against it). */
 function annualizeApr(
-  feeRevenueWei: bigint,
-  ethReserveWei: bigint,
+  revenueWei: bigint,
+  poolValueWei: bigint,
   hoursObserved: number
 ): number | null {
-  if (hoursObserved < MIN_HOURS_FOR_APR || feeRevenueWei <= BigInt(0) || ethReserveWei <= BigInt(0)) {
+  if (hoursObserved < MIN_HOURS_FOR_APR || revenueWei <= BigInt(0) || poolValueWei <= BigInt(0)) {
     return null;
   }
-  const revenueNum = Number(feeRevenueWei) / 1e18;
-  const tvlNum = Number(ethReserveWei) / 1e18;
-  if (tvlNum <= 0 || !Number.isFinite(revenueNum)) return null;
+  const revenueNum = Number(revenueWei) / 1e18;
+  const poolValueNum = Number(poolValueWei) / 1e18;
+  if (poolValueNum <= 0 || !Number.isFinite(revenueNum)) return null;
   const hourlyRate = revenueNum / hoursObserved;
-  // Cap so a short window with heavy mint fees doesn't print nonsense 6-digit %.
-  return Math.min((hourlyRate * 24 * 365) / tvlNum * 100, 9_999);
+  // Cap so a short window with heavy swap volume doesn't print nonsense 6-digit %.
+  return Math.min((hourlyRate * 24 * 365) / poolValueNum * 100, 9_999);
 }
 
 /**
- * Trailing fee-revenue APR.
- * 1) Blockscout-backed vault activity (deposits/redeems + timestamps)
- * 2) Fallback: held NFT count × mint fee + ≥24h window — CF often can't
- *    finish eth_getLogs; activity can also fail under Blockscout pressure.
+ * Deposit/redeem activity for this vault, replayed from real Deposited/
+ * Redeemed events. This is TREASURY revenue counting — see the aprPct docs
+ * on VaultStats for why it is never annualized or presented as APR: both
+ * fee models mint/pay these fees straight to the immutable treasury
+ * (`_mint(treasury, fee)` in MarketplankVault.sol, `accruedFees += msg.value`
+ * + withdrawFees() in MarketplankVaultV3.sol), never to LPs.
+ *
+ * There is deliberately no inventory-based fallback for depositCount.
+ * heldTokenCount is not a count of paid deposits — NFTs can also arrive via
+ * LP contribution, which charges no mint fee — so inferring deposits from
+ * inventory is exactly the fabricated-count bug this file's docstring warns
+ * against. A vault with zero real Deposited events reports depositCount: 0,
+ * even if its heldTokenCount is nonzero.
  *
  * Takes the per-event fee already resolved to wei (see feePerDepositWei /
- * feePerRedeemWei) rather than a fee model + bps, so this one replay loop
- * works unchanged for both a share-model legacy vault and an eth-model V3
- * vault — the model-specific math already happened once, upstream.
+ * feePerRedeemWei) rather than a fee model + bps, so this one loop works
+ * unchanged for both a share-model legacy vault and an eth-model V3 vault —
+ * the model-specific math already happened once, upstream.
  */
-async function estimateApr(
+function computeTreasuryFeeActivity(
+  events: VaultTradeEvent[],
   depositFeeWei: bigint,
   redeemFeeWeiPerEvent: bigint,
-  ethReserveWei: bigint,
-  heldTokenCount: number,
   vaultAddress?: string | null
-): Promise<{
-  aprPct: number | null;
-  aprBasisHours: number | null;
-  depositCount: number;
-  redeemCount: number;
-  feeRevenueWei: bigint;
-}> {
-  const none = {
-    aprPct: null as number | null,
-    aprBasisHours: null as number | null,
-    depositCount: 0,
-    redeemCount: 0,
-    feeRevenueWei: BigInt(0),
-  };
-  if (ethReserveWei <= BigInt(0)) return none;
-
+): { depositCount: number; redeemCount: number; feeRevenueWei: bigint } {
   let depositCount = 0;
   let redeemCount = 0;
   let feeRevenueWei = BigInt(0);
-  let earliest = Infinity;
-  let latestTs = 0;
   const vaultLc = vaultAddress?.toLowerCase() ?? null;
 
-  try {
-    // Short feed first (fast on CF); skip full=1 — it often exhausts the
-    // 12s APR budget and yields emptyApr.
-    const events = await getVaultActivity(80);
-    for (const e of events) {
-      if (e.kind !== "deposit" && e.kind !== "redeem") continue;
-      if (vaultLc && e.vaultAddress && e.vaultAddress.toLowerCase() !== vaultLc) continue;
-      const ts = e.timestamp ? new Date(e.timestamp).getTime() / 1000 : NaN;
-      if (Number.isFinite(ts)) {
-        earliest = Math.min(earliest, ts);
-        latestTs = Math.max(latestTs, ts);
-      }
-      if (e.kind === "deposit") {
-        depositCount += 1;
-        feeRevenueWei += depositFeeWei;
-      } else {
-        redeemCount += 1;
-        feeRevenueWei += redeemFeeWeiPerEvent;
-      }
+  for (const e of events) {
+    if (e.kind !== "deposit" && e.kind !== "redeem") continue;
+    if (vaultLc && e.vaultAddress && e.vaultAddress.toLowerCase() !== vaultLc) continue;
+    if (e.kind === "deposit") {
+      depositCount += 1;
+      feeRevenueWei += depositFeeWei;
+    } else {
+      redeemCount += 1;
+      feeRevenueWei += redeemFeeWeiPerEvent;
     }
-  } catch {
-    /* fall through to held-based estimate */
   }
 
-  // Fallback when activity is empty: every held NFT was deposited at least
-  // once → mint-fee lower bound over a 24h window.
-  if (feeRevenueWei <= BigInt(0) && heldTokenCount > 0 && depositFeeWei > BigInt(0)) {
-    // APR estimate only — do NOT invent depositCount = heldTokenCount for UI
-    // reconciliation (that made "57 held / 57 deposits / 0 redeems" look real
-    // when activity history was empty). Keep event counts from the walk above.
-    const aprOnly = mintFeeLowerBoundApr(ethReserveWei, depositFeeWei, heldTokenCount);
-    return {
-      ...aprOnly,
-      depositCount,
-      redeemCount,
-    };
+  return { depositCount, redeemCount, feeRevenueWei };
+}
+
+/**
+ * LP APR, replayed from real Bought/Sold events — the actual yield
+ * mechanism for a constant-product (V2-style) pool's liquidity providers.
+ * See the aprPct docs on VaultStats for the contract-level verification
+ * that swap fees (not mint/redeem fees) are what LPs earn.
+ *
+ * `VaultTradeEvent.ethWei` already holds the ETH-side amount of the trade
+ * either way — `ethIn` for a Bought event, `ethOut` for a Sold one — so
+ * summing it directly over both kinds gives real ETH-denominated swap
+ * volume with no extra share-price conversion needed. Fee revenue is then
+ * volume × swapFeeBps, same rate the AMM itself charges on every trade.
+ *
+ * TVL denominator is the FULL two-sided pool value, not just the ETH
+ * reserve: an LP is exposed to both sides of a constant-product pool. At
+ * the AMM's own spot price (ethReserve / shareReserve), the two sides are
+ * worth exactly the same by construction — shareReserve valued at that
+ * price is exactly ethReserve again — so total pool value is exactly
+ * 2 × ethReserveWei. No oracle or extra read needed; this is exact, not an
+ * approximation.
+ *
+ * Returns aprPct: null / aprBasisHours: null when there is no real swap
+ * volume to measure, or volume exists but no event carries a usable
+ * timestamp — never a fabricated placeholder or an asserted window nobody
+ * measured. Only meaningful for eth-fee (V3) vaults — see the caller in
+ * getVaultStats, which gates this out entirely for share-fee vaults, whose
+ * buyShares/sellShares apply no fee at all.
+ */
+function computeLpApr(
+  events: VaultTradeEvent[],
+  ethReserveWei: bigint,
+  swapFeeBps: number,
+  vaultAddress?: string | null
+): { aprPct: number | null; aprBasisHours: number | null } {
+  const none = { aprPct: null as number | null, aprBasisHours: null as number | null };
+  if (ethReserveWei <= BigInt(0) || swapFeeBps <= 0) return none;
+
+  const vaultLc = vaultAddress?.toLowerCase() ?? null;
+  let volumeWei = BigInt(0);
+  let earliest = Infinity;
+  let latestTs = 0;
+
+  for (const e of events) {
+    if (e.kind !== "buy" && e.kind !== "sell") continue;
+    if (vaultLc && e.vaultAddress && e.vaultAddress.toLowerCase() !== vaultLc) continue;
+    if (!e.ethWei) continue;
+    let wei: bigint;
+    try {
+      wei = BigInt(e.ethWei);
+    } catch {
+      continue;
+    }
+    if (wei <= BigInt(0)) continue;
+    volumeWei += wei;
+    const ts = e.timestamp ? new Date(e.timestamp).getTime() / 1000 : NaN;
+    if (Number.isFinite(ts)) {
+      earliest = Math.min(earliest, ts);
+      latestTs = Math.max(latestTs, ts);
+    }
   }
 
-  if (feeRevenueWei <= BigInt(0)) {
-    return { ...none, depositCount, redeemCount };
-  }
+  // No swap volume observed, or volume exists but nothing carried a
+  // parseable timestamp — either way, the window genuinely can't be
+  // measured, so don't assert one.
+  if (volumeWei <= BigInt(0) || earliest === Infinity) return none;
 
-  const hoursObserved =
-    earliest === Infinity
-      ? 24
-      : Math.max((latestTs - earliest) / 3600, MIN_HOURS_FOR_APR);
-
-  const aprPct = annualizeApr(feeRevenueWei, ethReserveWei, hoursObserved);
-  return { aprPct, aprBasisHours: hoursObserved, depositCount, redeemCount, feeRevenueWei };
+  const feeRevenueWei = (volumeWei * BigInt(swapFeeBps)) / BigInt(10_000);
+  const hoursObserved = Math.max((latestTs - earliest) / 3600, MIN_HOURS_FOR_APR);
+  const poolValueWei = ethReserveWei * BigInt(2);
+  const aprPct = annualizeApr(feeRevenueWei, poolValueWei, hoursObserved);
+  return { aprPct, aprBasisHours: hoursObserved };
 }
