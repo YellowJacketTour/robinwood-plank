@@ -125,6 +125,96 @@ export default function Nav() {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
 
+  // "Gallery" becomes "My NFTs" for a wallet that actually holds planks.
+  const { address, isConnected } = useWallet();
+  /** The wallet last confirmed to hold planks. Tagged with the address rather
+   *  than kept as a bare boolean so disconnecting or switching accounts reverts
+   *  the label by derivation — no reset write, and no window where the label
+   *  describes the previous wallet. */
+  const [holderAddress, setHolderAddress] = useState<string | null>(null);
+  const ownsPlanks =
+    isConnected && Boolean(address) && holderAddress === address?.toLowerCase();
+
+  /**
+   * Ownership check for the label. This component renders on every page, so
+   * cost control is the whole design:
+   *
+   * - a cached entry wins outright, even a stale one. The label only needs the
+   *   boolean "holds > 0", which does not decay the way a token list does, so
+   *   re-walking the chain to re-learn it would be waste. localStorage-backed,
+   *   so it is one walk per wallet per browser rather than one per page view.
+   * - the import is dynamic, keeping lib/market/inventory (and lib/ipfs behind
+   *   it) out of the chunk every page already pays for.
+   * - deferred, so it never competes with page-critical fetches.
+   *
+   * Starts false and only ever goes true after a real answer: SSR and the first
+   * client render must agree, so nothing here may read storage during render.
+   */
+  useEffect(() => {
+    if (!isConnected || !address) return;
+    const owner = address.toLowerCase();
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const [{ getCachedInventory }, { NFT_CONTRACT_ADDRESS }] = await Promise.all([
+          import("@/lib/nft-cache"),
+          import("@/lib/mint-contract"),
+        ]);
+        if (!alive) return;
+        const cached = getCachedInventory(`${NFT_CONTRACT_ADDRESS.toLowerCase()}:${owner}`);
+        if (cached) {
+          if (cached.ids.length > 0) setHolderAddress(owner);
+          return;
+        }
+        const { getOwnedTokenIds } = await import("@/lib/market/inventory");
+        const ids = await getOwnedTokenIds(NFT_CONTRACT_ADDRESS, address);
+        if (alive && ids.size > 0) setHolderAddress(owner);
+      })();
+    }, 1200);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [address, isConnected]);
+
+  /**
+   * One derivation for both the desktop and mobile lists, which map NAV_LINKS
+   * independently.
+   *
+   * `active` still comes from isActive(link, …), which matches on link.href —
+   * that is exactly why the tab is carried in a locally-computed href instead
+   * of in NAV_LINKS. usePathname() excludes the query string, so a constant of
+   * "/gallery?tab=my-nfts" would never equal the pathname and the entry would
+   * stop highlighting.
+   */
+  const resolveLink = useCallback(
+    (link: (typeof NAV_LINKS)[number]) => {
+      const mine = link.href === "/gallery" && ownsPlanks;
+      return {
+        label: mine ? "My NFTs" : link.label,
+        href: mine ? "/gallery?tab=my-nfts" : navHref(link.href, pathname),
+        active: isActive(link, pathname),
+      };
+    },
+    [ownsPlanks, pathname],
+  );
+
+  /**
+   * Clicking the relabelled link while already on /gallery changes only the
+   * query string. The App Router does not remount Gallery and fires no
+   * popstate, so the tab would silently not switch. Drive the same popstate
+   * listener Gallery already has rather than inventing a cross-component event.
+   */
+  const onNavLinkClick = useCallback(
+    (href: string) => (event: React.MouseEvent<HTMLAnchorElement>) => {
+      if (pathname !== "/gallery" || !href.startsWith("/gallery?")) return;
+      event.preventDefault();
+      window.history.pushState(null, "", href);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    },
+    [pathname],
+  );
+
   const closeMenu = useCallback((returnFocus = false) => {
     setOpen(false);
     if (returnFocus) {
@@ -216,8 +306,7 @@ export default function Nav() {
           <div className="hidden min-w-0 items-center gap-3 lg:flex">
             <ul className="flex items-center gap-1 lg:gap-1.5">
               {NAV_LINKS.map((link) => {
-                const href = navHref(link.href, pathname);
-                const active = isActive(link, pathname);
+                const { label, href, active } = resolveLink(link);
                 // Finalized mockup: flat text links, the active route as a
                 // quiet dark-gold pill, no borders. The header's single gold
                 // action is Connect wallet on the right.
@@ -232,12 +321,13 @@ export default function Nav() {
                         href={href}
                         className={className}
                         aria-current={active ? "page" : undefined}
+                        onClick={onNavLinkClick(href)}
                       >
-                        {link.label}
+                        {label}
                       </Link>
                     ) : (
                       <a href={href} className={className}>
-                        {link.label}
+                        {label}
                       </a>
                     )}
                   </li>
@@ -301,8 +391,7 @@ export default function Nav() {
             <WoodAmpMenuRow onOpen={() => closeMenu()} />
             <ul className="mt-3 flex flex-col gap-1">
               {NAV_LINKS.map((link) => {
-                const href = navHref(link.href, pathname);
-                const active = isActive(link, pathname);
+                const { label, href, active } = resolveLink(link);
                 const className = `flex min-h-12 items-center rounded-md px-3 py-2 text-base font-semibold uppercase tracking-wide transition-colors hover:bg-wood-900 hover:text-gold-300 ${
                   active ? "bg-gold-500/10 text-gold-300" : "text-foreground/80"
                 }`;
@@ -312,11 +401,14 @@ export default function Nav() {
                     {isRoute(href) ? (
                       <Link
                         href={href}
-                        onClick={() => closeMenu()}
+                        onClick={(event) => {
+                          onNavLinkClick(href)(event);
+                          closeMenu();
+                        }}
                         className={className}
                         aria-current={active ? "page" : undefined}
                       >
-                        {link.label}
+                        {label}
                       </Link>
                     ) : (
                       <a
@@ -333,7 +425,7 @@ export default function Nav() {
                         }}
                         className={className}
                       >
-                        {link.label}
+                        {label}
                       </a>
                     )}
                   </li>
