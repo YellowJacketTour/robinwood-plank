@@ -78,9 +78,22 @@ const STALE_SELLER_ERRORS = new Set([
   "The offerer does not have the sufficient approvals.",
 ]);
 
+/**
+ * seaport-js calls the BUYER the "fulfiller". Shown raw, "The fulfiller does not
+ * have the balances needed to fulfill" is unreadable to the person it is about —
+ * it is simply "you don't have enough ETH", and a real buyer hit exactly this
+ * and reported it as a broken button rather than an empty wallet.
+ */
+const BUYER_FUNDS_ERRORS = new Set([
+  "The fulfiller does not have the balances needed to fulfill.",
+]);
+
 function describeFulfillError(e: unknown): string {
   if (e instanceof Error && STALE_SELLER_ERRORS.has(e.message)) {
     return "This plank is no longer available — the seller's wallet changed since this page loaded.";
+  }
+  if (e instanceof Error && BUYER_FUNDS_ERRORS.has(e.message)) {
+    return "Not enough ETH in your wallet to cover this price plus gas. Add funds, or switch to a wallet that has them.";
   }
   return e instanceof Error ? e.message : "Purchase failed.";
 }
@@ -1033,8 +1046,13 @@ export default function MarketView() {
           collection={COLLECTION}
           verifiedPriceWei={buyTarget.verifiedPriceWei}
           busy={status !== null}
+          // Surface the failure in the dialog the buyer is actually looking at.
+          error={error}
           onConfirm={confirmBuy}
-          onCancel={() => setBuyTarget(null)}
+          onCancel={() => {
+            setError(null);
+            setBuyTarget(null);
+          }}
         />
       )}
 
