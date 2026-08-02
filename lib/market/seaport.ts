@@ -19,6 +19,7 @@ import type { DerivedOrder } from "@/lib/market/order-validation";
 import { assertSweepTotal } from "@/lib/market/sweep";
 import type { SweepItem } from "@/lib/market/sweep";
 import type { MarketCollection } from "@/lib/market/types";
+import type { Eip1193Provider } from "@/lib/wallet";
 import {
   ensureRobinhoodChain,
   getEthereumProvider,
@@ -36,6 +37,115 @@ function feesFor(feeBps: number): Fee[] | undefined {
   return [{ recipient: MARKET_FEE_RECIPIENT, basisPoints: feeBps }];
 }
 
+const ERC721_IFACE = new Interface([
+  "function isApprovedForAll(address owner, address operator) view returns (bool)",
+  "function setApprovalForAll(address operator, bool approved)",
+  "function getApproved(uint256 tokenId) view returns (address)",
+]);
+
+const ERC20_IFACE = new Interface([
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+]);
+
+async function ethCall(to: string, data: string): Promise<string> {
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+  return (await provider.request({
+    method: "eth_call",
+    params: [{ to, data }, "latest"],
+  })) as string;
+}
+
+/**
+ * Identifies one (owner, token contract, operator) triple whose
+ * `isApprovedForAll` read should be reported as `true` to seaport-js, because
+ * this module has ALREADY independently confirmed — via a direct getApproved
+ * eth_call, see checkPerTokenApprovalSpoof below — that the owner granted a
+ * valid PER-TOKEN approval covering the exact token being transferred. Never
+ * constructed except after that positive on-chain confirmation.
+ */
+export type ApprovalSpoof = { owner: string; token: string; operator: string };
+
+/**
+ * Wraps an injected EIP-1193 provider so that each `isApprovedForAll(owner,
+ * operator)` eth_call matching one of `spoofs` (by token address AND decoded
+ * owner/operator) answers `true`, and every other request (including every
+ * other eth_call, the eventual eth_sendTransaction, chain reads, etc.) passes
+ * through untouched.
+ *
+ * WHY: seaport-js's own approval pre-flight (lib/utils/approval.js) only ever
+ * calls `isApprovedForAll` — it never calls ERC-721 `getApproved(tokenId)`,
+ * so a seller/bidder who granted a single-token `approve` instead of a
+ * blanket `setApprovalForAll` reads as having NO approval at all, and
+ * seaport-js throws before the wallet ever opens, even though the order is
+ * genuinely fillable on-chain (Seaport itself calls transferFrom, and
+ * `getApproved(tokenId) == Seaport` is sufficient for that call to succeed).
+ * Proven against the real Seaport 1.6 runtime bytecode in
+ * test/contracts/SeaportPerTokenApproval.test.ts.
+ *
+ * `spoofs` is a LIST, not one triple, because a batch fulfillment
+ * (sweepFloor's fulfillOrders) runs this exact same `isApprovedForAll` check
+ * once per order in the batch — each covering a potentially different
+ * (owner, token) pair — and every read seaport-js performs during that one
+ * `getSeaport()` session shares this one wrapped provider. A single-order
+ * fill just passes a one-element list. Each entry was independently
+ * confirmed by computeApprovalSpoof before it ever reaches here.
+ *
+ * This spoof lets seaport-js's OWN vetted transaction-building code run
+ * completely unmodified — fulfillBasicOrder vs fulfillStandardOrder vs
+ * fulfillAvailableOrders selection, fee-recipient handling, everything — so
+ * we never hand-encode Seaport calldata ourselves and never touch its
+ * fund-flow logic. We only correct the specific incomplete reads, and only
+ * after confirming the truth of each one independently.
+ */
+export function wrapProviderWithApprovalSpoof(
+  base: Eip1193Provider,
+  spoofs: ApprovalSpoof[]
+): Eip1193Provider {
+  // Present in ERC721_IFACE's literal ABI above — never actually null.
+  const selector = ERC721_IFACE.getFunction("isApprovedForAll")!.selector.toLowerCase();
+  return new Proxy(base, {
+    get(target, prop, receiver) {
+      if (prop === "request") {
+        return async (args: { method: string; params?: unknown[] | object }) => {
+          if (args.method === "eth_call") {
+            const call = (args.params as unknown[] | undefined)?.[0] as
+              | { to?: string; data?: string }
+              | undefined;
+            if (
+              call?.to &&
+              typeof call.data === "string" &&
+              call.data.toLowerCase().startsWith(selector)
+            ) {
+              try {
+                const [owner, operator] = ERC721_IFACE.decodeFunctionData(
+                  "isApprovedForAll",
+                  call.data
+                );
+                const matched = spoofs.some(
+                  (spoof) =>
+                    call.to!.toLowerCase() === spoof.token.toLowerCase() &&
+                    String(owner).toLowerCase() === spoof.owner.toLowerCase() &&
+                    String(operator).toLowerCase() === spoof.operator.toLowerCase()
+                );
+                if (matched) {
+                  return ERC721_IFACE.encodeFunctionResult("isApprovedForAll", [true]);
+                }
+              } catch {
+                /* Malformed call data — fall through to the real read. */
+              }
+            }
+          }
+          return target.request(args);
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 /**
  * Client-side Seaport instance bound to the connected wallet. Always
  * re-checks the chain first — same discipline as lib/wallet.ts's swap path,
@@ -49,13 +159,27 @@ function feesFor(feeBps: number): Fee[] | undefined {
  * sendTransaction() instead (see executeActionsViaWallet), which re-asserts
  * eth_chainId, enforces the destination allowlist, and hard-fails on a
  * reverting eth_call before the wallet popup.
+ *
+ * `approvalSpoofs`, when given a non-empty list, is applied via
+ * wrapProviderWithApprovalSpoof — see that function for why (single-order
+ * fills pass one entry; sweepFloor may pass several, one per order). Every
+ * other call, including the eventual broadcast, is completely unaffected.
  */
-export async function getSeaport(): Promise<Seaport> {
+export async function getSeaport(
+  approvalSpoofs?: ApprovalSpoof | ApprovalSpoof[]
+): Promise<Seaport> {
   await ensureRobinhoodChain();
   const injected = getEthereumProvider();
   if (!injected) throw new Error("No wallet found.");
+  const spoofs = approvalSpoofs
+    ? Array.isArray(approvalSpoofs)
+      ? approvalSpoofs
+      : [approvalSpoofs]
+    : [];
+  const effectiveProvider =
+    spoofs.length > 0 ? wrapProviderWithApprovalSpoof(injected, spoofs) : injected;
 
-  const provider = new BrowserProvider(injected, {
+  const provider = new BrowserProvider(effectiveProvider, {
     chainId: CHAIN.id,
     name: CHAIN.name,
   });
@@ -271,15 +395,137 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
   return order;
 }
 
+/** The only conduit shape order-validation.ts lets onto the book — see there. */
+const ZERO_CONDUIT_KEY =
+  "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+export type FulfillableOrder = Parameters<Seaport["fulfillOrder"]>[0]["order"];
+
+/**
+ * Given the exact (owner, token, tokenId) a fulfillment is about to require
+ * approval for, POSITIVELY confirms on-chain whether seaport-js's
+ * `isApprovedForAll`-only pre-flight would misread a real approval as
+ * missing. Returns an ApprovalSpoof only when:
+ *   - `isApprovedForAll(owner, Seaport)` is genuinely false (if it were true,
+ *     seaport-js's own check already succeeds — nothing to fix), AND
+ *   - `getApproved(tokenId)` is exactly the Seaport contract.
+ *
+ * Any read failure, mismatch, or absent approval returns null — the caller
+ * must then let seaport-js's normal path (and its normal error) run
+ * unmodified. This function only ever asserts a fact it has itself checked;
+ * it is never told to trust a claim from the caller.
+ */
+export type ApprovalReader = (
+  owner: string,
+  token: string,
+  tokenId: string
+) => Promise<ApprovalSpoof | null>;
+
+async function checkPerTokenApprovalSpoof(
+  owner: string,
+  token: string,
+  tokenId: string
+): Promise<ApprovalSpoof | null> {
+  try {
+    const [allHex, approvedHex] = await Promise.all([
+      ethCall(token, ERC721_IFACE.encodeFunctionData("isApprovedForAll", [owner, SEAPORT_ADDRESS])),
+      ethCall(token, ERC721_IFACE.encodeFunctionData("getApproved", [tokenId])),
+    ]);
+    const isApprovedForAll = allHex !== "0x" && BigInt(allHex) !== BigInt(0);
+    if (isApprovedForAll) return null; // Normal path already works — nothing to fix.
+    if (!approvedHex || approvedHex === "0x") return null; // Unreadable — fail closed.
+    const [approvedAddress] = ERC721_IFACE.decodeFunctionResult("getApproved", approvedHex) as unknown as [
+      string,
+    ];
+    if (String(approvedAddress).toLowerCase() !== SEAPORT_ADDRESS.toLowerCase()) return null;
+    return { owner, token, operator: SEAPORT_ADDRESS };
+  } catch {
+    return null; // A reverting/erroring read is not a confirmed approval.
+  }
+}
+
+/**
+ * Inspects a to-be-fulfilled order for the ONE ERC-721 item whose approval
+ * seaport-js's offerer/fulfiller balance-and-approval check will actually
+ * gate, and — only for the zero-conduit shape this marketplace produces —
+ * checks whether that specific item has a confirmed per-token approval that
+ * seaport-js's own pre-flight would misread as absent.
+ *
+ * Three order shapes, matching order-validation.ts:
+ *   - LISTING (buy): the offerer's single ERC-721 offer item.
+ *   - PLAIN OFFER (accept): the fulfiller's single fixed-id ERC-721
+ *     consideration item.
+ *   - TRAIT OFFER (accept): the fulfiller's criteria-typed consideration
+ *     item, resolved to the concrete token id via the caller-supplied
+ *     considerationCriteria (already proof-verified upstream by
+ *     assertAcceptableTraitOffer before this ever runs).
+ *
+ * Anything else (non-zero conduit, multiple NFT items, no NFT item) returns
+ * null and the normal seaport-js path runs untouched.
+ *
+ * `checkApproval` defaults to the real on-chain reader; tests inject a fake
+ * so the SHAPE-SELECTION logic above (which item, which holder, gated on
+ * zero conduit) is exercised without a wallet/provider in the loop.
+ */
+export async function computeApprovalSpoof(
+  order: FulfillableOrder,
+  accountAddress: string,
+  considerationCriteria?: InputCriteria[],
+  checkApproval: ApprovalReader = checkPerTokenApprovalSpoof
+): Promise<ApprovalSpoof | null> {
+  const params = order.parameters;
+  const conduitKey = params.conduitKey;
+  const isZeroConduit =
+    conduitKey === undefined ||
+    conduitKey === null ||
+    conduitKey.toLowerCase() === ZERO_CONDUIT_KEY;
+  if (!isZeroConduit) return null;
+
+  const offerNfts = params.offer.filter((item) => Number(item.itemType) === ItemType.ERC721);
+  if (offerNfts.length === 1) {
+    const item = offerNfts[0];
+    return checkApproval(params.offerer, item.token, item.identifierOrCriteria);
+  }
+
+  const considerationFixedNfts = params.consideration.filter(
+    (item) => Number(item.itemType) === ItemType.ERC721
+  );
+  const considerationCriteriaNfts = params.consideration.filter(
+    (item) => Number(item.itemType) === ItemType.ERC721_WITH_CRITERIA
+  );
+  if (considerationFixedNfts.length === 1 && considerationCriteriaNfts.length === 0) {
+    const item = considerationFixedNfts[0];
+    return checkApproval(accountAddress, item.token, item.identifierOrCriteria);
+  }
+  if (considerationCriteriaNfts.length === 1 && considerationCriteria?.length === 1) {
+    const identifier = considerationCriteria[0]?.identifier;
+    if (identifier !== undefined) {
+      return checkApproval(accountAddress, considerationCriteriaNfts[0].token, identifier);
+    }
+  }
+
+  return null;
+}
+
 /**
  * Fulfills an existing signed order (buy a listing, or accept an offer).
  * Every tx (including any approval seaport-js derives FROM THE ORDER — the
  * exact vector the accept-offer audit finding exploited) is routed through
  * lib/wallet.ts, so an order whose fulfillment would touch a contract outside
  * the market allowlist is blocked before the wallet ever pops.
+ *
+ * BEFORE calling seaport-js, computeApprovalSpoof checks whether this order's
+ * relevant ERC-721 item has a confirmed per-token approval that seaport-js's
+ * own `isApprovedForAll`-only pre-flight would misread as missing (see that
+ * function, and wrapProviderWithApprovalSpoof, for the full reasoning). When
+ * confirmed, getSeaport() is asked to correct exactly that one read so
+ * seaport-js's normal, fully-vetted order-building code proceeds instead of
+ * throwing before the wallet opens. Every other call this makes — the
+ * eth_call simulation and the eventual send in executeActionsViaWallet — is
+ * completely unaffected by the spoof and still runs against reality.
  */
 export async function fulfillOrder(
-  order: Parameters<Seaport["fulfillOrder"]>[0]["order"],
+  order: FulfillableOrder,
   accountAddress: string,
   /**
    * For TRAIT-criteria bids only: the concrete token id being delivered plus
@@ -289,7 +535,8 @@ export async function fulfillOrder(
    */
   considerationCriteria?: InputCriteria[]
 ) {
-  const seaport = await getSeaport();
+  const approvalSpoof = await computeApprovalSpoof(order, accountAddress, considerationCriteria);
+  const seaport = await getSeaport(approvalSpoof ?? undefined);
   const { actions } = await seaport.fulfillOrder({
     order,
     accountAddress,
@@ -324,6 +571,19 @@ export async function fulfillOrder(
  *   so a zero-effect sweep cannot cost more than a failed-tx's gas.
  * - The exchange tx is routed through lib/wallet.ts sendTransaction (kind
  *   "market"): chain re-check, `to` allowlist, hard-fail pre-flight eth_call.
+ *
+ * APPROVAL SPOOF (batch): seaport-js's fulfillOrders runs the SAME
+ * `isApprovedForAll`-only offerer check as the single-order path, once per
+ * order in the batch (validateStandardFulfillBalancesAndApprovals inside its
+ * fulfillAvailableOrders, called from the forEach over every order — same
+ * throwOnInsufficientApprovals: true as the single-fulfill path). So a swept
+ * listing whose seller granted only a per-token approve has the identical
+ * exposure fulfillOrder has, and would abort the WHOLE batch before the
+ * wallet opens. Each order gets its own computeApprovalSpoof check — same
+ * function, same on-chain confirmation, same fail-closed-on-null behavior —
+ * and every confirmed spoof (there can be one per distinct seller/token in
+ * the sweep) is handed to getSeaport() together, via
+ * wrapProviderWithApprovalSpoof's list form.
  */
 export async function sweepFloor(
   items: SweepItem[],
@@ -334,11 +594,16 @@ export async function sweepFloor(
   // FAIL CLOSED: re-validate + re-price everything against what was displayed.
   assertSweepTotal(items, expectedTotalWei, collection);
 
-  const seaport = await getSeaport();
+  const orders = items.map(
+    (item) => item.listing.rawOrder as Parameters<Seaport["fulfillOrder"]>[0]["order"]
+  );
+  const approvalSpoofs = (
+    await Promise.all(orders.map((order) => computeApprovalSpoof(order, accountAddress)))
+  ).filter((spoof): spoof is ApprovalSpoof => spoof !== null);
+
+  const seaport = await getSeaport(approvalSpoofs);
   const { actions } = await seaport.fulfillOrders({
-    fulfillOrderDetails: items.map((item) => ({
-      order: item.listing.rawOrder as Parameters<Seaport["fulfillOrder"]>[0]["order"],
-    })),
+    fulfillOrderDetails: orders.map((order) => ({ order })),
     accountAddress,
     exactApproval: true,
   });
@@ -471,25 +736,6 @@ export function assertAcceptableTraitOffer(
 // Approval visibility + revocation (audit finding: blanket approvals could be
 // left live with no way to remove them from the UI).
 // ---------------------------------------------------------------------------
-
-const ERC721_IFACE = new Interface([
-  "function isApprovedForAll(address owner, address operator) view returns (bool)",
-  "function setApprovalForAll(address operator, bool approved)",
-]);
-
-const ERC20_IFACE = new Interface([
-  "function allowance(address owner, address spender) view returns (uint256)",
-  "function approve(address spender, uint256 amount) returns (bool)",
-]);
-
-async function ethCall(to: string, data: string): Promise<string> {
-  const provider = getEthereumProvider();
-  if (!provider) throw new Error("No wallet found.");
-  return (await provider.request({
-    method: "eth_call",
-    params: [{ to, data }, "latest"],
-  })) as string;
-}
 
 export type MarketApprovals = {
   /** setApprovalForAll(collection → Seaport) is live. */
