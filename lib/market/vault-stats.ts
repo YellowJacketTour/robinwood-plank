@@ -403,9 +403,25 @@ export async function getVaultStats(
   let lpAprPart = noLpApr;
   let marketplaceFeeRevenueEstWei = BigInt(0);
   try {
+    // Full per-vault lineage from the durable KV store, NOT a bounded 80-event
+    // live rescan spanning all three vaults. That bounded window starved APR:
+    // the legacy vaults are far busier than V3 (176 + 36 events vs V3's 7 in a
+    // real measurement), so an 80-event window across all vaults could contain
+    // zero V3 swaps while V3 had genuinely traded — computeLpApr then correctly
+    // returned null for a pool with real volume, for the wrong reason. `full:
+    // true` short-circuits to the durable lineage already kept current by the
+    // refresh cron (see scripts/refresh-market-data.ts) instead of repeating a
+    // live multi-source scan on every stats request — see buildVaultActivity's
+    // docs in vault-activity.ts. Capped at STORED_HISTORY_LIMIT (500), same as
+    // what's actually persisted.
     const [held, events, mkt] = await Promise.all([
       withTimeout(getVaultHeldTokenIds(vault), 20_000, [] as string[], "vault-held"),
-      withTimeout(getVaultActivity(80), 8_000, [] as VaultTradeEvent[], "vault-activity"),
+      withTimeout(
+        getVaultActivity(400, { full: true }),
+        12_000,
+        [] as VaultTradeEvent[],
+        "vault-activity"
+      ),
       withTimeout(estimateMarketplaceFeeRevenue(), 4_000, BigInt(0), "vault-mkt-fees"),
     ]);
     heldTokenIds = held;
