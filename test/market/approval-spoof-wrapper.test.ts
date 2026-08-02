@@ -211,3 +211,43 @@ test("an empty spoof list is a pure pass-through — nothing is ever answered TR
   assert.equal(decodeBool(result as string), false);
   assert.equal(calls.length, 1);
 });
+
+/**
+ * The gap an adversarial review found, now pinned.
+ *
+ * `isApprovedForAll` is collection-wide — it takes no tokenId. So a spoof
+ * confirmed against ONE token answers `true` for EVERY token that seller holds
+ * in that collection. In a sweep containing two planks from the same seller
+ * where only one is approved, the confirmed one would have vouched for the
+ * unapproved one.
+ *
+ * The wrapper cannot fix that — the read it intercepts genuinely has no tokenId
+ * to discriminate on. The caller must fail closed instead, which is what
+ * sweepFloor now does by withdrawing the spoof for the whole (owner, collection)
+ * group when any order in it is unconfirmed. This test documents the wrapper's
+ * real grain so nobody "optimises" that grouping away believing the wrapper is
+ * token-precise.
+ */
+test("a spoof is collection-wide by nature: it cannot distinguish two tokens of the same owner", async () => {
+  const iface = new Interface([
+    "function isApprovedForAll(address owner, address operator) view returns (bool)",
+  ]);
+  const OWNER = "0x1111111111111111111111111111111111111111";
+  const TOKEN = "0x2222222222222222222222222222222222222222";
+  const SEAPORT = "0x0000000000000068F116a894984e2DB1123eB395";
+
+  const spoof: ApprovalSpoof = { owner: OWNER, token: TOKEN, operator: SEAPORT };
+  const base = {
+    request: async () => iface.encodeFunctionResult("isApprovedForAll", [false]),
+  } as unknown as Parameters<typeof wrapProviderWithApprovalSpoof>[0];
+
+  const wrapped = wrapProviderWithApprovalSpoof(base, [spoof]);
+  const data = iface.encodeFunctionData("isApprovedForAll", [OWNER, SEAPORT]);
+  const answer = await wrapped.request({ method: "eth_call", params: [{ to: TOKEN, data }, "latest"] });
+
+  assert.equal(
+    iface.decodeFunctionResult("isApprovedForAll", answer as string)[0],
+    true,
+    "one spoof answers true for this owner+collection — with no way to scope it to a tokenId"
+  );
+});
