@@ -205,11 +205,12 @@ There are two distinct page-background systems in this codebase. Use the right o
 
 ### 1. Marketing background — the Plank masthead
 
-Mounted globally, once, in `app/layout.tsx` (`<PlankBackground />`, now a no-op placeholder — see below), so it is technically present on every route including Trade/Market/Gallery. It paints directly on `body` in `app/globals.css`, pure CSS, no JS:
+**The masthead art is painted by the hero section itself** (`components/Hero.tsx`), NOT by `body`. `body` is a solid field (`background-color: #14100b`) and carries no `background-image` at all. `<PlankBackground />` is still mounted in `app/layout.tsx` but is a no-op placeholder — see below.
 
-- A strong darkening gradient wash (`linear-gradient(180deg, rgba(20,16,11,.88) 0%, rgba(20,16,11,.95) 40%, rgba(20,16,11,.97) 100%)`) so foreground text stays legible for the entire scroll length, not just near the top.
-- `plank-head.webp` at true, undistorted aspect ratio, capped at `min(1500px, 120vw)` wide, anchored top-center, never repeated, never stretched.
-- Nothing below that — the page's own `background-color` (`#14100b`) fills the rest of the page. There is no `plank-legs.webp` layer and nothing dynamically sized.
+- `plank-head.webp` at true, undistorted aspect ratio, capped at `min(1500px, 120vw)` wide, anchored top-center, never repeated, never stretched — scoped to the hero.
+- Nothing below it. There is no `plank-legs.webp` layer and nothing dynamically sized.
+
+**Do not move this back onto `body`.** A page-length canvas cannot be reliably darkened by a single gradient, so the art bled through mid-page as a bright band. Worse, `Hero.tsx` paints it regardless — so a `body` copy renders the masthead TWICE. That exact regression reached production once already (a rebase on 2026-07-30 kept the hero components byte-for-byte but dropped the CSS hunk that removed the `body` copy), and the owner spotted it as "the hero has tweaks I don't see, the typography is off". Recovered from `backup-pre-rebase-7bf018f` on 2026-08-02.
 
 This is mockup-derived (`docs/mockups/landing-redesign/finalized.html`, the owner-approved intent for this page — see "Approved mockups" above) and intentionally corrects an earlier version of this rule that does not appear in that mockup: a JS-driven variant (`components/PlankBackground.tsx`, formerly using a `ResizeObserver` to measure viewport width and total page height) stretched `plank-legs.webp` to cover the entire scroll height. That stretch was a later, unreviewed elaboration recorded here as fact rather than checked against the approved design — it produced a wall of bright, uninterrupted yellow-and-black art past the hero that the owner flagged as looking strange. The capped-head-only treatment is the correct one; do not reintroduce a full-page stretched character or bring back the `ResizeObserver` sizing logic.
 
