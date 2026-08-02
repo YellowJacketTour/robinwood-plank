@@ -12,8 +12,18 @@
  *   tsx scripts/refresh-market-data.ts            # incremental (cron, ~15m)
  *   tsx scripts/refresh-market-data.ts --full     # full rebuild (cron, daily)
  *   tsx scripts/refresh-market-data.ts --sales    # one target only
+ *   tsx scripts/refresh-market-data.ts --purge --rarity --traits --collection
  *
  * Targets: --sales --vault --rarity --traits --collection
+ *
+ * --purge deletes the collection-wide snapshots BEFORE rebuilding them. The
+ * rarity snapshot and the collection image map are deliberately stored without
+ * a TTL (rebuilding them depends on rate-limited Blockscout/IPFS, and expiring
+ * them stampeded every Passenger worker at once). The cost of that choice is
+ * that a snapshot built from bad upstream data is permanent — which is exactly
+ * what happened when Blockscout served pre-reveal stubs for planks #1-180 and
+ * they stuck long after reveal. Nothing short of deleting the key fixes that,
+ * so this is the operational half of that fix. Not for routine cron use.
  * Exits non-zero only if every requested target failed, so a single flaky
  * upstream doesn't turn a cron run into a red alert.
  */
@@ -166,6 +176,29 @@ async function main(): Promise<void> {
     const snapshot = await rebuildOwnerIndex(NFT_CONTRACT_ADDRESS);
     return `${snapshot.count} owners indexed via ${snapshot.source}`;
   });
+
+  // Must run BEFORE the rebuilds below, and only when asked. There is no
+  // kv.del, so this writes a deliberately unusable value with a 1s expiry:
+  // both readers already reject an undersized blob and fall through to a
+  // rebuild, so an empty object is indistinguishable from "never built".
+  // Deliberately NOT routed through step(): step() returns silently for any
+  // target not in `targets`, so a purge invoked that way would no-op without
+  // saying so and the operator would believe the cache had been cleared.
+  if (args.has("--purge")) {
+    const { durableKv } = await import("../lib/market/durable-kv");
+    const { MARKET_COLLECTIONS } = await import("../lib/market/collections");
+    const keys = [
+      "plank:market:rarity-snapshot-v4",
+      "plank:market:collection-image-map-v1",
+      // Has a TTL, so it heals on its own eventually — but the collection
+      // index reads its per-token attributes from here, so leaving it means a
+      // rebuilt index still serves "Status: Unrevealed" traits against a
+      // correct name, image and rank. Purge it in the same pass.
+      ...MARKET_COLLECTIONS.map((c) => `plank:market:trait-index-v1:${c.slug}`),
+    ];
+    for (const key of keys) await durableKv.set(key, {}, { ex: 1 });
+    console.log(`[refresh] purge: invalidated ${keys.join(", ")}`);
+  }
 
   await step("rarity", async () => {
     const { getRaritySnapshot } = await import("../lib/market/rarity-snapshot");
