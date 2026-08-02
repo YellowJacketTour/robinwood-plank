@@ -92,7 +92,7 @@ const ENV_FLAGS: { name: string; value: boolean }[] = [
 ];
 
 export default function FlagsSection({ address }: { address: string | null }) {
-  const { doc, dirty, save, load, mutate, persist } =
+  const { doc, dirty, save, load, mutate, persist, pending } =
     useContentDocCard<FlagsDoc>("flags", sanitizeFlags, address);
 
   return (
@@ -138,7 +138,7 @@ export default function FlagsSection({ address }: { address: string | null }) {
         onSave={() => void persist()}
         canSave={!!address && doc !== null}
       >
-        {doc === null ? (
+        {pending ? (
           <div className="mt-3">
             <SkeletonStatus>Loading runtime overrides</SkeletonStatus>
             {[0, 1].map((i) => (
@@ -152,7 +152,7 @@ export default function FlagsSection({ address }: { address: string | null }) {
               </div>
             ))}
           </div>
-        ) : (
+        ) : doc === null ? null : (
           <>
             <OverrideRow
               label="Trade pause"

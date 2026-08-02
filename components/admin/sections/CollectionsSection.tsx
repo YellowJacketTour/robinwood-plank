@@ -856,7 +856,7 @@ function VaultDeployCard({ address }: { address: string | null }) {
 // --- staged ---------------------------------------------------------------
 
 function StagedCollectionsCard({ address }: { address: string | null }) {
-  const { doc, dirty, save, load, mutate, persist } =
+  const { doc, dirty, save, load, mutate, persist, pending } =
     useContentDocCard<CollectionsDoc>("collections", sanitizeCollections, address);
   const [draft, setDraft] = useState<StagedCollection>(EMPTY_DRAFT);
   const [draftError, setDraftError] = useState<string | null>(null);
@@ -898,7 +898,7 @@ function StagedCollectionsCard({ address }: { address: string | null }) {
         provenance checked). Staging doesn&apos;t change the site — it makes the
         release that promotes it a copy-paste with the decisions already made.
       </p>
-      {doc === null ? (
+      {pending ? (
         <div className="mt-3">
           <SkeletonStatus>Loading staged collections</SkeletonStatus>
           {[0, 1].map((i) => (
@@ -918,7 +918,7 @@ function StagedCollectionsCard({ address }: { address: string | null }) {
             </div>
           ))}
         </div>
-      ) : (
+      ) : doc === null ? null : (
         <>
           {doc.staged.length === 0 ? (
             <p className="mt-3 text-sm text-cream-muted">
