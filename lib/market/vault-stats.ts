@@ -9,7 +9,7 @@ import { fetchActivity } from "@/lib/market/activity";
 import { getVaultActivity } from "@/lib/market/vault-activity";
 import { MARKET_DEFAULT_FEE_BPS } from "@/lib/constants";
 import { withTimeout } from "@/lib/market/rpc-budget";
-import { ethCallMany } from "@/lib/market/fetch-rpc";
+import { ethCallManyDisplay } from "@/lib/market/fetch-rpc";
 
 function resolveStatsVault(vaultAddress?: string | null): string | null {
   if (vaultAddress && /^0x[0-9a-fA-F]{40}$/.test(vaultAddress)) {
@@ -56,7 +56,7 @@ async function getImmutableVaultConfig(vault: string): Promise<ImmutableVaultCon
   if (existing) return existing;
 
   const task = (async (): Promise<ImmutableVaultConfig> => {
-    const [mintFeeHex, redeemFeeHex, premiumHex] = await ethCallMany([
+    const [mintFeeHex, redeemFeeHex, premiumHex] = await ethCallManyDisplay([
       { to: vault, data: IFACE.encodeFunctionData("mintFeeBps", []) },
       { to: vault, data: IFACE.encodeFunctionData("redeemFeeBps", []) },
       { to: vault, data: IFACE.encodeFunctionData("targetPremiumBps", []) },
@@ -107,7 +107,7 @@ async function getImmutableVaultV3Config(vault: string): Promise<ImmutableVaultV
   if (existing) return existing;
 
   const task = (async (): Promise<ImmutableVaultV3Config> => {
-    const [mintFeeHex, redeemFeeHex, premiumHex, swapFeeHex] = await ethCallMany([
+    const [mintFeeHex, redeemFeeHex, premiumHex, swapFeeHex] = await ethCallManyDisplay([
       { to: vault, data: V3_IFACE.encodeFunctionData("mintFeeWei", []) },
       { to: vault, data: V3_IFACE.encodeFunctionData("redeemFeeWei", []) },
       { to: vault, data: V3_IFACE.encodeFunctionData("targetPremiumWei", []) },
@@ -177,7 +177,7 @@ async function readCoreVaultState(
   // between these two markers; keep both models' live batches inside them,
   // and keep every constructor-immutable fee getter out.
   if (feeModel === "eth") {
-    const [ethHex, shareHex, heldHex, openHex] = await ethCallMany([
+    const [ethHex, shareHex, heldHex, openHex] = await ethCallManyDisplay([
       { to: vault, data: V3_IFACE.encodeFunctionData("ethReserve", []) },
       { to: vault, data: V3_IFACE.encodeFunctionData("shareReserve", []) },
       { to: vault, data: V3_IFACE.encodeFunctionData("heldTokenCount", []) },
@@ -190,7 +190,7 @@ async function readCoreVaultState(
       poolOpen: Boolean(V3_IFACE.decodeFunctionResult("poolOpen", openHex)[0]),
     };
   }
-  const [ethHex, shareHex, heldHex, openHex] = await ethCallMany([
+  const [ethHex, shareHex, heldHex, openHex] = await ethCallManyDisplay([
     { to: vault, data: IFACE.encodeFunctionData("ethReserve", []) },
     { to: vault, data: IFACE.encodeFunctionData("balanceOf", [vault]) },
     { to: vault, data: IFACE.encodeFunctionData("heldTokenCount", []) },

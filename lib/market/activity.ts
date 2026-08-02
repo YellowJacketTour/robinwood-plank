@@ -3,7 +3,8 @@ import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS, SEAPORT_ADDRESS } from "@/lib/constants";
 import { resolveTokenImage } from "@/lib/market/token-image";
 import { wasOrderServedByUs } from "@/lib/market/served-orders";
-import { ethBlockNumber, ethGetLogs, rpcCall } from "@/lib/market/fetch-rpc";
+import { ethBlockNumberDisplay, ethGetLogsDisplay, rpcCall } from "@/lib/market/fetch-rpc";
+import { SERVER_DISPLAY_RPC_URLS } from "@/lib/server/rpc-urls";
 import { logScanBudget } from "@/lib/market/rpc-budget";
 import {
   fetchAddressTransactions,
@@ -201,7 +202,7 @@ async function resolveMarketplankAttribution(txHash: string): Promise<void> {
   try {
     const receipt = await rpcCall<{
       logs?: Array<{ address: string; topics: string[]; data: string }>;
-    }>("eth_getTransactionReceipt", [txHash], { timeoutMs: 8_000 });
+    }>("eth_getTransactionReceipt", [txHash], { timeoutMs: 8_000, urls: SERVER_DISPLAY_RPC_URLS });
     if (!receipt) return;
     attributionResolvedTxs.add(txHash);
 
@@ -708,7 +709,7 @@ export async function fetchActivity(
     // fall through to eth_ path
   }
 
-  const latest = await ethBlockNumber();
+  const latest = await ethBlockNumberDisplay();
   const { chunkBlocks, maxChunks } = logScanBudget();
 
   const logs: RawLog[] = [];
@@ -717,7 +718,7 @@ export async function fetchActivity(
   for (let chunk = 0; chunk < maxChunks && logs.length < effectiveLimit && toBlock > 0; chunk += 1) {
     const fromBlock = Math.max(0, toBlock - chunkBlocks);
     try {
-      const found = (await ethGetLogs({
+      const found = (await ethGetLogsDisplay({
         address: NFT_CONTRACT_ADDRESS,
         topics: [TRANSFER_TOPIC],
         fromBlock: "0x" + fromBlock.toString(16),
@@ -760,7 +761,7 @@ export async function fetchActivity(
       try {
         const fetched = await rpcCall<{ to?: string; value?: string }>("eth_getTransactionByHash", [
           hash,
-        ], { timeoutMs: 6_000 });
+        ], { timeoutMs: 6_000, urls: SERVER_DISPLAY_RPC_URLS });
         txCache.set(
           hash,
           fetched
@@ -776,7 +777,7 @@ export async function fetchActivity(
         const block = await rpcCall<{ timestamp?: string }>("eth_getBlockByNumber", [
           blockNumber,
           false,
-        ], { timeoutMs: 6_000 });
+        ], { timeoutMs: 6_000, urls: SERVER_DISPLAY_RPC_URLS });
         blockCache.set(
           blockNumber,
           block?.timestamp != null ? Number(BigInt(block.timestamp)) : null
