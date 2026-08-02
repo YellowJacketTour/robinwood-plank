@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Search, X, ExternalLink } from "lucide-react";
 import { SkeletonCardGrid, SkeletonStatus } from "@/components/Skeleton";
+import MemeSubmit from "@/components/memes/MemeSubmit";
 
 /**
  * Community Meme Vault feed for the RobinWood project.
@@ -32,13 +33,32 @@ type MemeAsset = {
 };
 
 type Attribution = { text?: string; url?: string; required?: boolean } | null;
-type TypeFilter = "all" | "image" | "video";
+/**
+ * "gif" is OURS, not theirs. The upstream `type` param only accepts
+ * image|video, so a GIF arrives as an image and was invisible as a category —
+ * which is what "GIF is not there" meant. We ask for images and narrow on
+ * mimeType client-side; `upstreamType` is the bit the API actually sees.
+ */
+type TypeFilter = "all" | "image" | "gif" | "video";
 
 const TYPES: Array<{ id: TypeFilter; label: string }> = [
   { id: "all", label: "All" },
   { id: "image", label: "Images" },
+  { id: "gif", label: "GIFs" },
   { id: "video", label: "Video" },
 ];
+
+const upstreamType = (t: TypeFilter): "image" | "video" | null =>
+  t === "video" ? "video" : t === "all" ? null : "image";
+
+const isGif = (a: MemeAsset) =>
+  a.mimeType === "image/gif" || /\.gif($|\?)/i.test(a.mediaUrl ?? "");
+
+/** Short format badge from the mime type — PNG, GIF, MP4. */
+function formatLabel(a: MemeAsset): string | null {
+  const sub = (a.mimeType ?? "").split("/")[1];
+  return sub ? sub.replace("quicktime", "mov").toUpperCase() : null;
+}
 
 export default function MemeVault() {
   const [assets, setAssets] = useState<MemeAsset[] | null>(null);
@@ -50,6 +70,7 @@ export default function MemeVault() {
   const [applied, setApplied] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [submitOpen, setSubmitOpen] = useState(false);
   const reqRef = useRef(0);
 
   const load = useCallback(
@@ -60,7 +81,8 @@ export default function MemeVault() {
       setError(null);
       try {
         const qs = new URLSearchParams({ page: String(nextPage) });
-        if (nextType !== "all") qs.set("type", nextType);
+        const upstream = upstreamType(nextType);
+        if (upstream) qs.set("type", upstream);
         if (nextQuery) qs.set("q", nextQuery);
         const res = await fetch(`/api/memes?${qs.toString()}`, { cache: "no-store" });
         const data = (await res.json()) as {
@@ -77,7 +99,11 @@ export default function MemeVault() {
           if (!append) setAssets([]);
           return;
         }
-        const rows = Array.isArray(data.assets) ? data.assets : [];
+        // GIF is a client-side narrowing of the image feed, so a page can
+        // legitimately yield none while more pages still hold some — that is
+        // why "Load more" stays available on `hasMore`, not on row count.
+        const all = Array.isArray(data.assets) ? data.assets : [];
+        const rows = nextType === "gif" ? all.filter(isGif) : all;
         setAssets((prev) => (append && prev ? [...prev, ...rows] : rows));
         setHasMore(Boolean(data.hasMore));
         if (data.attribution) setAttribution(data.attribution);
@@ -123,7 +149,20 @@ export default function MemeVault() {
           Plank art, memes and clips made by the community. Moderated upstream —
           everything here is already approved.
         </p>
+        <button
+          type="button"
+          onClick={() => setSubmitOpen((v) => !v)}
+          className="mt-3 inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-gold-500 px-4 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
+        >
+          {submitOpen ? "Close" : "Submit a meme"}
+        </button>
       </div>
+
+      {submitOpen && (
+        <div className="mb-4">
+          <MemeSubmit onClose={() => setSubmitOpen(false)} />
+        </div>
+      )}
 
       <div data-market-shell className="overflow-hidden rounded-xl border border-line bg-panel shadow-panel">
         <div className="border-b border-line p-3 sm:p-3.5">
@@ -205,7 +244,9 @@ export default function MemeVault() {
             // as a broken page.
             <p className="py-12 text-center text-sm text-foreground/60">
               {applied || type !== "all"
-                ? "No memes match that. Try clearing the filters."
+                ? type === "gif"
+                ? "No GIFs on this page yet — try Load more, or clear the filters."
+                : "No memes match that. Try clearing the filters."
                 : "No memes in the vault yet."}
             </p>
           ) : (
@@ -246,9 +287,11 @@ export default function MemeVault() {
                           className="h-full w-full object-cover transition group-hover:scale-[1.02]"
                         />
                       )}
-                      {a.mediaType === "video" && (
+                      {/* Format, not category: "Video" told you nothing a
+                          playing clip did not, and hid GIF entirely. */}
+                      {formatLabel(a) && (
                         <span className="absolute right-1.5 top-1.5 rounded-full border border-line bg-wood-950/80 px-1.5 py-0.5 text-[0.55rem] font-bold uppercase text-gold-300">
-                          Video
+                          {formatLabel(a)}
                         </span>
                       )}
                     </div>
