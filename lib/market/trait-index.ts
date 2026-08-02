@@ -5,6 +5,7 @@ import {
 import { fetchNftMetadata } from "@/lib/ipfs";
 import type { NftAttribute } from "@/lib/ipfs";
 import { fetchTokenInstances } from "@/lib/market/blockscout";
+import { pickCanonicalTraits } from "@/lib/rarity";
 import { robinwoodTokenUri } from "@/lib/market/token-image";
 import type { MarketCollection } from "@/lib/market/types";
 import { getRaritySnapshot } from "@/lib/market/rarity-snapshot";
@@ -210,7 +211,12 @@ async function buildIndex(collection: MarketCollection): Promise<TraitIndex> {
         trait_type: String(a.trait_type || ""),
         value: a.value as string | number | boolean,
       }));
-      if (attrs.length === 0) continue;
+      // Same trap as rarity-snapshot's `loaded` check: a pre-reveal stub is
+      // [{ trait_type: "Status", value: "Unrevealed" }], so it is non-empty and
+      // would be indexed as real coverage — which then excludes the token from
+      // the IPFS backfill below and freezes the stub in place. Require a
+      // canonical trait before treating Blockscout's answer as the truth.
+      if (pickCanonicalTraits(attrs).length === 0) continue;
       addAttributes(index, id, attrs);
     }
   } catch {

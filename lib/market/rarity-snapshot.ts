@@ -2,7 +2,12 @@ import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import { fetchTokenInstances } from "@/lib/market/blockscout";
 import { fetchNftMetadata } from "@/lib/ipfs";
 import { robinwoodTokenUri } from "@/lib/market/token-image";
-import { computeRaritySnapshot, emptyTierCounts, normalizeRarityTier } from "@/lib/rarity";
+import {
+  computeRaritySnapshot,
+  emptyTierCounts,
+  normalizeRarityTier,
+  pickCanonicalTraits,
+} from "@/lib/rarity";
 import type { RarityInput, RaritySnapshot, RarityTier, TokenRarity } from "@/lib/rarity";
 import {
   durableKv as kv,
@@ -141,8 +146,11 @@ async function traitsFromIpfs(tokenId: number): Promise<RarityInput["attributes"
 
 /** Fill traits Blockscout never indexed (pre-reveal stubs or missing pages). */
 async function backfillMissingTraits(inputs: RarityInput[]): Promise<RarityInput[]> {
+  // `!loaded` already means "no canonical traits" (see buildFromBlockscout), so
+  // this catches genuine gaps AND pre-reveal stubs. The attributes.length check
+  // is kept for inputs that reach here from another caller.
   const need = inputs
-    .filter((i) => !i.loaded || i.attributes.length === 0)
+    .filter((i) => !i.loaded || pickCanonicalTraits(i.attributes).length === 0)
     .sort((a, b) => a.tokenId - b.tokenId);
   if (need.length === 0) return inputs;
   // Cap cold-build work so Workers stay under CPU/subrequest limits; remaining
@@ -177,7 +185,21 @@ async function buildFromBlockscout(): Promise<RaritySnapshot> {
       trait_type: String(a.trait_type || ""),
       value: a.value as string | number,
     }));
-    return { tokenId, attributes: attrs, loaded: attrs.length > 0 };
+    // "Loaded" must mean SCOREABLE, not merely non-empty.
+    //
+    // A pre-reveal stub is not an empty attribute list — it is
+    // [{ trait_type: "Status", value: "Unrevealed" }], one real entry. Judging
+    // by `attrs.length > 0` marked those stubs loaded, which excluded them
+    // from backfillMissingTraits below, so they were never re-read from IPFS.
+    // Combined with this snapshot having no TTL, that made the stub permanent:
+    // planks #1-180 kept the name "Plank #N", a shared placeholder image and
+    // rank 0 long after reveal, and every other token's rank was computed
+    // against a 1,362-token sample instead of 1,542.
+    return {
+      tokenId,
+      attributes: attrs,
+      loaded: pickCanonicalTraits(attrs).length > 0,
+    };
   });
 
   const seen = new Set(inputs.map((i) => i.tokenId));
