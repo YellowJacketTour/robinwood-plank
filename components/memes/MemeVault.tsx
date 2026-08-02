@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Search, X, ExternalLink } from "lucide-react";
-import { SkeletonCardGrid, SkeletonStatus } from "@/components/Skeleton";
+import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 import MemeSubmit from "@/components/memes/MemeSubmit";
 
 /**
@@ -265,7 +265,23 @@ export default function MemeVault() {
           {assets === null ? (
             <>
               <SkeletonStatus>Loading community memes</SkeletonStatus>
-              <SkeletonCardGrid count={12} columns="grid-cols-2 sm:grid-cols-3 lg:grid-cols-4" />
+              <ul className="columns-2 gap-2 sm:columns-3 sm:gap-2.5 lg:columns-4" aria-hidden="true">
+                {/* Varied heights on purpose: a masonry wall of identical
+                    tiles resolves into a ragged one, which is the layout jump
+                    the skeleton exists to prevent. */}
+                {[220, 300, 180, 260, 340, 200, 280, 240, 320, 190, 270, 230].map((h, i) => (
+                  <li key={i} className="dense-card mb-2 overflow-hidden p-0 sm:mb-2.5 [break-inside:avoid]">
+                    <div
+                      style={{ height: h }}
+                      className="w-full animate-pulse bg-panel motion-reduce:animate-none"
+                    />
+                    <div className="space-y-1.5 p-2">
+                      <SkeletonBlock className="h-3 w-2/3" />
+                      <SkeletonBlock className="h-2.5 w-1/3" />
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </>
           ) : showing.length === 0 ? (
             // Distinguish "nothing matched your filters" from "the vault is
@@ -279,9 +295,18 @@ export default function MemeVault() {
                 : "No memes in the vault yet."}
             </p>
           ) : (
-            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-2.5 lg:grid-cols-4">
+            // Masonry via CSS columns. These are arbitrary user uploads, so a
+            // fixed square cropped every tall or wide meme — the punchline of
+            // a screenshot is often exactly what got cut. Trade-off accepted:
+            // columns flow top-to-bottom per column rather than left-to-right,
+            // so reading order is column-major. For a browse-y wall of memes
+            // that is fine; it would not be for a ranked list.
+            <ul className="columns-2 gap-2 sm:columns-3 sm:gap-2.5 lg:columns-4">
               {showing.map((a) => (
-                <li key={a.id} className="dense-card overflow-hidden p-0">
+                <li
+                  key={a.id}
+                  className="dense-card mb-2 block overflow-hidden p-0 sm:mb-2.5 [break-inside:avoid]"
+                >
                   <a
                     href={detailHref(a) ?? "#"}
                     target="_blank"
@@ -289,7 +314,7 @@ export default function MemeVault() {
                     className="group block"
                     title={a.description || a.title || undefined}
                   >
-                    <div className="relative aspect-square w-full overflow-hidden bg-wood-950">
+                    <div className="relative w-full overflow-hidden bg-wood-950">
                       {a.mediaType === "video" ? (
                         <video
                           src={a.mediaUrl}
@@ -297,7 +322,7 @@ export default function MemeVault() {
                           loop
                           playsInline
                           preload="metadata"
-                          className="h-full w-full object-cover"
+                          className="block h-auto w-full"
                           onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
                           onMouseLeave={(e) => {
                             e.currentTarget.pause();
@@ -314,7 +339,7 @@ export default function MemeVault() {
                           src={a.mediaUrl}
                           alt={a.title || "Community meme"}
                           loading="lazy"
-                          className="h-full w-full object-cover transition group-hover:scale-[1.02]"
+                          className="block h-auto w-full transition group-hover:opacity-95"
                         />
                       )}
                       {/* Format, not category: "Video" told you nothing a
