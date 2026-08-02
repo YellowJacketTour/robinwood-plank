@@ -375,7 +375,16 @@ export default function MarketView() {
     // Instant Swap
     prefetchJson("/api/market/vault/stats", { ttlMs: 10_000, swrMs: 90_000, session: true });
     prefetchJson("/api/market/vault/held", { ttlMs: 15_000, swrMs: 120_000, session: true });
-    prefetchJson("/api/market/vault/activity", { ttlMs: 12_000, swrMs: 90_000, session: true });
+    // Scoped to the primary vault — every real reader of this endpoint now
+    // asks with `?vault=`, so warming the unscoped URL only filled a cache
+    // key nothing reads anymore.
+    if (MARKET_VAULT_ADDRESS) {
+      prefetchJson(`/api/market/vault/activity?vault=${encodeURIComponent(MARKET_VAULT_ADDRESS)}`, {
+        ttlMs: 12_000,
+        swrMs: 90_000,
+        session: true,
+      });
+    }
     void getRarityMap();
   }, []);
 
@@ -1453,7 +1462,7 @@ export default function MarketView() {
                   </div>
                 </div>
                 <div className="grid items-start gap-3 md:grid-cols-2">
-                  <NftPriceChart active={tab === "swap"} />
+                  <NftPriceChart vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
                   <RedeemOdds vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
                 </div>
                 <VaultTradeHistory />
