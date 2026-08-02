@@ -1038,7 +1038,10 @@ jobs:
             scored="$(printf '%s' "$out" | sed -n 's/.*rarity: \([0-9]*\)\/.*/\1/p' | head -1)"
             : "${scored:=0}"
             echo "pass $attempt: $scored scored"
-            [ "$scored" -ge 1542 ] && break
+            # Not `[ ... ] && break`: under `set -e` a false test in an && list
+            # aborts the script, so an incomplete pass would have killed the
+            # very retry loop it is supposed to trigger.
+            if [ "$scored" -ge 1542 ]; then break; fi
             # No progress two passes running means retrying will not help —
             # stop rather than hammer a rate-limited upstream for nothing.
             if [ "$scored" -le "$prev" ]; then
@@ -1071,7 +1074,10 @@ jobs:
             code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
               --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
               "$url/api/health" || true)"
-            [ "$code" = "200" ] && break
+            # `[ ... ] && break` would be fatal here: under `set -e` a failing
+            # test in an && list takes the script with it, so the very first
+            # not-yet-up poll aborted the step before it printed anything.
+            if [ "$code" = "200" ]; then break; fi
             sleep 6
           done
           body="$(
