@@ -114,6 +114,7 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
 
         onChanged();
       } catch (e) {
+        console.error("Cancel order failed:", e);
         setError(e instanceof Error ? e.message : "Could not cancel.");
       } finally {
         setBusyId(null);
@@ -135,6 +136,7 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
         }
         await refreshApprovals();
       } catch (e) {
+        console.error("Revoke approval failed:", e);
         setError(e instanceof Error ? e.message : "Could not revoke.");
       } finally {
         setRevoking(null);
@@ -153,6 +155,7 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
       await refreshApprovals();
       onChanged();
     } catch (e) {
+      console.error("Cancel all orders failed:", e);
       setError(e instanceof Error ? e.message : "Could not cancel orders.");
     } finally {
       setCancellingAll(false);
@@ -292,6 +295,11 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
         </div>
       ) : approvals && COLLECTION ? (
         <div className="rounded-xl border border-line bg-panel space-y-2 p-3">
+          {error && (
+            <p className="text-center text-xs text-red-300" role="alert">
+              {error}
+            </p>
+          )}
           <div className="flex items-center justify-between gap-3">
             <p className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
               Marketplace approvals

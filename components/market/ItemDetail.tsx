@@ -355,6 +355,7 @@ export default function ItemDetail({
                             await sendNft(account!, collection.contractAddress, tokenId, sendTo);
                             setSendDone(true);
                           } catch (e) {
+                            console.error("Send NFT failed:", e);
                             setSendError(e instanceof Error ? e.message : "Send failed.");
                           } finally {
                             setSendBusy(false);

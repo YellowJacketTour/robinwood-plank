@@ -227,6 +227,7 @@ export default function FloorboardsView() {
       setSelected(null);
       await refreshAfterTx();
     } catch (e) {
+      console.error("Redeem targeted plank failed:", e);
       setError(decodeVaultError(e));
       setStatus(null);
     } finally {
@@ -253,6 +254,7 @@ export default function FloorboardsView() {
       setStatus("Done — a random plank is on its way to your wallet.");
       await refreshAfterTx();
     } catch (e) {
+      console.error("Redeem random plank failed:", e);
       setError(decodeVaultError(e));
       setStatus(null);
     } finally {
@@ -354,7 +356,11 @@ export default function FloorboardsView() {
               </p>
             )}
             {status && <p className="mt-2 text-[0.72rem] leading-4 text-emerald-300">{status}</p>}
-            {error && <p className="mt-2 text-[0.72rem] leading-4 text-rose-300">{error}</p>}
+            {error && (
+              <p role="alert" className="mt-2 text-[0.72rem] leading-4 text-rose-300">
+                {error}
+              </p>
+            )}
           </div>
 
           {/* Shared vault-wide random-redeem slot lifecycle (proven, reused). */}

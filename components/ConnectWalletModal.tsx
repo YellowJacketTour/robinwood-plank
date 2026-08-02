@@ -135,6 +135,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
           );
         }
       } catch (e) {
+        console.error("Network verification failed:", e);
         setPendingAddress(addr);
         setPhase("need_chain");
         setBusy(false);
@@ -170,6 +171,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
       setStatus("Phone approved — checking network…");
       await checkChainAndFinish(addr);
     } catch (e) {
+      console.error("WalletConnect failed:", e);
       const msg = e instanceof Error ? e.message : "WalletConnect failed.";
       if (!msg.toLowerCase().includes("cancelled")) {
         // If message is about wrong chain but we have a session, enter need_chain
@@ -206,6 +208,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
       }
       finish(pendingAddress);
     } catch (e) {
+      console.error("Retry network check failed:", e);
       setError(e instanceof Error ? e.message : "Still wrong network.");
     } finally {
       setBusy(false);
@@ -222,6 +225,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
       const addr = await connectInjectedWallet();
       await checkChainAndFinish(addr);
     } catch (e) {
+      console.error("Extension connect failed:", e);
       setError(e instanceof Error ? e.message : "Extension connect failed.");
       setStatus(null);
       setPhase("idle");

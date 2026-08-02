@@ -159,6 +159,13 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
         setSamePrice("");
         setPerItemPrices({});
       }
+    } catch (e) {
+      // listBulkItems catches every per-item signing/publish failure
+      // internally and always resolves — this is defense-in-depth in case
+      // that invariant is ever broken, so a failure still reaches the user
+      // here instead of becoming a silent unhandled rejection.
+      console.error("Bulk list failed:", e);
+      setError(e instanceof Error ? e.message : "Listing failed.");
     } finally {
       setBusy(false);
     }

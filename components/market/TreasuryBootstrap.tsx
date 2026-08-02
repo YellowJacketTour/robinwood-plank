@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
-import { depositForShares, getPoolStatus, openPool, seedShares } from "@/lib/market/vault";
+import { decodeVaultError, depositForShares, getPoolStatus, openPool, seedShares } from "@/lib/market/vault";
 import { getAvgSalePriceWei } from "@/lib/market/pricing";
 import { getOwnedInventory } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
@@ -165,7 +165,8 @@ export default function TreasuryBootstrap({ account }: Props) {
       setStatusMsg("Confirmed.");
       refresh(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Transaction failed.");
+      console.error(`${label} failed:`, e);
+      setError(decodeVaultError(e));
     } finally {
       setBusy(false);
       setTimeout(() => setStatusMsg(null), 3000);
@@ -210,7 +211,8 @@ export default function TreasuryBootstrap({ account }: Props) {
       loadOwned();
       refresh(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Deposit + seed failed.");
+      console.error("Deposit + seed failed:", e);
+      setError(decodeVaultError(e));
     } finally {
       setDepositSeedBusy(false);
       setDepositSeedStep(null);
@@ -234,7 +236,8 @@ export default function TreasuryBootstrap({ account }: Props) {
       loadOwned();
       refresh(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Deposit failed.");
+      console.error("Deposit failed:", e);
+      setError(decodeVaultError(e));
     } finally {
       setDepositSeedBusy(false);
       setDepositSeedStep(null);
@@ -261,7 +264,8 @@ export default function TreasuryBootstrap({ account }: Props) {
       setStatusMsg(`Seeded ${formatTokenAmount(realShares, 18, 4)} shares + ETH.`);
       refresh(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Seed failed.");
+      console.error("Seed failed:", e);
+      setError(decodeVaultError(e));
     } finally {
       setDepositSeedBusy(false);
       setDepositSeedStep(null);
@@ -395,6 +399,12 @@ export default function TreasuryBootstrap({ account }: Props) {
           </button>
         </div>
 
+        {error && (
+          <p className="text-center text-xs text-red-300" role="alert">
+            {error}
+          </p>
+        )}
+
         <button
           type="button"
           onClick={() => setManualMode((v) => !v)}
@@ -454,6 +464,11 @@ export default function TreasuryBootstrap({ account }: Props) {
           disabled={!canOpen}
           className="min-h-10 w-full rounded-md border border-red-500/30 bg-wood-950 px-2 text-xs text-foreground outline-none focus:border-red-400 disabled:opacity-40"
         />
+        {error && (
+          <p className="text-center text-xs text-red-300" role="alert">
+            {error}
+          </p>
+        )}
         <button
           type="button"
           disabled={busy || !canOpen || confirmOpen !== "OPEN"}
@@ -464,11 +479,6 @@ export default function TreasuryBootstrap({ account }: Props) {
         </button>
       </div>
 
-      {error && (
-        <p className="text-center text-xs text-red-300" role="alert">
-          {error}
-        </p>
-      )}
       {actionStatus && !error && (
         <p className="text-center text-xs text-forest-600" role="status">
           {actionStatus}
