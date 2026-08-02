@@ -1,5 +1,6 @@
 import { getCollection } from "@/lib/market/collections";
 import { getTraitIndex } from "@/lib/market/trait-index";
+import { getRaritySnapshot } from "@/lib/market/rarity-snapshot";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +32,18 @@ export async function GET(req: Request) {
     }
 
     const { index, complete, building } = await getTraitIndex(collection);
+    let rankings: Record<string, number> | null = null;
+    if (complete) {
+      try {
+        const rarity = await getRaritySnapshot();
+        rankings = {};
+        for (const [tokenId, item] of rarity.byTokenId) {
+          rankings[String(tokenId)] = item.rank;
+        }
+      } catch {
+        // Trait and rarity criteria remain available if rank data is cold.
+      }
+    }
     return publicJson({
       collection: collection.slug,
       complete,
@@ -40,6 +53,7 @@ export async function GET(req: Request) {
       // Trait sets are only served once COMPLETE — a partial set would let the
       // UI build a bid whose snapshot under-covers the trait.
       traits: complete && index ? index.traits : null,
+      rankings,
     });
   } catch (err) {
     return publicError(err, "Unexpected error reading trait index.");

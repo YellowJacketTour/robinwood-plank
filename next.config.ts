@@ -18,10 +18,26 @@ const securityHeaders = [
     key: "Content-Security-Policy",
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      // static.cloudflareinsights.com: Cloudflare injects its Web Analytics
+      // beacon at the edge whenever the feature is on for the zone, which it
+      // is. Without this the browser blocks it on every single page load — a
+      // console error for every visitor, and analytics that silently never
+      // report. Turn the feature off in the Cloudflare dashboard rather than
+      // dropping this entry, otherwise the error simply comes back.
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
+      // WoodAmp community tracks: without an explicit media-src, audio
+      // falls back to default-src 'self' and any community-hosted track
+      // URL is silently blocked. Hosted files stay same-origin; https:
+      // covers admin-approved remote tracks (Phase 2).
+      "media-src 'self' https:",
+      // WoodAmp embed tracks play through the providers' official iframe
+      // players (postMessage-controlled, no provider SDK script — so
+      // script-src stays untouched). Without frame-src, iframes fall back to
+      // default-src 'self' and the embeds are silently blocked.
+      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com",
       "connect-src 'self' https://rpc.mainnet.chain.robinhood.com https://*.alchemy.com https://*.infura.io wss: https:",
       "frame-ancestors 'self'",
       "base-uri 'self'",
@@ -31,6 +47,16 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Dev-only: the dev server rejects cross-origin requests by default, which
+  // blocks sharing a local preview through a tunnel. Has no effect on
+  // production builds — it only widens which origins `next dev` will answer.
+  allowedDevOrigins: ["*.trycloudflare.com"],
+  // Minimal, traced Node runtime for the InMotion Docker image.
+  // OpenNext can still consume the normal build artifacts on its own branch.
+  output: "standalone",
+  // GitHub Actions supplies the commit SHA. This lets rolling deployments
+  // detect clients that still reference assets from the previous image.
+  deploymentId: process.env.DEPLOYMENT_VERSION?.trim() || undefined,
   poweredByHeader: false,
   async rewrites() {
     return [
@@ -44,16 +70,16 @@ const nextConfig: NextConfig = {
         source: "/:path*",
         headers: securityHeaders,
       },
-      // App HTML must not stick for a year at the edge (stale Instant Swap
-      // clients after vault/env cutovers). Short edge cache + revalidate.
+      // Marketplank is a live application shell. Never let an edge or hosting
+      // proxy carry its HTML across an immutable release switch.
       {
         source: "/market",
         headers: [
           {
             key: "Cache-Control",
-            value: "public, max-age=0, s-maxage=30, stale-while-revalidate=60",
+            value: "no-store, no-cache, must-revalidate, private",
           },
-          { key: "CDN-Cache-Control", value: "public, max-age=0, s-maxage=30, stale-while-revalidate=60" },
+          { key: "Pragma", value: "no-cache" },
         ],
       },
       {
@@ -72,9 +98,28 @@ const nextConfig: NextConfig = {
           { key: "Pragma", value: "no-cache" },
         ],
       },
+      // Preserve the vault EventSource stream through nginx/Passenger-style
+      // reverse proxies. The proxy still needs buffering disabled in its own
+      // vhost; this response header is the application-side half.
+      {
+        source: "/api/market/vault/stream",
+        headers: [{ key: "X-Accel-Buffering", value: "no" }],
+      },
       // Later entries win over an earlier match on the same path/header —
       // carve public read-only routes out of the blanket no-store above.
       // Exact paths only — never /api/market/vault/stream (SSE).
+      // Admin uploads are content-addressed (name embeds the sha256 prefix),
+      // so a stored file never changes — immutable is safe and lets audio
+      // seek without refetching.
+      {
+        source: "/api/media/:name*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
       {
         source: "/api/market/vault/stats",
         headers: [
@@ -163,6 +208,15 @@ const nextConfig: NextConfig = {
       {
         source: "/images/:path*",
         headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }],
+      },
+      // 4.7 MB self-hosted WalletConnect runtime, lazy-loaded on first wallet
+      // connect. Unhashed checked-in artifact, so a day + SWR week — never
+      // immutable, it can change on deploy.
+      {
+        source: "/wallet-connect-bundle.js",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" },
+        ],
       },
       {
         source: "/plank-social.jpg",

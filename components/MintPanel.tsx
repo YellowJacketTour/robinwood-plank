@@ -1,208 +1,124 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  BrowserProvider,
-  Contract,
-  formatEther,
-  type Eip1193Provider,
-} from "ethers";
-import {
-  NFT_ABI,
-  NFT_CONTRACT_ADDRESS,
-  ROBINHOOD_CHAIN_HEX_ID,
-  ROBINHOOD_EXPLORER_URL,
-  ROBINHOOD_RPC_URL,
-  SALE_PHASE_NAMES,
-} from "@/lib/mint-contract";
-import {
-  clearMintReadClientCache,
-  getMintReadClient,
-  touchMintReadClient,
-} from "@/lib/robinhood-provider";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { formatEther } from "ethers";
+import { NFT_CONTRACT_ADDRESS, ROBINHOOD_EXPLORER_URL } from "@/lib/mint-contract";
+import { getMintReadClient, touchMintReadClient } from "@/lib/robinhood-provider";
 import {
   ensureNftCacheHydrated,
   getCachedMintStats,
   getCachedMintStatsIfFresh,
-  getCachedProofs,
   setCachedMintStats,
-  setCachedProofs,
 } from "@/lib/nft-cache";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 
 const TOTAL_SUPPLY = 1542;
 const COMMUNITY_SUPPLY = 777;
-
-type EthereumProvider = Eip1193Provider & {
-  on?: (event: string, listener: (...args: unknown[]) => void) => void;
-  removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
-};
-
-declare global {
-  interface Window {
-    ethereum?: EthereumProvider;
-  }
-}
+/** Historical fact — minting is closed forever, this can never change again. */
+const ORIGINAL_PRICE_ETH = "0.01";
+const MAX_PER_WALLET_WAS = 33;
 
 type Stats = {
-  phase: number;
-  paused: boolean;
   total: number;
   community: number;
   free: number;
   allowlist: number;
   paid: number;
-  remainingCommunity: number;
-  remainingTotal: number;
-  remainingPaidSupply: number;
   priceWei: bigint;
-  communityReleased: boolean;
   /** False until at least one successful chain read. */
   live: boolean;
 };
 
 const EMPTY_STATS: Stats = {
-  phase: -1,
-  paused: false,
   total: 0,
   community: 0,
   free: 0,
   allowlist: 0,
   paid: 0,
-  remainingCommunity: COMMUNITY_SUPPLY,
-  remainingTotal: TOTAL_SUPPLY,
-  remainingPaidSupply: 765,
   priceWei: BigInt(0),
-  communityReleased: false,
   live: false,
 };
 
-function shortAddress(address: string) {
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
-}
-
-function errorMessage(error: unknown) {
-  if (typeof error !== "object" || error === null) return "Transaction failed.";
-  const value = error as {
-    code?: number | string;
-    shortMessage?: string;
-    reason?: string;
-    message?: string;
-    info?: { error?: { message?: string } };
-  };
-  if (value.code === 4001 || value.code === "ACTION_REJECTED") return "Transaction cancelled.";
-  return (
-    value.shortMessage ||
-    value.reason ||
-    value.info?.error?.message ||
-    value.message ||
-    "Transaction failed."
-  );
-}
-
-function phaseLabel(phase: number, live: boolean, loading: boolean) {
-  if (loading && !live) return "Loading…";
-  if (!live) return "Offline";
-  if (phase < 0) return "Unknown";
-  return SALE_PHASE_NAMES[phase] || "Unknown";
-}
-
+/**
+ * The RobinWood collection is fully minted out — 1,542 / 1,542, forever.
+ * This panel keeps the live contract reads MintPanel always had (so the
+ * numbers below stay honest if they were ever wrong), but there is
+ * deliberately no mint form, quantity stepper, or wallet-connect-to-mint
+ * flow left: DESIGN.md — "never ship a mint form that cannot succeed."
+ * Every conversion path here goes to Marketplank instead.
+ */
 export default function MintPanel() {
   const [stats, setStats] = useState<Stats>(EMPTY_STATS);
-  const [address, setAddress] = useState("");
-  const [walletLimits, setWalletLimits] = useState({ free: 2, allowlist: 2, paid: 33 });
-  const [quantity, setQuantity] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [transactionHash, setTransactionHash] = useState("");
-  const [rpcLabel, setRpcLabel] = useState("");
+
+  /**
+   * Set once the contract itself confirms nothing is left to mint.
+   *
+   * The verification read above is worth doing; repeating it forever is not.
+   * The stats cache holds for 10s while this polled every 60s, so every single
+   * tick re-issued all twelve eth_calls — about 13.5M provider compute units a
+   * month per continuously-open tab, more than the entire monthly allowance,
+   * spent re-reading twelve values that cannot change. Verify, then stop.
+   */
+  const settledRef = useRef(false);
 
   const applyCachedStats = useCallback(() => {
     ensureNftCacheHydrated();
     const cached = getCachedMintStats();
     if (!cached) return false;
     setStats({
-      phase: cached.phase,
-      paused: cached.paused,
       total: cached.total,
       community: cached.community,
       free: cached.free,
       allowlist: cached.allowlist,
       paid: cached.paid,
-      remainingCommunity: cached.remainingCommunity,
-      remainingTotal: cached.remainingTotal,
-      remainingPaidSupply: cached.remainingPaidSupply,
       priceWei: BigInt(cached.priceWei || "0"),
-      communityReleased: cached.communityReleased,
       live: true,
     });
-    setLoading(false);
     return true;
   }, []);
 
-  const loadStats = useCallback(async (walletAddress = address, forceRpc = false) => {
+  const loadStats = useCallback(async (forceRpc = false) => {
     try {
-      // Serve fresh cache immediately; still refresh in background when forced or stale
       if (!forceRpc) {
         const fresh = getCachedMintStatsIfFresh();
         if (fresh) {
           setStats({
-            phase: fresh.phase,
-            paused: fresh.paused,
             total: fresh.total,
             community: fresh.community,
             free: fresh.free,
             allowlist: fresh.allowlist,
             paid: fresh.paid,
-            remainingCommunity: fresh.remainingCommunity,
-            remainingTotal: fresh.remainingTotal,
-            remainingPaidSupply: fresh.remainingPaidSupply,
             priceWei: BigInt(fresh.priceWei || "0"),
-            communityReleased: fresh.communityReleased,
             live: true,
           });
-          setLoading(false);
-          // Still refresh wallet limits if needed
-          if (!walletAddress) return;
-        } else {
-          applyCachedStats();
+          return;
         }
+        applyCachedStats();
       }
 
-      if (forceRpc) clearMintReadClientCache();
-      const { contract, rpcUrl } = await getMintReadClient(forceRpc);
-      setRpcLabel(rpcUrl.includes("blockscout") ? "Blockscout RPC" : "Robinhood RPC");
-
-      const [
-        phase,
-        paused,
-        total,
-        community,
-        free,
-        allowlist,
-        paid,
-        remainingCommunity,
-        remainingTotal,
-        remainingPaidSupply,
-        priceWei,
-        communityReleased,
-      ] = await Promise.all([
-        contract.salePhase(),
-        contract.paused(),
-        contract.totalSupply(),
-        contract.communityMintsClaimed(),
-        contract.freeMintsClaimed(),
-        contract.allowlistMintsClaimed(),
-        contract.paidMintsClaimed(),
-        contract.remainingCommunitySupply(),
-        contract.remainingTotalSupply(),
-        contract.remainingNonCommunitySupply(),
-        contract.mintPrice(),
-        contract.communitySupplyReleased(),
-      ]);
+      const { contract } = await getMintReadClient(forceRpc);
+      const [phase, paused, total, community, free, allowlist, paid, remainingCommunity, remainingTotal, remainingPaidSupply, priceWei, communityReleased] =
+        await Promise.all([
+          contract.salePhase(),
+          contract.paused(),
+          contract.totalSupply(),
+          contract.communityMintsClaimed(),
+          contract.freeMintsClaimed(),
+          contract.allowlistMintsClaimed(),
+          contract.paidMintsClaimed(),
+          contract.remainingCommunitySupply(),
+          contract.remainingTotalSupply(),
+          contract.remainingNonCommunitySupply(),
+          contract.mintPrice(),
+          contract.communitySupplyReleased(),
+        ]);
       touchMintReadClient();
 
-      const nextStats = {
+      // Sold out is terminal — supply only ever decreases, and the panel has no
+      // mint form, so nothing here can move again.
+      if (Number(remainingTotal) === 0) settledRef.current = true;
+
+      setCachedMintStats({
         phase: Number(phase),
         paused: Boolean(paused),
         total: Number(total),
@@ -213,396 +129,127 @@ export default function MintPanel() {
         remainingCommunity: Number(remainingCommunity),
         remainingTotal: Number(remainingTotal),
         remainingPaidSupply: Number(remainingPaidSupply),
-        priceWei,
+        priceWei: (priceWei as bigint).toString(),
         communityReleased: Boolean(communityReleased),
-        live: true as const,
-      };
-
-      setCachedMintStats({
-        phase: nextStats.phase,
-        paused: nextStats.paused,
-        total: nextStats.total,
-        community: nextStats.community,
-        free: nextStats.free,
-        allowlist: nextStats.allowlist,
-        paid: nextStats.paid,
-        remainingCommunity: nextStats.remainingCommunity,
-        remainingTotal: nextStats.remainingTotal,
-        remainingPaidSupply: nextStats.remainingPaidSupply,
-        priceWei: priceWei.toString(),
-        communityReleased: nextStats.communityReleased,
       });
 
-      setStats(nextStats);
-
-      if (walletAddress) {
-        const [freeRemaining, allowlistRemaining, paidRemaining] = await Promise.all([
-          contract.remainingFreeMintsForWallet(walletAddress),
-          contract.remainingAllowlistMintsForWallet(walletAddress),
-          contract.remainingPaidMintsForWallet(walletAddress),
-        ]);
-        setWalletLimits({
-          free: Number(freeRemaining),
-          allowlist: Number(allowlistRemaining),
-          paid: Number(paidRemaining),
-        });
-      }
-
-      setMessage((current) =>
-        current.startsWith("Unable to read") ? "" : current,
-      );
-      setLoading(false);
-    } catch (error) {
-      setMessage(`Unable to read the mint contract. ${errorMessage(error)}`);
-      setLoading(false);
-      // Keep last good live stats if we had them; otherwise stay offline (not "Closed")
-      setStats((previous) =>
-        previous.live
-          ? previous
-          : {
-              ...EMPTY_STATS,
-              live: false,
-            },
-      );
+      setStats({
+        total: Number(total),
+        community: Number(community),
+        free: Number(free),
+        allowlist: Number(allowlist),
+        paid: Number(paid),
+        priceWei: priceWei as bigint,
+        live: true,
+      });
+    } catch {
+      // Keep last good live stats if we had them; otherwise fall back to the
+      // known historical totals below (minting is closed, these never move).
     }
-  }, [address, applyCachedStats]);
+  }, [applyCachedStats]);
 
   useEffect(() => {
     applyCachedStats();
     const initialLoad = window.setTimeout(() => void loadStats(), 0);
-    const timer = window.setInterval(() => void loadStats(), 12_000);
+    // Keeps polling if the contract ever says supply remains; goes quiet the
+    // moment it confirms sold out.
+    const stop = startVisibleInterval(() => {
+      if (settledRef.current) return;
+      void loadStats();
+    }, 60_000);
     return () => {
       window.clearTimeout(initialLoad);
-      window.clearInterval(timer);
+      stop();
     };
   }, [loadStats, applyCachedStats]);
 
-  useEffect(() => {
-    if (!window.ethereum) return;
-    const handleAccounts = (...args: unknown[]) => {
-      const accounts = Array.isArray(args[0]) ? (args[0] as string[]) : [];
-      const nextAddress = accounts[0] || "";
-      setAddress(nextAddress);
-      if (nextAddress) void loadStats(nextAddress);
-    };
-    window.ethereum.on?.("accountsChanged", handleAccounts);
-    return () => window.ethereum?.removeListener?.("accountsChanged", handleAccounts);
-  }, [loadStats]);
-
-  const phaseLimit =
-    !stats.live
-      ? 0
-      : stats.phase === 1
-        ? Math.min(walletLimits.free, stats.remainingCommunity, stats.remainingTotal)
-        : stats.phase === 2
-          ? Math.min(walletLimits.allowlist, stats.remainingCommunity, stats.remainingTotal)
-          : stats.phase === 3
-            ? Math.min(walletLimits.paid, stats.remainingPaidSupply, stats.remainingTotal, 33)
-            : 0;
-
-  const mintQuantity = Math.max(1, Math.min(quantity, phaseLimit || 1));
-
-  const totalPrice = useMemo(
-    () => formatEther(stats.priceWei * BigInt(mintQuantity)),
-    [mintQuantity, stats.priceWei],
-  );
-
-  async function connectWallet() {
-    setMessage("");
-    if (!window.ethereum) {
-      setMessage("Open in an EVM wallet browser to mint.");
-      return;
-    }
-    try {
-      const accounts = (await window.ethereum.request({
-        method: "eth_requestAccounts",
-      })) as string[];
-      const nextAddress = accounts[0] || "";
-      setAddress(nextAddress);
-      if (nextAddress) await loadStats(nextAddress);
-    } catch (error) {
-      setMessage(errorMessage(error));
-    }
-  }
-
-  async function getSigner() {
-    if (!window.ethereum) throw new Error("No browser wallet found.");
-    const currentChain = (await window.ethereum.request({ method: "eth_chainId" })) as string;
-    if (currentChain.toLowerCase() !== ROBINHOOD_CHAIN_HEX_ID) {
-      try {
-        await window.ethereum.request({
-          method: "wallet_switchEthereumChain",
-          params: [{ chainId: ROBINHOOD_CHAIN_HEX_ID }],
-        });
-      } catch (switchError) {
-        const code = (switchError as { code?: number }).code;
-        if (code !== 4902) throw switchError;
-        await window.ethereum.request({
-          method: "wallet_addEthereumChain",
-          params: [
-            {
-              chainId: ROBINHOOD_CHAIN_HEX_ID,
-              chainName: "Robinhood Chain",
-              nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-              rpcUrls: [ROBINHOOD_RPC_URL],
-              blockExplorerUrls: [ROBINHOOD_EXPLORER_URL],
-            },
-          ],
-        });
-      }
-    }
-    return new BrowserProvider(window.ethereum).getSigner();
-  }
-
-  async function submitMint() {
-    if (!address) {
-      await connectWallet();
-      return;
-    }
-    if (!stats.live || stats.paused || stats.phase <= 0 || phaseLimit === 0) return;
-
-    setBusy(true);
-    setMessage("");
-    setTransactionHash("");
-    try {
-      // Fresh phase check right before mint
-      await loadStats(address);
-      const signer = await getSigner();
-      const contract = new Contract(NFT_CONTRACT_ADDRESS, NFT_ABI, signer);
-
-      // Re-read phase from wallet provider path via public client for truth
-      const { contract: readContract } = await getMintReadClient();
-      const livePhase = Number(await readContract.salePhase());
-      if (livePhase !== stats.phase && livePhase > 0) {
-        // Stats refresh will update UI; use live phase for this tx
-      }
-      const phase = livePhase;
-
-      let transaction;
-      if (phase === 1) {
-        transaction = await contract.freeMint(mintQuantity);
-      } else if (phase === 2) {
-        type ProofsFile = {
-          proofs?: Record<string, string[]>;
-          [key: string]: unknown;
-        };
-        let proofData = getCachedProofs() as ProofsFile | null;
-        if (!proofData) {
-          const response = await fetch("/proofs.json", { cache: "force-cache" });
-          if (!response.ok) throw new Error("The Wood List proof file is not available yet.");
-          proofData = (await response.json()) as ProofsFile;
-          setCachedProofs(proofData);
-        }
-        const normalizedAddress = address.toLowerCase();
-        const proof =
-          proofData.proofs?.[normalizedAddress] ||
-          (proofData[normalizedAddress] as string[] | undefined);
-        if (!proof) throw new Error("This wallet is not on the Wood List.");
-        transaction = await contract.allowlistMint(mintQuantity, proof);
-      } else if (phase === 3) {
-        const livePrice = (await contract.mintPrice()) as bigint;
-        transaction = await contract.publicMint(mintQuantity, {
-          value: livePrice * BigInt(mintQuantity),
-        });
-      } else {
-        throw new Error("Minting is currently closed on-chain.");
-      }
-
-      setTransactionHash(transaction.hash);
-      setMessage("Transaction submitted. Waiting for confirmation…");
-      await transaction.wait();
-      setMessage(`${mintQuantity} RobinWood Plank${mintQuantity === 1 ? "" : "s"} minted.`);
-      await loadStats(address);
-    } catch (error) {
-      setMessage(errorMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const soldOut = stats.live && stats.remainingTotal === 0;
-  const offline = !stats.live && !loading;
-  const trulyClosed = stats.live && stats.phase === 0;
-
-  const buttonLabel = offline
-    ? "Retry connection"
-    : !address
-      ? "Connect Wallet"
-      : busy
-        ? "Waiting for wallet…"
-        : soldOut
-          ? "Sold Out"
-          : stats.paused
-            ? "Mint Paused"
-            : trulyClosed
-              ? "Mint Closed"
-              : !stats.live
-                ? "Loading mint…"
-                : phaseLimit === 0
-                  ? "Mint Limit Reached"
-                  : stats.phase === 1
-                    ? `Mint ${mintQuantity} Free`
-                    : stats.phase === 2
-                      ? `Mint ${mintQuantity} Wood List`
-                      : stats.phase === 3
-                        ? `Mint ${mintQuantity} for ${totalPrice} ETH`
-                        : "Mint Unavailable";
-
-  const buttonDisabled =
-    loading ||
-    busy ||
-    (Boolean(address) &&
-      stats.live &&
-      (stats.paused || soldOut || trulyClosed || phaseLimit === 0));
+  const totalSupply = stats.live ? stats.total : TOTAL_SUPPLY;
+  const community = stats.live ? stats.community : COMMUNITY_SUPPLY;
+  const free = stats.live ? stats.free : undefined;
+  const allowlist = stats.live ? stats.allowlist : undefined;
+  const paid = stats.live ? stats.paid : undefined;
+  const priceEth = stats.live && stats.priceWei > BigInt(0) ? formatEther(stats.priceWei) : ORIGINAL_PRICE_ETH;
+  const paidAndReserve = totalSupply - community;
 
   return (
-    <div className="wood-frame w-full rounded-2xl bg-wood-900/95 p-4 text-left shadow-2xl sm:p-6">
+    <div className="wood-frame wood-grain-surface w-full rounded-2xl bg-wood-900/95 p-4 text-left shadow-2xl sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gold-500/20 pb-4">
-        <div className="min-w-0">
-          <p className="text-xs font-extrabold uppercase tracking-[0.2em] text-gold-300">
-            Live Mint
-          </p>
-          <p className="mt-1 truncate text-xs text-foreground/60 sm:text-sm">
-            {address ? shortAddress(address) : "Connect wallet to mint."}
-            {rpcLabel ? ` · ${rpcLabel}` : ""}
-          </p>
-        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-900/30 px-3 py-1 text-[0.65rem] font-black uppercase tracking-wide text-emerald-300">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+          Sold out · fully minted
+        </span>
         <a
           href={`${ROBINHOOD_EXPLORER_URL}/address/${NFT_CONTRACT_ADDRESS}`}
           target="_blank"
           rel="noopener noreferrer"
           className="min-h-11 shrink-0 text-xs font-bold text-gold-300 hover:text-gold-400 sm:text-sm"
         >
-          Contract ↗
+          NFT contract ↗
         </a>
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs sm:grid-cols-3 sm:gap-x-5 sm:text-sm">
-        <div>
-          <dt className="text-foreground/55">Sale phase</dt>
-          <dd className="mt-1 font-bold text-foreground">
-            {phaseLabel(stats.phase, stats.live, loading)}
+      <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <div className="rounded-lg border border-line bg-panel-strong px-3 py-2">
+          <dt className="text-[0.62rem] font-extrabold uppercase tracking-[0.12em] text-cream-muted">Total supply</dt>
+          <dd className="mt-0.5 font-display text-base text-cream">
+            {totalSupply.toLocaleString()} / {TOTAL_SUPPLY.toLocaleString()}
           </dd>
         </div>
-        <div>
-          <dt className="text-foreground/55">Minted</dt>
-          <dd className="mt-1 font-bold text-foreground">
-            {stats.live ? `${stats.total} / ${TOTAL_SUPPLY}` : "—"}
+        <div className="rounded-lg border border-line bg-panel-strong px-3 py-2">
+          <dt className="text-[0.62rem] font-extrabold uppercase tracking-[0.12em] text-cream-muted">Original price</dt>
+          <dd className="mt-0.5 font-display text-base text-cream">{priceEth} ETH</dd>
+        </div>
+        <div className="rounded-lg border border-line bg-panel-strong px-3 py-2">
+          <dt className="text-[0.62rem] font-extrabold uppercase tracking-[0.12em] text-cream-muted">Community</dt>
+          <dd className="mt-0.5 font-display text-base text-cream">
+            {community.toLocaleString()} / {COMMUNITY_SUPPLY.toLocaleString()}
           </dd>
         </div>
-        <div>
-          <dt className="text-foreground/55">Price</dt>
-          <dd className="mt-1 font-bold text-foreground">
-            {stats.live ? `${formatEther(stats.priceWei)} ETH` : "—"}
+        <div className="rounded-lg border border-line bg-panel-strong px-3 py-2">
+          <dt className="text-[0.62rem] font-extrabold uppercase tracking-[0.12em] text-cream-muted">Free / Wood List</dt>
+          <dd className="mt-0.5 font-display text-base text-cream">
+            {free != null && allowlist != null ? `${free} / ${allowlist}` : "642 / 135"}
           </dd>
         </div>
-        <div>
-          <dt className="text-foreground/55">Community</dt>
-          <dd className="mt-1 font-bold text-foreground">
-            {stats.live ? `${stats.community} / ${COMMUNITY_SUPPLY}` : "—"}
+        <div className="rounded-lg border border-line bg-panel-strong px-3 py-2">
+          <dt className="text-[0.62rem] font-extrabold uppercase tracking-[0.12em] text-cream-muted">Paid &amp; reserve</dt>
+          <dd className="mt-0.5 font-display text-base text-cream">
+            {paid != null ? paidAndReserve.toLocaleString() : (TOTAL_SUPPLY - COMMUNITY_SUPPLY).toLocaleString()}
           </dd>
         </div>
-        <div>
-          <dt className="text-foreground/55">Free / Wood List</dt>
-          <dd className="mt-1 font-bold text-foreground">
-            {stats.live ? `${stats.free} / ${stats.allowlist}` : "—"}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-foreground/55">Paid minted</dt>
-          <dd className="mt-1 font-bold text-foreground">
-            {stats.live ? stats.paid : "—"}
-          </dd>
+        <div className="rounded-lg border border-line bg-panel-strong px-3 py-2">
+          <dt className="text-[0.62rem] font-extrabold uppercase tracking-[0.12em] text-cream-muted">Max / wallet was</dt>
+          <dd className="mt-0.5 font-display text-base text-cream">{MAX_PER_WALLET_WAS}</dd>
         </div>
       </dl>
 
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-black/35">
-        <div
-          className="h-full rounded-full bg-gold-500 transition-[width]"
-          style={{
-            width: stats.live
-              ? `${Math.min(100, (stats.total / TOTAL_SUPPLY) * 100)}%`
-              : "0%",
-          }}
-        />
+      <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-black/35">
+        <div className="h-full w-full rounded-full bg-gold-500" />
+      </div>
+      <div className="mt-1.5 flex justify-between text-xs font-bold text-foreground/70">
+        <span>{totalSupply.toLocaleString()} minted</span>
+        <span>100% claimed</span>
       </div>
 
-      {address && stats.live && stats.phase > 0 && phaseLimit > 0 && (
-        <div className="mx-auto mt-5 flex w-fit items-center gap-5 rounded-full border border-gold-500/30 bg-black/20 p-1">
-          <button
-            type="button"
-            aria-label="Decrease mint quantity"
-            disabled={busy || mintQuantity <= 1}
-            onClick={() => setQuantity((value) => Math.max(1, value - 1))}
-            className="min-h-12 min-w-12 rounded-full text-xl font-bold text-gold-300 disabled:opacity-35"
-          >
-            −
-          </button>
-          <strong className="min-w-6 text-center text-lg">{mintQuantity}</strong>
-          <button
-            type="button"
-            aria-label="Increase mint quantity"
-            disabled={busy || mintQuantity >= phaseLimit}
-            onClick={() => setQuantity((value) => Math.min(phaseLimit, value + 1))}
-            className="min-h-12 min-w-12 rounded-full text-xl font-bold text-gold-300 disabled:opacity-35"
-          >
-            +
-          </button>
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={() => {
-          if (offline) {
-            setLoading(true);
-            setMessage("");
-            void loadStats(address, true);
-            return;
-          }
-          void submitMint();
-        }}
-        disabled={buttonDisabled && !offline}
-        className="mt-5 min-h-14 w-full rounded-lg bg-gold-500 px-6 py-4 text-base font-extrabold text-wood-950 transition-colors hover:bg-gold-400 disabled:cursor-not-allowed disabled:opacity-45"
-      >
-        {buttonLabel}
-      </button>
-
-      {offline && (
-        <p className="mt-3 text-xs text-amber-200/90 sm:text-sm">
-          RPC offline — tap Retry.
-        </p>
-      )}
-
-      {stats.live && stats.phase === 3 && (
-        <p className="mt-3 text-xs text-foreground/65 sm:text-sm">
-          0.01 ETH each · max 33 / wallet
-        </p>
-      )}
-
-      {stats.communityReleased && (
-        <p className="mt-3 text-xs text-foreground/65 sm:text-sm">
-          Community closed — unused supply moved to paid.
-        </p>
-      )}
-      {message && (
-        <p className="mt-3 break-words text-xs text-foreground/80 sm:text-sm" role="status" aria-live="polite">
-          {message}
-        </p>
-      )}
-      {transactionHash && (
+      <div className="mt-5 flex flex-wrap gap-2.5">
         <a
-          href={`${ROBINHOOD_EXPLORER_URL}/tx/${transactionHash}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-2 inline-block min-h-11 text-xs font-bold text-gold-300 hover:text-gold-400 sm:text-sm"
+          href="/market"
+          className="min-h-14 flex-1 rounded-lg bg-gold-500 px-6 py-4 text-center text-base font-extrabold text-wood-950 transition-colors hover:bg-gold-400"
         >
-          View transaction ↗
+          Buy on the Market →
         </a>
-      )}
-      <p className="mt-3 text-xs text-foreground/45">
-        Gas paid in ETH (Chain ID 4663).
+        <a
+          href="/market?tab=swap"
+          className="min-h-14 flex-1 rounded-lg border border-gold-500/50 bg-wood-950/70 px-6 py-4 text-center text-base font-extrabold text-gold-300 transition-colors hover:border-gold-400"
+        >
+          Instant Swap
+        </a>
+      </div>
+      <p className="mt-3 text-center text-xs text-foreground/65">
+        Every Plank now trades peer-to-peer on Marketplank — verified listings only.
       </p>
+
+      <p className="mt-3 text-xs text-foreground/45">Gas paid in ETH (Chain ID 4663).</p>
     </div>
   );
 }

@@ -3,14 +3,18 @@ import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS, SEAPORT_ADDRESS } from "@/lib/constants";
 import { resolveTokenImage } from "@/lib/market/token-image";
 import { wasOrderServedByUs } from "@/lib/market/served-orders";
-import { ethBlockNumber, ethGetLogs, rpcCall } from "@/lib/market/fetch-rpc";
+import { ethBlockNumberDisplay, ethGetLogsDisplay, rpcCall } from "@/lib/market/fetch-rpc";
+import { SERVER_DISPLAY_RPC_URLS } from "@/lib/server/rpc-urls";
 import { logScanBudget } from "@/lib/market/rpc-budget";
 import {
   fetchAddressTransactions,
   fetchTokenTransfers,
   fetchTxTokenTransfers,
 } from "@/lib/market/blockscout";
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
 
 // Canonical Seaport 1.6 OrderFulfilled event, copied from
 // @opensea/seaport-js's own compiled artifact (src/artifacts/seaport/...),
@@ -87,13 +91,14 @@ export type ActivityEvent = {
    *   (deposit vs redeem) is visible from `from`/`to` already on this event.
    * null — a plain wallet-to-wallet transfer, no contract intermediary.
    *
-   * NOTE ON SCOPE: this only ever sees activity that happens ON THIS CHAIN
-   * (Robinhood Chain, id 4663). It cannot and does not claim to see trades
-   * on OpenSea/Blur/Magic Eden/etc. on OTHER chains — those platforms would
-   * need to explicitly index this custom chain (they do not today, per
-   * research: Reservoir/NFTGo-style aggregators cover 60+ established chains
-   * but not a brand-new bespoke L3 unless they explicitly add it). That is a
-   * business-outreach question, not a code gap.
+   * NOTE ON SCOPE: this only ever sees activity that happens ON THIS CHAIN.
+   * Robinhood Chain is an Arbitrum Layer-2 on Ethereum (chain id 4663, ETH gas,
+   * Ethereum blobs for data availability — docs.robinhood.com/chain), mainnet
+   * live since July 2026. It cannot and does not claim to see trades on
+   * OpenSea/Blur/Magic Eden/etc. on OTHER chains; an NFT aggregator has to index
+   * this chain explicitly before its listings could appear here. Verify current
+   * coverage before assuming either way — this is a business-outreach question,
+   * not a code gap.
    */
   venue: { kind: "marketplank" | "seaport" | "vault" | "other"; contract: string } | null;
 };
@@ -197,7 +202,7 @@ async function resolveMarketplankAttribution(txHash: string): Promise<void> {
   try {
     const receipt = await rpcCall<{
       logs?: Array<{ address: string; topics: string[]; data: string }>;
-    }>("eth_getTransactionReceipt", [txHash], { timeoutMs: 8_000 });
+    }>("eth_getTransactionReceipt", [txHash], { timeoutMs: 8_000, urls: SERVER_DISPLAY_RPC_URLS });
     if (!receipt) return;
     attributionResolvedTxs.add(txHash);
 
@@ -265,7 +270,7 @@ const SALES_KV_TTL = 6 * 60 * 60;
 type PricedSaleKey = string; // txHash:tokenId
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
 }
 
 function isMarketplaceMethod(method: string): boolean {
@@ -704,7 +709,7 @@ export async function fetchActivity(
     // fall through to eth_ path
   }
 
-  const latest = await ethBlockNumber();
+  const latest = await ethBlockNumberDisplay();
   const { chunkBlocks, maxChunks } = logScanBudget();
 
   const logs: RawLog[] = [];
@@ -713,7 +718,7 @@ export async function fetchActivity(
   for (let chunk = 0; chunk < maxChunks && logs.length < effectiveLimit && toBlock > 0; chunk += 1) {
     const fromBlock = Math.max(0, toBlock - chunkBlocks);
     try {
-      const found = (await ethGetLogs({
+      const found = (await ethGetLogsDisplay({
         address: NFT_CONTRACT_ADDRESS,
         topics: [TRANSFER_TOPIC],
         fromBlock: "0x" + fromBlock.toString(16),
@@ -756,7 +761,7 @@ export async function fetchActivity(
       try {
         const fetched = await rpcCall<{ to?: string; value?: string }>("eth_getTransactionByHash", [
           hash,
-        ], { timeoutMs: 6_000 });
+        ], { timeoutMs: 6_000, urls: SERVER_DISPLAY_RPC_URLS });
         txCache.set(
           hash,
           fetched
@@ -772,7 +777,7 @@ export async function fetchActivity(
         const block = await rpcCall<{ timestamp?: string }>("eth_getBlockByNumber", [
           blockNumber,
           false,
-        ], { timeoutMs: 6_000 });
+        ], { timeoutMs: 6_000, urls: SERVER_DISPLAY_RPC_URLS });
         blockCache.set(
           blockNumber,
           block?.timestamp != null ? Number(BigInt(block.timestamp)) : null

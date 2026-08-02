@@ -25,22 +25,28 @@ export default function CollectionStats({
   totalSupply,
 }: Props) {
   const [recordWei, setRecordWei] = useState<string | null>(null);
+  const [volumeWei, setVolumeWei] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    swrJson<{ highestWei?: string | null; highestPlatform?: string | null }>(
-      "/api/market/sales-stats",
-      {
-        ttlMs: 60_000,
-        swrMs: 300_000,
-        session: true,
-      }
-    )
+    swrJson<{
+      highestWei?: string | null;
+      highestPlatform?: string | null;
+      totalVolumeWei?: string | null;
+    }>("/api/market/sales-stats", {
+      ttlMs: 60_000,
+      swrMs: 300_000,
+      session: true,
+    })
       .then((data) => {
-        if (!cancelled) setRecordWei(data.highestWei ?? null);
+        if (cancelled) return;
+        setRecordWei(data.highestWei ?? null);
+        setVolumeWei(data.totalVolumeWei ?? null);
       })
       .catch(() => {
-        if (!cancelled) setRecordWei(null);
+        if (cancelled) return;
+        setRecordWei(null);
+        setVolumeWei(null);
       });
     return () => {
       cancelled = true;
@@ -57,13 +63,34 @@ export default function CollectionStats({
     return max === null || v > max ? v : max;
   }, null);
 
+  // Finalized-mockup order and labels: Floor price · Items · Listed · Best
+  // offer · Volume · Highest sale.
+  //
+  // "Volume" is every royalty-paid secondary sale of this collection on
+  // Robinhood Chain, whichever venue settled it — the catalog gates on the
+  // EIP-2981 royalty leg, not on who executed the trade, so OpenSea fills
+  // already count. It is deliberately not labelled "Marketplank volume":
+  // claiming another venue's trades as our own would be a lie, and excluding
+  // them would understate the collection.
   const stats: { label: string; value: string }[] = [
-    { label: "Floor", value: floorWei === null ? "—" : `${formatTokenAmount(floorWei, 18, 4)} Ξ` },
-    { label: "Listed", value: String(listings.length) },
+    {
+      label: "Floor price",
+      value: floorWei === null ? "—" : `${formatTokenAmount(floorWei, 18, 4)} Ξ`,
+    },
     { label: "Items", value: totalSupply ? totalSupply.toLocaleString() : "—" },
+    {
+      label: "Listed",
+      value: totalSupply
+        ? `${listings.length.toLocaleString()} / ${totalSupply.toLocaleString()}`
+        : String(listings.length),
+    },
     {
       label: "Best offer",
       value: bestOfferWei === null ? "—" : `${formatTokenAmount(bestOfferWei, 18, 4)} WETH`,
+    },
+    {
+      label: "Volume",
+      value: volumeWei == null ? "…" : `${formatTokenAmount(volumeWei, 18, 3)} Ξ`,
     },
     {
       label: "Highest sale",
@@ -72,9 +99,12 @@ export default function CollectionStats({
   ];
 
   return (
-    <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-gold-500/20 bg-gold-500/20 sm:grid-cols-5">
+    <dl className="flex gap-px overflow-x-auto rounded-xl border border-line bg-gold-500/20 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-6 sm:overflow-hidden">
       {stats.map((s) => (
-        <div key={s.label} className="bg-wood-900/90 px-3 py-2 text-center">
+        <div
+          key={s.label}
+          className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0"
+        >
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">
             {s.label}
           </dt>

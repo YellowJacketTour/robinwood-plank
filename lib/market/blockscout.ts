@@ -90,6 +90,21 @@ function nextPath(basePath: string, next: Record<string, string | number> | null
   return `${bare}?${qs.toString()}`;
 }
 
+type BlockscoutPage = {
+  items?: unknown[];
+  next_page_params?: Record<string, string | number> | null;
+};
+
+/**
+ * Walks next_page_params, tolerating a mid-walk failure.
+ *
+ * Blockscout intermittently 500s on a single page deep into a long walk. This
+ * used to throw and discard every page already collected, so one transient
+ * upstream blip failed the whole catalog/index build — the caller saw nothing
+ * rather than the 30 pages that had succeeded. Now a failed page is retried
+ * once, and if it still fails we return the partial result. Page 0 failing is
+ * a real outage, so that still throws.
+ */
 async function paginate<T>(
   firstPath: string,
   pick: (page: unknown) => T[],
@@ -98,10 +113,23 @@ async function paginate<T>(
   const out: T[] = [];
   let path: string | null = firstPath;
   for (let page = 0; page < maxPages && path; page += 1) {
-    const data = await bsGet<{
-      items?: unknown[];
-      next_page_params?: Record<string, string | number> | null;
-    }>(path);
+    let data: BlockscoutPage;
+    try {
+      data = await bsGet<BlockscoutPage>(path);
+    } catch (error) {
+      try {
+        await new Promise((r) => setTimeout(r, 500));
+        data = await bsGet<BlockscoutPage>(path);
+      } catch (retryError) {
+        if (page === 0) throw retryError;
+        console.warn(
+          `[blockscout] partial walk: ${out.length} items from ${page} page(s) before ${
+            retryError instanceof Error ? retryError.message : String(retryError)
+          }`
+        );
+        return out;
+      }
+    }
     out.push(...pick(data));
     path = nextPath(firstPath, data.next_page_params);
   }
@@ -142,6 +170,55 @@ export async function fetchTokenTransfers(
     (d) => ((d as { items?: BlockscoutTokenTransfer[] }).items || []) as BlockscoutTokenTransfer[],
     opts?.maxPages ?? 5
   );
+}
+
+/**
+ * Every transfer of ONE token, mint included, newest first.
+ *
+ * The item-detail panel used to derive its history by filtering a recent
+ * collection-wide activity scan, which only ever contained whatever had moved
+ * lately — so a plank that had not traded since it was minted showed "No
+ * transfers recorded", and one that had shown only its most recent move with
+ * the mint missing. Measured 2026-08-02: #1533 and #1542 each have exactly one
+ * real transfer (their mint) and rendered as empty; #1466 has two and rendered
+ * one.
+ *
+ * This is the per-instance endpoint, so it returns that token's complete
+ * lineage regardless of how long ago it last moved. One page is plenty — a
+ * single plank has a handful of transfers, not hundreds — and keeping it to one
+ * request matters because Blockscout rate-limits hard.
+ */
+export async function fetchTokenInstanceTransfers(
+  tokenAddress: string,
+  tokenId: string
+): Promise<BlockscoutTokenTransfer[]> {
+  const d = await bsGet<{ items?: BlockscoutTokenTransfer[] }>(
+    `/api/v2/tokens/${tokenAddress}/instances/${encodeURIComponent(tokenId)}/transfers`
+  );
+  return d.items || [];
+}
+
+export type BlockscoutTokenBalance = {
+  token?: {
+    address_hash?: string;
+    symbol?: string;
+    name?: string;
+    decimals?: string;
+    type?: string;
+  };
+  value?: string;
+};
+
+/**
+ * Every token an address actually holds (ERC-20 by far the common case,
+ * ERC-721/1155 also returned) — one call, not a fixed probe list. This is
+ * what caught the admin Finance dashboard silently missing USDG on the swap
+ * fee wallet: it only ever checked $PLANK and WETH by address, so anything
+ * else that landed there was invisible. Not paginated by Blockscout for this
+ * endpoint — one response has every token.
+ */
+export async function fetchTokenBalances(address: string): Promise<BlockscoutTokenBalance[]> {
+  return bsGet<BlockscoutTokenBalance[]>(`/api/v2/addresses/${address}/token-balances`, 8_000);
 }
 
 export async function fetchAddressLogs(

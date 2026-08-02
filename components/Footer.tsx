@@ -1,4 +1,5 @@
-import { CONTRACT_ADDRESS, SOCIAL_LINKS } from "@/lib/constants";
+import Link from "next/link";
+import { CHAIN, CONTRACT_ADDRESS, SOCIAL_LINKS } from "@/lib/constants";
 
 const SOCIALS = [
   {
@@ -12,49 +13,102 @@ const SOCIALS = [
 
 export default function Footer() {
   return (
-    <footer className="wood-grain border-t border-gold-500/20 px-4 py-12 sm:px-6">
-      <div className="mx-auto flex max-w-6xl flex-col items-center gap-6 text-center">
-        <p className="font-display text-xl text-gold-300">Built on Robinhood Chain. Built for $PLANK.</p>
+    <footer className="site-footer-surface border-t border-gold-500/25 px-4 py-10 sm:px-6 lg:py-12">
+      <div className="mx-auto max-w-[1200px]">
+        <div className="grid gap-8 md:grid-cols-[1.15fr_1.5fr_0.85fr] md:gap-10">
+          <section aria-labelledby="footer-about">
+            <h2 id="footer-about" className="font-display text-xl text-gold-300">
+              Built on Robinhood Chain.
+              <span className="mt-1 block text-base text-foreground/70">Built for $PLANK.</span>
+            </h2>
+            <p className="mt-4 max-w-sm text-sm leading-6 text-foreground/70">
+              Meme coin. No promised return. Not financial advice. DYOR.
+            </p>
+          </section>
 
-        <p className="max-w-full break-all rounded-md bg-wood-950/90 px-4 py-2 font-mono text-xs text-foreground/80 sm:text-sm">
-          {CONTRACT_ADDRESS}
-        </p>
+          <section aria-labelledby="footer-contract">
+            <h2
+              id="footer-contract"
+              className="text-xs uppercase tracking-[0.16em] text-gold-300/80"
+            >
+              $PLANK token contract
+            </h2>
+            <a
+              href={`${CHAIN.blockExplorers.default.url}/address/${CONTRACT_ADDRESS}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 block min-h-11 max-w-full break-all rounded-md border border-gold-500/20 bg-black/25 px-3 py-3 font-mono text-xs leading-5 text-foreground/80 transition-colors hover:border-gold-400/60 hover:text-gold-300 sm:text-sm"
+              aria-label={`View $PLANK token contract ${CONTRACT_ADDRESS} on ${CHAIN.blockExplorers.default.name}`}
+            >
+              {CONTRACT_ADDRESS}
+            </a>
+          </section>
 
-        <ul className="flex items-center gap-4">
-          {SOCIALS.map((s) => (
-            <li key={s.name}>
-              <a
-                href={s.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label={s.name}
-                className="flex h-11 w-11 items-center justify-center rounded-full border border-gold-500/40 text-gold-300 transition-colors hover:border-gold-400 hover:bg-gold-500/10"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  {s.icon}
-                </svg>
-              </a>
-            </li>
-          ))}
-        </ul>
+          <nav aria-label="Footer">
+            <h2 className="text-xs uppercase tracking-[0.16em] text-gold-300/80">
+              Keep exploring
+            </h2>
+            <ul className="mt-2 grid grid-cols-2 gap-x-3 md:grid-cols-1">
+              <li>
+                <Link
+                  href="/learn"
+                  className="flex min-h-11 items-center text-sm text-foreground/75 transition-colors hover:text-gold-300"
+                >
+                  Learn how everything works
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/market"
+                  className="flex min-h-11 items-center text-sm text-foreground/75 transition-colors hover:text-gold-300"
+                >
+                  Market
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/gallery"
+                  className="flex min-h-11 items-center text-sm text-foreground/75 transition-colors hover:text-gold-300"
+                >
+                  Gallery
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/floorboards"
+                  className="flex min-h-11 items-center text-sm text-foreground/75 transition-colors hover:text-gold-300"
+                >
+                  Under the floorboards
+                </Link>
+              </li>
+              {SOCIALS.map((social) => (
+                <li key={social.name}>
+                  <a
+                    href={social.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex min-h-11 items-center gap-2 text-sm text-foreground/75 transition-colors hover:text-gold-300"
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      {social.icon}
+                    </svg>
+                    {social.name}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </div>
 
-        <p className="max-w-xl text-base text-foreground">
-          Meme coin. No promised return. Not financial advice. DYOR.
-        </p>
-
-        <p className="flex flex-wrap justify-center gap-3 text-xs text-foreground/50">
-          <a href="/learn" className="text-gold-300/90 underline hover:text-gold-300">
-            Learn how everything works
-          </a>
-          <a href="/market" className="underline hover:text-gold-300">
-            Market
-          </a>
-          <a href="/gallery" className="underline hover:text-gold-300">
-            Gallery
-          </a>
-        </p>
-
-        <p className="text-xs text-foreground/40">© {new Date().getFullYear()} RobinWood. All rights reserved.</p>
+        <div className="mt-8 border-t border-gold-500/15 pt-5 text-xs text-foreground/45">
+          © {new Date().getFullYear()} RobinWood. All rights reserved.
+        </div>
       </div>
     </footer>
   );

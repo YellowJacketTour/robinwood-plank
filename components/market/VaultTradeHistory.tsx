@@ -6,6 +6,7 @@ import { usePendingVaultTx } from "@/lib/market/pendingVaultTx";
 import ScrollBox from "@/components/market/ScrollBox";
 import {
   vaultColorKind,
+  vaultKindLabel,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
 
@@ -18,13 +19,15 @@ const KIND_LABEL: Record<VaultTradeKind, string> = {
   remove_lp: "Remove LP",
 };
 
-const KIND_COLOR: Record<VaultTradeKind, string> = {
-  buy: "text-emerald-300",
-  sell: "text-red-300",
-  deposit: "text-sky-300",
-  redeem: "text-amber-300",
-  add_lp: "text-violet-300",
-  remove_lp: "text-fuchsia-300",
+/** Kind reads in cream like the mockup's .event-type; color survives only as
+ * the small leading dot. */
+const KIND_DOT: Record<VaultTradeKind, string> = {
+  buy: "bg-emerald-400",
+  sell: "bg-red-400",
+  deposit: "bg-sky-400",
+  redeem: "bg-amber-400",
+  add_lp: "bg-violet-400",
+  remove_lp: "bg-fuchsia-400",
 };
 
 /** Amount cell: LP always shows shares + ETH; buy/sell prefer ETH; NFT kinds show #id. */
@@ -60,8 +63,9 @@ function shortAddr(a: string) {
 function vaultTag(vaultAddress?: string): { text: string; className: string } | null {
   if (!vaultAddress) return null;
   const kind = vaultColorKind(vaultAddress);
-  if (kind === "v1") return { text: "V1", className: VAULT_LABEL_CLASS.v1 };
-  if (kind === "v2") return { text: "V2", className: VAULT_LABEL_CLASS.v2 };
+  if (kind !== "unknown") {
+    return { text: vaultKindLabel(kind), className: VAULT_LABEL_CLASS[kind] };
+  }
   return {
     text: shortAddr(vaultAddress),
     className: VAULT_LABEL_CLASS.unknown,
@@ -125,13 +129,13 @@ export default function VaultTradeHistory() {
         : "Reconnecting…";
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1.5 rounded-xl border border-line bg-panel p-3">
       <div className="flex items-center justify-between">
-        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
-          Trades <span className="font-normal normal-case text-foreground/35">(V1 + V2)</span>
+        <p className="text-[0.72rem] font-black text-foreground">
+          Live Driftwood + WormWood trades
         </p>
         <span
-          className={`flex items-center gap-1 text-[0.55rem] font-bold uppercase ${live ? "text-emerald-300/70" : connected ? "text-gold-300/70" : "text-foreground/30"}`}
+          className={`flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[0.55rem] font-bold uppercase ${live ? "text-emerald-300/70" : connected ? "text-gold-300/70" : "text-foreground/30"}`}
         >
           <span
             className={`h-1.5 w-1.5 rounded-full ${live ? "animate-pulse bg-emerald-400" : connected ? "animate-pulse bg-gold-400" : "bg-foreground/30"}`}
@@ -142,33 +146,36 @@ export default function VaultTradeHistory() {
       {loading ? (
         <div className="space-y-1">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-7 animate-pulse rounded bg-wood-900/90" />
+            <div key={i} className="h-7 animate-pulse rounded bg-panel" />
           ))}
         </div>
       ) : activity.length === 0 && visiblePending.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-4 text-center text-xs text-foreground/45">
+        <p className="rounded-lg border border-line bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
           No vault trades yet.
         </p>
       ) : (
         <ScrollBox
           storageKey="vault-trades"
           defaultHeight={256}
-          className="rounded-lg border border-gold-500/15 bg-wood-950/90"
+          className="rounded-lg border border-line bg-wood-950"
         >
           <table className="w-full text-left text-[0.65rem]">
             <thead>
-              <tr className="border-b border-gold-500/15 text-[0.55rem] uppercase tracking-wide text-foreground/35">
-                <th className="px-2 py-1 font-bold">Kind</th>
-                <th className="px-2 py-1 font-bold">Amount</th>
-                <th className="px-2 py-1 font-bold">Price/share</th>
-                <th className="px-2 py-1 font-bold">Trader</th>
-                <th className="px-2 py-1 text-right font-bold">Time</th>
+              <tr className="border-b border-line bg-[rgba(219,165,63,0.07)] text-[0.58rem] uppercase tracking-[0.08em] text-[#9e9279]">
+                <th className="px-2 py-2 font-black">Kind</th>
+                <th className="px-2 py-2 font-black">Amount</th>
+                <th className="px-2 py-2 font-black">Price/share</th>
+                <th className="px-2 py-2 font-black">Trader</th>
+                <th className="px-2 py-2 text-right font-black">Time</th>
               </tr>
             </thead>
             <tbody>
               {visiblePending.map((p) => (
-                <tr key={p.txHash} className="border-b border-gold-500/10 bg-gold-500/5 last:border-0">
-                  <td className={`px-2 py-1.5 font-bold ${KIND_COLOR[p.kind]}`}>
+                <tr key={p.txHash} className="border-b border-line bg-gold-500/5 last:border-0">
+                  <td className="px-2 py-1.5 font-bold text-foreground">
+                    <span
+                      className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${KIND_DOT[p.kind]}`}
+                    />
                     {p.role === "settle" ? "Settle redeem" : KIND_LABEL[p.kind]}
                   </td>
                   <td className="px-2 py-1.5 font-mono text-foreground/70">
@@ -196,9 +203,12 @@ export default function VaultTradeHistory() {
               {activity.map((e) => (
                 <tr
                   key={`${e.vaultAddress || ""}:${e.txHash}:${e.kind}:${e.tokenId ?? ""}:${e.logIndex ?? ""}`}
-                  className="border-b border-gold-500/10 last:border-0"
+                  className="border-b border-line last:border-0"
                 >
-                  <td className={`px-2 py-1.5 font-bold ${KIND_COLOR[e.kind]}`}>
+                  <td className="px-2 py-1.5 font-bold text-foreground">
+                    <span
+                      className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${KIND_DOT[e.kind]}`}
+                    />
                     {KIND_LABEL[e.kind]}
                     {(() => {
                       const tag = vaultTag(e.vaultAddress);

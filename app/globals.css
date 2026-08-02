@@ -8,10 +8,24 @@
 }
 
 @theme inline {
+  /* Only values that must reference runtime CSS vars (next/font) stay
+     inline; colors live in the plain @theme below so utilities emit
+     var(--color-*) and can be re-themed per scope. */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --font-display: var(--font-stencil);
+  --font-sans: var(--font-body);
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-flicker: flicker 2.2s ease-in-out infinite;
+}
+
+@theme {
+  /* Canonical palette — DESIGN.md is the single source of truth.
+     (The market mockup's :root hexes were drift; the module's --market-*
+     vars alias these.) */
   --color-wood-950: #1b120a;
   --color-wood-900: #2a1a0f;
+  --color-wood-850: #302013;
   --color-wood-800: #3d2513;
   --color-wood-700: #5c3a1e;
   --color-wood-600: #7a4d26;
@@ -19,68 +33,89 @@
   --color-forest-800: #123322;
   --color-forest-700: #1a4a30;
   --color-forest-600: #24693f;
-  --color-gold-500: #d9a441;
+  --color-gold-600: #af761d;
+  --color-gold-500: #e9b43f;
   --color-gold-400: #eec164;
   --color-gold-300: #f8d98a;
-  --font-display: var(--font-stencil);
-  --font-sans: var(--font-body);
-  --animate-float: float 6s ease-in-out infinite;
-  --animate-flicker: flicker 2.2s ease-in-out infinite;
+
+  /* Semantic surface tokens (DESIGN.md components + mockup structure):
+     border-line / border-line-strong / bg-panel / bg-panel-soft /
+     bg-panel-strong / text-cream / text-cream-muted. Additive names —
+     nothing outside the market surface consumes them yet. */
+  --color-cream: #fff2cf;
+  --color-cream-muted: #c9b58a;
+  --color-line: rgba(233, 180, 63, 0.24);
+  --color-line-strong: rgba(233, 180, 63, 0.5);
+  --color-panel: rgba(28, 16, 8, 0.94);
+  --color-panel-soft: rgba(41, 26, 15, 0.88);
+  --color-panel-strong: rgba(17, 10, 5, 0.97);
+
+  --shadow-panel: 0 18px 60px rgba(0, 0, 0, 0.34);
+  --shadow-gold: 0 0 0 1px rgba(239, 196, 99, 0.14), 0 10px 32px rgba(0, 0, 0, 0.38);
 }
 
 * {
   scroll-behavior: smooth;
 }
 
+/* Mockup-derived (docs/mockups/landing-redesign/finalized.html): a single
+   capped plank-head.webp anchored at the top over a strong dark wash, with
+   the page's own background-color filling everything below it — never
+   plank-legs.webp stretched to the full scroll height. That stretch was a
+   later, unreviewed elaboration on this rule (recorded, not designed) that
+   produced the "wall of bright yellow" the owner flagged as looking
+   strange; this restores the approved treatment. See PlankBackground.tsx
+   (now a no-op — this is pure CSS, no JS sizing needed). */
 body {
   background-color: #14100b;
   color: var(--foreground);
   font-family: var(--font-body), Arial, Helvetica, sans-serif;
-  background-image:
-    /* darken/warm wash so foreground text stays readable over the giant render */
-    linear-gradient(180deg, rgba(20, 16, 11, 0.55) 0%, rgba(20, 16, 11, 0.75) 40%, rgba(20, 16, 11, 0.88) 100%),
-    /* head/eyes/smile — always shown at true, undistorted aspect ratio */
-    url("/images/plank-head.webp"),
-    /* legs/body — plain wood grain, safe to stretch to fill the rest of the page
-       (sized dynamically by PlankBackground.tsx so the whole body spans the
-       full page height without warping the face) */
-    url("/images/plank-legs.webp");
-  background-repeat: no-repeat, no-repeat, no-repeat;
-  background-position: top center, top center, top center;
-  background-size: 100% 100%, 100% auto, 100% auto;
-  background-attachment: scroll, scroll, scroll;
+  /* Solid page field. The plank-head masthead illustration is rendered by the
+     hero section itself (components/Hero.tsx) rather than as a body
+     background: a page-length canvas can't be reliably darkened by a single
+     gradient, so the art used to bleed through mid-page as a bright band.
+     Scoping it to the hero keeps the mockup's "capped head at the top" intent
+     and guarantees the rest of the page stays clean.
+
+     Recovered from backup-pre-rebase-7bf018f. A rebase restored the body copy
+     of this art while Hero.tsx kept painting it too, so production was
+     rendering the masthead TWICE — the second copy bleeding down the page,
+     which is precisely what this change existed to stop. */
   font-weight: 700;
 }
 
-/* Strong, warm typography that stays readable over every part of the Plank art. */
-body :where(h1, h2, h3, h4, p, a, button, dt, dd, li, code, strong, span, td, th, label) {
-  text-shadow:
-    -1px -1px 0 #1a0b03,
-    1px -1px 0 #1a0b03,
-    -1px 1px 0 #1a0b03,
-    1px 1px 0 #1a0b03,
-    0 3px 5px rgba(20, 8, 2, 0.98),
-    0 0 14px rgba(20, 8, 2, 0.82);
+/* Strong, warm typography that stays readable over every part of the Plank
+   art. These marketing-page clamps NEVER apply inside the market surface
+   ([data-market-shell]) — there, component styles are authoritative; the
+   !important overrides were silently repainting the mockup-accurate market
+   type gold and oversized. */
+/* Display type only. The heavy outline existed to keep copy legible over the
+   full-page character art; the background now matches the mockup (capped
+   head over a near-solid wash), so body copy sits on near-black and the
+   outline just made everything look chunky and unlike the approved design.
+   Headings keep a soft lift for depth.
+
+   This refinement was written on 2026-07-30, then lost: a rebase kept the
+   homepage components byte-for-byte but dropped this hunk, so production went
+   back to outlining every p/a/button/span and force-clamping paragraph size.
+   Recovered from backup-pre-rebase-7bf018f. */
+body :where(h1, h2, h3, h4):not([data-market-shell] *) {
+  text-shadow: 0 2px 6px rgba(20, 8, 2, 0.75);
 }
 
-body p {
-  font-size: clamp(1rem, 1.35vw, 1.2rem) !important;
-  line-height: 1.55 !important;
-}
-
-body dt {
+body dt:not([data-market-shell] *) {
   color: #e9c987 !important;
   font-size: 1rem !important;
   font-weight: 800;
 }
 
-body dd {
+body dd:not([data-market-shell] *) {
   color: #fff2cf !important;
   font-size: 1.15rem !important;
   font-weight: 900;
 }
 
-body [class*="text-foreground/"] {
+body [class*="text-foreground/"]:not([data-market-shell] *) {
   color: #f8e7c2 !important;
 }
 
@@ -96,35 +131,67 @@ body :where(.bg-forest-900\/70, .bg-forest-900\/75) {
   background-color: rgba(30, 18, 8, 0.95) !important;
 }
 
-button,
-a.rounded-lg,
-a.rounded-md {
+button:not([data-market-shell] *),
+a.rounded-lg:not([data-market-shell] *),
+a.rounded-md:not([data-market-shell] *) {
   font-size: 1rem !important;
   font-weight: 900 !important;
 }
 
-body :where(.bg-gold-500, .bg-gold-400) {
+body :where(.bg-gold-500, .bg-gold-400):not([data-market-shell] *) {
   color: #261105 !important;
   text-shadow:
     0 1px 0 rgba(255, 242, 207, 0.8),
     0 2px 2px rgba(89, 43, 12, 0.35) !important;
 }
 
+/* Uncial Antiqua ships ONE weight (400) and app/layout.tsx loads only that
+   cut. Everything inherited `font-weight: 700` from `body`, and buttons/links
+   are forced to 900, so the browser had no bold face to use and synthesised
+   one — smearing the glyphs sideways. Faux-bold on a display face reads as
+   "chunky", and it is not what this typeface looks like.
+
+   Pinning 400 here is not a style preference; it is the only weight that
+   exists. If a heavier display face is ever wanted, it needs a different
+   family with a real bold cut, not a heavier number against this one. */
 .font-display {
   font-family: var(--font-stencil), "Georgia", serif;
+  font-weight: 400;
   letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
 }
 
-.wood-grain {
+/* Plank grain — the brand's signature surface texture (DESIGN.md
+   "Elevation & Depth"): fine 1px gold-tinted board lines at 92deg, 11px
+   pitch. Originated on the footer; now a shared treatment for large brand
+   surfaces (footer, market shell, mockup panels). Deliberately quiet but
+   visible — never behind dense data text. */
+.wood-grain-surface {
+  background-image: repeating-linear-gradient(
+    92deg,
+    rgba(233, 180, 63, 0.05) 0,
+    rgba(233, 180, 63, 0.05) 1px,
+    transparent 1px,
+    transparent 11px
+  );
+}
+
+/* Also reused, unchanged, by components/AppBackdrop.tsx as the shared quiet
+   backdrop for dense app pages (Trade/Market/Gallery) — see that file for
+   why. Keep this the single source of truth for that texture; don't fork a
+   second copy of the gradient recipe elsewhere. */
+.site-footer-surface {
+  background-color: #160e08;
   background-image:
+    linear-gradient(180deg, rgba(10, 6, 3, 0.18), rgba(10, 6, 3, 0.62)),
     repeating-linear-gradient(
       92deg,
-      rgba(0, 0, 0, 0.12) 0px,
-      rgba(0, 0, 0, 0.12) 1px,
+      rgba(233, 180, 63, 0.05) 0,
+      rgba(233, 180, 63, 0.05) 1px,
       transparent 1px,
-      transparent 8px
+      transparent 11px
     ),
-    linear-gradient(135deg, #5c3a1e, #3d2513 55%, #2a1a0f);
+    linear-gradient(120deg, #24160c, #171008 62%, #100b07);
 }
 
 .wood-frame {
@@ -132,13 +199,6 @@ body :where(.bg-gold-500, .bg-gold-400) {
   box-shadow:
     inset 0 0 0 3px rgba(0, 0, 0, 0.35),
     0 8px 30px -10px rgba(0, 0, 0, 0.7);
-}
-
-.gold-text {
-  background: linear-gradient(180deg, #f8d98a 0%, #d9a441 55%, #a9781f 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
 }
 
 .plank-title {
@@ -155,6 +215,9 @@ body :where(.bg-gold-500, .bg-gold-400) {
 }
 .section-title {
   font-family: var(--font-stencil), "Georgia", serif;
+  /* Single-weight face — see .font-display. Without this it inherits 700 from
+     body and the browser fakes a bold that does not exist. */
+  font-weight: 400;
   letter-spacing: 0.02em;
   /* Dense: big enough to brand, small enough to avoid empty chrome */
   font-size: clamp(1.75rem, 5.5vw, 2.75rem) !important;
@@ -171,8 +234,7 @@ body :where(.bg-gold-500, .bg-gold-400) {
 /* Any text that sits directly on the giant scrolling background (not
    inside an opaque card) needs a guaranteed-legible shadow, since the
    backdrop swings from near-black to bright yellow across the page. */
-.lede,
-.on-bg-text {
+.lede {
   color: #fff0c9 !important;
   font-weight: 800;
   text-shadow:
@@ -338,22 +400,6 @@ input {
   );
 }
 
-.wood-ledger-entry {
-  font-family: ui-monospace, "Cascadia Code", "Courier New", monospace;
-  font-size: 0.68rem;
-  line-height: 1.4rem;
-  color: #f3e0b0;
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.7);
-}
-
-.wood-ledger-good {
-  color: #cfeec4;
-}
-
-.wood-ledger-bad {
-  color: #ffc9b0;
-}
-
 /* Airdrop allocation panel — beat global p/button clamps; dense & readable */
 .airdrop-panel {
   font-family: var(--font-body), system-ui, sans-serif;
@@ -381,7 +427,9 @@ input {
   font-family: var(--font-stencil), Georgia, serif;
   font-size: 1.15rem !important;
   line-height: 1.1 !important;
-  font-weight: 700;
+  /* Single-weight face — see .font-display. 700 here only ever rendered as
+     synthetic bold. */
+  font-weight: 400;
   color: #f8d98a;
   font-variant-numeric: tabular-nums;
 }
@@ -632,6 +680,32 @@ body .nft-modal .nft-modal-body {
   scrollbar-gutter: stable;
 }
 
+/* Themed scrollbar for dark wood/gold surfaces — used by the swap token
+   modal and anything else that shouldn't fall back to a stock white bar. */
+.token-modal-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(233, 180, 63, 0.4) #2a1a0f;
+}
+
+.token-modal-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.token-modal-scroll::-webkit-scrollbar-track {
+  background: #2a1a0f;
+  border-radius: 999px;
+}
+
+.token-modal-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(233, 180, 63, 0.4);
+  border-radius: 999px;
+  border: 2px solid #2a1a0f;
+}
+
+.token-modal-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(233, 180, 63, 0.6);
+}
+
 /* Text sitting on top of NFT artwork has to stay readable against ANY
    background color the art happens to use (this collection ranges from
    near-white to saturated green/purple/orange). A flat color alone isn't
@@ -644,12 +718,6 @@ body .nft-modal .nft-modal-body {
     0 0 1px rgba(0, 0, 0, 0.9);
 }
 
-.legible-text-strong {
-  text-shadow:
-    0 1px 3px rgba(0, 0, 0, 1),
-    0 0 10px rgba(0, 0, 0, 0.85),
-    0 0 2px rgba(0, 0, 0, 0.95);
-}
 
 /* Tier badges. First attempt kept dark text ON the tier's own light fill
    (Common/Uncommon/Rare/Epic are all light/pastel) plus a border — still
@@ -661,12 +729,10 @@ body .nft-modal .nft-modal-body {
    for the TEXT, not the fill. Callers set `color: tierColor(tier)` inline;
    this class supplies the guaranteed-dark background + border so that
    bright text always has a backdrop, whatever art or holo sheen sits
-   underneath. z-index lifts it above .holo-card's ::before/::after (both
-   z-index: 1) — those were painting over badge text inside the same
-   holo-card element without this, which is what made some tiers look
-   genuinely garbled rather than merely low-contrast. */
+   underneath. Overlay callers provide their own positioning; z-index lifts
+   those positioned badges above .holo-card's ::before/::after (both z-index:
+   1), which otherwise paint over the badge text. */
 .tier-badge {
-  position: relative;
   z-index: 2;
   /* ≥90% opaque so tier labels stay readable on any art/holo sheen */
   background: rgba(10, 6, 2, 0.92);
@@ -682,9 +748,6 @@ body .nft-modal .nft-modal-body {
 .data-module {
   background-color: rgba(18, 10, 4, 0.92);
 }
-.data-module-strong {
-  background-color: rgba(10, 6, 2, 0.94);
-}
 
 /* Same root cause as .tier-badge above, generalized: ANY overlay badge/
    label/checkmark sitting inside a .holo-card element needs an explicit
@@ -693,9 +756,9 @@ body .nft-modal .nft-modal-body {
    loses to an explicit z-index even if the auto element comes later in the
    DOM. Applied to every non-tier overlay (selection checkmarks, "Listed"
    labels, Floor/trust badges, id/rank badges) so none of them can suffer
-   the same bug independently. */
+   the same bug independently. Position stays caller-owned so absolute
+   overlay utilities are never overridden by this shared class. */
 .card-overlay {
-  position: relative;
   z-index: 2;
 }
 
@@ -784,4 +847,110 @@ body .nft-modal .nft-modal-body {
     opacity: 1;
     transform: none;
   }
+}
+
+/* ============================================================
+   WoodAmp (components/woodamp/) — keyframes + range hardware.
+   Layout and colors are Tailwind utilities in the components; only
+   what CSS utilities can't express lives here. The global
+   prefers-reduced-motion kill-switch above freezes the animations.
+   Colors reference the @theme vars — never restate a hex.
+   ============================================================ */
+
+@keyframes woodamp-eq {
+  from {
+    transform: scaleY(0.3);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes woodamp-marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.woodamp-eq-bar {
+  transform-origin: bottom;
+  animation: woodamp-eq 0.8s ease-in-out infinite alternate;
+}
+
+.woodamp-marquee > span {
+  display: inline-block;
+  animation: woodamp-marquee 12s linear infinite;
+}
+
+.woodamp-eq-paused,
+.woodamp-marquee-paused {
+  animation-play-state: paused !important;
+}
+
+/* Seek/volume sliders: a groove carved into the wood with a brass knob.
+   The input itself is the groove; thumbs are styled per-engine. */
+.woodamp-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.8),
+    inset 0 -1px 0 rgba(233, 180, 63, 0.12);
+  outline-offset: 4px;
+  cursor: pointer;
+}
+
+.woodamp-range:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.woodamp-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(
+    180deg,
+    var(--color-gold-300),
+    var(--color-gold-600)
+  );
+  border: 1px solid rgba(38, 17, 5, 0.8);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 242, 207, 0.5);
+}
+
+.woodamp-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(
+    180deg,
+    var(--color-gold-300),
+    var(--color-gold-600)
+  );
+  border: 1px solid rgba(38, 17, 5, 0.8);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 242, 207, 0.5);
+}
+
+.woodamp-range-slim {
+  height: 6px;
+}
+
+.woodamp-range-slim::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+}
+
+.woodamp-range-slim::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
 }

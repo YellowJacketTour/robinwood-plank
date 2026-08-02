@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   cancelWalletConnectConnect,
   connectWithWalletConnect,
@@ -20,6 +21,7 @@ import {
   getChainId,
   isRobinhoodChainId,
 } from "@/lib/wallet";
+import { useWallet } from "@/lib/wallet-context";
 import { CHAIN } from "@/lib/constants";
 
 type Props = {
@@ -31,6 +33,11 @@ type Props = {
 type Phase = "idle" | "pairing" | "need_chain" | "done";
 
 export default function ConnectWalletModal({ open, onClose, onConnected }: Props) {
+  // Any connection made here (WalletConnect QR or injected extension) must
+  // become visible app-wide, not just to whichever caller passed
+  // onConnected — otherwise a WalletConnect-sourced connect would update
+  // e.g. SwapWidget's local state but leave the nav/other surfaces stale.
+  const { adoptAccount: walletAdoptAccount } = useWallet();
   const [projectId, setProjectId] = useState("");
   const [uri, setUri] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -40,6 +47,17 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
   const [phase, setPhase] = useState<Phase>("idle");
   const [pendingAddress, setPendingAddress] = useState<string | null>(null);
   const [liveChain, setLiveChain] = useState<number | null>(null);
+  // Rendered via a portal straight onto <body> — this modal is opened from
+  // inside the homepage's ".reveal" section, which sets a (identity)
+  // transform once visible. Any non-"none" transform on an ancestor creates
+  // a new CSS containing block, so a plain `position: fixed` child (this
+  // modal) gets trapped inside that box instead of covering the viewport —
+  // same bug, same fix as TokenSelectModal.
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -71,10 +89,11 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
   const finish = useCallback(
     (addr: string) => {
       setPhase("done");
+      walletAdoptAccount(addr);
       onConnected(addr);
       onClose();
     },
-    [onConnected, onClose]
+    [walletAdoptAccount, onConnected, onClose]
   );
 
   const handleClose = useCallback(() => {
@@ -116,6 +135,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
           );
         }
       } catch (e) {
+        console.error("Network verification failed:", e);
         setPendingAddress(addr);
         setPhase("need_chain");
         setBusy(false);
@@ -151,6 +171,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
       setStatus("Phone approved — checking network…");
       await checkChainAndFinish(addr);
     } catch (e) {
+      console.error("WalletConnect failed:", e);
       const msg = e instanceof Error ? e.message : "WalletConnect failed.";
       if (!msg.toLowerCase().includes("cancelled")) {
         // If message is about wrong chain but we have a session, enter need_chain
@@ -187,6 +208,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
       }
       finish(pendingAddress);
     } catch (e) {
+      console.error("Retry network check failed:", e);
       setError(e instanceof Error ? e.message : "Still wrong network.");
     } finally {
       setBusy(false);
@@ -203,6 +225,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
       const addr = await connectInjectedWallet();
       await checkChainAndFinish(addr);
     } catch (e) {
+      console.error("Extension connect failed:", e);
       setError(e instanceof Error ? e.message : "Extension connect failed.");
       setStatus(null);
       setPhase("idle");
@@ -211,9 +234,9 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
     }
   }, [checkChainAndFinish]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4"
       role="dialog"
@@ -246,7 +269,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
 
         {phase !== "need_chain" && (
           <>
-            <div className="mt-3 rounded-lg border border-gold-500/25 bg-wood-950/90 px-3 py-2 text-[0.75rem] text-foreground/70">
+            <div className="mt-3 rounded-lg border border-gold-500/20 bg-wood-950/90 px-3 py-2 text-[0.75rem] text-foreground/70">
               <p className="font-bold text-gold-300">Before you scan</p>
               <ol className="mt-1 list-decimal space-y-0.5 pl-4">
                 <li>
@@ -258,27 +281,35 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
               </ol>
             </div>
 
-            <label className="mt-4 block text-[0.65rem] font-bold uppercase tracking-wide text-foreground/45">
-              WalletConnect Project ID
-            </label>
-            <input
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value.trim())}
-              placeholder="from cloud.reown.com"
-              className="mt-1 w-full rounded-lg border border-gold-500/25 bg-wood-950/90 px-3 py-2 font-mono text-xs text-foreground outline-none focus:border-gold-400"
-              autoComplete="off"
-            />
-            <p className="mt-1 text-[0.65rem] text-foreground/40">
-              Free:{" "}
-              <a
-                href="https://cloud.reown.com"
-                target="_blank"
-                rel="noreferrer"
-                className="text-gold-300 underline"
-              >
-                cloud.reown.com
-              </a>
-            </p>
+            {/* Config plumbing, not user UI: the project id ships with the
+                build (NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID). Ask only when
+                no id is configured anywhere — without one, WalletConnect
+                cannot pair at all. */}
+            {!getWalletConnectProjectId() && (
+              <>
+                <label className="mt-4 block text-[0.65rem] font-bold uppercase tracking-wide text-foreground/45">
+                  WalletConnect Project ID
+                </label>
+                <input
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value.trim())}
+                  placeholder="from cloud.reown.com"
+                  className="mt-1 w-full rounded-lg border border-gold-500/20 bg-wood-950/90 px-3 py-2 font-mono text-xs text-foreground outline-none focus:border-gold-400"
+                  autoComplete="off"
+                />
+                <p className="mt-1 text-[0.65rem] text-foreground/40">
+                  Free:{" "}
+                  <a
+                    href="https://cloud.reown.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-gold-300 underline"
+                  >
+                    cloud.reown.com
+                  </a>
+                </p>
+              </>
+            )}
 
             <button
               type="button"
@@ -317,18 +348,15 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
                 />
                 <p className="mt-2 text-center text-xs text-foreground/60">{status}</p>
                 {uri && (
-                  <>
-                    <p className="mt-2 max-h-14 w-full overflow-auto break-all font-mono text-[0.6rem] text-foreground/40">
-                      {uri}
-                    </p>
-                    <button
-                      type="button"
-                      className="mt-2 text-xs font-bold text-gold-300 underline"
-                      onClick={() => void navigator.clipboard.writeText(uri)}
-                    >
-                      Copy connection URI
-                    </button>
-                  </>
+                  // The raw wc: URI is noise on screen — the copy button
+                  // covers the deep-link use case without the text dump.
+                  <button
+                    type="button"
+                    className="mt-2 text-xs font-bold text-gold-300 underline"
+                    onClick={() => void navigator.clipboard.writeText(uri)}
+                  >
+                    Copy connection URI
+                  </button>
                 )}
               </div>
             )}
@@ -405,6 +433,7 @@ export default function ConnectWalletModal({ open, onClose, onConnected }: Props
           </p>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -1,6 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { kv } from "@vercel/kv";
+import {
+  durableKv as kv,
+  durableKvBackend,
+  hasDurableKv,
+} from "@/lib/market/durable-kv";
+import { postgresQuery } from "@/lib/postgres";
 
 /**
  * A durable record of Seaport order hashes WE served — the only honest basis
@@ -17,16 +22,20 @@ import { kv } from "@vercel/kv";
  * an order, and Activity cross-checks against it, never inferring from the
  * executing contract alone.
  *
- * Backend mirrors lib/market/orders-store.ts exactly: Vercel KV (a Redis SET,
- * so membership checks are O(1) and additions are naturally idempotent) when
- * configured, else a file + in-process Set for local dev.
+ * Backend mirrors lib/market/orders-store.ts: a PostgreSQL primary-key table
+ * gives indexed membership and idempotent additions. Local dev can still fall
+ * back to a file + in-process Set.
  */
 
 const KV_SET_KEY = "plank:market:served-order-hashes";
 const DATA_PATH = path.join(process.cwd(), ".data", "served-order-hashes.json");
 
 function hasKv(): boolean {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+  return hasDurableKv();
+}
+
+function hasPostgres(): boolean {
+  return durableKvBackend() === "postgres";
 }
 
 type GlobalServed = { __plankServedOrderHashes?: Set<string> };
@@ -61,6 +70,15 @@ async function persistFileSet(set: Set<string>): Promise<void> {
 /** Record that we served this order — call once, at successful POST time. */
 export async function markOrderServed(orderHash: string): Promise<void> {
   const normalized = orderHash.toLowerCase();
+  if (hasPostgres()) {
+    await postgresQuery(
+      `INSERT INTO served_order_hashes (order_hash)
+       VALUES ($1)
+       ON CONFLICT DO NOTHING`,
+      [normalized]
+    );
+    return;
+  }
   if (hasKv()) {
     await kv.sadd(KV_SET_KEY, normalized);
     return;
@@ -73,6 +91,13 @@ export async function markOrderServed(orderHash: string): Promise<void> {
 /** True only if THIS relay actually stored an order with this exact hash. */
 export async function wasOrderServedByUs(orderHash: string): Promise<boolean> {
   const normalized = orderHash.toLowerCase();
+  if (hasPostgres()) {
+    const result = await postgresQuery(
+      "SELECT 1 FROM served_order_hashes WHERE order_hash = $1",
+      [normalized]
+    );
+    return result.rowCount === 1;
+  }
   if (hasKv()) {
     const result = await kv.sismember(KV_SET_KEY, normalized);
     return result === 1;

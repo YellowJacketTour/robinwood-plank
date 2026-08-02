@@ -55,41 +55,47 @@ export default function SweepFloorboards({
 
   // Keep sweep scope in lockstep with rarity floor chips when user taps a tier.
   useEffect(() => {
-    if (tierScope === "all") {
-      if (scopeMode === "tier") setScopeMode("floor");
-    } else {
-      setScopeMode("tier");
-    }
+    const frame = window.requestAnimationFrame(() => {
+      if (tierScope === "all") {
+        if (scopeMode === "tier") setScopeMode("floor");
+      } else {
+        setScopeMode("tier");
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [tierScope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (scopeMode !== "trait") return;
     let cancelled = false;
-    setTraitLoading(true);
-    setTraitError(null);
-    fetchTraitIndex(collection)
-      .then((idx) => {
-        if (cancelled) return;
-        setTraitIndex(idx);
-        if (idx.complete && idx.traits) {
-          setClauses((prev) => {
-            if (prev.length > 0) return prev;
-            const first = defaultFirstClause(idx.traits!);
-            return first ? [first] : [];
-          });
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setTraitIndex(null);
-          setTraitError(e instanceof Error ? e.message : "Could not load traits.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setTraitLoading(false);
-      });
+    const frame = window.requestAnimationFrame(() => {
+      setTraitLoading(true);
+      setTraitError(null);
+      fetchTraitIndex(collection)
+        .then((idx) => {
+          if (cancelled) return;
+          setTraitIndex(idx);
+          if (idx.complete && idx.traits) {
+            setClauses((prev) => {
+              if (prev.length > 0) return prev;
+              const first = defaultFirstClause(idx.traits!);
+              return first ? [first] : [];
+            });
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) {
+            setTraitIndex(null);
+            setTraitError(e instanceof Error ? e.message : "Could not load traits.");
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setTraitLoading(false);
+        });
+    });
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(frame);
     };
   }, [scopeMode, collection]);
 
@@ -107,7 +113,9 @@ export default function SweepFloorboards({
     }
     // Multi-clause trait / rarity criteria
     if (clauses.length === 0 || !traitIndex?.traits) return new Set<string>();
-    return new Set(resolveCriteriaTokenIds(traitIndex.traits, clauses));
+    return new Set(
+      resolveCriteriaTokenIds(traitIndex.traits, clauses, traitIndex.rankings)
+    );
   }, [scopeMode, tierScope, listings, rarity, clauses, traitIndex]);
 
   const plan = useMemo(
@@ -133,7 +141,7 @@ export default function SweepFloorboards({
 
   if (listings.length < 2) {
     return (
-      <div className="flex min-h-9 items-center rounded-md border border-dashed border-gold-500/25 px-3 text-xs text-foreground/45">
+      <div className="flex min-h-9 items-center rounded-md border border-dashed border-line px-3 text-xs text-foreground/45">
         🧹 Nothing to sweep
       </div>
     );
@@ -149,7 +157,7 @@ export default function SweepFloorboards({
           : "scope";
 
   return (
-    <div className="flex w-full flex-col gap-1.5 rounded-lg border border-gold-500/20 bg-wood-950/90 px-2 py-1.5 sm:w-auto sm:min-w-[16rem]">
+    <div className="flex w-full flex-col gap-1.5 rounded-lg border border-line bg-panel-strong px-2 py-1.5 sm:w-auto sm:min-w-[16rem]">
       <div className="flex flex-wrap items-center gap-1">
         <span className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
           🧹 Sweep
@@ -169,7 +177,7 @@ export default function SweepFloorboards({
             className={`min-h-8 rounded-md border px-2 text-[0.65rem] font-bold transition ${
               scopeMode === m.id
                 ? "border-gold-400 bg-gold-500/15 text-gold-300"
-                : "border-gold-500/25 text-foreground/55 hover:border-gold-400/50"
+                : "border-line text-foreground/55 hover:border-line-strong"
             }`}
           >
             {m.label}
@@ -181,12 +189,13 @@ export default function SweepFloorboards({
       </div>
 
       {scopeMode === "trait" && (
-        <div className="rounded-md border border-gold-500/20 bg-wood-950/90 p-2">
+        <div className="rounded-md border border-line bg-panel-strong p-2">
           <p className="mb-1.5 text-[0.6rem] font-bold uppercase tracking-wide text-gold-400/80">
             Select traits / rarity to sweep
           </p>
           <TraitCriteriaPicker
             traits={traitIndex?.traits ?? null}
+            rankings={traitIndex?.rankings}
             complete={Boolean(traitIndex?.complete && traitIndex.traits)}
             building={traitIndex?.building}
             scanned={traitIndex?.scanned}
@@ -220,13 +229,13 @@ export default function SweepFloorboards({
             className={`min-h-8 rounded-md border px-2 text-xs font-bold transition ${
               count === n && customDraft === ""
                 ? "border-gold-400 bg-gold-500/15 text-gold-300"
-                : "border-gold-500/30 text-foreground/60 hover:border-gold-400"
+                : "border-line text-foreground/60 hover:border-gold-400"
             }`}
           >
             {n}
           </button>
         ))}
-        <label className="flex min-h-8 items-center gap-1 rounded-md border border-gold-500/30 bg-wood-950 px-1.5">
+        <label className="flex min-h-8 items-center gap-1 rounded-md border border-line bg-wood-950 px-1.5">
           <span className="sr-only">Custom sweep size</span>
           <input
             type="text"

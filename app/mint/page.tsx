@@ -1,36 +1,12 @@
-import type { Metadata } from "next";
 import Home from "../page";
+import { createPageMetadata } from "@/lib/seo";
 
-const shareImage =
-  "https://plank.love/plank-social.jpg";
-
-export const metadata: Metadata = {
-  title: "PLANK.LOVE — RobinWood Mint",
-  description: "Join the Wood List and mint on Robinhood Chain.",
-  alternates: {
-    canonical: "https://plank.love/mint",
-  },
-  openGraph: {
-    title: "PLANK.LOVE — RobinWood Mint",
-    description: "Join the Wood List and mint on Robinhood Chain.",
-    url: "https://plank.love/mint",
-    siteName: "PLANK.LOVE",
-    type: "website",
-    images: [
-      {
-        url: shareImage,
-        width: 1280,
-        height: 719,
-        alt: "PLANK.LOVE signed check",
-      },
-    ],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "PLANK.LOVE — RobinWood Mint",
-    description: "Join the Wood List and mint on Robinhood Chain.",
-    images: [shareImage],
-  },
-};
+export const metadata = createPageMetadata({
+  title: "Mint RobinWood",
+  description:
+    "Connect a wallet, review the RobinWood mint phases, and mint a Plank NFT on Robinhood Chain.",
+  path: "/mint",
+  keywords: ["mint RobinWood", "RobinWood NFT mint", "Robinhood Chain NFT"],
+});
 
 export default Home;

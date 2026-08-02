@@ -16,8 +16,12 @@ const TICK_MS = 8_000;
 /** How often the underlying chain data is actually re-read — the vault
  * replay (reserves + fee-revenue log walk) is real RPC work, not free, so
  * every open tab shares one server-side refresh cadence instead of each
- * triggering its own. Slower on CF to avoid RH RPC 429s. */
-const REFRESH_MS = 20_000;
+ * triggering its own. Slower on CF to avoid RH RPC 429s.
+ *
+ * 60s, not 20s: clients still get a tick every TICK_MS from cache, so the feed
+ * stays visibly live, but the chain is only re-read once a minute. At 20s this
+ * loop alone was the majority of the RPC provider bill. */
+const REFRESH_MS = 60_000;
 /** Cap per-connection lifetime, just under maxDuration's ceiling — Vercel
  * Node serverless functions aren't guaranteed to sustain a stream past
  * their configured maxDuration, so this proactively recycles the

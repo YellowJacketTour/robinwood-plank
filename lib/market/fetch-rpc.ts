@@ -3,7 +3,14 @@
  * ethers' JsonRpcProvider (which can hang on node:http under nodejs_compat).
  */
 
-import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
+import {
+  SERVER_RPC_URLS,
+  SERVER_DISPLAY_RPC_URLS,
+  FREE_RPC_URLS,
+  isMeteredRpcUrl,
+} from "@/lib/server/rpc-urls";
+import { recordRpc } from "@/lib/market/rpc-meter";
+import { peekRpcCache, putRpcCache, withRpcCache } from "@/lib/market/rpc-cache";
 
 type RpcResult<T> = { result?: T; error?: { message?: string; code?: number } };
 
@@ -13,12 +20,52 @@ type RpcResult<T> = { result?: T; error?: { message?: string; code?: number } };
  * and was making Instant Swap's live feed fail after the first successful hit.
  */
 function vaultRpcUrls(): string[] {
-  return ROBINHOOD_RPC_URLS.filter(
+  return SERVER_RPC_URLS.filter(
     (u) => !u.includes("blockscout.com")
   ).concat(
     // only if official list somehow empty
-    ROBINHOOD_RPC_URLS.filter((u) => u.includes("blockscout.com"))
+    SERVER_RPC_URLS.filter((u) => u.includes("blockscout.com"))
   );
+}
+
+/**
+ * Per-URL circuit breaker so a provider that is currently 429ing (Blockscout's
+ * eth-rpc bridge, observed 2026-07-31 returning 429 consistently) doesn't eat a
+ * failed round-trip on every single call while it's down. Three failures in a
+ * row opens the breaker for a cooldown; a success anywhere resets it
+ * immediately. Never filters a list down to nothing — if every candidate is
+ * "open", callers still need to try something, so the filter is a no-op in
+ * that case rather than a hard failure.
+ */
+const BREAKER_THRESHOLD = 3;
+const BREAKER_COOLDOWN_MS = 30_000;
+const breakerState = new Map<string, { failures: number; openUntil: number }>();
+
+function recordUrlFailure(url: string): void {
+  const s = breakerState.get(url) ?? { failures: 0, openUntil: 0 };
+  s.failures += 1;
+  if (s.failures >= BREAKER_THRESHOLD) {
+    s.openUntil = Date.now() + BREAKER_COOLDOWN_MS;
+  }
+  breakerState.set(url, s);
+}
+
+function recordUrlSuccess(url: string): void {
+  breakerState.set(url, { failures: 0, openUntil: 0 });
+}
+
+function isUrlBreakerOpen(url: string): boolean {
+  const s = breakerState.get(url);
+  return Boolean(s && s.openUntil > Date.now());
+}
+
+/** Drop URLs whose breaker is currently open, unless that would leave nothing
+ *  to try — an all-open list means every endpoint is currently believed dead,
+ *  and attempting anyway (and possibly resetting a breaker on success) beats
+ *  refusing to even try. */
+function availableUrls(urls: string[]): string[] {
+  const open = urls.filter((u) => !isUrlBreakerOpen(u));
+  return open.length > 0 ? open : urls;
 }
 
 async function postRpc(
@@ -29,6 +76,9 @@ async function postRpc(
 ): Promise<RpcResult<unknown>> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
+  // Counted before the await: a call that times out or 429s is still billed.
+  // Only the keyed provider bills — the public Robinhood endpoints are free.
+  if (isMeteredRpcUrl(url)) recordRpc(method);
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -43,12 +93,18 @@ async function postRpc(
       cache: "no-store",
     });
     if (res.status === 429) {
+      recordUrlFailure(url);
       return { error: { message: `HTTP 429 ${url}`, code: 429 } };
     }
     if (!res.ok) {
+      recordUrlFailure(url);
       return { error: { message: `HTTP ${res.status} ${url}`, code: res.status } };
     }
+    recordUrlSuccess(url);
     return (await res.json()) as RpcResult<unknown>;
+  } catch (error) {
+    recordUrlFailure(url);
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -57,13 +113,25 @@ async function postRpc(
 export async function rpcCall<T = unknown>(
   method: string,
   params: unknown[],
-  opts?: { timeoutMs?: number }
+  opts?: { timeoutMs?: number; urls?: string[] }
+): Promise<T> {
+  // Identical concurrent reads collapse into one upstream request, and
+  // repeat reads inside the TTL are free. See lib/market/rpc-cache.ts.
+  return withRpcCache(method, params, () => rpcCallUncached<T>(method, params, opts));
+}
+
+async function rpcCallUncached<T = unknown>(
+  method: string,
+  params: unknown[],
+  opts?: { timeoutMs?: number; urls?: string[] }
 ): Promise<T> {
   const timeoutMs = opts?.timeoutMs ?? 8_000;
   const errors: string[] = [];
 
   // Prefer official RH RPC; Blockscout is last-resort and rate-limits hard.
-  for (const url of vaultRpcUrls()) {
+  // availableUrls skips an endpoint whose breaker is open (repeated recent
+  // 429s/failures) rather than burning another round-trip on it.
+  for (const url of availableUrls(opts?.urls ?? vaultRpcUrls())) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const data = await postRpc(url, method, params, timeoutMs);
@@ -92,23 +160,89 @@ export async function ethCall(to: string, data: string): Promise<string> {
   return rpcCall<string>("eth_call", [{ to, data }, "latest"]);
 }
 
+/**
+ * eth_call for server-side DISPLAY reads — public endpoint first, keyed
+ * provider only as fallback (SERVER_DISPLAY_RPC_URLS). For high-volume reads
+ * that feed a dashboard rather than a decision: vault reserves/fee schedule,
+ * not order validation or ownership checks (those stay on ethCall/rpcCall,
+ * which default to the keyed-first SERVER_RPC_URLS).
+ */
+export async function ethCallDisplay(to: string, data: string): Promise<string> {
+  return rpcCall<string>("eth_call", [{ to, data }, "latest"], { urls: SERVER_DISPLAY_RPC_URLS });
+}
+
+/**
+ * eth_call over the free endpoints only, still cached and coalesced.
+ *
+ * For reads that must never cost compute units but should not depend on one
+ * hardcoded URL either. Callers that previously posted straight to
+ * CHAIN.rpcUrls.default get failover to a second free endpoint and dedupe of
+ * repeat reads, at the same price: nothing.
+ */
+export async function ethCallFree(to: string, data: string): Promise<string> {
+  const params = [{ to, data }, "latest"];
+  return withRpcCache("eth_call", params, async () => {
+    const errors: string[] = [];
+    for (const url of availableUrls(FREE_RPC_URLS)) {
+      try {
+        const data_ = await postRpc(url, "eth_call", params, 8_000);
+        if (data_.error) {
+          errors.push(data_.error.message || "RPC error");
+          continue;
+        }
+        return data_.result as string;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    throw new Error(`Free eth_call failed: ${errors.slice(-2).join(" | ")}`);
+  });
+}
+
 /** Batch several eth_calls in one HTTP round-trip (less rate-limit pressure). */
 export async function ethCallMany(
-  calls: Array<{ to: string; data: string }>
+  calls: Array<{ to: string; data: string }>,
+  opts?: { urls?: string[] }
 ): Promise<string[]> {
   const timeoutMs = 12_000;
   const errors: string[] = [];
-  const batch = calls.map((c, i) => ({
+  const urls = opts?.urls ?? vaultRpcUrls();
+
+  // Providers bill every entry in a JSON-RPC array separately, so a batch saves
+  // round-trips but no compute units. Dropping already-cached entries before
+  // building the body is what actually saves money — and on the vault-stats hot
+  // path most of these seven repeat unchanged between refreshes.
+  const paramsFor = (c: { to: string; data: string }) => [{ to: c.to, data: c.data }, "latest"];
+  const results = new Array<string | undefined>(calls.length);
+  const missIndexes: number[] = [];
+  calls.forEach((c, i) => {
+    const cached = peekRpcCache<string>("eth_call", paramsFor(c));
+    if (cached !== undefined) results[i] = cached;
+    else missIndexes.push(i);
+  });
+  if (missIndexes.length === 0) return results as string[];
+
+  const fill = (out: string[]): string[] => {
+    missIndexes.forEach((originalIndex, k) => {
+      results[originalIndex] = out[k];
+      putRpcCache("eth_call", paramsFor(calls[originalIndex]), out[k]);
+    });
+    return results as string[];
+  };
+
+  const pending = missIndexes.map((i) => calls[i]);
+  const batch = pending.map((c, i) => ({
     jsonrpc: "2.0" as const,
     id: i + 1,
     method: "eth_call",
-    params: [{ to: c.to, data: c.data }, "latest"],
+    params: paramsFor(c),
   }));
 
-  for (const url of vaultRpcUrls()) {
+  for (const url of availableUrls(urls)) {
     if (url.includes("blockscout.com")) continue; // no batches / rate limits
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
+    if (isMeteredRpcUrl(url)) recordRpc("eth_call", pending.length);
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -122,6 +256,7 @@ export async function ethCallMany(
         cache: "no-store",
       });
       if (!res.ok) {
+        recordUrlFailure(url);
         errors.push(`HTTP ${res.status} ${url}`);
         continue;
       }
@@ -129,6 +264,7 @@ export async function ethCallMany(
       // Some RPCs reject batches — fall back to sequential for that URL.
       if (!Array.isArray(data)) {
         if ((data as RpcResult<string>).error) {
+          recordUrlFailure(url);
           errors.push((data as RpcResult<string>).error?.message || "batch rejected");
           continue;
         }
@@ -136,49 +272,69 @@ export async function ethCallMany(
         continue;
       }
       const ordered = [...data].sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
-      if (ordered.length !== calls.length || ordered.some((r) => r.error || r.result == null)) {
+      if (ordered.length !== pending.length || ordered.some((r) => r.error || r.result == null)) {
         errors.push("batch incomplete");
-        // sequential on this same URL before giving up
-        try {
-          const out: string[] = [];
-          for (const c of calls) {
-            const one = await postRpc(url, "eth_call", [{ to: c.to, data: c.data }, "latest"], 8_000);
-            if (one.error || one.result == null) throw new Error(one.error?.message || "eth_call failed");
-            out.push(one.result as string);
-          }
-          return out;
-        } catch (e) {
-          errors.push(e instanceof Error ? e.message : String(e));
-          continue;
-        }
+        // Retry the batch once rather than fanning out to N individual calls.
+        // The fan-out billed 2N requests to the provider for what is usually a
+        // transient partial failure, and on a rate-limited provider it made the
+        // rate limiting strictly worse.
+        continue;
       }
-      return ordered.map((r) => r.result as string);
+      recordUrlSuccess(url);
+      return fill(ordered.map((r) => r.result as string));
     } catch (error) {
+      recordUrlFailure(url);
       errors.push(error instanceof Error ? error.message : String(error));
     } finally {
       clearTimeout(timer);
     }
   }
 
-  // Sequential fallback across URL list
+  // Sequential fallback across the same URL list — only for the entries that
+  // missed cache. Goes through rpcCall (not the ethCall/SERVER_RPC_URLS
+  // default) so a caller that passed a display-first `urls` list keeps that
+  // preference on the fallback path too, and so these populate the cache.
   const out: string[] = [];
-  for (const c of calls) {
-    out.push(await ethCall(c.to, c.data));
+  for (const c of pending) {
+    out.push(await rpcCall<string>("eth_call", [{ to: c.to, data: c.data }, "latest"], { urls }));
   }
-  return out;
+  return fill(out);
 }
 
-export async function ethBlockNumber(): Promise<number> {
-  const hex = await rpcCall<string>("eth_blockNumber", []);
+/**
+ * ethCallMany over SERVER_DISPLAY_RPC_URLS (public first, keyed fallback).
+ *
+ * For the same class of read as ethCallDisplay — vault dashboard reads that
+ * are shown to every visitor, not gating a wallet prompt. vault-stats.ts's
+ * readCoreVaultState (4 eth_calls, re-read on every SSE tick / stats poll)
+ * is the primary caller and the single largest steady-state source of
+ * metered eth_call volume before this existed.
+ */
+export async function ethCallManyDisplay(
+  calls: Array<{ to: string; data: string }>
+): Promise<string[]> {
+  return ethCallMany(calls, { urls: SERVER_DISPLAY_RPC_URLS });
+}
+
+export async function ethBlockNumber(opts?: { urls?: string[] }): Promise<number> {
+  const hex = await rpcCall<string>("eth_blockNumber", [], { urls: opts?.urls });
   return Number(BigInt(hex));
 }
 
-export async function ethGetLogs(filter: {
-  address: string;
-  topics: (string | string[] | null)[];
-  fromBlock: string;
-  toBlock: string;
-}): Promise<
+/** ethBlockNumber over SERVER_DISPLAY_RPC_URLS — see ethCallDisplay. */
+export async function ethBlockNumberDisplay(): Promise<number> {
+  return ethBlockNumber({ urls: SERVER_DISPLAY_RPC_URLS });
+}
+
+export async function ethGetLogs(
+  filter: {
+    address: string;
+    topics: (string | string[] | null)[];
+    fromBlock: string;
+    toBlock: string;
+  },
+  opts?: { urls?: string[] }
+): Promise<
   Array<{
     topics: string[];
     data: string;
@@ -187,5 +343,15 @@ export async function ethGetLogs(filter: {
     logIndex: string;
   }>
 > {
-  return rpcCall("eth_getLogs", [filter], { timeoutMs: 12_000 });
+  return rpcCall("eth_getLogs", [filter], { timeoutMs: 12_000, urls: opts?.urls });
+}
+
+/** ethGetLogs over SERVER_DISPLAY_RPC_URLS — see ethCallDisplay. */
+export function ethGetLogsDisplay(filter: {
+  address: string;
+  topics: (string | string[] | null)[];
+  fromBlock: string;
+  toBlock: string;
+}): ReturnType<typeof ethGetLogs> {
+  return ethGetLogs(filter, { urls: SERVER_DISPLAY_RPC_URLS });
 }

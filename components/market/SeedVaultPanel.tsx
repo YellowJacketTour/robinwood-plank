@@ -17,16 +17,19 @@ import { shortVault } from "@/lib/market/vault-registry";
 import { getVaultOnChainSnapshot } from "@/lib/market/vault";
 import TreasuryBootstrap from "@/components/market/TreasuryBootstrap";
 import { formatTokenAmount } from "@/lib/trade";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 
 type Props = {
   account: string | null;
   onConnect: () => void;
+  /** False while the owning tab is mounted but off screen — pauses polling. */
+  active?: boolean;
 };
 
 /** On-chain treasury for V2 (immutable constructor arg) — same as MARKET_FEE_RECIPIENT. */
 const TREASURY = MARKET_FEE_RECIPIENT;
 
-export default function SeedVaultPanel({ account, onConnect }: Props) {
+export default function SeedVaultPanel({ account, onConnect, active = true }: Props) {
   const primary = MARKET_VAULT_ADDRESS;
   const [open, setOpen] = useState<boolean | null>(null);
   const [held, setHeld] = useState(0);
@@ -50,9 +53,9 @@ export default function SeedVaultPanel({ account, onConnect }: Props) {
 
   useEffect(() => {
     void refresh();
-    const t = setInterval(() => void refresh(), 12_000);
-    return () => clearInterval(t);
-  }, [refresh]);
+    const stop = active ? startVisibleInterval(() => void refresh(), 12_000) : null;
+    return () => stop?.();
+  }, [refresh, active]);
 
   if (!primary) return null;
   if (open === true) return null;
@@ -64,7 +67,7 @@ export default function SeedVaultPanel({ account, onConnect }: Props) {
   return (
     <div
       id="seed-v2"
-      className="wood-frame space-y-3 scroll-mt-24 overflow-hidden rounded-2xl border-2 border-gold-400/50 bg-wood-900/95 p-4 sm:p-5"
+      className="space-y-3 scroll-mt-24 overflow-hidden rounded-2xl border border-line bg-panel p-4 sm:p-5"
     >
       <div>
         <p className="text-[0.65rem] font-extrabold uppercase tracking-[0.18em] text-gold-300">
@@ -75,12 +78,12 @@ export default function SeedVaultPanel({ account, onConnect }: Props) {
         </h3>
         <p className="mt-2 text-sm text-foreground/75">
           Image picker + starting ETH only appear when the{" "}
-          <strong className="text-gold-300">treasury</strong> wallet is connected (same as V1). Scroll
+          <strong className="text-gold-300">treasury</strong> wallet is connected (same as Driftwood). Scroll
           to this gold card on <strong>Instant Swap</strong>.
         </p>
       </div>
 
-      <div className="rounded-lg border border-gold-500/25 bg-wood-950/90 px-3 py-2 font-mono text-[0.7rem] text-gold-200/90">
+      <div className="rounded-lg border border-line bg-panel-strong px-3 py-2 font-mono text-[0.7rem] text-gold-200/90">
         <a
           href={`${CHAIN.blockExplorers.default.url}/address/${primary}`}
           target="_blank"
@@ -112,7 +115,7 @@ export default function SeedVaultPanel({ account, onConnect }: Props) {
         <div className="space-y-2">
           <p className="text-sm text-foreground/70">
             Connect treasury{" "}
-            <code className="rounded bg-wood-950/90 px-1 font-mono text-xs break-all">{treasury}</code>
+            <code className="rounded bg-panel-strong px-1 font-mono text-xs break-all">{treasury}</code>
           </p>
           <button
             type="button"
@@ -136,7 +139,7 @@ export default function SeedVaultPanel({ account, onConnect }: Props) {
             <code className="break-all font-mono text-xs">{treasury}</code>
           </p>
           <p className="text-[0.8rem] text-amber-50/80">
-            In Rabby, switch to the treasury account (same one that seeded V1), then reconnect. The NFT
+            In Rabby, switch to the treasury account (same one that seeded Driftwood), then reconnect. The NFT
             image grid only unlocks for that address because <code className="font-mono">seedShares</code>{" "}
             is treasury-only on-chain.
           </p>
@@ -172,7 +175,7 @@ export default function SeedVaultPanel({ account, onConnect }: Props) {
         </button>
         {MARKET_VAULT_LEGACY_ADDRESS && (
           <span className="text-[0.65rem] text-foreground/35">
-            Legacy V1 stays at {shortVault(MARKET_VAULT_LEGACY_ADDRESS)}
+            Legacy Driftwood stays at {shortVault(MARKET_VAULT_LEGACY_ADDRESS)}
           </span>
         )}
       </div>

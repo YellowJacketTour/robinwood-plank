@@ -60,10 +60,19 @@ type EthereumProvider = Eip1193Provider & {
   ) => void;
 };
 
-declare global {
-  interface Window {
-    ethereum?: EthereumProvider;
-  }
+/**
+ * Read window.ethereum via a local cast rather than a global `declare
+ * global { interface Window { ethereum?: ... } }` augmentation. A global
+ * augmentation merges across the whole TS program and must match byte-for-
+ * byte with any other package's augmentation of the same member —
+ * @reown/appkit's own type declarations (pulled in transitively wherever
+ * lib/wallet-reown.ts's connect surface is imported) declare
+ * `Window.ethereum?: Record<string, unknown>`, which collides with the
+ * stricter type here. A local cast avoids the collision without changing
+ * behavior.
+ */
+function getInjectedEthereum(): EthereumProvider | undefined {
+  return (window as unknown as { ethereum?: EthereumProvider }).ethereum;
 }
 
 export type OwnedNft = {
@@ -892,31 +901,33 @@ export default function NftViewer() {
   }, []);
 
   useEffect(() => {
-    if (!window.ethereum) return;
+    const ethereum = getInjectedEthereum();
+    if (!ethereum) return;
     const handleAccounts = (...args: unknown[]) => {
       const accounts = Array.isArray(args[0]) ? (args[0] as string[]) : [];
       const next = accounts[0] ? getAddress(accounts[0]) : "";
       setConnectedAddress(next);
     };
-    window.ethereum.on?.("accountsChanged", handleAccounts);
-    return () => window.ethereum?.removeListener?.("accountsChanged", handleAccounts);
+    ethereum.on?.("accountsChanged", handleAccounts);
+    return () => ethereum.removeListener?.("accountsChanged", handleAccounts);
   }, []);
 
   async function connectWallet() {
     setMessage("");
-    if (!window.ethereum) {
+    const ethereum = getInjectedEthereum();
+    if (!ethereum) {
       setMessage("No wallet found — open in Robinhood Wallet or an EVM browser wallet.");
       return;
     }
     try {
-      const accounts = (await window.ethereum.request({
+      const accounts = (await ethereum.request({
         method: "eth_requestAccounts",
       })) as string[];
       if (!accounts[0]) {
         setMessage("No wallet account returned.");
         return;
       }
-      const provider = new BrowserProvider(window.ethereum);
+      const provider = new BrowserProvider(ethereum);
       const signer = await provider.getSigner();
       const next = getAddress(await signer.getAddress());
       setConnectedAddress(next);
@@ -1027,7 +1038,7 @@ export default function NftViewer() {
                   rel="noopener noreferrer"
                   className="font-bold text-gold-300 hover:text-gold-400"
                 >
-                  Contract ↗
+                  NFT contract ↗
                 </a>
               </div>
             </div>

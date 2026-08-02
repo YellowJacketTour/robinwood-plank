@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.inmotion.example
+!.env.docker.example
 
 # vercel
 .vercel
@@ -64,3 +66,7 @@ scripts/deploy-tool/wallet-bundle.js
 scripts/deploy-tool/package-lock.json
 scripts/deploy-tool/DrandBeacon.json
 scripts/deploy-tool/MarketplankVault.json
+.gstack/
+
+# V3 deploy output artifact (contains deployed address; regenerated per run)
+deploy-out/

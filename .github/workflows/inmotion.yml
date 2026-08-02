@@ -1,0 +1,937 @@
+name: InMotion Passenger CI/CD
+
+on:
+  pull_request:
+    branches:
+      - master
+      - inmotion
+  push:
+    branches:
+      - inmotion
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Deploy, provision/verify the drand relayer, set the admin allowlist, or install the vault-deploy dispatch token.
+        required: true
+        type: choice
+        default: deploy
+        options:
+          - deploy
+          - provision-relayer
+          - verify-relayer
+          - set-admin-allowlist
+          - set-dispatch-token
+      confirmation:
+        description: Relay-disable confirmation, when required.
+        required: false
+        type: string
+      admin_addresses:
+        description: >-
+          set-admin-allowlist only — comma-separated 0x wallets allowed to sign
+          /admin mutations. Empty uses the PLANK_ADMIN_ADDRESSES repo variable.
+        required: false
+        type: string
+
+concurrency:
+  group: inmotion-passenger-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      inputs.operation == 'deploy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: plank
+          POSTGRES_USER: plankapp
+          POSTGRES_PASSWORD: github-actions-postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U plankapp -d plank"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DEPLOYMENT_VERSION: ${{ github.sha }}
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGDATABASE: plank
+      PGUSER: plankapp
+      PGPASSWORD: github-actions-postgres
+      PGPOOL_MAX: 4
+      NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://plank.tanggang.life' }}
+      NEXT_PUBLIC_MARKET_ENABLED: ${{ vars.NEXT_PUBLIC_MARKET_ENABLED || 'true' }}
+      # As of 2026-08-01 V3 ("Premium Plank Liquidity") is live and the repo
+      # Variable NEXT_PUBLIC_MARKET_VAULT_ADDRESS points at it. V2/WormWood
+      # (0xc4B29D7a…) has a critical LP drain
+      # (docs/marketplank/AUDIT-2026-07-31-lp.md) and must never be
+      # recommended for new deposits or LP. The LIVE value comes from the
+      # repo Variable; the literal defaults below are only a CI safety
+      # fallback for if the Variable is ever unset — intentionally left at
+      # V1-only (never V2) rather than bumped to V3, so an unset Variable
+      # fails safe instead of silently reintroducing the live vault address
+      # into a build.
+      NEXT_PUBLIC_MARKET_VAULT_ADDRESS: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_ADDRESS || '0xb2019Fd4cA24502e812C0C73b751Fa49979BF708' }}
+      NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS || '' }}
+      NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES: ${{ vars.NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES || '' }}
+      NEXT_PUBLIC_MINT_START_AT: ${{ vars.NEXT_PUBLIC_MINT_START_AT }}
+      NEXT_PUBLIC_ROBINHOOD_RPC_URL: ${{ vars.NEXT_PUBLIC_ROBINHOOD_RPC_URL || 'https://rpc.mainnet.chain.robinhood.com' }}
+      NEXT_PUBLIC_RULES_RELAXED: ${{ vars.NEXT_PUBLIC_RULES_RELAXED || 'true' }}
+      NEXT_PUBLIC_TRADE_OPENS_AT: ${{ vars.NEXT_PUBLIC_TRADE_OPENS_AT || '2026-07-25T21:20:00.000Z' }}
+      NEXT_PUBLIC_TRADE_PAUSED: ${{ vars.NEXT_PUBLIC_TRADE_PAUSED || 'false' }}
+      NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${{ vars.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID }}
+      # Feature flags baked into the client bundle at build time. These are
+      # repository VARIABLES, not secrets — NEXT_PUBLIC_* values are readable
+      # in the shipped JS by design, so storing them as secrets would be
+      # false assurance. Default off; set the variable to 'true' to enable.
+      NEXT_PUBLIC_GASLESS_ENABLED: ${{ vars.NEXT_PUBLIC_GASLESS_ENABLED || 'false' }}
+      NEXT_PUBLIC_ZEROX_ENABLED: ${{ vars.NEXT_PUBLIC_ZEROX_ENABLED || 'false' }}
+      NEXT_PUBLIC_ZEROX_CROSSCHAIN_ENABLED: ${{ vars.NEXT_PUBLIC_ZEROX_CROSSCHAIN_ENABLED || 'false' }}
+      NEXT_PUBLIC_CROSSCHAIN_ENABLED: ${{ vars.NEXT_PUBLIC_CROSSCHAIN_ENABLED || 'false' }}
+      # 'reown' swaps the connect surface to AppKit; unset keeps the legacy
+      # WalletConnect QR modal. Off in production until dogfooded.
+      NEXT_PUBLIC_WALLET_UI: ${{ vars.NEXT_PUBLIC_WALLET_UI || '' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm install -g npm@11.6.2
+      - run: npm ci
+      - run: npm run lint:inmotion
+      - run: npx tsc --noEmit
+      - run: npm run db:migrate
+      - run: npm test
+      - run: npm run test:postgres
+      - run: npm run build
+      - run: npm run build:relayer
+      - run: npm run build:market-refresh
+
+      - name: Package standalone Passenger release
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .next/standalone/.next
+          cp -R public .next/standalone/public
+          cp -R .next/static .next/standalone/.next/static
+          mkdir -p .next/standalone/deploy/inmotion
+          cp -R deploy/inmotion/postgres .next/standalone/deploy/inmotion/postgres
+          cp deploy/inmotion/passenger.cjs .next/standalone/deploy/inmotion/passenger.cjs
+          mkdir -p .next/standalone/scripts
+          cp scripts/migrate-postgres.mjs .next/standalone/scripts/migrate-postgres.mjs
+          cp scripts/postgres-maintenance.mjs .next/standalone/scripts/postgres-maintenance.mjs
+          cp scripts/backup-postgres.mjs .next/standalone/scripts/backup-postgres.mjs
+          cp scripts/snapshot-vault-state.mjs .next/standalone/scripts/snapshot-vault-state.mjs
+          # Bundled by build:market-refresh — the standalone tree has no tsx,
+          # so the cron runs the esbuild output, same as the drand relayer.
+          test -s .next/standalone/scripts/refresh-market-data.mjs
+          test -s .next/standalone/ops/drand-relayer/relay-drand.mjs
+          cp scripts/verify-relayer-log.mjs .next/standalone/ops/drand-relayer/verify-log.mjs
+          tar -C .next/standalone -czf passenger-release.tgz .
+
+      - uses: actions/upload-artifact@v7
+        if: github.event_name != 'pull_request'
+        with:
+          name: passenger-${{ github.sha }}
+          path: passenger-release.tgz
+          if-no-files-found: error
+          retention-days: 14
+
+  deploy:
+    needs: build
+    if: >-
+      vars.INMOTION_DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL || 'https://plank.tanggang.life' }}
+      RELEASE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: passenger-${{ github.sha }}
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Upload immutable release
+        env:
+          UNISWAP_API_KEY: ${{ secrets.UNISWAP_API_KEY }}
+          RPC_URL: ${{ secrets.RPC_URL }}
+          ZEROX_API_KEY: ${{ secrets.ZEROX_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${#UNISWAP_API_KEY}" -ge 16
+          port="${INMOTION_PORT:-2222}"
+
+          # Retry SSH/SCP. A deploy has failed on `scp: Connection closed`
+          # (exit 255) with the box under load average 36 — a dropped
+          # connection, not a bad artifact, yet it failed the whole deploy and
+          # left production a commit behind. These are idempotent: the upload
+          # writes to a SHA-named path and the mkdir is -p.
+          retry() {
+            local attempt
+            for attempt in 1 2 3; do
+              if "$@"; then return 0; fi
+              echo "::warning::transfer attempt $attempt failed, retrying in $((attempt * 10))s"
+              sleep $((attempt * 10))
+            done
+            echo "::error::transfer failed after 3 attempts"
+            return 1
+          }
+
+          runtime_secret="$RUNNER_TEMP/uniswap-api-key"
+          umask 077
+          printf '%s' "$UNISWAP_API_KEY" > "$runtime_secret"
+          retry ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            "mkdir -p '$INMOTION_APP_DIR/incoming' '$INMOTION_APP_DIR/shared/runtime-secrets' && chmod 700 '$INMOTION_APP_DIR/shared/runtime-secrets'"
+          retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+            passenger-release.tgz \
+            "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/incoming/${RELEASE_SHA}.tgz"
+          retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+            "$runtime_secret" \
+            "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.uniswap-api-key.${RELEASE_SHA}"
+          rm -f "$runtime_secret"
+          # Private RPC provider (Alchemy) — optional secret; staged like the
+          # Uniswap key (file over scp, never argv) and upserted into the
+          # runtime env during activation. Absent secret = keep whatever the
+          # server env already has (public-RPC fallback keeps working).
+          if [ -n "${RPC_URL:-}" ]; then
+            rpc_secret="$RUNNER_TEMP/rpc-url"
+            printf '%s' "$RPC_URL" > "$rpc_secret"
+            retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+              "$rpc_secret" \
+              "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.rpc-url.${RELEASE_SHA}"
+            rm -f "$rpc_secret"
+          fi
+          # 0x aggregator key — optional secret, staged exactly like RPC_URL
+          # (file over scp, never argv). Absent secret = 0x features stay
+          # disabled server-side; the Uniswap path is unaffected.
+          if [ -n "${ZEROX_API_KEY:-}" ]; then
+            zerox_secret="$RUNNER_TEMP/zerox-api-key"
+            printf '%s' "$ZEROX_API_KEY" > "$zerox_secret"
+            retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+              "$zerox_secret" \
+              "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.zerox-api-key.${RELEASE_SHA}"
+            rm -f "$zerox_secret"
+          fi
+
+      - name: Migrate, activate, and restart Passenger
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$RELEASE_SHA" "$INMOTION_NODE_BIN" <<'REMOTE'
+          set -euo pipefail
+          trap 'status=$?; echo "Remote activation failed at line $LINENO (exit $status)" >&2; exit "$status"' ERR
+          app_dir="$1"
+          release_sha="$2"
+          node_bin="$3"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected INMOTION_APP_DIR: $app_dir" >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+          test -f "$app_dir/shared/.env.production"
+          staged_uniswap_key="$app_dir/shared/runtime-secrets/.uniswap-api-key.$release_sha"
+          test -s "$staged_uniswap_key"
+          chmod 600 "$staged_uniswap_key"
+          mv -f "$staged_uniswap_key" "$app_dir/shared/runtime-secrets/uniswap-api-key"
+          chmod 600 "$app_dir/shared/runtime-secrets/uniswap-api-key"
+          # Optional staged RPC_URL: upsert into the runtime env (replace any
+          # existing RPC_URL line, then append the staged value). Idempotent;
+          # skipped entirely when no file was staged for this release.
+          staged_rpc_url="$app_dir/shared/runtime-secrets/.rpc-url.$release_sha"
+          if [ -s "$staged_rpc_url" ]; then
+            env_file="$app_dir/shared/.env.production"
+            grep -v '^RPC_URL=' "$env_file" > "$env_file.next" || true
+            printf 'RPC_URL=%s\n' "$(cat "$staged_rpc_url")" >> "$env_file.next"
+            chmod 600 "$env_file.next"
+            mv -f "$env_file.next" "$env_file"
+            rm -f "$staged_rpc_url"
+          fi
+          # Same upsert for the optional 0x key.
+          staged_zerox_key="$app_dir/shared/runtime-secrets/.zerox-api-key.$release_sha"
+          if [ -s "$staged_zerox_key" ]; then
+            env_file="$app_dir/shared/.env.production"
+            grep -v '^ZEROX_API_KEY=' "$env_file" > "$env_file.next" || true
+            printf 'ZEROX_API_KEY=%s\n' "$(cat "$staged_zerox_key")" >> "$env_file.next"
+            chmod 600 "$env_file.next"
+            mv -f "$env_file.next" "$env_file"
+            rm -f "$staged_zerox_key"
+          fi
+          release_dir="$app_dir/releases/$release_sha"
+          mkdir -p "$release_dir" "$app_dir/shared" "$app_dir/tmp" "$app_dir/logs"
+          tar -xzf "$app_dir/incoming/$release_sha.tgz" -C "$release_dir"
+          test -f "$release_dir/server.js"
+          test -f "$release_dir/scripts/migrate-postgres.mjs"
+          test -f "$release_dir/scripts/backup-postgres.mjs"
+
+          # Back up BEFORE migrating. Migrations are append-only, but a bad
+          # one — or a hand-run query afterwards — is otherwise unrecoverable,
+          # and a normal deploy would otherwise apply schema changes with no
+          # rollback point. This fails the deploy if it cannot produce a
+          # non-empty dump.
+          if ! command -v pg_dump >/dev/null 2>&1; then
+            echo "pg_dump not found on the server - cannot take a pre-migration backup." >&2
+            exit 1
+          fi
+          INMOTION_APP_DIR="$app_dir" \
+          PLANK_BACKUP_DIR="$app_dir/shared/backups" \
+          PLANK_BACKUP_LABEL="predeploy" \
+          PLANK_BACKUP_KEEP=14 \
+            "$node_bin" \
+              --env-file="$app_dir/shared/.env.production" \
+              "$release_dir/scripts/backup-postgres.mjs"
+
+          "$node_bin" \
+            --env-file="$app_dir/shared/.env.production" \
+            "$release_dir/scripts/migrate-postgres.mjs"
+
+          if [ -L "$app_dir/current" ]; then
+            readlink "$app_dir/current" > "$app_dir/.previous-release"
+          else
+            : > "$app_dir/.previous-release"
+          fi
+          cp "$release_dir/deploy/inmotion/passenger.cjs" "$app_dir/passenger.cjs"
+          cp "$release_dir/deploy/inmotion/passenger.cjs" "$app_dir/passenger.js"
+          rm -f "$app_dir/current.next"
+          ln -s "releases/$release_sha" "$app_dir/current.next"
+          mv -Tf "$app_dir/current.next" "$app_dir/current"
+          rm -f "$app_dir/incoming/$release_sha.tgz"
+          touch "$app_dir/tmp/restart.txt"
+          REMOTE
+
+      - name: Verify public health or roll back
+        shell: bash
+        run: |
+          set -euo pipefail
+          healthy=false
+          health_body=""
+          trade_body=""
+          market_body=""
+          market_deployment=""
+          for attempt in $(seq 1 36); do
+            if health_body="$(
+                 curl --fail --silent --show-error \
+                   --connect-timeout 5 --max-time 15 \
+                   --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                   --header "Accept: application/json" \
+                   --header "Cache-Control: no-cache" \
+                   --header "Pragma: no-cache" \
+                   "$INMOTION_HEALTH_URL/api/health?deployment=$RELEASE_SHA&attempt=$attempt"
+                )" &&
+               trade_body="$(
+                 curl --fail --silent --show-error \
+                   --connect-timeout 5 --max-time 15 \
+                   --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                   --header "Accept: application/json" \
+                   --header "Cache-Control: no-cache" \
+                   --header "Pragma: no-cache" \
+                   "$INMOTION_HEALTH_URL/api/trade/status?deployment=$RELEASE_SHA&attempt=$attempt"
+               )" &&
+               [[ "$health_body" == *'"ok":true'* ]] &&
+               [[ "$health_body" == *'"storage":"postgres"'* ]] &&
+               [[ "$health_body" == *"\"version\":\"$RELEASE_SHA\""* ]] &&
+               [[ "$trade_body" == *'"tradingApiConfigured":true'* ]] &&
+               market_body="$(
+                 curl --fail --silent --show-error \
+                   --connect-timeout 5 --max-time 15 \
+                   --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                   --header "Accept: text/html" \
+                   --header "Cache-Control: no-cache" \
+                   --header "Pragma: no-cache" \
+                   "$INMOTION_HEALTH_URL/market?tab=swap"
+               )" &&
+               market_deployment="$(
+                 printf '%s' "$market_body" |
+                   grep -o 'data-deployment="[^"]*"' |
+                   head -n 1 || true
+               )" &&
+               [[ "$market_deployment" == "data-deployment=\"$RELEASE_SHA\"" ]]; then
+              healthy=true
+              break
+            fi
+            sleep 5
+          done
+          if [ "$healthy" = true ]; then
+            exit 0
+          fi
+
+          echo "::error::Public deployment verification did not observe release $RELEASE_SHA after 36 attempts."
+          echo "Last public health response: $health_body"
+          echo "Last public trade status response: $trade_body"
+          echo "Last canonical market deployment marker: ${market_deployment:-missing}"
+
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          previous="$(cat "$app_dir/.previous-release")"
+          if [ -n "$previous" ]; then
+            rm -f "$app_dir/current.rollback"
+            ln -s "$previous" "$app_dir/current.rollback"
+            mv -Tf "$app_dir/current.rollback" "$app_dir/current"
+            touch "$app_dir/tmp/restart.txt"
+            echo "Deployment health check failed; previous release restored." >&2
+          else
+            echo "Deployment health check failed; no previous release exists." >&2
+          fi
+          REMOTE
+          exit 1
+
+  provision-relayer:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'provision-relayer'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      RELAYER_PRIVATE_KEY: ${{ secrets.RELAYER_PRIVATE_KEY }}
+    steps:
+      - name: Validate relayer and SSH inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELAYER_PRIVATE_KEY" =~ ^0x[0-9a-fA-F]{64}$ ]]
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_SSH_KEY"
+          test -n "$INMOTION_HOST_KEY"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Transfer cron-only key and repoint cPanel cron
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          relayer_env="$RUNNER_TEMP/relayer.env"
+          {
+            printf 'RELAYER_PRIVATE_KEY=%s\n' "$RELAYER_PRIVATE_KEY"
+            printf 'RPC_URL=%s\n' 'https://rpc.mainnet.chain.robinhood.com'
+            printf 'BEACON_ADDRESS=%s\n' '0x87d584df130FED0Fe540954eD48CE2691A18D619'
+            printf 'DRAND_CHAIN_HASH=%s\n' '04f1e9062b8a81f848fded9c12306733282b2727ecced50032187751166ec8c3'
+            printf 'VAULT_ADDRESSES=%s\n' '0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04,0xb2019Fd4cA24502e812C0C73b751Fa49979BF708'
+          } > "$relayer_env"
+          port="${INMOTION_PORT:-2222}"
+          staged="$INMOTION_APP_DIR/shared/runtime-secrets/.relayer-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.env"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            "mkdir -p '$INMOTION_APP_DIR/shared/runtime-secrets' && chmod 700 '$INMOTION_APP_DIR/shared/runtime-secrets'"
+          scp -i "$HOME/.ssh/inmotion" -P "$port" \
+            "$relayer_env" "${INMOTION_USER}@${INMOTION_HOST}:${staged}"
+          rm -f "$relayer_env"
+
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "$staged" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          staged="$3"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          cleanup() { rm -f "$staged"; }
+          trap cleanup EXIT
+          test -x "$node_bin"
+          test -s "$staged"
+          artifact="$app_dir/current/ops/drand-relayer/relay-drand.mjs"
+          verifier="$app_dir/current/ops/drand-relayer/verify-log.mjs"
+          test -s "$artifact"
+          test -s "$verifier"
+          if grep -q '^RELAYER_PRIVATE_KEY=' "$app_dir/shared/.env.production"; then
+            echo "RELAYER_PRIVATE_KEY must not be in Passenger .env.production." >&2
+            exit 1
+          fi
+
+          secret_dir="$app_dir/shared/runtime-secrets"
+          secret_file="$secret_dir/relayer.env"
+          logs_dir="$app_dir/logs"
+          log_file="$logs_dir/drand-relayer.log"
+          lock_file="$app_dir/shared/drand-relayer.lock"
+          mkdir -p "$secret_dir" "$logs_dir"
+          chmod 700 "$secret_dir"
+          chmod 700 "$logs_dir"
+          chmod 600 "$staged"
+          mv -f "$staged" "$secret_file"
+          chmod 600 "$secret_file"
+          touch "$log_file"
+          chmod 600 "$log_file"
+          flock_bin="$(command -v flock)"
+          test -x "$flock_bin"
+
+          "$flock_bin" -w 55 "$lock_file" \
+            "$node_bin" --env-file="$secret_file" "$artifact" \
+            >> "$log_file" 2>&1
+          "$node_bin" "$verifier" \
+            --require-hours=0 --max-age-minutes=10 "$log_file"
+
+          cron_before="$(mktemp)"
+          cron_after="$(mktemp)"
+          trap 'rm -f "$staged" "$cron_before" "$cron_after"' EXIT
+          crontab -l > "$cron_before" 2>/dev/null || true
+          old_relay_count="$(grep -Ec 'relay-drand|drand-relayer' "$cron_before" || true)"
+          awk '!/plank-drand-relayer/ && !/relay-drand/ && !/drand-relayer/' \
+            "$cron_before" > "$cron_after"
+          {
+            printf '%s\n' '# plank-drand-relayer (managed by inmotion branch)'
+            printf '* * * * * %s -n %s %s --env-file=%s %s >> %s 2>&1\n' \
+              "$flock_bin" "$lock_file" "$node_bin" "$secret_file" \
+              "$artifact" "$log_file"
+          } >> "$cron_after"
+          crontab "$cron_after"
+          managed_count="$(crontab -l | grep -c 'plank-drand-relayer' || true)"
+          test "$managed_count" -eq 1
+          test "$(stat -c '%a' "$secret_dir")" = "700"
+          test "$(stat -c '%a' "$secret_file")" = "600"
+
+          status_before="$(grep -c 'RELAYER_STATUS=' "$log_file" || true)"
+          cron_observed=false
+          for attempt in $(seq 1 18); do
+            sleep 5
+            status_after="$(grep -c 'RELAYER_STATUS=' "$log_file" || true)"
+            if [ "$status_after" -gt "$status_before" ]; then
+              cron_observed=true
+              break
+            fi
+          done
+          test "$cron_observed" = "true"
+          "$node_bin" "$verifier" \
+            --require-hours=0 --max-age-minutes=10 "$log_file"
+          echo "RELAYER_PROVISIONED={\"oldRelayLines\":$old_relay_count,\"managedEntries\":$managed_count}"
+          tail -n 3 "$log_file"
+          REMOTE
+
+  verify-relayer:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'verify-relayer'
+    permissions:
+      actions: write
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Validate disable confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CONFIRMATION" = "DISABLE_GITHUB_RELAY"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Verify 24 hours of InMotion relay health
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          secret_dir="$app_dir/shared/runtime-secrets"
+          secret_file="$secret_dir/relayer.env"
+          artifact="$app_dir/current/ops/drand-relayer/relay-drand.mjs"
+          verifier="$app_dir/current/ops/drand-relayer/verify-log.mjs"
+          log_file="$app_dir/logs/drand-relayer.log"
+          lock_file="$app_dir/shared/drand-relayer.lock"
+          test "$(stat -c '%a' "$secret_dir")" = "700"
+          test "$(stat -c '%a' "$secret_file")" = "600"
+          test -s "$artifact"
+          test -s "$verifier"
+          test "$(crontab -l | grep -c 'plank-drand-relayer')" -eq 1
+          flock_bin="$(command -v flock)"
+          "$flock_bin" -w 55 "$lock_file" \
+            "$node_bin" --env-file="$secret_file" "$artifact" \
+            >> "$log_file" 2>&1
+          "$node_bin" "$verifier" \
+            --require-hours=24 --max-age-minutes=10 "$log_file"
+          REMOTE
+
+      - name: Disable the GitHub scheduled relay
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method PUT \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/relay-drand.yml/disable"
+          state="$(
+            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/relay-drand.yml" \
+              --jq '.state'
+          )"
+          test "$state" = "disabled_manually"
+          echo "GitHub relay workflow disabled after verified InMotion takeover."
+
+  # ---------------------------------------------------------------------------
+  # Runtime admin allowlist.
+  #
+  # PLANK_ADMIN_ADDRESSES gates every /admin mutation. It is read per request,
+  # not baked into the bundle, so it lives in the server's shared/.env.production
+  # rather than the build env — and CI otherwise never touches that file.
+  #
+  # This job exists so the allowlist can be changed without anyone holding a
+  # shell on the box: the deploy key stays a secret the workflow uses and no
+  # human reads. The addresses themselves are public on-chain wallets, so they
+  # come from a repository variable (or a dispatch input), not a secret.
+  #
+  # The remote script rewrites in place rather than appending: a second
+  # PLANK_ADMIN_ADDRESSES= line would silently shadow the first, which is the
+  # kind of bug that only shows up as "why is my wallet still rejected".
+  # ---------------------------------------------------------------------------
+  admin-allowlist:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'set-admin-allowlist'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      ADMIN_ADDRESSES: ${{ inputs.admin_addresses || vars.PLANK_ADMIN_ADDRESSES }}
+    steps:
+      - name: Validate the allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ADMIN_ADDRESSES"
+          # Comma-separated 0x addresses, nothing else. This string is written
+          # into an env file the server sources, so anything unexpected in it
+          # is a shell-injection question, not a formatting one.
+          printf '%s' "$ADMIN_ADDRESSES" \
+            | grep -Eq '^0x[0-9a-fA-F]{40}(,0x[0-9a-fA-F]{40})*$'
+          echo "Allowlist entries: $(printf '%s\n' "$ADMIN_ADDRESSES" | tr ',' '\n' | wc -l)"
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_APP_DIR"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Apply the allowlist and restart Passenger
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$ADMIN_ADDRESSES" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          addresses="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+
+          # This file also holds the PostgreSQL password. Keep a timestamped
+          # copy before touching it, and never write it in place — build the
+          # replacement beside it and move it over atomically, so an
+          # interrupted run cannot leave the app with a half-written config.
+          backup="$env_file.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+          cp -p "$env_file" "$backup"
+          chmod 600 "$backup"
+
+          tmp="$env_file.next.$$"
+          grep -v '^[[:space:]]*PLANK_ADMIN_ADDRESSES=' "$env_file" > "$tmp"
+          printf 'PLANK_ADMIN_ADDRESSES=%s\n' "$addresses" >> "$tmp"
+          chmod 600 "$tmp"
+          mv -f "$tmp" "$env_file"
+
+          # Prove exactly one definition survived, and that it is ours.
+          test "$(grep -c '^PLANK_ADMIN_ADDRESSES=' "$env_file")" -eq 1
+          test "$(grep '^PLANK_ADMIN_ADDRESSES=' "$env_file")" \
+             = "PLANK_ADMIN_ADDRESSES=$addresses"
+          # The password line must still be there — a botched rewrite that
+          # dropped it would take the site down on restart.
+          test "$(grep -c '^PGPASSWORD=' "$env_file")" -eq 1
+
+          touch "$app_dir/tmp/restart.txt"
+          echo "Admin allowlist applied; backup kept at $backup"
+          REMOTE
+
+      - name: Confirm the app came back up
+        shell: bash
+        env:
+          INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          url="${INMOTION_HEALTH_URL:-https://plank.love}"
+          for attempt in $(seq 1 20); do
+            # Same headers the deploy job's health check uses. A bare curl
+            # user-agent is refused at the edge, which reads as an outage when
+            # the app is in fact serving perfectly well.
+            code="$(
+              curl -sS -o /dev/null -w '%{http_code}' \
+                --connect-timeout 5 --max-time 15 \
+                --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                --header "Accept: application/json" \
+                --header "Cache-Control: no-cache" \
+                "$url/api/health?attempt=$attempt" || true
+            )"
+            if [ "$code" = "200" ]; then
+              echo "Healthy after restart (attempt $attempt)."
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::App did not return 200 from $url/api/health after the restart."
+          echo "The previous .env.production is on the server as .env.production.bak.*"
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # Vault-deploy dispatch token.
+  #
+  # GITHUB_DISPATCH_TOKEN is what /admin's vault deploy card uses to fire the
+  # Deploy MarketplankVaultV3 workflow. It is read per request at runtime, so
+  # like PLANK_ADMIN_ADDRESSES it lives in the server's shared/.env.production
+  # and not in the build env — a value baked into the bundle would be a
+  # credential sitting in the release tarball.
+  #
+  # This job exists because a GitHub Actions secret cannot be read back by
+  # anyone — not the UI, not the API, not a person with admin rights. Only a
+  # job running inside Actions can see its value. So this is the one path that
+  # gets the token onto the box without a human copying a credential through a
+  # terminal, a clipboard, or a chat window.
+  #
+  # Same in-place rewrite as the allowlist: a second GITHUB_DISPATCH_TOKEN=
+  # line would silently shadow the first. The value is never echoed — it is
+  # piped over stdin, not passed as an argument, so it cannot surface in the
+  # remote host's process list either.
+  # ---------------------------------------------------------------------------
+  dispatch-token:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'set-dispatch-token'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      # NOTE THE NAMES. GitHub reserves the GITHUB_ prefix for secrets and
+      # variables — you cannot create one called GITHUB_DISPATCH_TOKEN, the
+      # API rejects it. So the CI-side names are VAULT_DISPATCH_*, and this
+      # job writes them to the server under the GITHUB_DISPATCH_* names the
+      # application actually reads. The two namespaces are deliberately
+      # different; do not "fix" one to match the other.
+      DISPATCH_TOKEN: ${{ secrets.VAULT_DISPATCH_TOKEN }}
+      DISPATCH_REPO: ${{ vars.VAULT_DISPATCH_REPO }}
+      DISPATCH_REF: ${{ vars.VAULT_DISPATCH_REF }}
+    steps:
+      - name: Validate the token is present and well formed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${DISPATCH_TOKEN:-}" ]; then
+            echo "::error::secrets.VAULT_DISPATCH_TOKEN is not set. Note the name: GitHub refuses any secret starting with GITHUB_, so the app's GITHUB_DISPATCH_TOKEN is stored here as VAULT_DISPATCH_TOKEN."
+            exit 1
+          fi
+          # Shape only, never the value. A fine-grained PAT is github_pat_*;
+          # a classic one is ghp_*. Anything else is probably a paste error,
+          # and a bad token silently disables the deploy card rather than
+          # failing loudly, so catch it here.
+          case "$DISPATCH_TOKEN" in
+            github_pat_*|ghp_*) ;;
+            *) echo "::error::Token does not look like a GitHub PAT (expected github_pat_* or ghp_*)."; exit 1 ;;
+          esac
+          # An env file is parsed line by line; a newline in the value would
+          # truncate it and leave the rest as a stray line.
+          case "$DISPATCH_TOKEN" in
+            *[$'\n\r']*) echo "::error::Token contains a newline."; exit 1 ;;
+          esac
+          echo "Token present, ${#DISPATCH_TOKEN} characters."
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_APP_DIR"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Install the token and restart Passenger
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          # The token goes over stdin, NOT as an argument — arguments are
+          # visible in ps output on the remote host for the life of the call.
+          # The repo/ref are non-secret and passed normally.
+          printf '%s\n' "$DISPATCH_TOKEN" | ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "${DISPATCH_REPO:-}" "${DISPATCH_REF:-}" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          repo="$2"
+          ref="$3"
+          IFS= read -r token
+          test -n "$token"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+
+          # Same discipline as the allowlist job: this file also holds the
+          # PostgreSQL password, so back it up, build the replacement beside
+          # it, and move it over atomically.
+          backup="$env_file.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+          cp -p "$env_file" "$backup"
+          chmod 600 "$backup"
+
+          tmp="$env_file.next.$$"
+          grep -v '^[[:space:]]*GITHUB_DISPATCH_TOKEN=' "$env_file" \
+            | grep -v '^[[:space:]]*GITHUB_DISPATCH_REPO=' \
+            | grep -v '^[[:space:]]*GITHUB_DISPATCH_REF=' > "$tmp"
+          printf 'GITHUB_DISPATCH_TOKEN=%s\n' "$token" >> "$tmp"
+          [ -n "$repo" ] && printf 'GITHUB_DISPATCH_REPO=%s\n' "$repo" >> "$tmp"
+          [ -n "$ref" ] && printf 'GITHUB_DISPATCH_REF=%s\n' "$ref" >> "$tmp"
+          chmod 600 "$tmp"
+          mv -f "$tmp" "$env_file"
+
+          # Exactly one definition survived. Compare lengths, never contents —
+          # echoing the line would put the token in the Actions log.
+          test "$(grep -c '^GITHUB_DISPATCH_TOKEN=' "$env_file")" -eq 1
+          # The password line must still be there — a botched rewrite that
+          # dropped it would take the site down on restart.
+          test "$(grep -c '^PGPASSWORD=' "$env_file")" -eq 1
+
+          touch "$app_dir/tmp/restart.txt"
+          echo "Dispatch token installed; backup kept at $backup"
+          REMOTE
+
+      - name: Confirm the app came back up and the card reports configured
+        shell: bash
+        env:
+          INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          url="${INMOTION_HEALTH_URL:-https://plank.love}"
+          for attempt in $(seq 1 20); do
+            code="$(
+              curl -sS -o /dev/null -w '%{http_code}' \
+                --connect-timeout 5 --max-time 15 \
+                --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                --header "Accept: application/json" \
+                --header "Cache-Control: no-cache" \
+                "$url/api/health?attempt=$attempt" || true
+            )"
+            if [ "$code" = "200" ]; then
+              echo "Healthy after restart (attempt $attempt)."
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::App did not return 200 from $url/api/health after the restart."
+          echo "The previous .env.production is on the server as .env.production.bak.*"
+          exit 1

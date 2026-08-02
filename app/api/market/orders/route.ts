@@ -1,4 +1,5 @@
-import { CHAIN, MARKET_OFFER_CURRENCY } from "@/lib/constants";
+import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
+import { ethCallFree } from "@/lib/market/fetch-rpc";
 import { getCollection } from "@/lib/market/collections";
 import { resolveTokenImage } from "@/lib/market/token-image";
 import {
@@ -11,9 +12,10 @@ import {
   putOffer,
   removeListing,
   removeOffer,
+  retireOrder,
   totalOrderCount,
 } from "@/lib/market/orders-store";
-import { getOrderLiveness, filterLiveOrders, computeOrderHash } from "@/lib/market/order-status";
+import { getOrderLiveness, splitLiveOrders, computeOrderHash } from "@/lib/market/order-status";
 import { markOrderServed } from "@/lib/market/served-orders";
 import { verifyOrderSignature } from "@/lib/market/signature";
 import { getVerifiedCriteriaTokenIds } from "@/lib/market/trait-index";
@@ -77,14 +79,82 @@ export async function GET(req: Request) {
 
   const items =
     kind === "offer" ? await getOffers(collectionSlug) : await getListings(collectionSlug);
-  // Drop orders that are dead on-chain (cancelled / filled / counter-advanced)
-  // so users never click a listing that is guaranteed to revert. Cached
-  // server-side; unknown-liveness rows are kept rather than hiding the whole
-  // book during an RPC outage (audit finding 4).
-  const live = await filterLiveOrders(
+  // Drop orders that are dead on-chain (cancelled / filled / counter-advanced /
+  // seller no longer holds or approves the token) so users never click a
+  // listing that is guaranteed to revert. Cached server-side; unknown-liveness
+  // rows are kept rather than hiding the whole book during an RPC outage
+  // (audit finding 4).
+  const { live, dead } = await splitLiveOrders(
     items as Array<{ id?: string; rawOrder?: unknown }>
   );
-  return publicJson({ kind, items: live });
+
+  // Retire them for good rather than hiding them on every request. Hiding alone
+  // meant a seller who reacquired the token would have a stale listing silently
+  // reappear at its old price. Fire-and-forget: the response must not wait on a
+  // write, and a failed retirement just means we hide it again next time.
+  for (const { item, reason } of dead) {
+    if (!item.id) continue;
+    void retireOrder(item.id).catch(() => {
+      /* retried on the next read */
+    });
+    console.info(`[orders] retired ${item.id} (${reason})`);
+  }
+
+  // Listings only. Offers stay ours alone — a foreign offer is not something a
+  // holder can accept from here, so surfacing one would be a dead end.
+  if (kind === "offer") return publicJson({ kind, items: live });
+
+  const { readOpenSeaListings } = await import("@/lib/market/opensea");
+  const { mergeBook } = await import("@/lib/market/book");
+  const foreign = await readOpenSeaListings().catch(() => []);
+
+  // Serve foreign listings OUR artwork. The collection image map already holds
+  // every token, built by the cron from Blockscout + IPFS, so there is no
+  // reason to depend on OpenSea for a picture we own — and without it every
+  // OpenSea row falls back to the collection logo and the grid looks broken.
+  let imageByTokenId: Record<string, string> | undefined;
+  if (foreign.length > 0) {
+    try {
+      const { getCollectionImageMap } = await import("@/lib/market/collection-index");
+      const { NFT_CONTRACT_ADDRESS } = await import("@/lib/mint-contract");
+      const { resolveIpfsUrl } = await import("@/lib/ipfs");
+      const map = await getCollectionImageMap(NFT_CONTRACT_ADDRESS);
+      // The index stores the RAW `ipfs://…` URI. A browser cannot load that, and
+      // a raw gateway URL in <img src> is blocked by ORB — so resolve to our
+      // same-origin proxy path here, exactly like our own listings do. Skipping
+      // this is what left every OpenSea row with a blank card in production.
+      // resolveIpfsUrl is idempotent, so an already-proxied value passes through.
+      imageByTokenId = Object.fromEntries(
+        Object.entries(map ?? {}).map(([id, rec]) => [
+          id,
+          rec?.imageUri ? resolveIpfsUrl(rec.imageUri) : "",
+        ])
+      );
+    } catch {
+      // No index yet — cards fall back to the collection logo, as before.
+    }
+  }
+
+  const merged = mergeBook(
+    live as unknown as import("@/lib/market/types").Listing[],
+    foreign,
+    collectionSlug ?? "robinwood",
+    imageByTokenId
+  );
+
+  // Normalise EVERY row's image, not just the ones the index supplied. Our own
+  // listings carry whatever imageUrl was resolved when they were signed, and
+  // some older rows stored a raw `https://gateway.pinata.cloud/…` URL — which
+  // renders today but bypasses our proxy, so it is exposed to ORB and to that
+  // gateway's uptime and rate limits. Measured on production: 2 of 61 rows.
+  // resolveIpfsUrl is idempotent, so already-proxied rows pass through
+  // untouched and this cannot double-wrap.
+  const { resolveIpfsUrl } = await import("@/lib/ipfs");
+  for (const item of merged) {
+    if (item.imageUrl) item.imageUrl = resolveIpfsUrl(item.imageUrl);
+  }
+
+  return publicJson({ kind, items: merged });
 }
 
 /**
@@ -196,20 +266,14 @@ async function ownsToken(
 ): Promise<boolean> {
   try {
     const idHex = BigInt(tokenId).toString(16).padStart(64, "0");
-    const res = await fetch(CHAIN.rpcUrls.default, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "eth_call",
-        params: [{ to: contractAddress, data: `0x6352211e${idHex}` }, "latest"], // ownerOf
-      }),
-      cache: "no-store",
-    });
-    const data = (await res.json()) as { result?: string };
-    if (!data.result || data.result.length < 66) return false;
-    const owner = `0x${data.result.slice(-40)}`;
+    // Free endpoints only, but with failover and caching — this used to post to
+    // a single hardcoded public URL, so one endpoint hiccuping meant a real
+    // owner could not list (the fail-closed branch below). It stays off the
+    // metered provider deliberately: a security read must not be able to
+    // escalate onto a paid endpoint under load.
+    const result = await ethCallFree(contractAddress, `0x6352211e${idHex}`); // ownerOf
+    if (!result || result.length < 66) return false;
+    const owner = `0x${result.slice(-40)}`;
     return owner.toLowerCase() === maker.toLowerCase();
   } catch {
     // FAIL CLOSED (audit finding 5). Previously this returned `true` on any RPC

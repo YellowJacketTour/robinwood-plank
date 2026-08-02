@@ -20,8 +20,16 @@
   "workers_dev": true,
   "vars": {
     "NEXT_PUBLIC_MARKET_ENABLED": "true",
-    "NEXT_PUBLIC_MARKET_VAULT_ADDRESS": "0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04",
-    "NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS": "0xb2019Fd4cA24502e812C0C73b751Fa49979BF708",
+    // As of 2026-08-01 V3 ("Premium Plank Liquidity") is live and the repo
+    // Variable NEXT_PUBLIC_MARKET_VAULT_ADDRESS points at it; V2/WormWood
+    // (0xc4B29D7a…) has a critical LP drain and must never be recommended for
+    // new deposits or LP. This Cloudflare Worker path is not the active
+    // deployment target (see docs/INMOTION_DEPLOYMENT.md) — the value below
+    // is left as the old V1-only fallback rather than updated in lockstep;
+    // do not rely on it without checking which deploy path is live first.
+    "NEXT_PUBLIC_MARKET_VAULT_ADDRESS": "0xb2019Fd4cA24502e812C0C73b751Fa49979BF708",
+    "NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESS": "",
+    "NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES": "",
     "OPEN_NEXT_CLOUDFLARE": "1"
   },
   "preview_urls": true,

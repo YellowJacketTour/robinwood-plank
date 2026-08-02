@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from "react";
 import type { VaultStats } from "@/lib/market/useVaultLive";
+import { startVisibleInterval } from "@/lib/useVisibleInterval";
 
 export type VaultBookState = {
   stats: VaultStats | null;
@@ -19,7 +20,11 @@ export type VaultBookState = {
 
 const FRESH_MS = 45_000;
 
-export function useVaultBook(vaultAddress: string | null | undefined): VaultBookState {
+export function useVaultBook(
+  vaultAddress: string | null | undefined,
+  options?: { active?: boolean }
+): VaultBookState {
+  const active = options?.active ?? true;
   const addr = vaultAddress && /^0x[0-9a-fA-F]{40}$/.test(vaultAddress) ? vaultAddress : null;
   const [stats, setStats] = useState<VaultStats | null>(null);
   const [live, setLive] = useState(false);
@@ -67,12 +72,14 @@ export function useVaultBook(vaultAddress: string | null | undefined): VaultBook
     };
 
     void load();
-    const t = setInterval(() => void load(), 12_000);
+    // Repeat cadence only while the page is visible and the owning tab is on
+    // screen; the initial load above always runs so state is never empty.
+    const stop = active ? startVisibleInterval(() => void load(), 12_000) : null;
     return () => {
       cancelled = true;
-      clearInterval(t);
+      stop?.();
     };
-  }, [addr]);
+  }, [addr, active]);
 
   return {
     stats: tracked === addr ? stats : null,

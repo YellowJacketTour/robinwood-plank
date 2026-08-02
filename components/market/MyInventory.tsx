@@ -11,18 +11,14 @@ import {
   type PricingMode,
   type SelectedItem,
 } from "@/lib/market/bulk-list";
+import { Check, X } from "lucide-react";
 import { getOwnedInventory, type OwnedInventory } from "@/lib/market/inventory";
 import { buildListing } from "@/lib/market/seaport";
 import { formatTokenAmount, parseTokenAmount } from "@/lib/trade";
-import {
-  getRarityMap,
-  tierAnimationClass,
-  tierCardStyle,
-  tierColor,
-  tierGlow,
-} from "@/lib/market/rarityClient";
+import { getRarityMap, tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import type { MarketCollection } from "@/lib/market/types";
+import { withImageWidth } from "@/lib/ipfs";
 
 type Props = {
   account: string;
@@ -57,6 +53,7 @@ const STATE_LABEL: Record<BulkItemStatus["state"], string> = {
  */
 export default function MyInventory({ account, collections, alreadyListed, onListed }: Props) {
   const [inventory, setInventory] = useState<OwnedInventory[] | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Map<string, SelectedItem>>(new Map());
   const [mode, setMode] = useState<PricingMode>("same");
@@ -65,22 +62,38 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
   const [durationDays, setDurationDays] = useState(7);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [statuses, setStatuses] = useState<BulkItemStatus[] | null>(null);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
 
-  useEffect(() => {
-    let cancelled = false;
-    setInventory(null);
+  const refresh = useCallback(() => {
+    setRefreshing(true);
     setLoadError(null);
     void getOwnedInventory(collections, account)
-      .then((inv) => {
-        if (!cancelled) setInventory(inv);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadError("Could not load your planks — try again.");
-      });
+      .then(setInventory)
+      .catch(() => setLoadError("Could not load your planks — try again."))
+      .finally(() => setRefreshing(false));
+  }, [account, collections]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const frame = window.requestAnimationFrame(() => {
+      setRefreshing(true);
+      setLoadError(null);
+      void getOwnedInventory(collections, account)
+        .then((nextInventory) => {
+          if (!cancelled) setInventory(nextInventory);
+        })
+        .catch(() => {
+          if (!cancelled) setLoadError("Could not load your planks — try again.");
+        })
+        .finally(() => {
+          if (!cancelled) setRefreshing(false);
+        });
+    });
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(frame);
     };
   }, [account, collections]);
 
@@ -146,6 +159,13 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
         setSamePrice("");
         setPerItemPrices({});
       }
+    } catch (e) {
+      // listBulkItems catches every per-item signing/publish failure
+      // internally and always resolves — this is defense-in-depth in case
+      // that invariant is ever broken, so a failure still reaches the user
+      // here instead of becoming a silent unhandled rejection.
+      console.error("Bulk list failed:", e);
+      setError(e instanceof Error ? e.message : "Listing failed.");
     } finally {
       setBusy(false);
     }
@@ -168,16 +188,33 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
     return formatTokenAmount(sum, 18, 6);
   }, [mode, samePrice, perItemPrices, selectedItems]);
 
-  if (loadError) {
+  const openReview = () => {
+    setError(null);
+    const priced = resolveBulkPrices(mode, samePrice, perItemPrices, selectedItems);
+    if (!priced.ok) {
+      setError(priced.error);
+      return;
+    }
+    setReviewOpen(true);
+  };
+
+  if (loadError && inventory === null) {
     return (
-      <p className="rounded-lg border border-dashed border-red-500/30 px-4 py-6 text-center text-sm text-red-300" role="alert">
-        {loadError}
-      </p>
+      <div className="rounded-xl border border-red-500/30 bg-panel px-4 py-6 text-center" role="alert">
+        <p className="text-sm text-red-300">{loadError}</p>
+        <button
+          type="button"
+          onClick={refresh}
+          className="mt-3 min-h-10 rounded-md border border-red-500/35 px-3 text-xs text-red-200"
+        >
+          Retry inventory
+        </button>
+      </div>
     );
   }
   if (inventory === null) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-xl border border-line bg-panel px-4 py-8 text-center text-sm text-cream-muted">
         Reading your planks from chain…
       </p>
     );
@@ -186,7 +223,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
   const totalOwned = inventory.reduce((n, g) => n + g.items.length, 0);
   if (totalOwned === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/30 bg-wood-900/90 px-4 py-8 text-center text-sm text-foreground/60">
+      <p className="rounded-xl border border-line bg-panel px-4 py-8 text-center text-sm text-cream-muted">
         This wallet holds no planks yet.
       </p>
     );
@@ -196,10 +233,35 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-[0.6rem] font-black uppercase tracking-[0.14em] text-gold-300/75">Your market desk</p>
+          <h3 className="font-display text-xl text-gold-300">List from your wallet</h3>
+          <p className="text-xs text-cream-muted">
+            {totalOwned} owned · {selectedItems.length} selected
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={refresh}
+          disabled={refreshing}
+          className="min-h-10 rounded-md border border-line px-3 text-xs font-bold text-gold-300 disabled:opacity-50"
+        >
+          {refreshing ? "Reloading…" : "Reload"}
+        </button>
+      </div>
+      {loadError && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-950/20 px-3 py-2 text-xs text-red-200" role="alert">
+          <span>{loadError}</span>
+          <button type="button" onClick={refresh} className="min-h-9 underline">
+            Retry
+          </button>
+        </div>
+      )}
       {groups.map((group) => (
         <section key={group.collection.slug} className="space-y-2">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-foreground/50">
-            {group.collection.name} · {group.items.length} owned
+          <h3 className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
+            {group.collection.name} <span className="text-cream-muted">· {group.items.length} owned</span>
           </h3>
           <ul className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2">
             {group.items.map((item) => {
@@ -210,23 +272,20 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
               return (
                 <li
                   key={key}
-                  className={`dense-card overflow-hidden p-0 ${r ? tierAnimationClass(r.tier) : ""}`}
-                  style={r ? { boxShadow: tierGlow(r.tier), ...tierCardStyle(r.tier) } : undefined}
+                  className={`dense-card flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-line-strong ${
+                    isSelected ? "ring-2 ring-gold-400" : ""
+                  }`}
                 >
-                  {/* holo-card scoped to the artwork button only, not the
-                      whole tile — inherits --holo-intensity from the <li>. */}
                   <button
                     type="button"
                     disabled={isListed || busy}
                     aria-pressed={isSelected}
                     aria-label={`${isSelected ? "Deselect" : "Select"} #${item.tokenId}`}
                     onClick={() => toggle(group.collection, item.tokenId)}
-                    className={`relative block aspect-square w-full bg-wood-900 outline-none transition ${
-                      r ? "holo-card" : ""
-                    } ${isSelected ? "ring-2 ring-inset ring-gold-400" : ""} ${isListed ? "cursor-not-allowed opacity-50" : "cursor-pointer focus-visible:ring-2 focus-visible:ring-gold-400/60"}`}
+                    className={`relative block aspect-square w-full bg-wood-900 outline-none transition ${isListed ? "cursor-not-allowed opacity-50" : "cursor-pointer focus-visible:ring-2 focus-visible:ring-gold-400/60"}`}
                   >
                     <Image
-                      src={item.imageUrl || group.collection.image}
+                      src={withImageWidth(item.imageUrl, 256) || group.collection.image}
                       alt={`${group.collection.name} #${item.tokenId}`}
                       fill
                       sizes="(min-width: 1024px) 20vw, 50vw"
@@ -235,12 +294,12 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                     />
                     {/* Same badge/overlay pattern as ListingCard's Floor badge. */}
                     {isSelected && (
-                      <span className="card-overlay absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold-500 text-[0.7rem] font-bold text-wood-950">
-                        ✓
+                      <span className="card-overlay absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold-500 text-wood-950">
+                        <Check size={12} strokeWidth={3} />
                       </span>
                     )}
                     {isListed && (
-                      <span className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/90 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
+                      <span className="card-overlay absolute left-1.5 top-1.5 rounded-full bg-black/90 px-2 py-0.5 text-[0.6rem] font-bold text-emerald-300">
                         Listed
                       </span>
                     )}
@@ -253,16 +312,16 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                         {r.tier}
                       </span>
                     )}
-                    <span className="card-overlay legible-text absolute inset-x-1.5 bottom-1.5 flex flex-col rounded-lg bg-black/90 px-2 py-0.5 leading-tight">
-                      <span className="truncate text-[0.6rem] font-bold text-foreground">
-                        {r?.name ?? `#${item.tokenId}`}
-                      </span>
-                      <span className="truncate text-[0.5rem] text-foreground/60">
-                        #{item.tokenId}
-                        {r ? ` · R${r.rank} · ${r.tier}` : ""}
-                      </span>
-                    </span>
                   </button>
+                  <div className="flex flex-1 flex-col gap-0.5 p-2 leading-tight">
+                    <span className="truncate text-[0.6rem] font-bold text-foreground">
+                      {r?.name ?? `#${item.tokenId}`}
+                    </span>
+                    <span className="truncate text-[0.55rem] text-cream-muted">
+                      #{item.tokenId}
+                      {r ? ` · R${r.rank}` : ""}
+                    </span>
+                  </div>
                 </li>
               );
             })}
@@ -271,7 +330,87 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
       ))}
 
       {selectedItems.length > 0 && (
-        <div className="wood-ledger space-y-3 p-3">
+        <div className="rounded-xl border border-line bg-panel-strong space-y-3 p-3">
+          {reviewOpen && (
+            <div
+              className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 sm:items-center sm:p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="listing-review-title"
+            >
+              <div className="w-full max-w-lg rounded-t-xl border border-line-strong bg-panel-strong p-4 sm:rounded-xl">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[0.65rem] font-black uppercase tracking-[0.14em] text-gold-300/75">
+                      Verify before signing
+                    </p>
+                    <h3 id="listing-review-title" className="mt-1 font-display text-2xl text-gold-300">
+                      Review listings
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReviewOpen(false)}
+                    className="flex h-10 w-10 items-center justify-center rounded-md border border-line text-foreground/65 hover:text-gold-300"
+                    aria-label="Close review"
+                  >
+                    <X size={14} strokeWidth={2.5} />
+                  </button>
+                </div>
+                <dl className="mt-4 grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                    <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
+                      Planks
+                    </dt>
+                    <dd className="mt-1 text-xs font-bold text-foreground">{selectedItems.length}</dd>
+                  </div>
+                  <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                    <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
+                      Wallet signatures
+                    </dt>
+                    <dd className="mt-1 text-xs font-bold text-foreground">{selectedItems.length}</dd>
+                  </div>
+                  <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                    <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
+                      Expires
+                    </dt>
+                    <dd className="mt-1 text-xs font-bold text-foreground">{durationDays} days</dd>
+                  </div>
+                  <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                    <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
+                      Total ask
+                    </dt>
+                    <dd className="mt-1 text-xs font-bold text-foreground">{totalPreview ?? "—"} ETH</dd>
+                  </div>
+                </dl>
+                <p className="mt-3 text-xs leading-5 text-foreground/55">
+                  Each Plank creates one independently cancellable order. Price, expiry,
+                  approval, and payload are checked before signing; the server verifies current
+                  ownership before publication. Stale or partial failures remain selected for
+                  retry.
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setReviewOpen(false)}
+                    className="min-h-11 rounded-lg border border-line text-sm text-foreground/75 hover:text-gold-300"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReviewOpen(false);
+                      void submit();
+                    }}
+                    className="min-h-11 rounded-lg bg-gold-500 text-sm font-bold text-wood-950 hover:bg-gold-400"
+                  >
+                    Continue to wallet
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <p className="text-sm font-bold text-foreground">
               List {selectedItems.length} plank{selectedItems.length > 1 ? "s" : ""}
@@ -293,7 +432,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                   className={`min-h-9 rounded-md border px-2.5 text-xs font-bold transition ${
                     mode === m.id
                       ? "border-gold-400 bg-gold-500/15 text-gold-300"
-                      : "border-gold-500/30 text-foreground/60 hover:border-gold-400"
+                      : "border-line text-foreground/60 hover:border-gold-400"
                   }`}
                 >
                   {m.label}
@@ -314,7 +453,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                 value={samePrice}
                 disabled={busy}
                 onChange={(e) => setSamePrice(e.target.value.replace(/[^0-9.]/g, ""))}
-                className="mt-1 min-h-11 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 text-foreground outline-none focus:border-gold-400"
+                className="mt-1 min-h-11 w-full rounded-lg border border-line bg-panel px-2.5 text-foreground outline-none focus:border-gold-400"
               />
             </label>
           ) : (
@@ -339,7 +478,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                           [key]: e.target.value.replace(/[^0-9.]/g, ""),
                         }))
                       }
-                      className="min-h-10 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 text-sm text-foreground outline-none focus:border-gold-400"
+                      className="min-h-10 w-full rounded-lg border border-line bg-panel px-2.5 text-sm text-foreground outline-none focus:border-gold-400"
                     />
                   </li>
                 );
@@ -356,7 +495,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                 value={durationDays}
                 disabled={busy}
                 onChange={(e) => setDurationDays(Number(e.target.value))}
-                className="mt-1 min-h-11 w-full rounded-lg border border-gold-500/30 bg-wood-900/90 px-2.5 text-foreground"
+                className="mt-1 min-h-11 w-full rounded-lg border border-line bg-panel px-2.5 text-foreground"
               >
                 {DURATIONS.map((d) => (
                   <option key={d.days} value={d.days}>
@@ -381,12 +520,12 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
           <button
             type="button"
             disabled={busy}
-            onClick={() => void submit()}
+            onClick={openReview}
             className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy
               ? "Listing…"
-              : `List ${selectedItems.length} for sale`}
+              : `Review ${selectedItems.length} listing${selectedItems.length > 1 ? "s" : ""}`}
           </button>
 
           {error && (
@@ -402,7 +541,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
           {statuses.map((s) => (
             <li
               key={s.key}
-              className="flex items-center justify-between gap-3 border-t border-gold-500/15 px-3 py-2 first:border-t-0"
+              className="flex items-center justify-between gap-3 border-t border-line px-3 py-2 first:border-t-0"
             >
               <span className="text-xs font-bold text-foreground">#{s.tokenId}</span>
               <span

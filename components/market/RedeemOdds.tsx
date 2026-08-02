@@ -8,6 +8,7 @@ import { TIER_ORDER } from "@/lib/rarity";
 import { useVaultBook } from "@/lib/market/useVaultBook";
 import {
   vaultColorKind,
+  vaultKindLabel,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
 import { swrJson } from "@/lib/market/swr-fetch";
@@ -20,6 +21,8 @@ type TierRow = {
 
 type Props = {
   vaultAddress?: string | null;
+  /** False while the owning tab is mounted but off screen — pauses polling. */
+  active?: boolean;
 };
 
 /**
@@ -32,8 +35,8 @@ type Props = {
  * Marketplace listing floors do NOT belong here — redeem odds are about
  * what the vault might draw, not open-market prices.
  */
-export default function RedeemOdds({ vaultAddress = null }: Props) {
-  const { stats } = useVaultBook(vaultAddress);
+export default function RedeemOdds({ vaultAddress = null, active = true }: Props) {
+  const { stats } = useVaultBook(vaultAddress, { active });
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
   /** Live held list from /vault/held — more reliable than stats.heldTokenIds
    * which can be empty when the stats path times out the ID scan. */
@@ -107,30 +110,37 @@ export default function RedeemOdds({ vaultAddress = null }: Props) {
     return { rows: nextRows, unscoredCount: unscored };
   }, [rarity, heldTokenIds, heldCount]);
 
+  /** ETH equivalent of one random redeem (share price + redeem fee) — the
+   * headline cost is denominated in shares; this is only the parenthetical.
+   * Share-model: fee is bps of one share. Eth-model (V3+): fee is already a
+   * flat wei amount, added straight to the share price. */
   const redeemCostWei = useMemo(() => {
     if (!stats?.sharePriceWei) return null;
     const base = BigInt(stats.sharePriceWei);
-    const bps = BigInt(stats.redeemFeeBps + stats.targetPremiumBps);
+    if (stats.feeModel === "eth") {
+      return base + BigInt(stats.redeemFeeWei ?? "0");
+    }
+    const bps = BigInt(stats.redeemFeeBps ?? 0);
     return base + (base * bps) / BigInt(10_000);
   }, [stats]);
 
   if (!stats && heldCount === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-4 text-center text-xs text-foreground/45">
+      <p className="rounded-lg border border-line bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
         Loading vault odds…
       </p>
     );
   }
   if (heldCount === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-4 text-center text-xs text-foreground/45">
+      <p className="rounded-lg border border-line bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
         Vault holds nothing to draw from right now.
       </p>
     );
   }
   if (rarity.size === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-gold-500/25 bg-wood-950/90 px-3 py-4 text-center text-xs text-foreground/45">
+      <p className="rounded-lg border border-line bg-wood-950 px-3 py-4 text-center text-xs text-foreground/45">
         Loading rarity map for redeem odds…
       </p>
     );
@@ -138,12 +148,12 @@ export default function RedeemOdds({ vaultAddress = null }: Props) {
 
   const scoredHeld = heldCount - unscoredCount;
 
-  const vaultTag = colorKind === "v1" ? "V1" : colorKind === "v2" ? "V2" : null;
+  const vaultTag = colorKind === "unknown" ? null : vaultKindLabel(colorKind);
 
   return (
-    <div className="space-y-2 rounded-lg border border-gold-500/15 bg-wood-950/90 p-3">
+    <div className="space-y-2 rounded-xl border border-line bg-panel p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="flex items-center gap-1.5 text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
+        <p className="flex items-center gap-1.5 text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
           Random redeem odds
           {vaultTag && (
             <span
@@ -178,7 +188,7 @@ export default function RedeemOdds({ vaultAddress = null }: Props) {
                   </span>
                   <span className="font-mono text-foreground/70">{pct.toFixed(1)}%</span>
                 </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-wood-900/90">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-wood-950">
                   <div
                     className="h-full rounded-full transition-[width]"
                     style={{ width: `${Math.max(pct > 0 ? pct : 0, 0)}%`, background: color }}
@@ -190,9 +200,22 @@ export default function RedeemOdds({ vaultAddress = null }: Props) {
         </div>
       )}
 
-      <div className="space-y-0.5 border-t border-gold-500/10 pt-1.5 text-[0.6rem] text-foreground/40">
-        {redeemCostWei != null && (
-          <p>Redeem cost ≈ {formatTokenAmount(redeemCostWei, 18, 4)} Ξ</p>
+      <div className="space-y-0.5 border-t border-line pt-1.5 text-[0.6rem] text-foreground/40">
+        {stats && stats.feeModel === "eth" && (
+          <p>
+            Random cost ≈ 1.00 share
+            {redeemCostWei != null
+              ? ` + fee (≈ ${formatTokenAmount(redeemCostWei, 18, 4)} Ξ)`
+              : ""}
+          </p>
+        )}
+        {stats && stats.feeModel === "share" && (
+          <p>
+            Random cost ≈ {(1 + (stats.redeemFeeBps ?? 0) / 10_000).toFixed(2)} shares
+            {redeemCostWei != null
+              ? ` (≈ ${formatTokenAmount(redeemCostWei, 18, 4)} Ξ)`
+              : ""}
+          </p>
         )}
         {unscoredCount > 0 && (
           <p>

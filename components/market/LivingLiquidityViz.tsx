@@ -10,6 +10,7 @@ import { useVaultBook } from "@/lib/market/useVaultBook";
 import {
   shortVault,
   vaultColorKind,
+  vaultKindLabel,
   VAULT_LABEL_CLASS,
   VAULT_TEXT_CLASS,
 } from "@/lib/market/vault-registry";
@@ -22,6 +23,8 @@ type HeldToken = { tokenId: string; imageUrl: string | null };
 type Props = {
   /** Selected Instant Swap vault — fence + liquidity follow this book. */
   vaultAddress?: string | null;
+  /** False while the owning tab is mounted but off screen — pauses polling. */
+  active?: boolean;
 };
 
 /**
@@ -32,8 +35,8 @@ type Props = {
  * straight from /api/market/vault/stats and /api/market/vault/held, the
  * same live data VaultDashboard renders as plain numbers.
  */
-export default function LivingLiquidityViz({ vaultAddress = null }: Props) {
-  const { stats } = useVaultBook(vaultAddress);
+export default function LivingLiquidityViz({ vaultAddress = null, active = true }: Props) {
+  const { stats } = useVaultBook(vaultAddress, { active });
   const [held, setHeld] = useState<HeldToken[] | null>(null);
   const [rarity, setRarity] = useState<Map<string, RarityLookup>>(new Map());
   const heldTokenCount = stats?.heldTokenCount ?? null;
@@ -112,14 +115,19 @@ export default function LivingLiquidityViz({ vaultAddress = null }: Props) {
   const vaultFeeEth = stats ? formatTokenAmount(stats.vaultFeeRevenueWei, 18, 4) : "0";
   const marketFeeEth = stats ? formatTokenAmount(stats.marketplaceFeeRevenueEstWei, 18, 4) : "0";
 
-  const vaultTag = colorKind === "v1" ? "V1" : colorKind === "v2" ? "V2" : null;
+  const vaultTag = colorKind === "unknown" ? null : vaultKindLabel(colorKind);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-gold-500/15 bg-wood-950/90">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gold-500/10 px-3 py-1.5">
-        <p className="text-[0.65rem] font-bold uppercase tracking-wide text-foreground/50">
-          On The Fence
-        </p>
+    <div className="overflow-hidden rounded-xl border border-line bg-panel">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
+        <div>
+          <p className="text-[0.58rem] font-black uppercase tracking-[0.14em] text-gold-400">
+            Living liquidity
+          </p>
+          <p className="text-[0.76rem] font-black uppercase tracking-[0.06em] text-foreground">
+            On The Fence
+          </p>
+        </div>
         {vaultTag && (
           <span className="flex items-center gap-1.5">
             <span
@@ -135,50 +143,81 @@ export default function LivingLiquidityViz({ vaultAddress = null }: Props) {
           </span>
         )}
       </div>
-      <div className="relative grid grid-cols-1 sm:grid-cols-2">
-        <div className="relative h-48 overflow-hidden border-b border-gold-500/10 bg-gradient-to-b from-wood-900/40 to-black/30 sm:h-64 sm:border-b-0 sm:border-r">
-          <PlankFence held={held} rarity={rarity} />
-          <span className="pointer-events-none absolute bottom-1.5 left-2 text-[0.55rem] font-bold uppercase tracking-wide text-foreground/35">
-            {held ? `${held.length} held` : "…"}
-          </span>
+      <div className="p-3">
+        {/* Finalized mockup .liquidity-visual: one centered radial-rings
+            scene with the fence caption — not a thumbnail carousel. Held
+            planks are drawn ON the fence line inside the rings, so the
+            lore (and the held art) survives inside the approved shape. */}
+        <div
+          className="liquidity-visual relative grid min-h-[260px] place-items-center overflow-hidden rounded-xl"
+          style={{
+            background:
+              "radial-gradient(circle at center, rgba(219,165,63,0.22), transparent 52%)," +
+              "repeating-radial-gradient(circle at center, rgba(239,196,99,0.13) 0 1px, transparent 1px 34px)," +
+              "#1b120a",
+          }}
+        >
+          <div className="pointer-events-none z-10 flex flex-col items-center gap-1.5 text-center">
+            <div
+              className="animate-liquidity-pulse relative overflow-hidden rounded-full bg-gold-400/20"
+              style={{
+                width: 64 + reserveScale * 40,
+                height: 64 + reserveScale * 40,
+                border: "1px solid rgba(239,196,99,0.3)",
+              }}
+            >
+              <Image
+                src="/images/plank-logo.webp"
+                alt=""
+                fill
+                sizes="104px"
+                className="object-contain p-3 opacity-90"
+                unoptimized
+              />
+            </div>
+            <p className="font-display text-base text-gold-300">
+              {held ? `${held.length} Planks in the fence` : "…"}
+            </p>
+            <p className="text-[0.62rem] text-foreground/50">
+              {stats
+                ? `${formatTokenAmount(stats.shareReserveWei, 18, 2)} shares · ${formatTokenAmount(stats.ethReserveWei, 18, 4)} Ξ${
+                    ethUsd > 0 ? ` · ≈ ${formatUsd(weiToUsd(stats.ethReserveWei, ethUsd))}` : ""
+                  }`
+                : "reading vault…"}
+            </p>
+          </div>
+          {/* The fence itself — held planks along the bottom of the scene. */}
+          <div className="absolute inset-x-0 bottom-0 h-16">
+            <PlankFence held={held} rarity={rarity} />
+          </div>
         </div>
 
-        <div className="relative flex h-48 flex-col items-center justify-center gap-3 overflow-hidden bg-gradient-to-bl from-gold-900/10 to-transparent px-3 sm:h-64">
-          <div
-            className="animate-liquidity-pulse relative overflow-hidden rounded-full bg-gold-400/20"
-            style={{
-              width: 70 + reserveScale * 60,
-              height: 70 + reserveScale * 60,
-              boxShadow: "0 0 30px rgba(244,201,93,0.25)",
-              border: "1px solid rgba(244,201,93,0.5)",
-            }}
-          >
-            <Image
-              src="/images/plank-logo.webp"
-              alt=""
-              fill
-              sizes="130px"
-              className="object-contain p-3.5 opacity-90"
-              unoptimized
-            />
+        <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+            <p className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Vault fee revenue</p>
+            <p className="mt-0.5 text-xs font-bold text-foreground">{vaultFeeEth} Ξ</p>
           </div>
-          <div className="text-center">
-            <p className="font-display text-base text-gold-300">
-              {stats ? formatTokenAmount(stats.ethReserveWei, 18, 4) : "…"} Ξ
-            </p>
-            <p className="text-[0.6rem] text-foreground/45">
-              liquidity{ethUsd > 0 && stats ? ` · ${formatUsd(weiToUsd(stats.ethReserveWei, ethUsd))}` : ""}
-            </p>
+          <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+            <p className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Est. market fees</p>
+            <p className="mt-0.5 text-xs font-bold text-foreground">{marketFeeEth} Ξ</p>
           </div>
-          <div className="flex gap-2 text-center">
-            <div className="rounded-md border border-emerald-400/30 bg-emerald-400/10 px-2 py-1">
-              <p className="text-[0.55rem] uppercase text-emerald-300/80">Vault fees</p>
-              <p className="font-mono text-[0.65rem] text-emerald-200">{vaultFeeEth} Ξ</p>
-            </div>
-            <div className="rounded-md border border-sky-400/30 bg-sky-400/10 px-2 py-1">
-              <p className="text-[0.55rem] uppercase text-sky-300/80">Market fees est.</p>
-              <p className="font-mono text-[0.65rem] text-sky-200">{marketFeeEth} Ξ</p>
-            </div>
+          <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+            <p className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Vault</p>
+            <p className="mt-0.5 truncate text-xs font-bold text-foreground">
+              {vaultAddress ? (
+                <a
+                  href={`https://robinhoodchain.blockscout.com/address/${vaultAddress}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:text-gold-300"
+                  title={vaultAddress}
+                >
+                  {shortVault(vaultAddress)} ↗
+                </a>
+              ) : (
+                "—"
+              )}
+            </p>
           </div>
         </div>
       </div>

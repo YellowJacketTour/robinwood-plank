@@ -1,8 +1,10 @@
 import Image from "next/image";
+import { ExternalLink } from "lucide-react";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
-import { tierAnimationClass, tierCardStyle, tierColor, tierGlow } from "@/lib/market/rarityClient";
+import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+import { withImageWidth } from "@/lib/ipfs";
 
 type Props = {
   listing: Listing;
@@ -22,10 +24,10 @@ type Props = {
   rarity?: RarityLookup;
 };
 
-const TRUST_ICON: Record<string, string> = {
-  "lp-burned": "🔥",
-  "ownership-renounced": "🔒",
-  verified: "✓",
+const TRUST_BADGE: Record<string, { icon: string; label: string }> = {
+  "lp-burned": { icon: "🔥", label: "LP burned" },
+  "ownership-renounced": { icon: "🔒", label: "Ownership renounced" },
+  verified: { icon: "✓", label: "Verified collection" },
 };
 
 /** 2 columns on mobile, up to 5 on desktop via the parent grid — matches Gallery.tsx. */
@@ -44,17 +46,19 @@ export default function ListingCard({
   const isOffer = variant === "offer";
   // Collection-wide bids have no token to open a detail view for.
   const selectable = Boolean(onSelect && listing.tokenId);
+  const trustLabels = collection.trustBadges.map(
+    (badge) => TRUST_BADGE[badge]?.label ?? badge
+  );
   return (
     <li
-      className={`dense-card flex flex-col overflow-hidden p-0 ${
+      // Finalized mockup card: uniform quiet frame, rarity communicated by
+      // the tier pill alone; the card lifts on hover instead of glowing.
+      className={`dense-card flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-line-strong ${
         isOffer ? "border-emerald-500/40" : ""
-      } ${rarity ? tierAnimationClass(rarity.tier) : ""}`}
-      style={rarity ? { boxShadow: tierGlow(rarity.tier), ...tierCardStyle(rarity.tier) } : undefined}
+      }`}
     >
-      {/* holo-card scoped to the artwork only — inherits --holo-intensity
-          from the <li> above it, CSS custom properties inherit down. */}
       <div
-        className={`relative aspect-square w-full bg-wood-900 ${rarity ? "holo-card" : ""} ${
+        className={`relative aspect-square w-full bg-wood-900 ${
           selectable ? "cursor-pointer" : ""
         }`}
         role={selectable ? "button" : undefined}
@@ -75,7 +79,7 @@ export default function ListingCard({
         <Image
           // The token's own art, not the collection logo — a grid of identical
           // logos reads as broken. Falls back only if resolution failed.
-          src={listing.imageUrl || collection.image}
+          src={withImageWidth(listing.imageUrl, 256) || collection.image}
           alt={`${collection.name} #${listing.tokenId}`}
           fill
           sizes="(min-width: 1024px) 20vw, 50vw"
@@ -84,7 +88,7 @@ export default function ListingCard({
         />
         {isFloor && (
           <span
-            className="card-overlay legible-text absolute left-1.5 top-1.5 rounded-full bg-black/90 px-2 py-0.5 text-[0.6rem] font-bold text-gold-300"
+            className="card-overlay legible-text absolute bottom-2 right-2 rounded-md bg-black/90 px-2 py-1 text-[0.55rem] font-black uppercase tracking-wide text-gold-300"
             title="Floorboard — cheapest listing"
           >
             Floor
@@ -95,23 +99,18 @@ export default function ListingCard({
           // not the tier's own fill as a background, which goes illegible
           // against similarly-light/pastel artwork (confirmed live).
           <span
-            className={`tier-badge absolute left-1.5 ${isFloor ? "top-7" : "top-1.5"} rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide`}
+            className="tier-badge absolute left-2 top-2 rounded-full px-2 py-1 text-[0.55rem] font-black uppercase tracking-wide"
             style={{ color: tierColor(rarity.tier) }}
             title={`Rank #${rarity.rank} · ${rarity.percentile.toFixed(0)}th percentile`}
           >
             {rarity.tier}
           </span>
         )}
-        {collection.trustBadges.length > 0 && (
-          <span
-            className="card-overlay absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black/90 text-[0.65rem] text-emerald-300"
-            title={collection.trustBadges.join(", ")}
-          >
-            {TRUST_ICON[collection.trustBadges[0]] ?? "✓"}
-          </span>
-        )}
       </div>
-      <div className="flex flex-1 flex-col gap-1 p-2.5 sm:p-3">
+      <div className="flex flex-1 flex-col gap-1.5 p-2.5 sm:p-3">
+        {trustLabels.length > 0 && (
+          <p className="sr-only">Collection trust: {trustLabels.join(", ")}</p>
+        )}
         <div className="min-w-0 leading-tight">
           <p className="truncate text-xs font-bold text-foreground sm:text-sm">
             {listing.tokenId ? (rarity?.name ?? `#${listing.tokenId}`) : "Any plank"}
@@ -119,45 +118,109 @@ export default function ListingCard({
           {listing.tokenId && (
             <p className="truncate text-[0.55rem] text-foreground/40">
               #{listing.tokenId}
-              {rarity ? ` · R${rarity.rank} · ${rarity.tier}` : ""}
+              {rarity ? ` · Rank ${rarity.rank}` : ""}
             </p>
           )}
         </div>
-        <p className="truncate text-[0.6rem] text-foreground/45" title={listing.maker}>
-          {isOffer ? "bid by " : ""}
-          {shortAddress(listing.maker)}
-        </p>
-        <p
-          className={`mt-auto font-display text-base sm:text-lg ${
-            isOffer ? "text-emerald-300" : "text-gold-300"
-          }`}
-        >
-          {formatTokenAmount(listing.priceWei, 18, 4)} Ξ
-        </p>
-        <div className="flex gap-1.5">
-          <button
-            type="button"
-            disabled={!canFill}
-            onClick={() => onBuy?.(listing)}
-            title={canFill ? undefined : "You don't own a plank this bid can take."}
-            className={`min-h-9 flex-1 rounded-md text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 sm:text-sm ${
-              isOffer
-                ? "bg-emerald-500 text-wood-950 hover:bg-emerald-400"
-                : "bg-gold-500 text-wood-950 hover:bg-gold-400"
-            }`}
-          >
-            {buyLabel ?? "Buy"}
-          </button>
-          {onOffer && (
+        <div className="mt-auto flex items-end justify-between gap-2 pt-1">
+          <div className="min-w-0">
+            <span className="block text-[0.55rem] font-black uppercase tracking-[0.12em] text-foreground/45">
+              Price
+            </span>
+            <p
+              className={`whitespace-nowrap text-sm font-extrabold tabular-nums sm:text-lg ${
+                isOffer ? "text-emerald-300" : "text-gold-300"
+              }`}
+              aria-label={`${formatTokenAmount(listing.priceWei, 18, 4)} ETH`}
+            >
+              <span aria-hidden="true">
+                {formatTokenAmount(listing.priceWei, 18, 4)} Ξ
+              </span>
+            </p>
+          </div>
+          {listing.venue === "opensea" ? (
+            /**
+             * Foreign listing: link out, never a Buy button. The order routes
+             * through a conduit we do not control, so a Buy here would be us
+             * promising a fill we cannot guarantee — the exact failure that
+             * made stale listings revert for buyers. A different label, a
+             * different colour and an outbound arrow mean nobody clicks
+             * expecting one flow and lands in another.
+             */
+            <a
+              href={listing.externalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex min-h-11 min-w-16 items-center justify-center gap-1 rounded-md border border-[#58BDF0]/40 px-2 text-xs font-bold text-[#58BDF0] transition hover:border-[#58BDF0] sm:min-w-[4.25rem] sm:px-3 sm:text-sm"
+            >
+              View
+              <ExternalLink size={12} strokeWidth={2.5} aria-hidden />
+              <span className="sr-only">on OpenSea, opens in a new tab</span>
+            </a>
+          ) : (
             <button
               type="button"
-              onClick={() => onOffer(listing)}
-              className="min-h-9 flex-1 rounded-md border border-gold-500/40 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
+              disabled={!canFill}
+              onClick={() => onBuy?.(listing)}
+              title={canFill ? undefined : "You don't own a plank this bid can take."}
+              className={`min-h-11 min-w-16 rounded-md px-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-[4.25rem] sm:px-3 sm:text-sm ${
+                isOffer
+                  ? "bg-emerald-500 text-wood-950 hover:bg-emerald-400"
+                  : "bg-gold-500 text-wood-950 hover:bg-gold-400"
+              }`}
             >
-              Offer
+              {buyLabel ?? "Buy"}
             </button>
           )}
         </div>
+        {!isOffer && (
+          /**
+           * Labelled on BOTH venues, not just the foreign one. Marking only
+           * OpenSea would make "unmarked" mean "ours" — an inference, and
+           * inferences fail for anyone landing mid-scroll. Explicit costs a
+           * little more ink and removes the ambiguity entirely.
+           */
+          <span
+            className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[0.55rem] font-black uppercase tracking-wider ${
+              listing.venue === "opensea"
+                ? "bg-[#58BDF0]/15 text-[#58BDF0]"
+                : "bg-gold-500/15 text-gold-300"
+            }`}
+          >
+            {listing.venue === "opensea" ? "OpenSea" : "Marketplank"}
+          </span>
+        )}
+        <div className="flex items-center justify-between gap-2">
+          <p className="truncate text-[0.6rem] text-foreground/45" title={listing.maker}>
+            {isOffer ? "Bidder " : "Maker "}
+            {shortAddress(listing.maker)}
+          </p>
+          {collection.trustBadges.includes("verified") && (
+            <span className="shrink-0 text-[0.6rem] font-bold text-emerald-300">Verified ✓</span>
+          )}
+        </div>
+        {(onOffer || selectable) && (
+          <div className="flex gap-1.5">
+            {onOffer && (
+              <button
+                type="button"
+                onClick={() => onOffer(listing)}
+                className="min-h-11 flex-1 rounded-md border border-line-strong text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
+              >
+                Offer
+              </button>
+            )}
+            {selectable && (
+              <button
+                type="button"
+                onClick={() => onSelect!(listing.tokenId)}
+                className="min-h-11 flex-1 rounded-md border border-line text-xs font-bold text-foreground/65 transition hover:border-gold-400 hover:text-gold-300"
+              >
+                Details
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </li>
   );

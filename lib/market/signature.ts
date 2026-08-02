@@ -1,5 +1,6 @@
 import { Interface, TypedDataEncoder, recoverAddress } from "ethers";
 import { CHAIN, SEAPORT_ADDRESS } from "@/lib/constants";
+import { SERVER_RPC_URLS } from "@/lib/server/rpc-urls";
 
 /**
  * Seaport 1.6 order-signature verification — the control that was entirely
@@ -232,19 +233,41 @@ export function signatureFailsOffline(rawOrder: unknown): boolean {
 
 /** Default RPC bound to the configured chain. */
 export function defaultRpc(): Rpc {
-  const url = CHAIN.rpcUrls.default;
-  async function rpc(method: string, params: unknown[]): Promise<string> {
+  // Server-side ordered list: private provider (RPC_URL) first, public
+  // fallbacks after — same chain the /api/rpc proxy walks.
+  const urls: string[] =
+    SERVER_RPC_URLS.length > 0 ? SERVER_RPC_URLS : [CHAIN.rpcUrls.default];
+  async function rpcOnce(url: string, method: string, params: unknown[]): Promise<string> {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
       cache: "no-store",
+      signal: AbortSignal.timeout(8_000),
     });
     const json = (await res.json()) as { result?: string; error?: unknown };
     if (json.error || typeof json.result !== "string") {
       throw new Error("rpc error");
     }
     return json.result;
+  }
+  // Verification stays fail-closed, but a single transient RPC blip (the
+  // public endpoint 502s intermittently — seen live) shouldn't bounce a
+  // user's freshly signed listing. Walk providers with a retry pass each,
+  // then reject.
+  async function rpc(method: string, params: unknown[]): Promise<string> {
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      for (const url of urls) {
+        try {
+          return await rpcOnce(url, method, params);
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
+    throw lastError instanceof Error ? lastError : new Error("rpc error");
   }
   return {
     getCode: (address) => rpc("eth_getCode", [address, "latest"]),

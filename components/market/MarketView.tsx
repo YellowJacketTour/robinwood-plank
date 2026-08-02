@@ -1,26 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import Reveal from "@/components/Reveal";
-import SectionHead from "@/components/SectionHead";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import MarketNav from "@/components/market/MarketNav";
+import MarketBrowseLayout from "@/components/market/MarketBrowseLayout";
+import {
+  MarketCollectionHero,
+  MarketContent,
+  MarketDisclosure,
+  MarketScaffold,
+  MarketTabPanel,
+  MarketTabRail,
+  MarketTabSection,
+  MarketWalletGate,
+} from "@/components/market/MarketScaffold";
 import ListingGrid from "@/components/market/ListingGrid";
-import OfferForm from "@/components/market/OfferForm";
-import SwapPanel from "@/components/market/SwapPanel";
-import InstantVaultSwitcher from "@/components/market/InstantVaultSwitcher";
-import VaultMigrate from "@/components/market/VaultMigrate";
-import SeedVaultPanel from "@/components/market/SeedVaultPanel";
+import Link from "next/link";
 import {
   dualVaultMode,
+  getVaultByAddress,
   getVaultByRole,
-  type VaultRole,
+  vaultGeneration,
 } from "@/lib/market/vault-registry";
-import MyPositions from "@/components/market/MyPositions";
-import MyInventory from "@/components/market/MyInventory";
-import MyNfts from "@/components/market/MyNfts";
-import TreasuryDashboard from "@/components/market/TreasuryDashboard";
-import VaultDashboard from "@/components/market/VaultDashboard";
-import NftPriceChart from "@/components/market/NftPriceChart";
 import VaultTradeHistory from "@/components/market/VaultTradeHistory";
 import LivingLiquidityViz from "@/components/market/LivingLiquidityViz";
 import RedeemOdds from "@/components/market/RedeemOdds";
@@ -28,44 +28,178 @@ import EventCountdown from "@/components/market/EventCountdown";
 import CollectionStats from "@/components/market/CollectionStats";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import SweepConfirm from "@/components/market/SweepConfirm";
-import SweepFloorboards from "@/components/market/SweepFloorboards";
 import RarityFloorStrip from "@/components/market/RarityFloorStrip";
 import IncomingBids from "@/components/market/IncomingBids";
 import ListingSkeleton from "@/components/market/ListingSkeleton";
-import ActivityFeed from "@/components/market/ActivityFeed";
 import ItemDetail from "@/components/market/ItemDetail";
 import WalletChip from "@/components/market/WalletChip";
+import WethBalance from "@/components/market/WethBalance";
 import FilterBar, { applyFilters, EMPTY_FILTERS } from "@/components/market/FilterBar";
 import type { MarketFilters } from "@/components/market/FilterBar";
 import { getRarityMap } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
-import { prefetchJson } from "@/lib/market/swr-fetch";
+import { invalidateSwr, prefetchJson } from "@/lib/market/swr-fetch";
 import { getOwnedTokenIds } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
-import {
-  assertAcceptableOffer,
-  assertAcceptableTraitOffer,
-  fulfillOrder,
-  sweepFloor,
-} from "@/lib/market/seaport";
+import { MARKET_TABS } from "@/lib/market/navigation";
 import type { SweepPlan } from "@/lib/market/sweep";
-import { validateListingOrder, validateOfferOrder } from "@/lib/market/order-validation";
-import { ensureRobinhoodChain, getConnectedAccounts } from "@/lib/wallet";
-import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
+import { ensureRobinhoodChain } from "@/lib/wallet";
+import { useWallet } from "@/lib/wallet-context";
+import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { formatTokenAmount } from "@/lib/trade";
 import type { Listing, MarketTab, Offer } from "@/lib/market/types";
 import dynamic from "next/dynamic";
 
-const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModal"), {
+const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModalSwitch"), {
   ssr: false,
+});
+
+/** Seaport (plus its ethers ceremony) loads on the first buy/list/accept
+ * click, not with the page — every use is inside a user-initiated handler. */
+type SeaportModule = typeof import("@/lib/market/seaport");
+const loadSeaport = () => import("@/lib/market/seaport");
+
+/** Same deal for order validation: it drags in criteria hashing (ethers
+ * keccak + Seaport's MerkleTree) and only runs inside buy/accept handlers. */
+const loadOrderValidation = () => import("@/lib/market/order-validation");
+
+/**
+ * seaport-js runs a balance-and-approval pre-flight on the OFFERER (the
+ * seller, for a listing fulfillment) BEFORE the wallet ever opens, and
+ * throws these two bare strings verbatim
+ * (node_modules/@opensea/seaport-js/lib/utils/balanceAndApprovalCheck.js).
+ * Shown as-is they read like an accusation against the buyer's own wallet —
+ * "you don't have approval" — when they actually mean the seller moved the
+ * token or revoked approval after this page loaded (the 30s liveness cache
+ * in order-status.ts can't catch everything). Map them to the truth instead.
+ */
+const STALE_SELLER_ERRORS = new Set([
+  "The offerer does not have the amount needed to create or fulfill.",
+  "The offerer does not have the sufficient approvals.",
+]);
+
+/**
+ * seaport-js calls the BUYER the "fulfiller". Shown raw, "The fulfiller does not
+ * have the balances needed to fulfill" is unreadable to the person it is about —
+ * it is simply "you don't have enough ETH", and a real buyer hit exactly this
+ * and reported it as a broken button rather than an empty wallet.
+ */
+const BUYER_FUNDS_ERRORS = new Set([
+  "The fulfiller does not have the balances needed to fulfill.",
+]);
+
+function describeFulfillError(e: unknown): string {
+  if (e instanceof Error && STALE_SELLER_ERRORS.has(e.message)) {
+    return "This plank is no longer available — the seller's wallet changed since this page loaded.";
+  }
+  if (e instanceof Error && BUYER_FUNDS_ERRORS.has(e.message)) {
+    return "Not enough ETH in your wallet to cover this price plus gas. Add funds, or switch to a wallet that has them.";
+  }
+  return e instanceof Error ? e.message : "Purchase failed.";
+}
+
+/** Fixed-height pulse placeholder — tab bodies stream in as their own
+ * chunks, and the placeholder keeps the layout from jumping meanwhile. */
+function PanelSkeleton({ className = "min-h-64" }: { className?: string }) {
+  return (
+    <div
+      aria-hidden
+      className={`${className} animate-pulse rounded-xl border border-line bg-wood-900/60`}
+    />
+  );
+}
+
+const panelLoading = () => <PanelSkeleton />;
+const gridLoading = () => <ListingSkeleton />;
+
+// Heavy tab bodies split out of the initial /market chunk. Everything the
+// default Buy & Sell view needs (ListingGrid, FilterBar, scaffold) stays
+// static; these mount when their tab is first visited (or pre-warmed).
+const SwapPanel = dynamic(() => import("@/components/market/SwapPanel"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const V3SwapView = dynamic(() => import("@/components/market/V3SwapView"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const InstantVaultSwitcher = dynamic(
+  () => import("@/components/market/InstantVaultSwitcher"),
+  { ssr: false, loading: () => <PanelSkeleton className="min-h-16" /> }
+);
+const SeedVaultPanel = dynamic(() => import("@/components/market/SeedVaultPanel"), {
+  ssr: false,
+});
+const MyPositions = dynamic(() => import("@/components/market/MyPositions"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const MyInventory = dynamic(() => import("@/components/market/MyInventory"), {
+  ssr: false,
+  loading: gridLoading,
+});
+const MyNfts = dynamic(() => import("@/components/market/MyNfts"), {
+  ssr: false,
+  loading: gridLoading,
+});
+const TreasuryDashboard = dynamic(() => import("@/components/market/TreasuryDashboard"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const VaultDashboard = dynamic(() => import("@/components/market/VaultDashboard"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const NftPriceChart = dynamic(() => import("@/components/market/NftPriceChart"), {
+  ssr: false,
+  loading: panelLoading,
+});
+const ActivityFeed = dynamic(() => import("@/components/market/ActivityFeed"), {
+  ssr: false,
+  loading: gridLoading,
+});
+const OfferForm = dynamic(() => import("@/components/market/OfferForm"), {
+  ssr: false,
+});
+const SweepFloorboards = dynamic(() => import("@/components/market/SweepFloorboards"), {
+  ssr: false,
+  loading: () => <PanelSkeleton className="min-h-24" />,
 });
 
 const COLLECTION = MARKET_COLLECTIONS[0];
 
-const VALID_TABS: MarketTab[] = ["buy-sell", "offers", "activity", "swap", "my-nfts", "positions"];
+function OrderBookAlert({
+  message,
+  onRetry,
+}: {
+  message: string | null;
+  onRetry: () => void;
+}) {
+  if (!message) return null;
+  return (
+    <div
+      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/25 bg-red-950/15 px-3 py-2.5"
+      role="alert"
+    >
+      <div>
+        <p className="text-sm font-bold text-red-200">{message}</p>
+        <p className="text-xs text-foreground/50">
+          Any last good listings and offers remain visible while you reconnect.
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="min-h-10 rounded-md border border-line-strong px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+      >
+        Retry order book
+      </button>
+    </div>
+  );
+}
 
 function isTab(value: string | null): value is MarketTab {
-  return value !== null && (VALID_TABS as string[]).includes(value);
+  return value !== null && MARKET_TABS.some((tab) => tab.id === value);
 }
 
 /**
@@ -116,8 +250,8 @@ function sortListings<T extends Listing>(items: T[], key: SortKey): T[] {
 export default function MarketView() {
   const [tab, setTab] = useState<MarketTab>("buy-sell");
   /** Instant Swap vault book: primary = V2, legacy = V1 deposits. */
-  const [vaultRole, setVaultRole] = useState<VaultRole>("primary");
-  const activeVault = getVaultByRole(vaultRole) ?? getVaultByRole("primary");
+  const [vaultAddr, setVaultAddr] = useState<string | null>(MARKET_VAULT_ADDRESS);
+  const activeVault = getVaultByAddress(vaultAddr) ?? getVaultByRole("primary");
   // Each tab mounts the first time it's actually opened, then stays mounted
   // (hidden, not removed) for the rest of the visit — switching back to an
   // already-opened tab is then instant with no re-fetch. Mounting every tab
@@ -130,7 +264,12 @@ export default function MarketView() {
   const [filters, setFilters] = useState<MarketFilters>(EMPTY_FILTERS);
   const [rarityMap, setRarityMap] = useState<Map<string, RarityLookup>>(new Map());
   const [detailTokenId, setDetailTokenId] = useState<string | null>(null);
-  const [account, setAccount] = useState<string | null>(null);
+  // Shared app-wide wallet state (lib/wallet-context.tsx) — this workspace
+  // previously kept its own useState populated once via getConnectedAccounts()
+  // with no accountsChanged listener, which is why the nav could say
+  // "Connect wallet" while this exact WalletChip still showed a connected
+  // address (the owner-reported bug).
+  const { address: account, adoptAccount: walletAdoptAccount } = useWallet();
   const [listings, setListings] = useState<Array<WithOrder<Listing>>>([]);
   const [offers, setOffers] = useState<Array<WithOrder<Listing>>>([]);
   const [offerTarget, setOfferTarget] = useState<{ tokenId?: string; trait?: boolean } | null>(
@@ -158,8 +297,13 @@ export default function MarketView() {
   const [showInventory, setShowInventory] = useState(false);
   const [sweepTarget, setSweepTarget] = useState<SweepPlan | null>(null);
   const [sweeping, setSweeping] = useState(false);
+  /** Finalized mockup: the sweep planner is progressive disclosure — a
+   * toolbar toggle opens it instead of the full control cluster living
+   * inline in the toolbar. */
+  const [sweepOpen, setSweepOpen] = useState(false);
   const [sort, setSort] = useState<SortKey>("price-asc");
   const [loading, setLoading] = useState(true);
+  const [bookError, setBookError] = useState<string | null>(null);
   const [ownedTokenIds, setOwnedTokenIds] = useState<Set<string> | undefined>(undefined);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -181,16 +325,27 @@ export default function MarketView() {
       ]);
       setListings(listingsRes.items ?? []);
       setOffers(offersRes.items ?? []);
+      setBookError(null);
+    } catch {
+      setBookError("The live order book could not be loaded.");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
+  const retryOrderBook = useCallback(() => {
+    if (!COLLECTION) return;
+    invalidateSwr(`/api/market/orders?collection=${COLLECTION.slug}`);
+    setBookError(null);
+    setLoading(true);
     void refresh();
-    void getConnectedAccounts().then((accounts) => {
-      if (accounts[0]) setAccount(accounts[0]);
+  }, [refresh]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      void refresh();
     });
+    return () => window.cancelAnimationFrame(frame);
   }, [refresh]);
 
   // Warm every public tab's data as soon as /market mounts so tab switches
@@ -208,9 +363,11 @@ export default function MarketView() {
       swrMs: 60_000,
       session: true,
     });
-    // Activity feed + stats lineage
+    // Activity feed. The ?full=1 lineage is deliberately NOT prefetched:
+    // it's the most expensive activity query and rate-limited to 60/min
+    // globally — every visitor requesting it on mount was eating the whole
+    // budget. The Activity tab fetches it when actually opened.
     prefetchJson("/api/market/activity", { ttlMs: 20_000, swrMs: 120_000, session: true });
-    prefetchJson("/api/market/activity?full=1", { ttlMs: 45_000, swrMs: 180_000, session: true });
     // Instant Swap
     prefetchJson("/api/market/vault/stats", { ttlMs: 10_000, swrMs: 90_000, session: true });
     prefetchJson("/api/market/vault/held", { ttlMs: 15_000, swrMs: 120_000, session: true });
@@ -253,10 +410,13 @@ export default function MarketView() {
   // (see visitedTabs' own comment) — it 429'd the public RPC. One at a time
   // on a real delay avoids that same burst while still getting there.
   useEffect(() => {
-    const STAGGER_MS = 6_000;
+    const STAGGER_MS = 15_000;
     const timer = window.setInterval(() => {
+      // Never pre-warm into a backgrounded page — each mount costs an
+      // initial data load the user isn't there to see.
+      if (document.hidden) return;
       setVisitedTabs((prev) => {
-        const next = VALID_TABS.find((t) => !prev.has(t));
+        const next = MARKET_TABS.map((marketTab) => marketTab.id).find((id) => !prev.has(id));
         if (!next) {
           window.clearInterval(timer);
           return prev;
@@ -304,6 +464,8 @@ export default function MarketView() {
   // Which planks this wallet holds — decides which incoming bids it can fill.
   useEffect(() => {
     if (!account || !COLLECTION) {
+      // Disconnecting invalidates the wallet-scoped ownership snapshot.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOwnedTokenIds(undefined);
       return;
     }
@@ -323,15 +485,37 @@ export default function MarketView() {
     setConnectOpen(true);
   }, []);
 
-  const onWalletConnected = useCallback(async (addr: string) => {
-    try {
-      await ensureRobinhoodChain();
-    } catch {
-      /* WC may already be on 4663; ensure will prompt if not */
+  // Header "Connect wallet" hand-off: the nav button routes to
+  // /market?connect=1 (or fires this event when already here) — connection
+  // itself stays owned by this workspace, per DESIGN.md.
+  useEffect(() => {
+    const openConnect = () => handleConnect();
+    window.addEventListener("plank:connect-wallet", openConnect);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("connect") === "1") {
+      params.delete("connect");
+      const query = params.toString();
+      window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
+      handleConnect();
     }
-    setAccount(addr);
-    setConnectOpen(false);
-  }, []);
+    return () => window.removeEventListener("plank:connect-wallet", openConnect);
+  }, [handleConnect]);
+
+  const onWalletConnected = useCallback(
+    async (addr: string) => {
+      try {
+        await ensureRobinhoodChain();
+      } catch {
+        /* WC may already be on 4663; ensure will prompt if not */
+      }
+      // ConnectWalletModal's own finish() already pushes addr into the
+      // shared context; this call is defensive/idempotent so this
+      // workspace's account never lags behind even if that wiring changes.
+      walletAdoptAccount(addr);
+      setConnectOpen(false);
+    },
+    [walletAdoptAccount]
+  );
 
   const requireAccount = useCallback(async () => {
     if (account) return account;
@@ -354,6 +538,7 @@ export default function MarketView() {
         // browser. The API already does this, but repeating it here means
         // even a compromised API or store cannot show one price and have the
         // wallet sign another.
+        const { validateListingOrder } = await loadOrderValidation();
         const derived = validateListingOrder(full.rawOrder, COLLECTION);
         if (derived.tokenId !== full.tokenId) {
           throw new Error("This listing's details don't match its signature.");
@@ -371,15 +556,23 @@ export default function MarketView() {
     setError(null);
     try {
       setStatus("Confirm in wallet…");
+      const { fulfillOrder } = await loadSeaport();
       await fulfillOrder(
-        buyTarget.listing.rawOrder as Parameters<typeof fulfillOrder>[0],
+        buyTarget.listing.rawOrder as Parameters<SeaportModule["fulfillOrder"]>[0],
         account
       );
       setBuyTarget(null);
       setStatus("Purchase confirmed.");
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Purchase failed.");
+      // Console keeps the raw seaport-js string for debugging; the user only
+      // ever sees the mapped, blame-free copy.
+      console.error("Buy fulfillment failed:", e);
+      setError(describeFulfillError(e));
+      if (STALE_SELLER_ERRORS.has(e instanceof Error ? e.message : "")) {
+        setBuyTarget(null);
+        void refresh(); // the stale row disappears instead of staying clickable
+      }
     } finally {
       setStatus(null);
     }
@@ -407,11 +600,13 @@ export default function MarketView() {
     try {
       setSweeping(true);
       setStatus("Confirm in wallet…");
+      const { sweepFloor } = await loadSeaport();
       await sweepFloor(sweepTarget.items, account, COLLECTION, sweepTarget.totalWei);
       setSweepTarget(null);
       setStatus("Sweep confirmed.");
       await refresh();
     } catch (e) {
+      console.error("Sweep failed:", e);
       setError(e instanceof Error ? e.message : "Sweep failed.");
     } finally {
       setSweeping(false);
@@ -445,7 +640,9 @@ export default function MarketView() {
         if (!full) throw new Error("Offer no longer available.");
         if (!COLLECTION) throw new Error("Unknown collection.");
 
+        const { validateOfferOrder } = await loadOrderValidation();
         const derived = validateOfferOrder(full.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY);
+        const { assertAcceptableOffer } = await loadSeaport();
         assertAcceptableOffer(full, derived);
         // derived.priceWei is the seller's NET proceeds (order-validation
         // OFFER semantics) — the number the seller must see before signing.
@@ -477,6 +674,7 @@ export default function MarketView() {
       try {
         if (!COLLECTION) throw new Error("Unknown collection.");
         if (!offer.criteriaTokenIds?.length) throw new Error("Offer snapshot missing.");
+        const { validateOfferOrder } = await loadOrderValidation();
         const derived = validateOfferOrder(offer.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY, {
           criteriaTokenIds: offer.criteriaTokenIds,
         });
@@ -491,6 +689,7 @@ export default function MarketView() {
         }
         // Dry-run the full cross-check now so a broken offer never reaches
         // the confirm modal; it runs again at send time.
+        const { assertAcceptableTraitOffer } = await loadSeaport();
         assertAcceptableTraitOffer(offer, derived, qualifyingOwned[0]);
         setAcceptTraitTarget({
           offer,
@@ -513,9 +712,11 @@ export default function MarketView() {
       const { offer, chosenTokenId } = acceptTraitTarget;
       // Re-derive EVERYTHING from the signed order at send time; the proof
       // handed to the wallet comes from the same verified snapshot.
+      const { validateOfferOrder } = await loadOrderValidation();
       const derived = validateOfferOrder(offer.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY, {
         criteriaTokenIds: offer.criteriaTokenIds ?? [],
       });
+      const { assertAcceptableTraitOffer, fulfillOrder } = await loadSeaport();
       const criteria = assertAcceptableTraitOffer(
         { priceWei: acceptTraitTarget.verifiedNetWei, criteriaTokenIds: offer.criteriaTokenIds },
         derived,
@@ -523,7 +724,7 @@ export default function MarketView() {
       );
       setStatus(`Accepting trait offer with #${chosenTokenId}…`);
       await fulfillOrder(
-        offer.rawOrder as Parameters<typeof fulfillOrder>[0],
+        offer.rawOrder as Parameters<SeaportModule["fulfillOrder"]>[0],
         account,
         [criteria]
       );
@@ -531,6 +732,7 @@ export default function MarketView() {
       setStatus("Offer accepted.");
       await refresh();
     } catch (e) {
+      console.error("Accept trait offer failed:", e);
       setError(e instanceof Error ? e.message : "Could not accept offer.");
     } finally {
       setAccepting(false);
@@ -544,14 +746,16 @@ export default function MarketView() {
     try {
       setAccepting(true);
       setStatus(`Accepting offer on #${acceptTarget.tokenId}…`);
+      const { fulfillOrder } = await loadSeaport();
       await fulfillOrder(
-        acceptTarget.offer.rawOrder as Parameters<typeof fulfillOrder>[0],
+        acceptTarget.offer.rawOrder as Parameters<SeaportModule["fulfillOrder"]>[0],
         account
       );
       setAcceptTarget(null);
       setStatus("Offer accepted.");
       await refresh();
     } catch (e) {
+      console.error("Accept offer failed:", e);
       setError(e instanceof Error ? e.message : "Could not accept offer.");
     } finally {
       setAccepting(false);
@@ -559,72 +763,112 @@ export default function MarketView() {
     }
   }, [acceptTarget, account, accepting, refresh]);
 
-  const visibleListings = applyFilters(listings, filters, rarityMap);
+  // Derived book data is memoized on its actual inputs: this component
+  // re-renders on every countdown tick and poll update, and the BigInt
+  // filter/sort/floor passes were re-running each time.
+  const visibleListings = useMemo(
+    () => applyFilters(listings, filters, rarityMap),
+    [listings, filters, rarityMap]
+  );
+  const sortedVisibleListings = useMemo(
+    () => sortListings(visibleListings, sort),
+    [visibleListings, sort]
+  );
+  // Listed count per tier for the filter rail's rarity rows (mockup parity).
+  const tierListedCounts = useMemo(() => {
+    const counts: Partial<Record<string, number>> = {};
+    for (const l of listings) {
+      const t = l.tokenId ? rarityMap.get(l.tokenId)?.tier : undefined;
+      if (t) counts[t] = (counts[t] ?? 0) + 1;
+    }
+    return counts;
+  }, [listings, rarityMap]);
   // TRAIT bids (criteria orders with a committed snapshot) render as their own
   // rows — they have no single tokenId, so a token-card grid can't show them.
-  const traitOffers = offers.filter(
-    (o) => ((o as unknown as Offer).criteriaTokenIds?.length ?? 0) > 0
-  ) as unknown as Array<WithOrder<Offer>>;
-  const tokenOffers = offers.filter(
-    (o) => !((o as unknown as Offer).criteriaTokenIds?.length ?? 0)
+  const traitOffers = useMemo(
+    () =>
+      offers.filter(
+        (o) => ((o as unknown as Offer).criteriaTokenIds?.length ?? 0) > 0
+      ) as unknown as Array<WithOrder<Offer>>,
+    [offers]
+  );
+  const tokenOffers = useMemo(
+    () => offers.filter((o) => !((o as unknown as Offer).criteriaTokenIds?.length ?? 0)),
+    [offers]
+  );
+  // Offers invert the price sort — "low to high" means best (highest) bid
+  // first on the offers tab, mirroring the original inline call.
+  const sortedTokenOffers = useMemo(
+    () => sortListings(tokenOffers, sort === "price-asc" ? "price-desc" : sort),
+    [tokenOffers, sort]
   );
   // Floor = cheapest live listing; every card at that exact price gets the badge.
-  const floorPriceWei =
-    listings.length > 0
-      ? listings.reduce(
-          (min, l) => (BigInt(l.priceWei) < BigInt(min) ? l.priceWei : min),
-          listings[0].priceWei
-        )
-      : undefined;
+  const floorPriceWei = useMemo(
+    () =>
+      listings.length > 0
+        ? listings.reduce(
+            (min, l) => (BigInt(l.priceWei) < BigInt(min) ? l.priceWei : min),
+            listings[0].priceWei
+          )
+        : undefined,
+    [listings]
+  );
   const detailListing = detailTokenId
     ? listings.find((l) => l.tokenId === detailTokenId)
     : undefined;
 
   return (
-    <div className="space-y-5">
+    <MarketScaffold>
       <ConnectWalletModal
         open={connectOpen}
         onClose={() => setConnectOpen(false)}
         onConnected={(addr) => void onWalletConnected(addr)}
       />
-      <Reveal>
-        <SectionHead eyebrow="Robinhood Chain" title="Marketplank" />
-      </Reveal>
-
-      <Reveal delayMs={40}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <MarketNav active={tab} onChange={selectTab} />
-          {account && <WalletChip account={account} />}
-          {tab === "buy-sell" &&
-            (account ? (
-              // Routes to "My Listings" (MyInventory) rather than opening a
-              // form that asks for a typed token ID — that form duplicated,
-              // less visually, what tap-to-select inventory browsing already
-              // does. One picker, not two.
-              <button
-                type="button"
-                onClick={() => selectTab("positions")}
-                className="min-h-10 shrink-0 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
-              >
-                Sell
-              </button>
+      {COLLECTION && <MarketCollectionHero collection={COLLECTION} />}
+      <MarketTabRail
+        navigation={
+          <MarketNav
+            active={tab}
+            onChange={selectTab}
+            counts={{ "buy-sell": listings.length, offers: offers.length }}
+            onPrewarm={(id) =>
+              setVisitedTabs((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
+            }
+          />
+        }
+        actions={
+          <>
+            {account ? (
+              <WalletChip account={account} />
             ) : (
               <button
                 type="button"
                 onClick={handleConnect}
-                className="min-h-10 shrink-0 rounded-lg bg-gold-500 px-3.5 text-xs font-bold text-wood-950 transition hover:bg-gold-400 sm:text-sm"
+                className="min-h-11 shrink-0 rounded-lg bg-gold-500 px-3.5 text-xs font-bold text-wood-950 transition hover:bg-gold-400"
               >
                 Connect
               </button>
-            ))}
-          {/* "Offer any" (collection-wide bid) removed — FAIL CLOSED, audit
-              2026-07-27: the criteria order it produced was unfillable (no
-              considerationCriteria resolver was ever supplied at fulfillment),
-              so it only minted dead bids backed by a live WETH approval.
-              Re-enable only after the resolver path is wired and verified. */}
-        </div>
-      </Reveal>
+            )}
+            {tab === "buy-sell" &&
+              account && (
+                // Routes to "My Listings" (MyInventory) rather than opening a
+                // duplicate typed-token form. One picker, not two.
+                <button
+                  type="button"
+                  onClick={() => selectTab("positions")}
+                  className="min-h-11 shrink-0 rounded-lg border border-line-strong px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+                >
+                  Sell
+                </button>
+              )}
+          </>
+        }
+      />
+      {/* Collection-wide "Offer any" remains intentionally absent: its
+          fulfillment resolver is not wired. The working criteria bid flow
+          stays available in Buy & Sell and Offers. */}
 
+      <MarketContent>
       {(status || error) && (
         <p
           className={`text-center text-xs ${error ? "text-red-300" : "text-forest-600"}`}
@@ -661,7 +905,11 @@ export default function MarketView() {
               <h3 className="font-display text-lg text-gold-300">Accept trait offer</h3>
               <button
                 type="button"
-                onClick={() => !accepting && setAcceptTraitTarget(null)}
+                onClick={() => {
+                  if (accepting) return;
+                  setError(null);
+                  setAcceptTraitTarget(null);
+                }}
                 aria-label="Cancel"
                 className="flex h-8 w-8 items-center justify-center rounded-full text-foreground/60 hover:text-gold-300"
               >
@@ -684,7 +932,7 @@ export default function MarketView() {
                     prev ? { ...prev, chosenTokenId: e.target.value } : prev
                   )
                 }
-                className="min-h-10 w-full rounded-md border border-gold-500/30 bg-wood-950 px-2 text-sm text-foreground"
+                className="min-h-10 w-full rounded-md border border-line bg-wood-950 px-2 text-sm text-foreground"
               >
                 {acceptTraitTarget.qualifyingOwned.map((id) => (
                   <option key={id} value={id}>
@@ -693,7 +941,7 @@ export default function MarketView() {
                 ))}
               </select>
             </label>
-            <dl className="space-y-1 rounded-lg border border-gold-500/20 bg-wood-900/90 px-3 py-2 text-xs">
+            <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
               <div className="flex justify-between">
                 <dt className="font-bold text-foreground">You receive (net)</dt>
                 <dd className="font-display tabular-nums text-gold-300">
@@ -702,9 +950,18 @@ export default function MarketView() {
               </div>
             </dl>
             <p className="text-center text-[0.6rem] text-foreground/40">
-              Amount and qualifying set verified against the buyer's signed order in this
+              Amount and qualifying set verified against the buyer&apos;s signed order in this
               browser. Plus network gas.
             </p>
+            {error && (
+              <p
+                role="alert"
+                className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100"
+              >
+                {error}
+              </p>
+            )}
+
             <button
               type="button"
               disabled={accepting}
@@ -731,7 +988,11 @@ export default function MarketView() {
               <h3 className="font-display text-lg text-gold-300">Accept offer</h3>
               <button
                 type="button"
-                onClick={() => !accepting && setAcceptTarget(null)}
+                onClick={() => {
+                  if (accepting) return;
+                  setError(null);
+                  setAcceptTarget(null);
+                }}
                 aria-label="Cancel"
                 className="flex h-8 w-8 items-center justify-center rounded-full text-foreground/60 hover:text-gold-300"
               >
@@ -741,8 +1002,8 @@ export default function MarketView() {
             <p className="text-sm text-foreground">
               You are selling {COLLECTION.name} #{acceptTarget.tokenId}.
             </p>
-            <dl className="space-y-1 rounded-lg border border-gold-500/20 bg-wood-900/90 px-3 py-2 text-xs">
-              <div className="flex justify-between border-t border-gold-500/15 pt-1 first:border-t-0 first:pt-0">
+            <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
+              <div className="flex justify-between border-t border-line pt-1 first:border-t-0 first:pt-0">
                 <dt className="font-bold text-foreground">You receive (net)</dt>
                 <dd className="font-display tabular-nums text-gold-300">
                   {formatTokenAmount(acceptTarget.verifiedNetWei, 18, 6)} WETH
@@ -750,8 +1011,17 @@ export default function MarketView() {
               </div>
             </dl>
             <p className="text-center text-[0.6rem] text-foreground/40">
-              Amount verified against the buyer's signed order in this browser. Plus network gas.
+              Amount verified against the buyer&apos;s signed order in this browser. Plus network gas.
             </p>
+            {error && (
+              <p
+                role="alert"
+                className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100"
+              >
+                {error}
+              </p>
+            )}
+
             <button
               type="button"
               disabled={accepting}
@@ -770,6 +1040,11 @@ export default function MarketView() {
           tokenId={detailTokenId}
           collection={COLLECTION}
           listing={detailListing}
+          // The grid already has this — it draws the tier pill on every card.
+          // Passing it makes the panel open with name, tier, rank and
+          // exclusivity already filled instead of showing a bare
+          // Token/Owner/History skeleton until the fetch lands.
+          initialRarity={rarityMap.get(String(detailTokenId)) ?? null}
           onBuy={(l) => {
             closeDetail();
             void handleBuy(l);
@@ -789,8 +1064,13 @@ export default function MarketView() {
           collection={COLLECTION}
           verifiedTotalWei={sweepTarget.totalWei}
           busy={sweeping}
+          // Surface the failure in the dialog the sweeper is actually looking at.
+          error={error}
           onConfirm={confirmSweep}
-          onCancel={() => setSweepTarget(null)}
+          onCancel={() => {
+            setError(null);
+            setSweepTarget(null);
+          }}
         />
       )}
 
@@ -800,8 +1080,13 @@ export default function MarketView() {
           collection={COLLECTION}
           verifiedPriceWei={buyTarget.verifiedPriceWei}
           busy={status !== null}
+          // Surface the failure in the dialog the buyer is actually looking at.
+          error={error}
           onConfirm={confirmBuy}
-          onCancel={() => setBuyTarget(null)}
+          onCancel={() => {
+            setError(null);
+            setBuyTarget(null);
+          }}
         />
       )}
 
@@ -809,278 +1094,436 @@ export default function MarketView() {
           unmounting on switch — a tab you've already opened snaps back
           instantly (its data, images, and any live connections are still
           there) instead of re-fetching and re-rendering from scratch.
-          Reveal's fade still plays via its own `key`; hidden tabs are just
-          display:none, not removed from the tree. */}
-      <Reveal delayMs={70}>
-        <div className={tab === "buy-sell" ? undefined : "hidden"}>
+          Hidden tabs are display:none, not removed from the tree. */}
+      <div>
+        <MarketTabPanel id="buy-sell" active={tab === "buy-sell"}>
           {visitedTabs.has("buy-sell") && (
-          <div className="space-y-3">
-            <EventCountdown />
-            {COLLECTION && (
-              <CollectionStats
-                collection={COLLECTION}
-                listings={listings}
-                offers={offers}
-                totalSupply={TOTAL_SUPPLY}
-              />
-            )}
-            {!loading && rarityMap.size > 0 && listings.length > 0 && (
-              <RarityFloorStrip
-                listings={listings}
-                rarity={rarityMap}
-                activeTier={filters.tier}
-                onSelectTier={(tier) => {
-                  setFilters((f) => ({ ...f, tier }));
-                }}
-              />
-            )}
-            {account && !loading && (
-              <IncomingBids
-                dense
-                offers={offers as unknown as Array<WithOrder<Offer>>}
-                ownedTokenIds={ownedTokenIds}
-                onAcceptToken={(o) => void handleAcceptOffer(o as unknown as Listing)}
-                onAcceptCriteria={(o) => void handleAcceptTraitOffer(o as WithOrder<Offer>)}
-              />
-            )}
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start">
-              <FilterBar
-                filters={filters}
-                onChange={setFilters}
-                resultCount={loading ? 0 : visibleListings.length}
-                rarityAvailable={rarityMap.size > 0}
-              />
-              {COLLECTION && !loading && (
-                <SweepFloorboards
-                  listings={listings}
-                  collection={COLLECTION}
-                  account={account}
-                  rarity={rarityMap}
-                  tierScope={filters.tier}
-                  onSweep={(plan) => void handleSweep(plan)}
-                />
-              )}
-              {COLLECTION && !loading && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const who = await requireAccount();
-                    if (who) setOfferTarget({ trait: true });
-                  }}
-                  className="min-h-9 shrink-0 rounded-lg border border-gold-500/40 px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
-                  title="Bid on any plank matching trait, rarity, or combo"
+            <MarketTabSection
+              eyebrow="Live order book"
+              title="Explore floorboards"
+              description="Search every live listing, compare rarity floors, make a criteria bid, or sweep several planks in one verified flow."
+              labelled={false}
+            >
+              <div className="space-y-3">
+                <EventCountdown />
+                {COLLECTION && (
+                  <CollectionStats
+                    collection={COLLECTION}
+                    listings={listings}
+                    offers={offers}
+                    totalSupply={TOTAL_SUPPLY}
+                  />
+                )}
+                <OrderBookAlert message={bookError} onRetry={retryOrderBook} />
+                {account && !loading && (
+                  <IncomingBids
+                    dense
+                    offers={offers as unknown as Array<WithOrder<Offer>>}
+                    ownedTokenIds={ownedTokenIds}
+                    onAcceptToken={(o) => void handleAcceptOffer(o as unknown as Listing)}
+                    onAcceptCriteria={(o) => void handleAcceptTraitOffer(o as WithOrder<Offer>)}
+                  />
+                )}
+                <MarketBrowseLayout
+                  summary={
+                    loading
+                      ? "Loading live listings…"
+                      : `${visibleListings.length} ${visibleListings.length === 1 ? "Plank" : "Planks"} on the market`
+                  }
+                  filters={
+                    <FilterBar
+                      filters={filters}
+                      onChange={setFilters}
+                      resultCount={loading ? 0 : visibleListings.length}
+                      rarityAvailable={rarityMap.size > 0}
+                      orientation="sidebar"
+                      tierCounts={tierListedCounts}
+                    />
+                  }
+                  lead={
+                    !loading && rarityMap.size > 0 && listings.length > 0 ? (
+                      <RarityFloorStrip
+                        listings={listings}
+                        rarity={rarityMap}
+                        activeTier={filters.tier}
+                        onSelectTier={(tier) => {
+                          setFilters((f) => ({
+                            ...f,
+                            tier,
+                            tiers: tier === "all" ? [] : [tier],
+                          }));
+                        }}
+                      />
+                    ) : undefined
+                  }
+                  toolbar={
+                    <>
+                      {COLLECTION && !loading && (
+                        <button
+                          type="button"
+                          onClick={() => setSweepOpen((v) => !v)}
+                          aria-pressed={sweepOpen}
+                          aria-controls="sweep-planner"
+                          className={`min-h-10 shrink-0 rounded-lg border px-3 text-xs font-bold transition ${
+                            sweepOpen
+                              ? "border-gold-400 bg-gold-500/15 text-gold-200"
+                              : "border-line-strong text-gold-300 hover:border-gold-400"
+                          }`}
+                          title="Batch-buy the cheapest listings — scopes, presets, and confirmation"
+                        >
+                          Sweep floorboards
+                        </button>
+                      )}
+                      {COLLECTION && !loading && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const who = await requireAccount();
+                            if (who) setOfferTarget({ trait: true });
+                          }}
+                          className="min-h-10 shrink-0 rounded-lg border border-line-strong px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+                          title="Bid on any plank matching trait, rarity, or combo"
+                        >
+                          Bid by criteria
+                        </button>
+                      )}
+                      <label className="flex items-center gap-1.5">
+                        <span className="sr-only">Sort listings</span>
+                        <select
+                          value={sort}
+                          onChange={(e) => setSort(e.target.value as SortKey)}
+                          className="min-h-10 max-w-[12rem] rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground"
+                        >
+                          {SORTS.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
+                  }
                 >
-                  Bid on trait / rarity
-                </button>
-              )}
-              <label className="flex items-center gap-1.5">
-                <span className="sr-only">Sort listings</span>
-                <select
-                  value={sort}
-                  onChange={(e) => setSort(e.target.value as SortKey)}
-                  className="min-h-9 rounded-md border border-gold-500/30 bg-wood-950 px-2 text-xs text-foreground"
-                >
-                  {SORTS.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            {loading ? (
-              <ListingSkeleton />
-            ) : (
-              <ListingGrid
-                listings={sortListings(visibleListings, sort)}
-                collections={MARKET_COLLECTIONS}
-                onBuy={handleBuy}
-                onOffer={handleOffer}
-                onSelect={openDetail}
-                floorPriceWei={floorPriceWei}
-                emptyMessage={
-                  listings.length === 0
-                    ? "No listings yet — be the first to sell."
-                    : "No matches."
-                }
-              />
-            )}
-          </div>
-          )}
-        </div>
-        <div className={tab === "offers" ? undefined : "hidden"}>
-          {visitedTabs.has("offers") && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="min-w-0 flex-1 rounded-lg border border-dashed border-emerald-500/30 bg-forest-900/50 px-3 py-2 text-center text-[0.7rem] text-foreground/70">
-                Bids from buyers — trait, rarity, combo, or single plank. Accepting one sells them
-                your matching plank.
-              </p>
-              <button
-                type="button"
-                onClick={async () => {
-                  const who = await requireAccount();
-                  if (who) setOfferTarget({ trait: true });
-                }}
-                className="min-h-10 shrink-0 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
-              >
-                Bid on trait / rarity / combo
-              </button>
-            </div>
-            {account && !loading && (
-              <IncomingBids
-                offers={offers as unknown as Array<WithOrder<Offer>>}
-                ownedTokenIds={ownedTokenIds}
-                onAcceptToken={(o) => void handleAcceptOffer(o as unknown as Listing)}
-                onAcceptCriteria={(o) => void handleAcceptTraitOffer(o as WithOrder<Offer>)}
-              />
-            )}
-            {!loading && traitOffers.length > 0 && (
-              <ul className="space-y-2">
-                {traitOffers.map((o) => {
-                  const canAccept =
-                    ownedTokenIds &&
-                    o.criteriaTokenIds?.some((id) =>
-                      ownedTokenIds.has(BigInt(id).toString())
-                    );
-                  return (
-                    <li
-                      key={o.id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gold-500/25 bg-wood-900/90 px-3 py-2"
+                  {COLLECTION && !loading && sweepOpen && (
+                    <div
+                      id="sweep-planner"
+                      className="mb-3 rounded-xl border border-line bg-wood-900/80 p-3"
                     >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-bold text-foreground">
-                          Any{" "}
-                          {o.traits?.map((t) => `${t.traitType}: ${t.value}`).join(", ") ??
-                            "qualifying plank"}
-                        </p>
-                        <p className="text-[0.65rem] text-foreground/60">
-                          {o.criteriaTokenIds?.length ?? 0} planks qualify · seller nets{" "}
-                          {formatTokenAmount(o.priceWei, 18, 6)} WETH
+                      <SweepFloorboards
+                        listings={listings}
+                        collection={COLLECTION}
+                        account={account}
+                        rarity={rarityMap}
+                        tierScope={filters.tier}
+                        onSweep={(plan) => void handleSweep(plan)}
+                      />
+                    </div>
+                  )}
+                  {loading ? (
+                    <ListingSkeleton />
+                  ) : (
+                    <ListingGrid
+                      listings={sortedVisibleListings}
+                      collections={MARKET_COLLECTIONS}
+                      onBuy={handleBuy}
+                      onOffer={handleOffer}
+                      onSelect={openDetail}
+                      floorPriceWei={floorPriceWei}
+                      emptyMessage={
+                        listings.length === 0
+                          ? "No listings yet — be the first to sell."
+                          : "No matches."
+                      }
+                      emptyAction={
+                        listings.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setFilters(EMPTY_FILTERS)}
+                            className="min-h-10 rounded-md border border-line-strong px-3 text-xs text-gold-300 hover:border-gold-400"
+                          >
+                            Clear filters
+                          </button>
+                        ) : undefined
+                      }
+                    />
+                  )}
+                </MarketBrowseLayout>
+              </div>
+            </MarketTabSection>
+          )}
+        </MarketTabPanel>
+        <MarketTabPanel id="offers" active={tab === "offers"}>
+          {visitedTabs.has("offers") && (
+          <MarketTabSection
+            eyebrow="Name your price"
+            title="Offers"
+            description="Bid on one Plank, a rarity tier, or a precise trait combo. Criteria clauses use AND logic and sellers verify net proceeds before accepting."
+          >
+            <OrderBookAlert message={bookError} onRetry={retryOrderBook} />
+            {account && (
+              <div className="mb-3 flex justify-end">
+                <WethBalance account={account} />
+              </div>
+            )}
+            <div className="grid items-start gap-3 lg:grid-cols-[360px_minmax(0,1fr)]">
+              <div className="lg:sticky lg:top-[8.75rem]">
+                {COLLECTION ? (
+                  <OfferForm
+                    presentation="inline"
+                    account={account}
+                    collection={COLLECTION}
+                    traitMode
+                    listings={listings}
+                    onClose={() => undefined}
+                    onConnect={handleConnect}
+                    onSubmitted={() => void refresh()}
+                  />
+                ) : null}
+              </div>
+              <div className="min-w-0 space-y-3">
+                {account && !loading && (
+                  <IncomingBids
+                    offers={offers as unknown as Array<WithOrder<Offer>>}
+                    ownedTokenIds={ownedTokenIds}
+                    onAcceptToken={(o) => void handleAcceptOffer(o as unknown as Listing)}
+                    onAcceptCriteria={(o) => void handleAcceptTraitOffer(o as WithOrder<Offer>)}
+                  />
+                )}
+                {!loading && traitOffers.length > 0 && (
+                  <section aria-labelledby="open-criteria-bids">
+                    <div className="mb-2 flex items-end justify-between gap-3">
+                      <div>
+                        <h3 id="open-criteria-bids" className="font-display text-xl text-gold-300">
+                          Open criteria bids
+                        </h3>
+                        <p className="text-xs text-foreground/55">
+                          Rarity, trait, rank, and combo orders.
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleAcceptTraitOffer(o)}
-                        disabled={account !== null && !canAccept}
-                        title={
-                          account !== null && !canAccept
-                            ? "None of your planks carry this trait"
-                            : undefined
-                        }
-                        className="min-h-9 rounded-md bg-gold-500 px-3 text-xs font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-40"
-                      >
-                        Accept
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            {loading ? (
-              <ListingSkeleton />
-            ) : (
-              <ListingGrid
-                listings={sortListings(tokenOffers, sort === "price-asc" ? "price-desc" : sort)}
-                collections={MARKET_COLLECTIONS}
-                onBuy={handleAcceptOffer}
-                onSelect={openDetail}
-                buyLabel="Accept"
-                variant="offer"
-                ownedTokenIds={ownedTokenIds}
-                emptyMessage={traitOffers.length > 0 ? "No single-token offers." : "No offers yet."}
-              />
-            )}
-          </div>
+                      <span className="rounded-full border border-line px-2 py-1 text-[0.65rem] text-gold-300">
+                        {traitOffers.length} active
+                      </span>
+                    </div>
+                    <ul className="space-y-2">
+                      {traitOffers.map((o) => {
+                        const canAccept =
+                          ownedTokenIds &&
+                          o.criteriaTokenIds?.some((id) =>
+                            ownedTokenIds.has(BigInt(id).toString())
+                          );
+                        return (
+                          <li
+                            key={o.id}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-panel px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-bold text-foreground">
+                                Any{" "}
+                                {o.traits
+                                  ?.map((t) => `${t.traitType}: ${t.value}`)
+                                  .join(", ") ?? "qualifying plank"}
+                              </p>
+                              <p className="text-xs text-foreground/60">
+                                {o.criteriaTokenIds?.length ?? 0} planks qualify · seller nets{" "}
+                                {formatTokenAmount(o.priceWei, 18, 6)} WETH
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void handleAcceptTraitOffer(o)}
+                              disabled={account !== null && !canAccept}
+                              title={
+                                account !== null && !canAccept
+                                  ? "None of your planks carry this trait"
+                                  : undefined
+                              }
+                              className="min-h-10 rounded-md bg-gold-500 px-3 text-xs font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-40"
+                            >
+                              Accept
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                )}
+                <section aria-labelledby="single-token-offers">
+                  <div className="mb-2">
+                    <h3 id="single-token-offers" className="font-display text-xl text-gold-300">
+                      Single-token offers
+                    </h3>
+                    <p className="text-xs text-foreground/55">
+                      Offers tied to one exact token ID.
+                    </p>
+                  </div>
+                  {loading ? (
+                    <ListingSkeleton />
+                  ) : (
+                    <ListingGrid
+                      listings={sortedTokenOffers}
+                      collections={MARKET_COLLECTIONS}
+                      onBuy={handleAcceptOffer}
+                      onSelect={openDetail}
+                      buyLabel="Accept"
+                      variant="offer"
+                      ownedTokenIds={ownedTokenIds}
+                      emptyMessage={
+                        traitOffers.length > 0
+                          ? "No single-token offers."
+                          : "No offers yet. Build the first criteria bid."
+                      }
+                    />
+                  )}
+                </section>
+              </div>
+            </div>
+          </MarketTabSection>
           )}
-        </div>
-        <div className={tab === "activity" ? undefined : "hidden"}>
+        </MarketTabPanel>
+        <MarketTabPanel id="activity" active={tab === "activity"}>
           {visitedTabs.has("activity") && (
-          <div className="space-y-3">
-            <EventCountdown />
-            <ActivityFeed
-              onSelectToken={openDetail}
-              collection={COLLECTION}
-              listings={listings}
-              offers={offers}
-              totalSupply={TOTAL_SUPPLY}
-            />
-            <VaultTradeHistory />
-          </div>
+          <MarketTabSection
+            eyebrow="On-chain record"
+            title="Activity"
+            description="Follow collection sales, mints, transfers, venue attribution, price history, and live vault liquidity-pool trades."
+          >
+            <div className="space-y-3">
+              <ActivityFeed
+                onSelectToken={openDetail}
+              />
+              <VaultTradeHistory />
+            </div>
+          </MarketTabSection>
           )}
-        </div>
-        <div className={tab === "swap" ? undefined : "hidden"}>
+        </MarketTabPanel>
+        <MarketTabPanel id="swap" active={tab === "swap"}>
           {visitedTabs.has("swap") && (
-          <div className="space-y-3">
-            <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} />
-            {/* CSS multi-column masonry, not a manual 2-column split — a
-                manual split left one side visibly taller than the other
-                (a whole empty quadrant under the shorter column, the
-                reported "hanging module" complaint) because these panels'
-                heights are all data-dependent and unequal. Columns
-                self-balance by filling whichever is currently shortest.
-                SwapPanel goes first so the actual action panel lands at
-                the top of column 1, not wherever the flow happens to put
-                it. break-inside-avoid keeps each card from being sliced
-                across the column break. */}
-            {/* Dual vault: pick V1 (legacy deposits) or V2 (new book / LP) first */}
-            <InstantVaultSwitcher role={vaultRole} onChange={setVaultRole} />
-            {/* Seed/bootstrap only on primary (V2) — never seed into legacy V1 */}
-            {vaultRole === "primary" && (
-              <SeedVaultPanel account={account} onConnect={handleConnect} />
+          <MarketTabSection
+            eyebrow="Trade shares · redeem NFTs"
+            title="Instant Swap"
+            description="Buy or sell vault shares instantly, provide liquidity, deposit a Plank, or redeem shares for an NFT."
+          >
+            <div className="space-y-3">
+            {vaultGeneration(activeVault?.address ?? vaultAddr) >= 3 ? (
+              // V3: the full self-contained V3 page (vault line, trade card,
+              // context column, tabbed analytics, and its own migration nudge).
+              <>
+                <V3SwapView vaultAddress={activeVault?.address ?? vaultAddr} active={tab === "swap"} />
+                {/* Quiet side-door to the retired V1 pool — only once V3 is the
+                    primary vault and a legacy V1 still exists (dual mode). */}
+                {dualVaultMode() && (
+                  <Link
+                    href="/floorboards"
+                    className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-[0.72rem] text-cream-muted transition hover:border-line-strong hover:text-cream"
+                  >
+                    <span aria-hidden className="text-gold-300/70">⌄</span>
+                    Hunting cheaper planks? Look under the floorboards
+                    <span aria-hidden className="ml-auto text-gold-300/70">→</span>
+                  </Link>
+                )}
+              </>
+            ) : (
+              <>
+                {/* Pick which vault to act on — current vault or a legacy */}
+                <InstantVaultSwitcher
+                  selected={activeVault?.address ?? vaultAddr}
+                  onSelect={setVaultAddr}
+                  active={tab === "swap"}
+                />
+                <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                  <SwapPanel
+                    account={account}
+                    onConnect={handleConnect}
+                    active={tab === "swap"}
+                    collection={COLLECTION}
+                    vaultAddress={activeVault?.address ?? COLLECTION.vaultAddress ?? null}
+                    vaultLabel={
+                      activeVault?.role === "legacy"
+                        ? "legacy deposits"
+                        : "current vault"
+                    }
+                  />
+                  <div className="space-y-3">
+                    <LivingLiquidityViz vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
+                    <VaultDashboard vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
+                  </div>
+                </div>
+                <div className="grid items-start gap-3 md:grid-cols-2">
+                  <NftPriceChart active={tab === "swap"} />
+                  <RedeemOdds vaultAddress={activeVault?.address ?? null} active={tab === "swap"} />
+                </div>
+                <VaultTradeHistory />
+                {dualVaultMode() && (
+                  <Link
+                    href="/migrate"
+                    className="flex flex-wrap items-center gap-3 rounded-xl border border-line-strong bg-gradient-to-r from-gold-500/12 to-transparent px-4 py-3.5 transition hover:border-gold-500/60"
+                  >
+                    <span className="h-2.5 w-2.5 flex-none rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-extrabold text-cream">Have planks in a retiring vault? Migrate them.</span>
+                      <span className="block text-[0.72rem] text-cream/60">A guided page redeems on the old vault and deposits on the new — same fees, no migration tax.</span>
+                    </span>
+                    <span className="inline-flex min-h-[44px] flex-none items-center rounded-lg bg-gold-500 px-4 text-sm font-black text-[#261105]">Open /migrate →</span>
+                  </Link>
+                )}
+                {activeVault?.role === "primary" && (
+                  <MarketDisclosure
+                    eyebrow="Operator controls"
+                    title="Seed and bootstrap the current vault"
+                    description="Treasury-only setup and liquidity controls for the primary vault."
+                  >
+                    <SeedVaultPanel account={account} onConnect={handleConnect} active={tab === "swap"} />
+                  </MarketDisclosure>
+                )}
+                <MarketDisclosure
+                  eyebrow="Protocol accounting"
+                  title="Treasury and fee dashboard"
+                  description="Live fee balances, collection flows, and treasury status."
+                >
+                  <TreasuryDashboard />
+                </MarketDisclosure>
+              </>
             )}
-            {dualVaultMode() && (
-              <VaultMigrate account={account} onConnect={handleConnect} />
-            )}
-            <div className="gap-3 [column-fill:balance] sm:columns-2 [&>*]:mb-3 [&>*]:break-inside-avoid">
-              <SwapPanel
+            </div>
+          </MarketTabSection>
+          )}
+        </MarketTabPanel>
+        <MarketTabPanel id="my-nfts" active={tab === "my-nfts"}>
+          {visitedTabs.has("my-nfts") && (account ? (
+            <MarketTabSection
+              eyebrow="Wallet inventory"
+              title="My NFTs"
+              description="Review every Plank in your wallet, inspect rarity and listing state, or select several for a verified transfer."
+            >
+              <MyNfts
                 account={account}
-                onConnect={handleConnect}
-                vaultAddress={activeVault?.address ?? null}
-                vaultLabel={
-                  vaultRole === "legacy"
-                    ? "legacy deposits"
-                    : activeVault?.isV1
-                      ? "primary vault"
-                      : "new Instant Swap"
+                collections={MARKET_COLLECTIONS}
+                alreadyListed={
+                  new Set(
+                    listings
+                      .filter((l) => l.maker.toLowerCase() === account.toLowerCase())
+                      .map((l) => `${l.collectionSlug}:${l.tokenId}`)
+                  )
                 }
               />
-              <VaultDashboard vaultAddress={activeVault?.address ?? null} />
-              <NftPriceChart />
-              <RedeemOdds vaultAddress={activeVault?.address ?? null} />
-              {/* Trades stay dual-vault (V1 + V2) regardless of selection */}
-              <VaultTradeHistory />
-              <TreasuryDashboard />
-            </div>
-          </div>
-          )}
-        </div>
-        <div className={tab === "my-nfts" ? undefined : "hidden"}>
-          {visitedTabs.has("my-nfts") && (account ? (
-            <MyNfts
-              account={account}
-              collections={MARKET_COLLECTIONS}
-              alreadyListed={
-                new Set(
-                  listings
-                    .filter((l) => l.maker.toLowerCase() === account.toLowerCase())
-                    .map((l) => `${l.collectionSlug}:${l.tokenId}`)
-                )
-              }
-            />
+            </MarketTabSection>
           ) : (
-            <button
-              type="button"
-              onClick={handleConnect}
-              className="mx-auto flex min-h-11 items-center justify-center rounded-lg bg-gold-500 px-5 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
-            >
-              Connect wallet
-            </button>
+            <MarketWalletGate
+              title="See your Planks"
+              description="Connect to load your collection, inspect rarity and listing status, and access the multi-select send workflow."
+              onConnect={handleConnect}
+            />
           ))}
-        </div>
-        <div className={tab === "positions" ? undefined : "hidden"}>
+        </MarketTabPanel>
+        <MarketTabPanel id="positions" active={tab === "positions"}>
           {visitedTabs.has("positions") && (account ? (
-            <div className="space-y-3">
+            <MarketTabSection
+              eyebrow="Seller workspace"
+              title="My Listings"
+              description="List Planks from your wallet, accept matching bids, cancel active orders, and manage marketplace approvals."
+            >
+              <div className="space-y-3">
+              <OrderBookAlert message={bookError} onRetry={retryOrderBook} />
               <IncomingBids
                 offers={offers as unknown as Array<WithOrder<Offer>>}
                 ownedTokenIds={ownedTokenIds}
@@ -1091,7 +1534,7 @@ export default function MarketView() {
                 type="button"
                 onClick={() => setShowInventory((v) => !v)}
                 aria-expanded={showInventory}
-                className="min-h-10 rounded-lg border border-gold-500/40 px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
+                className="min-h-10 rounded-lg border border-line-strong px-3.5 text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
               >
                 {showInventory ? "Hide my planks" : "List from your wallet"}
               </button>
@@ -1110,18 +1553,18 @@ export default function MarketView() {
                 />
               )}
               <MyPositions account={account} listings={listings} offers={offers} onChanged={refresh} />
-            </div>
+              </div>
+            </MarketTabSection>
           ) : (
-            <button
-              type="button"
-              onClick={handleConnect}
-              className="mx-auto flex min-h-11 items-center justify-center rounded-lg bg-gold-500 px-5 text-sm font-bold text-wood-950 transition hover:bg-gold-400"
-            >
-              Connect wallet
-            </button>
+            <MarketWalletGate
+              title="Manage your listings"
+              description="Connect to list Planks, review active listings and offers, accept matching bids, cancel orders, and revoke approvals."
+              onConnect={handleConnect}
+            />
           ))}
-        </div>
-      </Reveal>
-    </div>
+        </MarketTabPanel>
+      </div>
+      </MarketContent>
+    </MarketScaffold>
   );
 }
