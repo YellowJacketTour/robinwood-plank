@@ -35,9 +35,19 @@ import {
   computeRaritySnapshot,
   formatRank,
   tierColor,
+  TIER_ORDER,
+  type RarityTier,
   type TokenRarity,
 } from "@/lib/rarity";
-import { Search, X, LayoutGrid, BarChart3, ExternalLink, Wallet } from "lucide-react";
+import {
+  Search,
+  X,
+  LayoutGrid,
+  BarChart3,
+  ExternalLink,
+  Wallet,
+  SlidersHorizontal,
+} from "lucide-react";
 import type { GalleryNft } from "@/lib/gallery-types";
 import {
   GALLERY_TABS,
@@ -466,15 +476,30 @@ export default function Gallery() {
   const [items, setItems] = useState<GalleryNft[]>([]);
   const [totalMinted, setTotalMinted] = useState(0);
   const [loadedCount, setLoadedCount] = useState(0);
+  // `queryInput` is what the text box shows and updates on every keystroke.
+  // `query` is debounced off it and is the only one the expensive filter
+  // pass (matchesGalleryQuery over up to ~1,542 tokens, ~10-15ms/keystroke
+  // measured) actually reads — so typing stays instant in the box while the
+  // grid recomputes at most a few times a second instead of once a keystroke.
+  const [queryInput, setQueryInput] = useState("");
   const [query, setQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [status, setStatus] = useState("Connecting to Robinhood Chain…");
   const [selected, setSelected] = useState<GalleryNft | null>(null);
   const [livePulse, setLivePulse] = useState(false);
-  const [sortMode, setSortMode] = useState<"newest" | "rarest">("newest");
+  // Rarest is the default: on a fully-minted collection "newest" just means
+  // "highest token id", which reads as random and tells a browser nothing.
+  // Token id order is kept as an explicit, honestly-labeled option below
+  // ("Token #") since it's still the only stable way to find a specific plank.
+  const [sortMode, setSortMode] = useState<"rarest" | "tokenId">("rarest");
   const [panel, setPanel] = useState<GalleryPanel>(DEFAULT_GALLERY_PANEL);
   /** Token ids from Insights checkbox filters — null means no insight filter */
   const [insightFilterIds, setInsightFilterIds] = useState<number[] | null>(null);
+  /** Tier multi-select — empty set means no tier filter. Composes with
+   *  insightFilterIds/search/panel in the one `filtered` pipeline below. */
+  const [tierFilter, setTierFilter] = useState<Set<RarityTier>>(() => new Set());
+  const [holoOnly, setHoloOnly] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // My NFTs tab. First wallet state in this file — the modal's one-shot
   // getConnectedAccounts() stays as it is, since it only decides which CTA to
@@ -1023,13 +1048,23 @@ export default function Gallery() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Debounce the expensive filter pass off the keystroke. 160ms is short
+  // enough that it never reads as lag (well under the ~250ms people notice as
+  // "sluggish") but skips the recompute for every character of a fast typist.
+  useEffect(() => {
+    const id = window.setTimeout(() => setQuery(queryInput), 160);
+    return () => window.clearTimeout(id);
+  }, [queryInput]);
+
   // Reset pagination whenever the result set changes underneath it. Not just
   // `query`: switching panels changes the set too, and carrying a visibleCount
   // of 240 into a three-plank bag renders a stale "Collapse" footer over
   // nothing. `ownedIds` resolving (null -> Set) is the same kind of change.
+  // tierFilter/holoOnly are new filter axes that narrow the same list, so they
+  // reset pagination for the same reason.
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [query, panel, ownedIds]);
+  }, [query, panel, ownedIds, tierFilter, holoOnly]);
 
   // URL state. `?q=` is the deep link from the landing page's wallet lookup
   // (WalletLookupCard) and `?tab=` selects the panel.
@@ -1042,7 +1077,12 @@ export default function Gallery() {
     if (typeof window === "undefined") return;
     const sync = () => {
       const params = new URLSearchParams(window.location.search);
-      setQuery(params.get("q") ?? "");
+      const q = params.get("q") ?? "";
+      // Seed both the box and the debounced filter value directly — a deep
+      // link with `?q=` should show results on first paint, not after a
+      // 160ms debounce delay it never actually needed.
+      setQueryInput(q);
+      setQuery(q);
       setPanel(parseGalleryTab(params.get("tab")));
     };
     sync();
@@ -1090,10 +1130,14 @@ export default function Gallery() {
 
   const rarity = useMemo(() => computeRaritySnapshot(items), [items]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim();
+  /**
+   * Panel + Insights cut only — the shared starting point both `filtered`
+   * below and the empty-state diagnosis build on, split out so the two don't
+   * silently drift out of sync (and so the diagnosis isn't a second copy of
+   * this same narrowing).
+   */
+  const baseList = useMemo(() => {
     let list = items;
-
     // First cut, because it is the panel's defining constraint and the cheapest
     // (a Set.has over at most 200 ids). It narrows rather than replaces, so
     // search and sort still compose on top — searching inside your own bag is
@@ -1102,11 +1146,34 @@ export default function Gallery() {
       if (!ownedIds) return [];
       list = list.filter((item) => ownedIds.has(item.tokenId));
     }
-
     if (insightFilterIds) {
       const allow = new Set(insightFilterIds);
       list = list.filter((item) => allow.has(item.tokenId));
     }
+    return list;
+  }, [items, panel, ownedIds, insightFilterIds]);
+
+  const passesTierHolo = useCallback(
+    (item: GalleryNft) => {
+      if (tierFilter.size > 0) {
+        const r = rarity.byTokenId.get(item.tokenId);
+        if (!r || !tierFilter.has(r.tier)) return false;
+      }
+      if (holoOnly) {
+        const r = rarity.byTokenId.get(item.tokenId);
+        const holo = r?.traits.find(
+          (t) => t.trait.trim().toLowerCase() === "holographic",
+        );
+        if (!holo || holo.value.trim().toLowerCase() !== "yes") return false;
+      }
+      return true;
+    },
+    [tierFilter, holoOnly, rarity],
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim();
+    let list = baseList.filter(passesTierHolo);
 
     if (q) {
       list = list.filter((item) =>
@@ -1115,23 +1182,61 @@ export default function Gallery() {
           item.searchText || "",
           item.searchWords || [],
           item.owner || "",
+          item.tokenId,
         ),
       );
     }
 
-    if (sortMode === "rarest") {
-      return [...list].sort((a, b) => {
-        const ra = rarity.byTokenId.get(a.tokenId);
-        const rb = rarity.byTokenId.get(b.tokenId);
-        if (ra && rb) return ra.rank - rb.rank || b.tokenId - a.tokenId;
-        if (ra) return -1;
-        if (rb) return 1;
-        return b.tokenId - a.tokenId;
-      });
+    if (sortMode === "tokenId") {
+      // Honest label for what this order actually is — ascending token id,
+      // the one stable way to browse toward a specific plank.
+      return [...list].sort((a, b) => a.tokenId - b.tokenId);
     }
 
-    return [...list].sort(sortNewestFirst);
-  }, [items, query, sortMode, rarity, insightFilterIds, panel, ownedIds]);
+    // Default: rarest first.
+    return [...list].sort((a, b) => {
+      const ra = rarity.byTokenId.get(a.tokenId);
+      const rb = rarity.byTokenId.get(b.tokenId);
+      if (ra && rb) return ra.rank - rb.rank || b.tokenId - a.tokenId;
+      if (ra) return -1;
+      if (rb) return 1;
+      return b.tokenId - a.tokenId;
+    });
+  }, [baseList, passesTierHolo, query, sortMode, rarity]);
+
+  /**
+   * Which active constraint is responsible for an empty grid: the search
+   * text, the tier/holo filters, or both together (each alone still finds
+   * something, but not at the same time). Gated on `filtered.length === 0`
+   * so it costs nothing on the common non-empty path — this never runs while
+   * someone is just browsing.
+   */
+  const emptyCause = useMemo((): "search" | "filters" | "both" | null => {
+    if (filtered.length > 0 || baseList.length === 0) return null;
+    const q = query.trim();
+    const tierHoloActive = tierFilter.size > 0 || holoOnly;
+    if (!q && !tierHoloActive) return null;
+
+    const searchHitsAnything = q
+      ? baseList.some((item) =>
+          matchesGalleryQuery(
+            q,
+            item.searchText || "",
+            item.searchWords || [],
+            item.owner || "",
+            item.tokenId,
+          ),
+        )
+      : true;
+    const tierHoloHitsAnything = tierHoloActive
+      ? baseList.some(passesTierHolo)
+      : true;
+
+    if (q && !searchHitsAnything) return "search";
+    if (tierHoloActive && !tierHoloHitsAnything) return "filters";
+    if (q && tierHoloActive) return "both";
+    return null;
+  }, [filtered.length, baseList, query, tierFilter, holoOnly, passesTierHolo]);
 
   const visible = useMemo(
     () => filtered.slice(0, visibleCount),
@@ -1145,6 +1250,11 @@ export default function Gallery() {
       : Math.min(100, Math.round((loadedCount / totalMinted) * 100));
   const searchActive = query.trim().length > 0;
   const metadataStillLoading = totalMinted > 0 && loadedCount < totalMinted;
+  // Any filter axis that can legitimately explain an empty grid — used to
+  // tell "no matches for these filters" apart from "still loading" in the
+  // empty state below.
+  const hasActiveFilters =
+    tierFilter.size > 0 || holoOnly || insightFilterIds !== null;
   const selectedRarity = selected
     ? rarity.byTokenId.get(selected.tokenId)
     : undefined;
@@ -1154,8 +1264,17 @@ export default function Gallery() {
   }
 
   function onSearchChange(value: string) {
-    setQuery(value);
-    setVisibleCount(PAGE_SIZE);
+    // Updates the box immediately; `query` (what actually drives filtering)
+    // follows after the debounce effect above. visibleCount resets itself
+    // once `query` lands, via the effect keyed on it.
+    setQueryInput(value);
+  }
+
+  function clearSearch() {
+    // Clearing is a decisive action, not a keystroke — skip the debounce so
+    // the grid snaps back immediately instead of lagging behind an empty box.
+    setQueryInput("");
+    setQuery("");
   }
 
   function openToken(tokenId: number) {
@@ -1256,7 +1375,7 @@ export default function Gallery() {
                 <input
                   id="gallery-search"
                   type="search"
-                  value={query}
+                  value={queryInput}
                   onChange={(event) => onSearchChange(event.target.value)}
                   placeholder="Filter: holo, rare, 0x…, vanity, #id"
                   autoComplete="off"
@@ -1268,8 +1387,8 @@ export default function Gallery() {
               <div className="flex gap-1.5">
                 {(
                   [
-                    ["newest", "Newest"],
                     ["rarest", "Rarest"],
+                    ["tokenId", "Token #"],
                   ] as const
                 ).map(([id, label]) => (
                   <button
@@ -1293,10 +1412,28 @@ export default function Gallery() {
                     {label}
                   </button>
                 ))}
-                {query && (
+                {panel !== "insights" && (
                   <button
                     type="button"
-                    onClick={() => onSearchChange("")}
+                    onClick={() => setFiltersOpen((v) => !v)}
+                    aria-expanded={filtersOpen}
+                    className={`inline-flex min-h-11 flex-1 items-center justify-center gap-1 rounded-lg px-3 py-2 text-xs font-bold sm:flex-none sm:text-sm ${
+                      filtersOpen || tierFilter.size > 0 || holoOnly
+                        ? "bg-gold-500 text-wood-950"
+                        : "border border-line-strong text-gold-300 hover:border-gold-400"
+                    }`}
+                  >
+                    <SlidersHorizontal size={12} strokeWidth={2.5} />
+                    Filters
+                    {tierFilter.size > 0 || holoOnly
+                      ? ` · ${tierFilter.size + (holoOnly ? 1 : 0)}`
+                      : ""}
+                  </button>
+                )}
+                {queryInput && (
+                  <button
+                    type="button"
+                    onClick={clearSearch}
                     className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-line-strong px-3 py-2 text-xs font-bold text-gold-300 sm:text-sm"
                   >
                     <X size={12} strokeWidth={2.5} />
@@ -1305,6 +1442,73 @@ export default function Gallery() {
                 )}
               </div>
             </form>
+
+            {/* Collapsible row — keeps the search bar itself from getting
+                overloaded on mobile while still surfacing rarity/holo cuts.
+                Counts come straight off the already-computed snapshot, so
+                opening this costs no extra work. */}
+            {panel !== "insights" && filtersOpen && (
+              <div className="mt-2 flex flex-wrap gap-1.5 rounded-lg border border-line bg-wood-950 p-2">
+                {TIER_ORDER.map((tier) => {
+                  const active = tierFilter.has(tier);
+                  const count = rarity.tierCounts[tier];
+                  return (
+                    <button
+                      key={tier}
+                      type="button"
+                      onClick={() =>
+                        setTierFilter((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(tier)) next.delete(tier);
+                          else next.add(tier);
+                          return next;
+                        })
+                      }
+                      className="min-h-9 rounded-full px-2.5 py-1 text-[0.7rem] font-extrabold"
+                      style={
+                        active
+                          ? { background: tierColor(tier), color: "#261105" }
+                          : {
+                              border: `1px solid ${tierColor(tier)}66`,
+                              color: tierColor(tier),
+                              background: "transparent",
+                            }
+                      }
+                    >
+                      {tier} · {count.toLocaleString()}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => setHoloOnly((v) => !v)}
+                  className="min-h-9 rounded-full px-2.5 py-1 text-[0.7rem] font-extrabold"
+                  style={
+                    holoOnly
+                      ? { background: "#67e8f9", color: "#083344" }
+                      : {
+                          border: "1px solid #67e8f966",
+                          color: "#67e8f9",
+                          background: "transparent",
+                        }
+                  }
+                >
+                  Holo · {rarity.holoYes.toLocaleString()}
+                </button>
+                {(tierFilter.size > 0 || holoOnly) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTierFilter(new Set());
+                      setHoloOnly(false);
+                    }}
+                    className="ml-auto min-h-9 rounded-lg px-2.5 py-1 text-[0.7rem] font-bold text-foreground/50 underline underline-offset-2 hover:text-gold-300"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
 
             <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-foreground/60 sm:text-sm">
               <p role="status" aria-live="polite" className="min-w-0">
@@ -1321,6 +1525,39 @@ export default function Gallery() {
                 <span className="rounded-full border border-line px-2 py-0.5 text-gold-300">
                   {rarity.scoredCount.toLocaleString()} scored
                 </span>
+                {/* Every active filter is individually removable — a user who
+                    lands on an empty grid can see and undo exactly what did
+                    it, one chip at a time, without hunting for a reset. */}
+                {Array.from(tierFilter).map((tier) => (
+                  <button
+                    key={tier}
+                    type="button"
+                    onClick={() =>
+                      setTierFilter((prev) => {
+                        const next = new Set(prev);
+                        next.delete(tier);
+                        return next;
+                      })
+                    }
+                    className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5"
+                    style={{ borderColor: `${tierColor(tier)}66`, color: tierColor(tier) }}
+                    title={`Clear ${tier} filter`}
+                  >
+                    {tier}
+                    <X size={10} strokeWidth={2.5} />
+                  </button>
+                ))}
+                {holoOnly && (
+                  <button
+                    type="button"
+                    onClick={() => setHoloOnly(false)}
+                    className="inline-flex items-center gap-1 rounded-full border border-cyan-400/40 px-2 py-0.5 text-cyan-300"
+                    title="Clear holo filter"
+                  >
+                    Holo
+                    <X size={10} strokeWidth={2.5} />
+                  </button>
+                )}
                 {insightFilterIds && (
                   <button
                     type="button"
@@ -1415,12 +1652,30 @@ export default function Gallery() {
                   <p className="py-12 text-center text-sm text-foreground/60">
                     {searchActive && metadataStillLoading
                       ? `No matches yet — indexing ${progress}%.`
-                      : searchActive
-                        ? `No matches for “${query.trim()}”.`
-                        : // Reachable on My NFTs: the wallet holds planks, but
-                          // the collection index has not staged those ids yet.
-                          // Without this branch it read `No matches for “”.`
-                          "Loading your planks…"}
+                      : // With search and tier/holo filters both live, "nothing
+                        // here" has more than one possible cause — emptyCause
+                        // names which constraint(s) are actually responsible
+                        // instead of leaving the user to guess and clear things
+                        // one at a time.
+                        emptyCause === "both"
+                        ? `Nothing matches “${query.trim()}” together with the current filters — try clearing one.`
+                        : emptyCause === "search"
+                          ? `No matches for “${query.trim()}”.`
+                          : emptyCause === "filters"
+                            ? "No planks match the current tier/holo filters."
+                            : searchActive
+                              ? `No matches for “${query.trim()}”.`
+                              : hasActiveFilters
+                                ? // Distinguish "your filters did this" from the
+                                  // still-loading case below — an empty grid
+                                  // with active filters is not a bug to
+                                  // investigate, it's a cut with zero members.
+                                  "No planks match the current filters."
+                                : // Reachable on My NFTs: the wallet holds
+                                  // planks, but the collection index has not
+                                  // staged those ids yet. Without this branch
+                                  // it read `No matches for "".`
+                                  "Loading your planks…"}
                   </p>
                 )}
 

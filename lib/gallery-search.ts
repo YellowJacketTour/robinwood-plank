@@ -31,6 +31,12 @@ export function normalizeAddressQuery(value: string): string {
 /**
  * True when the query looks like a wallet, partial address, or vanity hex.
  * Examples: 0xabc…, full 40-hex, "dead", "beef01"
+ *
+ * Deliberately NOT true for a bare decimal run like "1234": that is this UI's
+ * id-search idiom (see matchesGalleryQuery's exact-id path), and decimal
+ * digits are a subset of hex, so without the `/[a-f]/` requirement below a
+ * plain id query was silently treated as a wallet/vanity fragment and
+ * cross-matched any owner whose address happened to contain that digit run.
  */
 export function isAddressLikeQuery(query: string): boolean {
   const q = normalizeAddressQuery(query);
@@ -38,8 +44,10 @@ export function isAddressLikeQuery(query: string): boolean {
   if (q.startsWith("0x")) {
     return /^0x[a-f0-9]{2,40}$/.test(q);
   }
-  // bare hex / vanity fragments (avoid pure trait words like "rare" by requiring hex-only)
-  if (/^[a-f0-9]{3,40}$/.test(q)) return true;
+  // Bare hex / vanity fragments — require at least one a–f letter so pure
+  // decimal (a token id) doesn't qualify, and pure trait words ("rare") still
+  // can't (no hex letters outside a–f).
+  if (/^[a-f0-9]{3,40}$/.test(q) && /[a-f]/.test(q)) return true;
   return false;
 }
 
@@ -80,6 +88,17 @@ export function addressMatchesOwner(query: string, owner?: string): boolean {
   if (!q) return true;
 
   const full = normalizeAddressQuery(owner);
+  const isRealAddress = /^0x[a-f0-9]{40}$/.test(full);
+
+  // A query that doesn't even look like part of an address (a plain trait
+  // word, or a bare decimal run meant as a token id — see isAddressLikeQuery)
+  // must never match a real hex address by coincidental overlap. A 40-char
+  // hex string contains *some* short digit run by chance essentially always,
+  // so without this guard a token-id search like "1234" matched any owner
+  // whose address happened to contain "1234" anywhere in it — nothing to do
+  // with the id or the owner the user actually meant.
+  if (isRealAddress && !isAddressLikeQuery(q)) return false;
+
   const hex = full.startsWith("0x") ? full.slice(2) : full;
   const qHex = q.startsWith("0x") ? q.slice(2) : q;
 
@@ -88,8 +107,10 @@ export function addressMatchesOwner(query: string, owner?: string): boolean {
   if (qHex.length >= 3 && (hex.startsWith(qHex) || hex.endsWith(qHex))) return true;
   if (q.length >= 3 && (full.startsWith(q) || full.endsWith(q))) return true;
 
-  // Vanity label on owner string (non-hex display name)
-  if (!isAddressLikeQuery(q) && full.includes(q)) return true;
+  // Vanity label match — only reachable when `owner` itself isn't a raw hex
+  // address (a display name string instead), so this can't reopen the same
+  // digit/letter-substring collision the guard above closes.
+  if (!isRealAddress && full.includes(q)) return true;
 
   return false;
 }
@@ -129,11 +150,24 @@ export function buildGallerySearchIndex(input: {
   for (const attribute of attributes) {
     const trait = String(attribute.trait_type ?? "").trim();
     const value = String(attribute.value ?? "").trim();
-    if (trait) parts.push(trait);
+    const isHolographic = trait.toLowerCase() === "holographic";
+    const isHolographicYes = isHolographic && /^yes$/i.test(value);
+
+    // Every token carries a Holographic attribute (Yes or No), so indexing
+    // the trait_type NAME — bare, or via the "trait value" combo strings
+    // below — put the word "Holographic" on every single token regardless of
+    // value. "holo" (the placeholder's own advertised example query) then
+    // prefix-matched that word and returned the whole collection instead of
+    // just the foil pieces. Skip the name entirely (bare and in combos) when
+    // the value isn't actually Yes, and add explicit "holo"/"foil" synonyms
+    // when it is.
+    const skipTraitName = isHolographic && !isHolographicYes;
+    if (trait && !skipTraitName) parts.push(trait);
     if (value) parts.push(value);
-    if (trait && value) {
+    if (trait && value && !skipTraitName) {
       parts.push(`${trait} ${value}`, `${trait}:${value}`, `${value} ${trait}`);
     }
+    if (isHolographicYes) parts.push("holo", "foil");
   }
 
   const words = unique(parts.flatMap((part) => {
@@ -189,9 +223,23 @@ export function tokenMatchesIndex(
   searchText: string,
   words: string[],
   owner?: string,
+  tokenId?: number,
 ): boolean {
   const q = token.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
   if (!q) return true;
+
+  // A purely numeric term ("1234", or "#1234" once tokenize strips the #) is
+  // this UI's id-search idiom, not a trait word or address fragment — exact
+  // match only, no substring/prefix/fuzzy leniency. That leniency is exactly
+  // what made "1234" also match #234 (edit-distance 1) and #12340 (contains
+  // "1234" as a substring): both wrong, and both silently wrong, since the
+  // grid just showed extra planks nobody asked for. When the caller doesn't
+  // have a numeric tokenId to compare against, fall back to requiring an
+  // exact indexed word rather than the substring/fuzzy paths below.
+  if (/^\d+$/.test(q)) {
+    if (tokenId !== undefined) return tokenId === Number(q);
+    return words.includes(q);
+  }
 
   // Wallet / vanity / partial address path
   if (owner && addressMatchesOwner(q, owner)) return true;
@@ -228,11 +276,16 @@ export function matchesGalleryQuery(
   searchText: string,
   words: string[],
   owner?: string,
+  tokenId?: number,
 ): boolean {
   const raw = query.trim();
   if (!raw) return true;
 
-  // Whole-query address / vanity (allows spaces-stripped paste)
+  // Whole-query address / vanity (allows spaces-stripped paste). A bare
+  // decimal query no longer reaches here as "address-like" — see
+  // isAddressLikeQuery — so a plain id search like "1234" skips straight to
+  // the exact-id path in tokenMatchesIndex below instead of being treated as
+  // a wallet fragment.
   const compact = normalizeAddressQuery(raw).replace(/\s+/g, "");
   if (owner && (addressMatchesOwner(raw, owner) || addressMatchesOwner(compact, owner))) {
     return true;
@@ -244,10 +297,12 @@ export function matchesGalleryQuery(
   const tokens = tokenize(raw);
   // If tokenize wiped a hex query, fall back to compact form
   if (!tokens.length) {
-    return tokenMatchesIndex(compact, searchText, words, owner);
+    return tokenMatchesIndex(compact, searchText, words, owner, tokenId);
   }
 
+  // Multi-token query: every token must match (AND) — "rare holo" narrows to
+  // tokens that are both, it does not fail outright on the second word.
   return tokens.every((token) =>
-    tokenMatchesIndex(token, searchText, words, owner),
+    tokenMatchesIndex(token, searchText, words, owner, tokenId),
   );
 }
