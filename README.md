@@ -289,7 +289,6 @@ Version numbers are internal. The UI presents each vault by product name
 - [InMotion deployment runbook](docs/INMOTION_DEPLOYMENT.md)
 - [Dependabot status](docs/DEPENDABOT_INMOTION.md)
 - [Marketplank engineering specification](docs/marketplank/SPEC.md)
-- [V2 LP drain audit — why V3 exists](docs/marketplank/AUDIT-2026-07-31-lp.md)
 - [V3 internal audit](docs/marketplank/AUDIT-2026-08-01-v3-internal.md)
 - [V3 deploy runbook](docs/marketplank/DEPLOY-V3-RUNBOOK.md)
 - [Vault LP migration postmortem](docs/marketplank/POSTMORTEM-2026-07-29-vault-lp-migration.md)
