@@ -36,7 +36,7 @@ export default function ContentSection({ address }: { address: string | null }) 
 // --- Learn visibility ------------------------------------------------------
 
 function LearnVisibilityCard({ address }: { address: string | null }) {
-  const { doc, dirty, save, load, mutate, persist } = useContentDocCard<LearnDoc>(
+  const { doc, dirty, save, load, mutate, persist, pending } = useContentDocCard<LearnDoc>(
     "learn",
     sanitizeLearn,
     address
@@ -84,7 +84,7 @@ function LearnVisibilityCard({ address }: { address: string | null }) {
         override restores it — the code is always the fallback, so nothing can
         drift silently.
       </p>
-      {doc === null ? (
+      {pending ? (
         <div className="mt-3">
           <SkeletonStatus>Loading Learn section visibility</SkeletonStatus>
           <div className="space-y-1">
@@ -100,7 +100,7 @@ function LearnVisibilityCard({ address }: { address: string | null }) {
             ))}
           </div>
         </div>
-      ) : (
+      ) : doc === null ? null : (
         <ul className="mt-3 space-y-1">
           {TOC.map((entry) => {
             const hidden = doc.hidden.includes(entry.id);
@@ -177,7 +177,7 @@ function Chip({ children }: { children: React.ReactNode }) {
 // --- Intro phrases ---------------------------------------------------------
 
 function IntroPhrasesCard({ address }: { address: string | null }) {
-  const { doc, dirty, save, load, mutate, persist } = useContentDocCard<IntroDoc>(
+  const { doc, dirty, save, load, mutate, persist, pending } = useContentDocCard<IntroDoc>(
     "intro",
     sanitizeIntro,
     address
@@ -198,7 +198,7 @@ function IntroPhrasesCard({ address }: { address: string | null }) {
         phrases reach visitors on their next homepage visit (the splash reads
         a local cache so it can paint instantly).
       </p>
-      {doc === null ? (
+      {pending ? (
         <div className="mt-3 space-y-3">
           <SkeletonStatus>Loading intro phrases</SkeletonStatus>
           {[0, 1].map((i) => (
@@ -212,7 +212,7 @@ function IntroPhrasesCard({ address }: { address: string | null }) {
             </div>
           ))}
         </div>
-      ) : (
+      ) : doc === null ? null : (
         <>
           <ol className="mt-3 space-y-3">
             {doc.phrases.map((phrase, i) => (
@@ -307,7 +307,7 @@ function IntroPhrasesCard({ address }: { address: string | null }) {
 // --- Banner ----------------------------------------------------------------
 
 function BannerCard({ address }: { address: string | null }) {
-  const { doc, dirty, save, load, mutate, persist } = useContentDocCard<BannerDoc>(
+  const { doc, dirty, save, load, mutate, persist, pending } = useContentDocCard<BannerDoc>(
     "banner",
     sanitizeBanner,
     address
@@ -323,14 +323,14 @@ function BannerCard({ address }: { address: string | null }) {
       onSave={() => void persist()}
       canSave={!!address && doc !== null}
     >
-      {doc === null ? (
+      {pending ? (
         <div className="mt-3 grid gap-2">
           <SkeletonStatus>Loading the announcement banner</SkeletonStatus>
           <SkeletonBlock className="h-11 w-48 rounded-md" />
           <SkeletonBlock className="h-11 w-full rounded-md" />
           <SkeletonBlock className="h-11 w-full rounded-md" />
         </div>
-      ) : (
+      ) : doc === null ? null : (
         <div className="mt-3 grid gap-2">
           <button
             type="button"
