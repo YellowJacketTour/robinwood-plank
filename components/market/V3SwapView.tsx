@@ -36,7 +36,7 @@ import { useLegacyPosition } from "@/lib/market/useLegacyPosition";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
 import { getOwnedTokenIds, getOwnedInventory } from "@/lib/market/inventory";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
-import { robinwoodTokenUri } from "@/lib/market/token-image";
+import { robinwoodTokenUri } from "@/lib/market/robinwood-uri";
 import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import type { PickerToken } from "@/components/market/TokenPicker";

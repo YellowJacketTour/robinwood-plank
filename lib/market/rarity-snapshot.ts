@@ -1,7 +1,4 @@
-import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
-import { fetchTokenInstances } from "@/lib/market/blockscout";
-import { fetchNftMetadata } from "@/lib/ipfs";
-import { robinwoodTokenUri } from "@/lib/market/token-image";
+import { getRobinwoodMetadataMap, ROBINWOOD_SUPPLY } from "@/lib/market/robinwood-metadata";
 import {
   computeRaritySnapshot,
   emptyTierCounts,
@@ -15,12 +12,20 @@ import {
 } from "@/lib/market/durable-kv";
 
 /**
- * Rarity snapshot for the whole collection via Blockscout metadata (CF-safe),
- * with IPFS metadata backfill for instances Blockscout never revealed.
+ * Rarity snapshot for the whole collection, built from the canonical
+ * IPFS-sourced metadata store (lib/market/robinwood-metadata.ts) — never
+ * from Blockscout. Blockscout served pre-reveal stubs
+ * ([{trait_type:"Status", value:"Unrevealed"}]) for planks #1-180 long after
+ * reveal and kept serving them indefinitely (no TTL on this snapshot), which
+ * both corrupted those 180 tokens' display AND shrank the ranked sample from
+ * 1,542 to 1,362. The canonical store is built once, offline, directly from
+ * IPFS (see `scripts/refresh-market-data.ts --metadata`), so this module no
+ * longer talks to any rate-limited third party at request time.
  */
 
-// v4: no Mythic tier (not in collection metadata); Background-based labels.
-const KV_KEY = "plank:market:rarity-snapshot-v4";
+// v5: sourced from the canonical robinwood_token_metadata table (IPFS-only),
+// not Blockscout. Same compact-blob shape as v4.
+const KV_KEY = "plank:market:rarity-snapshot-v5";
 
 let cached: { snapshot: RaritySnapshot; at: number } | null = null;
 let inflight: Promise<RaritySnapshot> | null = null;
@@ -131,84 +136,28 @@ async function writeKv(s: RaritySnapshot): Promise<void> {
   }
 }
 
-async function traitsFromIpfs(tokenId: number): Promise<RarityInput["attributes"]> {
-  try {
-    const meta = await fetchNftMetadata(robinwoodTokenUri(tokenId));
-    const attrs = (meta.attributes || []).map((a) => ({
-      trait_type: String(a.trait_type || ""),
-      value: a.value as string | number | boolean,
-    }));
-    return attrs;
-  } catch {
-    return [];
-  }
-}
-
-/** Fill traits Blockscout never indexed (pre-reveal stubs or missing pages). */
-async function backfillMissingTraits(inputs: RarityInput[]): Promise<RarityInput[]> {
-  // `!loaded` already means "no canonical traits" (see buildFromBlockscout), so
-  // this catches genuine gaps AND pre-reveal stubs. The attributes.length check
-  // is kept for inputs that reach here from another caller.
-  const need = inputs
-    .filter((i) => !i.loaded || pickCanonicalTraits(i.attributes).length === 0)
-    .sort((a, b) => a.tokenId - b.tokenId);
-  if (need.length === 0) return inputs;
-  // Cap cold-build work so Workers stay under CPU/subrequest limits; remaining
-  // gaps stay unscored until the next rebuild (seed script fills the rest).
-  // Prefer lower token IDs — Blockscout gaps cluster there (vault fence).
-  const MAX_BACKFILL = 400;
-  const queue = need.slice(0, MAX_BACKFILL);
-  const CONCURRENCY = 10;
-  const fixes = new Map<number, RarityInput["attributes"]>();
-  for (let i = 0; i < queue.length; i += CONCURRENCY) {
-    const slice = queue.slice(i, i + CONCURRENCY);
-    await Promise.all(
-      slice.map(async (row) => {
-        const attrs = await traitsFromIpfs(row.tokenId);
-        if (attrs.length > 0) fixes.set(row.tokenId, attrs);
-      })
-    );
-  }
-  if (fixes.size === 0) return inputs;
-  return inputs.map((row) => {
-    const attrs = fixes.get(row.tokenId);
-    if (!attrs) return row;
-    return { tokenId: row.tokenId, attributes: attrs, loaded: true };
-  });
-}
-
-async function buildFromBlockscout(): Promise<RaritySnapshot> {
-  const items = await fetchTokenInstances(NFT_CONTRACT_ADDRESS, { maxPages: 40 });
-  const inputs: RarityInput[] = items.map((it) => {
-    const tokenId = Number(it.id);
-    const attrs = (it.metadata?.attributes || []).map((a) => ({
-      trait_type: String(a.trait_type || ""),
-      value: a.value as string | number,
-    }));
-    // "Loaded" must mean SCOREABLE, not merely non-empty.
-    //
-    // A pre-reveal stub is not an empty attribute list — it is
-    // [{ trait_type: "Status", value: "Unrevealed" }], one real entry. Judging
-    // by `attrs.length > 0` marked those stubs loaded, which excluded them
-    // from backfillMissingTraits below, so they were never re-read from IPFS.
-    // Combined with this snapshot having no TTL, that made the stub permanent:
-    // planks #1-180 kept the name "Plank #N", a shared placeholder image and
-    // rank 0 long after reveal, and every other token's rank was computed
-    // against a 1,362-token sample instead of 1,542.
-    return {
-      tokenId,
+/**
+ * Build rarity inputs from the canonical metadata store. A token missing
+ * from the store, or present with no canonical trait, is marked
+ * `loaded: false` — the guard below (`pickCanonicalTraits(...).length === 0`
+ * inside computeRaritySnapshot's own filter) is kept even though the
+ * canonical store already enforces this at write time, because it is cheap
+ * insurance against a bad row slipping in some other way, not because we
+ * expect it to fire.
+ */
+async function buildFromCanonicalStore(): Promise<RaritySnapshot> {
+  const metadata = await getRobinwoodMetadataMap();
+  const inputs: RarityInput[] = [];
+  for (let id = 1; id <= ROBINWOOD_SUPPLY; id += 1) {
+    const entry = metadata.get(id);
+    const attrs = entry?.attributes ?? [];
+    inputs.push({
+      tokenId: id,
       attributes: attrs,
       loaded: pickCanonicalTraits(attrs).length > 0,
-    };
-  });
-
-  const seen = new Set(inputs.map((i) => i.tokenId));
-  for (let id = 1; id <= 1542; id += 1) {
-    if (!seen.has(id)) inputs.push({ tokenId: id, attributes: [], loaded: false });
+    });
   }
-
-  const filled = await backfillMissingTraits(inputs);
-  return computeRaritySnapshot(filled);
+  return computeRaritySnapshot(inputs);
 }
 
 export async function getRaritySnapshot(): Promise<RaritySnapshot> {
@@ -222,9 +171,12 @@ export async function getRaritySnapshot(): Promise<RaritySnapshot> {
       return fromKv;
     }
 
-    const snapshot = await buildFromBlockscout();
+    const snapshot = await buildFromCanonicalStore();
     if (snapshot.scoredCount < 50) {
-      throw new Error(`Rarity sample too small (${snapshot.scoredCount})`);
+      throw new Error(
+        `Rarity sample too small (${snapshot.scoredCount}) — the canonical metadata store ` +
+          `looks empty or unbuilt; run "tsx scripts/refresh-market-data.ts --metadata" first.`
+      );
     }
     cached = { snapshot, at: Date.now() };
     void writeKv(snapshot);

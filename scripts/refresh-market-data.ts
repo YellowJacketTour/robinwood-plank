@@ -12,9 +12,21 @@
  *   tsx scripts/refresh-market-data.ts            # incremental (cron, ~15m)
  *   tsx scripts/refresh-market-data.ts --full     # full rebuild (cron, daily)
  *   tsx scripts/refresh-market-data.ts --sales    # one target only
+ *   tsx scripts/refresh-market-data.ts --metadata # build/resume the canonical IPFS metadata store
  *   tsx scripts/refresh-market-data.ts --purge --rarity --traits --collection
  *
- * Targets: --sales --vault --rarity --traits --collection
+ * Targets: --sales --vault --rarity --traits --collection --metadata
+ *
+ * --metadata builds `robinwood_token_metadata` (see
+ * lib/market/robinwood-metadata.ts) — the canonical, IPFS-only source for
+ * every token's name/description/image/traits. It is idempotent and
+ * resumable: already-stored tokens are skipped, so a partial or failed run is
+ * always safe to re-run. It has NO per-run cap, unlike the rarity/trait
+ * backfills this replaced, which silently capped themselves at a few hundred
+ * tokens and could report a false "success" on an incomplete snapshot. Run
+ * this to completion (watch for "complete=true" in its own log line) BEFORE
+ * --rarity/--traits/--collection — those now read this table instead of
+ * Blockscout and will just see gaps as unscored/missing if it hasn't finished.
  *
  * --purge deletes the collection-wide snapshots BEFORE rebuilding them. The
  * rarity snapshot and the collection image map are deliberately stored without
@@ -34,6 +46,7 @@ const full = args.has("--full");
 const explicit = [
   "--sales",
   "--vault",
+  "--metadata",
   "--rarity",
   "--traits",
   "--collection",
@@ -48,7 +61,7 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["sales", "vault", "opensea", "official-assets", "token-registry", "owners", "rarity", "traits", "collection"]
+      ? ["sales", "vault", "opensea", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection"]
       : ["sales", "vault", "opensea", "official-assets", "token-registry", "owners"]
 );
 
@@ -188,26 +201,45 @@ async function main(): Promise<void> {
     const { durableKv } = await import("../lib/market/durable-kv");
     const { MARKET_COLLECTIONS } = await import("../lib/market/collections");
     const keys = [
-      "plank:market:rarity-snapshot-v4",
-      "plank:market:collection-image-map-v1",
+      // v5: sourced from the canonical robinwood_token_metadata table, not
+      // Blockscout. The old v4 key is left alone — nothing reads it anymore.
+      "plank:market:rarity-snapshot-v5",
       // Has a TTL, so it heals on its own eventually — but the collection
       // index reads its per-token attributes from here, so leaving it means a
-      // rebuilt index still serves "Status: Unrevealed" traits against a
-      // correct name, image and rank. Purge it in the same pass.
+      // rebuilt index still serves stale traits against a correct name,
+      // image and rank. Purge it in the same pass.
       ...MARKET_COLLECTIONS.map((c) => `plank:market:trait-index-v1:${c.slug}`),
     ];
     for (const key of keys) await durableKv.set(key, {}, { ex: 1 });
     console.log(`[refresh] purge: invalidated ${keys.join(", ")}`);
+    console.log(
+      "[refresh] purge: NOTE — robinwood_token_metadata (the canonical IPFS store) is " +
+        "NOT purged by this flag. It is immutable, verified-CID data; delete rows there " +
+        "explicitly (or pass --metadata --force via a one-off script) if it is ever wrong."
+    );
   }
+
+  // Canonical IPFS-sourced metadata store. Must run before rarity/traits/
+  // collection — they now read this table instead of walking Blockscout/IPFS
+  // themselves. No cap: walks whatever is still missing, however long that
+  // takes, and says plainly whether the run finished.
+  await step("metadata", async () => {
+    const { buildRobinwoodMetadataStore } = await import("../lib/market/robinwood-metadata");
+    const report = await buildRobinwoodMetadataStore();
+    const stored = report.alreadyStored + report.newlyStored;
+    return report.complete
+      ? `complete=true ${stored}/${report.totalSupply} stored`
+      : `complete=false ${stored}/${report.totalSupply} stored, ${report.failed.length} failed ` +
+          `(ids: ${report.failed.slice(0, 20).join(",")}${report.failed.length > 20 ? ",…" : ""}) — re-run to resume`;
+  });
 
   await step("rarity", async () => {
     const { getRaritySnapshot } = await import("../lib/market/rarity-snapshot");
     const snapshot = await getRaritySnapshot();
-    // Cold builds are capped (MAX_BACKFILL), so a first run can leave tokens
-    // unscored. Say so rather than reporting a clean success.
     const gap = snapshot.sampleSize - snapshot.scoredCount;
     return gap > 0
-      ? `${snapshot.scoredCount}/${snapshot.sampleSize} scored — ${gap} still unscored, re-run to fill`
+      ? `${snapshot.scoredCount}/${snapshot.sampleSize} scored — ${gap} still unscored, ` +
+          `run --metadata to fill the canonical store then re-run this`
       : `${snapshot.scoredCount}/${snapshot.sampleSize} scored`;
   });
 
