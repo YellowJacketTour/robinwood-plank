@@ -90,3 +90,27 @@ export const CLIENT_PROXY_RPC_URLS: string[] = DEV_LOCAL
         )
       )
     );
+
+/**
+ * Ordered RPC list for SERVER-side reads that are display-only — public
+ * endpoint FIRST, keyed provider as fallback. Same ordering as
+ * CLIENT_PROXY_RPC_URLS, deliberately, but for server code that has no
+ * browser proxy to go through (SSR/route handlers reading vault reserves,
+ * fee-revenue history, etc.).
+ *
+ * These are the server-side analog of "gallery scroll" reads: vault stats,
+ * fee schedules, trade-history enrichment. Nothing here gates a wallet
+ * prompt or a security decision — see SERVER_RPC_URLS above and
+ * FREE_RPC_URLS below for those. Falling through to the keyed provider on a
+ * public-RPC failure is fine; the worst case is the same request we'd have
+ * made anyway, same as the browser proxy's reasoning.
+ */
+export const SERVER_DISPLAY_RPC_URLS: string[] = DEV_LOCAL
+  ? [DEV_LOCAL_RPC]
+  : Array.from(
+      new Set(
+        [...ROBINHOOD_RPC_URLS, process.env.RPC_URL?.trim()].filter(
+          (url): url is string => Boolean(url && url.length > 0)
+        )
+      )
+    );
