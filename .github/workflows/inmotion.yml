@@ -904,8 +904,13 @@ jobs:
             bash -s -- "$INMOTION_APP_DIR" "${DISPATCH_REPO:-}" "${DISPATCH_REF:-}" <<'REMOTE'
           set -euo pipefail
           app_dir="$1"
-          repo="$2"
-          ref="$3"
+          # `${2:-}` not `$2`. ssh does not pass an argv — it joins the command
+          # into ONE string that the remote shell re-parses, so a quoted empty
+          # argument disappears entirely. With VAULT_DISPATCH_REPO unset this
+          # script received one positional instead of three and `set -u` killed
+          # it on $2, before it could install anything.
+          repo="${2:-}"
+          ref="${3:-}"
           IFS= read -r token
           # Second stdin line. `|| memes_key=""` because an unset secret sends
           # an empty line and `read` returns non-zero on it — under set -e that
