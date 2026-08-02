@@ -827,6 +827,12 @@ jobs:
       DISPATCH_TOKEN: ${{ secrets.VAULT_DISPATCH_TOKEN }}
       DISPATCH_REPO: ${{ vars.VAULT_DISPATCH_REPO }}
       DISPATCH_REF: ${{ vars.VAULT_DISPATCH_REF }}
+      # Community Meme Vault key for /memes. Installed by the same job for the
+      # same reason as the dispatch token: it is read per request at runtime,
+      # not at build time, and it is submit-capable — so it must never reach a
+      # browser bundle. Optional: /memes falls back to unauthenticated reads,
+      # which cost a smaller rate-limit budget rather than failing.
+      MEMES_VAULT_API: ${{ secrets.MEMES_VAULT_API }}
     steps:
       - name: Validate the token is present and well formed
         shell: bash
@@ -872,7 +878,7 @@ jobs:
           # The token goes over stdin, NOT as an argument — arguments are
           # visible in ps output on the remote host for the life of the call.
           # The repo/ref are non-secret and passed normally.
-          printf '%s\n' "$DISPATCH_TOKEN" | ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+          printf '%s\n%s\n' "$DISPATCH_TOKEN" "${MEMES_VAULT_API:-}" | ssh -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
             bash -s -- "$INMOTION_APP_DIR" "${DISPATCH_REPO:-}" "${DISPATCH_REF:-}" <<'REMOTE'
           set -euo pipefail
@@ -880,6 +886,10 @@ jobs:
           repo="$2"
           ref="$3"
           IFS= read -r token
+          # Second stdin line. `|| memes_key=""` because an unset secret sends
+          # an empty line and `read` returns non-zero on it — under set -e that
+          # would abort the whole install over an optional value.
+          IFS= read -r memes_key || memes_key=""
           test -n "$token"
           case "$app_dir" in
             /home/*/plank.tanggang.life) ;;
@@ -898,9 +908,11 @@ jobs:
           tmp="$env_file.next.$$"
           grep -v '^[[:space:]]*GITHUB_DISPATCH_TOKEN=' "$env_file" \
             | grep -v '^[[:space:]]*GITHUB_DISPATCH_REPO=' \
-            | grep -v '^[[:space:]]*GITHUB_DISPATCH_REF=' > "$tmp"
+            | grep -v '^[[:space:]]*GITHUB_DISPATCH_REF=' \
+            | grep -v '^[[:space:]]*MEMES_VAULT_API=' > "$tmp"
           printf 'GITHUB_DISPATCH_TOKEN=%s\n' "$token" >> "$tmp"
           [ -n "$repo" ] && printf 'GITHUB_DISPATCH_REPO=%s\n' "$repo" >> "$tmp"
+          [ -n "$memes_key" ] && printf 'MEMES_VAULT_API=%s\n' "$memes_key" >> "$tmp"
           [ -n "$ref" ] && printf 'GITHUB_DISPATCH_REF=%s\n' "$ref" >> "$tmp"
           chmod 600 "$tmp"
           mv -f "$tmp" "$env_file"
