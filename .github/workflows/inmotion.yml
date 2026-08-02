@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Deploy, provision/verify the drand relayer, or set the admin allowlist.
+        description: Deploy, provision/verify the drand relayer, set the admin allowlist, or install the vault-deploy dispatch token.
         required: true
         type: choice
         default: deploy
@@ -20,6 +20,7 @@ on:
           - provision-relayer
           - verify-relayer
           - set-admin-allowlist
+          - set-dispatch-token
       confirmation:
         description: Relay-disable confirmation, when required.
         required: false
@@ -759,6 +760,164 @@ jobs:
             # Same headers the deploy job's health check uses. A bare curl
             # user-agent is refused at the edge, which reads as an outage when
             # the app is in fact serving perfectly well.
+            code="$(
+              curl -sS -o /dev/null -w '%{http_code}' \
+                --connect-timeout 5 --max-time 15 \
+                --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+                --header "Accept: application/json" \
+                --header "Cache-Control: no-cache" \
+                "$url/api/health?attempt=$attempt" || true
+            )"
+            if [ "$code" = "200" ]; then
+              echo "Healthy after restart (attempt $attempt)."
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::App did not return 200 from $url/api/health after the restart."
+          echo "The previous .env.production is on the server as .env.production.bak.*"
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # Vault-deploy dispatch token.
+  #
+  # GITHUB_DISPATCH_TOKEN is what /admin's vault deploy card uses to fire the
+  # Deploy MarketplankVaultV3 workflow. It is read per request at runtime, so
+  # like PLANK_ADMIN_ADDRESSES it lives in the server's shared/.env.production
+  # and not in the build env — a value baked into the bundle would be a
+  # credential sitting in the release tarball.
+  #
+  # This job exists because a GitHub Actions secret cannot be read back by
+  # anyone — not the UI, not the API, not a person with admin rights. Only a
+  # job running inside Actions can see its value. So this is the one path that
+  # gets the token onto the box without a human copying a credential through a
+  # terminal, a clipboard, or a chat window.
+  #
+  # Same in-place rewrite as the allowlist: a second GITHUB_DISPATCH_TOKEN=
+  # line would silently shadow the first. The value is never echoed — it is
+  # piped over stdin, not passed as an argument, so it cannot surface in the
+  # remote host's process list either.
+  # ---------------------------------------------------------------------------
+  dispatch-token:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'set-dispatch-token'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      # NOTE THE NAMES. GitHub reserves the GITHUB_ prefix for secrets and
+      # variables — you cannot create one called GITHUB_DISPATCH_TOKEN, the
+      # API rejects it. So the CI-side names are VAULT_DISPATCH_*, and this
+      # job writes them to the server under the GITHUB_DISPATCH_* names the
+      # application actually reads. The two namespaces are deliberately
+      # different; do not "fix" one to match the other.
+      DISPATCH_TOKEN: ${{ secrets.VAULT_DISPATCH_TOKEN }}
+      DISPATCH_REPO: ${{ vars.VAULT_DISPATCH_REPO }}
+      DISPATCH_REF: ${{ vars.VAULT_DISPATCH_REF }}
+    steps:
+      - name: Validate the token is present and well formed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${DISPATCH_TOKEN:-}" ]; then
+            echo "::error::secrets.VAULT_DISPATCH_TOKEN is not set. Note the name: GitHub refuses any secret starting with GITHUB_, so the app's GITHUB_DISPATCH_TOKEN is stored here as VAULT_DISPATCH_TOKEN."
+            exit 1
+          fi
+          # Shape only, never the value. A fine-grained PAT is github_pat_*;
+          # a classic one is ghp_*. Anything else is probably a paste error,
+          # and a bad token silently disables the deploy card rather than
+          # failing loudly, so catch it here.
+          case "$DISPATCH_TOKEN" in
+            github_pat_*|ghp_*) ;;
+            *) echo "::error::Token does not look like a GitHub PAT (expected github_pat_* or ghp_*)."; exit 1 ;;
+          esac
+          # An env file is parsed line by line; a newline in the value would
+          # truncate it and leave the rest as a stray line.
+          case "$DISPATCH_TOKEN" in
+            *[$'\n\r']*) echo "::error::Token contains a newline."; exit 1 ;;
+          esac
+          echo "Token present, ${#DISPATCH_TOKEN} characters."
+
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_APP_DIR"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Install the token and restart Passenger
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          # The token goes over stdin, NOT as an argument — arguments are
+          # visible in ps output on the remote host for the life of the call.
+          # The repo/ref are non-secret and passed normally.
+          printf '%s\n' "$DISPATCH_TOKEN" | ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "${DISPATCH_REPO:-}" "${DISPATCH_REF:-}" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          repo="$2"
+          ref="$3"
+          IFS= read -r token
+          test -n "$token"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          env_file="$app_dir/shared/.env.production"
+          test -s "$env_file"
+
+          # Same discipline as the allowlist job: this file also holds the
+          # PostgreSQL password, so back it up, build the replacement beside
+          # it, and move it over atomically.
+          backup="$env_file.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+          cp -p "$env_file" "$backup"
+          chmod 600 "$backup"
+
+          tmp="$env_file.next.$$"
+          grep -v '^[[:space:]]*GITHUB_DISPATCH_TOKEN=' "$env_file" \
+            | grep -v '^[[:space:]]*GITHUB_DISPATCH_REPO=' \
+            | grep -v '^[[:space:]]*GITHUB_DISPATCH_REF=' > "$tmp"
+          printf 'GITHUB_DISPATCH_TOKEN=%s\n' "$token" >> "$tmp"
+          [ -n "$repo" ] && printf 'GITHUB_DISPATCH_REPO=%s\n' "$repo" >> "$tmp"
+          [ -n "$ref" ] && printf 'GITHUB_DISPATCH_REF=%s\n' "$ref" >> "$tmp"
+          chmod 600 "$tmp"
+          mv -f "$tmp" "$env_file"
+
+          # Exactly one definition survived. Compare lengths, never contents —
+          # echoing the line would put the token in the Actions log.
+          test "$(grep -c '^GITHUB_DISPATCH_TOKEN=' "$env_file")" -eq 1
+          # The password line must still be there — a botched rewrite that
+          # dropped it would take the site down on restart.
+          test "$(grep -c '^PGPASSWORD=' "$env_file")" -eq 1
+
+          touch "$app_dir/tmp/restart.txt"
+          echo "Dispatch token installed; backup kept at $backup"
+          REMOTE
+
+      - name: Confirm the app came back up and the card reports configured
+        shell: bash
+        env:
+          INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          url="${INMOTION_HEALTH_URL:-https://plank.love}"
+          for attempt in $(seq 1 20); do
             code="$(
               curl -sS -o /dev/null -w '%{http_code}' \
                 --connect-timeout 5 --max-time 15 \
