@@ -1,13 +1,18 @@
 name: InMotion Passenger CI/CD
 
+# Deployment runs from master, the repository's default branch. It ran from
+# `inmotion` until 2026-08-02; development continues on `dev` (the renamed
+# `inmotion`), and merging that into master is what ships. `inmotion` is kept
+# in the PR list only so any branch still named that opens a checked PR.
 on:
   pull_request:
     branches:
       - master
+      - dev
       - inmotion
   push:
     branches:
-      - inmotion
+      - master
   workflow_dispatch:
     inputs:
       operation:

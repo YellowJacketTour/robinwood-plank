@@ -6,21 +6,19 @@ real financial consequences.
 
 ## Branch policy
 
-`inmotion` is the canonical branch.
+`master` deploys. `dev` is where work happens.
 
-- Branch from the latest `origin/inmotion`.
-- Open pull requests with `base: inmotion`.
-- Do not target or merge InMotion work into `master`.
+- Branch from the latest `origin/dev`.
+- Open pull requests with `base: dev`.
+- Ship by merging `dev` into `master` — a push to `master` builds and deploys,
+  so treat it as a release action, not a place to commit.
 - Do not force-push shared branches.
 - Keep unrelated changes out of a pull request.
 
-The repository's GitHub default branch may still display as `master` until the
-owner changes that setting. Always check the PR base explicitly.
-
 ```bash
 git fetch origin
-git switch inmotion
-git pull --ff-only origin inmotion
+git switch dev
+git pull --ff-only origin dev
 git switch -c <type>/<short-description>
 ```
 

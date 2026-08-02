@@ -40,10 +40,11 @@ const WORKFLOW_FILE = "deploy-vault-v3.yml";
 // other address in this codebase — but broken out as a constant in case the
 // repo is ever renamed or forked.
 const REPO = process.env.GITHUB_DISPATCH_REPO?.trim() || "YellowJacketTour/robinwood-plank";
-// Workflow files only dispatch from a ref that already contains them;
-// `inmotion` is the canonical branch (AGENTS.md) and is where this workflow
-// lives.
-const REF = process.env.GITHUB_DISPATCH_REF?.trim() || "inmotion";
+// Workflow files only dispatch from a ref that already contains them, so this
+// must name a branch where deploy-vault-v3.yml exists. `master` is the
+// deployment branch (AGENTS.md) and always has it; a working branch may not,
+// and dispatching against a ref without the file fails with a bare 422.
+const REF = process.env.GITHUB_DISPATCH_REF?.trim() || "master";
 
 function dispatchToken(): string | null {
   return process.env.GITHUB_DISPATCH_TOKEN?.trim() || null;

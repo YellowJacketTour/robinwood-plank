@@ -482,7 +482,7 @@ function VaultDeployCard({ address }: { address: string | null }) {
             </li>
             <li>
               <code className="font-mono text-xs">GITHUB_DISPATCH_REF</code> —
-              defaults to <code className="font-mono text-xs">inmotion</code> if unset
+              defaults to <code className="font-mono text-xs">master</code> if unset
             </li>
           </ul>
           <p className="mt-1.5">

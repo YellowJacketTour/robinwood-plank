@@ -6,8 +6,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ## Repository rules
 
-- `inmotion` is the canonical development and deployment branch. Do not target
-  `master` with InMotion work.
+- `master` is the deployment branch: a push to it builds and deploys to
+  InMotion. `dev` is the working branch — do development there and merge into
+  `master` to ship. Do not commit directly to `master` for anything that is
+  not itself a release. (Until 2026-08-02 this was inverted: `inmotion` was
+  both the working and the deploy branch, and `master` was untouched.)
 - Preserve unrelated local changes and stage explicit paths.
 - Read `README.md`, `ARCHITECTURE.md`, and `CONTRIBUTING.md` before changing
   deployment, storage, wallet, marketplace, or relayer behavior.
