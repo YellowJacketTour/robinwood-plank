@@ -78,14 +78,35 @@ export async function GET(req: Request) {
     // real without it, so a failure degrades to "no traits" rather than a 500.
     let attributes: Array<{ trait_type?: string; value?: string | number | boolean }> = [];
     let image: string | null = imageResolved ?? null;
+    // Canonical store first. This route is the per-item view: every visitor
+    // opens a different token, so nothing collapses these into a shared cache,
+    // and traits are immutable data we already hold in Postgres. Reaching out
+    // to an IPFS gateway per request to re-learn them is work we stopped
+    // needing to do.
     try {
-      const metadata = await fetchNftMetadata(robinwoodTokenUri(tokenId));
-      attributes = metadata.attributes ?? [];
-      if (!image && metadata.image) {
-        image = resolveIpfsUrl(metadata.image);
+      const { getRobinwoodMetadataMap } = await import("@/lib/market/robinwood-metadata");
+      const stored = (await getRobinwoodMetadataMap()).get(Number(tokenId));
+      if (stored) {
+        attributes = stored.attributes ?? [];
+        if (!image && stored.imageUri) image = resolveIpfsUrl(stored.imageUri);
       }
     } catch {
-      attributes = [];
+      /* fall through to IPFS */
+    }
+
+    // Fallback, unchanged: a token missing from the store must still render.
+    // Metadata comes from IPFS and may be slow or missing; the token is still
+    // real without it, so a failure degrades to "no traits" rather than a 500.
+    if (attributes.length === 0) {
+      try {
+        const metadata = await fetchNftMetadata(robinwoodTokenUri(tokenId));
+        attributes = metadata.attributes ?? [];
+        if (!image && metadata.image) {
+          image = resolveIpfsUrl(metadata.image);
+        }
+      } catch {
+        attributes = [];
+      }
     }
 
     // History is optional. Item detail passes history=1; fence/image callers
