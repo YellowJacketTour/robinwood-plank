@@ -29,18 +29,24 @@ colors:
   bg-panel-soft: "rgba(41,26,15,0.88)"   # --color-panel-soft — lighter nested surface
   bg-panel-strong: "rgba(17,10,5,0.97)"  # --color-panel-strong — near-opaque, for financial data
   page-background: "#14100B"             # literal `body { background-color }`; see note below
-on-gold: "#261105"          # text/icon color placed on a gold-500/gold-400 fill
+  on-gold: "#261105"        # text on a gold-500/gold-400 fill. NOTE: most components
+                            # write text-wood-950 (#1B120A) instead, but the global rule
+                            # `body :where(.bg-gold-500,.bg-gold-400)` in app/globals.css
+                            # repaints them to this with !important, so this is what
+                            # actually renders. Both pass AA (9.50:1 / 9.73:1).
 typography:
   display-xl:
+    # Uncial Antiqua ships a SINGLE 400 cut and app/layout.tsx loads only that.
+    # Any heavier number here documents a synthetic bold, not a real face.
     fontFamily: Uncial Antiqua
     fontSize: 3.6rem
-    fontWeight: 700
+    fontWeight: 400
     lineHeight: 0.95
     letterSpacing: -0.02em
   display-md:
     fontFamily: Uncial Antiqua
     fontSize: 2rem
-    fontWeight: 700
+    fontWeight: 400
     lineHeight: 1.05
   body:
     fontFamily: Nunito Sans
@@ -54,18 +60,26 @@ typography:
     lineHeight: 1.2
     letterSpacing: 0.12em
 rounded:
-  sm: 6px
-  md: 9px
-  lg: 12px
-  xl: 16px
-  pill: 999px
+  # Stock Tailwind v4. There is no `--radius` override in app/globals.css and
+  # no tailwind config file, so these are what the utilities actually resolve
+  # to — the previously documented 6/9/12/16 scale existed nowhere in the code.
+  sm: 4px
+  md: 6px
+  lg: 8px
+  xl: 12px
+  2xl: 16px
+  pill: 9999px
 spacing:
-  xs: 4px
-  sm: 8px
-  md: 12px
-  lg: 16px
-  xl: 24px
-  2xl: 32px
+  # Stock Tailwind v4 scale (0.25rem step). Listed because the spec expects a
+  # spacing category, NOT because the codebase uses a curated subset — real
+  # components use continuous per-case values, so treat this as the available
+  # scale rather than an approved palette.
+  1: 4px
+  2: 8px
+  3: 12px
+  4: 16px
+  6: 24px
+  8: 32px
 components:
   page-shell:
     backgroundColor: "{colors.page-background}"
@@ -84,7 +98,7 @@ components:
     padding: 12px
   button-primary:
     backgroundColor: "{colors.gold-500}"
-    textColor: "{on-gold}"
+    textColor: "{colors.on-gold}"
     typography: "{typography.label}"
     rounded: "{rounded.md}"
     padding: 12px

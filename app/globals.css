@@ -145,9 +145,20 @@ body :where(.bg-gold-500, .bg-gold-400):not([data-market-shell] *) {
     0 2px 2px rgba(89, 43, 12, 0.35) !important;
 }
 
+/* Uncial Antiqua ships ONE weight (400) and app/layout.tsx loads only that
+   cut. Everything inherited `font-weight: 700` from `body`, and buttons/links
+   are forced to 900, so the browser had no bold face to use and synthesised
+   one — smearing the glyphs sideways. Faux-bold on a display face reads as
+   "chunky", and it is not what this typeface looks like.
+
+   Pinning 400 here is not a style preference; it is the only weight that
+   exists. If a heavier display face is ever wanted, it needs a different
+   family with a real bold cut, not a heavier number against this one. */
 .font-display {
   font-family: var(--font-stencil), "Georgia", serif;
+  font-weight: 400;
   letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Plank grain — the brand's signature surface texture (DESIGN.md
@@ -204,6 +215,9 @@ body :where(.bg-gold-500, .bg-gold-400):not([data-market-shell] *) {
 }
 .section-title {
   font-family: var(--font-stencil), "Georgia", serif;
+  /* Single-weight face — see .font-display. Without this it inherits 700 from
+     body and the browser fakes a bold that does not exist. */
+  font-weight: 400;
   letter-spacing: 0.02em;
   /* Dense: big enough to brand, small enough to avoid empty chrome */
   font-size: clamp(1.75rem, 5.5vw, 2.75rem) !important;
@@ -413,7 +427,9 @@ input {
   font-family: var(--font-stencil), Georgia, serif;
   font-size: 1.15rem !important;
   line-height: 1.1 !important;
-  font-weight: 700;
+  /* Single-weight face — see .font-display. 700 here only ever rendered as
+     synthetic bold. */
+  font-weight: 400;
   color: #f8d98a;
   font-variant-numeric: tabular-nums;
 }
