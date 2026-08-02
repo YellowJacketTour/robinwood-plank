@@ -22,7 +22,6 @@ import {
   v3ClaimRandomRedeem,
   v3ClaimRandomRedeemFor,
   v3ForfeitExpiredRedeem,
-  getV3Activity,
   quoteRemoveLiquidity,
   decodeV3Error,
   formatUnits,
@@ -87,6 +86,82 @@ function activityItem(a: V3Activity): string {
 /** The "amount" column, in ETH. */
 function activityAmount(a: V3Activity): string {
   return a.eth !== undefined ? `${formatUnits(a.eth, 4)} Ξ` : "—";
+}
+
+/**
+ * Vault history from our own indexed lineage, not a live client-side log scan.
+ *
+ * getV3Activity() queryFilters the last 50,000 blocks from the browser. On
+ * Robinhood Chain that is roughly EIGHTY MINUTES: ~518k blocks elapse in 14
+ * hours. This vault's seven events sat 560,301 blocks back, so the window saw
+ * nothing and the tab said "No activity yet" beside a vault visibly holding 20
+ * planks. Each per-event grab also swallows its own errors as "node hiccup",
+ * so a rejected range looked identical to an empty one.
+ *
+ * The server already keeps a durable, chunk-scanned, Blockscout-augmented
+ * lineage in Postgres with a resumable scan head — that is the thing to read.
+ * `full=1` is the whole history and is cached server-side.
+ */
+/** Same 0x1234…abcd shape vault-v3 uses for its own rows. */
+const shortAddr = (a: string) => (a.length > 10 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
+
+async function fetchVaultActivity(vault?: string | null): Promise<V3Activity[]> {
+  const qs = new URLSearchParams({ full: "1" });
+  if (vault) qs.set("vault", vault);
+  const res = await fetch(`/api/market/vault/activity?${qs.toString()}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`vault activity ${res.status}`);
+  const data = (await res.json()) as {
+    events?: Array<{
+      kind: string;
+      txHash: string;
+      blockNumber: number;
+      logIndex?: number;
+      timestamp?: string | null;
+      address?: string;
+      ethWei?: string | null;
+      sharesWei?: string | null;
+      tokenId?: string | null;
+    }>;
+  };
+  const KIND: Record<string, V3ActivityKind> = {
+    buy: "buy",
+    sell: "sell",
+    deposit: "deposit",
+    redeem: "redeem",
+    // The stored lineage names these add_lp/remove_lp; this view's union uses
+    // lp-add/lp-remove. Translate rather than widening the union — an
+    // unmapped kind is dropped instead of rendering as an unlabelled row.
+    add_lp: "lp-add",
+    remove_lp: "lp-remove",
+  };
+  const toBig = (v: string | null | undefined): bigint | undefined => {
+    if (!v) return undefined;
+    try {
+      return BigInt(v);
+    } catch {
+      return undefined;
+    }
+  };
+  return (data.events ?? []).flatMap((e) => {
+    const kind = KIND[e.kind];
+    if (!kind) return [];
+    const ts = e.timestamp ? Math.floor(new Date(e.timestamp).getTime() / 1000) : 0;
+    return [
+      {
+        kind,
+        tokenId: e.tokenId ?? undefined,
+        eth: toBig(e.ethWei),
+        shares: toBig(e.sharesWei),
+        who: shortAddr(e.address ?? ""),
+        block: e.blockNumber,
+        ts: Number.isFinite(ts) ? ts : 0,
+        tx: e.txHash,
+        key: `${e.txHash}:${e.logIndex ?? 0}`,
+      } satisfies V3Activity,
+    ];
+  });
 }
 
 // Resolve real plank artwork by token id via the RobinWood metadata directory —
@@ -270,7 +345,7 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
   useEffect(() => {
     if (tab !== "activity" || activity !== null || activityLoading) return;
     setActivityLoading(true);
-    getV3Activity(vaultAddress)
+    fetchVaultActivity(vaultAddress)
       .then(async (rows) =>
         Promise.all(
           rows.map(async (r) =>

@@ -28,33 +28,47 @@ export async function GET(req: Request) {
   const limited = rateLimit(req, { key: "vault-activity", limit: 60, windowMs: 60_000 });
   if (limited) return limited;
 
-  const full = new URL(req.url).searchParams.get("full") === "1";
+  const params = new URL(req.url).searchParams;
+  const full = params.get("full") === "1";
+  // `?vault=` was accepted and silently ignored — every caller got every
+  // vault's events. The Instant Swap Activity tab asks for one vault, so it
+  // was either showing another pool's trades or, after filtering client-side,
+  // nothing at all. Filter here, where the merged lineage actually lives.
+  const wanted = (params.get("vault") || "").trim().toLowerCase();
+  const forVault = (events: unknown[]) =>
+    wanted && /^0x[0-9a-f]{40}$/.test(wanted)
+      ? events.filter(
+          (e) =>
+            String((e as { vaultAddress?: string }).vaultAddress || "").toLowerCase() ===
+            wanted
+        )
+      : events;
 
   if (full) {
     if (fullCache && fullCache.events.length > 0 && Date.now() - fullCache.at < FULL_CACHE_MS) {
-      return ok({ events: fullCache.events, cached: true });
+      return ok({ events: forVault(fullCache.events), cached: true });
     }
     try {
       const events = await getVaultActivity(400, { full: true });
       // Never cache an empty success — that poisoned Instant Swap history.
       if (events.length > 0) fullCache = { at: Date.now(), events };
       if (events.length === 0 && cache?.events?.length) {
-        return ok({ events: cache.events, cached: true, stale: true });
+        return ok({ events: forVault(cache.events), cached: true, stale: true });
       }
-      return ok({ events, cached: false });
+      return ok({ events: forVault(events), cached: false });
     } catch (error) {
       if (fullCache?.events?.length) {
-        return ok({ events: fullCache.events, cached: true, stale: true });
+        return ok({ events: forVault(fullCache.events), cached: true, stale: true });
       }
       if (cache?.events?.length) {
-        return ok({ events: cache.events, cached: true, stale: true });
+        return ok({ events: forVault(cache.events), cached: true, stale: true });
       }
       return publicError(error, "Could not load full vault activity.");
     }
   }
 
   if (cache && cache.events.length > 0 && Date.now() - cache.at < CACHE_MS) {
-    return ok({ events: cache.events, cached: true });
+    return ok({ events: forVault(cache.events), cached: true });
   }
 
   try {
@@ -62,12 +76,12 @@ export async function GET(req: Request) {
     if (events.length > 0) cache = { at: Date.now(), events };
     // Never return empty success when we already have a warm book.
     if (events.length === 0 && cache?.events?.length) {
-      return ok({ events: cache.events, cached: true, stale: true });
+      return ok({ events: forVault(cache.events), cached: true, stale: true });
     }
-    return ok({ events, cached: false });
+    return ok({ events: forVault(events), cached: false });
   } catch (error) {
     if (cache?.events?.length) {
-      return ok({ events: cache.events, cached: true, stale: true });
+      return ok({ events: forVault(cache.events), cached: true, stale: true });
     }
     return publicError(error, "Could not load vault activity.");
   }
