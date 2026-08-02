@@ -2,18 +2,34 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
+import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import {
-  DRAND_BEACON_ADDRESS,
-  MARKET_FEE_RECIPIENT,
-  MARKET_VAULT_ADDRESS,
-} from "@/lib/constants";
+  EMPTY_VAULT_DEPLOY_INPUT,
+  MAINNET_CONFIRMATION,
+  validateVaultDeployInput,
+  weiToEthDisplay,
+  type VaultDeployInput,
+  type VaultDeployNetwork,
+  type VaultDeployProblem,
+} from "@/lib/market/vault-deploy-v3";
 import {
   sanitizeCollections,
   type CollectionsDoc,
   type StagedCollection,
 } from "@/lib/content-docs";
 import { useContentDocCard, CardChrome } from "./contentDocCard";
-import { BUTTON_SECONDARY, CARD, INPUT, LABEL } from "../ui";
+import { ExplorerAddress } from "../ExplorerAddress";
+import { dispatchVaultDeploy, vaultDeployConfigured } from "../api";
+import {
+  BUTTON_PRIMARY,
+  BUTTON_SECONDARY,
+  CARD,
+  INPUT,
+  LABEL,
+  NOTE_ERR,
+  NOTE_MUTED,
+  NOTE_OK,
+} from "../ui";
 
 /**
  * Collections section — see the explainer card at the top of the render:
@@ -36,10 +52,6 @@ const EMPTY_DRAFT: StagedCollection = {
   vaultAddress: "",
   notes: "",
 };
-
-function shortAddr(a: string): string {
-  return a.length > 14 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a;
-}
 
 function Chip({
   tone,
@@ -114,9 +126,11 @@ export default function CollectionsSection({
         </div>
         <ul className="mt-4 space-y-2">
           {MARKET_COLLECTIONS.map((c) => {
-            // Today the site's vault wiring is the global env pair, which
-            // belongs to RobinWood; per-collection vaultAddress takes over
-            // once populated.
+            // Today the site's vault wiring is the global env vault, which
+            // belongs to RobinWood — currently the current-generation
+            // Premium Plank Liquidity vault (resolved by address through
+            // lib/market/vault-registry.ts, never assumed by generation
+            // here); per-collection vaultAddress takes over once populated.
             const vault =
               c.vaultAddress ??
               (c.slug === "robinwood" ? MARKET_VAULT_ADDRESS : null);
@@ -138,15 +152,15 @@ export default function CollectionsSection({
                 <dl className="mt-2 grid gap-1 text-xs sm:grid-cols-2">
                   <div>
                     <dt className={LABEL}>NFT contract</dt>
-                    <dd className="mt-0.5 break-all font-mono text-cream-muted">
-                      {c.contractAddress}
+                    <dd className="mt-0.5 break-all text-cream-muted">
+                      <ExplorerAddress address={c.contractAddress} />
                     </dd>
                   </div>
                   {vault ? (
                     <div>
                       <dt className={LABEL}>Vault contract</dt>
-                      <dd className="mt-0.5 break-all font-mono text-cream-muted">
-                        {vault}
+                      <dd className="mt-0.5 break-all text-cream-muted">
+                        <ExplorerAddress address={vault} />
                       </dd>
                     </div>
                   ) : null}
@@ -163,50 +177,155 @@ export default function CollectionsSection({
       </section>
 
       <StagedCollectionsCard address={address} />
-      <VaultRunbookCard />
+      <VaultDeployCard address={address} />
     </>
   );
 }
 
-// --- vault deploy runbook --------------------------------------------------
+// --- vault deploy ------------------------------------------------------
 
-function CopyRow({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
+type DeployState =
+  | { kind: "idle" }
+  | { kind: "invalid" }
+  | { kind: "signing" }
+  | { kind: "dispatching" }
+  | { kind: "done"; runUrl: string | null; actionsUrl: string; network: VaultDeployNetwork }
+  | { kind: "error"; message: string };
+
+/**
+ * A locally-remembered testnet rehearsal, keyed by collection address —
+ * lets the mainnet step show "you already tried this collection" and offer
+ * to carry its exact fee/seed values forward, instead of an admin re-typing
+ * immutable wei amounts from memory (the single easiest way to make a costly
+ * typo). This is a convenience cache in THIS browser's localStorage, not a
+ * source of truth — it can't know about a rehearsal run from another machine,
+ * and `deployedAddress` is filled in by the admin by hand (recording it from
+ * the workflow's own output), not fetched automatically: doing that would
+ * mean polling the run to completion and pulling the deploy-out/v3.json
+ * artifact, real added surface deliberately left out of this pass.
+ */
+type VaultRehearsal = {
+  input: VaultDeployInput;
+  runUrl: string | null;
+  actionsUrl: string;
+  dispatchedAt: number;
+  deployedAddress: string;
+};
+
+const REHEARSAL_STORAGE_KEY = "plank-admin-vault-rehearsals-v1";
+
+function loadRehearsals(): Record<string, VaultRehearsal> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(REHEARSAL_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, VaultRehearsal>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveRehearsal(collection: string, entry: VaultRehearsal): Record<string, VaultRehearsal> {
+  const key = collection.trim().toLowerCase();
+  const all = loadRehearsals();
+  if (key) all[key] = entry;
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(REHEARSAL_STORAGE_KEY, JSON.stringify(all));
+    } catch {
+      // Best-effort convenience cache — fine to silently lose (storage full/blocked).
+    }
+  }
+  return all;
+}
+
+function timeAgo(ms: number): string {
+  const mins = Math.round((Date.now() - ms) / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} days ago`;
+}
+
+/** A wei input with its live ETH equivalent shown alongside — the whole point
+ * is that these fields are wei, not the bps an admin might expect from the
+ * old contract generation, and a typo here is unrecoverable after deploy. */
+function WeiField({
+  label,
+  hint,
+  value,
+  onChange,
+  problem,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (v: string) => void;
+  problem?: string;
+}) {
+  const eth = weiToEthDisplay(value);
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md bg-panel-strong px-3 py-2">
-      <span className={`${LABEL} w-40 shrink-0`}>{label}</span>
-      <span className="min-w-0 flex-1 break-all font-mono text-xs text-cream">
-        {value || "—"}
-      </span>
-      <button
-        type="button"
-        className={`${BUTTON_SECONDARY} h-8 px-2 text-[0.5625rem]`}
-        disabled={!value}
-        onClick={() => {
-          void navigator.clipboard.writeText(value);
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1500);
-        }}
-      >
-        {copied ? "Copied" : "Copy"}
-      </button>
-    </div>
+    <label className="block">
+      <span className={LABEL}>{label}</span>
+      <input
+        className={`${INPUT} mt-1 font-mono text-xs`}
+        placeholder="wei, e.g. 1000000000000000"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        spellCheck={false}
+        inputMode="numeric"
+      />
+      <p className="mt-1 text-[0.6875rem] text-cream-muted">
+        {hint}
+        {eth ? <> — <strong className="text-cream">{eth} ETH</strong></> : null}
+      </p>
+      {problem ? <p className="mt-1 text-xs text-rose-400">{problem}</p> : null}
+    </label>
   );
 }
 
 /**
- * Guided Layer-2 deployment. The signature deliberately stays in the LOCAL
- * deploy tool (scripts/deploy-tool — run from the repo, never hosted): the
- * treasury must sign bytecode verifiable against source on the operator's
- * machine, not whatever a production server serves. This card only removes
- * the transcription work: every constructor argument, pre-filled and
- * copyable.
+ * Deploys a new collection's Instant Swap vault by dispatching the gated
+ * GitHub Actions workflow (.github/workflows/deploy-vault-v3.yml — the same
+ * one that deployed RobinWood's own Premium Plank Liquidity pool; procedure:
+ * docs/marketplank/DEPLOY-V3-RUNBOOK.md) instead of sending an admin to the
+ * Actions tab. This form is a CALLER of that workflow, not a replacement for
+ * its gates — the mainnet confirmation string, fee ceilings, and non-zero
+ * mint/redeem check all still live in the workflow and the contract's
+ * constructor; this only forwards validated inputs to it, and validates
+ * client-side first so a bad value fails here instead of on-chain (real gas)
+ * or mid-CI-run (wasted minutes).
+ *
+ * The deploy key (`secrets.DEPLOYER_PK`) is managed entirely on GitHub and
+ * expected to rotate or be a dedicated wallet collaborators top up — this
+ * form never assumes, displays, or validates against any particular deploy
+ * address. `treasury` is typed here and reminded to match that key; it is
+ * deliberately NOT auto-filled from the connected admin wallet, because the
+ * wallet signing this dispatch and the key the workflow deploys with are
+ * different keys by design.
+ *
+ * Testnet-first by design, mirroring docs/marketplank/DEPLOY-V3-RUNBOOK.md's
+ * own sequence (the one that actually deployed RobinWood's V3 pool): testnet
+ * is the default view (Step 1); mainnet is a deliberate "skip ahead" action
+ * (Step 2), not a twin option in a neutral dropdown, and still requires the
+ * typed DEPLOY_V3_MAINNET confirmation the workflow itself enforces. A
+ * successful testnet dispatch is remembered per-collection in this browser
+ * (see VaultRehearsal) so the mainnet step can show it and offer to copy its
+ * exact fee/seed values forward — the highest-value thing this form can do,
+ * since every one of those values is immutable and hand-retyping wei amounts
+ * is exactly where a costly mistake happens. That memory is a convenience,
+ * never a gate: there is no block on dispatching mainnet without one.
+ *
+ * (scripts/deploy-tool, the old locally-signed alternative, deployed the
+ * prior share-fee contract and has been retired — see its README for why.)
  */
-function VaultRunbookCard() {
+function VaultDeployCard({ address }: { address: string | null }) {
   const [staged, setStaged] = useState<StagedCollection[]>([]);
   useEffect(() => {
-    // One-shot fetch of the staged list for the prefill dropdown; failures
-    // just leave the dropdown with live collections only.
+    // One-shot fetch of the staged list for the collection quick-pick;
+    // failures just leave it showing live collections only.
     const controller = new AbortController();
     void fetch("/api/content/collections", {
       cache: "no-store",
@@ -221,165 +340,446 @@ function VaultRunbookCard() {
       .catch(() => {});
     return () => controller.abort();
   }, []);
-  const [collectionAddress, setCollectionAddress] = useState("");
-  const [shareName, setShareName] = useState("");
-  const [shareSymbol, setShareSymbol] = useState("");
-  const [mintFeeBps, setMintFeeBps] = useState("100");
-  const [redeemFeeBps, setRedeemFeeBps] = useState("100");
-  const [targetPremiumBps, setTargetPremiumBps] = useState("500");
 
-  const prefill = useMemo(
-    () => (name: string, address: string) => {
-      setCollectionAddress(address);
-      setShareName(`Marketplank ${name}`);
-      setShareSymbol(
-        `plk${name.replace(/[^A-Za-z0-9]/g, "").slice(0, 8).toUpperCase()}`
-      );
-    },
+  const pendingVaults = useMemo(
+    () => staged.filter((c) => c.tokenStandard === "ERC721" && !c.vaultAddress),
+    [staged]
+  );
+
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  useEffect(() => {
+    void vaultDeployConfigured().then(setConfigured);
+  }, []);
+
+  // Hydrated post-mount (localStorage isn't available during SSR) — see
+  // loadRehearsals/saveRehearsal above.
+  const [rehearsals, setRehearsals] = useState<Record<string, VaultRehearsal>>({});
+  useEffect(() => {
+    // Hydrate from localStorage post-mount — same suppression as other
+    // fetch/read-on-mount effects in this admin console (e.g. MusicSection).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRehearsals(loadRehearsals());
+  }, []);
+
+  const [input, setInput] = useState<VaultDeployInput>(EMPTY_VAULT_DEPLOY_INPUT);
+  const set = useCallback(
+    <K extends keyof VaultDeployInput>(key: K, value: VaultDeployInput[K]) =>
+      setInput((prev) => ({ ...prev, [key]: value })),
     []
   );
+  const [state, setState] = useState<DeployState>({ kind: "idle" });
+
+  const problems = useMemo(() => validateVaultDeployInput(input), [input]);
+  const problemFor = useCallback(
+    (field: VaultDeployProblem["field"]) =>
+      problems.find((p) => p.field === field)?.message,
+    [problems]
+  );
+
+  const isMainnet = input.network === "robinhood";
+  const busy = state.kind === "signing" || state.kind === "dispatching";
+
+  const rehearsal = rehearsals[input.collection.trim().toLowerCase()];
+
+  const applyRehearsal = useCallback(() => {
+    if (!rehearsal) return;
+    // Deliberately NOT copied: treasury, confirmation, network — those must
+    // be typed fresh for mainnet, never carried over from a testnet run
+    // where treasury commonly just defaults to the signer.
+    setInput((prev) => ({
+      ...prev,
+      mintFeeWei: rehearsal.input.mintFeeWei,
+      redeemFeeWei: rehearsal.input.redeemFeeWei,
+      targetPremiumWei: rehearsal.input.targetPremiumWei,
+      swapFeeBps: rehearsal.input.swapFeeBps,
+      seedTokenIds: rehearsal.input.seedTokenIds,
+      seedEthWei: rehearsal.input.seedEthWei,
+      confirmOpen: rehearsal.input.confirmOpen,
+    }));
+  }, [rehearsal]);
+
+  const recordDeployedAddress = useCallback(
+    (addr: string) => {
+      if (!rehearsal) return;
+      setRehearsals(saveRehearsal(input.collection, { ...rehearsal, deployedAddress: addr }));
+    },
+    [rehearsal, input.collection]
+  );
+
+  const submit = useCallback(async () => {
+    if (!address) return;
+    if (problems.length > 0) {
+      setState({ kind: "invalid" });
+      return;
+    }
+    setState({ kind: "signing" });
+    const outcome = await dispatchVaultDeploy(input, address);
+    if (!outcome.ok) {
+      setState({ kind: "error", message: outcome.message });
+      return;
+    }
+    if (input.network === "robinhood-testnet") {
+      setRehearsals(
+        saveRehearsal(input.collection, {
+          input,
+          runUrl: outcome.runUrl,
+          actionsUrl: outcome.actionsUrl,
+          dispatchedAt: Date.now(),
+          deployedAddress: rehearsal?.deployedAddress ?? "",
+        })
+      );
+    }
+    setState({
+      kind: "done",
+      runUrl: outcome.runUrl,
+      actionsUrl: outcome.actionsUrl,
+      network: input.network,
+    });
+  }, [address, input, problems.length, rehearsal]);
 
   return (
     <section className={CARD}>
-      <h2 className="font-display text-xl text-gold-300">
-        Deploy a vault (runbook)
-      </h2>
+      <h2 className="font-display text-xl text-gold-300">Deploy a vault</h2>
       <p className={`mt-1 ${LABEL}`}>
-        Layer 2 — signed locally on purpose, never from this page
+        Dispatches the gated GitHub Actions workflow — your wallet signs the
+        request, never the deploy key
       </p>
-      <p className="mt-3 text-xs text-cream-muted">
-        The treasury wallet must sign bytecode it can verify against source,
-        so deployment happens in the local tool (scripts/deploy-tool in the
-        repo) — this card just fills in every value so nothing is
-        hand-transcribed. Reminder: MarketplankVault has had no independent
-        third-party audit; that call is yours each time.
+      <p className="mt-3 text-sm text-cream">
+        Every new collection vault deploys on the current-generation contract
+        (Premium Plank Liquidity&apos;s design) via{" "}
+        <code className="font-mono text-xs">
+          .github/workflows/deploy-vault-v3.yml
+        </code>
+        . Full procedure:{" "}
+        <code className="font-mono text-xs">docs/marketplank/DEPLOY-V3-RUNBOOK.md</code>.
+        The deploy key (<code className="font-mono text-xs">DEPLOYER_PK</code>)
+        lives in GitHub as a repo secret and is managed there — an admin who
+        can change secrets can rotate it or point at a dedicated wallet
+        independent of this form.
       </p>
 
-      <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-cream">
-        <li>
-          <code className="font-mono text-xs">npx hardhat compile</code> in the
-          repo root, then in <code className="font-mono text-xs">scripts/deploy-tool</code>:{" "}
-          <code className="font-mono text-xs">npm install && npm run build</code>
-        </li>
-        <li>
-          Copy the two artifact JSONs per the tool&apos;s README (re-copy after
-          ANY contract change), then <code className="font-mono text-xs">npx serve .</code>
-        </li>
-        <li>Fill the tool&apos;s form with the values below; treasury signs.</li>
-        <li>
-          Paste the deployed vault address into the staged entry above and
-          Sign &amp; save. Then seed liquidity and{" "}
-          <code className="font-mono text-xs">openPool()</code> from the
-          treasury — the vault deploys closed.
-        </li>
-      </ol>
+      {configured === false ? (
+        <p className={NOTE_MUTED}>
+          <code className="font-mono text-xs">GITHUB_DISPATCH_TOKEN</code> is
+          not set on the server, so this form can&apos;t dispatch anything —
+          add it (a token scoped to <code className="font-mono text-xs">actions: write</code>{" "}
+          on this repo) or run the workflow directly from the Actions tab.
+        </p>
+      ) : null}
 
       <div className="mt-4 rounded-md border border-line bg-panel-soft p-3">
-        <h3 className={LABEL}>Constructor values</h3>
-        <div className="mt-2 grid gap-2 sm:grid-cols-3">
-          <label className="block sm:col-span-1">
-            <span className={LABEL}>Prefill from staged / live</span>
-            <select
-              className={`${INPUT} mt-1`}
-              value=""
-              onChange={(e) => {
-                const [name, addr] = e.target.value.split("|");
-                if (addr) prefill(name, addr);
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className={LABEL}>
+            {isMainnet ? "Step 2 — Mainnet deploy" : "Step 1 — Testnet rehearsal"}
+          </h3>
+          {isMainnet ? (
+            <button
+              type="button"
+              className={`${BUTTON_SECONDARY} h-8 px-3 text-[0.5625rem]`}
+              onClick={() => {
+                set("network", "robinhood-testnet");
+                set("confirmation", "");
               }}
             >
-              <option value="">Pick a collection…</option>
-              {MARKET_COLLECTIONS.filter((c) => c.tokenStandard === "ERC721").map(
-                (c) => (
-                  <option key={c.slug} value={`${c.name}|${c.contractAddress}`}>
-                    {c.name} (live)
-                  </option>
-                )
-              )}
-              {staged
-                .filter((c) => c.tokenStandard === "ERC721" && !c.vaultAddress)
-                .map((c) => (
-                  <option key={c.slug} value={`${c.name}|${c.contractAddress}`}>
-                    {c.name} (staged)
-                  </option>
-                ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className={LABEL}>Share name</span>
-            <input
-              className={`${INPUT} mt-1`}
-              value={shareName}
-              onChange={(e) => setShareName(e.target.value)}
-            />
-          </label>
-          <label className="block">
-            <span className={LABEL}>Share symbol</span>
-            <input
-              className={`${INPUT} mt-1 font-mono`}
-              value={shareSymbol}
-              onChange={(e) => setShareSymbol(e.target.value)}
-            />
-          </label>
-          <label className="block">
-            <span className={LABEL}>mintFeeBps (max 1000)</span>
-            <input
-              className={`${INPUT} mt-1`}
-              type="number"
-              min={0}
-              max={1000}
-              value={mintFeeBps}
-              onChange={(e) => setMintFeeBps(e.target.value)}
-            />
-          </label>
-          <label className="block">
-            <span className={LABEL}>redeemFeeBps (max 1000)</span>
-            <input
-              className={`${INPUT} mt-1`}
-              type="number"
-              min={0}
-              max={1000}
-              value={redeemFeeBps}
-              onChange={(e) => setRedeemFeeBps(e.target.value)}
-            />
-          </label>
-          <label className="block">
-            <span className={LABEL}>targetPremiumBps (max 2000)</span>
-            <input
-              className={`${INPUT} mt-1`}
-              type="number"
-              min={0}
-              max={2000}
-              value={targetPremiumBps}
-              onChange={(e) => setTargetPremiumBps(e.target.value)}
-            />
-          </label>
-        </div>
-        <label className="mt-2 block">
-          <span className={LABEL}>collection_ (NFT contract, ERC721)</span>
-          <input
-            className={`${INPUT} mt-1 font-mono text-xs`}
-            placeholder="0x… — or pick above"
-            value={collectionAddress}
-            onChange={(e) => setCollectionAddress(e.target.value)}
-            spellCheck={false}
-          />
-        </label>
-        <div className="mt-3 space-y-1.5">
-          <CopyRow label="collection_" value={collectionAddress.trim()} />
-          <CopyRow label="name_" value={shareName.trim()} />
-          <CopyRow label="symbol_" value={shareSymbol.trim()} />
-          <CopyRow label="mintFeeBps_" value={mintFeeBps} />
-          <CopyRow label="redeemFeeBps_" value={redeemFeeBps} />
-          <CopyRow label="targetPremiumBps_" value={targetPremiumBps} />
-          <CopyRow label="treasury_" value={MARKET_FEE_RECIPIENT} />
-          <CopyRow label="beacon_" value={DRAND_BEACON_ADDRESS} />
+              ← Back to testnet rehearsal
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={`${BUTTON_SECONDARY} h-8 px-3 text-[0.5625rem]`}
+              onClick={() => set("network", "robinhood")}
+            >
+              Skip ahead: deploy to mainnet instead →
+            </button>
+          )}
         </div>
         <p className="mt-2 text-xs text-cream-muted">
-          treasury_ and beacon_ are the configured production values
-          (lib/constants.ts). Verify the beacon against a drand mirror before
-          any real-value deploy — see the tool&apos;s README.
+          {isMainnet
+            ? "Real value, immutable on success — rehearse these exact inputs on testnet first if you have not already."
+            : "The recommended default: exercises the same deploy + seed (+ open) flow against Robinhood's testnet before anything real is at stake."}
         </p>
+
+        {isMainnet ? (
+          <div className="mt-3 rounded-md border border-rose-400/40 bg-rose-400/10 p-3">
+            <p className="text-xs text-rose-400">
+              This deploys a contract that will custody real value. Every
+              field below is immutable the moment it lands on-chain.
+            </p>
+            <label className="mt-2 block">
+              <span className={LABEL}>
+                Type <code className="font-mono">{MAINNET_CONFIRMATION}</code>{" "}
+                to allow this dispatch
+              </span>
+              <input
+                className={`${INPUT} mt-1 font-mono text-xs`}
+                value={input.confirmation}
+                onChange={(e) => set("confirmation", e.target.value)}
+                spellCheck={false}
+              />
+              {problemFor("confirmation") ? (
+                <p className="mt-1 text-xs text-rose-400">{problemFor("confirmation")}</p>
+              ) : null}
+            </label>
+
+            {rehearsal ? (
+              <div className="mt-3 rounded-md border border-line bg-panel-strong p-3">
+                <p className={LABEL}>Last testnet deploy for this collection</p>
+                <dl className="mt-2 grid gap-1 text-xs sm:grid-cols-2">
+                  <div>
+                    <dt className="text-cream-muted">Dispatched</dt>
+                    <dd className="text-cream">{timeAgo(rehearsal.dispatchedAt)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-cream-muted">Run</dt>
+                    <dd className="text-cream">
+                      <a
+                        href={rehearsal.runUrl ?? rehearsal.actionsUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline"
+                      >
+                        {rehearsal.runUrl ? "view run" : "Actions tab"}
+                      </a>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-cream-muted">mintFeeWei</dt>
+                    <dd className="font-mono text-cream">{rehearsal.input.mintFeeWei}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-cream-muted">redeemFeeWei</dt>
+                    <dd className="font-mono text-cream">{rehearsal.input.redeemFeeWei}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-cream-muted">targetPremiumWei</dt>
+                    <dd className="font-mono text-cream">{rehearsal.input.targetPremiumWei}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-cream-muted">swapFeeBps</dt>
+                    <dd className="font-mono text-cream">{rehearsal.input.swapFeeBps}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-cream-muted">seed token ids</dt>
+                    <dd className="font-mono text-cream">{rehearsal.input.seedTokenIds || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-cream-muted">seed ETH (wei)</dt>
+                    <dd className="font-mono text-cream">{rehearsal.input.seedEthWei || "—"}</dd>
+                  </div>
+                </dl>
+                <label className="mt-2 block">
+                  <span className={LABEL}>
+                    Deployed testnet vault address (recorded by you, once known)
+                  </span>
+                  <input
+                    className={`${INPUT} mt-1 font-mono text-xs`}
+                    placeholder="0x… paste once you have it from the run output"
+                    value={rehearsal.deployedAddress}
+                    onChange={(e) => recordDeployedAddress(e.target.value)}
+                    spellCheck={false}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className={`${BUTTON_SECONDARY} mt-2 h-8 px-3 text-[0.5625rem]`}
+                  onClick={applyRehearsal}
+                >
+                  Copy fees + seed from this rehearsal
+                </button>
+                <p className="mt-2 text-[0.6875rem] text-cream-muted">
+                  Remembered in this browser only — not authoritative. Cross-check
+                  against the run itself before trusting it for a real-value deploy.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-cream-muted">
+                No testnet rehearsal recorded in this browser for this
+                collection address yet. Not required — but strongly
+                recommended: go back and rehearse first if you have not.
+              </p>
+            )}
+          </div>
+        ) : null}
       </div>
+
+      <div className="mt-3 rounded-md border border-line bg-panel-soft p-3">
+        <h3 className={LABEL}>Immutable — get these right before dispatching</h3>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          <label className="block sm:col-span-2">
+            <span className={LABEL}>Collection (NFT contract, ERC-721) — IMMUTABLE</span>
+            <input
+              className={`${INPUT} mt-1 font-mono text-xs`}
+              placeholder="0x…"
+              value={input.collection}
+              onChange={(e) => set("collection", e.target.value)}
+              spellCheck={false}
+            />
+            {problemFor("collection") ? (
+              <p className="mt-1 text-xs text-rose-400">{problemFor("collection")}</p>
+            ) : null}
+            {pendingVaults.length > 0 ? (
+              <span className="mt-1 flex flex-wrap gap-1.5">
+                {pendingVaults.map((c) => (
+                  <button
+                    key={c.slug}
+                    type="button"
+                    className={`${BUTTON_SECONDARY} h-7 px-2 text-[0.5625rem]`}
+                    onClick={() => set("collection", c.contractAddress)}
+                  >
+                    Use {c.name}
+                  </button>
+                ))}
+              </span>
+            ) : null}
+          </label>
+
+          <label className="block sm:col-span-2">
+            <span className={LABEL}>
+              Treasury — IMMUTABLE, must equal the deploy key&apos;s address
+            </span>
+            <input
+              className={`${INPUT} mt-1 font-mono text-xs`}
+              placeholder="0x… (blank on testnet defaults to the signer)"
+              value={input.treasury}
+              onChange={(e) => set("treasury", e.target.value)}
+              spellCheck={false}
+            />
+            <p className="mt-1 text-[0.6875rem] text-cream-muted">
+              Not auto-filled from your connected wallet on purpose — the
+              wallet signing this dispatch and the key the workflow deploys
+              with are different keys. The workflow enforces the match; this
+              app cannot verify it for you.
+            </p>
+            {problemFor("treasury") ? (
+              <p className="mt-1 text-xs text-rose-400">{problemFor("treasury")}</p>
+            ) : null}
+          </label>
+
+          <WeiField
+            label="mintFeeWei — IMMUTABLE, must be > 0, ≤ 0.05 ETH"
+            hint="Paid per NFT deposited"
+            value={input.mintFeeWei}
+            onChange={(v) => set("mintFeeWei", v)}
+            problem={problemFor("mintFeeWei")}
+          />
+          <WeiField
+            label="redeemFeeWei — IMMUTABLE, must be > 0, ≤ 0.05 ETH"
+            hint="Paid per random redeem request"
+            value={input.redeemFeeWei}
+            onChange={(v) => set("redeemFeeWei", v)}
+            problem={problemFor("redeemFeeWei")}
+          />
+          <WeiField
+            label="targetPremiumWei — IMMUTABLE, ≤ 0.1 ETH"
+            hint="Extra fee for a targeted (non-random) redeem"
+            value={input.targetPremiumWei}
+            onChange={(v) => set("targetPremiumWei", v)}
+            problem={problemFor("targetPremiumWei")}
+          />
+          <label className="block">
+            <span className={LABEL}>swapFeeBps — IMMUTABLE, ≤ 100 (RobinWood runs 30)</span>
+            <input
+              className={`${INPUT} mt-1`}
+              type="number"
+              min={0}
+              max={100}
+              value={input.swapFeeBps}
+              onChange={(e) => set("swapFeeBps", e.target.value)}
+            />
+            {problemFor("swapFeeBps") ? (
+              <p className="mt-1 text-xs text-rose-400">{problemFor("swapFeeBps")}</p>
+            ) : null}
+          </label>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-md border border-line bg-panel-soft p-3">
+        <h3 className={LABEL}>Seed (deposited by the treasury, before opening)</h3>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className={LABEL}>Seed token IDs (comma/space separated)</span>
+            <input
+              className={`${INPUT} mt-1 font-mono text-xs`}
+              placeholder="1, 2, 3"
+              value={input.seedTokenIds}
+              onChange={(e) => set("seedTokenIds", e.target.value)}
+              spellCheck={false}
+            />
+            {problemFor("seedTokenIds") ? (
+              <p className="mt-1 text-xs text-rose-400">{problemFor("seedTokenIds")}</p>
+            ) : null}
+          </label>
+          <WeiField
+            label="Seed ETH (wei)"
+            hint="Locked forever once the pool opens"
+            value={input.seedEthWei}
+            onChange={(v) => set("seedEthWei", v)}
+            problem={problemFor("seedEthWei")}
+          />
+        </div>
+        <label className="mt-3 flex items-center gap-2 text-sm text-cream">
+          <input
+            type="checkbox"
+            checked={input.confirmOpen}
+            onChange={(e) => set("confirmOpen", e.target.checked)}
+          />
+          Also call the one-way <code className="font-mono text-xs">openPool()</code> once
+          seeded (leave unchecked to deploy + seed only, and open manually later)
+        </label>
+      </div>
+
+      {state.kind === "invalid" ? (
+        <p className={NOTE_ERR}>Fix the highlighted fields above before dispatching.</p>
+      ) : state.kind === "error" ? (
+        <p className={NOTE_ERR}>{state.message}</p>
+      ) : state.kind === "done" ? (
+        <p className={NOTE_OK}>
+          Dispatched to {state.network === "robinhood" ? "mainnet" : "testnet"}.{" "}
+          {state.runUrl ? (
+            <a href={state.runUrl} target="_blank" rel="noreferrer" className="underline">
+              View the run
+            </a>
+          ) : (
+            <>
+              Run link not available yet —{" "}
+              <a href={state.actionsUrl} target="_blank" rel="noreferrer" className="underline">
+                check the Actions tab
+              </a>
+              .
+            </>
+          )}{" "}
+          {state.network === "robinhood-testnet" ? (
+            <>
+              Recorded as a rehearsal for this collection — use{" "}
+              <strong className="text-cream">Skip ahead: deploy to mainnet instead</strong> above
+              once it looks right to carry these values forward.
+            </>
+          ) : (
+            <>
+              After it finishes, paste the deployed vault address into the staged
+              entry above and Sign &amp; save.
+            </>
+          )}
+        </p>
+      ) : null}
+
+      <button
+        type="button"
+        className={`${BUTTON_PRIMARY} mt-4`}
+        onClick={() => void submit()}
+        disabled={!address || busy || configured !== true}
+      >
+        {state.kind === "signing"
+          ? "Sign in wallet…"
+          : state.kind === "dispatching"
+            ? "Dispatching…"
+            : isMainnet
+              ? "Sign & dispatch to mainnet"
+              : "Sign & dispatch to testnet"}
+      </button>
+      {!address ? (
+        <p className="mt-2 text-xs text-cream-muted">Connect an admin wallet to dispatch.</p>
+      ) : null}
     </section>
   );
 }
@@ -454,14 +854,17 @@ function StagedCollectionsCard({ address }: { address: string | null }) {
                         fee {c.feeBps === 0 ? "0 (free)" : `${c.feeBps} bps`}
                       </Chip>
                       <Chip tone={c.vaultAddress ? "on" : "off"}>
-                        {c.vaultAddress
-                          ? `vault ${shortAddr(c.vaultAddress)}`
-                          : "trading only"}
+                        {c.vaultAddress ? "vault" : "trading only"}
                       </Chip>
                     </div>
-                    <p className="mt-1 break-all font-mono text-xs text-cream-muted">
-                      {c.contractAddress}
+                    <p className="mt-1 break-all text-xs text-cream-muted">
+                      <ExplorerAddress address={c.contractAddress} />
                     </p>
+                    {c.vaultAddress ? (
+                      <p className="mt-0.5 break-all text-xs text-cream-muted">
+                        vault <ExplorerAddress address={c.vaultAddress} />
+                      </p>
+                    ) : null}
                     {c.notes ? (
                       <p className="mt-1 text-xs text-cream-muted">{c.notes}</p>
                     ) : null}

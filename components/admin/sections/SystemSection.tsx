@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { ExplorerAddress } from "../ExplorerAddress";
 import { BUTTON_SECONDARY, CARD, LABEL } from "../ui";
 
 /**
@@ -23,7 +24,7 @@ type Status = {
         lastRun: string | null;
         ageMinutes: number | null;
         vaults: { vault: string; state: string; actionable?: boolean; detail?: string }[];
-        lastFatal: string | null;
+        lastFatal: { timestamp: string | null; detail: string } | null;
       };
   playlist: { ok: boolean; count: number };
   uploads: { count: number; bytes: number };
@@ -39,10 +40,6 @@ function Dot({ ok }: { ok: boolean | null }) {
       }`}
     />
   );
-}
-
-function shortAddr(a: string): string {
-  return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
 }
 
 // Receives (and ignores) the shell's `address` prop — every section shares
@@ -130,8 +127,15 @@ export default function SystemSection() {
                 ) : relayer ? (
                   <>
                     <Dot ok={relayer.state === "ok"} />
+                    {/* "FATAL logged" with no timing read as an emergency even
+                        when the failure was days old and every run since had
+                        succeeded. The state now only goes fatal when nothing
+                        has run since the error, so say that plainly and give
+                        the age — a reader needs to know whether to act now. */}
                     {relayer.state === "fatal"
-                      ? "FATAL logged"
+                      ? relayer.ageMinutes === null
+                        ? "failing — no successful run logged"
+                        : `failing since last run (${relayer.ageMinutes} min ago)`
                       : relayer.ageMinutes === null
                         ? "no runs found"
                         : `last run ${relayer.ageMinutes} min ago`}
@@ -156,6 +160,15 @@ export default function SystemSection() {
           </dl>
         )}
 
+        {relayer && relayer.state === "fatal" && relayer.lastFatal ? (
+          <p className="mt-3 rounded-md border border-rose-400/30 bg-panel-strong px-3 py-2 text-xs text-rose-400">
+            {relayer.lastFatal.detail}
+            {relayer.lastFatal.timestamp
+              ? ` — ${new Date(relayer.lastFatal.timestamp).toLocaleString()}`
+              : null}
+          </p>
+        ) : null}
+
         {relayer && (relayer.state === "ok" || relayer.state === "stale" || relayer.state === "fatal") && relayer.vaults.length > 0 ? (
           <ul className="mt-3 grid gap-1 sm:grid-cols-2">
             {relayer.vaults.map((v) => (
@@ -164,8 +177,8 @@ export default function SystemSection() {
                 className="flex items-center gap-2 rounded-md bg-panel-strong px-3 py-2 text-xs"
               >
                 <Dot ok={v.state !== "error" && !v.actionable} />
-                <span className="truncate font-mono text-cream-muted">
-                  {shortAddr(v.vault)}
+                <span className="truncate text-cream-muted">
+                  <ExplorerAddress address={v.vault} short />
                 </span>
                 <span className="ml-auto uppercase tracking-wide text-cream">
                   {v.state}
@@ -192,8 +205,8 @@ export default function SystemSection() {
                 <span className="tabular-nums text-xs text-cream-muted">
                   {new Date(entry.at).toLocaleString()}
                 </span>
-                <span className="font-mono text-xs text-gold-300">
-                  {shortAddr(entry.address)}
+                <span className="text-xs text-gold-300">
+                  <ExplorerAddress address={entry.address} short />
                 </span>
                 <span className="text-cream">{entry.summary}</span>
                 <span className={`ml-auto ${LABEL}`}>{entry.action}</span>

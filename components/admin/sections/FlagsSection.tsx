@@ -6,6 +6,7 @@ import {
   RULES_RELAXED,
   TRADE_PAUSED,
 } from "@/lib/constants";
+import { CROSSCHAIN_ENABLED } from "@/lib/crosschain-constants";
 import { sanitizeFlags, type FlagsDoc } from "@/lib/content-docs";
 import { CardChrome, useContentDocCard } from "./contentDocCard";
 import { CARD, LABEL, NOTE_MUTED } from "../ui";
@@ -63,11 +64,30 @@ function OverrideRow({
   );
 }
 
-const ENV_FLAGS = [
+// ZEROX_ENABLED / ZEROX_CROSSCHAIN_ENABLED live in lib/zerox-server.ts, which
+// pulls in server-only fetch helpers (lib/uniswap-server.ts, ZEROX_API_KEY)
+// — not safe to import into this client component. Read the same
+// NEXT_PUBLIC_ values directly instead; Next.js inlines them at build time
+// exactly like the lib/constants.ts flags above.
+const ZEROX_ENABLED =
+  process.env.NEXT_PUBLIC_ZEROX_ENABLED?.trim().toLowerCase() === "true";
+const ZEROX_CROSSCHAIN_ENABLED =
+  process.env.NEXT_PUBLIC_ZEROX_CROSSCHAIN_ENABLED?.trim().toLowerCase() === "true";
+// Raw build-time value, not lib/wallet-reown.ts's isReownWalletUIEnabled()
+// (which also layers in a per-browser localStorage override) — this card
+// reports what the release baked in, not the current tab's effective state.
+// Not boolean like the others (it's a mode string), so it's rendered as
+// plain text below rather than the on/off pill.
+const WALLET_UI = (process.env.NEXT_PUBLIC_WALLET_UI || "").trim().toLowerCase();
+
+const ENV_FLAGS: { name: string; value: boolean }[] = [
   { name: "TRADE_PAUSED", value: TRADE_PAUSED },
   { name: "MARKET_ENABLED", value: MARKET_ENABLED },
   { name: "RULES_RELAXED", value: RULES_RELAXED },
   { name: "GASLESS_SWAPS_ENABLED", value: GASLESS_SWAPS_ENABLED },
+  { name: "CROSSCHAIN_ENABLED", value: CROSSCHAIN_ENABLED },
+  { name: "ZEROX_ENABLED", value: ZEROX_ENABLED },
+  { name: "ZEROX_CROSSCHAIN_ENABLED", value: ZEROX_CROSSCHAIN_ENABLED },
 ];
 
 export default function FlagsSection({ address }: { address: string | null }) {
@@ -95,6 +115,12 @@ export default function FlagsSection({ address }: { address: string | null }) {
               </span>
             </li>
           ))}
+          <li className="flex items-center justify-between gap-2 rounded-md bg-panel-strong px-3 py-2 text-sm">
+            <span className="font-mono text-xs text-cream">WALLET_UI</span>
+            <span className="text-[0.6875rem] font-black uppercase tracking-[0.12em] text-cream-muted">
+              {WALLET_UI === "reown" ? "reown" : "legacy (unset)"}
+            </span>
+          </li>
         </ul>
         <p className={NOTE_MUTED}>
           These are NEXT_PUBLIC_ env values compiled into the release. Changing

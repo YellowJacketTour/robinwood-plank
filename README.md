@@ -293,7 +293,7 @@ Version numbers are internal. The UI presents each vault by product name
 - [V3 internal audit](docs/marketplank/AUDIT-2026-08-01-v3-internal.md)
 - [V3 deploy runbook](docs/marketplank/DEPLOY-V3-RUNBOOK.md)
 - [Vault LP migration postmortem](docs/marketplank/POSTMORTEM-2026-07-29-vault-lp-migration.md)
-- [Wallet-signed vault deployment tool](scripts/deploy-tool/README.md)
+- [Wallet-signed vault deployment tool (retired 2026-08-02, see its README)](scripts/deploy-tool/README.md)
 
 ## Contributing and license
 

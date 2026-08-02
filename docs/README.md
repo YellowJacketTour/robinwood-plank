@@ -25,8 +25,10 @@ earlier hosting or contract state.
   `inmotion`.
 - [Marketplank engineering specification](marketplank/SPEC.md): current
   marketplace and vault design plus historical decisions.
-- [Vault deployment tool](../scripts/deploy-tool/README.md): operator-signed
-  contract deployment utility.
+- [Vault deployment tool](../scripts/deploy-tool/README.md): retired
+  2026-08-02 — new vaults deploy through
+  [`.github/workflows/deploy-vault-v3.yml`](../docs/marketplank/DEPLOY-V3-RUNBOOK.md)
+  instead; see the tool's README for why.
 
 ## Historical security and product records
 

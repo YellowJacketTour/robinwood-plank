@@ -1,6 +1,7 @@
 import { adminMessage, adminPayloadHash } from "@/lib/admin-auth";
 import { signMessage } from "@/lib/wallet";
 import type { ContentSlug } from "@/lib/content-docs";
+import type { VaultDeployInput } from "@/lib/market/vault-deploy-v3";
 
 /**
  * Client half of the admin auth contract (lib/admin-auth.ts): sign the exact
@@ -159,6 +160,71 @@ export async function uploadMediaFile(
     return {
       ok: false,
       message: err instanceof Error ? err.message : "Upload failed.",
+    };
+  }
+}
+
+/** Whether the server has GITHUB_DISPATCH_TOKEN configured — read before
+ * rendering the vault-deploy form so it can disable itself with a clear
+ * reason instead of failing silently on submit. */
+export async function vaultDeployConfigured(): Promise<boolean> {
+  try {
+    const res = await fetch("/api/admin/vault-deploy", { cache: "no-store" });
+    if (!res.ok) return false;
+    const data = (await res.json()) as { configured?: boolean };
+    return data.configured === true;
+  } catch {
+    return false;
+  }
+}
+
+export type VaultDeployOutcome =
+  | { ok: true; runUrl: string | null; actionsUrl: string }
+  | { ok: false; message: string };
+
+/**
+ * Sign and dispatch .github/workflows/deploy-vault-v3.yml. The signed payload
+ * is the exact validated input object (see lib/market/vault-deploy-v3.ts) —
+ * every field the workflow reads, so a captured signature authorizes exactly
+ * this dispatch and nothing else.
+ */
+export async function dispatchVaultDeploy(
+  input: VaultDeployInput,
+  address: string
+): Promise<VaultDeployOutcome> {
+  try {
+    const payloadJson = JSON.stringify(input);
+    const timestamp = Date.now();
+    const signature = await signMessage(
+      address,
+      adminMessage("vault-deploy-dispatch", timestamp, adminPayloadHash(payloadJson))
+    );
+    const res = await fetch("/api/admin/vault-deploy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input,
+        auth: { address, timestamp, signature },
+      }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      message?: string;
+      runUrl?: string | null;
+      actionsUrl?: string;
+    };
+    if (!res.ok || !data.ok) {
+      return { ok: false, message: data.message || "Dispatch rejected." };
+    }
+    return {
+      ok: true,
+      runUrl: data.runUrl ?? null,
+      actionsUrl: data.actionsUrl ?? "",
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : "Dispatch failed.",
     };
   }
 }

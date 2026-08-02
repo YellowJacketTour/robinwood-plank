@@ -57,6 +57,7 @@ export const TOC = [
   { id: "trading", label: "Buying, selling & trading" },
   { id: "liquidity", label: "Providing liquidity" },
   { id: "migrate", label: "Moving out of an old pool" },
+  { id: "woodamp", label: "Get your music on WoodAmp" },
   { id: "faq", label: "FAQ" },
 ] as const;
 
@@ -606,6 +607,40 @@ const SECTIONS: { id: string; body: React.ReactNode }[] = [
           </a>{" "}
           above) — if you have a liquidity position there, don&apos;t wait; withdraw it via /migrate.
         </P>
+      </>
+    ),
+  },
+  {
+    id: "woodamp",
+    body: (
+      <>
+        <H id="woodamp">Get your music on WoodAmp</H>
+        <P>
+          WoodAmp is the player in the site header — community tracks that keep playing as you
+          move around the site. It never starts on its own.
+        </P>
+        <P>
+          The playlist is curated, not open: <strong>only an admin can add a track.</strong> There
+          is no upload form and no submission queue. That is deliberate — it keeps the player from
+          becoming a dumping ground, and it means everything on it was chosen.
+        </P>
+        <P>
+          <strong>If you have music, reach out.</strong> Tag{" "}
+          <a
+            className="text-gold-300 underline"
+            href="https://x.com/RobinWoodPlank"
+            target="_blank"
+            rel="noreferrer"
+          >
+            @RobinWoodPlank
+          </a>{" "}
+          on X and someone will hear it.
+        </P>
+        <Note>
+          Reaching out is not a guarantee. Nobody is obliged to add a track, there is no queue
+          position to check, and silence is not a rejection — it usually just means it has not
+          been picked up yet.
+        </Note>
       </>
     ),
   },
