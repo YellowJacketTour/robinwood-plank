@@ -29,9 +29,36 @@ const DEV_LOCAL = process.env.NEXT_PUBLIC_DEV_LOCAL_CHAIN === "1";
 type UpstreamRpc = { jsonrpc?: string; id?: unknown; result?: unknown; error?: unknown };
 
 /**
- * POST a JSON-RPC body to the first provider that answers with parseable JSON.
- * A well-formed JSON-RPC error is a successful proxy; only transport failures
- * or non-JSON bodies fall through to the next provider.
+ * True when a parsed upstream entry is a well-formed JSON-RPC response —
+ * i.e. it has a `result` (any value, including null/0/false) or an `error`
+ * that is itself an object. A rate-limited or misbehaving upstream can
+ * return valid *JSON* that isn't a valid *JSON-RPC response* (e.g. an empty
+ * object, or `{"error":"rate limited"}` with a bare string instead of an
+ * error object) — forwarding that as a 200 makes the client believe the
+ * proxy succeeded with an empty result. ethers then can't decode a result or
+ * a revert reason from it and throws CALL_EXCEPTION with
+ * data=null/reason=null/revert=null (the "Sync pause" bug on /gallery,
+ * confirmed live 2026-08-02: salePhase() is healthy on every direct check —
+ * this is a proxy passthrough problem, not a contract revert).
+ */
+function isWellFormedRpc(entry: unknown): entry is UpstreamRpc {
+  if (!entry || typeof entry !== "object") return false;
+  const e = entry as UpstreamRpc;
+  if ("result" in e) return true;
+  return typeof e.error === "object" && e.error !== null;
+}
+
+function isWellFormedRpcBody(parsed: UpstreamRpc | UpstreamRpc[]): boolean {
+  return Array.isArray(parsed) ? parsed.length > 0 && parsed.every(isWellFormedRpc) : isWellFormedRpc(parsed);
+}
+
+/**
+ * POST a JSON-RPC body to the first provider that answers with a well-formed
+ * JSON-RPC response. A well-formed JSON-RPC error is a successful proxy;
+ * transport failures, non-2xx status codes (429 in particular — Blockscout's
+ * eth-rpc bridge rate-limits hard), non-JSON bodies, and JSON that doesn't
+ * actually look like a JSON-RPC response all fall through to the next
+ * provider instead of being forwarded to the client as if they succeeded.
  */
 async function proxyToRpc(
   body: string
@@ -49,17 +76,23 @@ async function proxyToRpc(
         signal: AbortSignal.timeout(10_000),
         cache: "no-store",
       });
+      if (!res.ok) {
+        lastError = new Error(`HTTP ${res.status} from ${url}`);
+        continue;
+      }
       const text = await res.text();
+      let parsed: UpstreamRpc | UpstreamRpc[];
       try {
-        return {
-          ok: true,
-          parsed: JSON.parse(text) as UpstreamRpc | UpstreamRpc[],
-          metered: isMeteredRpcUrl(url),
-        };
+        parsed = JSON.parse(text) as UpstreamRpc | UpstreamRpc[];
       } catch {
         lastError = new Error(`Non-JSON response from ${url}`);
         continue;
       }
+      if (!isWellFormedRpcBody(parsed)) {
+        lastError = new Error(`Malformed JSON-RPC body from ${url}`);
+        continue;
+      }
+      return { ok: true, parsed, metered: isMeteredRpcUrl(url) };
     } catch (error) {
       lastError = error;
     }
@@ -153,14 +186,24 @@ export async function POST(req: Request) {
         signal: AbortSignal.timeout(10_000),
         cache: "no-store",
       });
+      if (!res.ok) {
+        lastError = new Error(`HTTP ${res.status} from ${url}`);
+        continue;
+      }
       // A well-formed JSON-RPC error response is still a successful proxy —
-      // only a transport failure or non-JSON body should fall through to
-      // the next RPC.
+      // only a transport failure, non-2xx status, non-JSON body, or JSON that
+      // isn't actually shaped like a JSON-RPC response should fall through
+      // to the next RPC (see isWellFormedRpcBody above).
       const text = await res.text();
+      let parsed: UpstreamRpc | UpstreamRpc[];
       try {
-        JSON.parse(text);
+        parsed = JSON.parse(text) as UpstreamRpc | UpstreamRpc[];
       } catch {
         lastError = new Error(`Non-JSON response from ${url}`);
+        continue;
+      }
+      if (!isWellFormedRpcBody(parsed)) {
+        lastError = new Error(`Malformed JSON-RPC body from ${url}`);
         continue;
       }
       return new Response(text, {
