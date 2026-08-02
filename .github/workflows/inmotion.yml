@@ -1086,8 +1086,12 @@ jobs:
               --header "Cache-Control: no-cache" \
               "$url/api/market/collection-index" || true
           )"
-          stubs="$(printf '%s' "$body" | grep -o '"Unrevealed"' | wc -l | tr -d ' ')"
-          total="$(printf '%s' "$body" | grep -o '"tokenId"' | wc -l | tr -d ' ')"
+          # `|| true` is load-bearing: grep exits 1 when it matches NOTHING, which
+          # here is the SUCCESS case, and under `set -o pipefail` that killed the
+          # step before it could report. The check could only pass when it had
+          # something to complain about.
+          stubs="$(printf '%s' "$body" | grep -o '"Unrevealed"' | wc -l | tr -d ' ' || true)"
+          total="$(printf '%s' "$body" | grep -o '"tokenId"' | wc -l | tr -d ' ' || true)"
           echo "collection-index: $total entries, $stubs still carrying a pre-reveal stub"
           if [ "$stubs" != "0" ]; then
             echo "::error::$stubs token(s) still carry a pre-reveal stub — the rebuild did not fully land."
