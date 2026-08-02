@@ -73,6 +73,10 @@ export type { GalleryNft };
 const POLL_MS = 90_000;
 const META_CONCURRENCY = 6;
 const PAGE_SIZE = 24;
+/** builtAt of the collection dataset this browser last applied. Lets a server
+ *  rebuild override the 7-day per-token metadata cache — see
+ *  primeFromCollectionIndex. */
+const INDEX_STAMP_KEY = "plank.love:collection-index-builtAt";
 /** First paint: stage this many cards immediately (newest first). */
 const INITIAL_STAGE = 48;
 
@@ -772,11 +776,17 @@ export default function Gallery() {
    */
   const primeFromCollectionIndex = useCallback(async () => {
     try {
+      // Revalidate rather than force-cache. force-cache reuses the stored
+      // response indefinitely, so a server-side rebuild could never reach a
+      // browser that had already visited — planks #1-180 stayed unrevealed on
+      // screen for days after the data behind them was corrected. The payload
+      // is unchanged in the common case and comes back as a 304.
       const res = await fetch("/api/market/collection-index", {
-        cache: "force-cache",
+        cache: "no-cache",
       });
       if (!res.ok || !aliveRef.current) return;
       const data = (await res.json()) as {
+        builtAt?: number;
         totalSupply?: number;
         entries?: Array<{
           tokenId: number;
@@ -790,10 +800,32 @@ export default function Gallery() {
       const entries = Array.isArray(data.entries) ? data.entries : [];
       if (!entries.length || !aliveRef.current) return;
 
+      // Did the server rebuild since we last applied this dataset?
+      //
+      // The per-token cache holds metadata for 7 days on the assumption that
+      // it is immutable post-reveal. That assumption broke once: the server
+      // shipped pre-reveal stubs, and when the server data was later fixed,
+      // the hasFreshMetadata() guard below skipped every corrected token
+      // precisely because the stale copy was still "fresh". A rebuild has to
+      // be able to win, so compare builtAt and override wholesale when it
+      // moves.
+      const rebuilt = (() => {
+        if (typeof data.builtAt !== "number") return false;
+        try {
+          const seen = Number(window.localStorage.getItem(INDEX_STAMP_KEY) || 0);
+          if (data.builtAt <= seen) return false;
+          window.localStorage.setItem(INDEX_STAMP_KEY, String(data.builtAt));
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+
       for (const entry of entries) {
         // Already fresh (e.g. a poll or prior session beat this here) —
         // don't clobber a possibly-newer cached owner/tokenUri pairing.
-        if (hasFreshMetadata(entry.tokenId)) continue;
+        // A server rebuild is the one thing that outranks that.
+        if (!rebuilt && hasFreshMetadata(entry.tokenId)) continue;
         // Dataset entry itself is incomplete (rare: first-ever cold build
         // before the backing trait/image scans finished) — let the normal
         // chain+IPFS hydrate path fill this one in as before.
