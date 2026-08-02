@@ -260,6 +260,18 @@ The workflow uses the GitHub Environment `inmotion-staging`.
 - `UNISWAP_API_KEY`
 - `RELAYER_PRIVATE_KEY`
 - `CRON_SECRET` only while the legacy HTTP cron endpoint remains
+- `VAULT_DISPATCH_TOKEN` — the fine-grained PAT (`actions: write` on this repo
+  only) that `/admin` uses to dispatch a V3 vault deploy. **Note the name.**
+  GitHub rejects any secret or variable beginning with `GITHUB_`, so the value
+  the application reads as `GITHUB_DISPATCH_TOKEN` cannot be stored under that
+  name here. Run this workflow with `operation=set-dispatch-token` to install
+  it into the server's `.env.production` under the application's name; that
+  job is the only way to move the value, since a stored Actions secret cannot
+  be read back by the API, the UI, or a repository admin.
+
+Optional repository *variables* (not secrets — neither is sensitive):
+`VAULT_DISPATCH_REPO`, `VAULT_DISPATCH_REF`. Unset means the application's own
+defaults apply.
 
 The workflow can resolve repository or environment secrets. Environment-scoped
 secrets are preferred because they restrict deployment credentials to jobs

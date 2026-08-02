@@ -486,6 +486,15 @@ function VaultDeployCard({ address }: { address: string | null }) {
             </li>
           </ul>
           <p className="mt-1.5">
+            To install it, store the token as the repository secret{" "}
+            <code className="font-mono text-xs">VAULT_DISPATCH_TOKEN</code> —
+            GitHub rejects any secret whose name begins with{" "}
+            <code className="font-mono text-xs">GITHUB_</code>, so it cannot be
+            stored under the name the server reads — then run the InMotion
+            Passenger CI/CD workflow with{" "}
+            <code className="font-mono text-xs">operation=set-dispatch-token</code>.
+          </p>
+          <p className="mt-1.5">
             Or dispatch the workflow directly from the Actions tab in the
             meantime.
           </p>
