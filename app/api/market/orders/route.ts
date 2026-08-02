@@ -142,6 +142,18 @@ export async function GET(req: Request) {
     imageByTokenId
   );
 
+  // Normalise EVERY row's image, not just the ones the index supplied. Our own
+  // listings carry whatever imageUrl was resolved when they were signed, and
+  // some older rows stored a raw `https://gateway.pinata.cloud/…` URL — which
+  // renders today but bypasses our proxy, so it is exposed to ORB and to that
+  // gateway's uptime and rate limits. Measured on production: 2 of 61 rows.
+  // resolveIpfsUrl is idempotent, so already-proxied rows pass through
+  // untouched and this cannot double-wrap.
+  const { resolveIpfsUrl } = await import("@/lib/ipfs");
+  for (const item of merged) {
+    if (item.imageUrl) item.imageUrl = resolveIpfsUrl(item.imageUrl);
+  }
+
   return publicJson({ kind, items: merged });
 }
 

@@ -184,3 +184,23 @@ test("non-ERC721 and malformed orders are skipped rather than mis-priced", () =>
 
   assert.deepEqual(normalised, []);
 });
+
+test("a raw gateway URL stored on an old listing is normalised, not passed through", () => {
+  // Some listings signed early carry a bare https://gateway.pinata.cloud/… URL
+  // rather than a proxy path. It renders, so it hid — but it bypasses our
+  // proxy, exposing the card to ORB and to that gateway's rate limits.
+  // Measured on production: 2 of 61 rows. The orders route now normalises
+  // every row; this pins that resolveIpfsUrl actually rewrites that shape.
+  const raw = "https://gateway.pinata.cloud/ipfs/bafyexample/KnightWood3.png";
+  const resolved = resolveIpfsUrl(raw);
+
+  assert.ok(
+    resolved.startsWith("/api/ipfs/image?"),
+    `a raw gateway URL must become a proxy path, got ${resolved}`
+  );
+  assert.equal(
+    resolveIpfsUrl(resolved),
+    resolved,
+    "and re-resolving must be a no-op so the route cannot double-wrap"
+  );
+});
