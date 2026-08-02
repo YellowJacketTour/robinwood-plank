@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Deploy, provision/verify the drand relayer, set the admin allowlist, or install the vault-deploy dispatch token.
+        description: Deploy, provision/verify the drand relayer, set the admin allowlist, install the vault-deploy dispatch token, or purge and rebuild the market snapshots.
         required: true
         type: choice
         default: deploy
@@ -26,6 +26,7 @@ on:
           - verify-relayer
           - set-admin-allowlist
           - set-dispatch-token
+          - purge-market-data
       confirmation:
         description: Relay-disable confirmation, when required.
         required: false
@@ -940,3 +941,104 @@ jobs:
           echo "::error::App did not return 200 from $url/api/health after the restart."
           echo "The previous .env.production is on the server as .env.production.bak.*"
           exit 1
+
+  # ---------------------------------------------------------------------------
+  # Purge and rebuild the collection-wide market snapshots.
+  #
+  # The rarity snapshot and collection image map are written WITHOUT a TTL on
+  # purpose: rebuilding them walks 1,542 tokens against rate-limited Blockscout
+  # and IPFS, and expiring them made every Passenger worker cold-rebuild at the
+  # same boundary. The cost of that choice is that a snapshot built from bad
+  # upstream data is permanent — which is what happened when Blockscout served
+  # pre-reveal stubs for planks #1-180 and they survived reveal, leaving them
+  # named "Plank #N" with a placeholder image and no rank, and every other
+  # token's rank computed against a 1,362-token sample.
+  #
+  # A code fix cannot clear a key that has no expiry, so this exists to run the
+  # purge without anyone holding a shell. It is a repair tool, not routine:
+  # the 15-minute and daily crons do NOT pass --purge, and should not.
+  #
+  # Expect it to be slow (three full collection walks) and to leave the site
+  # showing the old numbers until it finishes. Nothing is taken offline — the
+  # snapshots are rebuilt in place and the app serves the previous values until
+  # each new one is written.
+  # ---------------------------------------------------------------------------
+  purge-market-data:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'purge-market-data'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+    steps:
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Purge and rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+          env_file="$app_dir/shared/.env.production"
+          script="$app_dir/current/scripts/refresh-market-data.mjs"
+          test -s "$env_file"
+          test -s "$script"
+
+          # Share the cron's lock. Without it a purge racing the 15-minute
+          # incremental run could write a half-built snapshot over a good one.
+          /usr/bin/flock -w 300 "$app_dir/shared/market-refresh.lock" \
+            "$node_bin" --env-file="$env_file" "$script" \
+            --purge --rarity --traits --collection
+          REMOTE
+
+      - name: Report the rebuilt collection
+        shell: bash
+        env:
+          INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          url="${INMOTION_HEALTH_URL:-https://plank.love}"
+          # Confirm the rebuild actually landed rather than trusting exit 0:
+          # count how many tokens still carry the pre-reveal Status stub.
+          body="$(
+            curl -sS --connect-timeout 5 --max-time 120 \
+              --user-agent "Mozilla/5.0 (compatible; PlankDeploy/1.0)" \
+              "$url/api/market/collection-index" || true
+          )"
+          stubs="$(printf '%s' "$body" | grep -o '"Unrevealed"' | wc -l | tr -d ' ')"
+          total="$(printf '%s' "$body" | grep -o '"tokenId"' | wc -l | tr -d ' ')"
+          echo "collection-index: $total entries, $stubs still carrying a pre-reveal stub"
+          if [ "$stubs" != "0" ]; then
+            echo "::error::$stubs token(s) still carry a pre-reveal stub — the rebuild did not fully land."
+            exit 1
+          fi
