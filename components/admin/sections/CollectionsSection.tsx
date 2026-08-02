@@ -388,6 +388,10 @@ function VaultDeployCard({ address }: { address: string | null }) {
     // where treasury commonly just defaults to the signer.
     setInput((prev) => ({
       ...prev,
+      // name/symbol ARE copied — unlike treasury/confirmation, these should
+      // be identical between the rehearsal and the real deploy.
+      shareName: rehearsal.input.shareName,
+      shareSymbol: rehearsal.input.shareSymbol,
       mintFeeWei: rehearsal.input.mintFeeWei,
       redeemFeeWei: rehearsal.input.redeemFeeWei,
       targetPremiumWei: rehearsal.input.targetPremiumWei,
@@ -459,12 +463,33 @@ function VaultDeployCard({ address }: { address: string | null }) {
       </p>
 
       {configured === false ? (
-        <p className={NOTE_MUTED}>
-          <code className="font-mono text-xs">GITHUB_DISPATCH_TOKEN</code> is
-          not set on the server, so this form can&apos;t dispatch anything —
-          add it (a token scoped to <code className="font-mono text-xs">actions: write</code>{" "}
-          on this repo) or run the workflow directly from the Actions tab.
-        </p>
+        <div className={NOTE_MUTED}>
+          <p>
+            This form can&apos;t dispatch anything until an admin sets these
+            on the server (never sent to the browser — the GET check only
+            ever returns a boolean):
+          </p>
+          <ul className="mt-1.5 list-disc space-y-0.5 pl-5">
+            <li>
+              <code className="font-mono text-xs">GITHUB_DISPATCH_TOKEN</code> —
+              a fine-grained token scoped to{" "}
+              <code className="font-mono text-xs">actions: write</code> on this
+              repo only, nothing broader
+            </li>
+            <li>
+              <code className="font-mono text-xs">GITHUB_DISPATCH_REPO</code> —
+              defaults to this repo if unset
+            </li>
+            <li>
+              <code className="font-mono text-xs">GITHUB_DISPATCH_REF</code> —
+              defaults to <code className="font-mono text-xs">inmotion</code> if unset
+            </li>
+          </ul>
+          <p className="mt-1.5">
+            Or dispatch the workflow directly from the Actions tab in the
+            meantime.
+          </p>
+        </div>
       ) : null}
 
       <div className="mt-4 rounded-md border border-line bg-panel-soft p-3">
@@ -540,6 +565,12 @@ function VaultDeployCard({ address }: { address: string | null }) {
                       >
                         {rehearsal.runUrl ? "view run" : "Actions tab"}
                       </a>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-cream-muted">share name / symbol</dt>
+                    <dd className="font-mono text-cream">
+                      {rehearsal.input.shareName} ({rehearsal.input.shareSymbol})
                     </dd>
                   </div>
                   <div>
@@ -630,6 +661,34 @@ function VaultDeployCard({ address }: { address: string | null }) {
                   </button>
                 ))}
               </span>
+            ) : null}
+          </label>
+
+          <label className="block">
+            <span className={LABEL}>Share token name — IMMUTABLE</span>
+            <input
+              className={`${INPUT} mt-1`}
+              value={input.shareName}
+              onChange={(e) => set("shareName", e.target.value)}
+            />
+            <p className="mt-1 text-[0.6875rem] text-cream-muted">
+              Defaults to RobinWood&apos;s own — change it for any other
+              collection, or its share token stays branded RobinWood forever.
+            </p>
+            {problemFor("shareName") ? (
+              <p className="mt-1 text-xs text-rose-400">{problemFor("shareName")}</p>
+            ) : null}
+          </label>
+          <label className="block">
+            <span className={LABEL}>Share token symbol — IMMUTABLE</span>
+            <input
+              className={`${INPUT} mt-1 font-mono`}
+              value={input.shareSymbol}
+              onChange={(e) => set("shareSymbol", e.target.value.toUpperCase())}
+              spellCheck={false}
+            />
+            {problemFor("shareSymbol") ? (
+              <p className="mt-1 text-xs text-rose-400">{problemFor("shareSymbol")}</p>
             ) : null}
           </label>
 

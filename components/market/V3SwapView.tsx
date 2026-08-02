@@ -413,17 +413,20 @@ export default function V3SwapView({ vaultAddress, active = true }: { vaultAddre
         <BigStat label="Available" value={snap ? String(snap.availableCount) : "—"} sub="redeemable" />
         {/* LP yield from real swap volume — never mint/redeem fee revenue,
             which pays the treasury, not LPs (see the aprPct docstring in
-            lib/market/vault-stats.ts). Basis is whatever window was actually
-            measured; "—" means there isn't enough swap history yet, not a
-            broken read. */}
+            lib/market/vault-stats.ts). The basis in the label is whatever
+            window was actually measured, never an asserted 24h — a thin
+            window (e.g. "3.1h basis") should read as thin, not as a
+            steady-state rate. "—" means there isn't enough swap history
+            yet, not a broken read; this is the number an LP decides on, so
+            it only ever shows a real measured figure. */}
         <BigStat
-          label="LP APR"
-          value={aprStats?.aprPct != null ? `${aprStats.aprPct >= 1000 ? aprStats.aprPct.toFixed(0) : aprStats.aprPct.toFixed(1)}%` : "—"}
-          sub={
+          label={
             aprStats?.aprPct != null && aprStats.aprBasisHours != null
-              ? `swap fees · ${aprStats.aprBasisHours.toFixed(1)}h`
-              : "swap fees · no history yet"
+              ? `LP APR (${aprStats.aprBasisHours.toFixed(1)}h basis)`
+              : "LP APR"
           }
+          value={aprStats?.aprPct != null ? `${aprStats.aprPct >= 1000 ? aprStats.aprPct.toFixed(0) : aprStats.aprPct.toFixed(1)}%` : "—"}
+          sub={aprStats?.aprPct != null ? "swap fees" : "not enough trading history yet"}
         />
       </div>
 

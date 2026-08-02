@@ -208,10 +208,46 @@ export async function readCoreVaultState(
   // LIVE_BATCH_END
 }
 
-/** Below this many hours of observed swap events, annualized APR is noisy.
- * Young pools still get a number once we have ≥1h of real Bought/Sold history
- * so Instant Swap isn't stuck on "—" after a day of real volume. */
-const MIN_HOURS_FOR_APR = 1;
+/**
+ * The full definition of a "valid" LP APR — the owner's own words: "display
+ * what its supposed to be if valid... if not then we can skip it." Every
+ * condition that gates whether computeLpApr renders a figure at all lives
+ * HERE, in one place, so changing the bar means changing one constant, not
+ * hunting through the function for a second copy of the same idea. The four
+ * conditions (see computeLpApr for where each is actually checked):
+ *
+ *   1. The vault charges a swap fee at all (gen-3/eth-fee model,
+ *      swapFeeBps > 0). Legacy buyShares/sellShares apply none — see the
+ *      aprPct docs on VaultStats — so those vaults can never clear this,
+ *      structurally, not because their data is thin.
+ *   2. There is real swap volume with at least one parseable timestamp.
+ *   3. The TRUE measured window is at least MIN_HOURS_FOR_APR. Annualizing
+ *      a two-swap, five-minute window is an ~8760x extrapolation from a
+ *      sample of one; a four-swap, 5.6h window is still a ~1560x
+ *      extrapolation. This is the number an LP reads before committing
+ *      liquidity — a dash for a pool's first day is a true statement; a
+ *      four-figure annualized rate off an afternoon is not, however
+ *      honestly the basis is labelled. MUST be enforced as a genuine gate
+ *      (see annualizeApr's guard), never as a floor a real-but-thin window
+ *      gets clamped up to — that reintroduces a fabricated basis under a
+ *      different name.
+ *   4. At least MIN_SWAPS_FOR_APR distinct swap events fall inside that
+ *      window. A pool can sit for a day and take two trades — 24 elapsed
+ *      hours with a two-event sample is a thin number wearing a respectable
+ *      window. This is a noise floor, not a statistical claim; 5 is a
+ *      judgement call, made explicitly rather than left implicit.
+ *
+ * One bar, used identically for the public Instant Swap page and the admin
+ * dashboard — not a laxer admin threshold that would need its own name and
+ * its own "provisional" labeling to stay honest.
+ *
+ * aprBasisHours is only ever set alongside a non-null aprPct (see
+ * computeLpApr) specifically so a caller can never see a "measured" hours
+ * figure sitting next to a null rate, or an unmeasured/clamped span at all.
+ */
+const MIN_HOURS_FOR_APR = 24;
+/** See MIN_HOURS_FOR_APR's docs (condition 4) — the noise-floor event count. */
+const MIN_SWAPS_FOR_APR = 5;
 
 /** ETH actually paid per deposit under this fee schedule. Share-model vaults
  *  charge a bps cut of one share, valued at the live share price; V3 charges a
@@ -514,22 +550,30 @@ function computeTreasuryFeeActivity(
  * volume with no extra share-price conversion needed. Fee revenue is then
  * volume × swapFeeBps, same rate the AMM itself charges on every trade.
  *
- * TVL denominator is the FULL two-sided pool value, not just the ETH
- * reserve: an LP is exposed to both sides of a constant-product pool. At
- * the AMM's own spot price (ethReserve / shareReserve), the two sides are
- * worth exactly the same by construction — shareReserve valued at that
- * price is exactly ethReserve again — so total pool value is exactly
- * 2 × ethReserveWei. No oracle or extra read needed; this is exact, not an
- * approximation.
+ * TVL denominator is the FULL two-sided pool value, which is exactly
+ * 2 × ethReserveWei — not the ETH side alone. An LP's position is both sides
+ * of the pool, and at the AMM's own spot price (ethReserve/shareReserve) the
+ * share side is worth exactly ethReserve too, so the total needs no oracle
+ * and no second read. Dividing by one side overstates the yield by exactly
+ * 2×, and would also disagree with the "TVL" figure V3SwapView already
+ * renders on the same screen (ethReserve + shareReserve × sharePrice), which
+ * evaluates to the same 2 × ethReserve.
  *
  * Returns aprPct: null / aprBasisHours: null when there is no real swap
- * volume to measure, or volume exists but no event carries a usable
- * timestamp — never a fabricated placeholder or an asserted window nobody
- * measured. Only meaningful for eth-fee (V3) vaults — see the caller in
+ * volume to measure, volume exists but no event carries a usable timestamp,
+ * or the real measured window is thinner than MIN_HOURS_FOR_APR (see that
+ * constant's docs — this is a hard gate, never a floor the window gets
+ * clamped up to). Never a fabricated placeholder or an asserted window
+ * nobody measured, and aprBasisHours is never set to a span too thin to
+ * annualize. Only meaningful for eth-fee (V3) vaults — see the caller in
  * getVaultStats, which gates this out entirely for share-fee vaults, whose
  * buyShares/sellShares apply no fee at all.
  */
-function computeLpApr(
+/** Exported so a test can prove a sub-MIN_HOURS_FOR_APR window returns the
+ *  null shape rather than an inflated/clamped one — the exact regression
+ *  that slipped through when this used Math.max as a floor instead of a
+ *  gate. See test/market/vault-apr.test.ts. */
+export function computeLpApr(
   events: VaultTradeEvent[],
   ethReserveWei: bigint,
   swapFeeBps: number,
@@ -540,6 +584,7 @@ function computeLpApr(
 
   const vaultLc = vaultAddress?.toLowerCase() ?? null;
   let volumeWei = BigInt(0);
+  let swapCount = 0;
   let earliest = Infinity;
   let latestTs = 0;
 
@@ -555,6 +600,7 @@ function computeLpApr(
     }
     if (wei <= BigInt(0)) continue;
     volumeWei += wei;
+    swapCount += 1;
     const ts = e.timestamp ? new Date(e.timestamp).getTime() / 1000 : NaN;
     if (Number.isFinite(ts)) {
       earliest = Math.min(earliest, ts);
@@ -567,9 +613,24 @@ function computeLpApr(
   // measured, so don't assert one.
   if (volumeWei <= BigInt(0) || earliest === Infinity) return none;
 
+  // Too few trades to annualize, however long the window. See
+  // MIN_SWAPS_FOR_APR — 24 hours and two trades is still a two-trade sample.
+  if (swapCount < MIN_SWAPS_FOR_APR) return none;
+
   const feeRevenueWei = (volumeWei * BigInt(swapFeeBps)) / BigInt(10_000);
-  const hoursObserved = Math.max((latestTs - earliest) / 3600, MIN_HOURS_FOR_APR);
+  // The TRUE measured span — never clamped up to MIN_HOURS_FOR_APR. A window
+  // thinner than the minimum must fail annualizeApr's own guard and come
+  // back null, not get inflated into a basis nobody actually observed.
+  const hoursObserved = (latestTs - earliest) / 3600;
+  // Both sides of the pool — see this function's docs. NOT ethReserveWei
+  // alone, which overstates the rate by exactly 2x.
   const poolValueWei = ethReserveWei * BigInt(2);
   const aprPct = annualizeApr(feeRevenueWei, poolValueWei, hoursObserved);
+  // aprBasisHours is only ever reported alongside a real aprPct — pairing
+  // them means a caller can never see a "measured" hours figure sitting next
+  // to a null rate (or vice versa), and a too-thin window (real hours, just
+  // below MIN_HOURS_FOR_APR) reports as the same clean "nothing to show yet"
+  // as no data at all, rather than as a partial number worth rendering.
+  if (aprPct == null) return none;
   return { aprPct, aprBasisHours: hoursObserved };
 }
