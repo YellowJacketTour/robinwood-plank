@@ -4,7 +4,7 @@ import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { deployBeaconMock, relayPendingRound } from "./helpers/beacon";
 
 /**
- * V3 is the fix for the V2 LP drain (docs/marketplank/AUDIT-2026-07-31-lp.md).
+ * V3 is the fix for the V2 LP drain (audit held privately).
  * These tests prove the drain is dead and the new surface — proportional LP,
  * ETH fees, the 30 bps swap fee, the locked seed, and batch redemption —
  * behaves. The drand random-redeem machinery is byte-identical to V2 and is

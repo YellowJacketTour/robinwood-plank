@@ -4,7 +4,7 @@ Status: **The Seaport marketplace and Instant Swap interface are deployed and
 enabled.** MarketplankVaultV3 ("Premium Plank Liquidity") is live on mainnet
 (2026-08-01) and is the primary, LP-capable vault; V1 (Driftwood) and V2
 (WormWood) are legacy, redeem-only — WormWood must never be recommended for
-new deposits or LP given its LP-drain (`docs/marketplank/AUDIT-2026-07-31-lp.md`).
+new deposits or LP given its LP-drain (audit held privately).
 The application is deployed from `master` to InMotion Passenger with
 PostgreSQL. The custom vault code has extensive internal audit evidence and
 regression tests but has not received an independent third-party audit.

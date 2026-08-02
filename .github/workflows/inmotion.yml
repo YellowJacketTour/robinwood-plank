@@ -78,7 +78,7 @@ jobs:
       # As of 2026-08-01 V3 ("Premium Plank Liquidity") is live and the repo
       # Variable NEXT_PUBLIC_MARKET_VAULT_ADDRESS points at it. V2/WormWood
       # (0xc4B29D7a…) has a critical LP drain
-      # (docs/marketplank/AUDIT-2026-07-31-lp.md) and must never be
+      # (audit held privately) and must never be
       # recommended for new deposits or LP. The LIVE value comes from the
       # repo Variable; the literal defaults below are only a CI safety
       # fallback for if the Variable is ever unset — intentionally left at

@@ -56,8 +56,8 @@
 <div class="warn" style="border-color:#e8c25f;">
   <strong>RETIRED (2026-08-02) — do not use for new deployments.</strong>
   This deploys <code>contracts/MarketplankVault.sol</code>, the pre-Premium-
-  Plank-Liquidity share-fee design (proven flash-loanable drain — see
-  <code>docs/marketplank/AUDIT-2026-07-31-lp.md</code>), and its constructor
+  Plank-Liquidity share-fee design (proven, externally exploitable LP flaw),
+  and its constructor
   doesn't even match <code>MarketplankVaultV3.sol</code>. New vaults deploy
   through <code>.github/workflows/deploy-vault-v3.yml</code> — see
   <code>scripts/deploy-tool/README.md</code> and

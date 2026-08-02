@@ -52,7 +52,7 @@
         "cookie": "0.7.2"
       },
       "solc": {
-        "tmp": "0.2.6"
+        "tmp": "0.2.7"
       }
     },
     "@nomicfoundation/hardhat-verify": {
@@ -63,7 +63,8 @@
     },
     "mocha": {
       "serialize-javascript": "7.0.5"
-    }
+    },
+    "axios": "^1.18.1"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",

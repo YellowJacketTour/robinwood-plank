@@ -2,8 +2,8 @@
 
 **Do not use this tool for new deployments.** It builds and deploys
 `contracts/MarketplankVault.sol` — the pre-Premium-Plank-Liquidity share-fee
-design whose LP primitive is a proven flash-loanable drain (see
-`docs/marketplank/AUDIT-2026-07-31-lp.md` and the "Do not migrate users into
+design whose LP primitive has a proven, externally exploitable flaw (see
+the privately-held V2 LP audit and the "Do not migrate users into
 V2" rule in `AGENTS.md`). Its constructor shape
 (`mintFeeBps`/`redeemFeeBps`/`targetPremiumBps`) also does not match
 `MarketplankVaultV3.sol`'s (`mintFeeWei`/`redeemFeeWei`/`targetPremiumWei`/
