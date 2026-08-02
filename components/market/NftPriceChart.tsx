@@ -73,8 +73,21 @@ function saveCachedPoints(key: string, points: LineData<UTCTimestamp>[]) {
  * standing server push, not a manual refresh) the moment they're mined —
  * no synthetic candle aggregation, a line of real trades is more honest
  * than fabricated OHLC bars with mostly-empty candles.
+ *
+ * `vaultAddress` scopes which vault's AMM trades feed the chart. ETH-per-share
+ * is only a meaningful, comparable price within ONE vault's own AMM — three
+ * independent pools have three independent share prices, so plotting them as
+ * one merged line used to average, say, a 0.0142 ETH/share pool against a
+ * differently-priced one into a series that described neither. This chart is
+ * only ever rendered from the legacy (pre-V3) Instant Swap view, alongside
+ * VaultDashboard/LivingLiquidityViz/RedeemOdds — all of which already take
+ * the same `vaultAddress` prop for the vault currently selected there, via
+ * lib/market/vault-registry.ts. V3 has its own price chart on its Price tab.
  */
-export default function NftPriceChart({ active = true }: { active?: boolean } = {}) {
+export default function NftPriceChart({
+  active = true,
+  vaultAddress = null,
+}: { active?: boolean; vaultAddress?: string | null } = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
@@ -82,14 +95,28 @@ export default function NftPriceChart({ active = true }: { active?: boolean } = 
     loadCachedPoints("sale-points")
   );
   const [vaultHistoryPoints, setVaultHistoryPoints] = useState<LineData<UTCTimestamp>[]>(
-    () => loadCachedPoints("vault-history-points") ?? []
+    () => loadCachedPoints(`vault-history-points:${vaultAddress ?? "primary"}`) ?? []
   );
   const [vaultHistoryLoaded, setVaultHistoryLoaded] = useState(
-    () => (loadCachedPoints("vault-history-points")?.length ?? 0) > 0
+    () => (loadCachedPoints(`vault-history-points:${vaultAddress ?? "primary"}`)?.length ?? 0) > 0
   );
   const [range, setRange] = useState<Range>("ALL");
   const [failed, setFailed] = useState(false);
-  const { activity: vaultActivity } = useVaultLive();
+  const { activity: vaultActivity } = useVaultLive(vaultAddress);
+
+  // Reset to the new vault's cached points the instant `vaultAddress`
+  // changes — done here, during render, rather than as a setState call
+  // inside an effect (React's documented pattern for "adjust state when a
+  // prop changes"), so the previous vault's price series never keeps
+  // painting while the new fetch is still in flight.
+  const [pointsVaultKey, setPointsVaultKey] = useState(vaultAddress ?? "primary");
+  if ((vaultAddress ?? "primary") !== pointsVaultKey) {
+    const cacheKey = `vault-history-points:${vaultAddress ?? "primary"}`;
+    const cached = loadCachedPoints(cacheKey);
+    setPointsVaultKey(vaultAddress ?? "primary");
+    setVaultHistoryPoints(cached ?? []);
+    setVaultHistoryLoaded((cached?.length ?? 0) > 0);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -139,6 +166,7 @@ export default function NftPriceChart({ active = true }: { active?: boolean } = 
   // empty while full=1 is still hanging.
   useEffect(() => {
     let cancelled = false;
+    const cacheKey = `vault-history-points:${vaultAddress ?? "primary"}`;
     const apply = (events: VaultEvent[]) => {
       const pts = events
         .map(vaultEventToPoint)
@@ -146,14 +174,15 @@ export default function NftPriceChart({ active = true }: { active?: boolean } = 
       if (pts.length === 0) return;
       setVaultHistoryPoints((prev) => {
         if (pts.length < prev.length) return prev;
-        saveCachedPoints("vault-history-points", pts);
+        saveCachedPoints(cacheKey, pts);
         return pts;
       });
     };
 
+    const qs = vaultAddress ? `?vault=${encodeURIComponent(vaultAddress)}` : "";
     const loadVault = () => {
       // Short first — paints quickly from the same feed as the trade ticker.
-      fetch("/api/market/vault/activity")
+      fetch(`/api/market/vault/activity${qs}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((short) => {
           if (cancelled) return;
@@ -164,7 +193,7 @@ export default function NftPriceChart({ active = true }: { active?: boolean } = 
           if (!cancelled) setVaultHistoryLoaded(true);
         });
 
-      fetch("/api/market/vault/activity?full=1")
+      fetch(`/api/market/vault/activity${qs ? `${qs}&full=1` : "?full=1"}`)
         .then((r) => (r.ok ? r.json() : null))
         .then((full) => {
           if (cancelled) return;
@@ -180,7 +209,7 @@ export default function NftPriceChart({ active = true }: { active?: boolean } = 
       cancelled = true;
       stop?.();
     };
-  }, [active]);
+  }, [active, vaultAddress]);
 
   const vaultLivePoints = useMemo<LineData<UTCTimestamp>[]>(() => {
     return vaultActivity.map(vaultEventToPoint).filter((p): p is LineData<UTCTimestamp> => p != null);
@@ -271,7 +300,6 @@ export default function NftPriceChart({ active = true }: { active?: boolean } = 
     // is real, avoidable jank. Data updates go through series.setData() in
     // the effect below instead, which is what that effect already did; it
     // just never got the chance to run against a stable chart before.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

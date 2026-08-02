@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { formatTokenAmount } from "@/lib/trade";
 import { useVaultLive } from "@/lib/market/useVaultLive";
+import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 
 type TreasuryData = {
   balanceWei: string;
@@ -18,9 +19,15 @@ type TreasuryData = {
  * was falling back to treasury-proxy with open:false after the vault RPC
  * failed on Cloudflare, which re-mounted this "Bootstrapping" card on a
  * live Instant Swap page.
+ *
+ * /api/market/treasury (the fallback fetch below) only ever reads
+ * MARKET_VAULT_ADDRESS — there is no per-vault bootstrap concept — so the
+ * live stats side must be pinned to that same primary vault explicitly,
+ * not whatever legacy vault the surrounding Instant Swap view happens to
+ * have selected.
  */
 export default function TreasuryDashboard() {
-  const { stats } = useVaultLive();
+  const { stats } = useVaultLive(MARKET_VAULT_ADDRESS);
   const [data, setData] = useState<TreasuryData | null>(null);
 
   useEffect(() => {

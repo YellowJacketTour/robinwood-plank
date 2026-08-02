@@ -1,7 +1,8 @@
 "use client";
 
+import { useMemo } from "react";
 import { formatTokenAmount } from "@/lib/trade";
-import { useVaultLive, type VaultTradeKind } from "@/lib/market/useVaultLive";
+import { useVaultLive, type VaultTradeEvent, type VaultTradeKind } from "@/lib/market/useVaultLive";
 import { usePendingVaultTx } from "@/lib/market/pendingVaultTx";
 import ScrollBox from "@/components/market/ScrollBox";
 import {
@@ -9,6 +10,7 @@ import {
   vaultKindLabel,
   VAULT_LABEL_CLASS,
 } from "@/lib/market/vault-registry";
+import { MARKET_VAULT_V1_KNOWN, MARKET_VAULT_V2_KNOWN } from "@/lib/constants";
 import { SkeletonRows, SkeletonStatus } from "@/components/Skeleton";
 
 const KIND_LABEL: Record<VaultTradeKind, string> = {
@@ -92,9 +94,34 @@ function timeAgo(iso: string | null) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+/** Merge the two legacy feeds into one time-ordered ticker — same dedupe key
+ * shape as useVaultLive's internal mergeActivity, since both legs can
+ * independently receive the same log via REST + SSE races. */
+function mergeLegacyActivity(a: VaultTradeEvent[], b: VaultTradeEvent[]): VaultTradeEvent[] {
+  const map = new Map<string, VaultTradeEvent>();
+  for (const e of [...a, ...b]) {
+    const key = `${e.vaultAddress ?? ""}|${e.txHash}|${e.logIndex ?? ""}|${e.kind}|${e.tokenId ?? ""}`;
+    const prev = map.get(key);
+    if (!prev || (!prev.timestamp && e.timestamp)) map.set(key, e);
+  }
+  return Array.from(map.values()).sort((x, y) => {
+    const bx = x.blockNumber ?? 0;
+    const by = y.blockNumber ?? 0;
+    if (bx !== by) return by - bx;
+    return (y.logIndex ?? 0) - (x.logIndex ?? 0);
+  });
+}
+
 /**
  * Vault share + NFT inventory ticker (buy/sell, deposit/redeem, add/remove LP).
  * NFT marketplace sales (Seaport/OpenSea) live on the Activity tab, not here.
+ *
+ * Deliberately Driftwood (V1) + WormWood (V2) only, not Premium Plank
+ * Liquidity (V3) — V3's Instant Swap tab has its own scoped activity table
+ * (components/market/V3SwapView.tsx), so this legacy ticker stays focused on
+ * the two retiring pools it's titled for. useVaultLive is single-vault
+ * scoped, so this calls it once per legacy vault and merges the two feeds
+ * client-side rather than asking for an unscoped "everything" feed.
  *
  * Rows this tab just submitted appear instantly as "Pending" (see
  * lib/market/pendingVaultTx.ts) — before confirmation, let alone before the
@@ -106,11 +133,20 @@ export default function VaultTradeHistory() {
   // socket state) — a routine ~1.5s reconnect used to flash "Reconnecting…"
   // even though the data on screen was still perfectly current, which read
   // as broken when nothing actually was. Both Activity and Instant Swap
-  // render their own instance of this component, but both read the exact
-  // same shared singleton (lib/market/useVaultLive.ts) — they can never
-  // actually show different data; the badge flicker was the only thing
-  // that ever made them look out of sync.
-  const { activity, live, connected } = useVaultLive();
+  // render their own instance of this component, and both read the same
+  // pair of shared per-vault buckets (lib/market/useVaultLive.ts) — they can
+  // never actually show different data; the badge flicker was the only
+  // thing that ever made them look out of sync.
+  const v1 = useVaultLive(MARKET_VAULT_V1_KNOWN);
+  const v2 = useVaultLive(MARKET_VAULT_V2_KNOWN);
+  const activity = useMemo(
+    () => mergeLegacyActivity(v1.activity, v2.activity).slice(0, 100),
+    [v1.activity, v2.activity]
+  );
+  // Optimistic OR: this ticker reads as "live" as long as either leg is
+  // fresh, since it's a combined view of both pools, not a single vault.
+  const live = v1.live || v2.live;
+  const connected = v1.connected || v2.connected;
   const pending = usePendingVaultTx();
   const confirmedHashes = new Set(activity.map((e) => e.txHash));
   const visiblePending = pending.filter((p) => !confirmedHashes.has(p.txHash));
