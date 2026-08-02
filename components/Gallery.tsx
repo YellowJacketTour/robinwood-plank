@@ -37,8 +37,17 @@ import {
   tierColor,
   type TokenRarity,
 } from "@/lib/rarity";
-import { Search, X, LayoutGrid, BarChart3, ExternalLink } from "lucide-react";
+import { Search, X, LayoutGrid, BarChart3, ExternalLink, Wallet } from "lucide-react";
 import type { GalleryNft } from "@/lib/gallery-types";
+import {
+  GALLERY_TABS,
+  DEFAULT_GALLERY_PANEL,
+  parseGalleryTab,
+  toNumericTokenIds,
+  type GalleryPanel,
+} from "@/lib/gallery-tabs";
+import { useWallet } from "@/lib/wallet-context";
+import { getOwnedTokenIds } from "@/lib/market/inventory";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
 import RarityInsights from "@/components/RarityInsights";
 import {
@@ -458,9 +467,26 @@ export default function Gallery() {
   const [selected, setSelected] = useState<GalleryNft | null>(null);
   const [livePulse, setLivePulse] = useState(false);
   const [sortMode, setSortMode] = useState<"newest" | "rarest">("newest");
-  const [panel, setPanel] = useState<"gallery" | "insights">("gallery");
+  const [panel, setPanel] = useState<GalleryPanel>(DEFAULT_GALLERY_PANEL);
   /** Token ids from Insights checkbox filters — null means no insight filter */
   const [insightFilterIds, setInsightFilterIds] = useState<number[] | null>(null);
+
+  // My NFTs tab. First wallet state in this file — the modal's one-shot
+  // getConnectedAccounts() stays as it is, since it only decides which CTA to
+  // show and does not need to react to connect/disconnect.
+  const { address, isConnected, openConnect } = useWallet();
+  /** The resolved bag, tagged with the wallet it belongs to. Tagging rather
+   *  than clearing on change is what makes a stale bag structurally
+   *  unshowable: `ownedIds` below simply does not match a different address,
+   *  so a wallet switch can never render the previous wallet's planks even for
+   *  a frame, and no reset write is needed. */
+  const [owned, setOwned] = useState<{ owner: string; ids: Set<number> } | null>(null);
+  /** Bumped by Recheck to force past the 45s inventory cache. */
+  const [ownedNonce, setOwnedNonce] = useState(0);
+  /** null = unresolved, which is also the disconnected state. One value, so
+   *  there is no separate loading flag that could disagree with it. */
+  const ownedIds =
+    address && owned?.owner === address.toLowerCase() ? owned.ids : null;
 
   /** Max supply id we've staged placeholders for */
   const knownMaxRef = useRef(0);
@@ -964,19 +990,69 @@ export default function Gallery() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reset pagination when query changes
+  // Reset pagination whenever the result set changes underneath it. Not just
+  // `query`: switching panels changes the set too, and carrying a visibleCount
+  // of 240 into a three-plank bag renders a stale "Collapse" footer over
+  // nothing. `ownedIds` resolving (null -> Set) is the same kind of change.
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [query]);
+  }, [query, panel, ownedIds]);
 
-  // Deep link from the landing page's condensed wallet lookup (WalletLookupCard)
-  // — prefill the same search box owner-address matching already supports,
-  // rather than duplicating a wallet-collection fetch here.
+  // URL state. `?q=` is the deep link from the landing page's wallet lookup
+  // (WalletLookupCard) and `?tab=` selects the panel.
+  //
+  // Both are read in an effect and never during render: the server has no
+  // `location`, so seeding state from it would hydrate mismatched markup. Same
+  // rule components/market/MarketView.tsx documents, and the reason this file
+  // does not reach for useSearchParams.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const q = new URLSearchParams(window.location.search).get("q");
-    if (q) setQuery(q);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const sync = () => {
+      const params = new URLSearchParams(window.location.search);
+      setQuery(params.get("q") ?? "");
+      setPanel(parseGalleryTab(params.get("tab")));
+    };
+    sync();
+    // Back/Forward, and the nav's same-route click on /gallery, which changes
+    // only the query string and so cannot remount this component.
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+
+  /**
+   * Which planks this wallet holds.
+   *
+   * Deliberately NOT derived from items[].owner: that field is filled in by the
+   * slow per-token ownerOf() chain walk, so on a cold load it is empty for
+   * almost everything and the tab would look empty for a holder. tokenOfOwnerByIndex
+   * via getOwnedTokenIds is the authoritative answer and is already cached.
+   */
+  useEffect(() => {
+    // A tab nobody opens costs no RPC.
+    if (panel !== "my-nfts" || !address) return;
+    const owner = address.toLowerCase();
+    let alive = true;
+    void getOwnedTokenIds(NFT_CONTRACT_ADDRESS, address, {
+      force: ownedNonce > 0,
+    }).then((ids) => {
+      if (alive) setOwned({ owner, ids: toNumericTokenIds(ids) });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [panel, address, ownedNonce]);
+
+  /** Single URL writer, mirroring MarketView's: the default panel drops the
+   *  param entirely so the canonical URL stays a bare /gallery, and everything
+   *  else already in the query string (notably `?q=`) survives. */
+  const selectPanel = useCallback((next: GalleryPanel) => {
+    setPanel(next);
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (next === DEFAULT_GALLERY_PANEL) params.delete("tab");
+    else params.set("tab", next);
+    const qs = params.toString();
+    window.history.pushState(null, "", qs ? `?${qs}` : window.location.pathname);
   }, []);
 
   const rarity = useMemo(() => computeRaritySnapshot(items), [items]);
@@ -984,6 +1060,15 @@ export default function Gallery() {
   const filtered = useMemo(() => {
     const q = query.trim();
     let list = items;
+
+    // First cut, because it is the panel's defining constraint and the cheapest
+    // (a Set.has over at most 200 ids). It narrows rather than replaces, so
+    // search and sort still compose on top — searching inside your own bag is
+    // the point, not a side effect.
+    if (panel === "my-nfts") {
+      if (!ownedIds) return [];
+      list = list.filter((item) => ownedIds.has(item.tokenId));
+    }
 
     if (insightFilterIds) {
       const allow = new Set(insightFilterIds);
@@ -1013,7 +1098,7 @@ export default function Gallery() {
     }
 
     return [...list].sort(sortNewestFirst);
-  }, [items, query, sortMode, rarity, insightFilterIds]);
+  }, [items, query, sortMode, rarity, insightFilterIds, panel, ownedIds]);
 
   const visible = useMemo(
     () => filtered.slice(0, visibleCount),
@@ -1096,16 +1181,14 @@ export default function Gallery() {
             </p>
           </div>
           <div className="flex shrink-0 gap-1.5">
-            {(
-              [
-                ["gallery", "Grid", LayoutGrid],
-                ["insights", "Insights", BarChart3],
-              ] as const
-            ).map(([id, label, Icon]) => (
+            {GALLERY_TABS.map(({ id, label }) => {
+              const Icon =
+                id === "insights" ? BarChart3 : id === "my-nfts" ? Wallet : LayoutGrid;
+              return (
               <button
                 key={id}
                 type="button"
-                onClick={() => setPanel(id)}
+                onClick={() => selectPanel(id)}
                 className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-bold transition ${
                   panel === id
                     ? "bg-gold-500 text-wood-950"
@@ -1115,7 +1198,8 @@ export default function Gallery() {
                 <Icon size={14} strokeWidth={2.5} />
                 {label}
               </button>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -1161,7 +1245,11 @@ export default function Gallery() {
                     onClick={() => {
                       setSortMode(id);
                       setVisibleCount(PAGE_SIZE);
-                      setPanel("gallery");
+                      // Sorting means "show me the grid", so leave Insights —
+                      // but only Insights. Bouncing off My NFTs here would
+                      // silently swap the result set out from under the sort
+                      // the user just asked for.
+                      if (panel === "insights") selectPanel("gallery");
                     }}
                     className={`min-h-11 flex-1 rounded-lg px-3 py-2 text-xs font-bold sm:flex-none sm:text-sm ${
                       sortMode === id
@@ -1238,6 +1326,44 @@ export default function Gallery() {
           ) : (
             <>
               <div className="max-h-[min(70dvh,760px)] overflow-y-auto overscroll-contain p-2 sm:p-3">
+                {/* My NFTs gates. Copy and framing are lifted from
+                    components/market/MyNfts.tsx so the two wallet-scoped
+                    surfaces read as one product rather than two features that
+                    happen to share a name. */}
+                {panel === "my-nfts" && !isConnected ? (
+                  <div className="px-4 py-12 text-center">
+                    <p className="text-sm text-cream-muted">
+                      Connect a wallet to see the planks it holds.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={openConnect}
+                      className="mt-3 inline-flex min-h-11 items-center rounded-lg bg-gold-500 px-4 text-sm font-bold text-wood-950 transition-colors hover:bg-gold-400"
+                    >
+                      Connect wallet
+                    </button>
+                  </div>
+                ) : panel === "my-nfts" && ownedIds === null ? (
+                  <p className="rounded-xl border border-line bg-panel px-4 py-8 text-center text-sm text-cream-muted">
+                    Reading your planks from chain…
+                  </p>
+                ) : panel === "my-nfts" && ownedIds?.size === 0 ? (
+                  // getOwnedTokenIds fails OPEN (lib/market/inventory.ts) — a
+                  // transport blip and a genuinely empty wallet are the same
+                  // value here, so there is no honest error state to render.
+                  // Recheck (force: true) is the cover for the blip.
+                  <p className="rounded-xl border border-line bg-panel px-4 py-8 text-center text-sm text-cream-muted">
+                    This wallet holds no planks yet.
+                    <button
+                      type="button"
+                      onClick={() => setOwnedNonce((n) => n + 1)}
+                      className="ml-2 underline underline-offset-2 hover:text-gold-300"
+                    >
+                      Recheck
+                    </button>
+                  </p>
+                ) : (
+                <>
                 {totalMinted === 0 && status.startsWith("Connecting") && (
                   // Cold, no-cache visit: the dataset request is still in
                   // flight. Same card frame as a loaded grid (dense-card +
@@ -1272,7 +1398,12 @@ export default function Gallery() {
                   <p className="py-12 text-center text-sm text-foreground/60">
                     {searchActive && metadataStillLoading
                       ? `No matches yet — indexing ${progress}%.`
-                      : `No matches for “${query.trim()}”.`}
+                      : searchActive
+                        ? `No matches for “${query.trim()}”.`
+                        : // Reachable on My NFTs: the wallet holds planks, but
+                          // the collection index has not staged those ids yet.
+                          // Without this branch it read `No matches for “”.`
+                          "Loading your planks…"}
                   </p>
                 )}
 
@@ -1362,6 +1493,17 @@ export default function Gallery() {
                       );
                     })}
                   </ul>
+                )}
+
+                {/* getOwnedTokenIds caps its tokenOfOwnerByIndex walk at 200 so
+                    a whale cannot stall the page. Say so rather than letting
+                    the 201st plank vanish silently. */}
+                {panel === "my-nfts" && ownedIds !== null && ownedIds.size >= 200 && (
+                  <p className="px-2 pb-2 pt-3 text-center text-xs text-foreground/60">
+                    Showing the first 200 planks this wallet holds.
+                  </p>
+                )}
+                </>
                 )}
               </div>
 
