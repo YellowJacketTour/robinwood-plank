@@ -281,7 +281,7 @@ export default function MigrateView() {
             <SkeletonStatus>Scanning the retiring vaults for your position</SkeletonStatus>
             <div className="space-y-3 rounded-xl border border-line bg-panel-strong p-4">
               <SkeletonBlock className="h-5 w-56" />
-              <SkeletonStats count={4} />
+              <SkeletonStats count={4} columns="grid-cols-2 sm:grid-cols-4" />
             </div>
           </div>
           <div className="space-y-3">

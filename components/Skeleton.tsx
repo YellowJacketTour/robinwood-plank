@@ -118,19 +118,25 @@ export function SkeletonRows({
   );
 }
 
-/** Stat strip — the label/value tiles used across market and admin headers. */
+/**
+ * Stat strip — the label/value tiles used across market and admin headers.
+ *
+ * `columns` must match the grid of the real strip it stands in for. A default
+ * that is merely plausible defeats the point: a 4-column placeholder in front
+ * of a 3-column grid reflows the moment data lands, which is the jump the
+ * skeleton exists to prevent.
+ */
 export function SkeletonStats({
   count = 4,
+  columns = "sm:grid-cols-2 lg:grid-cols-4",
   className = "",
 }: {
   count?: number;
+  columns?: string;
   className?: string;
 }) {
   return (
-    <div
-      className={`grid gap-2 sm:grid-cols-2 lg:grid-cols-4 ${className}`}
-      aria-hidden="true"
-    >
+    <div className={`grid gap-2 ${columns} ${className}`} aria-hidden="true">
       {Array.from({ length: count }, (_, i) => (
         <div key={i} className="rounded-lg border border-line bg-panel-strong p-3">
           <div className={`${PULSE} h-2.5 w-20 rounded bg-panel`} />
