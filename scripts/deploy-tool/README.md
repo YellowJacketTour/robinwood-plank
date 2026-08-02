@@ -104,7 +104,7 @@ is public forever and seeding is dead forever, for everyone, you included.
 There is no contract-enforced minimum — that judgment call is entirely yours.
 
 Then: verify the deployed addresses and configure them through a reviewed
-`inmotion` release. Production random-redemption settlement is performed by
+`master` release. Production random-redemption settlement is performed by
 the standalone relayer packaged in each Passenger release and scheduled by the
 cPanel cron. `scripts/relay-drand.ts` remains the source/manual diagnostic, not
 the long-running production command. Follow the

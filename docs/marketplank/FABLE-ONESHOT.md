@@ -5,7 +5,7 @@
 > deployment runbook. Its Vercel KV, Cloudflare Worker, undeployed-vault,
 > feature-gate, test-count, and workspace assumptions are historical. Current
 > authority is `README.md`, `ARCHITECTURE.md`,
-> `docs/INMOTION_DEPLOYMENT.md`, and the `inmotion` branch.
+> `docs/INMOTION_DEPLOYMENT.md`, and the `master` branch.
 
 Copy everything below the line into a **fresh Fable 5 session** with the repo open.
 It assumes zero prior context.

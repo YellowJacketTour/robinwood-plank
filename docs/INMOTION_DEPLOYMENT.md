@@ -1,6 +1,8 @@
 # InMotion cPanel Passenger deployment
 
-This is the operator runbook for the canonical `inmotion` branch.
+This is the operator runbook for the canonical `master` branch, the
+deployment branch. Development happens on `dev`; merging `dev` into `master`
+ships.
 
 ## Current state
 
@@ -8,7 +10,9 @@ As verified on 2026-07-30:
 
 - the InMotion application is healthy at `https://plank.tanggang.life`;
 - `/api/health` reports `storage: "postgres"`;
-- releases are built and deployed from `inmotion`;
+- releases are built and deployed from `inmotion` (the deployment branch at
+  the time of this verification; the deployment branch has been `master`
+  since 2026-08-02);
 - the physical application root is
   `/home/CPANEL_USER/plank.tanggang.life`;
 - the standalone drand relayer is packaged with every release;
@@ -51,10 +55,10 @@ indexes the signed orders, shared application state, and expensive snapshots.
 
 ## 2. Branch and release authority
 
-- `inmotion` is the source of truth.
-- Pull requests must target `inmotion`.
-- Pushes to `inmotion` deploy when `INMOTION_DEPLOY_ENABLED=true`.
-- `master` is a legacy branch and is not an InMotion deployment source.
+- `master` is the deployment branch — the source of truth for what is live.
+- `dev` is the working branch. Pull requests target `dev`; merging `dev` into
+  `master` ships.
+- Pushes to `master` deploy when `INMOTION_DEPLOY_ENABLED=true`.
 - Every release is an immutable Git commit SHA.
 
 See [RELEASES.md](RELEASES.md) for versioning, ruleset, and rollback policy.
@@ -292,7 +296,7 @@ The PostgreSQL password remains only in the server's `.env.production`.
 
 ## 9. Automatic CI/CD behavior
 
-Pull requests to `inmotion` run:
+Pull requests to `dev` and `master` run:
 
 - locked dependency installation;
 - deployment-critical lint;
@@ -303,10 +307,7 @@ Pull requests to `inmotion` run:
 - production Next.js build; and
 - standalone drand relayer bundling.
 
-The workflow also listens to pull requests targeting `master` for legacy
-compatibility, but `master` does not deploy.
-
-A push to `inmotion` packages `.next/standalone`. When
+A push to `master` packages `.next/standalone`. When
 `INMOTION_DEPLOY_ENABLED=true`, the deploy job:
 
 1. uploads an immutable release named by commit SHA;
@@ -402,7 +403,7 @@ gh variable set INMOTION_HEALTH_URL \
 ```
 
 Update the server's `NEXT_PUBLIC_SITE_URL` for consistency, then deploy the
-current `inmotion` SHA. Because public values are compiled into browser
+current `master` SHA. Because public values are compiled into browser
 bundles, an env-file edit without a rebuild is insufficient.
 
 If a legacy cPanel cron still calls:

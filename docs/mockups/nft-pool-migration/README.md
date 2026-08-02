@@ -3,8 +3,8 @@
 **Status:** Owner-approved direction (2026-07-31). Waiting for go-ahead before
 implementation. Nothing in this folder is live code.
 
-**Branch:** `nft-pool-migration` (from `inmotion`). All implementation for this
-feature lands here and merges to `inmotion` only after owner testing.
+**Branch:** `nft-pool-migration` (from `dev`). All implementation for this
+feature lands here and merges to `dev` only after owner testing.
 
 **Mockup:** `mockup.html` — open directly in a browser. Shows the site-wide
 banner, the `/migrate` page mid-migration (plank 2 of 3), the four non-happy
