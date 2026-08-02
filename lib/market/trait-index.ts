@@ -7,6 +7,11 @@ import type { NftAttribute } from "@/lib/ipfs";
 import { fetchTokenInstances } from "@/lib/market/blockscout";
 import { pickCanonicalTraits } from "@/lib/rarity";
 import { robinwoodTokenUri } from "@/lib/market/token-image";
+import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
+import {
+  getRobinwoodMetadataMap,
+  ROBINWOOD_SUPPLY as ROBINWOOD_CANONICAL_SUPPLY,
+} from "@/lib/market/robinwood-metadata";
 import type { MarketCollection } from "@/lib/market/types";
 import { getRaritySnapshot } from "@/lib/market/rarity-snapshot";
 import {
@@ -17,13 +22,21 @@ import {
 /**
  * Server-side trait → token-id index for trait-scoped bids / sweeps.
  *
- * Cloudflare Workers cannot rely on:
+ * For RobinWood (the only collection registered today), this is built
+ * straight from the canonical IPFS-sourced metadata store
+ * (lib/market/robinwood-metadata.ts) — no Blockscout, no per-request IPFS
+ * reads. That store already resolved every token offline and idempotently,
+ * so an in-request rebuild here is just an in-memory scan.
+ *
+ * Any OTHER collection (none registered yet) falls back to the original
+ * Blockscout REST + IPFS-backfill path below, since it has no canonical
+ * store of its own. That path still runs in Cloudflare Workers, which
+ * cannot rely on:
  *  - process.cwd()/.data filesystem (ephemeral / unwritable)
  *  - fire-and-forget background scans (isolate freezes after the response)
  *
- * So this mirrors rarity-snapshot: Blockscout REST + IPFS backfill, durable
- * Durable storage (PostgreSQL), in-request build with inflight
- * dedupe.
+ * Durable storage is PostgreSQL either way, with in-request build + inflight
+ * dedupe on a cold miss.
  *
  * FAIL CLOSED: trait bids only when complete (every token successfully
  * attributed, failed empty). Partial indexes never leave the API as traits.
@@ -187,12 +200,56 @@ async function backfillIpfs(
   return stillFailed;
 }
 
+function isRobinwoodCollection(collection: MarketCollection): boolean {
+  return collection.contractAddress.toLowerCase() === NFT_CONTRACT_ADDRESS.toLowerCase();
+}
+
+/**
+ * Build straight from the canonical IPFS-sourced metadata store — no
+ * Blockscout, no per-request IPFS reads. That store is built offline
+ * (scripts/refresh-market-data.ts --metadata) and idempotently covers every
+ * token, so this is just inverting attributes[] -> traitType -> value ->
+ * tokenIds over an in-memory map.
+ */
+async function buildIndexFromCanonicalStore(collection: MarketCollection): Promise<TraitIndex> {
+  const totalSupply = ROBINWOOD_CANONICAL_SUPPLY;
+  const index: TraitIndex = {
+    collectionSlug: collection.slug,
+    totalSupply,
+    scanned: 0,
+    failed: [],
+    traits: {},
+    builtAt: 0,
+  };
+
+  const metadata = await getRobinwoodMetadataMap();
+  const failed: number[] = [];
+  for (let id = 1; id <= totalSupply; id += 1) {
+    const entry = metadata.get(id);
+    if (!entry || pickCanonicalTraits(entry.attributes).length === 0) {
+      failed.push(id);
+      continue;
+    }
+    addAttributes(index, String(id), entry.attributes);
+  }
+
+  sortIndex(index);
+  index.scanned = coveredIds(index).size;
+  index.failed = failed;
+  index.builtAt = Date.now();
+  return index;
+}
+
 /**
  * Build from Blockscout token instances (CF-safe REST) + IPFS for gaps.
  * Prefer RobinWood fixed supply 1..N so missing Blockscout pages still leave
- * a concrete work list.
+ * a concrete work list. Only reached for a collection with no canonical
+ * metadata store of its own (i.e. not RobinWood — see isRobinwoodCollection).
  */
 async function buildIndex(collection: MarketCollection): Promise<TraitIndex> {
+  if (isRobinwoodCollection(collection)) {
+    return buildIndexFromCanonicalStore(collection);
+  }
   const totalSupply = ROBINWOOD_SUPPLY;
   const index: TraitIndex = {
     collectionSlug: collection.slug,
