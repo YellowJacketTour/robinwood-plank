@@ -242,7 +242,7 @@ describe("MarketplankVault — randomized solvency & draw-immutability", () => {
    * properties are what a value-extraction bug actually shows up in.
    *
    * They are reported rather than asserted because the current contract does
-   * violate them — see VaultLp.audit.test.ts for the deterministic exploit.
+   * violate them. The deterministic V2 exploit case is no longer in this repo.
    * Once LP accounting is proportional, flip both to expect(...).to.equal(0n).
    */
   it("reports aggregate LP credit exceeding the ETH reserve", () => {

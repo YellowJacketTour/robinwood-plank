@@ -25,8 +25,8 @@ test("zero fees and zero premium still cost exactly 1.0 share", () => {
 /**
  * Adding liquidity to an older pool must be impossible, not merely discouraged.
  *
- * The absolute-credit LP primitive on the second-generation pool is a proven,
- * flash-loanable drain (docs/marketplank/AUDIT-2026-07-31-lp.md; the rule is in
+ * The absolute-credit LP primitive on the second-generation pool has a proven,
+ * externally exploitable flaw (audit held privately; the rule is in
  * AGENTS.md). Nothing enforced it in code until 2026-08-02 — the Instant Swap
  * switcher lists every configured pool and contributeLiquidity() targeted
  * whichever was selected.

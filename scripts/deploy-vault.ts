@@ -1,7 +1,7 @@
 /**
  * ⚠ DEPRECATED — deploys the RETIRED V2 vault (contracts/MarketplankVault.sol),
- * whose liquidity functions have a critical flash-loanable pool-drain
- * (docs/marketplank/AUDIT-2026-07-31-lp.md). DO NOT deploy a new vault with
+ * whose liquidity functions have a critical, externally exploitable flaw
+ * (audit held privately). DO NOT deploy a new vault with
  * this script. Use scripts/deploy-vault-v3.ts instead. Kept only as the record
  * of how V1/V2 were deployed. Its post-deploy env output below also hardcodes
  * V1 as the sole legacy, which after a V3 deploy would strand V2 depositors —

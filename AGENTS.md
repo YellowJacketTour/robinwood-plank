@@ -28,8 +28,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - **Never render a vault version number in the UI.** `V1`/`V2`/`V3` are internal
   identity only. Users see product names — Driftwood, WormWood, Premium Plank
   Liquidity — from `VAULT_NAMES` in the registry.
-- **Do not migrate users into V2.** Its LP primitive is a proven flash-loanable
-  drain (`docs/marketplank/AUDIT-2026-07-31-lp.md`). V3 is the destination.
+- **Do not migrate users into V2.** Its LP primitive has a proven, externally
+  drain (audit held privately, not in this repo). V3 is the destination.
 - Never print, commit, or copy production secrets into release artifacts.
 - `RELAYER_PRIVATE_KEY` is cron-only and must not be loaded by Passenger.
 - PostgreSQL migrations are append-only and must remain compatible with the

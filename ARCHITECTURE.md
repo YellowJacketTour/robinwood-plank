@@ -182,13 +182,11 @@ and strands every remaining depositor.
 ### Why V3 exists
 
 V2's only addition over V1 — `contributeLiquidity` / `removeLiquidity` with
-*absolute* LP credits — is a flash-loanable drain. A one-sided contribution moves
-the constant-product price, removal returns the contribution at nominal, and
-sandwiching a trade between the two extracts the entire ETH reserve atomically.
-`nonReentrant` does not help (the legs are sequential calls, not reentrancy), and
-no fee level mitigates it. This is proven by an executable exploit in
-`test/contracts/VaultLp.audit.test.ts` and written up in
-[`docs/marketplank/AUDIT-2026-07-31-lp.md`](docs/marketplank/AUDIT-2026-07-31-lp.md).
+*absolute* LP credits — carries a critical, externally exploitable flaw in its
+LP accounting. It is not mitigable by fee level or by `nonReentrant`, which is
+why V2 accepts no new liquidity and why nobody is migrated into it. The audit
+that establishes this, and the executable proof, are held privately and are
+deliberately not in this repository.
 
 `contracts/MarketplankVaultV3.sol` closes it and fixes the fee model, keeping the
 drand commit-reveal random-redeem machinery unchanged:

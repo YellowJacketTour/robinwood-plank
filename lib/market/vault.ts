@@ -970,8 +970,8 @@ export async function contributeLiquidity(
   // Guardrail: never add NEW liquidity to a pool that is not the current one.
   //
   // The absolute-credit LP primitive on the second-generation pool (selector
-  // 0xc1244a5c) is a proven, flash-loanable drain — see
-  // docs/marketplank/AUDIT-2026-07-31-lp.md, and the rule in AGENTS.md. Nothing
+  // 0xc1244a5c) has a proven, externally exploitable flaw — see
+  // the privately-held V2 LP audit, and the rule in AGENTS.md. Nothing
   // enforced that in code until 2026-08-02: the Instant Swap vault switcher
   // lists every configured pool, and this function targeted whichever one was
   // selected, so a connected user was a few clicks from funding a contract we

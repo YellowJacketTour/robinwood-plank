@@ -271,9 +271,9 @@ next build and deploy. The `.env.*.example` files still show the pre-V3 shape
 and are illustrative, not the production source of truth — the repository
 variables are.
 
-**V2 must not receive new deposits or liquidity.** Its LP primitive is a proven
-flash-loanable drain — see the audit linked below. It stays configured only so
-existing depositors can exit through `/migrate`.
+**V2 must not receive new deposits or liquidity.** Its LP primitive has a
+proven, externally exploitable flaw. It stays configured only so existing
+depositors can exit through `/migrate`.
 
 Version numbers are internal. The UI presents each vault by product name
 (Driftwood, WormWood, Premium Plank Liquidity) via `lib/market/vault-registry.ts`.

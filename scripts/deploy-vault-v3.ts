@@ -6,8 +6,8 @@
  * an AI assistant.
  *
  * V3 replaces V2 (contracts/MarketplankVault.sol), whose liquidity functions
- * had a critical, flash-loanable pool-drain — see
- * docs/marketplank/AUDIT-2026-07-31-lp.md. V1 AND V2 both become redeem-only
+ * had a critical, externally exploitable LP flaw — see
+ * the privately-held V2 LP audit. V1 AND V2 both become redeem-only
  * legacies; users migrate into V3.
  *
  * Before running this against mainnet:
