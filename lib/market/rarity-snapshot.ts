@@ -99,9 +99,13 @@ function blobToSnapshot(b: CompactBlob): RaritySnapshot {
 }
 
 async function readKv(): Promise<RaritySnapshot | null> {
+  return readKvAt(KV_KEY);
+}
+
+async function readKvAt(key: string): Promise<RaritySnapshot | null> {
   if (!hasKv()) return null;
   try {
-    let b = await kv.get<CompactBlob | string | { value?: CompactBlob }>(KV_KEY);
+    let b = await kv.get<CompactBlob | string | { value?: CompactBlob }>(key);
     // Tolerate stringified / double-wrapped seed formats.
     if (typeof b === "string") {
       try {
@@ -169,6 +173,22 @@ export async function getRaritySnapshot(): Promise<RaritySnapshot> {
     if (fromKv) {
       cached = { snapshot: fromKv, at: Date.now() };
       return fromKv;
+    }
+
+    // Deploy-window fallback. This key moved v4 -> v5 because the provenance
+    // changed, so the first request after deploy finds nothing at v5 and would
+    // rebuild from a canonical table the migration has only just created and
+    // nothing has filled yet — throwing, and 500ing every rarity read until
+    // the metadata build finishes minutes later.
+    //
+    // The v4 blob is the same shape and, in production, holds a correct
+    // 1,542-token snapshot. Serving it beats serving an error, and it is NOT
+    // written back to v5: the next build from the canonical store overwrites
+    // it properly. Safe to delete this branch once v5 exists everywhere.
+    const legacy = await readKvAt("plank:market:rarity-snapshot-v4");
+    if (legacy && legacy.scoredCount >= 50) {
+      cached = { snapshot: legacy, at: Date.now() };
+      return legacy;
     }
 
     const snapshot = await buildFromCanonicalStore();
