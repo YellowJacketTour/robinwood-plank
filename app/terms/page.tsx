@@ -316,14 +316,6 @@ export default function TermsPage() {
             jurisdiction, that provision is limited or removed to the minimum extent necessary, and
             the remaining provisions stay in full effect.
           </LegalClause>
-          <LegalNote>
-            This structure is written to be complete and workable for a global, pseudonymous
-            project without inventing a jurisdiction or entity that doesn&apos;t exist. It is
-            still a placeholder for professional judgment: the operator should have a lawyer
-            confirm this section, or replace it with a specific governing-law and arbitration
-            clause, before treating it as final.
-          </LegalNote>
-
           <LegalH2 id="contact">18. Contact</LegalH2>
           <LegalUl
             items={[
