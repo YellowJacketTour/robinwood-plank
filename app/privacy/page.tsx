@@ -7,7 +7,6 @@ import {
   LegalH2,
   LegalHeader,
   LegalNote,
-  LegalTodo,
   LegalUl,
 } from "@/components/legal/LegalProse";
 
@@ -134,16 +133,72 @@ export default function PrivacyPage() {
             after the fact.
           </LegalNote>
 
-          <LegalH2 id="changes">9. Changes to this policy</LegalH2>
+          <LegalH2 id="children">9. Children&apos;s privacy</LegalH2>
+          <LegalClause>
+            plank.love is not directed at children and we do not knowingly collect personal data
+            from anyone under 18. Site use requires connecting a crypto wallet and signing
+            transactions with real value, which is not something intended for children. If you
+            believe a child has used the site or that we have inadvertently collected data linked
+            to a child, contact{" "}
+            <a href="mailto:privacy@plank.love" className="text-gold-300 underline underline-offset-2">
+              privacy@plank.love
+            </a>{" "}
+            and we will look into removing it.
+          </LegalClause>
+
+          <LegalH2 id="retention">10. How long we keep things</LegalH2>
+          <LegalClause>
+            We keep data only as long as it serves the purpose it was collected for:
+          </LegalClause>
+          <LegalUl
+            items={[
+              "Marketplank orders (Section 3) are kept for as long as the order is open or useful as a record of a completed trade, then may be pruned.",
+              "The owner index (Section 2) is a rebuilding cache, not a historical log — it reflects current ownership, not a permanent record of past holders.",
+              "Rate-limit counters (Section 6) are in-memory and short-lived by design; we do not retain them as a visit log.",
+              "Admin action logs (Section 3) are kept for as long as reasonably needed to operate and secure the admin console.",
+            ]}
+          />
+          <LegalClause>
+            None of this changes what the blockchain itself retains — on-chain data (transactions,
+            token ownership, contract state) is public and permanent by nature, and outside our
+            ability to delete regardless of any request made to us.
+          </LegalClause>
+
+          <LegalH2 id="international">11. Where data goes</LegalH2>
+          <LegalClause>
+            plank.love is reachable worldwide, and the services in front of and behind it are not
+            confined to one country. Cloudflare (Section 6) operates a global network, so your
+            connection metadata can be processed at whichever of their edge locations is closest to
+            you. Data you provide when submitting a meme is sent to the Community Meme Vault
+            (Section 5 and 7), a separate operator whose own infrastructure and location are
+            outside our control. By using the site, you understand your data may be processed in a
+            country other than your own, by us or by the third parties listed in Section 7.
+          </LegalClause>
+
+          <LegalH2 id="changes">12. Changes to this policy</LegalH2>
           <LegalClause>
             If how we handle data changes, we&apos;ll update this page and its &quot;last updated&quot;
             date. Material changes may also be announced elsewhere on the site.
           </LegalClause>
 
-          <LegalH2 id="contact">10. Contact</LegalH2>
-          <LegalTodo>
-            Insert a real contact address once one exists (support/privacy email or a form).
-          </LegalTodo>
+          <LegalH2 id="contact">13. Contact</LegalH2>
+          <LegalClause>
+            To ask what data we hold about you, request its deletion (where it&apos;s ours to
+            delete — see Section 10 on what the chain itself retains), or ask anything else about
+            this policy, email{" "}
+            <a href="mailto:privacy@plank.love" className="text-gold-300 underline underline-offset-2">
+              privacy@plank.love
+            </a>
+            . For questions about our Terms of Use instead, use{" "}
+            <a href="mailto:legal@plank.love" className="text-gold-300 underline underline-offset-2">
+              legal@plank.love
+            </a>
+            , and to report content or an IP concern, use{" "}
+            <a href="mailto:abuse@plank.love" className="text-gold-300 underline underline-offset-2">
+              abuse@plank.love
+            </a>
+            .
+          </LegalClause>
 
           <LegalClause>
             Related reading: our{" "}
