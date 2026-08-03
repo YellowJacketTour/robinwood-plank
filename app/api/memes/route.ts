@@ -77,7 +77,13 @@ export async function GET(req: Request) {
     limit: "24",
     page: String(Number.isFinite(page) && page > 0 ? Math.min(page, 200) : 1),
   });
-  if (type === "image" || type === "video") qs.set("type", type);
+  // Upstream accepts image | gif | video, and returns 400 for anything else —
+  // so forward only known values rather than passing the query through. `gif`
+  // is a FIRST-CLASS type there, not a subset of image: type=image excludes
+  // GIFs entirely. Dropping it here is what made the GIFs tab ask for the
+  // unfiltered feed and find none, since page one is 50 assets with no GIF in
+  // it while type=gif returns four.
+  if (type === "image" || type === "gif" || type === "video") qs.set("type", type);
   if (q) qs.set("q", q.slice(0, 100));
 
   const cacheKey = qs.toString();
