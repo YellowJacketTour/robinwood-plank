@@ -56,14 +56,6 @@ export function LegalNote({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function LegalTodo({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="mt-4 rounded-lg border border-amber-400/40 border-l-[3px] border-l-amber-400/80 bg-amber-400/10 px-4 py-3 text-sm text-amber-50/90">
-      <strong className="font-black uppercase tracking-wide">TODO:</strong> {children}
-    </div>
-  );
-}
-
 export function LegalHeader({
   eyebrow,
   title,

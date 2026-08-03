@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Search, X, ExternalLink } from "lucide-react";
+import { Search, X, ExternalLink, Flag } from "lucide-react";
 import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 import MemeSubmit from "@/components/memes/MemeSubmit";
 
@@ -51,6 +51,26 @@ type MemeAsset = {
  */
 const detailHref = (a: MemeAsset): string | null =>
   a.url || a.pageUrl || a.projectUrl || a.mediaUrl || null;
+
+/**
+ * mailto: link that prefills a report to abuse@plank.love with the asset's
+ * id and URL, per Terms Section 14 ("Report a submission or request
+ * removal"). This is the minimum reporting path a site accepting public
+ * uploads needs — no in-house moderation queue exists, so the route has to
+ * reach a human directly.
+ */
+const reportHref = (a: MemeAsset): string => {
+  const link = detailHref(a) ?? a.mediaUrl ?? "(no link available)";
+  const subject = `Report meme submission — asset ${a.id}`;
+  const body = [
+    `Asset ID: ${a.id}`,
+    `URL: ${link}`,
+    "",
+    "Reason for report (infringement, impersonation, illegal content, other):",
+    "",
+  ].join("\n");
+  return `mailto:abuse@plank.love?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+};
 
 type Attribution = { text?: string; url?: string; required?: boolean } | null;
 /**
@@ -305,8 +325,16 @@ export default function MemeVault() {
               {showing.map((a) => (
                 <li
                   key={a.id}
-                  className="dense-card mb-2 block overflow-hidden p-0 sm:mb-2.5 [break-inside:avoid]"
+                  className="dense-card group/card relative mb-2 block overflow-hidden p-0 sm:mb-2.5 [break-inside:avoid]"
                 >
+                  <a
+                    href={reportHref(a)}
+                    className="absolute left-1 top-1 z-10 flex min-h-11 min-w-11 items-center justify-center rounded-full bg-wood-950/80 text-cream/70 opacity-0 transition-opacity hover:text-rose-300 focus-visible:opacity-100 group-hover/card:opacity-100"
+                    title="Report this meme"
+                    aria-label={`Report meme: ${a.title || "Untitled"}`}
+                  >
+                    <Flag size={13} strokeWidth={2.5} aria-hidden="true" />
+                  </a>
                   <a
                     href={detailHref(a) ?? "#"}
                     target="_blank"
