@@ -4,6 +4,14 @@ FROM node:22-bookworm-slim AS dependencies
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# node:22-bookworm-slim is a floating tag: whichever npm ships with the image
+# on build day. package-lock.json was generated with npm 11.6.2, and other
+# npm versions (10.x, and even newer 11.x patches) disagree with it on
+# optional-dependency resolution and fail `npm ci` outright ("Missing: ...
+# from lock file") — the same failure mode already hit and fixed in
+# .github/workflows/relay-drand.yml. Pin here too so a Docker build doesn't
+# silently start failing the next time the base image updates its npm.
+RUN npm install -g npm@11.6.2
 COPY package.json package-lock.json ./
 RUN npm ci
 
