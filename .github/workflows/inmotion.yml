@@ -1181,3 +1181,47 @@ jobs:
             echo "::error::$stubs token(s) still carry a pre-reveal stub — the rebuild did not fully land."
             exit 1
           fi
+
+  # ---------------------------------------------------------------------------
+  # Keep dev from drifting behind master.
+  #
+  # master is the deploy branch and dev is where work is supposed to start, but
+  # nothing kept them level: after the branch-model change on 2026-08-02, dev
+  # sat still while master took 39 commits, so anyone branching from dev forked
+  # from a build over a day old. PRs #13 and #14 were both written that way.
+  # A stale base is also how a well-meaning PR reverts newer work — it carries
+  # old copies of files that moved on in the meantime.
+  #
+  # FAST-FORWARD ONLY. If dev holds commits master does not, this does nothing
+  # and says so: that is unmerged work, and force-moving the branch would
+  # destroy it. The push is the only elevated permission in this file, scoped
+  # to this job.
+  # ---------------------------------------------------------------------------
+  sync-dev:
+    needs: deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Fast-forward dev to master
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master dev
+          if git merge-base --is-ancestor origin/dev origin/master; then
+            if [ "$(git rev-parse origin/dev)" = "$(git rev-parse origin/master)" ]; then
+              echo "dev already matches master — nothing to do."
+              exit 0
+            fi
+            git push origin "origin/master:refs/heads/dev"
+            echo "dev fast-forwarded to $(git rev-parse --short origin/master)."
+          else
+            behind="$(git rev-list --count origin/dev..origin/master)"
+            ahead="$(git rev-list --count origin/master..origin/dev)"
+            echo "::warning::dev has $ahead commit(s) master does not and is $behind behind — NOT fast-forwarding. Merge dev into master (or rebase dev) so the branches converge."
+          fi
