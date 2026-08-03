@@ -73,12 +73,6 @@ const reportHref = (a: MemeAsset): string => {
 };
 
 type Attribution = { text?: string; url?: string; required?: boolean } | null;
-/**
- * "gif" is OURS, not theirs. The upstream `type` param only accepts
- * image|video, so a GIF arrives as an image and was invisible as a category —
- * which is what "GIF is not there" meant. We ask for images and narrow on
- * mimeType client-side; `upstreamType` is the bit the API actually sees.
- */
 type TypeFilter = "all" | "image" | "gif" | "video";
 
 const TYPES: Array<{ id: TypeFilter; label: string }> = [
@@ -89,19 +83,18 @@ const TYPES: Array<{ id: TypeFilter; label: string }> = [
 ];
 
 /**
- * Which `type` to ask upstream for. GIF asks for NOTHING on purpose.
+ * `type` maps straight through — image | gif | video are all first-class
+ * upstream values.
  *
- * Measured against the live API: unfiltered returns 7 assets including one
- * image/gif, while `type=image` returns 6 and excludes it — so upstream does
- * not classify a GIF as an image. Asking for `type=image` and then narrowing
- * to GIFs, which is what this did, could only ever return zero. GIFs are
- * therefore selected from the unfiltered feed.
+ * This previously sent nothing for GIFs and narrowed on mimeType in the
+ * browser, on the belief that upstream had no GIF category. It does. The
+ * workaround then guaranteed an empty tab: unfiltered page one is fifty
+ * assets with no GIF among them, while type=gif returns four. Client-side
+ * narrowing of a paginated feed cannot work anyway — the page boundary
+ * decides the result, not the filter.
  */
-const upstreamType = (t: TypeFilter): "image" | "video" | null =>
-  t === "video" ? "video" : t === "image" ? "image" : null;
-
-const isGif = (a: MemeAsset) =>
-  a.mimeType === "image/gif" || /\.gif($|\?)/i.test(a.mediaUrl ?? "");
+const upstreamType = (t: TypeFilter): "image" | "gif" | "video" | null =>
+  t === "all" ? null : t;
 
 /** Short format badge from the mime type — PNG, GIF, MP4. */
 function formatLabel(a: MemeAsset): string | null {
@@ -151,8 +144,7 @@ export default function MemeVault() {
         // GIF is a client-side narrowing of the image feed, so a page can
         // legitimately yield none while more pages still hold some — that is
         // why "Load more" stays available on `hasMore`, not on row count.
-        const all = Array.isArray(data.assets) ? data.assets : [];
-        const rows = nextType === "gif" ? all.filter(isGif) : all;
+        const rows = Array.isArray(data.assets) ? data.assets : [];
         setAssets((prev) => (append && prev ? [...prev, ...rows] : rows));
         setHasMore(Boolean(data.hasMore));
         if (data.attribution) setAttribution(data.attribution);
@@ -309,9 +301,7 @@ export default function MemeVault() {
             // as a broken page.
             <p className="py-12 text-center text-sm text-foreground/60">
               {applied || type !== "all"
-                ? type === "gif"
-                ? "No GIFs on this page yet — try Load more, or clear the filters."
-                : "No memes match that. Try clearing the filters."
+                ? "No memes match that. Try clearing the filters."
                 : "No memes in the vault yet."}
             </p>
           ) : (
