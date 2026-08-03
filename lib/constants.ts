@@ -221,6 +221,7 @@ export const NAV_LINKS = [
   { href: "/trade", label: "Trade", emphasis: "cta" },
   { href: "#mint", label: "Mint", activePaths: ["/mint", "/launch"] },
   { href: "/gallery", label: "Gallery" },
+  { href: "/memes", label: "Memes" },
   { href: "/learn", label: "Learn" },
   // Airdrop intentionally removed from the nav (2026-07) to make room for
   // the WoodAmp music chip — the #airdrop section and its checker still

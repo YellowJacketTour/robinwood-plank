@@ -7,10 +7,9 @@ import { createPageMetadata } from "@/lib/seo";
 /**
  * Community meme vault, filtered to the RobinWood project.
  *
- * Deliberately NOT in NAV_LINKS — the owner asked for a page that exists and
- * can be linked, not another top-level destination. It stays indexable so a
- * shared link still resolves and previews properly; leave `index` alone unless
- * that changes.
+ * Added to NAV_LINKS (2026-08) alongside the footer's "Keep exploring" list —
+ * see lib/constants.ts. It stays indexable so a shared link still resolves
+ * and previews properly; leave `index` alone unless that changes.
  */
 export const metadata = createPageMetadata({
   title: "Memes",

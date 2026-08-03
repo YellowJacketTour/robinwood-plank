@@ -283,7 +283,7 @@ export default function Nav() {
 
       <header className="sticky top-0 z-[60] h-[58px] border-b border-gold-500/25 bg-wood-950/90 backdrop-blur-lg supports-[backdrop-filter]:bg-wood-950/85 lg:h-[68px]">
         <nav
-          className="mx-auto flex h-full max-w-[1360px] items-center justify-between gap-4 px-4 sm:px-6"
+          className="mx-auto flex h-full max-w-[1360px] items-center justify-between gap-2 px-4 sm:px-6 lg:gap-4"
           aria-label="Primary"
         >
           <Link
@@ -303,14 +303,20 @@ export default function Nav() {
             <span className="hidden text-foreground/60 min-[420px]:inline">($PLANK)</span>
           </Link>
 
-          <div className="hidden min-w-0 items-center gap-3 lg:flex">
-            <ul className="flex items-center gap-1 lg:gap-1.5">
+          <div className="hidden min-w-0 items-center gap-2 lg:flex xl:gap-3">
+            <ul className="flex items-center gap-0.5 xl:gap-1.5">
               {NAV_LINKS.map((link) => {
                 const { label, href, active } = resolveLink(link);
                 // Finalized mockup: flat text links, the active route as a
                 // quiet dark-gold pill, no borders. The header's single gold
                 // action is Connect wallet on the right.
-                const className = `inline-flex min-h-11 items-center rounded-md px-2 text-xs font-semibold uppercase tracking-wide transition-colors hover:bg-gold-500/10 hover:text-gold-300 lg:px-3 lg:text-sm ${
+                //
+                // Six items now share this rail (Memes added 2026-08) — the
+                // lg breakpoint (1024px, the documented "no destination
+                // clipped" floor in DESIGN.md) stays at the tighter xs/px-2
+                // sizing; the larger px-3/text-sm treatment only kicks in at
+                // xl (1280px) where there's room for it.
+                const className = `inline-flex min-h-11 items-center rounded-md px-1.5 text-xs font-semibold uppercase tracking-wide transition-colors hover:bg-gold-500/10 hover:text-gold-300 xl:px-3 xl:text-sm ${
                   active ? "bg-gold-500/15 text-gold-300" : "text-foreground/75"
                 }`;
 
