@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 
-/** 8/4/26 — assumed UTC midnight; adjust if a specific timezone was meant. */
-const TARGET_ISO = "2026-08-04T00:00:00Z";
+/** 8/8/26 04:20 CDT (UTC-5, Central US local clock time in August). */
+const TARGET_ISO = "2026-08-08T09:20:00Z";
 
 type Remaining = {
   days: number;
