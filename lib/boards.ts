@@ -126,6 +126,57 @@ export function cooldownEndsAt(startedAtMs: number): number {
   return startedAtMs + WALLET_COOLDOWN_MS;
 }
 
+// --- Bad Boards reputation decay -----------------------------------------
+//
+// A negative mark is not permanent: a wallet that keeps showing up as good
+// behavior (recorded via recordGoodBehavior in lib/boards-store.ts — e.g. a
+// daily tick for every day it holds an official plank.love widget session
+// with no new Bad Boards mark) fades its severity to zero over
+// REPUTATION_DECAY_FULL_DAYS of SUSTAINED, CONSECUTIVE good days. Missing
+// even one day resets the streak — this is deliberately stricter than "N
+// good days total" so a wallet cannot bank a long-ago streak and coast
+// through fresh bad activity later. Pure functions only: lib/boards-store.ts
+// owns persistence, these own the math.
+
+/** Consecutive good days needed to fully decay a mark's severity to 0. */
+export const REPUTATION_DECAY_FULL_DAYS = 60;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Next goodStreakDays value after a good-behavior tick at `nowIso`.
+ *  - No prior tick: streak starts at 1 (today counts).
+ *  - Same UTC calendar day as the last tick: no-op (already counted today,
+ *    calling this twice in one day must not double-count the streak).
+ *  - Exactly the next calendar day: streak continues, +1.
+ *  - Any larger gap: the streak was broken by an inactive day, restart at 1.
+ */
+export function nextGoodStreakDays(
+  prevGoodStreakDays: number,
+  lastGoodMarkAtIso: string | null | undefined,
+  nowIso: string
+): number {
+  if (!lastGoodMarkAtIso) return 1;
+  const last = Date.parse(lastGoodMarkAtIso);
+  const now = Date.parse(nowIso);
+  if (Number.isNaN(last) || Number.isNaN(now) || now < last) return 1;
+  const gapDays = Math.floor((now - last) / DAY_MS);
+  if (gapDays <= 0) return Math.max(1, prevGoodStreakDays);
+  if (gapDays === 1) return prevGoodStreakDays + 1;
+  return 1;
+}
+
+/**
+ * Severity multiplier for a Bad Boards mark, 1 (full weight, no decay yet)
+ * down to 0 (fully faded) as goodStreakDays approaches
+ * REPUTATION_DECAY_FULL_DAYS. Linear, clamped — no cliff, no negative
+ * values, no overshoot past 0 for a very long streak.
+ */
+export function decayedBadSeverity(goodStreakDays: number): number {
+  const streak = Number.isFinite(goodStreakDays) ? Math.max(0, goodStreakDays) : 0;
+  return Math.max(0, 1 - streak / REPUTATION_DECAY_FULL_DAYS);
+}
+
 export function tradeOpensAtIso(): string {
   return TRADE_OPENS_AT_ISO;
 }
