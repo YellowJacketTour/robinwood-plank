@@ -572,3 +572,79 @@ export async function countChainEvents(source?: ChainEventSource): Promise<numbe
       );
   return Number(result.rows[0]?.total ?? "0");
 }
+
+export type LedgerSalesStats = {
+  saleCount: number;
+  highestWei: string | null;
+  highestTokenId: string | null;
+  highestTxHash: string | null;
+  highestPlatform: string | null;
+  totalVolumeWei: string | null;
+  /**
+   * Vestigial: the pre-ledger sales-catalog gated "is this a real sale" on
+   * royalty having been paid, since that was the best available signal at
+   * the time. The ledger's kind='sale' classification is already
+   * evidence-based (a real OrderFulfilled settling this token, or ETH
+   * actually moving — see chain-indexer.ts) and doesn't track royalty
+   * status per row, so this is just saleCount again. Kept only so callers
+   * built against the old sales-catalog shape (statsFromCatalog) don't need
+   * a second code path.
+   */
+  royaltyPaidCount: number;
+};
+
+/**
+ * The complete-history replacement for sales-catalog.ts's statsFromCatalog.
+ * That function read a bounded-rebuild KV blob scoped to RobinWood sales
+ * that specifically paid EIP-2981 royalty; this reads every row this ledger
+ * has ever evidence-classified as a real sale, with no rebuild-depth cap and
+ * no royalty-payment requirement (a real Seaport fill is real evidence on
+ * its own — see PR #28's classification fix). "Highest sale" no longer
+ * silently excludes a genuine sale just because royalty enforcement was
+ * bypassed by whatever venue it went through.
+ */
+export async function salesStatsFromLedger(): Promise<LedgerSalesStats> {
+  const empty: LedgerSalesStats = {
+    saleCount: 0,
+    highestWei: null,
+    highestTokenId: null,
+    highestTxHash: null,
+    highestPlatform: null,
+    totalVolumeWei: null,
+    royaltyPaidCount: 0,
+  };
+  if (!hasChainEventStore()) return empty;
+
+  const totals = await postgresQuery<{ sale_count: string; total_wei: string | null }>(
+    `SELECT COUNT(*)::text AS sale_count, SUM(price_wei)::text AS total_wei
+     FROM plank_chain_events
+     WHERE kind = 'sale' AND price_wei IS NOT NULL`
+  );
+  const saleCount = Number(totals.rows[0]?.sale_count ?? "0");
+  if (saleCount === 0) return empty;
+  const totalVolumeWei = totals.rows[0]?.total_wei ?? null;
+
+  const highest = await postgresQuery<{
+    price_wei: string;
+    token_id: string | null;
+    tx_hash: string;
+    venue_kind: string | null;
+  }>(
+    `SELECT price_wei, token_id, tx_hash, venue_kind
+     FROM plank_chain_events
+     WHERE kind = 'sale' AND price_wei IS NOT NULL
+     ORDER BY price_wei DESC
+     LIMIT 1`
+  );
+  const top = highest.rows[0];
+
+  return {
+    saleCount,
+    highestWei: top?.price_wei ?? null,
+    highestTokenId: top?.token_id ?? null,
+    highestTxHash: top?.tx_hash ?? null,
+    highestPlatform: top?.venue_kind ?? null,
+    totalVolumeWei,
+    royaltyPaidCount: saleCount,
+  };
+}
