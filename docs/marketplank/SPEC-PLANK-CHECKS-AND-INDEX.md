@@ -234,6 +234,26 @@ identical rule to an index's creator:
   fee routes to the Global Index reserve, pro-rata to existing holders") —
   mechanical and public, same non-negotiable as the buyback mechanic in §2.5.
 
+**Attribution stays strictly per-constituent — never pooled or blended
+across collections, at any size.** Each collection's own vault already keeps
+fully isolated fee/reserve accounting; the index doesn't change that, it
+only holds a claim on each collection's v-token. The index-level revenue
+share above must follow the same rule at its own layer: revenue generated
+by trading a *specific* collection flows back only to the index's holding
+of *that* collection's v-token — never spread evenly across every
+constituent regardless of source. This is what makes it fair and
+ungriefable at any collection size without a separate size-tiering rule:
+a larger, more active collection naturally contributes proportionally more
+to the index's growth because its own v-token inside the basket genuinely
+grows faster; a smaller collection contributes less but is never diluted
+by, or forced to subsidize, anyone else's performance. There is no shared
+pot for a bad actor's collection to drain from good ones, because there is
+no shared pot at all — only proportional claims on isolated pots. This is
+also what makes "real APR for LPs" a true statement rather than a slogan:
+every LP's yield is a direct, traceable function of the real fee activity
+in the specific pool(s) they're actually exposed to, never an average
+smeared across collections they aren't.
+
 ### 2.4 Creator-controlled marketplace fee tiers
 
 Per the admin's explicit addition: a collection's creator, not just the
@@ -260,6 +280,39 @@ reads as exactly what it is. This closes a real flywheel (more marketplace
 activity → more fees → more buyback → more reason to hold $PLANK → more
 trading interest → more marketplace activity) without ever requiring anyone
 to trust a promise about *when* a purchase happens.
+
+The buyback percentage, while timelocked and published like any other
+parameter (§2.7), also needs a **hard-coded maximum ceiling in the
+contract itself, not just a timelock.** A timelock only slows a bad change
+down; it doesn't bound how bad the change can be once it lands. A
+compromised admin key could otherwise raise the buyback cut high enough to
+starve the Global Index's own promised revenue-share to its LPs (§2.3) even
+after the delay expires and nobody stopped it in time. A ceiling written
+into the contract (e.g. never more than X% of protocol revenue, X fixed at
+deploy time or only lowerable, never raisable, past initial audit) closes
+this regardless of whether anyone's watching the timelock queue.
+
+**PLANK is never sold, converted, or used as a settlement currency to fund
+anything — this is a permanent rule, not a phase of the design.** Every
+inbound flow into this system is ETH or stables; PLANK only ever moves
+*out* via the buyback above, never back in for the protocol to spend,
+route, or convert. Index shares are never minted against deposited PLANK,
+and no mechanism in this spec ever asks the protocol to sell PLANK to
+acquire something else. If PLANK ever gets an inbound role at all, the only
+acceptable shape is one-way locking/bonding — the same protocol-owned-
+liquidity pattern Olympus DAO popularized — where PLANK goes in permanently
+and is never resold, with any share value owed to the depositor funded from
+elsewhere (real ETH already sitting in the buyback/treasury reserve), never
+from reselling the PLANK itself. This is a direct, permanent consequence of
+the admin's explicit rule: "always eth and or stables into plank, never
+plank convert to something else." A related but separate rule: NAV and
+share pricing anywhere in this system are always computed and anchored in
+ETH off real basket reserves — **never** in PLANK, and never using a
+PLANK/ETH exchange rate as a direct pricing input. A single wallet holding
+56.78% of all PLANK supply means PLANK's own market is thin enough that a
+sustained TWAP manipulation there is plausible; keeping every NAV
+calculation ETH-denominated and PLANK-blind removes that surface entirely,
+regardless of how PLANK's own price moves.
 
 ### 2.6 What this needs before mainnet (not a checklist item to skip)
 
@@ -379,6 +432,50 @@ ordinary arbitrage the same way any efficient market does; it only becomes
 a problem if the underlying NAV computation can be manipulated in the first
 place, which the pricing defense above is specifically what prevents.
 
+### 2.8 Compromised-key blast-radius audit (2026-08-04)
+
+**The anchor rule, extending V3's own already-audited guarantee ("no
+owner-mutable fees, no admin withdrawal of pool ETH"):** no role in this
+entire system — treasury, index creator, collection owner, protocol
+admin — ever has a withdrawal path over *pooled reserves already held*.
+Every privileged control any role has is scoped strictly to **future** fee
+routing and **future** capital allocation, never to principal that's
+already in the pool. A compromised key should be able to misdirect what
+happens *next*; it should never be able to reach back and take what's
+*already there*. Every existing adjustable control was walked through
+against this test:
+
+- **Plank Checks point weights** — adjusts future scoring only; the
+  permanent ledger (`plank_checks_events`) is append-only, so a compromised
+  key can misweight future points but can never rewrite or drain a past
+  score. Safe.
+- **Index weight-curve constants** (§2.7) — adjusts how future rebalances
+  compute target weights; timelocked and published, and even at the
+  extreme still bounded by the hard concentration cap. A compromised key
+  can bias future rebalancing, never pull existing reserves. Safe.
+- **Claimed-collection fee tier** (§2.4) — adjusts the fee rate applied to
+  *future* trades only, within the existing 0–1000 bps bound, always shown
+  to a buyer before they sign. A compromised creator key can raise their
+  own future fee (self-harming, visibly, opt-in per trade); it cannot touch
+  reserves already in the vault. Safe.
+- **Treasury reassignment** — changes *where future* fee flows land, never
+  grants a claim on existing pooled ETH; the wallet-verification design in
+  §2 (signing from the collection's own launch/royalty address to change
+  treasury) additionally requires proving control of the *right* key before
+  even that future-facing change is allowed. Safe.
+- **Buyback percentage** (§2.5) — the one gap this audit found: a
+  timelock alone bounds *when* a change lands, not *how much damage* it can
+  do once it does, since raising it high enough could starve the Global
+  Index's own promised LP revenue-share indefinitely. Closed above with a
+  hard, contract-level maximum ceiling in addition to the existing
+  timelock.
+
+No other gaps were found in this pass. Any new adjustable control proposed
+for this system in the future must be run through this same test before
+it ships: *does a compromised key holding this control ever get a path to
+reserves that are already pooled?* If yes, it needs a structural fix before
+it's acceptable, not just a timelock.
+
 ---
 
 ## 3. Routing intelligence (1inch/Matcha-style)
@@ -414,6 +511,66 @@ breakdown — can be built and tested against the venues we *do* have
 real access to today (native vault, Uniswap, 0x), with 9x added as one more
 adapter the moment its details arrive. The venue-neutral architecture means
 adding it later is genuinely "swap one adapter in," not a rewrite.
+
+### 3.4 Index-share routing: mint-vs-secondary arbitrage, without starving the primary vaults (2026-08-04)
+
+Buying or selling an index share on a secondary market (Uniswap, 9mm) does
+not, by itself, touch the underlying collections the index actually holds —
+only trading the index's *own* vault directly (mint/redeem) does that. Left
+alone, a purely efficiency-seeking router would happily route all volume to
+whichever is cheaper in the moment, which over time could mean secondary
+liquidity absorbs sustained demand that never reaches the underlying vaults
+at all — a "the derivative cannibalizes the underlying" risk.
+
+**Mint-vs-secondary arbitrage integration.** The same best-execution router
+from §3.1 should treat "buy the index share on the secondary market" and
+"mint it directly from the index vault" as two more venues to compare, same
+as it already compares the native vault against Uniswap and 9mm for any
+other asset. This is the real precedent ETF Authorized Participants already
+exploit professionally: whenever the secondary price of a share and the
+real NAV of what it represents diverge, buying the cheap side and settling
+the expensive side (mint if secondary trades rich, redeem if secondary
+trades cheap) is a genuine arbitrage that mechanically pulls the two back
+together — and it converts sustained secondary demand into real,
+underlying-touching mint activity automatically, without requiring anyone
+to be a professional arbitrageur to do it. Routing this through the same
+consumer-facing router that already exists means ordinary users capture
+what's currently an AP-only privilege in real-world ETFs.
+
+**The primary-vault volume floor.** Arbitrage alone closes *price*
+divergence but doesn't guarantee *volume* reaches the primary vault, since
+efficient secondary liquidity can absorb flow indefinitely without ever
+triggering the arbitrage trigger point. Real precedent for exactly this
+problem: the U.S. equities Order Protection Rule exists specifically to
+stop dark-pool/off-exchange venues from silently capturing flow away from
+the lit, primary exchange that everyone's price discovery actually depends
+on. Two layers, applied together, not as alternatives:
+
+1. **Order-splitting is the router's default, not winner-take-all**, for
+   anything beyond trivial trade size — the router divides a trade across
+   the primary vault and secondary venues in the same execution, rather
+   than sending 100% of a trade to whichever quoted marginally better.
+   This is also just better execution practice on its own (reduces price
+   impact versus dumping the whole size on one venue).
+2. **A structural minimum volume-share the primary vault is always
+   guaranteed**, set **adaptively proportional to the primary vault's own
+   real current share of total available liquidity across all venues** —
+   never a frozen fixed percentage, since a fixed number would either be
+   too high once secondary liquidity genuinely deepens (bad execution for
+   users) or too low if secondary liquidity thins back out (starves the
+   vault that's supposed to be primary). As the primary vault's real share
+   of liquidity moves, its guaranteed floor share moves with it.
+
+These two layers stack with the mint-vs-secondary arbitrage above rather
+than replacing it: arbitrage keeps price honest, the floor keeps volume
+flowing to the primary vault even in the range where arbitrage alone
+wouldn't yet trigger, and order-splitting-by-default means both happen in
+the same trade instead of an all-or-nothing routing decision. The floor
+itself is a published, timelocked, admin-adjustable parameter (same
+discipline as every other parameter in §2.7) and its current value, along
+with the live primary/secondary volume split it's producing, is shown on
+the same public Grand-Exchange-style ticker (§2.3) — so the mechanism
+protecting the fundamentals is as visible as the price it's protecting.
 
 ---
 
