@@ -274,6 +274,111 @@ to trust a promise about *when* a purchase happens.
   test coverage exists.
 - A deploy runbook mirroring `DEPLOY-V3-RUNBOOK.md`'s structure.
 
+### 2.7 Adversarial hardening — pen-tested design, worked through with the admin (2026-08-04)
+
+Every item below closes a specific, named attack, not a generic "be careful."
+Treat this section as required scope for the eventual Index Vault contracts
+and their audit brief — not optional polish.
+
+**Weight metric: real fee revenue + permanently-locked LP, never raw volume.**
+`weight ∝ (fee_revenue_weighted) + (locked_lp_value_weighted)`. Both halves
+resist manipulation for different reasons: fee revenue is self-taxing (an
+attacker must pay the treasury real ETH to move this number at all — wash
+trading it is not free), and locked LP is un-fakeable by construction, using
+the same `L0` minted to `address(0)` forever pattern V3 already uses — a
+collection can't "prove commitment" with liquidity it can later pull,
+because it's permanently locked. This closes the classic fake-volume-farming
+attack that has drained real index-style DeFi products.
+
+**Weight curve: square-root, with a hard capped-and-redistributed ceiling.**
+`weight ∝ √(metric)` rather than linear — a collection with 4x the real
+metric only earns ~2x the weight, so outsized winners self-dampen smoothly
+with no gameable cliff. Layer a hard cap on top (e.g. no single collection
+above 40% of NAV) with any excess above the cap redistributed pro-rata
+across the other constituents at each rebalance — the same capped-index
+methodology real regulated funds (UCITS-style concentration limits) and
+crypto index products (Index Coop) already use. This bounds the blast
+radius of *any* single collection, legitimate or not, ever threatening the
+whole index, while still letting relative ranking move naturally below the
+cap.
+
+**NAV pricing: virtual-shares offset (mandatory floor) + TWAP, tiered by
+trade size.** The underlying-asset-is-itself-another-vault's-share-price
+shape here is a well-studied class of attack (a "nested vault" or
+vault-of-vaults exploit): a flash loan can spike an underlying vault's
+reserves in one block, get priced into an index deposit at that instant,
+then reverse — extracting value from every other index holder in a single
+atomic transaction. Defense, two layers: (1) OpenZeppelin's current
+ERC-4626 virtual-shares/assets offset as a mandatory, zero-UX-cost floor —
+this alone closes the classic first-depositor inflation attack
+mathematically; (2) TWAP the underlying vaults' share prices before using
+them for the index's own NAV, the standard defense lending protocols use
+for oracle-style pricing, since it makes single-block manipulation require
+sustaining a false price across multiple blocks at real capital risk. For
+trades above a defined size threshold — where the manipulation incentive is
+actually large enough to matter — require delayed/epoch settlement (request
+now, settle at a NAV snapshot finalized in a later block) instead of
+same-transaction pricing, which closes the attack entirely regardless of
+TWAP window tuning. Small trades stay instant under TWAP protection; only
+whale-sized moves get the stronger, slower guarantee.
+
+**Index eligibility is a separate, stricter, human-reviewed gate — not
+automatic from marketplace listing.** Launching a standalone vault (as
+RobinWood's V3 already does) and being included in the Global Index are
+deliberately two different, sequential stages with different bars:
+
+1. A collection launches its own vault exactly like today, fully
+   independent of the index.
+2. It accumulates a real track record over time — real fee revenue, real
+   locked LP, a minimum elapsed time, and a minimum count of *distinct*
+   wallets trading it (weighted down for sybil-correlated wallets, reusing
+   the existing `lib/boards-store.ts` reputation signal) — nothing here can
+   be rushed or faked per the weight-metric design above.
+3. At a **published, scheduled review point** (never continuous, never ad
+   hoc), collections clearing the threshold are proposed for index
+   inclusion through the strict human-reviewed gate.
+4. If approved, the new constituent's weight **ramps in gradually** over a
+   defined window (weeks, not one block) rather than jumping to its target
+   weight instantly. This is directly modeled on how live weighted-pool
+   products actually handle adding a new asset in production: Balancer's
+   Managed Pools support exactly this via a gradual, governance-controlled
+   weight transition, and real-world indices (S&P, MSCI, Index Coop) add
+   new constituents only at scheduled, publicly pre-announced review dates
+   with lead time before it takes effect. A sudden, instant weight jump is
+   both a manipulation shock and a front-runnable MEV event; a gradual,
+   announced ramp is neither.
+
+**Rebalancing execution is never a naive market order.** Route every
+rebalance trade through the same slippage-protected, min-out-guarded
+execution path every other swap in this codebase already requires, and
+execute in smaller pieces over a window rather than one large predictable
+block — closes the classic sandwich-the-rebalance MEV vector, which is one
+of the most heavily front-run events in real-world index funds too.
+
+**Personal index creators get zero privileged power, ever.** Same rule as
+the V3 treasury: real power only before the pool opens (choose weights,
+seed it), zero privileged power the instant it does — proportional,
+non-transferable LP like everyone else. Weights are locked at creation (or
+changeable only through a slow, public timelock) and always shown before a
+depositor signs, same as every wallet-facing value elsewhere in this app
+already has to be.
+
+**Parameter changes are timelocked and published, never instant or silent.**
+Fee splits, weight-curve constants, and the buyback percentage all need to
+stay tunable — but an instantly-changeable parameter is also a lever a
+compromised or malicious key could quietly pull. Every economically
+significant parameter change goes through the same transparent,
+published-in-advance, timelocked discipline the buyback mechanic already
+requires (§2.5) — enough delay that every collection and index holder can
+see a change coming and react before it applies.
+
+**Cross-index arbitrage is expected and healthy, not a vulnerability** — as
+long as NAV pricing (above) is flash-loan-safe. Price differences between
+multiple indexes holding overlapping collections self-correct through
+ordinary arbitrage the same way any efficient market does; it only becomes
+a problem if the underlying NAV computation can be manipulated in the first
+place, which the pricing defense above is specifically what prevents.
+
 ---
 
 ## 3. Routing intelligence (1inch/Matcha-style)
@@ -324,3 +429,99 @@ adding it later is genuinely "swap one adapter in," not a rewrite.
 4. **Routing intelligence** (§3) — the core comparison/splitting logic is
    buildable now against existing venues; the 9x adapter specifically is
    blocked on bullish providing real integration details.
+
+---
+
+## 5. Architectural flexibility — staying able to evolve like competitors do
+
+None of this is worth much if it's a dead end the moment the roadmap shifts.
+Four concrete commitments, none of which cost anything to hold to now:
+
+**Every economically significant number is a named, adjustable parameter,
+never a hardcoded literal.** Fee splits, weight-curve constants, the buyback
+percentage, the index weight cap, the free-wallet limit, the point weights —
+all of it lives in one place, changeable through the timelocked process in
+§2.7, never buried inline in contract logic where changing it means a
+redeploy. This is the same discipline `MARKET_DEFAULT_FEE_BPS` and the
+vault-registry pattern already established for per-collection fees; it just
+needs to be applied consistently to everything new.
+
+**New constituent types are an adapter, not a rewrite.** The Global Index
+should be defined against an interface ("anything that can report a
+verifiable NAV and accept/return value against it"), not against
+`MarketplankVaultV3` specifically. Today that interface has one
+implementation (vault share tokens); tomorrow it could accept an
+NFT-fractionalization scheme that isn't a Marketplank vault at all, a wrapped
+position from another chain, or a real-world-asset token, without changing
+anything about the index itself — only adding a new adapter behind the same
+interface. This is the same "venue-neutral" discipline
+`lib/market/token-registry.ts` already uses for swap venues, applied one
+layer up.
+
+**Data and settlement stay separated, so a UI/feature pivot never touches
+custody.** Plank Checks is proof this already works: the entire points
+system is a read-only layer over data other, already-audited systems
+produce. Keep that boundary sacred as the roadmap grows — a new leaderboard
+view, a new reward type, a new season format should never require touching
+anything that holds funds.
+
+**Every new asset type gets its own audit gate, scaled to what it actually
+risks — never inherited from a sibling system's audit.** V3's audit does not
+cover an Index Vault; an Index Vault's audit will not cover whatever comes
+after it. This is slower per-launch and faster overall, because it's the
+only way "move fast" and "hold real user value" coexist without one
+eventually eating the other.
+
+---
+
+## 6. DeFi mechanisms not yet employed anywhere in the plank.love vision
+
+A direct gap-analysis answer to "what tricks and aligned incentives aren't
+we using yet" — real, established patterns, not speculation, each mapped to
+where it would actually fit:
+
+- **Vote-escrow / gauge weighting (Curve's veTokenomics).** Lock $PLANK for
+  voting power over where index emissions or fee-share flow — turns
+  long-term PLANK holders into active stewards of which collections get
+  boosted liquidity, rather than passive holders. A natural fit once the
+  buyback mechanic (§2.5) exists to lock up, but a real, separate, larger
+  project of its own — not a launch-day feature.
+- **Protocol-owned liquidity (Olympus DAO's model).** Instead of relying
+  entirely on mercenary LP capital that can leave overnight, have the
+  treasury directly hold a permanent LP position (funded by real revenue,
+  never printed), so a meaningful floor of liquidity never depends on
+  anyone else's incentive to stay.
+- **Time-locked vesting on creator fee shares (§2.4).** Without it, a
+  creator opting into a higher fee tier could pump their own collection's
+  activity briefly, harvest the fee share, and abandon it. Vesting the
+  creator's fee-share payout over time aligns their incentive with the
+  collection's durability, not just its next 24 hours.
+- **Retroactive public-goods-style rewards for early risk-takers.** Once
+  points can convert to real value (§1.7), consider a one-time retroactive
+  bonus for wallets with real, verifiable activity *before* any of this
+  existed — rewards the people who took the actual risk of using an
+  unproven system, a well-established pattern in how mature protocols treat
+  their earliest real users.
+- **A genuine insurance/backstop fund (Aave's Safety Module).** A small,
+  published percentage of protocol revenue accumulates as a standing
+  backstop against a future black-swan event (an exploit despite audits,
+  an oracle failure) — funded the same never-negative-sum way everything
+  else here is, and a real trust signal to prospective collections
+  deciding whether to list here versus elsewhere.
+- **Dutch-auction-style rebalancing (Balancer LBP mechanics), as an upgrade
+  path beyond the TWAP/small-piece execution in §2.7.** Once volume
+  justifies the complexity, a Dutch auction for rebalance trades can extract
+  even less MEV than piecewise execution alone, at the cost of real added
+  complexity — worth having in mind as a later optimization, not a
+  first-version requirement.
+- **Composability with a real lending market, if one ever exists on
+  Robinhood Chain.** The Global Index share, once trusted and liquid
+  (Gen 2 in the ticker's own roadmap, §"public price ticker" discussion),
+  is a natural collateral asset — this is deliberately not scoped or
+  designed here, since it depends entirely on infrastructure this repo
+  doesn't control, but it's the direct, obvious next step once it exists.
+
+None of the above is scoped for near-term build — flagged here specifically
+because they're the kind of mechanism a competitor with a longer head start
+would already be reaching for, and worth having named and prioritized rather
+than discovered under pressure later.
