@@ -3,13 +3,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { SkeletonRows, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 import { ExplorerAddress } from "../ExplorerAddress";
-import { BUTTON_SECONDARY, CARD, LABEL } from "../ui";
+import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, LABEL, NOTE_ERR, NOTE_OK } from "../ui";
+import { adminMessage, adminPayloadHash } from "@/lib/admin-auth";
+import { signMessage } from "@/lib/wallet";
+
+const BACKFILL_ACTION = "backfill-events";
 
 /**
  * System section — the expanded operational picture: durable storage, chain
  * RPC, the drand relayer cron (tail of its structured status log), WoodAmp
  * store counts, and the admin action log. All read-only, from
- * /api/admin/status.
+ * /api/admin/status, plus one mutation: manually fast-forwarding the
+ * permanent chain-event ledger's backfill (see
+ * app/api/admin/backfill-events/route.ts) instead of waiting on however many
+ * 2-minute cron ticks a cold ~9.5M-block walk takes.
  */
 
 type Status = {
@@ -43,11 +50,17 @@ function Dot({ ok }: { ok: boolean | null }) {
   );
 }
 
-// Receives (and ignores) the shell's `address` prop — every section shares
-// the same signature so the shell can render them uniformly.
-export default function SystemSection() {
+type BackfillState =
+  | { kind: "idle" }
+  | { kind: "signing" }
+  | { kind: "running" }
+  | { kind: "ok"; message: string }
+  | { kind: "error"; message: string };
+
+export default function SystemSection({ address }: { address: string | null }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [failed, setFailed] = useState(false);
+  const [backfill, setBackfill] = useState<BackfillState>({ kind: "idle" });
 
   const load = useCallback(async () => {
     try {
@@ -66,6 +79,47 @@ export default function SystemSection() {
     void load();
   }, [load]);
 
+  const runBackfill = useCallback(async () => {
+    if (!address) return;
+    try {
+      setBackfill({ kind: "signing" });
+      const timestamp = Date.now();
+      const signature = await signMessage(
+        address,
+        adminMessage(BACKFILL_ACTION, timestamp, adminPayloadHash("{}"))
+      );
+      setBackfill({ kind: "running" });
+      const res = await fetch("/api/admin/backfill-events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auth: { address, timestamp, signature } }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        message?: string;
+        passes?: number;
+        rowsInserted?: number;
+        caughtUp?: boolean;
+        head?: number | null;
+        confirmedHead?: number | null;
+        note?: string;
+      };
+      if (!res.ok || !data.ok) {
+        setBackfill({ kind: "error", message: data.message || "The backfill pass failed." });
+        return;
+      }
+      setBackfill({
+        kind: "ok",
+        message: `${data.passes} pass(es), +${data.rowsInserted} rows, confirmed=${data.confirmedHead}/${data.head}. ${data.note}`,
+      });
+    } catch (err) {
+      setBackfill({
+        kind: "error",
+        message: err instanceof Error ? err.message : "The backfill pass failed.",
+      });
+    }
+  }, [address]);
+
   const relayer = status?.relayer;
 
   return (
@@ -79,6 +133,37 @@ export default function SystemSection() {
           <button type="button" className={BUTTON_SECONDARY} onClick={() => void load()}>
             Re-check
           </button>
+        </div>
+
+        <div className="mt-4 rounded-md bg-panel-strong p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className={LABEL}>Chain event ledger</p>
+              <p className="mt-1 text-sm text-cream-muted">
+                The permanent Activity/sales ledger backfills on its own every cron
+                tick — this fast-forwards it by running several passes right now
+                instead of waiting. Safe to click repeatedly; each pass is
+                idempotent.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={BUTTON_PRIMARY}
+              disabled={!address || backfill.kind === "signing" || backfill.kind === "running"}
+              onClick={() => void runBackfill()}
+            >
+              {backfill.kind === "signing"
+                ? "Sign to confirm…"
+                : backfill.kind === "running"
+                  ? "Backfilling…"
+                  : "Backfill now"}
+            </button>
+          </div>
+          {backfill.kind === "ok" ? (
+            <p className={`mt-2 ${NOTE_OK}`}>{backfill.message}</p>
+          ) : backfill.kind === "error" ? (
+            <p className={`mt-2 ${NOTE_ERR}`}>{backfill.message}</p>
+          ) : null}
         </div>
 
         {failed ? (
