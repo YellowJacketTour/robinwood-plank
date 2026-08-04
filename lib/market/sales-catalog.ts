@@ -3,7 +3,7 @@ import {
   hasDurableKv,
 } from "@/lib/market/durable-kv";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
-import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
+import { MARKET_OFFER_CURRENCY, SEAPORT_ADDRESS } from "@/lib/constants";
 import {
   fetchTokenTransfers,
   fetchTxTokenTransfers,
@@ -123,19 +123,31 @@ function hasKv(): boolean {
   return hasDurableKv();
 }
 
-function isMarketMethod(method: string): boolean {
+/** Plain wallet-to-wallet ERC-721 moves — these decode reliably (extremely
+ * common, well-known selectors every indexer has cached), unlike marketplace
+ * calls. Used as a denylist in isSaleCandidateMethod below instead of trying
+ * to positively recognize every marketplace method name. */
+const PLAIN_TRANSFER_METHODS = new Set(["transferfrom", "safetransferfrom", "transfer"]);
+
+/**
+ * Broader than isMarketMethod on purpose: a real gap found live 2026-08-04 —
+ * a genuine Seaport sale (tx.to really is SEAPORT_ADDRESS, confirmed
+ * on-chain) never even reached priceRoyaltySaleTx's own, more careful check,
+ * because Blockscout's decoded method string for that exact tx was garbage
+ * ("createcollectionn2m_000oefvt", not resembling any real Seaport method) —
+ * isMarketMethod's positive name-matching silently excluded it here, before
+ * priceRoyaltySaleTx ever got a chance to verify it via tx.to. Seaport's real
+ * function selectors (vanity-mined for gas, e.g.
+ * fulfillBasicOrder_efficient_6GL6yc) are exactly the kind of signature a
+ * decoder is most likely to mis-resolve — the one place a positive-match
+ * heuristic is least reliable. Denylist plain transfers instead: anything
+ * that isn't a recognized ordinary wallet-to-wallet move is a candidate,
+ * verified for real (royalty, tx.to, price) inside priceRoyaltySaleTx.
+ */
+function isSaleCandidateMethod(method: string): boolean {
   const m = (method || "").toLowerCase();
-  return (
-    m.includes("fulfill") ||
-    m.includes("match") ||
-    m.includes("sweep") ||
-    m.includes("buyfrom") ||
-    m.includes("buy_") ||
-    m.includes("take") ||
-    m.includes("accept") ||
-    m.includes("purchase") ||
-    m.includes("order")
-  );
+  if (!m) return false;
+  return !PLAIN_TRANSFER_METHODS.has(m);
 }
 
 function platformFromMethod(method: string): string {
@@ -406,8 +418,19 @@ export async function priceRoyaltySaleTx(
   // don't see in token-transfers. User rule: "as long as royalty was paid".
   // When we can't prove it via WETH, require marketplace method AND
   // native/WETH price, and treat estimated royalty as paid if method is fulfill*.
+  //
+  // Real gap found live 2026-08-04: a genuine 0.1 ETH Seaport listing fill
+  // (tx.to really is SEAPORT_ADDRESS, confirmed on-chain) got silently
+  // dropped from the catalog — Blockscout's decoded `method` string for that
+  // exact tx was garbage (not containing "fulfill"/"match"/"buyfrom" at
+  // all), so this heuristic said seaportLike=false and rejected a real,
+  // verified sale. The actual transaction destination is a far more
+  // reliable signal than a fuzzy decoded method name — prefer it.
   const seaportLike =
-    method.includes("fulfill") || method.includes("match") || method.includes("buyfrom");
+    (tx?.to?.hash || "").toLowerCase() === SEAPORT_ADDRESS.toLowerCase() ||
+    method.includes("fulfill") ||
+    method.includes("match") ||
+    method.includes("buyfrom");
 
   if (!hasExplicitRoyalty && !seaportLike) {
     return []; // wallet transfer / vault — not a royalty marketplace sale
@@ -431,7 +454,14 @@ export async function priceRoyaltySaleTx(
   if (per <= BigInt(0)) return [];
   const royPer = royaltyWei / BigInt(nftMoves.length);
 
-  const platform = platformFromMethod(method);
+  // Prefer the confirmed tx.to == Seaport signal over the same fragile
+  // decoded-method-string matching platformFromMethod does internally — a
+  // tx we already know is really Seaport shouldn't get mislabeled by a
+  // garbled method name (see the seaportLike comment above).
+  const platform =
+    (tx?.to?.hash || "").toLowerCase() === SEAPORT_ADDRESS.toLowerCase()
+      ? "seaport"
+      : platformFromMethod(method);
   const out: SaleRecord[] = [];
   for (const m of nftMoves) {
     out.push({
@@ -459,10 +489,15 @@ export async function buildRoyaltySalesCatalog(opts?: {
   const maxDetail = opts?.maxTxDetail ?? 120;
 
   const transfers = await fetchTokenTransfers(NFT_CONTRACT_ADDRESS, { maxPages });
+  const ZERO_FROM = "0x0000000000000000000000000000000000000000";
   const saleHashes = [
     ...new Set(
       transfers
-        .filter((t) => isMarketMethod(t.method || ""))
+        .filter(
+          (t) =>
+            (t.from?.hash || "").toLowerCase() !== ZERO_FROM &&
+            isSaleCandidateMethod(t.method || "")
+        )
         .map((t) => t.transaction_hash || "")
         .filter((h) => /^0x[0-9a-fA-F]{64}$/.test(h))
     ),
