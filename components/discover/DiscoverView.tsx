@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { formatEther } from "ethers";
 import Link from "next/link";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
+import FollowButton from "@/components/social/FollowButton";
 
 type DiscoverResult = {
   id: string;
@@ -411,47 +412,57 @@ function TrendingRail({ collections }: { collections: TrendingCollection[] | nul
 
   return (
     <section aria-labelledby="trending-heading">
-      <h2 id="trending-heading" className="mb-3 font-display text-lg text-gold-300">
-        Trending Collections
-      </h2>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 id="trending-heading" className="font-display text-lg text-gold-300">
+          Trending Collections
+        </h2>
+        <Link
+          href="/rankings"
+          className="text-xs font-bold uppercase tracking-wide text-gold-300/80 hover:text-gold-300"
+        >
+          Community Rankings →
+        </Link>
+      </div>
       <div className="flex gap-3 overflow-x-auto pb-2">
         {collections.map((c) => (
-          <Link
+          <div
             key={c.slug}
-            href={`/market/${c.slug}`}
             className="flex w-56 shrink-0 flex-col gap-2 rounded-lg border border-line bg-panel p-3 transition hover:border-gold-500/60"
           >
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-bold text-cream">{c.name}</span>
-              {c.saleCount24h > 0 && (
-                <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.65rem] font-black text-emerald-400">
-                  {c.volumeVelocity >= 999
-                    ? "NEW"
-                    : `${c.volumeVelocity.toFixed(1)}x pace`}
-                </span>
-              )}
-            </div>
-            <dl className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
-              <dt className="text-cream-muted">Floor</dt>
-              <dd className="text-right text-gold-300">{ethLabel(c.floorWei)}</dd>
-              <dt className="text-cream-muted">24h vol</dt>
-              <dd className="text-right text-cream">{ethLabel(c.volume24hWei)}</dd>
-              <dt className="text-cream-muted">Floor Δ24h</dt>
-              <dd
-                className={`text-right ${
-                  c.floorDeltaPct === null
-                    ? "text-cream-muted"
-                    : c.floorDeltaPct >= 0
-                      ? "text-emerald-400"
-                      : "text-red-400"
-                }`}
-              >
-                {c.floorDeltaPct === null ? "—" : `${c.floorDeltaPct >= 0 ? "+" : ""}${c.floorDeltaPct.toFixed(1)}%`}
-              </dd>
-              <dt className="text-cream-muted">Trades 24h</dt>
-              <dd className="text-right text-cream">{c.tradeCount24h}</dd>
-            </dl>
-          </Link>
+            <Link href={`/market/${c.slug}`} className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-bold text-cream">{c.name}</span>
+                {c.saleCount24h > 0 && (
+                  <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.65rem] font-black text-emerald-400">
+                    {c.volumeVelocity >= 999
+                      ? "NEW"
+                      : `${c.volumeVelocity.toFixed(1)}x pace`}
+                  </span>
+                )}
+              </div>
+              <dl className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
+                <dt className="text-cream-muted">Floor</dt>
+                <dd className="text-right text-gold-300">{ethLabel(c.floorWei)}</dd>
+                <dt className="text-cream-muted">24h vol</dt>
+                <dd className="text-right text-cream">{ethLabel(c.volume24hWei)}</dd>
+                <dt className="text-cream-muted">Floor Δ24h</dt>
+                <dd
+                  className={`text-right ${
+                    c.floorDeltaPct === null
+                      ? "text-cream-muted"
+                      : c.floorDeltaPct >= 0
+                        ? "text-emerald-400"
+                        : "text-red-400"
+                  }`}
+                >
+                  {c.floorDeltaPct === null ? "—" : `${c.floorDeltaPct >= 0 ? "+" : ""}${c.floorDeltaPct.toFixed(1)}%`}
+                </dd>
+                <dt className="text-cream-muted">Trades 24h</dt>
+                <dd className="text-right text-cream">{c.tradeCount24h}</dd>
+              </dl>
+            </Link>
+            <FollowButton targetType="collection" targetId={c.slug} label="Watch" />
+          </div>
         ))}
       </div>
     </section>
