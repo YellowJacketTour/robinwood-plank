@@ -15,6 +15,7 @@ import {
   durableKv as kv,
   hasDurableKv,
 } from "@/lib/market/durable-kv";
+import { readSalesCatalog } from "@/lib/market/sales-catalog";
 
 // Canonical Seaport 1.6 OrderFulfilled event, copied from
 // @opensea/seaport-js's own compiled artifact (src/artifacts/seaport/...),
@@ -460,8 +461,44 @@ async function buildMarketplacePriceMap(opts?: {
   return out;
 }
 
+/**
+ * Real priced sales, from the royalty-verified catalog (lib/market/
+ * sales-catalog.ts, KV key "...-v2") that /api/market/sales-stats and the
+ * Activity tab's own aggregate sidebar already rely on and keep current.
+ *
+ * This function used to read its own separate, never-migrated "...-v1" key
+ * instead — nothing has written a usable value there in a long time, so
+ * every individual Activity row's price silently came back "Unavailable"
+ * while the aggregate stats built from the real (v2) catalog right next to
+ * it were correct. Confirmed live: sales-stats reported 72 priced sales and
+ * a real highest price, while every row here showed none. Falls through to
+ * the legacy v1 key only if the v2 catalog has nothing yet (e.g. its first
+ * cold build hasn't completed), so a brand-new deployment never regresses
+ * to fully empty.
+ */
 async function loadSalesKv(): Promise<Map<string, bigint>> {
   const map = new Map<string, bigint>();
+  try {
+    const catalog = await readSalesCatalog();
+    if (catalog) {
+      for (const sale of catalog.sales) {
+        try {
+          const wei = BigInt(sale.priceWei);
+          if (wei > BigInt(0)) {
+            const key = `${sale.txHash}:${sale.tokenId}`;
+            map.set(key, wei);
+            priceCache.set(key, wei);
+          }
+        } catch {
+          /* skip */
+        }
+      }
+    }
+  } catch {
+    /* fall through to the legacy key below */
+  }
+  if (map.size > 0) return map;
+
   if (!hasKv()) return map;
   try {
     const prev = await kv.get<Record<string, string>>(SALES_KV_KEY);
