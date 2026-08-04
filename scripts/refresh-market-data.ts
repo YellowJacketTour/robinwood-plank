@@ -12,10 +12,20 @@
  *   tsx scripts/refresh-market-data.ts            # incremental (cron, ~15m)
  *   tsx scripts/refresh-market-data.ts --full     # full rebuild (cron, daily)
  *   tsx scripts/refresh-market-data.ts --sales    # one target only
+ *   tsx scripts/refresh-market-data.ts --events   # advance the permanent event ledger only
  *   tsx scripts/refresh-market-data.ts --metadata # build/resume the canonical IPFS metadata store
  *   tsx scripts/refresh-market-data.ts --purge --rarity --traits --collection
  *
- * Targets: --sales --vault --portfolio --rarity --traits --collection --metadata
+ * Targets: --events --sales --vault --portfolio --rarity --traits --collection --metadata
+ *
+ * --events advances `plank_chain_events` (see migration 008), the permanent
+ * append-only on-chain ledger the Activity feed reads from. It is idempotent
+ * and resumable via a stored per-contract cursor: re-running it over an
+ * already-indexed range inserts nothing, so an interrupted run is always safe
+ * to repeat. Backfill is not a separate script — a cold database simply starts
+ * its cursor at the collection's deploy block and catches up over successive
+ * cron ticks. Runs first: nothing else here depends on it, but everything
+ * downstream is more accurate once it has.
  *
  * --portfolio must run after --vault in the same pass (it reads the durable
  * activity lineage that step just refreshed): records a NAV snapshot per
@@ -62,6 +72,7 @@ const explicit = [
   "--official-assets",
   "--token-registry",
   "--owners",
+  "--events",
 ].filter((t) => args.has(t));
 
 /** Full runs include the expensive collection-wide rebuilds; incremental ones don't. */
@@ -69,8 +80,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["sales", "vault", "portfolio", "opensea", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection"]
-      : ["sales", "vault", "portfolio", "opensea", "official-assets", "token-registry", "owners"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "official-assets", "token-registry", "owners"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -116,6 +127,32 @@ async function main(): Promise<void> {
       error instanceof Error ? error.message : error
     );
   }
+
+  // Permanent on-chain event ledger. Runs FIRST, and on every tick including
+  // incremental ones, because it is the only step whose output is append-only
+  // and irreplaceable: every other snapshot here can be rebuilt from upstream
+  // at any time, whereas a block range that is never scanned leaves a hole
+  // nothing can later notice or fill.
+  //
+  // Backfill and live sync are the same call — see lib/market/chain-indexer.ts.
+  // On a cold database the first several runs walk history forward from the
+  // collection's deploy block and report caughtUp=false; once the cursor
+  // reaches the confirmed head each run costs a single small forward window.
+  await step("events", async () => {
+    const { runChainIndexer } = await import("../lib/market/chain-indexer");
+    const run = await runChainIndexer();
+    const parts = run.sources.map((s) => {
+      const range = s.toBlock >= s.fromBlock ? `${s.fromBlock}-${s.toBlock}` : "nothing due";
+      return (
+        `${s.source}:${s.contract.slice(0, 10)} ${range} ` +
+        `+${s.rowsInserted}/${s.logsScanned}${s.error ? ` ERR(${s.error.slice(0, 60)})` : ""}`
+      );
+    });
+    return (
+      `head=${run.head} confirmed=${run.confirmedHead} ` +
+      `+${run.rowsInserted} new rows, caughtUp=${run.caughtUp} — ${parts.join("; ")}`
+    );
+  });
 
   // Sales catalog — the one that actually changes over time, and the one whose
   // absence blanks Highest sale / volume / sale history.
