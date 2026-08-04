@@ -132,6 +132,106 @@ test("a LEGACY vault's deposit/redeem is a vault transfer, not a sale", () => {
   }
 });
 
+/**
+ * Second classification bug found the same way (2026-08-04): after the legacy
+ * vaults were accounted for, 131 "sales" still carried no price. Pulling every
+ * one of their receipts off the real chain showed 121 had no payment leg of any
+ * kind — they were not sales at all:
+ *   0x0000000000c2d145a2526bd8c716263bfebe1a72  83  Seaport's TransferHelper,
+ *                                                   method bulkTransfer
+ *   0xd5c0fc17959314b212db7de6a195586be18d5c97  26  0xb58adcb2 =
+ *                                                   safeBatchTransferToSingleWallet
+ *   0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789   9  ERC-4337 EntryPoint,
+ *                                                   0x1fad948c = handleOps
+ * while RelayApprovalProxyV3 (0xccc8…15be) turned out to be the opposite case:
+ * an unrecognised address whose receipts DO carry a real Seaport fill.
+ * The address a transaction was sent to therefore decides nothing on its own.
+ */
+const TRANSFER_HELPER = "0x0000000000c2d145a2526bd8c716263bfebe1a72";
+const RELAY_PROXY = "0xccc88a9d1b4ed6b0eaba998850414b24f1c315be";
+
+test("a contract call with a receipt proving no payment is a transfer, not an unpriced sale", () => {
+  for (const executor of [TRANSFER_HELPER, "0xd5c0fc17959314b212db7de6a195586be18d5c97"]) {
+    const r = classifyTransfer({
+      from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",
+      txTo: executor,
+      seaportAddress: SEAPORT,
+      nftContractAddress: NFT,
+      saleEvidence: "none",
+    });
+    assert.equal(r.kind, "transfer", `${executor} moved no money`);
+    assert.equal(r.venue, null);
+  }
+});
+
+test("a fill routed through an unknown proxy is a SALE, with Seaport as the venue", () => {
+  const r = classifyTransfer({
+    from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",
+    txTo: RELAY_PROXY,
+    seaportAddress: SEAPORT,
+    nftContractAddress: NFT,
+    saleEvidence: "seaport-fill",
+  });
+  assert.equal(r.kind, "sale");
+  assert.deepEqual(
+    r.venue,
+    { kind: "seaport", contract: SEAPORT },
+    "the order cleared on Seaport — the router is not the venue"
+  );
+});
+
+test("an unknown contract that moved ETH is still a sale at an unnamed venue", () => {
+  const r = classifyTransfer({
+    from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",
+    txTo: OTHER_MARKETPLACE,
+    seaportAddress: SEAPORT,
+    nftContractAddress: NFT,
+    saleEvidence: "native-value",
+  });
+  assert.equal(r.kind, "sale");
+  assert.deepEqual(r.venue, { kind: "other", contract: OTHER_MARKETPLACE });
+});
+
+test("evidence can never demote a transaction Seaport itself executed", () => {
+  // The safety rail on the rule above: a receipt this run failed to decode must
+  // not be able to turn a real Seaport fill into a plain transfer.
+  const r = classifyTransfer({
+    from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",
+    txTo: SEAPORT,
+    seaportAddress: SEAPORT,
+    nftContractAddress: NFT,
+    saleEvidence: "none",
+  });
+  assert.equal(r.kind, "sale");
+  assert.equal(r.venue?.kind, "seaport");
+});
+
+test("a vault mechanic stays a vault transfer even when a receipt shows payment", () => {
+  const r = classifyTransfer({
+    from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",
+    txTo: VAULT,
+    seaportAddress: SEAPORT,
+    nftContractAddress: NFT,
+    vaultAddresses: [VAULT],
+    saleEvidence: "native-value",
+  });
+  assert.equal(r.kind, "transfer");
+  assert.equal(r.venue?.kind, "vault");
+});
+
+test("with NO evidence supplied, classification is byte-for-byte what it always was", () => {
+  // An unreadable receipt must leave behaviour unchanged rather than guess in
+  // the other direction — silently demoting real sales would be a worse bug.
+  const r = classifyTransfer({
+    from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",
+    txTo: OTHER_MARKETPLACE,
+    seaportAddress: SEAPORT,
+    nftContractAddress: NFT,
+  });
+  assert.equal(r.kind, "sale");
+  assert.deepEqual(r.venue, { kind: "other", contract: OTHER_MARKETPLACE });
+});
+
 test("vault matching is case-insensitive, so a checksummed registry entry still matches", () => {
   const r = classifyTransfer({
     from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",

@@ -50,6 +50,8 @@ import { logScanBudget } from "@/lib/market/rpc-budget";
 import {
   TRANSFER_TOPIC,
   classifyTransfer,
+  hasResolvedReceipt,
+  hasSeaportFillFor,
   isMarketplankAttributed,
   readCachedSalePriceWei,
   resolveMarketplankAttribution,
@@ -61,6 +63,7 @@ import {
   activityEventToRow,
   hasChainEventStore,
   readChainCursor,
+  repairChainEvents,
   vaultEventToRow,
   writeChainCursor,
   type ChainEventRow,
@@ -315,14 +318,33 @@ async function buildNftRows(logs: RawLog[]): Promise<ChainEventRow[]> {
 
   const timestamps = await readBlockTimestamps(uniqueBlocks);
 
-  // Only decode OrderFulfilled for transactions that really went through
-  // Seaport — never a blanket scan, for the reason in this file's header.
-  const seaportTxs = txSlice.filter(
-    (hash) => txInfo.get(hash)?.to?.toLowerCase() === SEAPORT_ADDRESS.toLowerCase()
+  // Read the receipt of every transaction that some CONTRACT executed — not
+  // just the ones sent straight to Seaport. Still never a blanket scan (this is
+  // per-transaction, and only for transactions the collection's own Transfer
+  // log already surfaced), but the tx.to filter it replaces was too narrow in
+  // both directions, proven against the live chain on 2026-08-04:
+  //   - it MISSED real fills routed through an aggregator. RelayApprovalProxyV3
+  //     (0xccc8…15be, permit2TransferAndMulticall) settles on Seaport and its
+  //     receipt carries the OrderFulfilled to prove it; tx.to is the proxy, so
+  //     the price was never decoded.
+  //   - it left every OTHER contract's transfers classified as a sale on no
+  //     evidence at all, because without a receipt there was nothing to
+  //     contradict the "executed by a contract, therefore a sale" fallback.
+  // Vault transactions are excluded: classifyTransfer settles those from the
+  // address alone and a receipt would tell us nothing we do not already know.
+  const vaultSet = new Set(
+    [MARKET_VAULT_ADDRESS, ...MARKET_VAULT_ADDRESSES]
+      .filter((v): v is string => Boolean(v))
+      .map((v) => v.toLowerCase())
   );
-  for (let i = 0; i < seaportTxs.length; i += CONCURRENCY) {
+  const nftLower = NFT_CONTRACT_ADDRESS.toLowerCase();
+  const settlementTxs = txSlice.filter((hash) => {
+    const to = txInfo.get(hash)?.to?.toLowerCase() ?? null;
+    return to != null && to !== nftLower && !vaultSet.has(to);
+  });
+  for (let i = 0; i < settlementTxs.length; i += CONCURRENCY) {
     await Promise.all(
-      seaportTxs.slice(i, i + CONCURRENCY).map(async (hash) => {
+      settlementTxs.slice(i, i + CONCURRENCY).map(async (hash) => {
         try {
           await resolveMarketplankAttribution(hash);
         } catch {
@@ -346,6 +368,17 @@ async function buildNftRows(logs: RawLog[]): Promise<ChainEventRow[]> {
     }
 
     const tx = txInfo.get(log.transactionHash) ?? null;
+    // Only claim evidence when the receipt was genuinely read. If it was not,
+    // `undefined` leaves classifyTransfer on its original behaviour — an RPC
+    // failure must never be able to turn a real sale into a transfer.
+    const saleEvidence = hasResolvedReceipt(log.transactionHash)
+      ? hasSeaportFillFor(log.transactionHash, tokenId)
+        ? ("seaport-fill" as const)
+        : tx != null && tx.value > BigInt(0)
+          ? ("native-value" as const)
+          : ("none" as const)
+      : undefined;
+
     const { kind, venue } = classifyTransfer({
       // classifyTransfer's zero-address mint check compares against the
       // canonical lowercase zero address, which is what the topic slice yields.
@@ -358,6 +391,7 @@ async function buildNftRows(logs: RawLog[]): Promise<ChainEventRow[]> {
       // deposit/redeem into the ledger as an unpriced "sale" — and the ledger
       // is append-only, so a misclassification here is permanent.
       vaultAddresses: MARKET_VAULT_ADDRESSES,
+      saleEvidence,
     });
 
     if (venue?.kind === "seaport" && isMarketplankAttributed(log.transactionHash, tokenId)) {
@@ -367,9 +401,13 @@ async function buildNftRows(logs: RawLog[]): Promise<ChainEventRow[]> {
     // Same price rule as the live feed: a native fill moves value via tx.value,
     // a WETH fill moves it as a Seaport consideration leg (decoded above).
     const nativeWei = kind === "sale" && tx != null && tx.value > BigInt(0) ? tx.value : null;
-    const wethWei =
+    const settledWei =
       kind === "sale" ? readCachedSalePriceWei(log.transactionHash, tokenId) : null;
-    const priceWei = nativeWei ?? wethWei;
+    // The decoded settlement wins over tx.value when both exist: tx.value is
+    // whatever the buyer SENT (a sweep sends one lump for several tokens, and
+    // Seaport refunds any excess), whereas the OrderFulfilled legs are what this
+    // specific token actually cleared for.
+    const priceWei = settledWei ?? nativeWei;
 
     const event: ActivityEvent = {
       kind,
@@ -484,6 +522,49 @@ export async function indexSource(input: {
     result.toBlock = reached;
   }
   return result;
+}
+
+/**
+ * Re-read one historical block range and correct what is already stored.
+ *
+ * Separate from indexSource on purpose, and deliberately does NOT touch the
+ * cursor: this walks BACKWARDS over history the cursor has already passed, so
+ * moving it would make the indexer skip live blocks. New rows are appended
+ * exactly as normal (a range can legitimately contain a log that was never
+ * written, e.g. one lost to a failed window), and rows that already exist have
+ * only their derived columns corrected — see repairChainEvents for why that is
+ * consistent with an append-only ledger rather than an exception to it.
+ */
+export async function reindexNftRange(input: {
+  fromBlock: number;
+  toBlock: number;
+}): Promise<{ logsScanned: number; rowsInserted: number; rowsRepaired: number; windows: number }> {
+  const { chunkBlocks } = logScanBudget();
+  const chunk = Math.max(1, Math.floor(chunkBlocks));
+  const from = Math.max(0, Math.floor(input.fromBlock));
+  const to = Math.max(from, Math.floor(input.toBlock));
+
+  let logsScanned = 0;
+  let rowsInserted = 0;
+  let rowsRepaired = 0;
+  let windows = 0;
+
+  for (let cursor = from; cursor <= to; cursor += chunk) {
+    const windowTo = Math.min(to, cursor + chunk - 1);
+    windows += 1;
+    const found = (await ethGetLogsDisplay({
+      address: NFT_CONTRACT_ADDRESS,
+      topics: [TRANSFER_TOPIC],
+      fromBlock: "0x" + cursor.toString(16),
+      toBlock: "0x" + windowTo.toString(16),
+    })) as RawLog[];
+    logsScanned += found.length;
+    const rows = await buildNftRows(found);
+    rowsInserted += await appendChainEvents(rows);
+    rowsRepaired += await repairChainEvents(rows);
+  }
+
+  return { logsScanned, rowsInserted, rowsRepaired, windows };
 }
 
 /** Every contract the ledger tracks: the collection plus every known vault. */

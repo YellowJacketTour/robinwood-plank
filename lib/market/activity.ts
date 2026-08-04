@@ -141,6 +141,37 @@ export function classifyTransfer(input: {
    * ledger — 130 of 375 "sales" were actually legacy-vault mechanics.
    */
   vaultAddresses?: readonly string[];
+  /**
+   * What the transaction's OWN receipt proves about payment, when it could be
+   * read. Omit it and this function keeps its original behaviour exactly
+   * ("executed by some contract, therefore a sale") — which is what a caller
+   * that could not read the receipt must do, since silently downgrading a real
+   * sale to a transfer on an RPC failure would be a worse lie than the one this
+   * exists to fix.
+   *
+   * Verified against the real chain on 2026-08-04 by pulling the receipts of
+   * every unpriced "sale" in the ledger. 121 of 131 had NO payment leg at all:
+   *   - 83 via Seaport's TransferHelper (`bulkTransfer`, tx.value 0, receipt
+   *     contains nothing but ERC-721 Transfer logs) — a bulk *transfer* tool,
+   *     not a marketplace;
+   *   - 26 via 0xd5c0…5c97 (`0xb58adcb2` =
+   *     safeBatchTransferToSingleWallet, tx.value 0, no payment log);
+   *   - 9 via 0x5ff1…2789, which is the ERC-4337 EntryPoint (`0x1fad948c` =
+   *     handleOps; its receipts carry UserOperationEvent/Deposited and the NFT
+   *     Transfer, no payment) — an account-abstraction bundler, not a venue.
+   * The remaining 10 were genuine fills, 3 of them routed through
+   * RelayApprovalProxyV3 (`permit2TransferAndMulticall`) whose receipt DOES
+   * carry a real Seaport OrderFulfilled — which is why "was there a Seaport
+   * fill in this receipt" is the evidence that matters, not the address the
+   * transaction happened to be sent to.
+   *
+   *   "seaport-fill"  — the receipt contains a Seaport OrderFulfilled that
+   *                     settled THIS token. A sale, whoever routed it.
+   *   "native-value"  — no Seaport fill, but the transaction carried ETH. A
+   *                     sale through some venue we cannot name.
+   *   "none"          — receipt read, no fill and no value moved. NOT a sale.
+   */
+  saleEvidence?: "seaport-fill" | "native-value" | "none";
 }): { kind: ActivityKind; venue: ActivityEvent["venue"] } {
   const nftContract = input.nftContractAddress.toLowerCase();
   const seaport = input.seaportAddress.toLowerCase();
@@ -173,18 +204,32 @@ export function classifyTransfer(input: {
   if (txTo != null && vaults.has(txTo)) {
     return { kind: "transfer", venue: { kind: "vault", contract: input.txTo! } };
   }
+  // Seaport itself executed the call: a fill, unconditionally. Deliberately
+  // ahead of the evidence checks below — a receipt that failed to read must
+  // never be able to demote a transaction Seaport plainly executed.
+  if (txTo === seaport) {
+    return { kind: "sale", venue: { kind: "seaport", contract: input.txTo! } };
+  }
+  // Some OTHER contract executed it. Now the receipt decides, when we have it.
+  if (input.saleEvidence === "none") {
+    // A batch-transfer tool, an AA bundler, an airdrop script — moved a token,
+    // moved no money. Recording it as a "sale" with no price was the bug.
+    return { kind: "transfer", venue: null };
+  }
+  if (input.saleEvidence === "seaport-fill") {
+    // Routed by a relayer/aggregator, settled by Seaport. The VENUE is Seaport,
+    // not the router — that is where the order actually cleared.
+    return { kind: "sale", venue: { kind: "seaport", contract: input.seaportAddress } };
+  }
   // NOTE: "seaport" here is provisional, never "marketplank" — attribution
   // to us requires a positive orderHash match, applied as a later async
   // upgrade step in fetchActivity (see upgradeMarketplankAttribution). This
   // function stays pure and synchronous on purpose so it's fully testable
   // without an RPC.
-  return {
-    kind: "sale",
-    venue:
-      txTo === seaport
-        ? { kind: "seaport", contract: input.txTo! }
-        : { kind: "other", contract: input.txTo! },
-  };
+  // Either the transaction carried ETH ("native-value"), or no receipt was
+  // available at all — in which case this keeps the original, unchanged
+  // behaviour rather than guessing in the other direction.
+  return { kind: "sale", venue: { kind: "other", contract: input.txTo! } };
 }
 
 type RawLog = {
@@ -211,6 +256,9 @@ const priceCache = new Map<string, bigint>();
 // matching order (nothing added to attributionCache) doesn't get its
 // receipt re-fetched on every subsequent request.
 const attributionResolvedTxs = new Set<string>();
+// "txHash:tokenId" for every token a Seaport OrderFulfilled in that
+// transaction actually settled — the sale evidence classifyTransfer consumes.
+const seaportFillKeys = new Set<string>();
 
 /**
  * Readers for the two caches above, so the permanent event indexer
@@ -225,6 +273,90 @@ export function readCachedSalePriceWei(txHash: string, tokenId: string): bigint 
 /** True only on a POSITIVE orderHash match against an order this relay served. */
 export function isMarketplankAttributed(txHash: string, tokenId: string): boolean {
   return attributionCache.get(`${txHash}:${tokenId}`) === true;
+}
+
+/**
+ * True when this transaction's receipt was successfully READ (regardless of
+ * what was in it). Callers use it to distinguish "the receipt proves there was
+ * no payment" from "the receipt could not be fetched" — the difference between
+ * reclassifying a fake sale and inventing a fake transfer.
+ */
+export function hasResolvedReceipt(txHash: string): boolean {
+  return attributionResolvedTxs.has(txHash);
+}
+
+/**
+ * True when a Seaport OrderFulfilled in this transaction actually settled this
+ * token — the positive, forgery-proof evidence that a transfer was a sale, no
+ * matter which router the transaction was sent to.
+ */
+export function hasSeaportFillFor(txHash: string, tokenId: string): boolean {
+  return seaportFillKeys.has(`${txHash}:${tokenId}`);
+}
+
+/** An OrderFulfilled item, in the only shape this module needs. */
+type SettlementItem = {
+  itemType: number | bigint;
+  token: string;
+  identifier: bigint | string;
+  amount: bigint | string;
+};
+
+/**
+ * What one OrderFulfilled event settled: which of OUR tokens it moved, and how
+ * much the buyer paid for them.
+ *
+ * Pure, and exported, because the shape of a Seaport order is exactly the part
+ * that a test can pin down and a live decode cannot. Two real order shapes
+ * occur on this chain and only one of them was handled before:
+ *
+ *   LISTING SIDE  offer = [NFT], consideration = [payment legs]
+ *     Someone bought a listing. Price = the consideration legs.
+ *
+ *   BID SIDE      offer = [WETH], consideration = [NFT, fee legs]
+ *     Someone ACCEPTED an offer. The NFT is in the consideration and the money
+ *     is in the offer — the exact inversion the old decoder had no branch for,
+ *     which is why `fulfillAvailableAdvancedOrders` collection-bid fills
+ *     (verified live: tx 0x56ea0b8f…, token 968, 0.005 WETH) landed in the
+ *     ledger as sales with a null price.
+ *
+ * Payment counts NATIVE legs (itemType 0) as well as the WETH-equivalent
+ * currency: RelayApprovalProxyV3 fill 0xbd7f18fe… paid 0.00999999 ETH natively
+ * through a consideration leg, with tx.value 0, so a native-only-via-tx.value
+ * rule could never have seen it. A leg denominated in any OTHER ERC-20 is
+ * deliberately NOT counted — two of these fills settled in USDG (6 decimals),
+ * and adding 20000000 USDG units to a wei total would render as an absurd ETH
+ * price. Those stay honestly unpriced rather than confidently wrong.
+ */
+export function orderFulfilledSettlement(
+  order: { offer: readonly SettlementItem[]; consideration: readonly SettlementItem[] },
+  opts: { nftContract: string; currency: string }
+): { tokenIds: string[]; paidWei: bigint } {
+  const nft = opts.nftContract.toLowerCase();
+  const currency = (opts.currency || "").toLowerCase();
+
+  const ours = (item: SettlementItem) => String(item.token).toLowerCase() === nft;
+  const payment = (items: readonly SettlementItem[]) => {
+    let total = BigInt(0);
+    for (const item of items) {
+      const type = Number(item.itemType);
+      const token = String(item.token).toLowerCase();
+      // 0 = NATIVE, 1 = ERC20. 2/3 are the NFT itself; 4/5 are criteria items.
+      if (type !== 0 && type !== 1) continue;
+      if (type === 1 && (!currency || token !== currency)) continue;
+      total += BigInt(item.amount);
+    }
+    return total;
+  };
+
+  const offered = order.offer.filter(ours);
+  const considered = order.consideration.filter(ours);
+  // The money is always on the side the NFT is NOT on.
+  const source = offered.length > 0 ? order.consideration : considered.length > 0 ? order.offer : [];
+  const tokenIds = (offered.length > 0 ? offered : considered).map((item) =>
+    BigInt(item.identifier).toString()
+  );
+  return { tokenIds, paidWei: tokenIds.length === 0 ? BigInt(0) : payment(source) };
 }
 
 /**
@@ -259,24 +391,33 @@ export async function resolveMarketplankAttribution(txHash: string): Promise<voi
       if (!parsed) continue;
 
       const orderHash: string = parsed.args.orderHash;
+
+      // Handles BOTH order shapes — a bought listing and an accepted bid — and
+      // native as well as WETH payment. See orderFulfilledSettlement.
+      const { tokenIds, paidWei } = orderFulfilledSettlement(
+        {
+          offer: parsed.args.offer as unknown as SettlementItem[],
+          consideration: parsed.args.consideration as unknown as SettlementItem[],
+        },
+        { nftContract: NFT_CONTRACT_ADDRESS, currency: MARKET_OFFER_CURRENCY }
+      );
+      if (tokenIds.length === 0) continue;
+
       const isOurs = await wasOrderServedByUs(orderHash);
 
-      // Total the buyer paid in WETH — every consideration leg that's the
-      // WETH token, summed (proceeds + marketplace fee + royalty, if any).
-      let weiPaid = BigInt(0);
-      for (const item of parsed.args.consideration) {
-        if (String(item.token).toLowerCase() !== MARKET_OFFER_CURRENCY.toLowerCase()) continue;
-        weiPaid += item.amount as bigint;
-      }
-
-      // Attribute (and, if priced, price) every token this specific order
-      // actually moved — an order's offer items name the NFT(s) it settled.
-      for (const item of parsed.args.offer) {
-        if (String(item.token).toLowerCase() !== NFT_CONTRACT_ADDRESS.toLowerCase()) continue;
-        const tokenId = (item.identifier as bigint).toString();
+      for (const tokenId of tokenIds) {
         const key = `${txHash}:${tokenId}`;
+        // Positive proof this transfer was a settled sale, independent of both
+        // price and attribution.
+        seaportFillKeys.add(key);
         if (isOurs) attributionCache.set(key, true);
-        if (weiPaid > BigInt(0)) priceCache.set(key, weiPaid);
+        // A matched pair (matchAdvancedOrders) emits TWO OrderFulfilled logs
+        // for the same token: the listing side nets the seller's proceeds, the
+        // bid side carries the full amount the buyer paid. Keep the larger —
+        // "sale price" means what the buyer paid, fees included, which is the
+        // convention every Seaport frontend displays.
+        const known = priceCache.get(key) ?? BigInt(0);
+        if (paidWei > known) priceCache.set(key, paidWei);
       }
     }
   } catch {
