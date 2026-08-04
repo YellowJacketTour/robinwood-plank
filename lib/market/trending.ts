@@ -18,8 +18,12 @@ import { collectionFloorWei } from "@/lib/market/floors";
  *    proxy — there is no persisted historical order-book floor snapshot to
  *    diff against, so this uses actual settled sales rather than inventing
  *    one).
- *  - uniqueBuyers24h / uniqueBuyers7d: distinct `to` addresses across sales
- *    in each window (a real transfer recipient, not a display name).
+ *  - tradeCount24h / tradeCount7d: distinct settled-sale tx hashes in each
+ *    window. NOT a unique-buyer count — SaleRecord has no `to`/buyer address
+ *    field to dedupe on (see uniqueTrades() below), so this is a trade-count
+ *    proxy, not a wallet-diversity signal. It is intentionally cheap for two
+ *    wallets round-tripping a sale to inflate: treat this as "how much is
+ *    happening," not "how many distinct people are involved."
  *
  * Collections with no sales in the 7d window are ranked last (score 0), not
  * hidden — an empty-activity collection is still real data, not an error.
@@ -37,8 +41,9 @@ export type TrendingCollectionSignal = {
   volumeVelocity: number;
   floorWei: string | null;
   floorDeltaPct: number | null;
-  uniqueBuyers24h: number;
-  uniqueBuyers7d: number;
+  /** Distinct settled-sale tx hashes, NOT unique buyers — see module doc comment. */
+  tradeCount24h: number;
+  tradeCount7d: number;
   saleCount24h: number;
   score: number;
 };
@@ -118,8 +123,12 @@ export async function computeTrendingSignal(
   // breadth are secondary tie-breakers.
   const velocityScore = Number.isFinite(volumeVelocity) ? Math.min(volumeVelocity, 10) : 10;
   const floorScore = floorDeltaPct !== null ? Math.max(-1, Math.min(1, floorDeltaPct / 100)) : 0;
-  const buyerScore = Math.min(uniqueTrades(last24h) / 10, 1);
-  const score = velocityScore * 0.6 + floorScore * 0.25 + buyerScore * 0.15;
+  // Trade-count term, not a wallet-diversity term — see uniqueTrades() and
+  // the module doc comment. Cheap for a wash-trading pair to inflate; kept
+  // as a minor (15%) tie-breaker specifically because it's gameable, not
+  // treated as the dominant signal.
+  const tradeScore = Math.min(uniqueTrades(last24h) / 10, 1);
+  const score = velocityScore * 0.6 + floorScore * 0.25 + tradeScore * 0.15;
 
   return {
     slug,
@@ -130,8 +139,8 @@ export async function computeTrendingSignal(
     volumeVelocity: Number.isFinite(volumeVelocity) ? volumeVelocity : 999,
     floorWei: floorNow !== null ? floorNow.toString() : null,
     floorDeltaPct,
-    uniqueBuyers24h: uniqueTrades(last24h),
-    uniqueBuyers7d: uniqueTrades(last7d),
+    tradeCount24h: uniqueTrades(last24h),
+    tradeCount7d: uniqueTrades(last7d),
     saleCount24h: last24h.length,
     score,
   };

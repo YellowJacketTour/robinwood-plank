@@ -89,10 +89,20 @@ export async function GET(req: Request): Promise<Response> {
       await Promise.all(slugs.map((slug) => getListings(slug)))
     ).flat();
 
-    const min = minEth ? Number(minEth) : null;
-    const max = maxEth ? Number(maxEth) : null;
-    const minWei = min !== null && Number.isFinite(min) ? BigInt(Math.round(min * 1e18)) : null;
-    const maxWei = max !== null && Number.isFinite(max) ? BigInt(Math.round(max * 1e18)) : null;
+    // Cap at a generous but finite ETH bound before the *1e18 wei conversion —
+    // Number.isFinite alone isn't enough: a huge-but-finite ETH value (e.g.
+    // 1e300) is still finite pre-multiplication but overflows to Infinity
+    // once scaled to wei, and BigInt(Infinity) throws a RangeError that was
+    // previously surfacing as an ugly generic 500 instead of a clean 400.
+    const MAX_ETH_BOUND = 1e12; // far above any real listing; just a sanity ceiling
+    function parseEthBound(raw: string | null): bigint | null {
+      if (!raw) return null;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || Math.abs(n) > MAX_ETH_BOUND) return null;
+      return BigInt(Math.round(n * 1e18));
+    }
+    const minWei = parseEthBound(minEth);
+    const maxWei = parseEthBound(maxEth);
 
     let filtered = allListings.filter((listing) => {
       if (matchingTokenIds && !matchingTokenIds.has(`${listing.collectionSlug}:${listing.tokenId}`)) {
@@ -112,8 +122,16 @@ export async function GET(req: Request): Promise<Response> {
 
     if (q) {
       const needle = q.toLowerCase();
-      // Name search: token id substring always matches; trait-derived name
-      // (Base value) matched via the traits table for collections that have one.
+      // Name search: token id substring always matches; trait-value substring
+      // matched across ANY trait_type, not a hardcoded one. RobinWood happens
+      // to encode its display name as a "Base" trait, but a second collection
+      // may use "Name", may use no name-bearing trait at all, or may just have
+      // a different taxonomy — hardcoding trait_type = 'Base' here silently
+      // degraded every other collection to token-id-only search (looks like
+      // "no results" rather than "unsupported"). Matching any trait_type is
+      // the honestly-generic behavior for a cross-collection search: it can
+      // over-match a non-name trait too (e.g. "Oak" matching a background
+      // color), which is an acceptable trade for not silently breaking.
       const tokenIdsForQuery = new Set(
         filtered
           .filter((l) => l.tokenId.toLowerCase().includes(needle))
@@ -121,7 +139,7 @@ export async function GET(req: Request): Promise<Response> {
       );
       const { rows: nameRows } = await postgresQuery<{ collection: string; token_id: number }>(
         `SELECT collection, token_id FROM collection_token_traits
-         WHERE collection = ANY($1) AND trait_type = 'Base' AND trait_value ILIKE $2`,
+         WHERE collection = ANY($1) AND trait_value ILIKE $2`,
         [slugs, `%${q}%`]
       );
       for (const row of nameRows) tokenIdsForQuery.add(`${row.collection}:${row.token_id}`);
