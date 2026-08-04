@@ -30,6 +30,16 @@ export type BadBoardEntry = {
   /** USD equivalent at last known ETH price (derived on read). */
   ethSpentUsd?: number;
   ethSpentUsdLabel?: string;
+  /**
+   * Reputation decay — see lib/boards.ts's nextGoodStreakDays /
+   * decayedBadSeverity. Consecutive calendar days of recorded good
+   * behavior (recordGoodBehavior in lib/boards-store.ts) since the mark,
+   * with no new bad mark breaking the streak. Never negative, never
+   * mutated except by that one function.
+   */
+  goodStreakDays?: number;
+  /** ISO timestamp of the most recent good-behavior tick, if any. */
+  lastGoodMarkAt?: string;
 };
 
 /** Good Wood / nice column with provenance. */
