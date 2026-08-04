@@ -211,6 +211,118 @@ export async function appendChainEvents(rows: ChainEventRow[]): Promise<number> 
   return inserted;
 }
 
+/**
+ * Correct the DERIVED fields of rows that are already stored.
+ *
+ * This is not a hole in the append-only rule, it is the other half of it. A
+ * ledger row carries two very different kinds of column:
+ *
+ *   OBSERVED — tx_hash, log_index, block_number, source, contract, token_id,
+ *     from_address, to_address. These come straight off the log. They are
+ *     facts, they never change, and nothing here touches them.
+ *
+ *   DERIVED — kind, price_wei, venue_kind, venue_contract. These are this
+ *     codebase's INTERPRETATION of the log, and an interpretation can be wrong
+ *     — or simply incomplete, because the enrichment RPC that would have
+ *     supplied it failed on the tick that wrote the row.
+ *
+ * Before this existed, `ON CONFLICT DO NOTHING` made both permanent, so a
+ * transient receipt timeout during backfill produced a sale with a null price
+ * that no amount of re-indexing could ever repair, and a decoder bug fixed
+ * later still read wrong forever. That is exactly what happened: 131 of the
+ * ledger's 245 "sales" carried no price, and re-running the indexer over the
+ * same blocks was a no-op by design.
+ *
+ * The guards below are what keep this honest:
+ *   - price_wei is only ever FILLED IN, never overwritten and never nulled, so
+ *     a re-index that fails to decode cannot erase a price already recovered.
+ *   - kind/venue are only rewritten when the new value actually differs.
+ *   - The WHERE clause means an unchanged re-index reports 0 rows repaired.
+ */
+export async function repairChainEvents(rows: ChainEventRow[]): Promise<number> {
+  if (!hasChainEventStore() || rows.length === 0) return 0;
+
+  const byKey = new Map<string, ChainEventRow>();
+  for (const row of rows) {
+    if (!row.txHash || !Number.isInteger(row.logIndex)) continue;
+    byKey.set(`${row.txHash}:${row.logIndex}`, row);
+  }
+  const unique = [...byKey.values()];
+
+  let repaired = 0;
+  const BATCH = 200;
+  for (let start = 0; start < unique.length; start += BATCH) {
+    const batch = unique.slice(start, start + BATCH);
+    const values: unknown[] = [];
+    const tuples = batch.map((row, index) => {
+      const base = index * 6;
+      values.push(
+        row.txHash,
+        row.logIndex,
+        row.kind,
+        row.priceWei,
+        row.venueKind,
+        row.venueContract
+      );
+      return (
+        `($${base + 1}, $${base + 2}::integer, $${base + 3}, $${base + 4}::numeric, ` +
+        `$${base + 5}, $${base + 6})`
+      );
+    });
+
+    const result = await postgresQuery(
+      `UPDATE plank_chain_events e
+          SET kind = v.kind,
+              price_wei = COALESCE(e.price_wei, v.price_wei),
+              venue_kind = v.venue_kind,
+              venue_contract = v.venue_contract
+         FROM (VALUES ${tuples.join(", ")})
+              AS v(tx_hash, log_index, kind, price_wei, venue_kind, venue_contract)
+        WHERE e.tx_hash = v.tx_hash
+          AND e.log_index = v.log_index
+          AND (e.kind IS DISTINCT FROM v.kind
+               OR (e.price_wei IS NULL AND v.price_wei IS NOT NULL)
+               OR e.venue_kind IS DISTINCT FROM v.venue_kind
+               OR e.venue_contract IS DISTINCT FROM v.venue_contract)`,
+      values
+    );
+    repaired += result.rowCount ?? 0;
+  }
+  return repaired;
+}
+
+/**
+ * Block ranges that contain rows whose interpretation is known to be suspect:
+ * a "sale" with no price. Used to aim a re-index at the handful of windows that
+ * can actually change rather than re-walking 8 million blocks of history.
+ *
+ * Ranges are padded and coalesced so a scan stays inside a sane number of
+ * eth_getLogs calls; `maxGap` is how far apart two suspect blocks can be before
+ * they are worth scanning separately.
+ */
+export async function unpricedSaleBlockRanges(
+  maxGap = 5_000
+): Promise<Array<{ fromBlock: number; toBlock: number }>> {
+  if (!hasChainEventStore()) return [];
+  const result = await postgresQuery<{ block_number: string | number }>(
+    `SELECT DISTINCT block_number
+       FROM plank_chain_events
+      WHERE source = 'nft' AND kind = 'sale' AND price_wei IS NULL
+      ORDER BY block_number`
+  );
+  const blocks = result.rows.map((r) => Number(r.block_number)).filter(Number.isFinite);
+  const ranges: Array<{ fromBlock: number; toBlock: number }> = [];
+  for (const block of blocks) {
+    const last = ranges[ranges.length - 1];
+    if (last && block - last.toBlock <= maxGap) {
+      last.toBlock = block;
+    } else {
+      ranges.push({ fromBlock: block, toBlock: block });
+    }
+  }
+  return ranges;
+}
+
 /* ---------------- *
  * Cursor           *
  * ---------------- */
