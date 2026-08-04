@@ -476,6 +476,80 @@ it ships: *does a compromised key holding this control ever get a path to
 reserves that are already pooled?* If yes, it needs a structural fix before
 it's acceptable, not just a timelock.
 
+### 2.9 Lessons from real incidents (2026-08-04)
+
+Every item below is tied to a documented, real DeFi exploit or near-miss —
+not generic caution — and is scoped as required audit brief input for the
+eventual Index Vault contracts, same as §2.7.
+
+**Credit actual received balance, never nominal transfer amount, for every
+constituent — Balancer STA hack (Jun 2020, ~$500k).** Balancer's pool math
+assumed transferred-in amount always equals credited amount; a
+fee-on-transfer token broke that assumption and let an attacker drain the
+pool via repeated flash-loaned swaps. A v-token from an NFT vault can
+behave the same way if the underlying vault charges entry/exit fees or
+rebalances share counts — the index contract must read and credit the
+*actual* balance delta after a transfer, never trust the nominal amount
+requested.
+
+**The ERC-4626 inflation-attack defense (§2.7's virtual-shares offset)
+must be applied independently at BOTH nesting layers, not just one.** A
+common real-world gap: fixing the first-depositor inflation attack on the
+underlying vault's own v-token, then forgetting the Global Index's own
+share token is a second, separate ERC-4626-shaped surface that needs the
+identical defense. Verify both layers explicitly in the audit brief.
+
+**A flash-loan NAV-manipulation defense must trigger on cumulative flow in
+a rolling window, not just per-transaction notional — Harvest Finance
+(Oct 2020, $34M).** The attacker didn't do one big trade; they distorted a
+shared price reference then deposited/withdrew from Harvest's vault at the
+skewed rate 32 times in 7 minutes, each individually small. §2.7's
+delayed/epoch settlement above a size threshold must key off *cumulative*
+flow within a rolling window, or an attacker simply chunks below the
+per-transaction threshold repeatedly.
+
+**Independent math review of NAV/virtual-share rounding direction at every
+nesting layer — Balancer V2 Composable Stable Pool hack (Nov 2025,
+~$120M).** A rounding error in nested-pool batch-swap math distorted the
+pool token's own price, which was then directly arbitraged. This is the
+closest real precedent to a v-token-of-v-tokens index specifically —
+composability multiplies rounding-direction bugs. Balancer's *weighted*
+pools (different math, same protocol) were unaffected, meaning the
+specific pool-math type matters, not just "has this protocol been
+audited before." Get independent review specifically on rounding
+direction at each layer (NFT vault → v-token, v-token → index share),
+always rounding in the protocol's favor at every step.
+
+**Treat every auxiliary/helper contract users approve as part of the
+threat model, not just admin keys — NFTX NFTXMarketplace0xZap incident
+(Sep 2022, near-miss, $0 lost).** A router/zap helper contract with
+blanket vault-fund approval became a theft vector; NFTX shipped a
+deny-list and paused fast enough to avoid loss. §2.8's compromised-key
+anchor rule ("no role ever has a withdrawal path over pooled reserves")
+must extend explicitly to any future zap/batcher/integration contract
+users approve, with an emergency pause/deny-list designed in from day
+one — not bolted on after a near-miss the way NFTX's was.
+
+**A stale/no-liquidity circuit breaker for constituents with no recent
+trades.** TWAP-based NAV pricing (§2.7) has no defense against a
+constituent that goes to zero *without any trade occurring at all* — e.g.
+the underlying NFT vault gets drained or frozen and nobody trades it
+afterward, so there's no TWAP data to reflect the loss. No close fungible-
+token precedent fully covers this (it's specific to illiquid NFT-vault
+constituents); the recommended defense is: if a constituent has no
+qualifying trade within N epochs, force its contribution to a
+conservative floor value and freeze further weight ramp-in for it, rather
+than trusting a TWAP that may simply have gone silent.
+
+**Zero-tolerance on "small" bugs in auxiliary contracts, since materiality
+scales with AUM, not code — Index Coop's ExchangeIssuanceZeroEx.** A known
+withdrawal-path bug in an issuance helper was left unfixed as "not worth
+it at these amounts" — exactly the kind of debt that becomes material
+once basket AUM grows, which is the explicit intended trajectory here
+(§4). Any auxiliary contract touching value gets the same audit bar as
+the core vault, not a lighter one because it "only" moves small amounts
+today.
+
 ---
 
 ## 3. Routing intelligence (1inch/Matcha-style)
@@ -659,26 +733,146 @@ where it would actually fit:
   existed — rewards the people who took the actual risk of using an
   unproven system, a well-established pattern in how mature protocols treat
   their earliest real users.
-- **A genuine insurance/backstop fund (Aave's Safety Module).** A small,
-  published percentage of protocol revenue accumulates as a standing
-  backstop against a future black-swan event (an exploit despite audits,
-  an oracle failure) — funded the same never-negative-sum way everything
-  else here is, and a real trust signal to prospective collections
-  deciding whether to list here versus elsewhere.
+- **A genuine insurance/backstop fund.** Spec-only, same audit-gate as
+  everything else in §2 — see the dedicated subsection below for the
+  design lessons real incidents actually teach, since "have a reserve" on
+  its own turned out not to be the deciding factor in which protocols
+  survived a real exploit.
 - **Dutch-auction-style rebalancing (Balancer LBP mechanics), as an upgrade
   path beyond the TWAP/small-piece execution in §2.7.** Once volume
   justifies the complexity, a Dutch auction for rebalance trades can extract
   even less MEV than piecewise execution alone, at the cost of real added
   complexity — worth having in mind as a later optimization, not a
   first-version requirement.
-- **Composability with a real lending market, if one ever exists on
-  Robinhood Chain.** The Global Index share, once trusted and liquid
-  (Gen 2 in the ticker's own roadmap, §"public price ticker" discussion),
-  is a natural collateral asset — this is deliberately not scoped or
-  designed here, since it depends entirely on infrastructure this repo
-  doesn't control, but it's the direct, obvious next step once it exists.
+- **Composability with a real lending market against v-token collateral.**
+  Spec-only, same audit gate — see the dedicated subsection below.
 
 None of the above is scoped for near-term build — flagged here specifically
 because they're the kind of mechanism a competitor with a longer head start
 would already be reaching for, and worth having named and prioritized rather
 than discovered under pressure later.
+
+### 6.1 Backstop/insurance fund — lessons from real incidents (2026-08-04)
+
+Researched against every major documented DeFi insurance-fund case, both
+successes and failures. **The deciding factor was never fund size alone —
+it was segregation from the exploited surface, and a payout trigger that
+can't be captured by whoever caused the loss or changed unilaterally after
+the fact.**
+
+- **Segregation is the single biggest survival factor — Drift Protocol
+  (Apr 2026, $295M drained in a North-Korea-linked exploit).** The
+  Insurance Fund was untouched because it was never commingled with the
+  exploited trading/liquidation logic, and the protocol paused before the
+  loss cascade could reach it. Converted a catastrophic hack into "user
+  funds safe, recovery in progress." Directly validates the reserve design
+  already recommended for Marketplank: a fee-funded treasury reserve held
+  in a genuinely separate contract from the vaults it backstops.
+- **A payout trigger with no independent check becomes a governance-
+  capture weapon — Mango Markets (Oct 2022, $117M).** The exploiter used
+  his own stolen governance tokens to vote himself a $47M "bug bounty" out
+  of the treasury. Token-weighted governance as the payout trigger is
+  fatally exploitable whenever the attacker can acquire voting weight from
+  the exploit itself — rule out any trigger design where the entity that
+  can trigger a payout could plausibly be (or be controlled by) the same
+  entity that caused the loss.
+- **A reserve too small to cover a severe-tail loss isn't a backstop, it's
+  theater — Euler Finance ($197M, Mar 2023).** No dedicated fund large
+  enough existed; recovery depended entirely on white-hat pressure and
+  negotiation, not fund design. A reserve sized off "normal" volatility
+  rather than a real tail scenario fails exactly when it's needed —
+  Venus Protocol's $95M+ of bad debt from a May 2021 oracle-manipulation
+  event is the same lesson from the sizing side.
+- **Changing claims terms after the fact destroys trust even at a high
+  payout rate — InsurAce's UST de-peg response (2022).** InsurAce
+  unilaterally shortened its claims window from 15 to 7 days, still paid
+  $11M to 155 claimants using only 20% of the available pool (this was
+  never a capital shortfall), and still faced "a promise is a promise"
+  backlash. Whatever the claims/evidence window is, publish it in advance
+  and never shorten it after a claim is already in flight.
+- **Socialized-loss/staking layers add capital efficiency but add a second
+  attack surface — Aave Umbrella vs. Nexus Mutual's Capital Pool.** Aave
+  moved from governance-vote-gated slashing to automated threshold-
+  triggered slashing specifically because the vote-gated version was too
+  slow; Nexus Mutual's 50%-burn/50%-socialize model has paid $18.5M since
+  2019 with every claim publicly documented, but requires years of mature
+  underwriting-market track record Marketplank doesn't have yet. Both
+  confirm the existing recommendation to start with the simplest
+  no-staking design and treat these as a real, later upgrade — not a v1
+  requirement.
+
+**Concrete sizing and trigger recommendation for a protocol at
+Marketplank's scale** (small/mid, not $B-scale like Aave/Nexus, where a
+flat "3-5% of TVL" ratio is too small in absolute terms to matter): size
+the reserve to cover 1.5-2x the realistic liquidation shortfall of the
+single largest vault, funded purely from protocol fees (no staking/
+slashing at v1), with a hard per-incident payout cap (e.g. ≤25-40% of
+reserve per event) so one claim can't fully drain it — the same discipline
+that kept Nexus solvent across multiple real claims. For the trigger:
+a fixed, pre-published evidence window (e.g. 72h, never shortened after a
+claim opens) followed by an M-of-N multisig payout requiring signers
+structurally unable to have caused the loss (rotating community members
+plus a security partner, excluded if they hold the exploited position),
+with every claim's outcome and rationale published on-chain — mirroring
+what actually preserved trust in the real cases above, not mechanism
+sophistication for its own sake.
+
+### 6.2 Lending/borrowing against v-tokens — lessons from real incidents (2026-08-04)
+
+Researched against the major documented oracle-manipulation and illiquid-
+collateral lending failures, with **BendDAO as the single closest real
+precedent** — an NFT-collateral lending protocol that nearly failed from
+exactly the failure mode this design would inherit if built carelessly.
+
+- **Never let the collateral market and its own price oracle be the same
+  venue — Mango Markets (Oct 2022, $117M).** The attacker pumped a thinly-
+  traded spot price on the same venue used to price his own collateral,
+  then borrowed against the inflated value. This directly rules out the
+  "isolated pooled market, vault's own AMM curve as oracle" design
+  candidate from earlier research (§ the routing-intelligence discussion)
+  unless paired with a fully independent, multi-source price feed
+  decoupled from the v-token's own trading venue — structurally hard for a
+  bespoke token with no external liquid market, which is most of them.
+- **BendDAO (Aug 2022) — the closest real analog.** Borrowing against
+  BAYC/MAYC NFTs using floor-price TWAP; when floor dropped, the
+  liquidation auction required starting bids above both the debt and 95%
+  of floor price with a 48-hour liquidator ETH lockup, so nobody bid and
+  liquidations simply didn't clear while utilization spiked toward 100%,
+  threatening a depositor bank run. BendDAO's own postmortem: they
+  "underestimated how illiquid NFTs could be in a bear market." Fixes
+  shipped: liquidation threshold lowered from ~95% to 70%, auction window
+  shortened from 48 hours to 4 hours, base interest rates cut from
+  100%→20%. Every one of these numbers is a direct input for any future
+  v-token lending design: conservative thresholds well below 95%
+  LTV-equivalent, an auction/decay window measured in hours not days,
+  interest curves that don't punish distressed borrowers into forced
+  default.
+- **Concentration risk can make a technically-correct liquidation
+  systemically catastrophic — Solend whale near-miss (Jun 2022).** One
+  account held >95% of pool deposits with $108M borrowed; a liquidation
+  cliff threatened a cascade that could have crashed both the protocol and
+  (via DEX liquidation flow) the underlying chain. Hard per-borrower and
+  per-collateral concentration caps matter as much as oracle design — a
+  single position's liquidation must never be able to overwhelm the
+  vault's realistic exit liquidity.
+- **Uncontained accounting bugs compound catastrophically — Euler Finance
+  (Mar 2023, $197M).** A missing solvency check let an attacker
+  self-collateralize an artificially "healthy" position and self-liquidate
+  at a steep discount. Any function touching collateral/debt accounting
+  needs an explicit solvency check, and dynamic liquidation-discount
+  mechanisms are themselves exploitable state.
+
+**Recommendation given these lessons:** of the three candidate designs
+from prior research (isolated pooled market w/ AMM-as-oracle; P2P
+perpetual with Dutch-auction liquidation, Blend/Blur-style; NFT-backed
+CDP stablecoin, JPEG'd-style), **the P2P/Dutch-auction design is safest to
+build toward first**, provided it explicitly incorporates BendDAO's
+post-crisis fixes (conservative thresholds, short auction windows,
+distress-aware interest curves) plus the Solend-lesson concentration caps.
+The AMM-as-oracle design should be rejected outright unless paired with a
+genuinely independent multi-source price feed — a hard requirement given
+how directly it reproduces Mango's exploit shape. The CDP/stablecoin
+design should be deferred until the auction/oracle mechanics of whichever
+design ships first are proven in production, since bad debt there
+propagates into peg risk rather than staying contained (Euler's lesson:
+uncontained errors compound, they don't stay isolated).
