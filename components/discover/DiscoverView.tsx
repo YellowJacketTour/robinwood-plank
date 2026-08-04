@@ -28,7 +28,7 @@ type TrendingCollection = {
   volumeVelocity: number;
   floorWei: string | null;
   floorDeltaPct: number | null;
-  uniqueBuyers24h: number;
+  tradeCount24h: number;
   saleCount24h: number;
   score: number;
 };
@@ -448,8 +448,8 @@ function TrendingRail({ collections }: { collections: TrendingCollection[] | nul
               >
                 {c.floorDeltaPct === null ? "—" : `${c.floorDeltaPct >= 0 ? "+" : ""}${c.floorDeltaPct.toFixed(1)}%`}
               </dd>
-              <dt className="text-cream-muted">Buyers 24h</dt>
-              <dd className="text-right text-cream">{c.uniqueBuyers24h}</dd>
+              <dt className="text-cream-muted">Trades 24h</dt>
+              <dd className="text-right text-cream">{c.tradeCount24h}</dd>
             </dl>
           </Link>
         ))}
