@@ -636,13 +636,22 @@ async function fetchActivityFromBlockscout(
           ? { kind: "seaport", contract: SEAPORT_ADDRESS }
           : { kind: "other", contract: method || "marketplace" };
     } else if (from !== ZERO && to !== ZERO) {
-      if (method && method !== "transferfrom" && method !== "safetransferfrom") {
-        kind = "sale";
-        venue = { kind: "other", contract: method };
-      } else {
-        kind = "transfer";
-        venue = null;
-      }
+      // Real gap found live 2026-08-04: this used to assume ANY method other
+      // than the two literal strings "transferfrom"/"safetransferfrom" was a
+      // sale — so a genuinely unrelated, unverified contract call (confirmed
+      // on one real tx: method 0xb58adcb2, which 4byte.directory resolves to
+      // safeBatchTransferToSingleWallet(address,address,uint256[]) — a plain
+      // batch NFT transfer tool, not a marketplace, no ETH or WETH moved at
+      // all) got labeled "sale" and rendered the alarming "Unavailable"
+      // instead of the honest "—" a genuine unpriced transfer shows. We
+      // already have a real positive-evidence path above (priced ||
+      // isMarketplaceMethod) for actual sales; nothing here has any positive
+      // signal this is a sale, only that Blockscout couldn't name the
+      // method — which is just as true of an unverified airdrop, batch-send,
+      // or migration tool as of an unrecognized marketplace. Default to the
+      // honest, safe answer instead of guessing "sale".
+      kind = "transfer";
+      venue = null;
     }
 
     const inst = t.total?.token_instance;
