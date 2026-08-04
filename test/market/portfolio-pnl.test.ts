@@ -185,8 +185,31 @@ test("a decrease larger than the tracked position clamps to what's held, never g
   pos = applyFlow(pos, dec(2n * SHARE_UNIT, 4n * SHARE_UNIT, 2));
   assert.equal(pos.sharesHeld, 0n);
   assert.equal(pos.costBasisWei, 0n);
-  // realized still uses the known cost (1.0) against the FULL proceeds (4.0)
-  assert.equal(pos.realizedPnlWei, 3n * SHARE_UNIT);
+  // Proceeds split proportionally: only the matched half (1 of 2 shares,
+  // 2.0 of the 4.0 proceeds) is realized against the known 1.0 cost.
+  // Folding the whole 4.0 in against a 1.0 cost would manufacture a fake
+  // 3.0 "gain" for shares this cohort never actually tracked owning.
+  assert.equal(pos.realizedPnlWei, SHARE_UNIT); // 2.0 matched proceeds - 1.0 cost
+  assert.equal(pos.unmatchedSharesWei, SHARE_UNIT);
+  assert.equal(pos.unmatchedProceedsWei, 2n * SHARE_UNIT);
+});
+
+test("an unmatched decrease with zero tracked history reports zero realized gain, not the full proceeds as profit", () => {
+  // No prior increase event at all — this cohort's history starts mid-stream.
+  const pos = applyFlow(emptyPosition(WALLET, VAULT), dec(5n * SHARE_UNIT, 500n * SHARE_UNIT, 1));
+  assert.equal(pos.sharesHeld, 0n);
+  assert.equal(pos.realizedPnlWei, 0n, "zero known cost basis must not be read as 100% profit");
+  assert.equal(pos.unmatchedSharesWei, 5n * SHARE_UNIT);
+  assert.equal(pos.unmatchedProceedsWei, 500n * SHARE_UNIT);
+});
+
+test("a full exit leaves zero cost-basis dust despite weighted-average rounding", () => {
+  let pos = emptyPosition(WALLET, VAULT);
+  // 3 wei-shares for 1 wei of cost — avgCostPerShareWei floors to 0.
+  pos = applyFlow(pos, inc(3n, 1n, 1));
+  pos = applyFlow(pos, dec(3n, 10n, 2));
+  assert.equal(pos.sharesHeld, 0n);
+  assert.equal(pos.costBasisWei, 0n, "a fully-exited cohort must never carry rounding dust forward");
 });
 
 test("events are reduced in ascending block order regardless of input order", () => {
