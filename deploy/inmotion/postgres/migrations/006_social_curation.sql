@@ -28,8 +28,12 @@ CREATE TABLE IF NOT EXISTS social_follows (
     (followed_wallet IS NOT NULL AND followed_collection IS NULL) OR
     (followed_wallet IS NULL AND followed_collection IS NOT NULL)
   ),
+  -- Case-insensitive: addresses are normalized to lowercase by every current
+  -- caller (lib/social-follows.ts), but the constraint itself must not rely
+  -- on that discipline — a future direct-insert path (admin tooling, a
+  -- different route) that skips normalization must still be blocked here.
   CONSTRAINT social_follows_no_self_follow CHECK (
-    followed_wallet IS NULL OR followed_wallet <> follower_wallet
+    followed_wallet IS NULL OR LOWER(followed_wallet) <> LOWER(follower_wallet)
   )
 );
 
