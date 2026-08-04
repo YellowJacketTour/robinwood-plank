@@ -21,7 +21,8 @@
     "db:migrate": "node scripts/migrate-postgres.mjs",
     "db:maintenance": "node scripts/postgres-maintenance.mjs",
     "market:refresh": "tsx scripts/refresh-market-data.ts",
-    "market:refresh:full": "tsx scripts/refresh-market-data.ts --full"
+    "market:refresh:full": "tsx scripts/refresh-market-data.ts --full",
+    "discover:compute-rarity": "tsx scripts/compute-rarity.ts"
   },
   "engines": {
     "node": ">=20.9.0"
