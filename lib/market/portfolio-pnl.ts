@@ -58,6 +58,8 @@
  * what the fee-bearing flow actually realized, accumulated per decrease.
  */
 
+import type { VaultTradeKind } from "@/lib/market/vault-activity";
+
 export type FlowKind = "increase" | "decrease";
 
 export type FlowEvent = {
@@ -93,6 +95,18 @@ export type CohortPosition = {
   realizedCostWei: bigint;
   /** Sum of (nav-parity realized - actual realized) — positive = fees cost the wallet. */
   feeDragWei: bigint;
+  /**
+   * Shares removed by a decrease that exceeded the tracked position — e.g.
+   * cohort history starts mid-stream, an earlier deposit/buy was missed by
+   * the indexer, or a vault migration isn't reflected in this cohort's flow
+   * history. Proceeds for this portion are NOT folded into realizedPnlWei
+   * (that would manufacture a fake 100%-profit gain against zero known cost)
+   * — they're tracked here instead, an honest "we don't know" bucket a
+   * caller must surface rather than silently absorb.
+   */
+  unmatchedSharesWei: bigint;
+  /** ETH proceeds attributable to unmatchedSharesWei — excluded from realizedPnlWei. */
+  unmatchedProceedsWei: bigint;
   eventCount: number;
 };
 
@@ -108,6 +122,8 @@ export function emptyPosition(wallet: string, vaultAddress: string): CohortPosit
     realizedProceedsWei: ZERO,
     realizedCostWei: ZERO,
     feeDragWei: ZERO,
+    unmatchedSharesWei: ZERO,
+    unmatchedProceedsWei: ZERO,
     eventCount: 0,
   };
 }
@@ -141,28 +157,45 @@ export function applyFlow(pos: CohortPosition, event: FlowEvent): CohortPosition
   // decrease — realize PnL on the portion removed, weighted-average.
   // Clamp to what's actually held: a decrease larger than the tracked
   // position (e.g. cohort history starts mid-stream, missing an earlier
-  // deposit) still realizes correctly against whatever basis IS known,
-  // rather than going net negative on shares held.
+  // deposit, or a vault migration not reflected in this cohort) still
+  // realizes correctly against whatever basis IS known, rather than going
+  // net negative on shares held.
   const sharesRemoved = event.sharesWei > pos.sharesHeld ? pos.sharesHeld : event.sharesWei;
+  const sharesUnmatched = event.sharesWei - sharesRemoved;
   const avgCost = avgCostPerShareWei(pos);
   const costOfRemoved = (avgCost * sharesRemoved) / SHARE_UNIT;
 
-  // Proceeds/nav-parity are for the FULL event size (even the unmatched
-  // excess, if any) — that excess just has zero attributable cost basis,
-  // which is the honest "we don't know" answer rather than dropping it.
-  const proceeds = event.valueWei;
-  const navParityProceeds = navParity;
+  // Proceeds/nav-parity are split proportionally between the matched
+  // (tracked) portion and any unmatched excess. Only the matched portion is
+  // ever realized PnL — folding unmatched proceeds in at zero attributable
+  // cost would manufacture a fake 100%-profit gain for the untracked
+  // portion. The unmatched share is instead surfaced honestly on
+  // unmatchedSharesWei/unmatchedProceedsWei for the caller to flag.
+  const proceeds =
+    sharesUnmatched > ZERO ? (event.valueWei * sharesRemoved) / event.sharesWei : event.valueWei;
+  const navParityProceeds =
+    sharesUnmatched > ZERO ? (navParity * sharesRemoved) / event.sharesWei : navParity;
+  const unmatchedProceeds = event.valueWei - proceeds;
   const realized = proceeds - costOfRemoved;
   const feeDrag = navParityProceeds - proceeds;
 
+  const sharesHeld = pos.sharesHeld - sharesRemoved;
+  // Weighted-average division floors, so a full exit can leave sub-unit
+  // rounding dust in costBasisWei instead of landing exactly on zero — force
+  // it to zero whenever the position is actually flat, rather than letting
+  // that dust silently corrupt the basis of a later re-entry into this cohort.
+  const costBasisWei = sharesHeld <= ZERO ? ZERO : pos.costBasisWei - costOfRemoved;
+
   return {
     ...pos,
-    sharesHeld: pos.sharesHeld - sharesRemoved,
-    costBasisWei: pos.costBasisWei - costOfRemoved,
+    sharesHeld,
+    costBasisWei,
     realizedPnlWei: pos.realizedPnlWei + realized,
     realizedProceedsWei: pos.realizedProceedsWei + proceeds,
     realizedCostWei: pos.realizedCostWei + costOfRemoved,
     feeDragWei: pos.feeDragWei + feeDrag,
+    unmatchedSharesWei: pos.unmatchedSharesWei + sharesUnmatched,
+    unmatchedProceedsWei: pos.unmatchedProceedsWei + unmatchedProceeds,
     eventCount: pos.eventCount + 1,
   };
 }
@@ -234,17 +267,30 @@ export function navPerShareWei(ethReserveWei: bigint, totalSupplyWei: bigint): b
 }
 
 /**
- * Classify vault-activity events (lib/market/vault-activity.ts VaultTradeKind)
- * into trading-volume vs internal-rebalancing buckets, per the requirement
- * that vault mint/burn never inflates a "trading volume" chart.
+ * Classify vault-activity events (lib/market/vault-activity.ts VaultTradeKind,
+ * imported directly rather than duplicated — a future new kind is a compile
+ * error here via the exhaustive switch below, not a silent gap) into
+ * trading-volume vs internal-rebalancing buckets, per the requirement that
+ * vault mint/burn never inflates a "trading volume" chart.
  *
  * - buy / sell: real AMM trades against the pool — counts as trading volume.
  * - deposit / redeem: NFT <-> v-token mint/burn — internal rebalancing, must
  *   be EXCLUDED from volume.
  * - add_lp / remove_lp: liquidity provisioning — also not a trade, excluded.
  */
-export type VaultTradeKindForVolume = "buy" | "sell" | "deposit" | "redeem" | "add_lp" | "remove_lp";
-
-export function isTradingVolumeEvent(kind: VaultTradeKindForVolume): boolean {
-  return kind === "buy" || kind === "sell";
+export function isTradingVolumeEvent(kind: VaultTradeKind): boolean {
+  switch (kind) {
+    case "buy":
+    case "sell":
+      return true;
+    case "deposit":
+    case "redeem":
+    case "add_lp":
+    case "remove_lp":
+      return false;
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`isTradingVolumeEvent: unhandled VaultTradeKind ${String(exhaustive)}`);
+    }
+  }
 }
