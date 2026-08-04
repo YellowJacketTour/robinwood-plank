@@ -15,7 +15,7 @@
  *   tsx scripts/refresh-market-data.ts --metadata # build/resume the canonical IPFS metadata store
  *   tsx scripts/refresh-market-data.ts --purge --rarity --traits --collection
  *
- * Targets: --sales --vault --rarity --traits --collection --metadata
+ * Targets: --sales --vault --rarity --traits --collection --metadata --social-decay
  *
  * --metadata builds `robinwood_token_metadata` (see
  * lib/market/robinwood-metadata.ts) — the canonical, IPFS-only source for
@@ -54,15 +54,21 @@ const explicit = [
   "--official-assets",
   "--token-registry",
   "--owners",
+  "--social-decay",
 ].filter((t) => args.has(t));
 
-/** Full runs include the expensive collection-wide rebuilds; incremental ones don't. */
+/** Full runs include the expensive collection-wide rebuilds; incremental ones don't.
+ * "social-decay" runs in BOTH — it's cheap (a bounded query plus per-wallet
+ * writes only for wallets that already have a Bad Boards mark) and, like
+ * lp_hold accrual, wants to tick as often as the incremental cadence allows
+ * so a real day of good behavior is never delayed behind the daily --full
+ * run. */
 const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["sales", "vault", "opensea", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection"]
-      : ["sales", "vault", "opensea", "official-assets", "token-registry", "owners"]
+      ? ["sales", "vault", "opensea", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "social-decay"]
+      : ["sales", "vault", "opensea", "official-assets", "token-registry", "owners", "social-decay"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -188,6 +194,60 @@ async function main(): Promise<void> {
     const { NFT_CONTRACT_ADDRESS } = await import("../lib/mint-contract");
     const snapshot = await rebuildOwnerIndex(NFT_CONTRACT_ADDRESS);
     return `${snapshot.count} owners indexed via ${snapshot.source}`;
+  });
+
+  // Bad Boards reputation-decay tick (lib/boards.ts's nextGoodStreakDays /
+  // decayedBadSeverity, lib/boards-store.ts's recordGoodBehavior). This is
+  // the exact gap the PR #21 pen-test flagged: recordGoodBehavior's own doc
+  // comment always said it should run "once per wallet per day it shows
+  // good behavior", but nothing ever called it — there was no cron. Wiring
+  // it naively off widgetSessions (a quote OR swap ping, see
+  // recordWidgetActivity) would have made the FIRST wrong choice the
+  // pen-test also called out: a free quote (no real trade, no cost, no
+  // revenge risk for spamming it) is not "good behavior" and must not fade
+  // a real Bad Boards mark. A wallet could quote plank.love once a day
+  // forever and launder a sniper/off-widget flag for free.
+  //
+  // Instead this gates strictly on plank_checks_events rows with
+  // category='swap' — a REAL, chain-verified swap that already passed
+  // lib/plank-checks.ts's swapPoints() fee-paid accounting, not a
+  // self-reported or quote-only signal. Scoped to a lookback window
+  // (slightly wider than the incremental cron cadence, so a slow cron pass
+  // or a brief outage cannot skip a wallet's day) and further restricted to
+  // wallets that already carry a Bad Boards mark — recordGoodBehavior is a
+  // no-op for a clean wallet anyway, but filtering here keeps this query
+  // (and the run) cheap regardless of total swap volume.
+  await step("social-decay", async () => {
+    const { postgresQuery } = await import("../lib/postgres");
+    const { recordGoodBehavior, listAllBadBoards } = await import("../lib/boards-store");
+
+    const badWallets = new Set(
+      (await listAllBadBoards()).map((entry) => entry.address.toLowerCase())
+    );
+    if (badWallets.size === 0) return "no Bad Boards wallets to decay";
+
+    // Lookback window, not "since last run" — recordGoodBehavior itself is
+    // idempotent per UTC calendar day (nextGoodStreakDays no-ops a second
+    // tick on the same day), so re-processing the same wallet across
+    // overlapping windows is always safe.
+    const LOOKBACK_HOURS = 26;
+    const result = await postgresQuery<{ wallet_address: string }>(
+      `SELECT DISTINCT wallet_address
+         FROM plank_checks_events
+        WHERE category = 'swap'
+          AND earned_at >= NOW() - INTERVAL '${LOOKBACK_HOURS} hours'`
+    );
+
+    const swappedToday = result.rows
+      .map((row) => row.wallet_address.toLowerCase())
+      .filter((wallet) => badWallets.has(wallet));
+
+    let ticked = 0;
+    for (const wallet of swappedToday) {
+      const updated = await recordGoodBehavior(wallet);
+      if (updated) ticked += 1;
+    }
+    return `${ticked}/${swappedToday.length} Bad Boards wallet(s) ticked (real swap in last ${LOOKBACK_HOURS}h, out of ${badWallets.size} flagged)`;
   });
 
   // Must run BEFORE the rebuilds below, and only when asked. There is no
