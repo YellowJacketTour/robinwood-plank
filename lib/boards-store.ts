@@ -2,9 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
   cooldownEndsAt,
+  decayedBadSeverity,
   isListingWindowActive,
   isOffWidgetCaptureActive,
   isSniperCaptureActive,
+  nextGoodStreakDays,
   normalizeAddress,
   WALLET_COOLDOWN_MS,
 } from "@/lib/boards";
@@ -371,6 +373,43 @@ export async function markBadBoard(opts: {
     touchCooldown(state, a, at);
     return entry;
   });
+}
+
+/**
+ * Reputation decay tick — see lib/boards.ts's nextGoodStreakDays /
+ * decayedBadSeverity for the pure math this wires up. Call once per wallet
+ * per day it shows good behavior (e.g. a cron pass over that day's
+ * plank.love widget sessions with no fresh Bad Boards mark). A no-op when
+ * the wallet has no existing Bad Boards entry — decay only ever fades an
+ * existing mark, it never creates one.
+ */
+export async function recordGoodBehavior(address: string, at?: Date): Promise<BadBoardEntry | null> {
+  const a = normalizeAddress(address);
+  if (!/^0x[a-f0-9]{40}$/.test(a)) return null;
+  const nowIso = (at ?? new Date()).toISOString();
+
+  return mutateState((state) => {
+    const prev = state.badBoards[a];
+    if (!prev) return null;
+    const goodStreakDays = nextGoodStreakDays(prev.goodStreakDays ?? 0, prev.lastGoodMarkAt, nowIso);
+    const entry: BadBoardEntry = { ...prev, goodStreakDays, lastGoodMarkAt: nowIso };
+    state.badBoards[a] = entry;
+    return entry;
+  });
+}
+
+/**
+ * Current decayed severity (1 = full weight, 0 = fully faded) for a wallet's
+ * Bad Boards mark — 0 for a wallet with no mark at all, same as "clean".
+ * This is a pure read; it never mutates the streak (only
+ * recordGoodBehavior does that).
+ */
+export async function getBadSeverity(address: string): Promise<number> {
+  const a = normalizeAddress(address);
+  const state = await ensureLoaded();
+  const entry = state.badBoards[a];
+  if (!entry) return 0;
+  return decayedBadSeverity(entry.goodStreakDays ?? 0);
 }
 
 export async function getBoardsState(): Promise<BoardsState> {
