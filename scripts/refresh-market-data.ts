@@ -15,7 +15,14 @@
  *   tsx scripts/refresh-market-data.ts --metadata # build/resume the canonical IPFS metadata store
  *   tsx scripts/refresh-market-data.ts --purge --rarity --traits --collection
  *
- * Targets: --sales --vault --rarity --traits --collection --metadata
+ * Targets: --sales --vault --portfolio --rarity --traits --collection --metadata
+ *
+ * --portfolio must run after --vault in the same pass (it reads the durable
+ * activity lineage that step just refreshed): records a NAV snapshot per
+ * vault then recomputes every wallet+vault CohortPosition
+ * (lib/market/portfolio-pnl.ts) and upserts it — see migration
+ * 008_portfolio_pnl.sql and lib/market/portfolio-flow-mapper.ts's doc
+ * comment for the historical-NAV and LP-exclusion tradeoffs this makes.
  *
  * --metadata builds `robinwood_token_metadata` (see
  * lib/market/robinwood-metadata.ts) — the canonical, IPFS-only source for
@@ -46,6 +53,7 @@ const full = args.has("--full");
 const explicit = [
   "--sales",
   "--vault",
+  "--portfolio",
   "--metadata",
   "--rarity",
   "--traits",
@@ -61,8 +69,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["sales", "vault", "opensea", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection"]
-      : ["sales", "vault", "opensea", "official-assets", "token-registry", "owners"]
+      ? ["sales", "vault", "portfolio", "opensea", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection"]
+      : ["sales", "vault", "portfolio", "opensea", "official-assets", "token-registry", "owners"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -142,6 +150,60 @@ async function main(): Promise<void> {
     const { getVaultActivity } = await import("../lib/market/vault-activity");
     const events = await getVaultActivity(full ? 400 : 100);
     return `${events.length} events`;
+  });
+
+  // Vault-aware wallet portfolio PnL — records a NAV snapshot per vault
+  // (grows the historical-NAV fallback table lib/market/portfolio-nav-history.ts
+  // uses for deposit/redeem valuation) then recomputes every wallet+vault
+  // cohort seen in the vault activity we just scanned above and upserts
+  // CohortPositions (migration 008_portfolio_pnl.sql) so /api/portfolio
+  // reads a precomputed row instead of re-deriving from scratch per request.
+  await step("portfolio", async () => {
+    const { MARKET_VAULT_ADDRESS, MARKET_VAULT_ADDRESSES } = await import("../lib/constants");
+    const { getVaultActivity } = await import("../lib/market/vault-activity");
+    const { vaultEventsToFlowRows } = await import("../lib/market/portfolio-flow-mapper");
+    const { computeCohortPositions } = await import("../lib/market/portfolio-pnl");
+    const { resolveNavAtBlock, recordCurrentNavSnapshot } = await import(
+      "../lib/market/portfolio-nav-history"
+    );
+    const { upsertCohortPosition } = await import("../lib/market/portfolio-store");
+
+    const vaults =
+      MARKET_VAULT_ADDRESSES.length > 0
+        ? [...MARKET_VAULT_ADDRESSES]
+        : MARKET_VAULT_ADDRESS
+          ? [MARKET_VAULT_ADDRESS]
+          : [];
+    if (vaults.length === 0) return "no vault configured, skipped";
+
+    let snapshotsWritten = 0;
+    for (const vault of vaults) {
+      try {
+        const snapshot = await recordCurrentNavSnapshot(vault);
+        if (snapshot) snapshotsWritten += 1;
+      } catch {
+        /* one vault's NAV read failing must not block the others */
+      }
+    }
+
+    // Full lineage — cost-basis is a stateful reduction over ALL history for
+    // a cohort, not just the incremental window; getVaultActivity(full:true)
+    // serves the durable merged history (capped at 500 events) built up by
+    // the "vault" step above, no extra scan.
+    const events = await getVaultActivity(400, { full: true });
+    const rows = await vaultEventsToFlowRows(events, resolveNavAtBlock);
+    const positions = computeCohortPositions(rows);
+
+    let written = 0;
+    for (const pos of positions.values()) {
+      try {
+        await upsertCohortPosition(pos);
+        written += 1;
+      } catch {
+        /* one cohort failing to write must not lose the rest */
+      }
+    }
+    return `${snapshotsWritten}/${vaults.length} nav snapshots, ${written}/${positions.size} cohort positions from ${events.length} events`;
   });
 
   // OpenSea's own collection figures, stored for reconciliation against our
