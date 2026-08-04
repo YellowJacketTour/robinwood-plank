@@ -188,6 +188,17 @@ export async function linkWallet(req: WalletLinkRequest): Promise<WalletLinkResu
   }
 
   return withPostgresTransaction(async (client) => {
+    // Lock the profile row first so concurrent link attempts for the SAME
+    // profile serialize instead of racing. Without this, Postgres's default
+    // READ COMMITTED isolation lets several concurrent transactions each
+    // read the free-wallet count as still under the limit before any of
+    // their inserts commit — a phantom-read race that could land more than
+    // FREE_WALLET_LIMIT wallets as "free". FOR UPDATE forces every other
+    // concurrent linkWallet call for this profile to wait for this one to
+    // commit or roll back before it can even read the count.
+    await client.query(`SELECT profile_id FROM plank_checks_profiles WHERE profile_id = $1 FOR UPDATE`, [
+      req.profileId,
+    ]);
     const countResult = await client.query(
       `SELECT COUNT(*)::int AS n FROM plank_checks_wallets WHERE profile_id = $1`,
       [req.profileId]
@@ -215,6 +226,19 @@ export async function linkWallet(req: WalletLinkRequest): Promise<WalletLinkResu
 }
 
 // --- point recording ----------------------------------------------------
+//
+// TRUSTED-CALLER-ONLY BOUNDARY. Every function below this line takes
+// `points` / fee amounts as plain parameters and performs NO independent
+// verification that they correspond to a real on-chain event — that
+// verification is the CALLER'S job, always, the same way the rest of this
+// codebase's chain-indexing code (lib/market/sales-catalog.ts,
+// lib/market/vault-stats.ts) verifies real events server-side before
+// writing anything durable. This is safe only as long as every caller is
+// trusted, chain-verifying server code (a cron job reading real swap/LP/
+// deposit events), never a route that accepts a client-supplied amount
+// directly. If a future API route calls recordPointEvent with anything
+// derived from client input without first re-deriving it from a real chain
+// read, that route lets any wallet mint arbitrary points for itself.
 
 export type PointEvent = {
   wallet: string;
@@ -278,6 +302,11 @@ export async function recordReferredSwap(opts: {
     sourceTxHash: opts.txHash,
     earnedAt: opts.earnedAt,
   });
+  // A wallet cannot refer itself. Without this, tagging your own trade with
+  // your own address as the referral code would double the same real swap's
+  // points for free — no extra cost, effort, or economic activity, unlike
+  // two genuinely different wallets referring each other's real trades.
+  if (opts.buyer.toLowerCase() === opts.referrer.toLowerCase()) return;
   await recordPointEvent({
     wallet: opts.referrer,
     category: "referral",
