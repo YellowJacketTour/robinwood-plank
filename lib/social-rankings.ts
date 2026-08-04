@@ -60,6 +60,11 @@ export function endorsementWeight(voter: EndorsementVoter): number {
 
 export type Endorsement = {
   targetId: string;
+  /** Stable identity for the voter (normalized wallet address) — used only
+   * to count how many LIVE endorsements this voter currently has out, for
+   * the per-voter dilution below. Never used for anything else here (no
+   * per-voter storage, no I/O — this module stays pure). */
+  voterId: string;
   voter: EndorsementVoter;
 };
 
@@ -70,14 +75,63 @@ export type RankedTarget = {
 };
 
 /**
+ * Per-voter dilution: a voter's endorsement weight toward EACH target is
+ * divided by sqrt(number of live endorsements that voter currently has out
+ * across all targets). This is the real fix for the pen-test finding that a
+ * single high-point wallet could endorse unlimited targets at full weight
+ * each — undiluted, one whale wallet could out-rank an entire target's
+ * organic support just by clicking "endorse" on everything.
+ *
+ * Chose dilution over a hard cap for two reasons:
+ *  1. A hard cap ("at most N live endorsements per voter") is a cliff: voter
+ *     N+1 is rejected outright, which means UI has to surface a confusing
+ *     "unendorse something else first" flow, and picking N is an arbitrary
+ *     tuning knob with no principled value.
+ *  2. sqrt dilution degrades gracefully and mirrors the sqrt(points)
+ *     diminishing-returns shape pointsWeight() already uses above — a voter
+ *     spreading across many targets keeps *some* voice everywhere (this is
+ *     a curation signal, not a single-choice election), but their total
+ *     influence summed across all targets is bounded: with k live
+ *     endorsements each diluted by sqrt(k), the voter's total contributed
+ *     weight across every target is weight * k / sqrt(k) = weight *
+ *     sqrt(k) — growing sub-linearly in k instead of linearly (undiluted)
+ *     or being flatly rejected past a cliff (hard cap). A whale can still
+ *     make itself heard on more collections, but each additional
+ *     endorsement is worth strictly less, and diluting toward a handful of
+ *     targets is worth much less per-target than concentrating on one.
+ *
+ * k = 1 (the common case, one endorsement) divides by 1 — no dilution for a
+ * normal voter. This function is pure and takes k directly so it stays
+ * unit-testable without Postgres, same as the rest of this module; callers
+ * (the endorse API route / rankings route) derive k from a real COUNT(*)
+ * over social_endorsements (migration 008) grouped by voter_wallet, never
+ * from client-supplied input.
+ */
+export function dilutedEndorsementWeight(voter: EndorsementVoter, liveEndorsementCount: number): number {
+  const k = Number.isFinite(liveEndorsementCount) ? Math.max(1, Math.floor(liveEndorsementCount)) : 1;
+  return endorsementWeight(voter) / Math.sqrt(k);
+}
+
+/**
  * Aggregates endorsements into a reputation-weighted ranking, highest score
  * first. Ties broken by targetId for a stable, deterministic order (no
  * dependence on object/array iteration order across runs).
+ *
+ * Each voter's per-target weight is diluted by their OWN total live
+ * endorsement count (see dilutedEndorsementWeight above) — computed once per
+ * distinct voterId in this batch, not per endorsement, so a voter's dilution
+ * factor is consistent across every target they endorsed in the same call.
  */
 export function rankByWeightedEndorsements(endorsements: readonly Endorsement[]): RankedTarget[] {
+  const voterCounts = new Map<string, number>();
+  for (const { voterId } of endorsements) {
+    voterCounts.set(voterId, (voterCounts.get(voterId) ?? 0) + 1);
+  }
+
   const totals = new Map<string, { score: number; voteCount: number }>();
-  for (const { targetId, voter } of endorsements) {
-    const weight = endorsementWeight(voter);
+  for (const { targetId, voter, voterId } of endorsements) {
+    const k = voterCounts.get(voterId) ?? 1;
+    const weight = dilutedEndorsementWeight(voter, k);
     const existing = totals.get(targetId) ?? { score: 0, voteCount: 0 };
     existing.score += weight;
     existing.voteCount += 1;
