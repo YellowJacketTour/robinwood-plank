@@ -1,6 +1,11 @@
 import { Interface, formatEther, getAddress } from "ethers";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
-import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS, SEAPORT_ADDRESS } from "@/lib/constants";
+import {
+  MARKET_OFFER_CURRENCY,
+  MARKET_VAULT_ADDRESS,
+  MARKET_VAULT_ADDRESSES,
+  SEAPORT_ADDRESS,
+} from "@/lib/constants";
 import { resolveTokenImage } from "@/lib/market/token-image";
 import { wasOrderServedByUs } from "@/lib/market/served-orders";
 import { ethBlockNumberDisplay, ethGetLogsDisplay, rpcCall } from "@/lib/market/fetch-rpc";
@@ -41,7 +46,12 @@ const ORDER_FULFILLED_IFACE = new Interface([
  * transaction instead.
  */
 
-const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+/** ERC-721 Transfer(address,address,uint256). Exported so the permanent event
+ *  indexer (lib/market/chain-indexer.ts) queries the exact same topic this
+ *  module's own decoder expects, rather than keeping a second copy that could
+ *  drift. */
+export const TRANSFER_TOPIC =
+  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const ZERO = "0x0000000000000000000000000000000000000000";
 
 /** The node rejects wide ranges, so walk backwards in bounded windows.
@@ -121,10 +131,24 @@ export function classifyTransfer(input: {
   nftContractAddress: string;
   /** Null when no vault is deployed for this collection yet. */
   vaultAddress?: string | null;
+  /**
+   * EVERY vault, not just the primary one. Vaults are an N-vault registry
+   * (see AGENTS.md), and passing only the primary was a real, observed bug:
+   * a deposit into or redeem from a LEGACY pool has a `txTo` that matches no
+   * known vault, so it fell through to the generic "any other contract
+   * executed it, therefore a sale" branch and was recorded as an unpriced
+   * sale. Confirmed against the live chain while backfilling the permanent
+   * ledger — 130 of 375 "sales" were actually legacy-vault mechanics.
+   */
+  vaultAddresses?: readonly string[];
 }): { kind: ActivityKind; venue: ActivityEvent["venue"] } {
   const nftContract = input.nftContractAddress.toLowerCase();
   const seaport = input.seaportAddress.toLowerCase();
-  const vault = input.vaultAddress?.toLowerCase() ?? null;
+  const vaults = new Set(
+    [input.vaultAddress, ...(input.vaultAddresses ?? [])]
+      .filter((v): v is string => Boolean(v))
+      .map((v) => v.toLowerCase())
+  );
   const txTo = input.txTo?.toLowerCase() ?? null;
 
   // A plain wallet-to-wallet transfer calls the NFT contract directly — `to`
@@ -146,7 +170,7 @@ export function classifyTransfer(input: {
   // exactly the reported bug (VaultTradeHistory already shows these with
   // their real numbers; this feed just needs to stop double-counting them
   // as broken sales).
-  if (vault != null && txTo === vault) {
+  if (txTo != null && vaults.has(txTo)) {
     return { kind: "transfer", venue: { kind: "vault", contract: input.txTo! } };
   }
   // NOTE: "seaport" here is provisional, never "marketplank" — attribution
@@ -189,6 +213,21 @@ const priceCache = new Map<string, bigint>();
 const attributionResolvedTxs = new Set<string>();
 
 /**
+ * Readers for the two caches above, so the permanent event indexer
+ * (lib/market/chain-indexer.ts) reuses this module's already-written Seaport
+ * OrderFulfilled decoding instead of re-implementing the ABI work. Call
+ * resolveMarketplankAttribution(txHash) first — these are plain lookups.
+ */
+export function readCachedSalePriceWei(txHash: string, tokenId: string): bigint | null {
+  return priceCache.get(`${txHash}:${tokenId}`) ?? null;
+}
+
+/** True only on a POSITIVE orderHash match against an order this relay served. */
+export function isMarketplankAttributed(txHash: string, tokenId: string): boolean {
+  return attributionCache.get(`${txHash}:${tokenId}`) === true;
+}
+
+/**
  * Decode every OrderFulfilled log in a transaction: check each one's
  * orderHash against what we served (populates attributionCache) AND extract
  * its WETH sale price (populates priceCache) — regardless of who served the
@@ -198,7 +237,7 @@ const attributionResolvedTxs = new Set<string>();
  * Fails closed in the sense that matters: any failure here just leaves the
  * event unattributed/unpriced rather than guessing.
  */
-async function resolveMarketplankAttribution(txHash: string): Promise<void> {
+export async function resolveMarketplankAttribution(txHash: string): Promise<void> {
   if (attributionResolvedTxs.has(txHash)) return;
   try {
     const receipt = await rpcCall<{
@@ -580,7 +619,14 @@ async function fetchActivityFromBlockscout(
     });
   }
 
-  const vault = MARKET_VAULT_ADDRESS?.toLowerCase() ?? null;
+  // EVERY vault, not just the primary — same N-vault-registry correction as
+  // classifyTransfer above. A legacy-pool deposit/redeem seen only through the
+  // Blockscout feed was landing in the generic "sale" branch here too.
+  const vaults = new Set(
+    [MARKET_VAULT_ADDRESS, ...MARKET_VAULT_ADDRESSES]
+      .filter((v): v is string => Boolean(v))
+      .map((v) => v.toLowerCase())
+  );
   const events: ActivityEvent[] = [];
   const seen = new Set<string>(); // txHash:tokenId
 
@@ -623,11 +669,15 @@ async function fetchActivityFromBlockscout(
       kind = "mint";
       venue = null;
     } else if (
-      vault &&
-      (from === vault || to === vault || method.includes("deposit") || method.includes("redeem"))
+      vaults.has(from) ||
+      vaults.has(to) ||
+      (vaults.size > 0 && (method.includes("deposit") || method.includes("redeem")))
     ) {
       kind = "transfer";
-      venue = { kind: "vault", contract: MARKET_VAULT_ADDRESS! };
+      venue = {
+        kind: "vault",
+        contract: vaults.has(from) ? fromRaw : vaults.has(to) ? toRaw : MARKET_VAULT_ADDRESS!,
+      };
     } else if (priced || isMarketplaceMethod(method)) {
       kind = "sale";
       // Seaport methods → seaport venue; anything else → other (still priced).
@@ -868,6 +918,7 @@ export async function fetchActivity(
       seaportAddress: SEAPORT_ADDRESS,
       nftContractAddress: NFT_CONTRACT_ADDRESS,
       vaultAddress: MARKET_VAULT_ADDRESS,
+      vaultAddresses: MARKET_VAULT_ADDRESSES,
     });
 
     // Upgrade "seaport" (unattributed) to "marketplank" ONLY on a positive
