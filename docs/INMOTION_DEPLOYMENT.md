@@ -521,11 +521,17 @@ the app could see (§11). Those scripts are deleted; this cron replaces them.
 Without it the sale surfaces drift stale and cold rebuilds land on user
 requests.
 
-Incremental, every 15 minutes — sales catalog and vault activity:
+Incremental, every 2 minutes — sales catalog and vault activity:
 
 ```cron
-*/15 * * * * /usr/bin/flock -n /home/CPANEL_USER/plank.tanggang.life/shared/market-refresh.lock /ABSOLUTE/NODE/BIN --env-file=/home/CPANEL_USER/plank.tanggang.life/shared/.env.production /home/CPANEL_USER/plank.tanggang.life/current/scripts/refresh-market-data.mjs >> /home/CPANEL_USER/plank.tanggang.life/logs/market-refresh.log 2>&1
+*/2 * * * * /usr/bin/flock -n /home/CPANEL_USER/plank.tanggang.life/shared/market-refresh.lock /ABSOLUTE/NODE/BIN --env-file=/home/CPANEL_USER/plank.tanggang.life/shared/.env.production /home/CPANEL_USER/plank.tanggang.life/current/scripts/refresh-market-data.mjs >> /home/CPANEL_USER/plank.tanggang.life/logs/market-refresh.log 2>&1
 ```
+
+`flock -n` is non-blocking: if a run is still in flight when the next tick
+fires, the new attempt exits immediately instead of queuing, so a shorter
+interval can never pile up overlapping runs — it just self-limits back down
+to "as often as a pass actually takes" on any tick where the previous one
+ran long.
 
 Full rebuild, once daily off-peak — adds rarity, traits and the collection index:
 
