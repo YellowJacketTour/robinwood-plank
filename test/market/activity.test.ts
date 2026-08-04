@@ -102,3 +102,44 @@ test("an unreadable transaction (txTo null) falls back to plain transfer rather 
   assert.equal(r.kind, "transfer");
   assert.equal(r.venue, null);
 });
+
+/**
+ * Found while backfilling the permanent event ledger against the real chain
+ * (2026-08-04): 130 of 375 rows classified as "sale" were actually deposits
+ * into or redeems from a LEGACY pool. Only the PRIMARY vault address was ever
+ * passed here, so a legacy vault's `txTo` matched nothing and fell straight
+ * through to the generic "some other contract executed it, therefore a sale"
+ * branch — surfacing pool mechanics as unpriced sales in the Activity feed and,
+ * once a ledger exists, writing that mistake down permanently.
+ *
+ * AGENTS.md is explicit that vaults are an N-vault registry and must never be
+ * resolved as a single "the vault". This is that rule with a test behind it.
+ */
+test("a LEGACY vault's deposit/redeem is a vault transfer, not a sale", () => {
+  const LEGACY_A = "0xb2019Fd4cA24502e812C0C73b751Fa49979BF708";
+  const LEGACY_B = "0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04";
+  for (const legacy of [LEGACY_A, LEGACY_B]) {
+    const r = classifyTransfer({
+      from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",
+      txTo: legacy,
+      seaportAddress: SEAPORT,
+      nftContractAddress: NFT,
+      vaultAddress: VAULT,
+      vaultAddresses: [VAULT, LEGACY_A, LEGACY_B],
+    });
+    assert.equal(r.kind, "transfer", `${legacy} must not be a sale`);
+    assert.equal(r.venue?.kind, "vault");
+  }
+});
+
+test("vault matching is case-insensitive, so a checksummed registry entry still matches", () => {
+  const r = classifyTransfer({
+    from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",
+    txTo: VAULT.toLowerCase(),
+    seaportAddress: SEAPORT,
+    nftContractAddress: NFT,
+    vaultAddresses: [VAULT.toUpperCase().replace("0X", "0x")],
+  });
+  assert.equal(r.kind, "transfer");
+  assert.equal(r.venue?.kind, "vault");
+});
