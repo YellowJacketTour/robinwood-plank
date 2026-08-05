@@ -123,6 +123,7 @@ import {ScopedRoles} from "./ScopedRoles.sol";
 import {IndexMath} from "./lib/IndexMath.sol";
 import {Observation, Constituent, OBS_SLOTS as TYPES_OBS_SLOTS} from "./lib/IndexTypes.sol";
 import {IndexValuation} from "./lib/IndexValuation.sol";
+import {IndexOracle} from "./lib/IndexOracle.sol";
 import {IndexEligibility} from "./lib/IndexEligibility.sol";
 // The parameter SET itself is declared in IndexParams.sol and imported under
 // this contract's historical name, so the key-space dispatch can be moved out
@@ -774,82 +775,16 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         }
     }
 
+    /// @dev The observation writer, the truncation cap and the variance
+    /// accumulator all live in IndexOracle.sol now — see that file's header for
+    /// why this particular extraction pays. The event is emitted HERE, under
+    /// this contract's address, because a library `emit` would carry the
+    /// library's topic set and every indexer keys on the vault.
     function _observe(address token, Constituent storage c, bool bootstrap) private {
-        uint256 spot = _spotPrice(c.source);
-        if (spot == 0) revert NoPriceData();
-
-        if (c.obsCount == 0) {
-            c.obs[0] = Observation({
-                timestamp: uint64(block.timestamp),
-                price: uint192(spot),
-                cumulative: 0
-            });
-            c.obsCount = 1;
-            c.obsHead = 0;
-            emit Checkpointed(token, spot);
-            return;
-        }
-
-        Observation memory prev = _last(c);
-        if (!bootstrap && block.timestamp < uint256(prev.timestamp) + params.minCheckpointInterval) {
-            revert CheckpointTooSoon();
-        }
-        if (block.timestamp == prev.timestamp) revert CheckpointTooSoon();
-
-        // Per-observation movement cap — the truncated-oracle core.
-        uint256 capped = spot;
-        uint256 hi = (uint256(prev.price) * (BPS + params.priceCapBps)) / BPS;
-        uint256 lo = (uint256(prev.price) * (BPS - params.priceCapBps)) / BPS;
-        if (capped > hi) capped = hi;
-        if (capped < lo) capped = lo;
-        if (capped == 0) capped = 1;
-
-        uint256 dt = block.timestamp - uint256(prev.timestamp);
-        uint256 head = (uint256(c.obsHead) + 1) % OBS_SLOTS;
-        c.obs[head] = Observation({
-            timestamp: uint64(block.timestamp),
-            price: uint192(capped),
-            cumulative: prev.cumulative + uint256(prev.price) * dt
-        });
-        c.obsHead = uint8(head);
-        if (c.obsCount < OBS_SLOTS) c.obsCount += 1;
-
-        // Part E: fold this settled move into the LONG calibration window.
-        // Measured on the CAPPED price, not the raw spot — the accumulator is
-        // a record of what the oracle actually priced, so a rejected spike
-        // cannot inflate the calibration any more than it can inflate NAV.
-        uint256 prevPrice = uint256(prev.price);
-        uint256 delta = capped > prevPrice ? capped - prevPrice : prevPrice - capped;
-        uint256 moveBps = (delta * BPS) / prevPrice; // <= priceCapBps by construction
-        _accrueVariance(c, moveBps * moveBps);
-
-        emit Checkpointed(token, capped);
-    }
-
-    /// @dev Two-bucket tumbling window over squared per-checkpoint moves. No
-    /// division, no price history, no per-sample storage — one add and a
-    /// counter, plus a bucket roll at most once per VARIANCE_WINDOW.
-    function _accrueVariance(Constituent storage c, uint256 squaredBps) private {
-        if (c.varWindowStart == 0) c.varWindowStart = block.timestamp;
-        if (block.timestamp >= c.varWindowStart + VARIANCE_WINDOW) {
-            c.varPrevSumSq = c.varCurSumSq;
-            c.varPrevSamples = c.varCurSamples;
-            c.varCurSumSq = 0;
-            c.varCurSamples = 0;
-            c.varWindowStart = block.timestamp;
-        }
-        // Cannot overflow in any reachable configuration: a squared move is at
-        // most CEIL_PRICE_CAP_BPS^2 = 4e6 and the sample count is bounded by
-        // 2*VARIANCE_WINDOW / minCheckpointInterval.
-        c.varCurSumSq += squaredBps;
-        c.varCurSamples += 1;
-    }
-
-    function _spotPrice(IIndexPriceSource source) private view returns (uint256) {
-        uint256 e = source.ethReserve();
-        uint256 s = source.shareReserve();
-        if (e == 0 || s == 0) return 0;
-        return Math.mulDiv(e, WAD, s);
+        emit Checkpointed(
+            token,
+            IndexOracle.observe(c, params.priceCapBps, params.minCheckpointInterval, bootstrap)
+        );
     }
 
     function _last(Constituent storage c) private view returns (Observation memory) {
@@ -877,28 +812,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         view
         returns (uint256 low, uint256 high, uint256 twap)
     {
-        Constituent storage c = _get(token);
-        if (c.obsCount == 0) return (0, 0, 0);
-
-        uint256 minP = type(uint256).max;
-        uint256 maxP = 0;
-        uint256 sum = 0;
-        uint256 n = c.obsCount;
-        for (uint256 i = 0; i < n; i++) {
-            uint256 slot = (uint256(c.obsHead) + OBS_SLOTS - i) % OBS_SLOTS;
-            uint256 p = uint256(c.obs[slot].price);
-            if (p < minP) minP = p;
-            if (p > maxP) maxP = p;
-            sum += p;
-        }
-        twap = sum / n;
-
-        low = (minP * (BPS - params.bandBps)) / BPS;
-        high = (maxP * (BPS + params.bandBps)) / BPS;
-
-        if (block.timestamp > uint256(_last(c).timestamp) + params.staleAfter) {
-            low = 0;
-        }
+        return IndexOracle.priceBand(_get(token), params.bandBps, params.staleAfter);
     }
 
     /**
@@ -1007,10 +921,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      * observations, so a spike the truncated oracle rejected is not in here.
      */
     function realizedVolBps(address token) public view returns (uint256) {
-        Constituent storage c = _get(token);
-        uint256 samples = c.varPrevSamples + c.varCurSamples;
-        if (samples == 0) return 0;
-        return Math.sqrt((c.varPrevSumSq + c.varCurSumSq) / samples); // RMS bps
+        return IndexOracle.realizedVol(_get(token));
     }
 
     /**
@@ -1055,21 +966,15 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
 
     /// @notice `persistenceHolds`, but against an explicit checkpoint count.
     function persistenceHoldsFor(address token, uint256 required) public view returns (bool) {
-        Constituent storage c = _get(token);
-        if (c.obsCount < required) return false;
-        if (block.timestamp > uint256(_last(c).timestamp) + params.staleAfter) return false;
-
-        (, , uint256 twap) = priceBand(token);
-        if (twap == 0) return false;
-        uint256 tol = (twap * params.persistenceToleranceBps) / BPS;
-        uint256 n = c.obsCount;
-        for (uint256 i = 0; i < n; i++) {
-            uint256 slot = (uint256(c.obsHead) + OBS_SLOTS - i) % OBS_SLOTS;
-            uint256 p = uint256(c.obs[slot].price);
-            uint256 diff = p > twap ? p - twap : twap - p;
-            if (diff > tol) return false;
-        }
-        return true;
+        Params memory p = params;
+        return
+            IndexOracle.persistenceHoldsFor(
+                _get(token),
+                required,
+                p.bandBps,
+                p.staleAfter,
+                p.persistenceToleranceBps
+            );
     }
 
     // ══ Part A: eligibility, read from the constituent's own books ════════
@@ -1257,14 +1162,13 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
 
     /// @notice The basket's NAV band in ETH wei. Never one number, anywhere.
     function nav() public view returns (uint256 navLow, uint256 navHigh) {
-        uint256 n = constituentList.length;
-        for (uint256 i = 0; i < n; i++) {
-            address t = constituentList[i];
-            (uint256 lo, uint256 hi, ) = priceBand(t);
-            uint256 r = constituents[t].reserve;
-            navLow += Math.mulDiv(r, lo, WAD);
-            navHigh += Math.mulDiv(r, hi, WAD);
-        }
+        return
+            IndexValuation.navBand(
+                constituentList,
+                constituents,
+                params.bandBps,
+                params.staleAfter
+            );
     }
 
     /// @notice Per-constituent share of NAV_low, in bps. Used for the cap.
@@ -2253,40 +2157,24 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         ecosystemFeesWei[token] += cut;
     }
 
+    /// @dev The whole decomposition now lives in IndexValuation.sol; `_get`
+    /// keeps the NotListed guard on this side of the boundary so an unlisted
+    /// token can never reach the library's raw mapping read.
     function _previewSingleExit(uint256 sharesIn, address token)
         private
         view
         returns (uint256 amountOut, uint256 feeAmount)
     {
-        Constituent storage target = _get(token);
-        (, uint256 targetHi, ) = priceBand(token);
-        (uint256 targetLo, , ) = priceBand(token);
-        if (targetHi == 0 || targetLo == 0) revert StalePrice();
-
-        uint256 denom = totalSupply() + VIRTUAL_SHARES;
-        uint256 proRataTarget = Math.mulDiv(sharesIn, target.reserve, denom);
-
-        uint256 otherEth;
-        uint256 n = constituentList.length;
-        for (uint256 i = 0; i < n; i++) {
-            address t = constituentList[i];
-            if (t == token) continue;
-            (uint256 lo, , ) = priceBand(t);
-            uint256 v = Math.mulDiv(sharesIn, constituents[t].reserve, denom);
-            otherEth += Math.mulDiv(v, lo, WAD);
-        }
-
-        uint256 extra = Math.mulDiv(otherEth, WAD, targetHi);
-        uint256 remaining = target.reserve > proRataTarget ? target.reserve - proRataTarget : 0;
-        if (remaining == 0) revert ReserveWouldEmpty();
-        // `feeAmount` is the fee this exit charges, in TARGET-token units —
-        // the same number that was already being retained implicitly by
-        // paying out less. Returning it explicitly changes no arithmetic on
-        // this path; it only makes the quantity nameable so the split can be
-        // taken out of the fee rather than out of the reserve.
-        feeAmount = (extra * _imbalanceFeeBps(extra, remaining)) / BPS;
-        extra -= feeAmount;
-        amountOut = proRataTarget + extra;
+        _get(token);
+        return
+            IndexValuation.previewSingleExit(
+                constituentList,
+                constituents,
+                token,
+                sharesIn,
+                totalSupply() + VIRTUAL_SHARES,
+                params
+            );
     }
 
     /**
@@ -2367,18 +2255,13 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     /// @dev Every constituent's share of NAV_low in one O(n) pass. Calling
     /// `weightBps` per leg would be O(n^2) — it recomputes NAV each time.
     function _allWeightsBps() private view returns (uint256[] memory w) {
-        uint256 n = constituentList.length;
-        w = new uint256[](n);
-        uint256[] memory v = new uint256[](n);
-        uint256 navLow;
-        for (uint256 i = 0; i < n; i++) {
-            address t = constituentList[i];
-            (uint256 lo, , ) = priceBand(t);
-            v[i] = Math.mulDiv(constituents[t].reserve, lo, WAD);
-            navLow += v[i];
-        }
-        if (navLow == 0) return w;
-        for (uint256 i = 0; i < n; i++) w[i] = (v[i] * BPS) / navLow;
+        return
+            IndexValuation.allWeightsBps(
+                constituentList,
+                constituents,
+                params.bandBps,
+                params.staleAfter
+            );
     }
 
     /// @dev Above `largeOpValueWei`, a constituent's band must have HELD
