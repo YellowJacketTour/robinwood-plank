@@ -180,6 +180,117 @@ interface IIndexDividendShare is IERC20 {
  *    the bribe and let holders exit, rather than assume a closed membership
  *    the wrapper never promised.
  *
+ *  ROUND 9f — WHY THE ABOVE WAS NOT ENOUGH, AND THE DILUTION RE-VEST
+ *  -----------------------------------------------------------------
+ *  Both halves of that mitigation quietly assume THE DEPOSITOR STAYS. A red
+ *  team drove the case where they do not, and the disclosure above does not
+ *  survive it:
+ *
+ *    `deposit` then `withdraw` IN THE SAME TRANSACTION. The raw leg is priced
+ *    on R and round-trips to dust. The dividend leg is charged proportionally
+ *    (ceil in, floor out) and round-trips to dust. The stream legs are charged
+ *    NOTHING on the way in and paid pro rata on the way out. So the whole
+ *    round trip was a free, risk-free, ZERO-DURATION transfer of stream
+ *    backing out of the holders who earned it.
+ *
+ *  And it was not bounded in any useful sense: the disclosed bound is
+ *  `w / (S + w + VIRTUAL_SHARES)`, which tends to ONE as `w` grows. With
+ *  flash-sourced raw shares `w` is not capital the attacker has to own, only
+ *  capital they have to touch for one transaction. The PoC measured ~99% of a
+ *  100,000-unit bribe captured in a single transaction for a cost of dust.
+ *
+ *  That defeats the entire purpose of the stream system, which is to reward
+ *  REAL, HELD liquidity. It is fixed here.
+ *
+ *  THE SHAPE OF THE FIX, AND WHY THIS SHAPE AND NOT THE OTHER ONE
+ *  --------------------------------------------------------------
+ *  Two shapes were considered, and the choice between them is the whole design
+ *  decision, so it is recorded rather than implied.
+ *
+ *  REJECTED — GATE THE HOLDER. Stamp a `depositBlock[holder]` on mint and
+ *  refuse the stream legs until it matures. It is the obvious fix and it is
+ *  WRONG HERE, for three independent reasons, any one of which is fatal:
+ *
+ *    1. wIDX IS FREELY TRANSFERABLE, AND IS SUPPOSED TO BE. That is the entire
+ *       reason this contract exists (see the header's opening): the token is
+ *       built to sit inside an LP pool, a lending market, a custodian. A
+ *       per-ADDRESS stamp is therefore trivially washed — mint to A, transfer
+ *       to a fresh B, exit from B in the same transaction — unless receiving
+ *       wIDX also propagates the taint.
+ *    2. Propagating the taint on transfer BREAKS THE HONEST CASE, and breaks
+ *       it precisely for the users this wrapper was written for. An LP pool is
+ *       ONE address holding everybody's wIDX. One fresh mint routed through it
+ *       re-stamps the pool, and every honest LP behind that pool loses their
+ *       stream entitlement for the full window, repeatedly, forever. The fix
+ *       would strand exactly the value the wrapper exists to un-strand.
+ *    3. Per-address holding state is per-holder reward state by another name,
+ *       and the architectural rule at the top of this file forbids it for the
+ *       same reason: it makes a pooled holder the accruer of record.
+ *
+ *  CHOSEN — GATE THE BACKING. Nothing about a holder is tracked, nothing about
+ *  a holder can be washed, and a transfer is not an event this contract has
+ *  any opinion about. Instead, ISSUING NEW wIDX MOVES STREAM BACKING OUT OF
+ *  THE REDEEMABLE POOL AND RE-VESTS IT LINEARLY OVER `STREAM_VEST_BLOCKS`.
+ *
+ *  The rule, stated exactly. On a mint of `w` against pre-deposit supply `S`,
+ *  for every tracked stream, the amount
+ *
+ *      revest = min( net, net * w * DILUTION_REVEST_MULTIPLE
+ *                              / (S + w + VIRTUAL_SHARES) )
+ *
+ *  leaves the redeemable pool and re-enters it linearly over the next
+ *  `STREAM_VEST_BLOCKS` blocks, to WHOEVER HOLDS THEN — the depositor
+ *  included, which is the point: they are entitled to it once they have
+ *  actually held the position for real time, and not one block before.
+ *
+ *  WHY A MULTIPLE, AND WHY 25. Removing exactly the depositor's own share
+ *  (`multiple == 1`) is the intuitive rule and it is INSUFFICIENT: the
+ *  depositor still redeems their fraction `f` of whatever is left, so atomic
+ *  capture is `f*(1-f)*Vst`, which peaks at 25% of the stream pool at
+ *  `f = 0.5`. Removing `M*f` instead makes atomic capture
+ *
+ *      f * (1 - M*f) * Vst        (zero once f >= 1/M)
+ *
+ *  whose maximum over f is `Vst / (4M)` at `f = 1/(2M)`. At `M = 25` that is
+ *  ONE PERCENT of the stream pool as the worst single-transaction capture, at
+ *  the cost of having to mint 2% of the supply to reach it. Salami-slicing
+ *  does not escape it either: each slice multiplies the remaining pool by
+ *  `(1 - M*f)`, so the total captured over an unboundedly long sequence of
+ *  arbitrarily small deposits converges to `Vst / M` = 4% — and to get there
+ *  the attacker has to end up owning essentially the entire wrapper. Against
+ *  the measured 99%, that is the finding closed.
+ *
+ *  WHAT THIS IS NOT, and each of these is load-bearing:
+ *    - IT IS NOT A LOCK, A STAKE, OR A COOLDOWN ON wIDX. No balance is frozen,
+ *      no transfer is blocked, no withdrawal is delayed, and there is no new
+ *      contract to trust. `withdraw` still pays the raw leg, the dividend leg
+ *      and every vested stream leg on demand, in the same call, forever.
+ *    - IT CANNOT TRAP. Release is time-based, unconditional, permissionless
+ *      and needs no call by anybody: `unvestedOf` is a pure function of block
+ *      height that reaches zero at `end` and stays there. No role can read it,
+ *      write it, extend it, or reach it — there is no setter and no parameter.
+ *      `pruneStream` additionally refuses to drop a token with a live vest, so
+ *      a vesting balance can never be orphaned off the iteration list.
+ *    - IT DOES NOT TOUCH THE RAW OR DIVIDEND LEGS. Those were already priced
+ *      correctly on the way in and are unaffected on the way out.
+ *
+ *  THE DISCLOSED COST, stated plainly rather than buried. A mint temporarily
+ *  reduces what a stream leg pays to everyone, holders who were already here
+ *  included, and they receive it back over the following
+ *  `STREAM_VEST_BLOCKS`. A holder who exits inside that window forfeits the
+ *  re-vesting slice to the holders who stay. So an actor willing to pay gas
+ *  can repeatedly mint dust to keep some fraction of a stream pool vesting —
+ *  a LIVENESS cost on reward timing, never a loss of value, never a block on
+ *  an exit, and self-healing within `STREAM_VEST_BLOCKS` of the moment they
+ *  stop. It is also not free to them: `_dividendSideFor` CEILS on the way in
+ *  and `withdraw` FLOORS on the way out, so every grief round trip donates
+ *  dust to the holders being griefed. Note the multiple makes this bounded in
+ *  the right direction too — a dust mint re-vests a dust fraction; zeroing a
+ *  stream leg outright requires minting 4% of the supply.
+ *
+ *  `harvest()` deliberately does NOT trigger a re-vest: it mints nothing and
+ *  dilutes nobody, so there is no dilution to offset.
+ *
  *  THE RESTRICTED-ASSET PROBLEM, AND THE FAULT-TOLERANT PAYOUT
  *  ----------------------------------------------------------
  *  Real-world-asset tokens routinely enforce transfer restrictions the issuer
@@ -283,8 +394,14 @@ interface IIndexDividendShare is IERC20 {
  *      so a reverting `balanceOf` cannot brick pricing or `withdraw`.
  *    - `_payout` is bounded-gas and cannot revert the caller, so a reverting
  *      `transfer` cannot brick the other legs.
- *    - `deposit` and `harvest` never read a stream at all, so the core
- *      wIDX / raw-share / dividend mechanism is untouchable from a stream.
+ *    - `harvest` never reads a stream at all, and `deposit` reads streams ONLY
+ *      through `_probeBalance` (bounded-gas STATICCALL, failure reads as zero)
+ *      and only AFTER the mint is already complete, so the core wIDX /
+ *      raw-share / dividend mechanism remains untouchable from a stream. A
+ *      hostile stream can no more brick a deposit than it can brick a
+ *      withdrawal. (Round 9f moved `deposit` from "reads no stream" to "reads
+ *      every stream the same bounded way `withdraw` already did"; the bound is
+ *      identical and so is the worst case.)
  *    - `reserved` and `pendingClaim` are keyed per token, so a hostile
  *      token's absurd balance inflates only its own bookkeeping.
  *  The 63/64 gas rule means a bounded-gas callee cannot consume the caller's
@@ -359,6 +476,34 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
     uint256 private constant PROBE_GAS = 100_000;
 
     /**
+     * @notice How long stream backing displaced by a new mint takes to re-enter
+     * the redeemable pool, in blocks. See "ROUND 9f" in the header.
+     *
+     * A CONSTANT, deliberately: it is not a role's parameter, not timelocked,
+     * and not settable, because anything settable here would be a lever over
+     * when users can redeem, which is the one thing this contract refuses to
+     * hand anybody. It is also not a lock — see the header — and its exact
+     * value does not carry the security property. The ATOMIC exploit is closed
+     * at any value >= 1 block, because the displacement happens inside the
+     * depositing transaction and the release cannot begin until the next
+     * block. The value only sets how long a would-be flash attacker has to
+     * become an actual holder, at real market risk, before the slice they
+     * displaced comes back to them along with everyone else.
+     */
+    uint256 public constant STREAM_VEST_BLOCKS = 300;
+
+    /**
+     * @dev The `M` in `revest = net * M * w / (S + w + VIRTUAL_SHARES)`.
+     *
+     * `M = 1` (remove exactly the depositor's own share) leaves a worst-case
+     * atomic capture of 25% of the stream pool. The worst case is `1/(4M)`, so
+     * `M = 25` puts it at 1%, and the salami-sliced limit at `1/M` = 4%. Any
+     * larger M buys a tighter bound at the cost of a smaller mint being able
+     * to stall a stream leg; 25 is the point where both numbers are small.
+     */
+    uint256 private constant DILUTION_REVEST_MULTIPLE = 25;
+
+    /**
      * @dev The first-depositor-inflation offsets, copied verbatim from
      * GlobalIndexVault. Not retuned, not reinvented.
      */
@@ -417,6 +562,23 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
      *                        block height >= n (always `transition + 1`).
      */
     uint256 private _carryUnlockBlock;
+
+    /**
+     * @dev Per-stream linear re-vest schedule. `unvested` is the amount as of
+     * `last`; the amount as of NOW is `unvested * (end - now) / (end - last)`,
+     * which is what `unvestedOf` returns and what every backing read subtracts.
+     * `end == 0` or a block height already reached means nothing is displaced.
+     *
+     * There is no write path to this from any role. The only writers are
+     * `deposit` (which adds) and the lazy commit that adding performs.
+     */
+    struct StreamVest {
+        uint256 unvested;
+        uint64 last;
+        uint64 end;
+    }
+
+    mapping(address => StreamVest) private _vest;
 
     error ZeroAmount();
     error NothingToMint();
@@ -510,6 +672,32 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
     function streamHeld(address token) public view returns (uint256) {
         if (!_tracked[token]) return 0;
         return _probeBalance(token);
+    }
+
+    /**
+     * @notice How much of `token` is currently DISPLACED — held by this
+     * contract, excluded from every backing read, and re-entering the
+     * redeemable pool linearly as blocks pass. Reaches exactly zero at
+     * `streamVestEndsAt(token)` with no call by anybody.
+     *
+     * Pure function of storage and `block.number`. Nothing can extend it, and
+     * `pruneStream` will not drop a token while it is nonzero.
+     */
+    function unvestedOf(address token) public view returns (uint256) {
+        StreamVest storage v = _vest[token];
+        uint256 u = v.unvested;
+        if (u == 0) return 0;
+        uint256 end_ = v.end;
+        if (block.number >= end_) return 0;
+        // `last < end` always holds: `_addVest` writes them together as
+        // (n, n + STREAM_VEST_BLOCKS) with STREAM_VEST_BLOCKS > 0.
+        return Math.mulDiv(u, end_ - block.number, end_ - v.last);
+    }
+
+    /// @notice The block at which `token`'s displaced backing is fully back in
+    /// the redeemable pool. Informational; nothing prices off it.
+    function streamVestEndsAt(address token) external view returns (uint256) {
+        return _vest[token].end;
     }
 
     /// @notice How many stream slots of `MAX_STREAMS` are occupied.
@@ -704,6 +892,14 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
         // clock at the NEXT block, so this depositor cannot round-trip it out
         // in the same transaction and anyone else may join first.
         if (supply == 0) _armCarry();
+
+        // ROUND 9f. Offset the stream-leg dilution this mint just imposed by
+        // displacing that backing out of the redeemable pool and re-vesting it
+        // over STREAM_VEST_BLOCKS. This is what makes a same-transaction
+        // deposit->withdraw round trip capture ~nothing, WITHOUT locking,
+        // staking, or restricting a single wIDX. Runs last: the mint is
+        // already priced and already done, so nothing here can influence it.
+        _revestOnMint(wrappedOut, supply);
 
         emit Wrapped(msg.sender, rawCredited, divCredited, wrappedOut);
     }
@@ -984,7 +1180,16 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
         // subtracts it: a token holding nothing BUT a carried balance would
         // otherwise probe as empty, get pruned off `_streamList`, and never be
         // reachable by `_foldCarry` again — trapping the carry permanently.
-        if (_probeBalance(token) != 0 || reserved[token] != 0 || carry[token] != 0) {
+        // `unvestedOf` is checked for the identical reason `carry` is: a token
+        // holding nothing BUT a displaced, still-vesting balance probes as
+        // empty, and pruning it would orphan that balance off `_streamList`
+        // where no `withdraw` would ever iterate it again.
+        if (
+            _probeBalance(token) != 0 ||
+            reserved[token] != 0 ||
+            carry[token] != 0 ||
+            unvestedOf(token) != 0
+        ) {
             revert StreamNotEmpty();
         }
 
@@ -1018,8 +1223,50 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
     /// zero rather than reverting: an underflow here would brick every path in
     /// the contract, which is a far worse failure than reading a hair low.
     function _netOf(address token, uint256 bal) private view returns (uint256) {
-        uint256 res = reserved[token] + carry[token];
+        // `unvestedOf` is only ever nonzero for a tracked stream — nothing
+        // writes a vest schedule for the raw share or the dividend asset — so
+        // this term is a no-op on the two core legs.
+        uint256 res = reserved[token] + carry[token] + unvestedOf(token);
         return bal > res ? bal - res : 0;
+    }
+
+    /**
+     * @dev Displace stream backing to offset the dilution a fresh mint just
+     * imposed on the stream legs, and re-vest it linearly. THE FIX for the
+     * atomic deposit->withdraw extraction; see "ROUND 9f" in the header for the
+     * derivation of the bound and for why the multiple is not 1.
+     *
+     * Runs AFTER the mint, so it cannot affect the mint's own pricing, and
+     * reads streams only through the bounded-gas `_probeBalance`, so a hostile
+     * stream can neither revert a deposit nor consume its gas.
+     */
+    function _revestOnMint(uint256 minted, uint256 supplyBefore) private {
+        if (minted == 0) return;
+        uint256 denom = supplyBefore + minted + VIRTUAL_SHARES;
+        uint256 n = _streamList.length;
+        for (uint256 i = 0; i < n; ++i) {
+            address t = _streamList[i];
+            uint256 net = _probeBalance(t);
+            if (net == 0) continue;
+            // `minted * M >= denom` means the depositor's dilution reaches the
+            // whole leg; clamp rather than overflow, and skip the mulDiv.
+            uint256 amt = minted >= denom / DILUTION_REVEST_MULTIPLE
+                ? net
+                : Math.mulDiv(net, minted * DILUTION_REVEST_MULTIPLE, denom);
+            _addVest(t, amt);
+        }
+    }
+
+    /// @dev Commit the time-based release so far, then displace `amount` more
+    /// and re-arm the window. Monotone in safety: `unvestedOf` is unchanged by
+    /// the commit, and the added amount can never exceed the net balance it
+    /// came from, so backing can never be double-subtracted below zero.
+    function _addVest(address token, uint256 amount) private {
+        if (amount == 0) return;
+        StreamVest storage v = _vest[token];
+        v.unvested = unvestedOf(token) + amount;
+        v.last = uint64(block.number);
+        v.end = uint64(block.number + STREAM_VEST_BLOCKS);
     }
 
     /**
