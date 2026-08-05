@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {ScopedRoles} from "./ScopedRoles.sol";
 
 /**
  * @dev The exact, minimal slice of GlobalIndexVault this wrapper depends on.
@@ -46,84 +47,225 @@ interface IIndexDividendShare is IERC20 {
  *  a fixed-balance token needs no integration, no hook, no awareness — its
  *  holdings simply become worth more.
  *
- *  This contract is that wrapper, and nothing else:
+ *  ROUND 9d — THE SAME FIX, GENERALISED TO N REWARD STREAMS
+ *  --------------------------------------------------------
+ *  The wrapper originally backed wIDX with exactly TWO assets: raw index
+ *  shares (R) and the vault's own harvested dividend asset (D). But the
+ *  stranding bug it exists to solve is not specific to that one dividend. A
+ *  third-party bribe, an RWA airdrop, a partner incentive — ANY token someone
+ *  wants to route to index-share holders — hits the identical wall: pooled
+ *  shares are held by a custodian that will never claim it.
  *
- *    - It is OPT-IN. Direct holders of the raw share are wholly unaffected and
- *      keep using the vault mechanism that already works for them.
- *    - It has NO owner, NO admin, NO roles, NO pause, NO timelock, NO
- *      upgrade path and no privileged function of any kind. There is no lever
- *      here that could lock a user's assets, because there is no lever.
- *    - `deposit` / `withdraw` / `harvest` are the entire external surface.
- *    - It holds NO accounting state at all beyond its own ERC-20 supply.
- *      Backing is read from live balances, so a stray donation of either
- *      backing asset is simply a gift to every wrapped holder and can never
- *      desynchronise an internal ledger from reality.
+ *  So backing is now an ARBITRARY SET of assets: R, D, and up to
+ *  `MAX_STREAMS` whitelisted "stream" tokens. Every one of them is redeemed
+ *  pro rata on `withdraw`, in its own native units.
+ *
+ *  THE ARCHITECTURAL RULE THIS FILE WILL NOT BREAK
+ *  ----------------------------------------------
+ *  ONLY BACKING-POOL APPRECIATION REACHES A POOLED HOLDER. A per-holder
+ *  correction-term accumulator — the mechanism GlobalIndexVault uses, the
+ *  mechanism this wrapper exists to work around — DOES NOT. Adding a new
+ *  reward stream via per-holder accounting would silently reintroduce the
+ *  exact stranding bug one level up: the LP pool would become the accruer of
+ *  record for the bribe, and the bribe would be as stranded as the dividend
+ *  was. Every stream therefore folds into the SAME aggregate backing pool,
+ *  read from live balances, redeemed by exchange rate. There is no per-holder
+ *  reward state anywhere in this contract, and there must never be.
+ *
+ *  (`pendingClaim` below is NOT a counterexample. It is not a reward
+ *  accumulator: nothing accrues into it. It only holds an amount that was
+ *  ALREADY computed pro rata and ALREADY left the backing pool, whose
+ *  transfer bounced. See "THE RESTRICTED-ASSET PROBLEM".)
+ *
+ *  WHAT IS AND IS NOT ADMINISTERED
+ *  -------------------------------
+ *  The wrapper previously had NO roles at all. It now has exactly ONE
+ *  capability behind a role, and the boundary is worth stating precisely,
+ *  because the no-lever property is the reason anyone would trust this thing:
+ *
+ *    ROLE_STREAM_LISTER can do exactly two things — queue a token onto the
+ *    stream whitelist (timelocked), and remove a token from it. That is the
+ *    whole surface. It CANNOT touch backing, cannot move a token the wrapper
+ *    already holds, cannot pause, cannot block or delay `withdraw`, cannot
+ *    reach `deposit`, `harvest`, `claimPending`, the raw share leg or the
+ *    dividend leg, and cannot mint, burn or freeze a single wIDX.
+ *    DELISTING NEVER CLAWS BACK HELD BACKING (see `delistStream`).
+ *
+ *  Whitelisting is deliberately NOT permissionless. A stream token is code
+ *  this contract will `transfer` to a user inside `withdraw` and `balanceOf`
+ *  inside its own pricing; letting anyone push an arbitrary contract into
+ *  that position is an open invitation. The gate is an admission decision,
+ *  not a value decision — see `queueStream`'s NatSpec for the full list of
+ *  judgment calls the listing role is accepting responsibility for.
+ *
+ *  `depositStream` — actually PUTTING value into an already-listed stream —
+ *  IS permissionless, which is the part that matters: a bribe or an
+ *  airdrop-forwarder funds a stream with no permission from anybody.
  *
  *  HOW THE RATE APPRECIATES — WITH ZERO MARKET RISK
  *  ------------------------------------------------
  *  Because this contract holds raw shares, it IS a direct holder, so the
- *  vault's own correction-term mechanism accrues its dividend automatically,
- *  with no special support and nothing new to trust. `harvest()` is a
- *  permissionless public-good trigger that calls `claimDividend()` and pulls
- *  in what was ALREADY earned. No swap. No price. No oracle. No slippage. No
- *  route. The harvested asset lands in this contract's backing and is paid out
- *  pro rata on withdraw — yield shows up as backing growth, never as balance
- *  growth, and the growth mechanism itself takes no market risk whatsoever.
+ *  vault's own correction-term mechanism accrues its dividend automatically.
+ *  `harvest()` is a permissionless public-good trigger that calls
+ *  `claimDividend()` and pulls in what was ALREADY earned. No swap. No price.
+ *  No oracle. No slippage. No route.
  *
- *  THE JOIN IS PROPORTIONAL IN BOTH BACKING ASSETS. READ THIS.
+ *  WHY STREAMS HAVE NO `harvest` OF THEIR OWN — AND SHOULD NOT
  *  ----------------------------------------------------------
- *  Backing is TWO assets: raw shares (R) and harvested dividend asset (D).
- *  The obvious design — mint against `R + D` as if one unit of each were worth
- *  the same, and accept raw shares alone — is UNSOUND, and not subtly. Let a
- *  raw share be worth `p` units of the dividend asset on the open market. A
+ *  `harvest()` is not a generic "collect rewards" step. It does exactly one
+ *  thing no other function can: it calls `GlobalIndexVault.claimDividend()`,
+ *  moving value the vault is HOLDING FOR THIS CONTRACT under a per-holder
+ *  accumulator into this contract's balance. It is a PULL, and it is needed
+ *  precisely because the vault's dividend is per-holder state.
+ *
+ *  Streams have no such holding contract and no such accumulator. They are
+ *  PUSHED: `depositStream` moves the tokens into this contract in the same
+ *  transaction that funds them, and backing is read from live balances, so
+ *  the value is in the backing pool the instant it lands. There is nothing
+ *  left to pull. A `harvestStream()` would be a function whose entire body is
+ *  a no-op, and shipping one would imply an integrator must call it or lose
+ *  value — a lie that would eventually strand somebody. The two flows differ
+ *  because the two mechanisms differ, and this file says so rather than
+ *  forcing them into a matching shape.
+ *
+ *  (Even a raw, unsolicited `transfer` of a listed stream token straight to
+ *  this address needs no call at all: live-balance backing means a donation
+ *  is credited to every holder on arrival. `depositStream` exists for the
+ *  measured-delta accounting and the event, not because a push is required.)
+ *
+ *  The batch convenience that IS meaningful is on the OTHER side — see
+ *  `claimPendingMany`.
+ *
+ *  THE JOIN, AND WHAT IT DOES AND DOES NOT CHARGE FOR. READ THIS.
+ *  -------------------------------------------------------------
+ *  `deposit` takes RAW SHARES ONLY, and prices the mint against the raw leg
+ *  alone, plus the proportional DIVIDEND-asset side.
+ *
+ *  Why the dividend leg is charged: the obvious design — mint against
+ *  `R + D` as if one unit of each were worth the same — is UNSOUND, and not
+ *  subtly. Let a raw share be worth `p` units of the dividend asset. A
  *  deposit of `x` raw priced against `R + D`, immediately withdrawn, nets
  *
  *      out - in  =  x * D * (1 - p) / (R + D + x)
  *
- *  which is a risk-free drain of the existing holders whenever `p < 1`, and a
- *  silent robbery of the depositor whenever `p > 1`. The two assets have no
- *  fixed relative value, so `p = 1` is never true except by accident. Adding
- *  unlike units is a valuation claim, and this codebase does not make
- *  valuation claims it cannot defend.
+ *  a risk-free drain of existing holders whenever `p < 1` and a silent
+ *  robbery of the depositor whenever `p > 1`. Adding unlike units is a
+ *  valuation claim, and this codebase does not make valuation claims it
+ *  cannot defend. So the mint is priced on R alone and the dividend side is
+ *  charged proportionally alongside — the Balancer/Set proportional join.
  *
- *  So `deposit` is a PROPORTIONAL JOIN, the Balancer/Set model this repo uses
- *  everywhere else: supplying `x` raw shares also requires supplying the
- *  matching `ceil(x * D / R)` of the dividend asset. Round-tripping is then
- *  exactly value-neutral in BOTH assets for ANY `p`, with no price ever read.
- *  When `D == 0` (nothing harvested yet) the requirement is zero and the join
- *  is single-asset, which is the common case. The wrapped token itself remains
- *  a single fixed-balance ERC-20 with one appreciating exchange rate, which is
- *  the only property the downstream LP pool ever needed.
+ *  Why the STREAM legs are NOT charged — a disclosed trade-off, stated
+ *  plainly rather than buried:
  *
- *  `deposit` and `withdraw` both harvest FIRST, so the pending-but-unharvested
- *  entitlement is never a window in which a new depositor can buy into value
- *  that predates them, or an exiting holder can walk away from value they
- *  earned.
+ *    Requiring a depositor to also hold and approve a proportional slice of
+ *    EVERY listed stream (a bribe token, an RWA unit that may itself be
+ *    KYC-gated and therefore unobtainable) would make `deposit` unusable, and
+ *    for a KYC-gated stream, literally impossible for most depositors. The
+ *    deliberate choice is that `deposit` stays single-asset.
+ *
+ *    The exact consequence, quantified: a depositor minting `w` wIDX against
+ *    supply `S` acquires a `w / (S + w + VIRTUAL_SHARES)` claim on stream
+ *    backing they did not contribute to. Existing holders are diluted by that
+ *    fraction on the stream legs ONLY — never on the raw leg (priced on R)
+ *    and never on the dividend leg (charged proportionally). Call
+ *    `previewWithdraw` before and after to measure it exactly; `streams()`
+ *    shows every held balance, so the dilution is fully observable on-chain
+ *    in advance, never a surprise.
+ *
+ *    This is a real cost and it is not zero. It is accepted because the
+ *    alternative is a wrapper nobody can deposit into, and because the
+ *    dilution is bounded by deposit size relative to the pool and is
+ *    symmetric — the same depositor is diluted in turn by everyone after
+ *    them. A stream funder who wants to reward a FIXED holder set should push
+ *    the bribe and let holders exit, rather than assume a closed membership
+ *    the wrapper never promised.
+ *
+ *  THE RESTRICTED-ASSET PROBLEM, AND THE FAULT-TOLERANT PAYOUT
+ *  ----------------------------------------------------------
+ *  Real-world-asset tokens routinely enforce transfer restrictions the issuer
+ *  controls and nobody here can influence: a KYC allowlist, a jurisdiction
+ *  block, a lockup. USDC-shaped tokens carry an issuer blacklist. So a
+ *  `withdraw` that loops over N backing assets doing a plain `transfer` for
+ *  each has a fatal property: ONE asset reverting on transfer to THIS
+ *  PARTICULAR withdrawer reverts the WHOLE transaction, trapping that user's
+ *  raw shares and every other, perfectly unrestricted asset along with it.
+ *  That is precisely the unmovable-assets failure this codebase treats as the
+ *  cardinal sin, arrived at from a new direction.
+ *
+ *  So every payout leg is INDIVIDUALLY FAULT-TOLERANT:
+ *
+ *    1. Amounts for ALL assets are computed FIRST, from pre-burn backing, so
+ *       no leg's outcome can influence another leg's size.
+ *    2. wIDX is burned once.
+ *    3. Each leg is paid by `_payout`, a bounded-gas low-level `transfer`
+ *       that CANNOT revert the enclosing call. Success: the user has the
+ *       tokens. Failure — revert, `false` return, out-of-gas inside the
+ *       token, anything — the owed amount is credited to
+ *       `pendingClaim[user][asset]` and moved into `reserved[asset]`.
+ *
+ *  `reserved` is the load-bearing half. A deferred slice has LEFT the backing
+ *  pool: `_heldOf` subtracts `reserved`, so remaining holders cannot redeem
+ *  it a second time and the withdrawer's claim is not silently donated to the
+ *  people who stayed. The user retries whenever they like — the restriction
+ *  clearing, a KYC approval landing, a blacklist lifting — via `claimPending`
+ *  (loud, full gas) or `claimPendingMany` (batched, tolerant). The credit
+ *  never expires, no role can touch it, and nothing can take it back.
+ *
+ *  The value is therefore never lost and never trapped BY THIS CONTRACT: if
+ *  it is unreachable, it is unreachable because the issuer of that one token
+ *  says so, and the user's OTHER assets came out in the same call regardless.
+ *
+ *  PER-STREAM ISOLATION
+ *  --------------------
+ *  A listed token that later turns hostile, breaks, or self-destructs must
+ *  never be able to brick anything else. It cannot:
+ *    - `_probeBalance` reads every stream balance through a bounded-gas
+ *      STATICCALL and treats any failure or short return as a zero balance,
+ *      so a reverting `balanceOf` cannot brick pricing or `withdraw`.
+ *    - `_payout` is bounded-gas and cannot revert the caller, so a reverting
+ *      `transfer` cannot brick the other legs.
+ *    - `deposit` and `harvest` never read a stream at all, so the core
+ *      wIDX / raw-share / dividend mechanism is untouchable from a stream.
+ *    - `reserved` and `pendingClaim` are keyed per token, so a hostile
+ *      token's absurd balance inflates only its own bookkeeping.
+ *  The 63/64 gas rule means a bounded-gas callee cannot consume the caller's
+ *  remaining gas, which is what makes the above bounds real rather than
+ *  decorative.
+ *
+ *  THE FINITE STREAM CAP — DELIBERATE, DISCLOSED
+ *  ---------------------------------------------
+ *  `withdraw` iterates every backing asset, so an unbounded stream count
+ *  would eventually make WITHDRAWAL — the one function that must always work
+ *  — gas-unsafe. That would be a slow-motion version of the trapping bug
+ *  this file spends most of its length avoiding. `MAX_STREAMS = 32`, the same
+ *  number as `GlobalIndexVault.MAX_CONSTITUENTS` and for the same reason: it
+ *  is generous enough that no honest deployment reaches it, and small enough
+ *  that a full exit is comfortably within a block. Worst case is 34 legs (32
+ *  streams + raw + dividend), each bounded by `PAYOUT_GAS`. This is a
+ *  disclosed bound, not an accidental limitation, and `pruneStream` lets a
+ *  fully-drained delisted stream free its slot permissionlessly.
+ *
+ *  REBASING TOKENS — AN OPERATIONAL CONSTRAINT, NOT A CODE GUARANTEE
+ *  ----------------------------------------------------------------
+ *  See `queueStream`. Stated there rather than claimed here.
  *
  *  FIRST-DEPOSITOR INFLATION
  *  -------------------------
  *  Defended with GlobalIndexVault's own `VIRTUAL_SHARES` / `VIRTUAL_ASSETS`
  *  offsets, same constants, same direction, deliberately not a new invention.
- *  A griefer donating raw shares or dividend asset into an empty wrapper is
- *  making a gift, not setting a trap: the virtual offsets keep the second
- *  depositor's mint from rounding toward zero, and the proportional join keeps
- *  the donation from ever being mispriced against them.
- *
  *  A consequence worth stating plainly: the FIRST deposit into an empty
  *  wrapper mints `VIRTUAL_SHARES : VIRTUAL_ASSETS`, i.e. 1000 wIDX per raw
- *  share, so wIDX opens at 1000x the raw share's unit count and drifts down as
- *  the rate appreciates. That is the offset doing its job, not a bug; wIDX's
- *  balance is a bookkeeping unit and only its redemption value is meaningful.
+ *  share, so wIDX opens at 1000x the raw share's unit count and drifts down
+ *  as the rate appreciates.
  *
  *  ROUNDING
  *  --------
  *  Every division that pays a user floors; every division that charges a user
  *  ceils. Dust always settles in the wrapper, i.e. with the holders who
- *  stayed, never systematically to the last actor out. Same discipline as the
- *  vault's redeem path.
+ *  stayed, never systematically to the last actor out.
  * ============================================================================
  */
-contract WrappedIndexShare is ERC20, ReentrancyGuard {
+contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
     using SafeERC20 for IERC20;
 
     /// @notice The raw GlobalIndexVault share token being wrapped.
@@ -135,17 +277,85 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard {
     IERC20 public immutable dividendAsset;
 
     /**
+     * @notice The ONLY role in this contract with a capability, and its
+     * capability is admission and nothing else: list a stream (timelocked),
+     * delist a stream. It can never move, freeze, or reach a single unit of
+     * backing, and nothing it does can delay or block an exit.
+     */
+    bytes32 public constant ROLE_STREAM_LISTER = "stream.lister";
+
+    /// @notice Disclosed, deliberate bound on iterated backing assets. Same
+    /// value as `GlobalIndexVault.MAX_CONSTITUENTS`. See the header.
+    uint256 public constant MAX_STREAMS = 32;
+
+    /// @dev Gas ceiling on a fault-tolerant payout leg. Generous for an ERC-20
+    /// `transfer` including a KYC/allowlist check (a plain transfer is ~50k),
+    /// and low enough that 34 legs cannot approach a block. A legitimate token
+    /// too heavy for this still pays out via `claimPending`, which forwards
+    /// everything it has.
+    uint256 private constant PAYOUT_GAS = 250_000;
+
+    /// @dev Gas ceiling on a stream `balanceOf` probe. A view that needs more
+    /// than this is not a token, it is a liability.
+    uint256 private constant PROBE_GAS = 100_000;
+
+    /**
      * @dev The first-depositor-inflation offsets, copied verbatim from
-     * GlobalIndexVault. Not retuned, not reinvented: the same numbers make the
-     * same argument, and that argument is already tested in this repo.
+     * GlobalIndexVault. Not retuned, not reinvented.
      */
     uint256 private constant VIRTUAL_SHARES = 10 ** 3;
     uint256 private constant VIRTUAL_ASSETS = 1;
+
+    /// @dev Same bounds GlobalIndexVault enforces on its own delay, so a
+    /// listing can never be scheduled on a shorter clock than a vault change.
+    uint256 private constant MIN_TIMELOCK_DELAY = 48 hours;
+    uint256 private constant MAX_TIMELOCK_DELAY = 30 days;
+
+    /// @notice The timelock every stream listing and every role rotation
+    /// waits out. Immutable — no role can shorten it.
+    uint256 public immutable timelockDelay;
+
+    struct QueuedStream {
+        uint64 eta;
+        bool pending;
+    }
+
+    /// @dev Every token that has ever been listed and not yet pruned, in
+    /// listing order. Iterated by `withdraw`; bounded by MAX_STREAMS.
+    address[] private _streamList;
+
+    /// @dev Present in `_streamList` (whether or not still accepting pushes).
+    mapping(address => bool) private _tracked;
+
+    /// @notice Currently accepting `depositStream` pushes. Going false does
+    /// NOT remove held backing — see `delistStream`.
+    mapping(address => bool) public isStream;
+
+    /// @notice Pending timelocked listing per token.
+    mapping(address => QueuedStream) public queuedStreams;
+
+    /// @notice Per-asset total owed to specific users whose payout bounced.
+    /// Subtracted from backing, so it can never be redeemed twice.
+    mapping(address => uint256) public reserved;
+
+    /// @notice user => asset => amount owed from a bounced payout leg.
+    /// Claimable forever, by that user, with no role able to touch it.
+    mapping(address => mapping(address => uint256)) public pendingClaim;
 
     error ZeroAmount();
     error NothingToMint();
     error NothingToReturn();
     error NoDividendAsset();
+    error BadTimelockDelay();
+    error InvalidStream();
+    error StreamAlreadyListed();
+    error StreamCapReached();
+    error NotAStream();
+    error NoStreamQueued();
+    error StreamTimelockNotElapsed();
+    error StreamStillListed();
+    error StreamNotEmpty();
+    error NothingCredited();
 
     event Wrapped(
         address indexed account,
@@ -160,11 +370,22 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard {
         uint256 dividendAssetOut
     );
     event Harvested(address indexed caller, uint256 amount);
+    event StreamQueued(address indexed token, uint64 eta);
+    event StreamListed(address indexed token);
+    event StreamDelisted(address indexed token);
+    event StreamPruned(address indexed token);
+    event StreamFunded(address indexed token, address indexed from, uint256 credited);
+    event StreamPaid(address indexed account, address indexed token, uint256 amount);
+    event PayoutDeferred(address indexed account, address indexed token, uint256 amount);
+    event PendingClaimed(address indexed account, address indexed token, uint256 amount);
 
     constructor(
         address indexShare_,
         string memory name_,
-        string memory symbol_
+        string memory symbol_,
+        address roleAdmin_,
+        address streamLister_,
+        uint256 timelockDelay_
     ) ERC20(name_, symbol_) {
         if (indexShare_ == address(0)) revert ZeroAmount();
         indexShare = IIndexDividendShare(indexShare_);
@@ -174,22 +395,119 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard {
         // a footgun waiting for the vault to be replaced. Refuse at birth.
         if (asset == address(0)) revert NoDividendAsset();
         dividendAsset = IERC20(asset);
+
+        if (timelockDelay_ < MIN_TIMELOCK_DELAY || timelockDelay_ > MAX_TIMELOCK_DELAY) {
+            revert BadTimelockDelay();
+        }
+        timelockDelay = timelockDelay_;
+
+        // `_initRole` rejects address(0), so both roles are always occupied.
+        _initRole(ROLE_ADMIN, roleAdmin_);
+        _initRole(ROLE_STREAM_LISTER, streamLister_);
+    }
+
+    function _timelockDelay() internal view override returns (uint256) {
+        return timelockDelay;
+    }
+
+    function _isKnownRole(bytes32 role) internal pure override returns (bool) {
+        return role == ROLE_ADMIN || role == ROLE_STREAM_LISTER;
     }
 
     // ══ views ═══════════════════════════════════════════════════════════════
 
-    /// @notice Raw index shares currently backing the wrapped supply.
+    /// @notice Raw index shares currently backing the wrapped supply, net of
+    /// anything already owed to a specific user by a bounced payout.
     function rawSharesHeld() public view returns (uint256) {
-        return indexShare.balanceOf(address(this));
+        return _netOf(address(indexShare), indexShare.balanceOf(address(this)));
     }
 
-    /// @notice Harvested dividend asset currently backing the wrapped supply.
+    /// @notice Harvested dividend asset currently backing the wrapped supply,
+    /// net of bounced-payout reservations.
     function dividendAssetHeld() public view returns (uint256) {
-        return dividendAsset.balanceOf(address(this));
+        return _netOf(address(dividendAsset), dividendAsset.balanceOf(address(this)));
     }
 
-    /// @notice What one wrapped share currently redeems for, both legs, at
-    /// `1e18` granularity. Purely informational — no code path prices off it.
+    /// @notice A single stream's backing, net of reservations. Returns 0 for a
+    /// token that is not tracked AND for a tracked token whose `balanceOf`
+    /// misbehaves — a broken stream reads as empty, never as a revert.
+    function streamHeld(address token) public view returns (uint256) {
+        if (!_tracked[token]) return 0;
+        return _probeBalance(token);
+    }
+
+    /// @notice How many stream slots of `MAX_STREAMS` are occupied.
+    function streamCount() external view returns (uint256) {
+        return _streamList.length;
+    }
+
+    /**
+     * @notice Stream discovery for a UI or an external agent: every tracked
+     * stream, its current held backing, and whether it still accepts pushes.
+     *
+     * A token with `accepting == false` and `held > 0` is a DELISTED stream
+     * whose backing remains fully withdrawable by every holder — that is the
+     * intended, permanent state after a delisting, not a stuck one.
+     */
+    function streams()
+        external
+        view
+        returns (address[] memory tokens, uint256[] memory held, bool[] memory accepting)
+    {
+        uint256 n = _streamList.length;
+        tokens = new address[](n);
+        held = new uint256[](n);
+        accepting = new bool[](n);
+        for (uint256 i = 0; i < n; ++i) {
+            address t = _streamList[i];
+            tokens[i] = t;
+            held[i] = _probeBalance(t);
+            accepting[i] = isStream[t];
+        }
+    }
+
+    /// @notice Every backing asset in payout order — raw share, dividend
+    /// asset, then each tracked stream — with current held balances.
+    function backingAssets()
+        public
+        view
+        returns (address[] memory tokens, uint256[] memory held)
+    {
+        uint256 n = _streamList.length;
+        tokens = new address[](n + 2);
+        held = new uint256[](n + 2);
+        tokens[0] = address(indexShare);
+        held[0] = rawSharesHeld();
+        tokens[1] = address(dividendAsset);
+        held[1] = dividendAssetHeld();
+        for (uint256 i = 0; i < n; ++i) {
+            tokens[i + 2] = _streamList[i];
+            held[i + 2] = _probeBalance(_streamList[i]);
+        }
+    }
+
+    /**
+     * @notice Exactly what burning `wrappedIn` pays out right now, per asset,
+     * in payout order. Quoted WITHOUT harvesting first (a view cannot), so the
+     * dividend leg is a lower bound — `withdraw` harvests before it prices.
+     */
+    function previewWithdraw(uint256 wrappedIn)
+        external
+        view
+        returns (address[] memory tokens, uint256[] memory amounts)
+    {
+        uint256[] memory held;
+        (tokens, held) = backingAssets();
+        amounts = new uint256[](held.length);
+        uint256 denom = totalSupply() + VIRTUAL_SHARES;
+        for (uint256 i = 0; i < held.length; ++i) {
+            amounts[i] = Math.mulDiv(wrappedIn, held[i], denom);
+        }
+    }
+
+    /// @notice What one wrapped share currently redeems for on the two core
+    /// legs, at `1e18` granularity. Purely informational — no code path prices
+    /// off it. Stream legs are in `previewWithdraw`.
     function exchangeRate()
         external
         view
@@ -206,10 +524,6 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard {
      * @notice The dividend-asset side a `deposit(rawSharesIn)` will also pull,
      * quoted against CURRENT backing. Approve at least this much, plus a
      * little headroom if a harvest may land between quote and send.
-     *
-     * Deliberately quoted WITHOUT harvesting first (a view cannot), so it is a
-     * lower bound. `deposit` harvests before it prices, which can only raise
-     * `D` and therefore the requirement — hence the headroom note.
      */
     function quoteDividendAssetIn(uint256 rawSharesIn) external view returns (uint256) {
         return _dividendSideFor(rawSharesIn, rawSharesHeld(), dividendAssetHeld(), totalSupply());
@@ -220,7 +534,7 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard {
         return indexShare.withdrawableDividendOf(address(this));
     }
 
-    // ══ the entire mutating surface ═════════════════════════════════════════
+    // ══ core mechanism — no role can reach any of this ══════════════════════
 
     /**
      * @notice Pull in the dividend this wrapper has already earned as a
@@ -228,11 +542,9 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard {
      * holder at once — including a passive LP pool that will never call
      * anything itself.
      *
-     * Permissionless by design and safe to call by anyone, repeatedly,
-     * back to back. With nothing to claim it is a clean no-op returning 0,
-     * matching `GlobalIndexVault.claimDividend`'s own documented behaviour
-     * ("paying zero is a successful transaction, not an error"). A harvest
-     * that reverted on zero would be a griefable gate on a public good.
+     * Permissionless by design and safe to call by anyone, repeatedly. With
+     * nothing to claim it is a clean no-op returning 0. Reads no stream, so no
+     * stream can affect it.
      */
     function harvest() external nonReentrant returns (uint256 claimed) {
         claimed = _harvest();
@@ -242,11 +554,13 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard {
      * @notice Wrap raw index shares into wIDX.
      *
      * Pulls `rawSharesIn` raw shares and, if any dividend asset is already in
-     * backing, the proportional dividend-asset side alongside it (see the
-     * header — a single-asset join against mixed backing is a drain). BOTH
-     * pulls credit the MEASURED BALANCE DELTA, never the nominal amount: the
-     * Balancer-STA discipline every other inbound path in this codebase uses,
-     * so a fee-on-transfer token cannot mint against value that never arrived.
+     * backing, the proportional dividend-asset side alongside it. BOTH pulls
+     * credit the MEASURED BALANCE DELTA, never the nominal amount.
+     *
+     * Deliberately does NOT charge a proportional side on stream legs, and
+     * deliberately does not read a stream at all — see the header for the
+     * quantified dilution this trades away, and for why a stream can never
+     * interfere with a deposit.
      */
     function deposit(uint256 rawSharesIn)
         external
@@ -284,17 +598,11 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard {
         }
 
         // If either leg under-delivered, re-price the mint DOWN to what
-        // actually arrived. Scaling by the raw leg alone is correct and
-        // conservative: the dividend leg is a proportional obligation, so
-        // short-changing it can only ever leave the pool richer per wrapped
-        // share, never poorer.
+        // actually arrived.
         if (rawCredited < rawSharesIn) {
             wrappedOut = Math.mulDiv(wrappedOut, rawCredited, rawSharesIn);
         }
         if (divIn > 0 && divCredited < divIn) {
-            // The raw side bought a proportional claim on a dividend side that
-            // did not fully show up. Charge the shortfall to the depositor's
-            // own mint rather than to the pool.
             wrappedOut = Math.mulDiv(wrappedOut, divCredited, divIn);
         }
 
@@ -305,13 +613,19 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard {
     }
 
     /**
-     * @notice Unwrap wIDX back into its exact pro-rata slice of BOTH backing
-     * assets — raw index shares AND accrued dividend asset — in one call.
+     * @notice Unwrap wIDX back into its exact pro-rata slice of EVERY backing
+     * asset — raw index shares, accrued dividend asset, and every tracked
+     * stream with a nonzero balance — in one call, each in its own native
+     * units, with no price ever read or implied.
      *
-     * Both divisions floor, so dust stays with the holders who stayed and
-     * there is no way to extract more than your exact share. Harvests first so
-     * an exiting holder is paid the dividend they earned right up to the
-     * block they leave in.
+     * Every leg is individually fault-tolerant: a leg whose `transfer` fails
+     * for this particular withdrawer (an RWA transfer restriction, an issuer
+     * blacklist, a token that simply broke) is credited to
+     * `pendingClaim[msg.sender][asset]` and reserved out of backing, and EVERY
+     * OTHER LEG STILL PAYS OUT IN THIS SAME CALL. One restricted asset can
+     * never trap a user's unrestricted assets. Retry with `claimPending`.
+     *
+     * All divisions floor, so dust stays with the holders who stayed.
      */
     function withdraw(uint256 wrappedIn)
         external
@@ -322,46 +636,324 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard {
 
         _harvest();
 
-        // Read AFTER harvest, BEFORE the burn. The `+ VIRTUAL_SHARES` on the
+        // Read AFTER harvest, BEFORE the burn. `+ VIRTUAL_SHARES` on the
         // denominator is the redeem-side half of the offset pair, mirroring
-        // GlobalIndexVault's own `redeemProRata`: the mint side charges
-        // against `R + VIRTUAL_ASSETS` while the redeem side pays against `R`
-        // alone, which makes deposit-then-withdraw STRICTLY lossy for the
-        // round-tripper by construction rather than by rounding luck.
+        // GlobalIndexVault's `redeemProRata`.
         uint256 denom = totalSupply() + VIRTUAL_SHARES;
         rawSharesOut = Math.mulDiv(wrappedIn, rawSharesHeld(), denom);
         dividendAssetOut = Math.mulDiv(wrappedIn, dividendAssetHeld(), denom);
 
+        // EVERY amount is computed from pre-burn backing, before a single
+        // transfer is attempted, so no leg's success or failure can change
+        // another leg's size. This ordering is the isolation guarantee.
+        uint256 n = _streamList.length;
+        uint256[] memory streamOut = new uint256[](n);
+        bool anyStream;
+        for (uint256 i = 0; i < n; ++i) {
+            uint256 amt = Math.mulDiv(wrappedIn, _probeBalance(_streamList[i]), denom);
+            streamOut[i] = amt;
+            if (amt > 0) anyStream = true;
+        }
+
         // A burn that returns nothing at all is a user error, not a feature.
         // Reverting here cannot trap anything: the caller keeps their wrapped
         // shares and can simply exit a larger amount.
-        if (rawSharesOut == 0 && dividendAssetOut == 0) revert NothingToReturn();
+        if (rawSharesOut == 0 && dividendAssetOut == 0 && !anyStream) revert NothingToReturn();
 
         // Effects before interactions. `_burn` reverts on insufficient
         // balance, which is what authorises the payout.
         _burn(msg.sender, wrappedIn);
 
-        if (rawSharesOut > 0) {
-            IERC20(address(indexShare)).safeTransfer(msg.sender, rawSharesOut);
-        }
-        if (dividendAssetOut > 0) {
-            dividendAsset.safeTransfer(msg.sender, dividendAssetOut);
+        _payout(address(indexShare), msg.sender, rawSharesOut);
+        _payout(address(dividendAsset), msg.sender, dividendAssetOut);
+        for (uint256 i = 0; i < n; ++i) {
+            address t = _streamList[i];
+            if (streamOut[i] > 0) {
+                _payout(t, msg.sender, streamOut[i]);
+                emit StreamPaid(msg.sender, t, streamOut[i]);
+            }
         }
 
         emit Unwrapped(msg.sender, wrappedIn, rawSharesOut, dividendAssetOut);
     }
 
+    /**
+     * @notice Retry ONE bounced payout leg, at full gas and loudly.
+     *
+     * Unlike the `withdraw` loop this does NOT swallow a failure: if the
+     * restriction is still in force the call reverts and the credit is left
+     * exactly as it was. That is the right shape for a deliberate retry — the
+     * caller wants to know whether it worked — and it is the escape hatch for
+     * a legitimate token whose transfer costs more than `PAYOUT_GAS`.
+     *
+     * Permissionless in the only sense that matters: only the credited user
+     * can move their own credit, and no role can touch it, ever.
+     */
+    function claimPending(address token) external nonReentrant returns (uint256 amount) {
+        amount = pendingClaim[msg.sender][token];
+        if (amount == 0) revert NothingToReturn();
+        pendingClaim[msg.sender][token] = 0;
+        reserved[token] -= amount;
+        IERC20(token).safeTransfer(msg.sender, amount);
+        emit PendingClaimed(msg.sender, token, amount);
+    }
+
+    /**
+     * @notice Batch-retry several bounced legs. THIS is the batch convenience
+     * that is actually meaningful here (see the header on why streams need no
+     * `harvest`): a user exiting a wrapper with several restricted assets can
+     * settle all of them in one call once their approvals land.
+     *
+     * Tolerant, unlike `claimPending`: a leg that still fails is simply
+     * re-credited and the others still pay. Duplicate entries are harmless —
+     * the second sees a zero credit and is skipped.
+     */
+    function claimPendingMany(address[] calldata tokens)
+        external
+        nonReentrant
+        returns (uint256 settled)
+    {
+        for (uint256 i = 0; i < tokens.length; ++i) {
+            address t = tokens[i];
+            uint256 amount = pendingClaim[msg.sender][t];
+            if (amount == 0) continue;
+            pendingClaim[msg.sender][t] = 0;
+            reserved[t] -= amount;
+            // `_payout` re-credits and re-reserves on failure, so a still-
+            // restricted leg ends exactly where it started.
+            if (_payout(t, msg.sender, amount)) {
+                ++settled;
+                emit PendingClaimed(msg.sender, t, amount);
+            }
+        }
+    }
+
+    // ══ streams: permissionless funding ═════════════════════════════════════
+
+    /**
+     * @notice Push value into an already-listed stream. PERMISSIONLESS — this
+     * is how a bribe, a partner incentive, or an RWA-airdrop forwarder funds
+     * index-share holders, including the pooled ones that can never claim
+     * anything themselves.
+     *
+     * Credits the MEASURED BALANCE DELTA, never the nominal `amount`: the
+     * Balancer-STA discipline every inbound path in this codebase uses, so a
+     * fee-on-transfer stream token cannot credit value that never arrived.
+     *
+     * The credited amount lands directly in the aggregate backing pool, which
+     * is why there is nothing to "harvest" afterwards — the exchange rate has
+     * already moved for every holder, pooled ones included.
+     *
+     * Reverts if `token` is not CURRENTLY accepting pushes: an unlisted token
+     * can never be forced into backing, and a delisted one can never be
+     * re-funded without a fresh timelocked listing.
+     */
+    function depositStream(address token, uint256 amount)
+        external
+        nonReentrant
+        returns (uint256 credited)
+    {
+        if (!isStream[token]) revert NotAStream();
+        if (amount == 0) revert ZeroAmount();
+        uint256 before = IERC20(token).balanceOf(address(this));
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 nowBal = IERC20(token).balanceOf(address(this));
+        credited = nowBal > before ? nowBal - before : 0;
+        if (credited == 0) revert NothingCredited();
+        emit StreamFunded(token, msg.sender, credited);
+    }
+
+    // ══ streams: admission, the ONLY administered surface ═══════════════════
+
+    /**
+     * @notice Queue a token onto the stream whitelist. ROLE_STREAM_LISTER
+     * only, and it lands no sooner than `timelockDelay` from now — the same
+     * clock as a role rotation, so a listing is always publicly visible and
+     * contestable before it can take effect.
+     *
+     * @dev WHAT THE LISTING ROLE IS ACCEPTING RESPONSIBILITY FOR. These are
+     * operational constraints this contract CANNOT enforce, stated as
+     * constraints rather than dressed up as protections that do not exist:
+     *
+     *  - REBASING TOKENS MUST NOT BE LISTED. Backing is read from live
+     *    balances, which handles a donation correctly but cannot distinguish a
+     *    rebase from one. A NEGATIVE rebase silently shrinks every holder's
+     *    claim and can push `balanceOf` below `reserved`, at which point a
+     *    bounced credit is no longer fully covered. There is no reliable
+     *    on-chain test for "is this token rebasing" — a token can rebase once,
+     *    a year from now, on a governance vote — so this is NOT and CANNOT BE
+     *    enforced in code. It is a judgment call made at listing time, and the
+     *    honest thing is to say so.
+     *  - The token must be a real contract with a working `transfer` and
+     *    `balanceOf`. Non-contract addresses are rejected here, but a contract
+     *    that lies is not detectable.
+     *  - The token must not be able to re-enter this contract. `nonReentrant`
+     *    covers the mutating surface; a token designed around it is out of
+     *    scope for any whitelist.
+     *  - A KYC/allowlist-gated RWA token IS acceptable — the fault-tolerant
+     *    payout path exists precisely for it — but note that restricted
+     *    holders will accumulate `pendingClaim` credits rather than receive
+     *    the token, which is a UX cost the lister should weigh.
+     *  - Listing DILUTES existing holders on that stream's leg as new
+     *    depositors arrive (see the header). It is not a free action.
+     *
+     * The raw share and the dividend asset are rejected: they are already
+     * backing legs, and listing one would double-count it into oblivion.
+     */
+    function queueStream(address token) external onlyRole(ROLE_STREAM_LISTER) {
+        _validateCandidate(token);
+        uint64 eta = uint64(block.timestamp + timelockDelay);
+        queuedStreams[token] = QueuedStream({eta: eta, pending: true});
+        emit StreamQueued(token, eta);
+    }
+
+    /**
+     * @notice Apply a queued listing once the delay has elapsed.
+     * Permissionless after the eta, exactly as `executeRole` is: the timelock
+     * is the gate, not a second discretionary approval.
+     *
+     * Re-validates from scratch, so a queue made when a slot was free cannot
+     * be executed past the cap, and a token listed by another route in the
+     * meantime cannot be listed twice.
+     */
+    function executeStream(address token) external {
+        QueuedStream memory q = queuedStreams[token];
+        if (!q.pending) revert NoStreamQueued();
+        if (block.timestamp < q.eta) revert StreamTimelockNotElapsed();
+        _validateCandidate(token);
+        delete queuedStreams[token];
+        _streamList.push(token);
+        _tracked[token] = true;
+        isStream[token] = true;
+        emit StreamListed(token);
+    }
+
+    /// @notice Withdraw a queued listing. ROLE_STREAM_LISTER only. Grants no
+    /// capability — it only undoes something the same role scheduled.
+    function cancelStream(address token) external onlyRole(ROLE_STREAM_LISTER) {
+        if (!queuedStreams[token].pending) revert NoStreamQueued();
+        delete queuedStreams[token];
+        emit StreamQueued(token, 0);
+    }
+
+    /**
+     * @notice Stop accepting NEW pushes into a stream. ROLE_STREAM_LISTER only.
+     *
+     * @dev DELISTING NEVER CLAWS BACK BACKING, AND THIS IS THE POINT. The
+     * wrapper's existing balance of a delisted token stays in the backing
+     * pool, stays in `_streamList`, stays iterated by `withdraw`, and stays
+     * fully redeemable pro rata by every holder forever — exactly as it was
+     * the block before. Delisting removes ONE thing and one thing only: the
+     * ability of a new `depositStream` to add more.
+     *
+     * That asymmetry is deliberate. A listing role that could remove value
+     * already promised to holders would be a lever over user assets, which
+     * this codebase does not build. A listing role that can only close the
+     * door to NEW value is an admission control, which is what was asked for.
+     *
+     * Immediate rather than timelocked, and that direction is the safe one: a
+     * delay here could only prolong exposure to a token just discovered to be
+     * hostile, and delisting cannot take anything from anyone. The timelock
+     * guards the direction that ADDS an obligation, which is listing.
+     */
+    function delistStream(address token) external onlyRole(ROLE_STREAM_LISTER) {
+        if (!isStream[token]) revert NotAStream();
+        isStream[token] = false;
+        emit StreamDelisted(token);
+    }
+
+    /**
+     * @notice Free a stream's slot once it is delisted, fully drained, and
+     * owes nobody. PERMISSIONLESS — it can only ever remove a token that has
+     * nothing left to give, so there is no discretion to gate.
+     *
+     * Requires `held == 0` AND `reserved == 0`, so pruning can never orphan a
+     * holder's pro-rata slice or a bounced credit. A hostile token whose
+     * `balanceOf` reverts probes as zero and can be pruned, which is the
+     * desired outcome: the stuck stream leaves and everyone else's exits get
+     * cheaper.
+     */
+    function pruneStream(address token) external {
+        if (!_tracked[token]) revert NotAStream();
+        if (isStream[token]) revert StreamStillListed();
+        if (_probeBalance(token) != 0 || reserved[token] != 0) revert StreamNotEmpty();
+
+        uint256 n = _streamList.length;
+        for (uint256 i = 0; i < n; ++i) {
+            if (_streamList[i] == token) {
+                _streamList[i] = _streamList[n - 1];
+                _streamList.pop();
+                break;
+            }
+        }
+        _tracked[token] = false;
+        emit StreamPruned(token);
+    }
+
     // ══ internals ═══════════════════════════════════════════════════════════
+
+    function _validateCandidate(address token) private view {
+        if (
+            token == address(0) ||
+            token == address(this) ||
+            token == address(indexShare) ||
+            token == address(dividendAsset) ||
+            token.code.length == 0
+        ) revert InvalidStream();
+        if (_tracked[token]) revert StreamAlreadyListed();
+        if (_streamList.length >= MAX_STREAMS) revert StreamCapReached();
+    }
+
+    /// @dev Backing net of amounts already owed to specific users. Clamped at
+    /// zero rather than reverting: an underflow here would brick every path in
+    /// the contract, which is a far worse failure than reading a hair low.
+    function _netOf(address token, uint256 bal) private view returns (uint256) {
+        uint256 res = reserved[token];
+        return bal > res ? bal - res : 0;
+    }
+
+    /**
+     * @dev A stream's net backing, read through a bounded-gas STATICCALL that
+     * cannot revert this contract. Any failure, any short return, reads as
+     * zero backing — a broken stream becomes invisible instead of fatal.
+     */
+    function _probeBalance(address token) private view returns (uint256) {
+        (bool ok, bytes memory data) = token.staticcall{gas: PROBE_GAS}(
+            abi.encodeWithSelector(IERC20.balanceOf.selector, address(this))
+        );
+        if (!ok || data.length < 32) return 0;
+        return _netOf(token, abi.decode(data, (uint256)));
+    }
+
+    /**
+     * @dev Pay one leg without ever reverting the caller. Returns true on a
+     * completed transfer; on ANY failure the amount is credited to the user
+     * and reserved out of backing so it is neither lost to them nor
+     * double-redeemable by anyone else.
+     *
+     * The bounded gas is what makes this real: the 63/64 rule means a hostile
+     * token cannot consume the gas the remaining legs need.
+     */
+    function _payout(address token, address to, uint256 amount) private returns (bool) {
+        if (amount == 0) return true;
+        (bool ok, bytes memory data) = token.call{gas: PAYOUT_GAS}(
+            abi.encodeWithSelector(IERC20.transfer.selector, to, amount)
+        );
+        // Accept the two shapes a real ERC-20 returns: nothing, or `true`.
+        if (ok && (data.length == 0 || (data.length >= 32 && abi.decode(data, (bool))))) {
+            return true;
+        }
+        pendingClaim[to][token] += amount;
+        reserved[token] += amount;
+        emit PayoutDeferred(to, token, amount);
+        return false;
+    }
 
     /**
      * @dev The proportional dividend-asset side owed alongside `rawIn`.
      *
-     * Zero while the wrapper is empty (`supply == 0`): with no wrapped shares
-     * outstanding there is nobody for a donated dividend balance to belong to,
-     * so requiring a matching side would let one wei of donation price the
-     * first real depositor out of the contract entirely. A donation into an
+     * Zero while the wrapper is empty (`supply == 0`): a donation into an
      * empty wrapper is a gift to whoever opens it, which is not an attack.
-     *
      * Ceils, and divides by `rawHeld + VIRTUAL_ASSETS` so it can never divide
      * by zero.
      */
@@ -377,13 +969,15 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard {
 
     /**
      * @dev Claim this contract's own already-earned entitlement from the
-     * vault and credit the MEASURED delta. Never reverts on zero.
+     * vault and credit the MEASURED delta. Never reverts on zero. Touches no
+     * stream, so no stream can break it.
      */
     function _harvest() private returns (uint256 claimed) {
         if (indexShare.withdrawableDividendOf(address(this)) == 0) return 0;
         uint256 before = dividendAssetHeld();
         indexShare.claimDividend();
-        claimed = dividendAssetHeld() - before;
+        uint256 after_ = dividendAssetHeld();
+        claimed = after_ > before ? after_ - before : 0;
         if (claimed > 0) emit Harvested(msg.sender, claimed);
     }
 }

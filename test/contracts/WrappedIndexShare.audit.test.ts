@@ -49,7 +49,18 @@ describe("WrappedIndexShare — opt-in composability wrapper (wIDX)", () => {
   async function fixture() {
     const fx = await deployOpenIndex();
     const W = await ethers.getContractFactory("WrappedIndexShare");
-    const wrapper: any = await W.deploy(fx.vaultAddr, "Wrapped Global Index", "wIDX");
+    // ROUND 9d MECHANICAL UPDATE: the wrapper gained the stream-admission
+    // role pair and its timelock. Nothing about the two core backing legs
+    // these tests exercise changed — no assertion below was touched.
+    const lister = (await ethers.getSigners())[9];
+    const wrapper: any = await W.deploy(
+      fx.vaultAddr,
+      "Wrapped Global Index",
+      "wIDX",
+      fx.roleAdmin.address,
+      lister.address,
+      48 * 3600
+    );
     const wrapperAddr = await wrapper.getAddress();
 
     for (const who of [fx.alice, fx.bob, fx.carol]) {
@@ -58,7 +69,7 @@ describe("WrappedIndexShare — opt-in composability wrapper (wIDX)", () => {
       await fx.tokens[0].connect(who).approve(wrapperAddr, ethers.MaxUint256);
       await fx.vault.connect(who).approve(wrapperAddr, ethers.MaxUint256);
     }
-    return { ...fx, wrapper, wrapperAddr, div: fx.tokens[0] };
+    return { ...fx, wrapper, wrapperAddr, lister, div: fx.tokens[0] };
   }
 
   const mint = (fx: any, who: any, shares: bigint) =>
@@ -107,10 +118,16 @@ describe("WrappedIndexShare — opt-in composability wrapper (wIDX)", () => {
       ethers.ZeroAddress
     );
     const W = await ethers.getContractFactory("WrappedIndexShare");
-    await expect(W.deploy(await inert.getAddress(), "w", "w")).to.be.revertedWithCustomError(
-      W,
-      "NoDividendAsset"
-    );
+    await expect(
+      W.deploy(
+        await inert.getAddress(),
+        "w",
+        "w",
+        fx.roleAdmin.address,
+        fx.risk.address,
+        48 * 3600
+      )
+    ).to.be.revertedWithCustomError(W, "NoDividendAsset");
   });
 
   // ══ 1. First-depositor inflation ═════════════════════════════════════════
