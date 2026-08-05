@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { time, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { time, takeSnapshot, mine, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
 import { deployOpenIndex, maxIn } from "./helpers/index-vault";
 
 /**
@@ -187,8 +187,28 @@ describe("WrappedIndexShare — N-asset reward streams (round 9d)", () => {
     expect(await fx.wrapper.streamCount()).to.equal(1n);
 
     // Now the push works, and it is permissionless.
+    //
+    // ROUND 9e: pushed with NO wrapped supply, the credit is held in the
+    // zero-denominator `carry` instead of counting as backing — see
+    // IndexZeroDenominatorCarry.test.ts. Assert BOTH halves here rather than
+    // only the one this test originally saw: carried while empty, and backing
+    // the instant there is somebody to divide it among.
     await fx.wrapper.connect(fx.alice).depositStream(addr, E("10"));
-    expect(await fx.wrapper.streamHeld(addr)).to.equal(E("10"));
+    expect(await fx.wrapper.totalSupply()).to.equal(0n);
+    expect(await fx.wrapper.carry(addr)).to.equal(E("10"));
+    expect(await fx.wrapper.streamHeld(addr)).to.equal(0n);
+
+    await mint(fx, fx.alice, E("1000"));
+    await fx.wrapper.connect(fx.alice).deposit(E("100"));
+    await mine();
+    await fx.wrapper.connect(fx.alice).withdraw(E("1")); // any interaction folds
+    expect(await fx.wrapper.carry(addr)).to.equal(0n);
+
+    // And a push with a live supply is backing in the very same call, exactly
+    // as it always was.
+    await bribe.mint(fx.alice.address, E("5"));
+    await fx.wrapper.connect(fx.alice).depositStream(addr, E("5"));
+    expect(await fx.wrapper.streamHeld(addr)).to.be.greaterThan(E("14"));
   });
 
   it("an un-whitelisted token can never be pushed, and cannot be listed twice or as a core leg", async () => {
