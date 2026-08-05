@@ -260,6 +260,12 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     /// history is unsatisfiable and would brick the priced paths outright.
     uint256 private constant MIN_REQUIRED_CHECKPOINTS = 2;
     uint256 private constant MAX_REQUIRED_CHECKPOINTS = OBS_SLOTS;
+    /// @dev Extra settled checkpoints a LARGE single-asset exit into a HEALTHY
+    /// leg must see while ANY constituent is publicly queued for removal. See
+    /// `_exitWindowOpen` for the race this closes and why the fix is economic
+    /// rather than informational. Clamped by MAX_REQUIRED_CHECKPOINTS, so it
+    /// can never make the requirement unsatisfiable.
+    uint256 private constant EXIT_WINDOW_EXTRA_CHECKPOINTS = 2;
     /// @dev Gas cap on every eligibility read. A hostile constituent must not
     /// be able to out-of-gas a whole-basket recount.
     uint256 private constant ELIGIBILITY_GAS_CAP = 50_000;
@@ -1465,7 +1471,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
 
         uint256 credited = _pullCredited(IERC20(token), msg.sender, amountIn);
         uint256 ethValue = Math.mulDiv(credited, lo, WAD);
-        _requirePersistenceIfLarge(token, ethValue);
+        _requirePersistenceIfLarge(token, ethValue, false);
 
         // Pro-rata-equivalent shares, floored, against the OVER-stated basket.
         sharesOut = Math.mulDiv(ethValue, totalSupply() + VIRTUAL_SHARES, navHigh + VIRTUAL_ASSETS);
@@ -1672,7 +1678,9 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
 
         {
             (uint256 targetLo, , ) = priceBand(token);
-            _requirePersistenceIfLarge(token, Math.mulDiv(amountOut, targetLo, WAD));
+            // `true`: this is the single-asset EXIT, the one path the
+            // exit-window guard applies to. See `_exitWindowOpen`.
+            _requirePersistenceIfLarge(token, Math.mulDiv(amountOut, targetLo, WAD), true);
         }
 
         uint256[] memory weightsBefore = _allWeightsBps();
@@ -2299,16 +2307,18 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         view
         returns (address[] memory tokens, uint256[] memory amounts)
     {
-        uint256 n = constituentList.length;
-        tokens = new address[](n);
-        amounts = new uint256[](n);
-        uint256 denom = totalSupply() + VIRTUAL_SHARES;
-        for (uint256 i = 0; i < n; i++) {
-            tokens[i] = constituentList[i];
-            // Mirrors redeemProRata exactly, including the deliberate
-            // absence of VIRTUAL_ASSETS on the payout side.
-            amounts[i] = Math.mulDiv(sharesIn, constituents[tokens[i]].reserve, denom);
-        }
+        // Mirrors redeemProRata exactly, including the deliberate absence of
+        // VIRTUAL_ASSETS on the payout side. Both previews share one body in
+        // IndexValuation so they cannot drift apart.
+        return
+            IndexValuation.previewProRata(
+                constituentList,
+                constituents,
+                sharesIn,
+                totalSupply() + VIRTUAL_SHARES,
+                0,
+                false
+            );
     }
 
     function previewMintProRata(uint256 sharesOut)
@@ -2316,19 +2326,15 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         view
         returns (address[] memory tokens, uint256[] memory amounts)
     {
-        uint256 n = constituentList.length;
-        tokens = new address[](n);
-        amounts = new uint256[](n);
-        uint256 denom = totalSupply() + VIRTUAL_SHARES;
-        for (uint256 i = 0; i < n; i++) {
-            tokens[i] = constituentList[i];
-            amounts[i] = Math.mulDiv(
+        return
+            IndexValuation.previewProRata(
+                constituentList,
+                constituents,
                 sharesOut,
-                constituents[tokens[i]].reserve + VIRTUAL_ASSETS,
-                denom,
-                Math.Rounding.Up
+                totalSupply() + VIRTUAL_SHARES,
+                VIRTUAL_ASSETS,
+                true
             );
-        }
     }
 
     /// @notice What a single-asset exit of `sharesIn` into `token` pays,
@@ -2556,14 +2562,64 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     /// across independent checkpoints before the basket prices against it —
     /// and across MORE of them the larger the operation is (see
     /// `requiredCheckpoints`).
-    function _requirePersistenceIfLarge(address token, uint256 ethValue) private view {
+    function _requirePersistenceIfLarge(
+        address token,
+        uint256 ethValue,
+        bool exitWindow
+    ) private view {
         if (ethValue < params.largeOpValueWei) return;
         // The VARIANCE-CALIBRATED requirement (Part E), not the size-only one.
         // `requiredCheckpoints` is retained unchanged as the pure size term
         // and as the figure a UI or monitor should read.
-        if (!persistenceHoldsFor(token, requiredCheckpointsFor(token, ethValue))) {
-            revert PersistenceCheckFailed();
+        uint256 required = requiredCheckpointsFor(token, ethValue);
+        if (exitWindow && _exitWindowOpen(token)) {
+            required += EXIT_WINDOW_EXTRA_CHECKPOINTS;
+            if (required > MAX_REQUIRED_CHECKPOINTS) required = MAX_REQUIRED_CHECKPOINTS;
         }
+        if (!persistenceHoldsFor(token, required)) revert PersistenceCheckFailed();
+    }
+
+    /**
+     * @dev IS THIS A LARGE SINGLE-ASSET EXIT INTO A HEALTHY LEG WHILE SOME
+     * OTHER LEG IS PUBLICLY QUEUED FOR REMOVAL?
+     *
+     * THE RACE THIS CLOSES. `isExiting()` flags a constituent the INSTANT a
+     * removal is queued — not when it executes — and that is correct and stays
+     * public: transparency about what the basket is unwinding is worth having,
+     * and hiding it would only advantage whoever reads the mempool. But the
+     * price band is a LAGGING instrument by construction (per-observation
+     * movement cap + a checkpoint cadence measured in minutes), so between the
+     * announcement and the band catching up there is a window in which a
+     * rational holder can race a large `redeemSingleAsset` into a still-healthy
+     * leg at a price that has not yet absorbed the news. That is the
+     * publicly-announced version of exactly the bank-run dynamic the timelock
+     * exists to give people reaction time AGAINST, not to enable.
+     *
+     * THE FIX IS ECONOMIC, NOT INFORMATIONAL, and it blocks nobody. It asks the
+     * band to have HELD across more independent settlement checkpoints before
+     * a basket-moving single-asset exit is honoured during that window — the
+     * same instrument Part E already uses, turned up for the same reason it
+     * exists. Anyone may still leave: `redeemProRata` is untouched (it reads no
+     * price at all), small exits are untouched (this only applies above
+     * `largeOpValueWei`), and the requirement is hard-clamped at
+     * MAX_REQUIRED_CHECKPOINTS, which is the ring-buffer depth — so it is
+     * always satisfiable by waiting, never by permission.
+     *
+     * The target must be HEALTHY. An exit into a leg that is ITSELF being
+     * removed is not the stale-band arbitrage; it is somebody leaving the
+     * position the basket has already announced it is leaving, which is the
+     * behaviour the ramp-out is for.
+     */
+    function _exitWindowOpen(address token) private view returns (bool) {
+        Constituent storage tc = constituents[token];
+        QueuedListing storage tq = queuedListings[token];
+        if (!tc.active || (tq.pending && tq.isRemoval)) return false;
+        uint256 n = constituentList.length;
+        for (uint256 i = 0; i < n; i++) {
+            QueuedListing storage q = queuedListings[constituentList[i]];
+            if (q.pending && q.isRemoval) return true;
+        }
+        return false;
     }
 
     /**
@@ -2651,29 +2707,14 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      * improve a convenience.
      */
     function _mintFeeBps(address token, uint256 depthFee) private view returns (uint256) {
-        (address[] memory tokens, uint256[] memory target) = targetWeightsBps();
-        uint256[] memory current = _allWeightsBps();
-        uint256 idx = type(uint256).max;
-        for (uint256 i = 0; i < tokens.length; i++) {
-            if (tokens[i] == token) {
-                idx = i;
-                break;
-            }
-        }
-        if (idx == type(uint256).max) return params.maxImbalanceFeeBps;
-
-        uint256 t = target[idx];
-        if (t == 0) return params.maxImbalanceFeeBps; // unknown target => max
-
-        Params memory p = params;
         return
-            IndexMath.mintFeeBps(
+            IndexValuation.mintFeeBps(
+                constituentList,
+                constituents,
+                token,
                 depthFee,
-                current[idx],
-                t,
-                p.baseImbalanceFeeBps,
-                p.imbalanceSlopeBps,
-                p.maxImbalanceFeeBps
+                effectiveConcentrationCapBps(),
+                params
             );
     }
 
