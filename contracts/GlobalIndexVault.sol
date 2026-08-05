@@ -122,6 +122,21 @@ import {IIndexPriceSource} from "./IIndexPriceSource.sol";
 import {IEligibilitySource} from "./IEligibilitySource.sol";
 import {ScopedRoles} from "./ScopedRoles.sol";
 
+/**
+ * @notice The two functions this vault needs from an ecosystem fee sink, and
+ * NOTHING else. Deliberately a two-function interface over
+ * IndexDividendDistributor rather than an import of it: the vault must not
+ * acquire a compile-time dependency on — or an ABI-level reach into — a
+ * contract that holds its own funds. `reinvestAsset()` is read ONCE, at the
+ * timelocked appointment, to pin which constituent this vault is allowed to
+ * divert (see `executeEcosystemSink`); `receiveDividendsWrapped` is a PUSH the
+ * sink pulls from an allowance, so the vault never hands it an open approval.
+ */
+interface IEcosystemFeeSink {
+    function reinvestAsset() external view returns (address);
+    function receiveDividendsWrapped(uint256 amount) external;
+}
+
 contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     using SafeERC20 for IERC20;
 
@@ -186,6 +201,29 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     /// should favour the depositor, since the depositor is the party who did
     /// not vote on it. It is inert until a treasury is appointed anyway.
     uint256 private constant DEFAULT_PLATFORM_ALLOCATION_BPS = 200;
+
+    /**
+     * @dev ECOSYSTEM FEE SPLIT — hard ceiling and default.
+     *
+     * The imbalance fee has always been retained in reserves, where it lifts
+     * NAV per share for everyone who stayed. `ecosystemFeeSplitBps` is the
+     * fraction of that fee — and ONLY of that fee, never of principal — that
+     * is instead booked to a SEGREGATED per-token ledger for the ecosystem
+     * sink. The ceiling is 30%, so a supermajority of the fee is retained for
+     * NAV appreciation no matter what governance does; the default is 20%.
+     *
+     * The trade-off is deliberately NOT hidden: with the sink appointed and
+     * the split at 20%, existing holders get 80% of the NAV lift they would
+     * have got with the whole fee retained. They are never WORSE off than
+     * before a priced operation — per-share backing is still non-decreasing on
+     * both priced paths, which the audit suite asserts directly — they simply
+     * capture less of the upside, and the other 20% pays the holders who
+     * staked into the dividend distributor. That is a distribution choice
+     * between two groups of holders, made in the open by a timelocked
+     * parameter with a compile-time ceiling, not a withdrawal path.
+     */
+    uint256 private constant CEIL_ECOSYSTEM_SPLIT_BPS = 3_000;
+    uint256 private constant DEFAULT_ECOSYSTEM_SPLIT_BPS = 2_000;
 
     // ── Part D: dynamic HHI-derived concentration cap ──────────────────────
     /// @dev Target basket HHI as a fraction of BPS. 2_000 = HHI 2000/10000 =
@@ -357,6 +395,54 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     address public platformTreasury;
     uint256 public platformAllocationBps;
 
+    /**
+     * @notice SEGREGATED ECOSYSTEM-FEE LEDGER (the MarketplankVaultV3
+     * `accruedFees` pattern, applied per-token).
+     *
+     * V3 solved exactly this problem once already and the solution is copied
+     * here rather than reinvented: fees live in their OWN ledger, are added to
+     * with `+=` at the instant of collection, are never mixed into the backing
+     * reserve, are never counted by any valuation view, and leave only through
+     * one permissionless function with a fixed destination.
+     *
+     * The four properties that make this safe, each asserted by the suite:
+     *
+     *  1. `ecosystemFeesWei[t]` is NEVER read by `nav()`, `priceBand()`,
+     *     `weightBps()`, `_allWeightsBps()` or `targetWeightsBps()`. Those all
+     *     read `constituents[t].reserve` and nothing else, unchanged.
+     *  2. `redeemProRata` pays `floor(s * reserve_k / (S + V))` against
+     *     `reserve_k` alone, exactly as before. A redeemer receives BIT-FOR-BIT
+     *     the same amounts whether this ledger holds zero or a fortune. This
+     *     is the exit door and this feature does not go near it.
+     *  3. Nothing ever moves FROM `reserve` TO this ledger after the fact. The
+     *     only writes are at fee-collection time, out of the fee the operation
+     *     itself charged, before that fee was ever added to the reserve.
+     *  4. Only the constituent pinned by `ecosystemAsset` can ever accrue,
+     *     and that is by construction the sink's own `reinvestAsset` — so
+     *     every wei booked here is harvestable by anyone, immediately. There
+     *     is no "accrued in a token nothing can spend" state to strand.
+     *
+     * INERT BY DEFAULT: with `ecosystemSink` unset (address(0)) no accrual
+     * happens on any path and every priced operation behaves bit-for-bit as it
+     * did before this feature existed.
+     */
+    mapping(address => uint256) public ecosystemFeesWei;
+
+    /// @notice The appointed sink (in practice IndexDividendDistributor).
+    /// Timelocked, and it is a DESTINATION, not a permission: it can call
+    /// nothing on this contract and reach no reserve.
+    address public ecosystemSink;
+
+    /// @notice The ONE constituent whose imbalance fee may be split, pinned to
+    /// `ecosystemSink.reinvestAsset()` at appointment time. See
+    /// `executeEcosystemSink` for why this is read once and stored rather than
+    /// consulted live.
+    address public ecosystemAsset;
+
+    /// @notice Fraction of the imbalance fee diverted to `ecosystemFeesWei`,
+    /// in bps. Timelocked, ceilinged at `CEIL_ECOSYSTEM_SPLIT_BPS`.
+    uint256 public ecosystemFeeSplitBps;
+
     // ── Part A: oracle-free, self-sourced eligibility bar ──────────────────
 
     /// @notice Minimum lifetime fee revenue (wei) a constituent must have
@@ -401,6 +487,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     event RedeemedSingle(address indexed from, address indexed token, uint256 shares, uint256 amountOut);
     event MetricUpdated(address indexed token, uint256 metric);
     event EligibleCountUpdated(uint256 eligibleCount, uint256 effectiveCapBps);
+    event EcosystemFeesHarvested(address indexed token, address indexed sink, uint256 amount);
 
     // ── Errors ─────────────────────────────────────────────────────────────
 
@@ -426,6 +513,8 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     error ShortDelivery();
     error ConstituentExiting();
     error AllocationCapExceeded();
+    error EcosystemSinkUnset();
+    error ApprovalNotConsumed();
 
     // ── Construction ───────────────────────────────────────────────────────
 
@@ -462,6 +551,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         _validateParams(params_);
         params = params_;
         platformAllocationBps = DEFAULT_PLATFORM_ALLOCATION_BPS; // inert: no treasury yet
+        ecosystemFeeSplitBps = DEFAULT_ECOSYSTEM_SPLIT_BPS; // inert: no sink yet
         targetHhiBps = DEFAULT_TARGET_HHI_BPS;
         // Placeholder bars, deliberately modest and deliberately timelocked:
         // the honest calibration for a real chain is an operational decision,
@@ -1314,7 +1404,12 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         if (sharesOut == 0) revert ZeroAmount();
 
         uint256[] memory weightsBefore = _allWeightsBps();
-        c.reserve += credited;
+        // The fee this mint just charged, expressed in the DEPOSITED token:
+        // the depositor was credited shares for `credited * (1 - feeBps)`, so
+        // `credited * feeBps` is the fee, and the split is taken out of THAT
+        // and nothing else. Whatever is not split off still lands in the
+        // reserve and still lifts NAV per share, exactly as before.
+        c.reserve += credited - _accrueEcosystem(token, (credited * feeBps) / BPS);
         // The slippage guard is checked against what the DEPOSITOR actually
         // receives, not the pre-allocation gross — a guard that can be
         // satisfied by shares the caller never gets is not a guard.
@@ -1412,8 +1507,15 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         if (sharesIn == 0) revert ZeroAmount();
         Constituent storage target = _get(token);
 
-        amountOut = _previewSingleExit(sharesIn, token);
-        if (amountOut >= target.reserve) revert ReserveWouldEmpty();
+        uint256 feeAmount;
+        (amountOut, feeAmount) = _previewSingleExit(sharesIn, token);
+        // The split is taken out of `feeAmount` — the fee this exit ALREADY
+        // charged and was already retaining — and never out of the payout.
+        // `amountOut` above is computed before this line and is not touched
+        // by it: the redeemer receives exactly what they would have received
+        // with the split at zero, which is the property the suite pins.
+        uint256 cut = _accrueEcosystem(token, feeAmount);
+        if (amountOut + cut >= target.reserve) revert ReserveWouldEmpty();
         if (amountOut < minAmountOut) revert SlippageExceeded();
 
         {
@@ -1423,7 +1525,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
 
         uint256[] memory weightsBefore = _allWeightsBps();
         _burn(msg.sender, sharesIn);
-        target.reserve -= amountOut;
+        target.reserve -= amountOut + cut;
         IERC20(token).safeTransfer(msg.sender, amountOut);
         // A single-asset exit lowers the TARGET's weight — but by shrinking
         // one leg it mechanically raises every OTHER leg's share of NAV, which
@@ -1459,7 +1561,20 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      *    through the back door. Whitelisting the key space closes that.
      */
     function roleForParamKey(bytes32 key) public pure returns (bytes32) {
-        if (key == "platformAllocationBps") return ROLE_PLATFORM_ALLOCATION;
+        // `ecosystemFeeSplitBps` is keyed to the VALUE-FLOW role, not the risk
+        // role, on purpose. It does not change what anyone is charged — the
+        // fee schedule is untouched by it — it changes where an already-
+        // charged fee is booked. That is the same kind of decision
+        // `platformAllocationBps` makes, so it lives behind the same role, and
+        // the risk role (which owns the fee SCHEDULE) cannot reach it. Neither
+        // role can reach the other's half, which is the point.
+        if (
+            key == "platformAllocationBps" ||
+            key == "ecosystemFeeSplitBps" ||
+            key == "ecosystemSink"
+        ) {
+            return ROLE_PLATFORM_ALLOCATION;
+        }
         if (
             key == "concentrationCapBps" ||
             key == "baseImbalanceFeeBps" ||
@@ -1513,6 +1628,20 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
             // change lands, never how bad it can be.
             if (q.value > CEIL_PLATFORM_ALLOCATION_BPS) revert AllocationCapExceeded();
             platformAllocationBps = q.value;
+            emit ParamApplied(key, q.value);
+            return;
+        } else if (key == "ecosystemFeeSplitBps") {
+            // Same doctrine, same place: the ceiling is re-checked at
+            // EXECUTION. A timelock bounds when a bad value lands, never how
+            // bad it can be — so no governance, colluding or not, can ever
+            // route more than CEIL_ECOSYSTEM_SPLIT_BPS of the fee away from
+            // NAV appreciation.
+            if (q.value > CEIL_ECOSYSTEM_SPLIT_BPS) revert AllocationCapExceeded();
+            ecosystemFeeSplitBps = q.value;
+            emit ParamApplied(key, q.value);
+            return;
+        } else if (key == "ecosystemSink") {
+            _applyEcosystemSink(q.value);
             emit ParamApplied(key, q.value);
             return;
         } else if (
@@ -1677,6 +1806,92 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         emit ParamApplied("platformTreasury", q.value);
     }
 
+    /**
+     * @dev APPOINTING THE ECOSYSTEM SINK. There is no bespoke
+     * `queueEcosystemSink` pair: the appointment rides the SAME
+     * `queueParam`/`executeParam` timelock every other parameter uses, under
+     * key `"ecosystemSink"`, routed by `roleForParamKey` to
+     * ROLE_PLATFORM_ALLOCATION and applied by `_applyEcosystemSink` below. One
+     * timelock implementation, not two — a second hand-rolled queue is a
+     * second place for a timelock bypass to hide, and this contract is also
+     * against the EIP-170 size limit.
+     *
+     * Like every other appointment here it grants the appointee NO reach: the
+     * sink cannot call anything on this contract, cannot move a reserve, and
+     * cannot block a redemption. It is a destination address and nothing else.
+     *
+     * @dev WHY THE ASSET IS READ ONCE, AT APPOINTMENT, AND NOT LIVE ON THE
+     * HOT PATH.
+     * Consulting the sink inside `mintSingleAsset`/`redeemSingleAsset` would
+     * put an external call to a third-party contract on both priced paths —
+     * a reentrancy surface bought for a value that does not change — and it
+     * would let a sink silently retarget which constituent this vault diverts
+     * by mutating its own storage. Reading it once, at a timelocked
+     * appointment, means retargeting costs a fresh appointment with the full
+     * timelock's public notice.
+     *
+     * @dev WHY THE SCOPE IS "THE SINK'S OWN REINVEST ASSET, AND ONLY IT"
+     * (the scoping decision, stated rather than half-implemented). Index
+     * constituents are arbitrary ERC-20s; the distributor accepts exactly one
+     * — its `reinvestAsset`, the WETH leg. Three options existed: accrue in
+     * every constituent and route non-WETH legs through `mintSingleAsset` to
+     * convert (an internal priced swap on a fee-harvest path, which is new
+     * value-moving machinery with its own proofs to redo); accrue in every
+     * constituent and harvest only WETH (which strands the rest in a ledger
+     * nothing can spend — an asset trap, and this codebase does not build
+     * those); or accrue ONLY in the leg the sink can actually take. The third
+     * is chosen. Every wei that can be booked can be harvested by anyone,
+     * immediately, and there is no unreachable state. Extending to other legs
+     * is a later change with its own conversion proofs, not a silent gap.
+     *
+     * @dev RETIRING/RETARGETING AND ALREADY-ACCRUED FEES. Pointing the sink at
+     * address(0), or at a sink with a different `reinvestAsset`, leaves fees
+     * accrued under the OLD asset unharvestable until an appointment restores
+     * a sink with that asset. This is not a trap on user assets — the ledger
+     * is fee revenue, holds nothing redeemable, and `redeemProRata` is
+     * untouched by it — and the timelock gives the full delay of public notice
+     * during which anyone at all may call the permissionless harvest first.
+     */
+    function _applyEcosystemSink(uint256 value) private {
+        address sink = address(uint160(value));
+        ecosystemSink = sink;
+        ecosystemAsset = sink == address(0)
+            ? address(0)
+            : IEcosystemFeeSink(sink).reinvestAsset();
+    }
+
+    /**
+     * @notice Push the segregated ecosystem fees to the appointed sink.
+     *
+     * PERMISSIONLESS, with a FIXED destination — `MarketplankVaultV3`'s
+     * `withdrawFees()` pattern, one for one. Anyone may call it; nobody may
+     * choose where it goes. There is no recipient argument, no override, and
+     * no privileged variant, so this is a trigger, not a rug lever: the worst
+     * a caller can do is pay gas to move protocol fee revenue to the address
+     * governance appointed under timelock in public.
+     *
+     * The allowance is granted for exactly `amount` and zeroed immediately
+     * after, so this contract never leaves a standing approval over any token
+     * balance — including the balance backing `reserve`.
+     */
+    function harvestEcosystemFees() external nonReentrant returns (uint256 amount) {
+        address sink = ecosystemSink;
+        if (sink == address(0)) revert EcosystemSinkUnset();
+        address asset = ecosystemAsset;
+        amount = ecosystemFeesWei[asset];
+        if (amount == 0) revert ZeroAmount();
+        ecosystemFeesWei[asset] = 0; // effects before interactions
+        IERC20(asset).forceApprove(sink, amount);
+        IEcosystemFeeSink(sink).receiveDividendsWrapped(amount);
+        // The sink must consume the WHOLE allowance. Asserting it is strictly
+        // cheaper than re-approving to zero and strictly stronger than
+        // trusting it: this contract can never be left with a standing
+        // approval over a token balance, including the balance backing
+        // `reserve`. A sink that under-pulls reverts the harvest instead.
+        if (IERC20(asset).allowance(address(this), sink) != 0) revert ApprovalNotConsumed();
+        emit EcosystemFeesHarvested(asset, sink, amount);
+    }
+
     /// @notice The mint-side fee a deposit of `amountIn` into `token` would
     /// pay, directional term included. Shown before signature, per
     /// CONTRIBUTING.md's pre-signature transparency rule.
@@ -1785,7 +2000,8 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         view
         returns (uint256)
     {
-        return _previewSingleExit(sharesIn, token);
+        (uint256 out, ) = _previewSingleExit(sharesIn, token);
+        return out;
     }
 
     function imbalanceFeeBps(uint256 amount, uint256 against) external view returns (uint256) {
@@ -1862,10 +2078,38 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      *      what keeps the balanced path strictly cheaper than the concentrated
      *      one for every input.
      */
+    /**
+     * @dev Book the ecosystem share of an ALREADY-CHARGED fee and return it,
+     * so the caller can keep the remainder in the reserve. The one and only
+     * writer of `ecosystemFeesWei`.
+     *
+     * Three guards, in the order that matters:
+     *  - `token != ecosystemAsset` → zero. No constituent other than the one
+     *    the sink can actually take ever accrues, so nothing can strand.
+     *  - no sink appointed → zero. The whole feature is inert by default.
+     *  - the cut FLOORS, so an ambiguous base unit stays in the reserve with
+     *    existing holders rather than going to the sink. Same rounding
+     *    doctrine as everywhere else in this file: the party who did not set
+     *    the parameter wins the dust.
+     *
+     * `feeAmount` is always a strict fraction of an amount the operation
+     * already moved, and `bps <= CEIL_ECOSYSTEM_SPLIT_BPS < BPS`, so the
+     * returned cut is always strictly less than the fee and can never exceed
+     * — let alone reach into — principal.
+     */
+    function _accrueEcosystem(address token, uint256 feeAmount) private returns (uint256 cut) {
+        if (ecosystemSink == address(0) || token != ecosystemAsset) return 0;
+        uint256 bps = ecosystemFeeSplitBps;
+        if (bps == 0 || feeAmount == 0) return 0;
+        cut = (feeAmount * bps) / BPS; // floors, in existing holders' favour
+        if (cut == 0) return 0;
+        ecosystemFeesWei[token] += cut;
+    }
+
     function _previewSingleExit(uint256 sharesIn, address token)
         private
         view
-        returns (uint256 amountOut)
+        returns (uint256 amountOut, uint256 feeAmount)
     {
         Constituent storage target = _get(token);
         (, uint256 targetHi, ) = priceBand(token);
@@ -1888,7 +2132,13 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         uint256 extra = Math.mulDiv(otherEth, WAD, targetHi);
         uint256 remaining = target.reserve > proRataTarget ? target.reserve - proRataTarget : 0;
         if (remaining == 0) revert ReserveWouldEmpty();
-        extra -= (extra * _imbalanceFeeBps(extra, remaining)) / BPS;
+        // `feeAmount` is the fee this exit charges, in TARGET-token units —
+        // the same number that was already being retained implicitly by
+        // paying out less. Returning it explicitly changes no arithmetic on
+        // this path; it only makes the quantity nameable so the split can be
+        // taken out of the fee rather than out of the reserve.
+        feeAmount = (extra * _imbalanceFeeBps(extra, remaining)) / BPS;
+        extra -= feeAmount;
         amountOut = proRataTarget + extra;
     }
 
