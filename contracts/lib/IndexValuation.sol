@@ -83,6 +83,16 @@ library IndexValuation {
         uint256 bandBps,
         uint256 staleAfter
     ) external view returns (uint256[] memory w) {
+        return _weights(list, cs, bandBps, staleAfter);
+    }
+
+    /// @dev The body, `private` for the same reason `_targets` is.
+    function _weights(
+        address[] storage list,
+        mapping(address => Constituent) storage cs,
+        uint256 bandBps,
+        uint256 staleAfter
+    ) private view returns (uint256[] memory w) {
         uint256 n = list.length;
         w = new uint256[](n);
         uint256[] memory v = new uint256[](n);
@@ -154,6 +164,82 @@ library IndexValuation {
         amountOut = proRataTarget + extra;
     }
 
+    /**
+     * @notice The two strict pro-rata quotes, in one body.
+     *
+     * `roundUp` selects the MINT side (every amount ceils, against
+     * `reserve + VIRTUAL_ASSETS`) or the REDEEM side (every amount floors,
+     * against `reserve` alone). That asymmetry is not a simplification for the
+     * sake of sharing a body — it is the deliberate rounding doctrine
+     * documented at `redeemProRata`, and keeping both sides in ONE function
+     * makes it impossible for the two previews to drift apart from each other.
+     *
+     * @dev Moved verbatim from GlobalIndexVault. `denom` and `virtualAssets`
+     * are supplied by the caller, so this library needs no reach into the
+     * share token.
+     */
+    function previewProRata(
+        address[] storage list,
+        mapping(address => Constituent) storage cs,
+        uint256 shares,
+        uint256 denom,
+        uint256 virtualAssets,
+        bool roundUp
+    ) external view returns (address[] memory tokens, uint256[] memory amounts) {
+        uint256 n = list.length;
+        tokens = new address[](n);
+        amounts = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) {
+            tokens[i] = list[i];
+            uint256 r = cs[tokens[i]].reserve;
+            amounts[i] = roundUp
+                ? Math.mulDiv(shares, r + virtualAssets, denom, Math.Rounding.Up)
+                : Math.mulDiv(shares, r, denom);
+        }
+    }
+
+    /**
+     * @notice DIRECTIONAL mint-side imbalance fee, layered on the depth-based
+     * fee. A deposit into an UNDERWEIGHT constituent moves the basket toward
+     * its target vector and is discounted; one into an OVERWEIGHT constituent
+     * moves it away and is surcharged. See GlobalIndexVault._mintFeeBps for the
+     * two conservative choices (the discount floors at the base fee and can
+     * never go negative; an unknown target pays the maximum).
+     *
+     * @dev Moved verbatim. Living here is what lets the target vector and the
+     * current weight vector be computed by PRIVATE calls — the vault used to
+     * pay two delegatecalls and two dynamic-array ABI decodes for this one fee.
+     */
+    function mintFeeBps(
+        address[] storage list,
+        mapping(address => Constituent) storage cs,
+        address token,
+        uint256 depthFee,
+        uint256 cap,
+        IndexParamSet memory p
+    ) external view returns (uint256) {
+        (address[] memory tokens, uint256[] memory target) = _targets(list, cs, cap, p.staleAfter);
+        uint256 idx = type(uint256).max;
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (tokens[i] == token) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx == type(uint256).max) return p.maxImbalanceFeeBps;
+        uint256 t = target[idx];
+        if (t == 0) return p.maxImbalanceFeeBps; // unknown target => max
+        return
+            IndexMath.mintFeeBps(
+                depthFee,
+                _weights(list, cs, p.bandBps, p.staleAfter)[idx],
+                t,
+                p.baseImbalanceFeeBps,
+                p.imbalanceSlopeBps,
+                p.maxImbalanceFeeBps
+            );
+    }
+
     /// @dev The pro-rata slice of every NON-target leg, valued at that leg's
     /// band LOW, summed in ETH wei. Split out of `previewSingleExit` purely to
     /// keep that function's stack inside the EVM's 16-slot reach — the
@@ -201,6 +287,17 @@ library IndexValuation {
         uint256 cap,
         uint256 staleAfter
     ) external view returns (address[] memory tokens, uint256[] memory bps) {
+        return _targets(list, cs, cap, staleAfter);
+    }
+
+    /// @dev The body, `private` so `mintFeeBps` below reaches it with a plain
+    /// jump rather than a second delegatecall and a second array decode.
+    function _targets(
+        address[] storage list,
+        mapping(address => Constituent) storage cs,
+        uint256 cap,
+        uint256 staleAfter
+    ) private view returns (address[] memory tokens, uint256[] memory bps) {
         uint256 n = list.length;
         tokens = new address[](n);
         bps = new uint256[](n);
