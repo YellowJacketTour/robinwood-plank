@@ -118,9 +118,25 @@ interface IIndexMint {
         returns (uint256 sharesOut);
 }
 
-/// @notice Canonical WETH9 shape. Only `deposit` is used.
-interface IWrappedEth {
+/**
+ * @notice The REAL canonical WETH9 surface: the wrap/unwrap pair on top of the
+ * standard ERC-20 one. This is the interface of the already-deployed,
+ * already-verified WETH at 0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73 on the
+ * target chain (lib/constants.ts `MARKET_OFFER_CURRENCY`, the same contract
+ * the marketplace already uses as its offer currency) — not a mock, and not a
+ * shape invented here.
+ *
+ * The address is NOT hardcoded. It is a constructor-set immutable, so a local
+ * test can point this contract at a locally-deployed copy of the real
+ * canonical WETH9 source (contracts/test/CanonicalWeth9.sol) and exercise the
+ * genuine semantics, including the ones a hand-rolled mock silently gets
+ * wrong. An immutable rather than a storage slot because a mutable wrapped-ETH
+ * address is a mutable definition of what every reinvestment means.
+ */
+interface IWETH9 is IERC20 {
     function deposit() external payable;
+
+    function withdraw(uint256 amount) external;
 }
 
 contract IndexDividendDistributor is ReentrancyGuard {
@@ -145,7 +161,7 @@ contract IndexDividendDistributor is ReentrancyGuard {
      * and has no ETH entry point at all, so a wrapped-ETH leg is a hard
      * requirement for the compounding path, not a convenience.
      */
-    IWrappedEth public immutable reinvestAsset;
+    IWETH9 public immutable reinvestAsset;
 
     /// @notice ETH-per-staked-share accumulator, WAD-scaled. Monotone.
     uint256 public accEthPerShareWad;
@@ -176,8 +192,9 @@ contract IndexDividendDistributor is ReentrancyGuard {
     error TransferFailed();
     error ReinvestUnavailable();
     error BadParam();
+    error DirectEthRejected();
 
-    constructor(IERC20 shareToken_, IIndexMint indexVault_, IWrappedEth reinvestAsset_) {
+    constructor(IERC20 shareToken_, IIndexMint indexVault_, IWETH9 reinvestAsset_) {
         if (address(shareToken_) == address(0) || address(indexVault_) == address(0)) {
             revert BadParam();
         }
@@ -229,30 +246,115 @@ contract IndexDividendDistributor is ReentrancyGuard {
      * "attack" is donating money) and would add a key to lose.
      */
     function receiveDividends() external payable {
-        if (msg.value == 0) revert ZeroAmount();
-        totalReceived += msg.value;
-        uint256 pot = msg.value + undistributed;
+        _credit(msg.value);
+    }
+
+    /**
+     * @notice Push dividends denominated in WRAPPED ETH. Pulled, UNWRAPPED to
+     * real ETH through the real `WETH.withdraw`, then credited by the identical
+     * accumulator every other push uses.
+     *
+     * Exists because the marketplace fee flow this contract is fed by settles
+     * in the offer currency, which IS the WETH at `reinvestAsset` — so without
+     * this the pusher has to unwrap first, off-chain, in a separate
+     * transaction, and a step that has to be remembered is a step that gets
+     * skipped.
+     *
+     * THE UNWRAP-AND-PAY PATTERN, done in the order that matters:
+     *   1. pull the WETH and credit the ACTUAL delta (Balancer-STA
+     *      discipline, same as `stake` and the vault's `_pullCredited`);
+     *   2. `WETH.withdraw(credited)` — the real contract, which pays this
+     *      contract back in ETH through `receive()` below;
+     *   3. ONLY THEN the accounting, in `_credit`.
+     * Both external calls are to the immutable WETH address and nowhere else,
+     * the whole function is `nonReentrant`, and no state this contract owns is
+     * read across either of them.
+     */
+    function receiveDividendsWrapped(uint256 amount) external nonReentrant {
+        IWETH9 weth = reinvestAsset;
+        if (address(weth) == address(0)) revert ReinvestUnavailable();
+        if (amount == 0) revert ZeroAmount();
+
+        uint256 before = weth.balanceOf(address(this));
+        IERC20(address(weth)).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 credited = weth.balanceOf(address(this)) - before;
+        if (credited == 0) revert ZeroAmount();
+
+        uint256 ethBefore = address(this).balance;
+        weth.withdraw(credited);
+        // Credit what really arrived as ETH, never the nominal figure.
+        _credit(address(this).balance - ethBefore);
+    }
+
+    /// @dev The one accumulator, shared by both push paths.
+    function _credit(uint256 amount) private {
+        if (amount == 0) revert ZeroAmount();
+        totalReceived += amount;
+        uint256 pot = amount + undistributed;
         uint256 staked = totalStaked;
         if (staked == 0) {
             // Nobody to credit. Held, never lost, never reverted.
             undistributed = pot;
-            emit DividendsReceived(msg.sender, msg.value, 0);
+            emit DividendsReceived(msg.sender, amount, 0);
             return;
         }
         undistributed = 0;
         // Floors. The remainder stays in the contract forever, which is what
         // makes totalClaimed <= totalReceived structural rather than hopeful.
         accEthPerShareWad += Math.mulDiv(pot, WAD, staked);
-        emit DividendsReceived(msg.sender, msg.value, staked);
+        emit DividendsReceived(msg.sender, amount, staked);
+    }
+
+    /**
+     * @notice ETH may enter this contract through `receiveDividends` and
+     * through the WETH contract unwrapping. NOTHING ELSE.
+     *
+     * This is Uniswap's router pattern (`assert(msg.sender == WETH)`) and it
+     * is here for its reason, not its shape: a bare `receive()` that accepts
+     * anyone's ETH makes unsolicited donation ETH indistinguishable from
+     * pushed dividends. That matters because `ethStatus()` publishes
+     * `held` against `received - claimed`, and a donation would silently widen
+     * the gap between them — turning a real solvency read into a number with
+     * an unexplained residue in it, which is exactly the kind of accounting
+     * fog that hides a genuine shortfall. Refusing donation ETH keeps
+     * "everything here was pushed, and is accounted for" true by construction.
+     *
+     * Deliberately cheap: the guard is one immutable read (no SLOAD) and one
+     * comparison, so it fits inside the 2300-gas stipend real WETH9's
+     * `withdraw` pays with. A `receive()` that did anything more would be
+     * unpayable by the real contract — which is precisely the class of bug the
+     * hand-rolled mock's gas-forwarding `.call` was hiding.
+     */
+    receive() external payable {
+        if (msg.sender != address(reinvestAsset)) revert DirectEthRejected();
     }
 
     // ══ Dividends out ═════════════════════════════════════════════════════
 
-    /// @notice Claim everything settled and pending. Paying zero is a
-    /// successful transaction, not an error — `claimable()` is where a caller
-    /// learns why it was zero.
+    /**
+     * @notice Claim everything settled and pending. Paying zero is a
+     * successful transaction, not an error — `claimable()` is where a caller
+     * learns why it was zero.
+     *
+     * CHECKS-EFFECTS-INTERACTIONS, PLUS A GUARD, AND BOTH ARE LOAD-BEARING.
+     * `_crystallise` applies EVERY state change this function makes —
+     * `_settle`, `owed[a] = 0`, `totalClaimed += amount` — strictly BEFORE the
+     * raw `.call`. So a recipient that re-enters mid-payment finds
+     * `owed[msg.sender]` already zero and `claimable()` already zero: even
+     * with the guard removed, a re-entrant claim would pay nothing, which is
+     * the property that actually matters. `nonReentrant` is defence in depth
+     * on top of that, not the thing holding it up, and the audit suite proves
+     * the extraction bound against a mock recipient that really does re-enter.
+     *
+     * A raw `.call` rather than `transfer` because 2300 gas is not enough for
+     * a smart-contract holder (a multisig, a vault, a splitter) to accept a
+     * payment, and pinning a gas stipend into the payout path would silently
+     * lock those holders out of their own dividends after any repricing. The
+     * boolean IS checked — a failed send reverts the whole claim, so the
+     * dividend is never marked paid when it was not.
+     */
     function claim() external nonReentrant returns (uint256 amount) {
-        amount = _crystallise(msg.sender);
+        amount = _crystallise(msg.sender); // ALL effects, before any interaction
         if (amount == 0) return 0;
         (bool ok, ) = payable(msg.sender).call{value: amount}("");
         if (!ok) revert TransferFailed();
@@ -284,7 +386,7 @@ contract IndexDividendDistributor is ReentrancyGuard {
         nonReentrant
         returns (uint256 sharesOut)
     {
-        IWrappedEth weth = reinvestAsset;
+        IWETH9 weth = reinvestAsset;
         if (address(weth) == address(0)) revert ReinvestUnavailable();
 
         uint256 amount = _crystallise(msg.sender);

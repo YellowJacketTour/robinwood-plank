@@ -277,6 +277,17 @@ contract PlankGauge is ReentrancyGuard {
     uint256 public baseBoostBps;
     uint256 public maxBoostBps;
 
+    /**
+     * @notice SELF-DEAL REDIRECT SINK. Timelocked, and it is an ADDRESS THIS
+     * CONTRACT PUBLISHES A CREDIT AGAINST, never an address it pays: this
+     * contract still holds nothing and still moves nothing. Setting it is
+     * subject to the same delay as every other parameter.
+     *
+     * See `_isSameAddressSelfDeal` for exactly what it catches and — much more
+     * importantly — exactly what it does not.
+     */
+    address public redirectSink;
+
     // ── Registries (unchanged from the previous generation) ────────────────
 
     /// @notice Registered gauges. A gauge id is a constituent identifier — in
@@ -337,6 +348,7 @@ contract PlankGauge is ReentrancyGuard {
     mapping(bytes32 => QueuedParam) public queuedParams;
     mapping(bytes32 => QueuedAllowlist) public queuedAllowlists;
     QueuedParam public queuedAdmin;
+    QueuedParam public queuedRedirectSink;
 
     // ── Events ─────────────────────────────────────────────────────────────
 
@@ -359,6 +371,16 @@ contract PlankGauge is ReentrancyGuard {
     event CollectionLpApproved(address indexed gauge, address token, address vault);
     event AdminQueued(address indexed next, uint64 eta);
     event AdminApplied(address indexed next);
+    event RedirectSinkQueued(address indexed next, uint64 eta);
+    event RedirectSinkApplied(address indexed next);
+    /// @notice A burn whose directing address was provably the same address as
+    /// the entity the boost would benefit. The weight went to `to`, not `from`.
+    event SelfDealRedirected(
+        address indexed gauge,
+        address indexed from,
+        address indexed to,
+        uint256 weighted
+    );
 
     // ── Errors ─────────────────────────────────────────────────────────────
 
@@ -371,6 +393,7 @@ contract PlankGauge is ReentrancyGuard {
     error GaugeAlreadyRegistered();
     error NotApprovedLp();
     error ShortBurn();
+    error SelfDealing();
 
     // ── Construction ───────────────────────────────────────────────────────
 
@@ -491,9 +514,26 @@ contract PlankGauge is ReentrancyGuard {
         uint256 weighted = (burned * multiplierBps[path]) / BPS;
         if (weighted == 0) revert ZeroAmount();
 
+        // SELF-DEAL REDIRECT (the narrow, honestly-detectable case only).
+        // The tokens still come from `msg.sender` and still go to dEaD — the
+        // destruction is real either way. What changes is WHO the resulting
+        // weight and boost are credited to.
+        address beneficiary = msg.sender;
+        if (_isSameAddressSelfDeal(gauge, msg.sender)) {
+            address sink = redirectSink;
+            // With no sink appointed there is nowhere honest to put it, and
+            // crediting the self-dealer anyway would make the check
+            // decorative. Refusing is the conservative resolution: it costs a
+            // self-dealer a transaction, and it costs an honest party nothing,
+            // because an honest party is never one of these addresses.
+            if (sink == address(0)) revert SelfDealing();
+            beneficiary = sink;
+            emit SelfDealRedirected(gauge, msg.sender, sink, weighted);
+        }
+
         uint256 e = currentEpoch();
-        uint256 prevWeighted = epochWeightedBurn[e][gauge][msg.sender];
-        uint256 prevContribution = epochContribution[e][gauge][msg.sender];
+        uint256 prevWeighted = epochWeightedBurn[e][gauge][beneficiary];
+        uint256 prevContribution = epochContribution[e][gauge][beneficiary];
         uint256 nextWeighted = prevWeighted + weighted;
         // sqrt DAMPENING. Applied to the account's epoch TOTAL rather than to
         // each burn separately, deliberately: per-burn sqrt would mean ten
@@ -503,12 +543,58 @@ contract PlankGauge is ReentrancyGuard {
         contribution = Math.sqrt(nextWeighted);
         if (contribution == 0) revert ZeroAmount();
 
-        if (prevContribution == 0) epochBurners[e][gauge].push(msg.sender);
-        epochWeightedBurn[e][gauge][msg.sender] = nextWeighted;
-        epochContribution[e][gauge][msg.sender] = contribution;
+        if (prevContribution == 0) epochBurners[e][gauge].push(beneficiary);
+        epochWeightedBurn[e][gauge][beneficiary] = nextWeighted;
+        epochContribution[e][gauge][beneficiary] = contribution;
         epochTotalContribution[e][gauge] += contribution - prevContribution;
 
-        emit Burned(gauge, msg.sender, path, token, burned, e, contribution);
+        emit Burned(gauge, beneficiary, path, token, burned, e, contribution);
+    }
+
+    /**
+     * @dev THE NARROW, PROVABLE SELF-DEAL CASE — and an honest statement of
+     * the far larger one that is not detectable at all.
+     *
+     * WHAT IS CAUGHT. Exactly one thing: the address directing the burn is,
+     * bit for bit, an address this contract can already see standing on the
+     * other side of the benefit the burn buys. Concretely, `who` is
+     *
+     *   - the GAUGE ITSELF (`gauge`), whose weight the burn is buying; or
+     *   - the gauge's registered VAULT (`collectionVaultOf[gauge]`), the
+     *     contract that earns the LP swap fees a boost on this gauge scales;
+     *     or
+     *   - the gauge's registered LP TOKEN (`collectionLpOf[gauge]`), the
+     *     position whose yield the boost applies to.
+     *
+     * All three are addresses the admin explicitly registered on-chain, in a
+     * timelocked action, naming the pairing. So the equality test here is over
+     * facts this contract already holds — no heuristic, no inference, no
+     * probability. When it fires, it is certain.
+     *
+     * WHAT IS NOT CAUGHT, AND WILL NOT BE. Cross-wallet self-dealing — the
+     * same human operating the vault from one key and directing the burn from
+     * another — is NOT detectable here and is NOT detectable by any
+     * permissionless EVM contract without an identity layer. Two addresses
+     * that never transact with each other are, to this contract, two people.
+     * This is the same limitation, from the same root cause, that
+     * PlankGauge's header already documents for sqrt burn-splitting: an
+     * identity-free system cannot count parties, only addresses. Nothing in
+     * this function should be read as closing that gap, and no future change
+     * should try to close it with a heuristic (shared funding source, timing
+     * correlation, nonce patterns) — every such heuristic is either trivially
+     * evaded by an attacker who cares or fires on honest users who do not,
+     * and usually both.
+     *
+     * So the honest claim is narrow and it is the whole claim: the case where
+     * a single address is provably on both sides is caught and redirected; the
+     * case where two addresses are the same person is open, known, and
+     * unclosed.
+     */
+    function _isSameAddressSelfDeal(address gauge, address who) private view returns (bool) {
+        if (who == gauge) return true;
+        if (who != address(0) && who == collectionVaultOf[gauge]) return true;
+        if (who != address(0) && who == collectionLpOf[gauge]) return true;
+        return false;
     }
 
     // ══ Published weights ═════════════════════════════════════════════════
@@ -830,6 +916,34 @@ contract PlankGauge is ReentrancyGuard {
         delete queuedAdmin;
         admin = address(uint160(q.value));
         emit AdminApplied(admin);
+    }
+
+    /**
+     * @notice Queue the self-deal redirect sink (address(0) to retire it).
+     * @dev Grants the sink NOTHING that any other address does not already
+     * have: it receives published WEIGHT, in a contract that has no payable
+     * function, no balance and no payer. Whether a downstream contract chooses
+     * to honour that weight is entirely that contract's decision, made with
+     * its own funds under its own audit — which is the same relationship every
+     * burner already has with the numbers published here.
+     */
+    function queueRedirectSink(address sink) external onlyAdmin {
+        uint64 eta = uint64(block.timestamp + timelockDelay);
+        queuedRedirectSink = QueuedParam({
+            value: uint256(uint160(sink)),
+            eta: eta,
+            pending: true
+        });
+        emit RedirectSinkQueued(sink, eta);
+    }
+
+    function executeRedirectSink() external {
+        QueuedParam memory q = queuedRedirectSink;
+        if (!q.pending) revert NothingQueued();
+        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        delete queuedRedirectSink;
+        redirectSink = address(uint160(q.value));
+        emit RedirectSinkApplied(redirectSink);
     }
 
     // ── Internals ──────────────────────────────────────────────────────────

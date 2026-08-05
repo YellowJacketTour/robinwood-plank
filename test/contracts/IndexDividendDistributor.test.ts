@@ -49,10 +49,33 @@ describe("IndexDividendDistributor", () => {
    * legs, roughly equal, so a reinvest into the WETH leg has real headroom
    * under the 40% concentration cap.
    */
+  /**
+   * Give `who` `amount` of `token`. Plain mocks mint; the REAL WETH9 has no
+   * mint and never will — every wei of WETH must be backed by real ETH the
+   * holder actually sent, which is the invariant the old mock quietly broke.
+   * So for the WETH leg we top the account's ETH balance up and wrap.
+   */
+  async function fund(token: any, who: any, amount: bigint) {
+    if (typeof token.deposit === "function") {
+      const bal: bigint = await ethers.provider.getBalance(who.address);
+      await ethers.provider.send("hardhat_setBalance", [
+        who.address,
+        "0x" + (bal + amount + ethers.parseEther("100")).toString(16),
+      ]);
+      await token.connect(who).deposit({ value: amount });
+      return;
+    }
+    await token.mint(who.address, amount);
+  }
+
   async function fixture() {
     const [, admin, seeder, alice, bob, carol] = await ethers.getSigners();
 
-    const Weth = await ethers.getContractFactory("MockWrappedEth");
+    // THE REAL canonical WETH9 source, deployed locally — not a mock. See
+    // contracts/test/CanonicalWeth9.sol for what the old hand-rolled mock was
+    // hiding (the infinite-approval special case, the 2300-gas `transfer`
+    // stipend on `withdraw`, and the bare-send fallthrough to `deposit`).
+    const Weth = await ethers.getContractFactory("CanonicalWeth9");
     const weth: any = await Weth.deploy();
     const Token = await ethers.getContractFactory("MockIndexToken");
     const t1: any = await Token.deploy("cB", "cB");
@@ -79,7 +102,7 @@ describe("IndexDividendDistributor", () => {
 
     for (let i = 0; i < 3; i++) {
       await vault.connect(seeder).seedConstituent(addrs[i], await sources[i].getAddress(), 3_333);
-      await tokens[i].mint(seeder.address, 1_000n * WAD);
+      await fund(tokens[i], seeder, 1_000n * WAD);
       await tokens[i].connect(seeder).approve(vaultAddr, ethers.MaxUint256);
       await vault.connect(seeder).seedDeposit(addrs[i], 1_000n * WAD);
     }
@@ -87,7 +110,7 @@ describe("IndexDividendDistributor", () => {
 
     for (const who of [alice, bob, carol]) {
       for (const t of tokens) {
-        await t.mint(who.address, 100_000n * WAD);
+        await fund(t, who, 100_000n * WAD);
         await t.connect(who).approve(vaultAddr, ethers.MaxUint256);
       }
     }
