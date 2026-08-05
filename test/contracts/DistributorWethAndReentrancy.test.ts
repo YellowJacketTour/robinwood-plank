@@ -94,7 +94,7 @@ describe("IndexDividendDistributor — real WETH, restricted receive, re-entranc
     const vault: any = await Vault.deploy(
       "Marketplank Global Index",
       "gPLNK",
-      admin.address,
+      [admin.address, admin.address, admin.address, admin.address],
       seeder.address,
       TIMELOCK,
       paramsTuple(defaultParams)

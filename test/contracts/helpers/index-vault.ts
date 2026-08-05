@@ -67,7 +67,14 @@ export async function deployConstituent(
 }
 
 export interface IndexFixture {
-  admin: any;
+  /** ROLE_ADMIN — reassigns role holders, and can do nothing else. */
+  roleAdmin: any;
+  /** ROLE_CONSTITUENT_ADMISSION — queueListing / queueMetric. */
+  admission: any;
+  /** ROLE_RISK_PARAM — queueParam over the risk surface. */
+  risk: any;
+  /** ROLE_PLATFORM_ALLOCATION — platformAllocationBps / platformTreasury. */
+  allocation: any;
   seeder: any;
   alice: any;
   bob: any;
@@ -87,7 +94,8 @@ export async function deployOpenIndex(
   overrides: Partial<ParamStruct> = {},
   reserves: bigint[] = [1000n * WAD, 1000n * WAD, 1000n * WAD]
 ): Promise<IndexFixture> {
-  const [, admin, seeder, alice, bob, carol] = await ethers.getSigners();
+  const [, roleAdmin, seeder, alice, bob, carol, admission, risk, allocation] =
+    await ethers.getSigners();
 
   const c0 = await deployConstituent("cA", 100n * WAD, 100n * WAD); // 1.0
   const c1 = await deployConstituent("cB", 50n * WAD, 100n * WAD); // 0.5
@@ -98,7 +106,7 @@ export async function deployOpenIndex(
   const vault: any = await Vault.deploy(
     "Marketplank Global Index",
     "gPLNK",
-    admin.address,
+    [roleAdmin.address, admission.address, risk.address, allocation.address],
     seeder.address,
     TIMELOCK,
     paramsTuple({ ...defaultParams, ...overrides })
@@ -124,7 +132,10 @@ export async function deployOpenIndex(
   }
 
   return {
-    admin,
+    roleAdmin,
+    admission,
+    risk,
+    allocation,
     seeder,
     alice,
     bob,

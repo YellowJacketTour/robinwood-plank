@@ -200,8 +200,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {ScopedRoles} from "./ScopedRoles.sol";
 
-contract PlankGauge is ReentrancyGuard {
+contract PlankGauge is ReentrancyGuard, ScopedRoles {
     using SafeERC20 for IERC20;
 
     /// @notice Generation marker. 2 = epoch-scoped publisher (this file);
@@ -248,9 +249,23 @@ contract PlankGauge is ReentrancyGuard {
     /// same reason the vault's is not: a mutable delay can be set to zero.
     uint256 public immutable timelockDelay;
 
-    /// @notice Sets FUTURE parameters only. Has no path to any burn record and
-    /// no path to any value, because this contract holds none.
-    address public admin;
+    // ── Scoped administration roles (see ScopedRoles.sol) ──────────────────
+    //
+    // There is NO blanket admin. Each role sets FUTURE parameters only, within
+    // its own enumerated scope, and none of them has a path to any burn record
+    // or to any value, because this contract holds none.
+
+    /// @notice The on-chain address registries: gauge registration/removal,
+    /// the PLANK/ETH LP allowlist, the per-gauge collection-LP pairing, and
+    /// the self-deal redirect sink. Every one of these is "which address is
+    /// this credential" — a different question, and a different key, from
+    /// "how steep is the curve". Cannot retune anything.
+    bytes32 public constant ROLE_GAUGE_REGISTRY = "gauge.registry";
+
+    /// @notice The curve: the three path multipliers, the concentration
+    /// exponent, the boost floor/ceiling, and the epoch duration. Cannot
+    /// register a gauge, an LP token, or a sink.
+    bytes32 public constant ROLE_GAUGE_TUNING = "gauge.tuning";
 
     /// @notice bps multiplier per burn path, indexed by PATH_*.
     uint256[3] public multiplierBps;
@@ -347,7 +362,6 @@ contract PlankGauge is ReentrancyGuard {
 
     mapping(bytes32 => QueuedParam) public queuedParams;
     mapping(bytes32 => QueuedAllowlist) public queuedAllowlists;
-    QueuedParam public queuedAdmin;
     QueuedParam public queuedRedirectSink;
 
     // ── Events ─────────────────────────────────────────────────────────────
@@ -369,8 +383,6 @@ contract PlankGauge is ReentrancyGuard {
     event GaugeUnregistered(address indexed gauge);
     event PlankEthLpApproved(address indexed token, bool approved);
     event CollectionLpApproved(address indexed gauge, address token, address vault);
-    event AdminQueued(address indexed next, uint64 eta);
-    event AdminApplied(address indexed next);
     event RedirectSinkQueued(address indexed next, uint64 eta);
     event RedirectSinkApplied(address indexed next);
     /// @notice A burn whose directing address was provably the same address as
@@ -384,7 +396,6 @@ contract PlankGauge is ReentrancyGuard {
 
     // ── Errors ─────────────────────────────────────────────────────────────
 
-    error NotAdmin();
     error BadParam();
     error NothingQueued();
     error TimelockNotElapsed();
@@ -397,14 +408,18 @@ contract PlankGauge is ReentrancyGuard {
 
     // ── Construction ───────────────────────────────────────────────────────
 
+    /**
+     * @param roles_ The three scoped role holders, in the fixed order
+     *        [ROLE_ADMIN, ROLE_GAUGE_REGISTRY, ROLE_GAUGE_TUNING].
+     */
     constructor(
         IERC20 plank_,
-        address admin_,
+        address[3] memory roles_,
         uint256 timelockDelay_,
         uint256[3] memory multiplierBps_,
         uint256 epochDuration_
     ) {
-        if (address(plank_) == address(0) || admin_ == address(0)) revert BadParam();
+        if (address(plank_) == address(0)) revert BadParam();
         if (timelockDelay_ < MIN_TIMELOCK_DELAY || timelockDelay_ > MAX_TIMELOCK_DELAY) {
             revert BadParam();
         }
@@ -419,8 +434,11 @@ contract PlankGauge is ReentrancyGuard {
             revert BadParam();
         }
 
+        _initRole(ROLE_ADMIN, roles_[0]);
+        _initRole(ROLE_GAUGE_REGISTRY, roles_[1]);
+        _initRole(ROLE_GAUGE_TUNING, roles_[2]);
+
         plank = plank_;
-        admin = admin_;
         timelockDelay = timelockDelay_;
         multiplierBps = multiplierBps_;
         epochDuration = epochDuration_;
@@ -431,9 +449,12 @@ contract PlankGauge is ReentrancyGuard {
         maxBoostBps = 25_000; // 2.5x ceiling, Curve-veCRV-shaped
     }
 
-    modifier onlyAdmin() {
-        if (msg.sender != admin) revert NotAdmin();
-        _;
+    function _timelockDelay() internal view override returns (uint256) {
+        return timelockDelay;
+    }
+
+    function _isKnownRole(bytes32 role) internal pure override returns (bool) {
+        return role == ROLE_ADMIN || role == ROLE_GAUGE_REGISTRY || role == ROLE_GAUGE_TUNING;
     }
 
     // ══ The epoch clock ═══════════════════════════════════════════════════
@@ -737,7 +758,33 @@ contract PlankGauge is ReentrancyGuard {
     // can move a burn record, and none of them can move value, because this
     // contract holds no value of any kind.
 
-    function queueParam(bytes32 key, uint256 value) external onlyAdmin {
+    /**
+     * @notice Which role may queue `key`. Reverts for anything unrecognised.
+     *
+     * @dev The revert-on-unknown is load-bearing, not tidiness: `queuedParams`
+     * is a shared mapping, and without a whitelist the tuning role could write
+     * a `keccak256("gauge", g)`-shaped key and have an allowlist executor pick
+     * it up, which would hand it the registry role's power. Note the two key
+     * spaces already differ in shape (`queuedAllowlists` is a separate
+     * mapping), so this is defence in depth — kept because "the other mapping
+     * happens not to collide today" is not an access-control argument.
+     */
+    function roleForParamKey(bytes32 key) public pure returns (bytes32) {
+        if (
+            key == "multiplierRawBps" ||
+            key == "multiplierPlankEthLpBps" ||
+            key == "multiplierCollectionLpBps" ||
+            key == "epochDuration" ||
+            key == "concentrationExponentHalves" ||
+            key == "baseBoostBps" ||
+            key == "maxBoostBps"
+        ) return ROLE_GAUGE_TUNING;
+        revert BadParam();
+    }
+
+    function queueParam(bytes32 key, uint256 value) external {
+        bytes32 role = roleForParamKey(key);
+        if (msg.sender != roleHolder[role]) revert NotRoleHolder(role);
         uint64 eta = uint64(block.timestamp + timelockDelay);
         queuedParams[key] = QueuedParam({value: value, eta: eta, pending: true});
         emit ParamQueued(key, value, eta);
@@ -787,7 +834,7 @@ contract PlankGauge is ReentrancyGuard {
     }
 
     /// @notice Queue a gauge registration (or removal).
-    function queueGauge(address gauge, bool isRemoval) external onlyAdmin {
+    function queueGauge(address gauge, bool isRemoval) external onlyRole(ROLE_GAUGE_REGISTRY) {
         if (gauge == address(0)) revert BadParam();
         bytes32 key = keccak256(abi.encodePacked("gauge", gauge));
         uint64 eta = uint64(block.timestamp + timelockDelay);
@@ -838,7 +885,10 @@ contract PlankGauge is ReentrancyGuard {
     }
 
     /// @notice Queue an approved PLANK/ETH LP pair address.
-    function queuePlankEthLp(address lpToken, bool isRemoval) external onlyAdmin {
+    function queuePlankEthLp(address lpToken, bool isRemoval)
+        external
+        onlyRole(ROLE_GAUGE_REGISTRY)
+    {
         if (lpToken == address(0)) revert BadParam();
         bytes32 key = keccak256(abi.encodePacked("plankEthLp", lpToken));
         uint64 eta = uint64(block.timestamp + timelockDelay);
@@ -869,7 +919,7 @@ contract PlankGauge is ReentrancyGuard {
      */
     function queueCollectionLp(address gauge, address lpToken, address vault, bool isRemoval)
         external
-        onlyAdmin
+        onlyRole(ROLE_GAUGE_REGISTRY)
     {
         if (gauge == address(0)) revert BadParam();
         if (!isRemoval && (lpToken == address(0) || vault == address(0))) revert BadParam();
@@ -902,21 +952,8 @@ contract PlankGauge is ReentrancyGuard {
         }
     }
 
-    function queueAdmin(address next) external onlyAdmin {
-        if (next == address(0)) revert BadParam();
-        uint64 eta = uint64(block.timestamp + timelockDelay);
-        queuedAdmin = QueuedParam({value: uint256(uint160(next)), eta: eta, pending: true});
-        emit AdminQueued(next, eta);
-    }
-
-    function executeAdmin() external {
-        QueuedParam memory q = queuedAdmin;
-        if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
-        delete queuedAdmin;
-        admin = address(uint160(q.value));
-        emit AdminApplied(admin);
-    }
+    // Role handover lives in ScopedRoles: `queueRole` / `executeRole`, on the
+    // same `timelockDelay` the old single-admin handover used.
 
     /**
      * @notice Queue the self-deal redirect sink (address(0) to retire it).
@@ -927,7 +964,7 @@ contract PlankGauge is ReentrancyGuard {
      * its own funds under its own audit — which is the same relationship every
      * burner already has with the numbers published here.
      */
-    function queueRedirectSink(address sink) external onlyAdmin {
+    function queueRedirectSink(address sink) external onlyRole(ROLE_GAUGE_REGISTRY) {
         uint64 eta = uint64(block.timestamp + timelockDelay);
         queuedRedirectSink = QueuedParam({
             value: uint256(uint160(sink)),

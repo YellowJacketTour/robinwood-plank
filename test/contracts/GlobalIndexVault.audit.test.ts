@@ -385,11 +385,11 @@ describe("GlobalIndexVault", () => {
 
   it("the sqrt weight curve dampens outsized constituents and the cap redistributes", async () => {
     const fx = await fixture();
-    const { vault, admin, addrs } = fx;
+    const { vault, admission, addrs } = fx;
     // A collection with 100x the metric of its peers.
-    await vault.connect(admin).queueMetric(addrs[0], 1_000_000n);
-    await vault.connect(admin).queueMetric(addrs[1], 10_000n);
-    await vault.connect(admin).queueMetric(addrs[2], 10_000n);
+    await vault.connect(admission).queueMetric(addrs[0], 1_000_000n);
+    await vault.connect(admission).queueMetric(addrs[1], 10_000n);
+    await vault.connect(admission).queueMetric(addrs[2], 10_000n);
     await time.increase(TIMELOCK + 1);
     for (const a of addrs) await vault.executeMetric(a);
 
@@ -407,10 +407,10 @@ describe("GlobalIndexVault", () => {
 
   it("a newly added constituent ramps in over a real window, never in one block", async () => {
     const fx = await fixture();
-    const { vault, admin } = fx;
+    const { vault, admission } = fx;
     const d = await deployConstituent("cD", 100n * WAD, 100n * WAD);
 
-    await vault.connect(admin).queueListing(d.addr, await d.source.getAddress(), 3_333, false);
+    await vault.connect(admission).queueListing(d.addr, await d.source.getAddress(), 3_333, false);
     await expect(vault.executeListing(d.addr)).to.be.revertedWithCustomError(
       vault,
       "TimelockNotElapsed"
@@ -437,9 +437,9 @@ describe("GlobalIndexVault", () => {
 
   it("a stale constituent's ramp-in freezes (§2.9 silent-constituent breaker)", async () => {
     const fx = await fixture();
-    const { vault, admin } = fx;
+    const { vault, admission } = fx;
     const d = await deployConstituent("cD", 100n * WAD, 100n * WAD);
-    await vault.connect(admin).queueListing(d.addr, await d.source.getAddress(), 3_333, false);
+    await vault.connect(admission).queueListing(d.addr, await d.source.getAddress(), 3_333, false);
     await time.increase(TIMELOCK + 1);
     await vault.executeListing(d.addr);
 
@@ -578,7 +578,8 @@ describe("GlobalIndexVault", () => {
 
   it("ANCHOR RULE: no privileged function can reach reserves already pooled", async () => {
     const fx = await fixture();
-    const { vault, vaultAddr, admin, seeder, alice, tokens, addrs } = fx;
+    const { vault, vaultAddr, roleAdmin, admission, risk, allocation, seeder, alice, tokens, addrs } =
+      fx;
     await vault.connect(alice).mintProRata(500n * WAD, maxIn(3));
     await warmCheckpoints(fx, 3);
 
@@ -603,7 +604,10 @@ describe("GlobalIndexVault", () => {
       return 0n;
     };
 
-    for (const who of [admin, seeder]) {
+    // EVERY scoped role, plus the seeder — the sweep is only a §2.8 proof if
+    // it exercises the whole privileged surface, so splitting the admin into
+    // four keys means sweeping all four.
+    for (const who of [roleAdmin, admission, risk, allocation, seeder]) {
       for (const f of fns as any[]) {
         const args = f.inputs.map((i: any) => argFor(i.type));
         try {
@@ -617,7 +621,9 @@ describe("GlobalIndexVault", () => {
     // Neither role received a single unit of any constituent, and the pooled
     // reserves are exactly where they were.
     for (let i = 0; i < 3; i++) {
-      expect(await tokens[i].balanceOf(admin.address)).to.equal(0n, `admin took leg ${i}`);
+      for (const who of [roleAdmin, admission, risk, allocation]) {
+        expect(await tokens[i].balanceOf(who.address)).to.equal(0n, `a role took leg ${i}`);
+      }
       expect(await tokens[i].balanceOf(seeder.address)).to.equal(0n, `seeder took leg ${i}`);
       expect(await vault.reserveOf(addrs[i])).to.equal(before[i], `reserve ${i} moved`);
       expect(await tokens[i].balanceOf(vaultAddr)).to.equal(
@@ -639,7 +645,9 @@ describe("GlobalIndexVault", () => {
     );
     await expect(
       vault.connect(seeder).queueParam(ethers.encodeBytes32String("bandBps"), 1n)
-    ).to.be.revertedWithCustomError(vault, "NotAdmin");
+    )
+      .to.be.revertedWithCustomError(vault, "NotRoleHolder")
+      .withArgs(await vault.ROLE_RISK_PARAM());
   });
 
   it("the vault cannot hold ETH at all — there is no receive and no payable path", async () => {
@@ -655,9 +663,9 @@ describe("GlobalIndexVault", () => {
 
   it("a deactivated constituent's reserves stay redeemable and cannot be stranded", async () => {
     const fx = await fixture();
-    const { vault, admin, alice, addrs } = fx;
+    const { vault, admission, alice, addrs } = fx;
     await vault.connect(alice).mintProRata(200n * WAD, maxIn(3));
-    await vault.connect(admin).queueListing(addrs[1], addrs[1], 0, true);
+    await vault.connect(admission).queueListing(addrs[1], addrs[1], 0, true);
     await time.increase(TIMELOCK + 1);
     await vault.executeListing(addrs[1]);
 
@@ -676,11 +684,11 @@ describe("GlobalIndexVault", () => {
 
   it("a parameter change is QUEUED, never applied instantly", async () => {
     const fx = await fixture();
-    const { vault, admin } = fx;
+    const { vault, risk } = fx;
     const key = ethers.encodeBytes32String("bandBps");
     const before = (await vault.params()).bandBps;
 
-    await vault.connect(admin).queueParam(key, 250n);
+    await vault.connect(risk).queueParam(key, 250n);
     expect((await vault.params()).bandBps).to.equal(before, "applied on queue");
     await expect(vault.executeParam(key)).to.be.revertedWithCustomError(
       vault,
@@ -698,7 +706,7 @@ describe("GlobalIndexVault", () => {
 
   it("the hard parameter ceilings hold even after the timelock elapses", async () => {
     const fx = await fixture();
-    const { vault, admin } = fx;
+    const { vault, risk } = fx;
     // Try to raise the concentration cap past its compile-time ceiling (50%)
     // and the imbalance fee past its 10% ceiling.
     for (const [name, value] of [
@@ -708,7 +716,7 @@ describe("GlobalIndexVault", () => {
       ["priceCapBps", 9_000n],
     ] as const) {
       const key = ethers.encodeBytes32String(name);
-      await vault.connect(admin).queueParam(key, value);
+      await vault.connect(risk).queueParam(key, value);
       await time.increase(TIMELOCK + 1);
       await expect(vault.executeParam(key)).to.be.revertedWithCustomError(vault, "BadParam");
     }
@@ -724,23 +732,35 @@ describe("GlobalIndexVault", () => {
     expect(setters.some((n: string) => n.includes("timelock"))).to.equal(false);
   });
 
-  it("an admin handover is itself timelocked", async () => {
+  it("a role handover is itself timelocked", async () => {
     const fx = await fixture();
-    const { vault, admin, bob } = fx;
-    await vault.connect(admin).queueAdmin(bob.address);
-    expect(await vault.admin()).to.equal(admin.address);
-    await expect(vault.executeAdmin()).to.be.revertedWithCustomError(vault, "TimelockNotElapsed");
+    const { vault, roleAdmin, bob } = fx;
+    const ROLE_RISK = await vault.ROLE_RISK_PARAM();
+    const riskBefore = await vault.roleHolder(ROLE_RISK);
+    await vault.connect(roleAdmin).queueRole(ROLE_RISK, bob.address);
+    expect(await vault.roleHolder(ROLE_RISK)).to.equal(riskBefore, "applied on queue");
+    await expect(vault.executeRole(ROLE_RISK)).to.be.revertedWithCustomError(
+      vault,
+      "RoleTimelockNotElapsed"
+    );
     await time.increase(TIMELOCK + 1);
-    await vault.executeAdmin();
-    expect(await vault.admin()).to.equal(bob.address);
+    await vault.executeRole(ROLE_RISK);
+    expect(await vault.roleHolder(ROLE_RISK)).to.equal(bob.address);
   });
 
   it("a below-floor timelock delay cannot be deployed at all", async () => {
-    const [, admin, seeder] = await ethers.getSigners();
+    const [, a, seeder, b, c, d] = await ethers.getSigners();
     const Vault = await ethers.getContractFactory("GlobalIndexVault");
     const { defaultParams, paramsTuple } = await import("./helpers/index-vault");
     await expect(
-      Vault.deploy("x", "x", admin.address, seeder.address, 3_600, paramsTuple(defaultParams))
+      Vault.deploy(
+        "x",
+        "x",
+        [a.address, b.address, c.address, d.address],
+        seeder.address,
+        3_600,
+        paramsTuple(defaultParams)
+      )
     ).to.be.revertedWithCustomError(Vault, "BadParam");
   });
 });
@@ -805,7 +825,7 @@ describe("GlobalIndexVault — real MarketplankVaultV3 constituent", () => {
     const index: any = await Vault.deploy(
       "gPLNK",
       "gPLNK",
-      admin.address,
+      [admin.address, admin.address, admin.address, admin.address],
       seeder.address,
       TIMELOCK,
       paramsTuple(defaultParams)
@@ -916,7 +936,7 @@ describe("GlobalIndexVault — hardening pass", () => {
 
   it("RAMP-OUT: a removed constituent's target weight decays, it never cliffs to zero", async () => {
     const fx = await deployOpenIndex({}, LOPSIDED);
-    const { vault, admin, addrs } = fx;
+    const { vault, admission, addrs } = fx;
     const weightOf = async (t: string) => {
       const [tokens, bps] = await vault.targetWeightsBps();
       const i = tokens.findIndex((x: string) => x.toLowerCase() === t.toLowerCase());
@@ -926,7 +946,7 @@ describe("GlobalIndexVault — hardening pass", () => {
     const before = await weightOf(addrs[1]);
     expect(before).to.be.gt(0n);
 
-    await vault.connect(admin).queueListing(addrs[1], addrs[1], 0, true);
+    await vault.connect(admission).queueListing(addrs[1], addrs[1], 0, true);
     await time.increase(TIMELOCK + 1);
     await vault.executeListing(addrs[1]);
 
@@ -958,13 +978,13 @@ describe("GlobalIndexVault — hardening pass", () => {
 
   it("MID-FLIGHT: a constituent can be added while another is mid-removal", async () => {
     const fx = await deployOpenIndex({}, LOPSIDED);
-    const { vault, admin, addrs } = fx;
+    const { vault, admission, addrs } = fx;
     const d = await deployConstituent("cD", 100n * WAD, 100n * WAD);
 
     // Removal of leg 1 and admission of D queued together and executed in the
     // same block — the adversarial overlap.
-    await vault.connect(admin).queueListing(addrs[1], addrs[1], 0, true);
-    await vault.connect(admin).queueListing(d.addr, await d.source.getAddress(), 3_333, false);
+    await vault.connect(admission).queueListing(addrs[1], addrs[1], 0, true);
+    await vault.connect(admission).queueListing(d.addr, await d.source.getAddress(), 3_333, false);
     await time.increase(TIMELOCK + 1);
     await vault.executeListing(addrs[1]);
     await vault.executeListing(d.addr);
@@ -1003,7 +1023,7 @@ describe("GlobalIndexVault — hardening pass", () => {
     // only decays a target-weight VIEW, and the reserves stay in the pro-rata
     // payout set until they are redeemed to zero.
     const fx = await deployOpenIndex({}, [1n * WAD, 10_000n * WAD, 1n * WAD]);
-    const { vault, admin, alice, addrs, tokens, vaultAddr } = fx;
+    const { vault, admission, alice, addrs, tokens, vaultAddr } = fx;
     await vault.connect(alice).mintProRata(100n * WAD, maxIn(3));
     await warmCheckpoints(fx, 3);
     expect(await vault.weightBps(addrs[1])).to.be.gt(9_000n, "leg is not actually dominant");
@@ -1011,7 +1031,7 @@ describe("GlobalIndexVault — hardening pass", () => {
     const before = await Promise.all(addrs.map((a) => vault.reserveOf(a)));
     const balBefore = await Promise.all(tokens.map((t) => t.balanceOf(vaultAddr)));
 
-    await vault.connect(admin).queueListing(addrs[1], addrs[1], 0, true);
+    await vault.connect(admission).queueListing(addrs[1], addrs[1], 0, true);
     await time.increase(TIMELOCK + 1);
     await vault.executeListing(addrs[1]);
 
@@ -1036,7 +1056,7 @@ describe("GlobalIndexVault — hardening pass", () => {
     const vault: any = await Vault.deploy(
       "gPLNK",
       "gPLNK",
-      admin.address,
+      [admin.address, admin.address, admin.address, admin.address],
       seeder.address,
       TIMELOCK,
       paramsTuple(defaultParams)
@@ -1095,17 +1115,19 @@ describe("GlobalIndexVault — hardening pass", () => {
     await expect(
       fx.vault.connect(fx.seeder).seedConstituent(d.addr, await d.source.getAddress(), 1_000)
     ).to.be.revertedWithCustomError(fx.vault, "IndexAlreadyOpen");
-    // Post-open admission is the timelocked admin's, and nobody else's.
+    // Post-open admission is the timelocked admission ROLE's, and nobody else's.
     await expect(
       fx.vault.connect(fx.seeder).queueListing(d.addr, await d.source.getAddress(), 1_000, false)
-    ).to.be.revertedWithCustomError(fx.vault, "NotAdmin");
+    )
+      .to.be.revertedWithCustomError(fx.vault, "NotRoleHolder")
+      .withArgs(await fx.vault.ROLE_CONSTITUENT_ADMISSION());
   });
 
   // ── Facet 4: trustless vs. owner-claimed collections ─────────────────
 
   it("CLAIMED-VS-NOT: admission reads no ownership, and a claimed owner gets no path in", async () => {
     const fx = await deployOpenIndex({}, LOPSIDED);
-    const { vault, admin, vaultAddr, tokens, addrs } = fx;
+    const { vault, admission, vaultAddr, tokens, addrs } = fx;
     const all = await ethers.getSigners();
     const collectionOwner = all[10]; // stands in for a deployer who claimed
 
@@ -1142,7 +1164,7 @@ describe("GlobalIndexVault — hardening pass", () => {
     const unclaimed = await deployConstituent("cUNCLAIMED", 100n * WAD, 100n * WAD);
     await claimed.token.mint(collectionOwner.address, 10_000n * WAD);
     for (const c of [claimed, unclaimed]) {
-      await vault.connect(admin).queueListing(c.addr, await c.source.getAddress(), 2_000, false);
+      await vault.connect(admission).queueListing(c.addr, await c.source.getAddress(), 2_000, false);
     }
     await time.increase(TIMELOCK + 1);
     for (const c of [claimed, unclaimed]) await vault.executeListing(c.addr);
@@ -1189,6 +1211,8 @@ describe("GlobalIndexVault — hardening pass", () => {
         "claimed owner took a leg"
       );
     }
-    expect(await vault.admin()).to.equal(admin.address);
+    expect(await vault.roleHolder(await vault.ROLE_CONSTITUENT_ADMISSION())).to.equal(
+      admission.address
+    );
   });
 });

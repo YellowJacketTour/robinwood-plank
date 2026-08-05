@@ -17,7 +17,7 @@ import { TIMELOCK, WAD, defaultParams, paramsTuple } from "./helpers/index-vault
  *   PART B/C — THE SELF-DEAL REDIRECT (PlankGauge). The contract catches
  *   exactly one thing: an address that is provably standing on both sides of
  *   the benefit a burn buys — the gauge itself, its registered vault, or its
- *   registered LP token. All three are addresses the admin registered
+ *   registered LP token. All three are addresses the registry role registered
  *   on-chain in a timelocked action, so the equality test is over facts the
  *   contract already holds and, when it fires, it is certain. This file drives
  *   all three, drives the no-sink refusal, drives the honest third party who
@@ -75,7 +75,9 @@ describe("Self-deal redirect (PlankGauge) and direction symmetry (GlobalIndexVau
      */
     async function fixture() {
       const all = await ethers.getSigners();
-      const [gaugeAdmin, honest, sink, funder] = [all[6], all[7], all[8], all[9]];
+      const [gaugeRegistry, honest, sink, funder] = [all[12], all[13], all[14], all[15]];
+      const gaugeRoleAdmin = all[16];
+      const gaugeTuning = all[17];
 
       const Token = await ethers.getContractFactory("MockIndexToken");
       const plank: any = await Token.deploy("PLANK", "PLANK");
@@ -84,7 +86,7 @@ describe("Self-deal redirect (PlankGauge) and direction symmetry (GlobalIndexVau
       const Gauge = await ethers.getContractFactory("PlankGauge");
       const gauge: any = await Gauge.deploy(
         await plank.getAddress(),
-        gaugeAdmin.address,
+        [gaugeRoleAdmin.address, gaugeRegistry.address, gaugeTuning.address],
         TIMELOCK,
         [RAW_MULT, LP_MULT, COLL_MULT],
         EPOCH
@@ -99,9 +101,9 @@ describe("Self-deal redirect (PlankGauge) and direction symmetry (GlobalIndexVau
       const vaultA = ethers.Wallet.createRandom().address;
       const collLpAddr = await collLp.getAddress();
 
-      await gauge.connect(gaugeAdmin).queueGauge(gA, false);
-      await gauge.connect(gaugeAdmin).queueGauge(gB, false);
-      await gauge.connect(gaugeAdmin).queueCollectionLp(gA, collLpAddr, vaultA, false);
+      await gauge.connect(gaugeRegistry).queueGauge(gA, false);
+      await gauge.connect(gaugeRegistry).queueGauge(gB, false);
+      await gauge.connect(gaugeRegistry).queueCollectionLp(gA, collLpAddr, vaultA, false);
       await time.increase(TIMELOCK + 1);
       await gauge.executeGauge(gA);
       await gauge.executeGauge(gB);
@@ -115,7 +117,7 @@ describe("Self-deal redirect (PlankGauge) and direction symmetry (GlobalIndexVau
       }
 
       return {
-        gaugeAdmin,
+        gaugeRegistry,
         honest,
         sink,
         funder,
@@ -132,7 +134,7 @@ describe("Self-deal redirect (PlankGauge) and direction symmetry (GlobalIndexVau
 
     /** Appoint the redirect sink through the timelock. */
     async function appointSink(fx: any, sinkAddr: string) {
-      await fx.gauge.connect(fx.gaugeAdmin).queueRedirectSink(sinkAddr);
+      await fx.gauge.connect(fx.gaugeRegistry).queueRedirectSink(sinkAddr);
       await time.increase(TIMELOCK + 1);
       await fx.gauge.executeRedirectSink();
       expect(await fx.gauge.redirectSink()).to.equal(sinkAddr);
@@ -313,15 +315,17 @@ describe("Self-deal redirect (PlankGauge) and direction symmetry (GlobalIndexVau
       expect(await gauge.accountWeight(gA, sink.address)).to.equal(isqrt(400n * WAD));
     });
 
-    it("the sink is TIMELOCKED and admin-only, and retiring it re-arms the refusal", async () => {
+    it("the sink is TIMELOCKED and registry-role-only, and retiring it re-arms the refusal", async () => {
       const fx = await fixture();
-      const { gauge, gaugeAdmin, honest, sink, gA } = fx;
+      const { gauge, gaugeRegistry, honest, sink, gA } = fx;
 
       await expect(
         gauge.connect(honest).queueRedirectSink(honest.address)
-      ).to.be.revertedWithCustomError(gauge, "NotAdmin");
+      )
+        .to.be.revertedWithCustomError(gauge, "NotRoleHolder")
+        .withArgs(await gauge.ROLE_GAUGE_REGISTRY());
 
-      await gauge.connect(gaugeAdmin).queueRedirectSink(sink.address);
+      await gauge.connect(gaugeRegistry).queueRedirectSink(sink.address);
       await expect(gauge.executeRedirectSink()).to.be.revertedWithCustomError(
         gauge,
         "TimelockNotElapsed"
@@ -336,7 +340,7 @@ describe("Self-deal redirect (PlankGauge) and direction symmetry (GlobalIndexVau
       );
 
       // Retiring it (back to address(0)) makes self-dealing revert again.
-      await gauge.connect(gaugeAdmin).queueRedirectSink(ethers.ZeroAddress);
+      await gauge.connect(gaugeRegistry).queueRedirectSink(ethers.ZeroAddress);
       await time.increase(TIMELOCK + 1);
       await gauge.executeRedirectSink();
       const signer = await asAddress(fx, gA);
@@ -398,6 +402,12 @@ describe("Self-deal redirect (PlankGauge) and direction symmetry (GlobalIndexVau
      * `_mintFeeBps` is provably zero rather than merely small. */
     async function balancedIndex() {
       const [, admin, seeder, alice] = await ethers.getSigners();
+      const roles: [string, string, string, string] = [
+        admin.address,
+        admin.address,
+        admin.address,
+        admin.address,
+      ];
       const Token = await ethers.getContractFactory("MockIndexToken");
       const Source = await ethers.getContractFactory("MockIndexPriceSource");
       const tokens: any[] = [];
@@ -412,7 +422,7 @@ describe("Self-deal redirect (PlankGauge) and direction symmetry (GlobalIndexVau
       const vault: any = await Vault.deploy(
         "gi",
         "gi",
-        admin.address,
+        roles,
         seeder.address,
         TIMELOCK,
         paramsTuple(defaultParams)
