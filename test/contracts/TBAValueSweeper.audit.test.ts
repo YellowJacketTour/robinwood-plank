@@ -75,6 +75,16 @@ describe("TBAValueSweeper — stranded-value capture", () => {
 
     const chainId = (await ethers.provider.getNetwork()).chainId;
 
+    // The ERC-6551 registry: the ONLY authority on which address is a given
+    // NFT's token-bound account. `implementation` is any deployed contract —
+    // it participates in the derivation domain, which is what matters here.
+    const Registry = await ethers.getContractFactory("MockERC6551Registry");
+    const registry: any = await Registry.deploy();
+    const registryAddr = await registry.getAddress();
+    const implementation: any = await Sink.deploy();
+    const implAddr = await implementation.getAddress();
+    const SALT = ethers.zeroPadValue("0x01", 32);
+
     const Sweeper = await ethers.getContractFactory("TBAValueSweeper");
     const sweeper: any = await Sweeper.deploy(
       nftAddr,
@@ -82,20 +92,30 @@ describe("TBAValueSweeper — stranded-value capture", () => {
       reserveAddr,
       miscAddr,
       DELAY,
-      [roleAdmin.address, allowAdmin.address]
+      [roleAdmin.address, allowAdmin.address],
+      registryAddr,
+      implAddr,
+      SALT
     );
     const sweeperAddr = await sweeper.getAddress();
 
-    // One TBA per held NFT, each bound to its own token id.
+    // One TBA per held NFT, each DEPLOYED BY THE REGISTRY at the one address
+    // the registry derives for it — never at an address of our choosing.
     const TBA = await ethers.getContractFactory("MockTBA");
     const tbas: any[] = [];
     for (let id = 1; id <= 4; id++) {
-      const tba: any = await TBA.deploy(chainId, nftAddr, id);
+      await registry.createAccount(implAddr, SALT, chainId, nftAddr, id);
+      const at = await registry.account(implAddr, SALT, chainId, nftAddr, id);
+      const tba: any = TBA.attach(at);
       await tba.setOperator(sweeperAddr, true);
       tbas.push(tba);
     }
 
     return {
+      registry,
+      registryAddr,
+      implAddr,
+      SALT,
       deployer,
       treasury,
       alice,
@@ -133,14 +153,22 @@ describe("TBAValueSweeper — stranded-value capture", () => {
   // ── Construction: the structural guarantees ─────────────────────────────
 
   it("refuses a construction that would commingle swept NFTs with the basket", async () => {
-    const { nftAddr, vaultAddr, reserveAddr, roleAdmin, allowAdmin } = await fixture();
+    const { nftAddr, vaultAddr, reserveAddr, roleAdmin, allowAdmin, registryAddr, implAddr, SALT } =
+      await fixture();
     const Sweeper = await ethers.getContractFactory("TBAValueSweeper");
     // miscellanySink == vault is exactly the commingling this forbids.
     await expect(
-      Sweeper.deploy(nftAddr, vaultAddr, reserveAddr, vaultAddr, DELAY, [
-        roleAdmin.address,
-        allowAdmin.address,
-      ])
+      Sweeper.deploy(
+        nftAddr,
+        vaultAddr,
+        reserveAddr,
+        vaultAddr,
+        DELAY,
+        [roleAdmin.address, allowAdmin.address],
+        registryAddr,
+        implAddr,
+        SALT
+      )
     ).to.be.revertedWithCustomError(Sweeper, "BadParam");
   });
 
@@ -165,6 +193,281 @@ describe("TBAValueSweeper — stranded-value capture", () => {
         "a forwarder/rescue/withdraw surface exists"
       ).to.not.match(/forward|rescue|withdraw|sweepto|call|delegate/);
     }
+  });
+
+  // ── Gap 1: registry-derived TBA verification ────────────────────────────
+
+  it("THE FAKE-TBA CLOSE: a contract that self-reports perfect token()/owner() is rejected because the registry never derived its address", async () => {
+    const { sweeper, allowAdmin, nftAddr, vaultAddr, chainId, tbas } = await fixture();
+
+    // The attack, built to beat the OLD checks exactly. This contract answers
+    // `token()` with (this chain, this collection, held id 1) and `owner()`
+    // with the vault — every self-report the sweeper used to rely on, correct.
+    const Fake = await ethers.getContractFactory("MockFakeTBA");
+    const fake: any = await Fake.deploy(chainId, nftAddr, 1, vaultAddr);
+    const fakeAddr = await fake.getAddress();
+
+    // Prove the premise, not just the conclusion: it really would have passed
+    // all three self-report checks.
+    const [rc, rcoll, rid] = await fake.token();
+    expect(rc).to.equal(chainId);
+    expect(rcoll).to.equal(nftAddr);
+    expect(rid).to.equal(1n);
+    expect(await fake.owner()).to.equal(vaultAddr);
+    // NFT #1 genuinely is held by the vault, so checks 2 and 3 pass too.
+    expect(await sweeper.expectedTba(1)).to.equal(await tbas[0].getAddress());
+
+    const tok = await deployToken();
+    const tokAddr = await tok.getAddress();
+    await tok.mint(fakeAddr, 1_000n);
+    await allowlist(sweeper, allowAdmin, KIND_ERC20, tokAddr);
+
+    // And it is refused anyway — on the one fact it cannot forge, its address.
+    await expect(sweeper.sweepTBAERC20(1, fakeAddr, tokAddr))
+      .to.be.revertedWithCustomError(sweeper, "TbaNotRegistryDerived")
+      .withArgs(fakeAddr, await tbas[0].getAddress());
+
+    // The sweeper never reached its execute(): no misattributed interaction.
+    expect(await fake.wasExecuted()).to.equal(false);
+  });
+
+  it("the fake TBA is refused on all three primitives, not just the ERC-20 one", async () => {
+    const { sweeper, allowAdmin, nftAddr, vaultAddr, chainId, tbas, pmAddr } = await lpFixture();
+    const Fake = await ethers.getContractFactory("MockFakeTBA");
+    const fake: any = await Fake.deploy(chainId, nftAddr, 1, vaultAddr);
+    const fakeAddr = await fake.getAddress();
+    const derived = await tbas[0].getAddress();
+
+    const Sub = await ethers.getContractFactory("MockSubNft");
+    const sub: any = await Sub.deploy("Sub", "SUB");
+    await sub.mint(fakeAddr, 77);
+    await allowlist(sweeper, allowAdmin, KIND_ERC721, await sub.getAddress());
+    await allowlist(sweeper, allowAdmin, KIND_PM, pmAddr);
+
+    await expect(sweeper.sweepTBAERC721(1, fakeAddr, await sub.getAddress(), 77))
+      .to.be.revertedWithCustomError(sweeper, "TbaNotRegistryDerived")
+      .withArgs(fakeAddr, derived);
+    await expect(
+      sweeper.sweepLpPositionFees(1, fakeAddr, pmAddr, 1001)
+    ).to.be.revertedWithCustomError(sweeper, "TbaNotRegistryDerived");
+    expect(await fake.wasExecuted()).to.equal(false);
+  });
+
+  it("a REAL account built on a different implementation or salt derives elsewhere and is refused", async () => {
+    const { sweeper, allowAdmin, registry, implAddr, nftAddr, chainId, tbas, SALT } =
+      await fixture();
+    const OTHER_SALT = ethers.zeroPadValue("0x02", 32);
+    await registry.createAccount(implAddr, OTHER_SALT, chainId, nftAddr, 1);
+    const otherSaltAddr = await registry.account(implAddr, OTHER_SALT, chainId, nftAddr, 1);
+    expect(otherSaltAddr).to.not.equal(await tbas[0].getAddress());
+
+    const TBA = await ethers.getContractFactory("MockTBA");
+    const other: any = TBA.attach(otherSaltAddr);
+    await other.setOperator(await sweeper.getAddress(), true);
+
+    const tok = await deployToken();
+    const tokAddr = await tok.getAddress();
+    await tok.mint(otherSaltAddr, 500n);
+    await allowlist(sweeper, allowAdmin, KIND_ERC20, tokAddr);
+
+    // Correct chain, correct collection, correct id, correct owner, real
+    // registry-deployed account — and still not THE account this deployment
+    // recognises for NFT #1.
+    await expect(sweeper.sweepTBAERC20(1, otherSaltAddr, tokAddr))
+      .to.be.revertedWithCustomError(sweeper, "TbaNotRegistryDerived")
+      .withArgs(otherSaltAddr, await tbas[0].getAddress());
+    expect(SALT).to.not.equal(OTHER_SALT);
+  });
+
+  it("the derivation is fed the CALLER'S claimed id, so a TBA cannot steer its own verification", async () => {
+    const { sweeper, allowAdmin, tbas, nftAddr, registry, implAddr, SALT, chainId } =
+      await fixture();
+    // tbas[1] is NFT #2's genuine account. Claim it is NFT #1's.
+    const tok = await deployToken();
+    await tok.mint(await tbas[1].getAddress(), 100n);
+    await allowlist(sweeper, allowAdmin, KIND_ERC20, await tok.getAddress());
+    await expect(
+      sweeper.sweepTBAERC20(1, await tbas[1].getAddress(), await tok.getAddress())
+    ).to.be.revertedWithCustomError(sweeper, "TbaNotBoundToHeldToken");
+    // And expectedTba() is a pure function of the id, matching the registry.
+    for (let id = 1; id <= 4; id++) {
+      expect(await sweeper.expectedTba(id)).to.equal(
+        await registry.account(implAddr, SALT, chainId, nftAddr, id)
+      );
+    }
+  });
+
+  it("the registry, implementation and salt are immutable — there is no setter for the definition of a genuine TBA", async () => {
+    const { sweeper, registryAddr, implAddr, SALT } = await fixture();
+    expect(await sweeper.accountRegistry()).to.equal(registryAddr);
+    expect(await sweeper.accountImplementation()).to.equal(implAddr);
+    expect(await sweeper.accountSalt()).to.equal(SALT);
+    const names = (
+      (await ethers.getContractFactory("TBAValueSweeper")).interface.fragments.filter(
+        (f: any) => f.type === "function"
+      ) as any[]
+    ).map((f) => f.name);
+    for (const bad of [
+      "setRegistry",
+      "setAccountRegistry",
+      "setAccountImplementation",
+      "setAccountSalt",
+      "queueRegistry",
+    ]) {
+      expect(names, `${bad} exists`).to.not.include(bad);
+    }
+  });
+
+  it("a zero or code-less registry/implementation is refused at construction", async () => {
+    const { nftAddr, vaultAddr, reserveAddr, miscAddr, roleAdmin, allowAdmin, registryAddr, implAddr, SALT, outsider } =
+      await fixture();
+    const Sweeper = await ethers.getContractFactory("TBAValueSweeper");
+    const base = [
+      nftAddr,
+      vaultAddr,
+      reserveAddr,
+      miscAddr,
+      DELAY,
+      [roleAdmin.address, allowAdmin.address],
+    ];
+    for (const [reg, impl] of [
+      [ethers.ZeroAddress, implAddr],
+      [registryAddr, ethers.ZeroAddress],
+      [outsider.address, implAddr], // an EOA cannot be a registry
+      [registryAddr, outsider.address], // nor an implementation
+    ]) {
+      await expect(
+        Sweeper.deploy(...(base as any), reg, impl, SALT)
+      ).to.be.revertedWithCustomError(Sweeper, "BadParam");
+    }
+  });
+
+  // ── Gap 2: construction-time sink validation ────────────────────────────
+
+  it("an EOA sink is refused at construction, in either position, with a clear revert", async () => {
+    const { nftAddr, vaultAddr, reserveAddr, miscAddr, roleAdmin, allowAdmin, registryAddr, implAddr, SALT, outsider, bob } =
+      await fixture();
+    const Sweeper = await ethers.getContractFactory("TBAValueSweeper");
+
+    await expect(
+      Sweeper.deploy(
+        nftAddr,
+        vaultAddr,
+        outsider.address, // reserve sink is somebody's personal wallet
+        miscAddr,
+        DELAY,
+        [roleAdmin.address, allowAdmin.address],
+        registryAddr,
+        implAddr,
+        SALT
+      )
+    )
+      .to.be.revertedWithCustomError(Sweeper, "SinkNotContract")
+      .withArgs(outsider.address);
+
+    await expect(
+      Sweeper.deploy(
+        nftAddr,
+        vaultAddr,
+        reserveAddr,
+        bob.address, // and the miscellany sink likewise
+        DELAY,
+        [roleAdmin.address, allowAdmin.address],
+        registryAddr,
+        implAddr,
+        SALT
+      )
+    )
+      .to.be.revertedWithCustomError(Sweeper, "SinkNotContract")
+      .withArgs(bob.address);
+  });
+
+  it("a legitimate contract sink still deploys, and publishes exactly what it validated", async () => {
+    const { nftAddr, vaultAddr, reserveAddr, miscAddr, roleAdmin, allowAdmin, registryAddr, implAddr, SALT } =
+      await fixture();
+    const Sweeper = await ethers.getContractFactory("TBAValueSweeper");
+    const fresh: any = await Sweeper.deploy(
+      nftAddr,
+      vaultAddr,
+      reserveAddr,
+      miscAddr,
+      DELAY,
+      [roleAdmin.address, allowAdmin.address],
+      registryAddr,
+      implAddr,
+      SALT
+    );
+    const rHash = await ethers.provider.getCode(reserveAddr).then(ethers.keccak256);
+    const mHash = await ethers.provider.getCode(miscAddr).then(ethers.keccak256);
+    const rSize = (await ethers.provider.getCode(reserveAddr)).length / 2 - 1;
+    const mSize = (await ethers.provider.getCode(miscAddr)).length / 2 - 1;
+
+    await expect(fresh.deploymentTransaction())
+      .to.emit(fresh, "SinksValidated")
+      .withArgs(reserveAddr, miscAddr, rHash, mHash, rSize, mSize);
+    await expect(fresh.deploymentTransaction())
+      .to.emit(fresh, "RegistryBound")
+      .withArgs(registryAddr, implAddr, SALT);
+
+    expect(await fresh.reserveSinkCodehash()).to.equal(rHash);
+    expect(await fresh.miscellanySinkCodehash()).to.equal(mHash);
+    const [rOk, mOk, rh, mh] = await fresh.sinksValidated();
+    expect(rOk).to.equal(true);
+    expect(mOk).to.equal(true);
+    expect(rh).to.equal(rHash);
+    expect(mh).to.equal(mHash);
+  });
+
+  it("sink hardening added NO redirect path: the sinks are still immutable and setter-less", async () => {
+    const { sweeper, reserveAddr, miscAddr } = await fixture();
+    const names = (
+      (await ethers.getContractFactory("TBAValueSweeper")).interface.fragments.filter(
+        (f: any) => f.type === "function"
+      ) as any[]
+    ).map((f) => f.name);
+    for (const bad of [
+      "setReserveSink",
+      "setMiscellanySink",
+      "queueSink",
+      "executeSink",
+      "revalidateSinks",
+      "migrateSink",
+      "setSinks",
+    ]) {
+      expect(names, `${bad} exists`).to.not.include(bad);
+    }
+    // `sinksValidated` is a view — it reports, it cannot act.
+    const frag: any = (await ethers.getContractFactory("TBAValueSweeper")).interface.getFunction(
+      "sinksValidated"
+    );
+    expect(frag.stateMutability).to.equal("view");
+    const [reserve, misc] = await sweeper.sinks();
+    expect(reserve).to.equal(reserveAddr);
+    expect(misc).to.equal(miscAddr);
+  });
+
+  it("NO-TRAP: nothing added here touches the vault's redemption path — redeemProRata is unreachable from this contract", async () => {
+    const { sweeper, vault, alice, nft, vaultAddr, allowAdmin, tbas } = await fixture();
+    // The sweeper's entire view of the vault is one read-only function.
+    const iface = (await ethers.getContractFactory("TBAValueSweeper")).interface;
+    const names = (iface.fragments.filter((f: any) => f.type === "function") as any[]).map(
+      (f) => f.name
+    );
+    for (const bad of ["redeemProRata", "redeem", "redeemTarget", "pause", "setVault"]) {
+      expect(names, `${bad} exists`).to.not.include(bad);
+    }
+    // And with the new registry check live and an asset allowlisted, exits are
+    // still exactly as available as before.
+    const tok = await deployToken();
+    await tok.mint(await tbas[0].getAddress(), 100n);
+    await allowlist(sweeper, allowAdmin, KIND_ERC20, await tok.getAddress());
+    await sweeper.sweepTBAERC20(1, await tbas[0].getAddress(), await tok.getAddress());
+    for (let id = 1; id <= 4; id++) {
+      await vault.connect(alice).redeemTarget(id, { value: TARGET_COST });
+      expect(await nft.ownerOf(id)).to.equal(alice.address);
+    }
+    expect(await vault.heldTokenCount()).to.equal(0n);
+    expect(await nft.balanceOf(vaultAddr)).to.equal(0n);
   });
 
   // ── Primitive 1: ERC-20 ─────────────────────────────────────────────────
@@ -393,7 +696,8 @@ describe("TBAValueSweeper — stranded-value capture", () => {
     // A sweeper whose miscellany sink reverts on receipt: every 721 sweep
     // through it fails, and NOTHING else does — ERC-20 sweeps and the LP
     // collect path are untouched, because no state is shared between them.
-    const { nftAddr, vaultAddr, reserveAddr, roleAdmin, allowAdmin, tbas } = await fixture();
+    const { nftAddr, vaultAddr, reserveAddr, roleAdmin, allowAdmin, tbas, registryAddr, implAddr, SALT } =
+      await fixture();
     const Rev = await ethers.getContractFactory("MockRevertingReceiver");
     const rev: any = await Rev.deploy();
     const Sweeper = await ethers.getContractFactory("TBAValueSweeper");
@@ -403,7 +707,10 @@ describe("TBAValueSweeper — stranded-value capture", () => {
       reserveAddr,
       await rev.getAddress(),
       DELAY,
-      [roleAdmin.address, allowAdmin.address]
+      [roleAdmin.address, allowAdmin.address],
+      registryAddr,
+      implAddr,
+      SALT
     );
     await tbas[0].setOperator(await hostile.getAddress(), true);
 

@@ -89,6 +89,132 @@ contract MockTBA is IERC721Receiver {
     receive() external payable {}
 }
 
+/**
+ * @notice Test-only stand-in for the canonical ERC-6551 registry, implementing
+ * the real `account()` / `createAccount()` pair.
+ *
+ * The property that matters — and the only one TBAValueSweeper relies on — is
+ * that `account()` is a PURE DETERMINISTIC CREATE2 derivation over
+ * (implementation, salt, chainId, tokenContract, tokenId), and that
+ * `createAccount` deploys at exactly that address and nowhere else. That is
+ * reproduced here faithfully; only the deployed bytecode differs from the
+ * canonical registry (which deploys an ERC-1167 proxy with a token footer,
+ * whereas this deploys MockTBA with the same binding as constructor args). The
+ * derivation domain, and therefore the security argument, is identical: an
+ * account contract deployed by any other means lands at a different address
+ * and cannot pass the sweeper's check no matter what its views claim.
+ */
+contract MockERC6551Registry {
+    error AccountCreationFailed();
+
+    event AccountCreated(address account, address implementation, uint256 tokenId);
+
+    function _initCode(uint256 chainId, address tokenContract, uint256 tokenId)
+        internal
+        pure
+        returns (bytes memory)
+    {
+        return
+            abi.encodePacked(
+                type(MockTBA).creationCode,
+                abi.encode(chainId, tokenContract, tokenId)
+            );
+    }
+
+    function _create2Salt(address implementation, bytes32 salt) internal pure returns (bytes32) {
+        return keccak256(abi.encode(salt, implementation));
+    }
+
+    /// @notice The canonical derivation. View, pure function of its arguments.
+    function account(
+        address implementation,
+        bytes32 salt,
+        uint256 chainId,
+        address tokenContract,
+        uint256 tokenId
+    ) external view returns (address) {
+        bytes32 initHash = keccak256(_initCode(chainId, tokenContract, tokenId));
+        return
+            address(
+                uint160(
+                    uint256(
+                        keccak256(
+                            abi.encodePacked(
+                                bytes1(0xff),
+                                address(this),
+                                _create2Salt(implementation, salt),
+                                initHash
+                            )
+                        )
+                    )
+                )
+            );
+    }
+
+    /// @notice Deploy the account for this NFT at — and only at — the address
+    /// `account()` derives.
+    function createAccount(
+        address implementation,
+        bytes32 salt,
+        uint256 chainId,
+        address tokenContract,
+        uint256 tokenId
+    ) external returns (address deployed) {
+        bytes memory code = _initCode(chainId, tokenContract, tokenId);
+        bytes32 s = _create2Salt(implementation, salt);
+        assembly {
+            deployed := create2(0, add(code, 32), mload(code), s)
+        }
+        if (deployed == address(0)) revert AccountCreationFailed();
+        emit AccountCreated(deployed, implementation, tokenId);
+    }
+}
+
+/**
+ * @notice The fake-TBA attack, in one contract. It self-reports whatever
+ * `token()` and `owner()` values the deployer wants — i.e. it passes every
+ * self-report check the sweeper used to rely on — while living at an arbitrary
+ * address that no registry ever derived. Its `execute` records that it was
+ * reached, so a test can prove the sweeper never got that far.
+ */
+contract MockFakeTBA is IERC721Receiver {
+    uint256 public fakeChainId;
+    address public fakeCollection;
+    uint256 public fakeTokenId;
+    address public fakeOwner;
+    bool public wasExecuted;
+
+    constructor(uint256 chainId_, address collection_, uint256 tokenId_, address owner_) {
+        fakeChainId = chainId_;
+        fakeCollection = collection_;
+        fakeTokenId = tokenId_;
+        fakeOwner = owner_;
+    }
+
+    function token() external view returns (uint256, address, uint256) {
+        return (fakeChainId, fakeCollection, fakeTokenId);
+    }
+
+    function owner() external view returns (address) {
+        return fakeOwner;
+    }
+
+    function execute(address, uint256, bytes calldata, uint8) external payable returns (bytes memory) {
+        wasExecuted = true;
+        return "";
+    }
+
+    function onERC721Received(address, address, uint256, bytes calldata)
+        external
+        pure
+        returns (bytes4)
+    {
+        return IERC721Receiver.onERC721Received.selector;
+    }
+
+    receive() external payable {}
+}
+
 /// @notice A TBA whose `token()` names a token id / collection / chain of the
 /// deployer's choosing — used to prove an unbound TBA cannot be swept from.
 contract MockTBALiar is MockTBA {

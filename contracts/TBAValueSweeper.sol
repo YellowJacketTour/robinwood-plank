@@ -72,6 +72,45 @@ pragma solidity ^0.8.24;
  *     `abi.encodeCall` and no caller-influenced bytes anywhere in it. A caller
  *     chooses only WHICH allowlisted asset to sweep, never what happens to it.
  *
+ *  ══ WHY THE TBA ADDRESS IS DERIVED, NOT BELIEVED (v2) ═════════════════════
+ *  `tbaAddress` is caller-supplied. Authenticating it with `token()` and
+ *  `owner()` alone is authenticating an address by ASKING THAT ADDRESS: any
+ *  contract deployed anywhere can implement both views, answer correctly, and
+ *  then do as it pleases when `execute()` reaches it — a sweep "from held NFT
+ *  #7's account" that in truth touched an attacker's contract that merely
+ *  claimed to be it.
+ *
+ *  ERC-6551 removes the need to trust the claim at all: a genuine account's
+ *  address is a deterministic CREATE2 function of (implementation, salt,
+ *  chainId, tokenContract, tokenId). So this contract asks the REGISTRY —
+ *  `IERC6551Registry.account()`, the derivation's own author — for the address
+ *  NFT #heldTokenId's account must have, and requires an exact match before any
+ *  primitive proceeds. The registry, implementation and salt are all immutable
+ *  constructor parameters: the definition of "genuine TBA" cannot be edited
+ *  after deployment any more than the sinks can.
+ *
+ *  The registry is asked rather than the CREATE2 math re-derived locally on
+ *  purpose. A local copy is a second implementation of a spec this contract
+ *  does not own, free to drift from it; the registry cannot drift from itself.
+ *
+ *  ══ WHY THE SINKS ARE VALIDATED AT CONSTRUCTION (v2) ══════════════════════
+ *  The sinks must be immutable — that is the whole of rule 2's no-claw-back
+ *  guarantee, and nothing here softens it: there is still no setter, no queue,
+ *  no role, no path of any kind to change either one. But immutability defends
+ *  a WRONG sink exactly as faithfully as a right one, so the assurance has to
+ *  be bought at construction, where it is still purchasable:
+ *
+ *    - A sink must be a CONTRACT. A raw EOA sink is a personal wallet with the
+ *      word "reserve" written on it, which is precisely what "value lands in
+ *      accounted reserves" is meant to exclude. `SinkNotContract` refuses it.
+ *    - Whatever code each sink holds is hashed, sized and EMITTED at deploy
+ *      time (`SinksValidated`), so the deployer's choice is a public, indexed,
+ *      permanently-checkable fact rather than something a reviewer has to be
+ *      told. `sinksValidated()` re-checks it any time, forever.
+ *
+ *  Both are construction-time only. Neither adds a post-deploy redirect, and
+ *  no code path anywhere in this file acts on `sinksValidated()`'s answer.
+ *
  *  ══ DEPLOYMENT PREREQUISITE, STATED HONESTLY ══════════════════════════════
  *  An ERC-6551 account executes only for its resolved owner (the vault) or for
  *  a caller that owner has explicitly permitted — most reference accounts
@@ -135,6 +174,27 @@ interface IERC6551Account {
 }
 
 /**
+ * @notice The REAL ERC-6551 registry interface. `account()` is the registry's
+ * OWN canonical CREATE2 derivation: given (implementation, salt, chainId,
+ * tokenContract, tokenId) it returns the one and only address at which a
+ * genuine token-bound account for that NFT can exist.
+ *
+ * This is the authoritative answer to "is this really NFT #n's TBA?", and it is
+ * why this contract asks the registry rather than reimplementing the CREATE2
+ * formula locally: a local reimplementation would be a second, drifting copy of
+ * a spec this contract does not own. The registry is the spec.
+ */
+interface IERC6551Registry {
+    function account(
+        address implementation,
+        bytes32 salt,
+        uint256 chainId,
+        address tokenContract,
+        uint256 tokenId
+    ) external view returns (address);
+}
+
+/**
  * @notice The ERC-6551 execution interface, deliberately declared as its own
  * one-function type so that every use of it in this file is trivially
  * greppable and reviewable. Calldata passed to it is ALWAYS built by this
@@ -179,7 +239,9 @@ interface IPositionManager {
 
 contract TBAValueSweeper is ReentrancyGuard, ScopedRoles {
     /// @notice Generation marker so the client never has to sniff bytecode.
-    uint256 public constant SWEEPER_VERSION = 1;
+    /// v2 adds (a) registry-derived TBA address verification and (b) sink
+    /// construction-time contract validation with a published attestation.
+    uint256 public constant SWEEPER_VERSION = 2;
 
     /**
      * @notice The allowlist administration role. Adds/removes sweepable asset
@@ -219,6 +281,32 @@ contract TBAValueSweeper is ReentrancyGuard, ScopedRoles {
      * structural, not a convention someone has to remember.
      */
     address public immutable miscellanySink;
+
+    /**
+     * @notice The ERC-6551 registry whose `account()` view is treated as the
+     * ONLY authority on which address is a given NFT's token-bound account.
+     * IMMUTABLE — a mutable registry would be a mutable definition of "genuine
+     * TBA", i.e. the same hole in slower motion.
+     */
+    IERC6551Registry public immutable accountRegistry;
+
+    /// @notice The account implementation the registry deploys behind. Part of
+    /// the derivation domain, so a TBA at the right (collection, tokenId) but
+    /// built on a DIFFERENT implementation derives to a different address and
+    /// is rejected.
+    address public immutable accountImplementation;
+
+    /// @notice The registry salt this deployment recognises. Same reasoning:
+    /// one deployment, one canonical account per NFT, no ambiguity.
+    bytes32 public immutable accountSalt;
+
+    /**
+     * @notice The code hashes each sink had at construction, recorded so the
+     * deployer's choice is a published, checkable fact rather than a trust
+     * assumption. See `sinksValidated()`.
+     */
+    bytes32 public immutable reserveSinkCodehash;
+    bytes32 public immutable miscellanySinkCodehash;
 
     /// @notice Timelock delay, immutable, shared by allowlist entries and by
     /// ScopedRoles reassignment — so a role rotation can never be scheduled on
@@ -263,7 +351,36 @@ contract TBAValueSweeper is ReentrancyGuard, ScopedRoles {
         uint256 amount1
     );
 
+    /**
+     * @notice Emitted exactly once, at construction, recording precisely what
+     * the deployer pointed this sweeper at: both sinks, the code hash and code
+     * size each contained AT THAT MOMENT, and the registry/implementation/salt
+     * triple that defines a genuine TBA here.
+     *
+     * The sinks stay immutable — this adds no redirect path of any kind. What
+     * it adds is that a wrong or hostile sink is impossible to choose SILENTLY:
+     * the choice is on-chain, in the deployment receipt, before one wei has
+     * ever been swept.
+     */
+    event SinksValidated(
+        address indexed reserveSink,
+        address indexed miscellanySink,
+        bytes32 reserveCodehash,
+        bytes32 miscellanyCodehash,
+        uint256 reserveCodeSize,
+        uint256 miscellanyCodeSize
+    );
+
+    event RegistryBound(address indexed registry, address indexed implementation, bytes32 salt);
+
     error BadParam();
+    /// @notice A sink with no code. An EOA sink defeats the entire point of
+    /// "value lands in accounted reserves, not somebody's personal wallet",
+    /// and it is refused at construction rather than discovered later.
+    error SinkNotContract(address sink);
+    /// @notice `tbaAddress` is not the address the registry derives for this
+    /// held NFT. The fake-TBA close.
+    error TbaNotRegistryDerived(address supplied, address derived);
     error NotAllowlisted(address asset);
     error NothingQueued();
     error TimelockNotElapsed();
@@ -284,6 +401,10 @@ contract TBAValueSweeper is ReentrancyGuard, ScopedRoles {
      *        differ from `vault_` — non-commingling, enforced at construction.
      * @param timelockDelay_ delay for allowlist entries and role rotations.
      * @param roles_ [ROLE_ADMIN, ROLE_SWEEP_ALLOWLIST].
+     * @param registry_ the ERC-6551 registry that defines, canonically, which
+     *        address is a given NFT's token-bound account.
+     * @param implementation_ the account implementation that registry deploys.
+     * @param salt_ the registry salt for this deployment's accounts.
      */
     constructor(
         IERC721 collection_,
@@ -291,14 +412,24 @@ contract TBAValueSweeper is ReentrancyGuard, ScopedRoles {
         address reserveSink_,
         address miscellanySink_,
         uint256 timelockDelay_,
-        address[2] memory roles_
+        address[2] memory roles_,
+        IERC6551Registry registry_,
+        address implementation_,
+        bytes32 salt_
     ) {
         if (
             address(collection_) == address(0) ||
             address(vault_) == address(0) ||
             reserveSink_ == address(0) ||
-            miscellanySink_ == address(0)
+            miscellanySink_ == address(0) ||
+            address(registry_) == address(0) ||
+            implementation_ == address(0)
         ) revert BadParam();
+        // A registry or an implementation with no code cannot possibly be the
+        // authority this contract is about to trust for every sweep.
+        if (address(registry_).code.length == 0 || implementation_.code.length == 0) {
+            revert BadParam();
+        }
         // The non-commingling rule, made structural.
         if (miscellanySink_ == address(vault_)) revert BadParam();
         // A sweep destination that is this contract would be custody, and
@@ -306,14 +437,44 @@ contract TBAValueSweeper is ReentrancyGuard, ScopedRoles {
         if (reserveSink_ == address(this) || miscellanySink_ == address(this)) revert BadParam();
         if (timelockDelay_ < MIN_TIMELOCK || timelockDelay_ > MAX_TIMELOCK) revert BadParam();
 
+        // ══ SINK VALIDATION, CONSTRUCTION-TIME ONLY ═════════════════════════
+        // The sinks must stay immutable — that immutability is exactly what
+        // makes swept value un-clawable-back, and nothing below weakens it.
+        // But immutability protects a WRONG sink just as faithfully as a right
+        // one, so the assurance has to be paid for up front, here, once:
+        //
+        //   (1) a sink must be a CONTRACT. An EOA sink is a personal wallet
+        //       wearing the word "reserve", and it is the single most likely
+        //       way this deployment could be silently wrong. Refused outright.
+        //   (2) whatever code each sink holds is HASHED, SIZED AND PUBLISHED
+        //       in the deployment receipt, so "which sink, containing what"
+        //       stops being a claim and becomes a verifiable on-chain fact.
+        //
+        // There is deliberately no post-construction path to revisit either.
+        uint256 reserveSize = reserveSink_.code.length;
+        uint256 miscSize = miscellanySink_.code.length;
+        if (reserveSize == 0) revert SinkNotContract(reserveSink_);
+        if (miscSize == 0) revert SinkNotContract(miscellanySink_);
+
         collection = collection_;
         vault = vault_;
         reserveSink = reserveSink_;
         miscellanySink = miscellanySink_;
         timelockDelay = timelockDelay_;
+        accountRegistry = registry_;
+        accountImplementation = implementation_;
+        accountSalt = salt_;
+
+        bytes32 rHash = reserveSink_.codehash;
+        bytes32 mHash = miscellanySink_.codehash;
+        reserveSinkCodehash = rHash;
+        miscellanySinkCodehash = mHash;
 
         _initRole(ROLE_ADMIN, roles_[0]);
         _initRole(ROLE_SWEEP_ALLOWLIST, roles_[1]);
+
+        emit SinksValidated(reserveSink_, miscellanySink_, rHash, mHash, reserveSize, miscSize);
+        emit RegistryBound(address(registry_), implementation_, salt_);
     }
 
     function _timelockDelay() internal view override returns (uint256) {
@@ -546,6 +707,43 @@ contract TBAValueSweeper is ReentrancyGuard, ScopedRoles {
         return (reserveSink, miscellanySink);
     }
 
+    /**
+     * @notice The canonical TBA address this contract will accept for
+     * `heldTokenId`, derived by the registry. Published so anyone can check,
+     * off-chain and before spending gas, exactly which address is sweepable —
+     * and so the answer never has to be taken from the account itself.
+     */
+    function expectedTba(uint256 heldTokenId) external view returns (address) {
+        return
+            accountRegistry.account(
+                accountImplementation,
+                accountSalt,
+                block.chainid,
+                address(collection),
+                heldTokenId
+            );
+    }
+
+    /**
+     * @notice Are both sinks still exactly the contracts they were at
+     * construction. A pure observation — nothing in this contract can act on
+     * it, and no answer it gives can redirect anything, because the sinks are
+     * immutable either way. It exists so that "the sinks are what the deployer
+     * attested to" is continuously checkable rather than a one-time promise.
+     */
+    function sinksValidated()
+        external
+        view
+        returns (bool reserveOk, bool miscellanyOk, bytes32 reserveCodehash, bytes32 miscellanyCodehash)
+    {
+        reserveCodehash = reserveSinkCodehash;
+        miscellanyCodehash = miscellanySinkCodehash;
+        reserveOk = reserveSink.codehash == reserveCodehash && reserveSink.code.length != 0;
+        miscellanyOk =
+            miscellanySink.codehash == miscellanyCodehash &&
+            miscellanySink.code.length != 0;
+    }
+
     function capabilities()
         external
         pure
@@ -598,6 +796,33 @@ contract TBAValueSweeper is ReentrancyGuard, ScopedRoles {
         if (collection.ownerOf(heldTokenId) != vaultAddr) revert TokenNotHeldByVault(heldTokenId);
         if (!vault.isTokenHeld(heldTokenId)) revert TokenNotHeldByVault(heldTokenId);
         if (IERC6551Account(tba).owner() != vaultAddr) revert TbaOwnerMismatch();
+
+        // ══ THE CHECK THAT MAKES THE THREE ABOVE UNFAKEABLE ═════════════════
+        // Everything above this line is a SELF-REPORT: `token()` and `owner()`
+        // are views on the very address being authenticated, so a contract
+        // deployed anywhere at all can implement both and answer whatever gets
+        // it past them — and then behave however it likes when `execute()` is
+        // called on it. A fake would sail through 1-3 and misattribute a sweep
+        // to a held NFT it has nothing to do with.
+        //
+        // ERC-6551 makes that unnecessary: a genuine account address is a pure
+        // CREATE2 function of (implementation, salt, chainId, tokenContract,
+        // tokenId), so the right address can be DERIVED rather than believed.
+        // We ask the registry itself, which owns that derivation, and require
+        // an exact match before any sweep primitive touches the account.
+        //
+        // Note the derivation is fed `heldTokenId` — the id the caller is
+        // claiming and that the vault was just proven to hold — never anything
+        // the supplied address told us about itself. The self-reported values
+        // cannot steer their own verification.
+        address derived = accountRegistry.account(
+            accountImplementation,
+            accountSalt,
+            block.chainid,
+            address(collection),
+            heldTokenId
+        );
+        if (tba != derived) revert TbaNotRegistryDerived(tba, derived);
     }
 
     /**
