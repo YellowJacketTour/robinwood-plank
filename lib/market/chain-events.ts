@@ -428,6 +428,15 @@ export type ChainEventQuery = {
   kinds?: string[];
   source?: ChainEventSource;
   tokenId?: string;
+  /**
+   * Restrict to a specific NFT contract address (case-insensitive). Only
+   * RobinWood is indexed under source="nft" today, but this exists so a
+   * second collection never silently receives another collection's sales
+   * just because both share source="nft" — the same "silently wrong for
+   * the next collection" bug class the discovery module's own pen-test
+   * flagged for a hardcoded trait assumption.
+   */
+  contract?: string;
 };
 
 export type ChainActivityPage = {
@@ -517,6 +526,10 @@ export async function readChainActivity(query: ChainEventQuery): Promise<ChainAc
   const where: string[] = ["e.source = $1"];
   const params: unknown[] = [query.source ?? "nft"];
 
+  if (query.contract) {
+    params.push(query.contract.toLowerCase());
+    where.push(`e.contract = $${params.length}`);
+  }
   if (query.kinds && query.kinds.length > 0) {
     params.push(query.kinds);
     where.push(`e.kind = ANY($${params.length}::text[])`);
