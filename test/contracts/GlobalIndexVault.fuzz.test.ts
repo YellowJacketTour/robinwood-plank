@@ -50,8 +50,8 @@ import {
  */
 describe("GlobalIndexVault — randomized invariants", () => {
 
-  // These suites advance the shared Hardhat clock by YEARS (four-year vePLANK
-  // locks, month-long weight ramps). Mocha shares one network across files, so
+  // These suites advance the shared Hardhat clock by MONTHS (month-long weight
+  // ramps, 48h timelocks). Mocha shares one network across files, so
   // without restoring the snapshot afterwards every later suite runs in the
   // future — which silently expires the fixed-endTime Seaport orders in
   // SeaportPerTokenApproval/SeaportCriteriaFulfill. Snapshot in, restore out.
