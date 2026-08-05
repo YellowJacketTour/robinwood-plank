@@ -100,16 +100,22 @@ export interface IndexFixture {
  * drift apart.
  */
 export async function indexVaultFactory() {
-  const IndexMath = await ethers.getContractFactory("IndexMath");
-  const indexMath = await IndexMath.deploy();
-  const IndexParams = await ethers.getContractFactory("IndexParams");
-  const indexParams = await IndexParams.deploy();
-  return ethers.getContractFactory("GlobalIndexVault", {
-    libraries: {
-      IndexMath: await indexMath.getAddress(),
-      IndexParams: await indexParams.getAddress(),
-    },
-  });
+  const libraries: Record<string, string> = {};
+  // IndexValuation itself calls IndexMath, so IndexMath must be linked into it
+  // as well as into the vault. Order matters: deploy the leaf first.
+  const indexMath = await (await ethers.getContractFactory("IndexMath")).deploy();
+  libraries.IndexMath = await indexMath.getAddress();
+  for (const name of ["IndexParams", "IndexEligibility"]) {
+    const c = await (await ethers.getContractFactory(name)).deploy();
+    libraries[name] = await c.getAddress();
+  }
+  const valuation = await (
+    await ethers.getContractFactory("IndexValuation", {
+      libraries: { IndexMath: libraries.IndexMath },
+    })
+  ).deploy();
+  libraries.IndexValuation = await valuation.getAddress();
+  return ethers.getContractFactory("GlobalIndexVault", { libraries });
 }
 
 export async function deployOpenIndex(
@@ -131,7 +137,10 @@ export async function deployOpenIndex(
     [roleAdmin.address, admission.address, risk.address, allocation.address],
     seeder.address,
     TIMELOCK,
-    paramsTuple({ ...defaultParams, ...overrides })
+    paramsTuple({ ...defaultParams, ...overrides }),
+    // Dividends are denominated in the first constituent. Immutable, so every
+    // fixture-based test exercises a vault whose dividend asset is real.
+    c0.addr
   );
   const vaultAddr = await vault.getAddress();
 

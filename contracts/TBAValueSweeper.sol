@@ -7,7 +7,7 @@ pragma solidity ^0.8.24;
  *  accounts owned by vault-held NFTs
  *
  *  NOT FOR DEPLOYMENT. Same gate as GlobalIndexVault.sol, PlankGauge.sol and
- *  IndexDividendDistributor.sol: nothing in this repo may put any of them on
+ *  PlankGauge.sol: nothing in this repo may put any of them on
  *  any network until the external audit clears. hardhat.config.ts has no
  *  default network on purpose; keep it that way.
  *
@@ -23,7 +23,7 @@ pragma solidity ^0.8.24;
  *  every share-holder's pro-rata claim.
  *
  *  This contract is the sweep. It is deliberately a SEPARATE contract with no
- *  authority over either vault, for the same reason IndexDividendDistributor
+ *  authority over either vault, for the same reason PlankGauge
  *  is separate: the vaults' redemption paths are the part that has to be
  *  perfect, and the cheapest way to keep them perfect is to not touch them.
  *
@@ -269,7 +269,8 @@ contract TBAValueSweeper is ReentrancyGuard, ScopedRoles {
      * IMMUTABLE. This is the whole of rule 2: there is no setter, no queued
      * change, and no role that can move it, so credited value can never be
      * redirected after the fact. In production this is the accounted-reserve /
-     * dividend sink (e.g. IndexDividendDistributor), which is push-only.
+     * dividend sink (in practice GlobalIndexVault's own holder-dividend
+     * accumulator, round 9b), which is push-only.
      */
     address public immutable reserveSink;
 

@@ -84,7 +84,8 @@ describe("GlobalIndexVault — realized-variance persistence calibration (Part E
       [roleAdmin.address, admission.address, risk.address, allocation.address],
       seeder.address,
       TIMELOCK,
-      paramsTuple({ ...defaultParams, ...overrides })
+      paramsTuple({ ...defaultParams, ...overrides }),
+        ethers.ZeroAddress // dividends off: this fixture never pushes one
     );
     const vaultAddr = await vault.getAddress();
 

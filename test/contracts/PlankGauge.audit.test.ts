@@ -697,6 +697,12 @@ describe("PlankGauge", () => {
     ) as any[]) {
       const blob = (f.name + " " + f.inputs.map((i: any) => i.name).join(" ")).toLowerCase();
       for (const bad of ["gauge", "burn", "plank", "claim", "reward", "boost", "epoch"]) {
+        // `claimDividend` is the vault's OWN holder dividend claim (round 9b).
+        // It is not a gauge reach: it reads this contract's own share balances
+        // and pays this contract's own dividend ledger. The exemption is named
+        // rather than the keyword dropped, so any OTHER "claim*" on the vault
+        // still trips this assertion.
+        if (f.name === "claimDividend" && bad === "claim") continue;
         expect(blob.includes(bad)).to.equal(false, `vault.${f.name} mentions ${bad}`);
       }
     }

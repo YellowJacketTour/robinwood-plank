@@ -190,6 +190,13 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // triggering it is not a privilege. Same shape as V3's `withdrawFees`.
       "harvestEcosystemFees",
       "executeRole",
+      // Permissionless BY DESIGN and pays the CALLER their own already-accrued
+      // entitlement and nothing else. There is no recipient argument, so it
+      // cannot be aimed, and no role can call it on anyone else's behalf.
+      "claimDividend",
+      // Permissionless BY DESIGN: pushing dividends is donating money. A role
+      // gate here would buy nothing and add a key to lose.
+      "receiveDividendsWrapped",
       "delistEmpty",
       "refreshEligibleCount",
       "seedConstituent",

@@ -139,7 +139,8 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
       [roleAdmin.address, admission.address, risk.address, allocation.address],
       seeder.address,
       TIMELOCK,
-      paramsTuple({ ...defaultParams, ...paramOverrides })
+      paramsTuple({ ...defaultParams, ...paramOverrides }),
+        ethers.ZeroAddress // dividends off: this fixture never pushes one
     );
     const vaultAddr = await vault.getAddress();
 
@@ -352,7 +353,8 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
         roles,
         seeder.address,
         TIMELOCK,
-        paramsTuple(defaultParams)
+        paramsTuple(defaultParams),
+        ethers.ZeroAddress // dividends off: this fixture never pushes one
       );
       const vaultAddr = await vault.getAddress();
       for (const [tok, price] of [

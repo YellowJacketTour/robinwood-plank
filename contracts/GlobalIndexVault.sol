@@ -119,9 +119,11 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IIndexPriceSource} from "./IIndexPriceSource.sol";
-import {IEligibilitySource} from "./IEligibilitySource.sol";
 import {ScopedRoles} from "./ScopedRoles.sol";
 import {IndexMath} from "./lib/IndexMath.sol";
+import {Observation, Constituent, OBS_SLOTS as TYPES_OBS_SLOTS} from "./lib/IndexTypes.sol";
+import {IndexValuation} from "./lib/IndexValuation.sol";
+import {IndexEligibility} from "./lib/IndexEligibility.sol";
 // The parameter SET itself is declared in IndexParams.sol and imported under
 // this contract's historical name, so the key-space dispatch can be moved out
 // of this bytecode without an encode/decode shim at the boundary. Field order
@@ -131,7 +133,7 @@ import {IndexParams, IndexParamSet as Params} from "./lib/IndexParams.sol";
 /**
  * @notice The two functions this vault needs from an ecosystem fee sink, and
  * NOTHING else. Deliberately a two-function interface over
- * IndexDividendDistributor rather than an import of it: the vault must not
+ * a sink rather than an import of one: the vault must not
  * acquire a compile-time dependency on — or an ABI-level reach into — a
  * contract that holds its own funds. `reinvestAsset()` is read ONCE, at the
  * timelocked appointment, to pin which constituent this vault is allowed to
@@ -167,8 +169,10 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     /// @dev Bounded so every constituent loop is gas-safe and un-strandable.
     uint256 private constant MAX_CONSTITUENTS = 32;
 
-    /// @dev Ring buffer depth for each constituent's price observations.
-    uint256 private constant OBS_SLOTS = 8;
+    /// @dev Ring buffer depth. Declared in IndexTypes.sol, where it fixes the
+    /// `Constituent.obs` array's storage shape, and re-exported here under the
+    /// name the rest of this file has always used.
+    uint256 private constant OBS_SLOTS = TYPES_OBS_SLOTS;
 
     /// @dev A seed floor stronger than UniV2's 1000-wei MINIMUM_LIQUIDITY.
     uint256 private constant MIN_SEED_SHARES = 1e6;
@@ -260,42 +264,6 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     uint256 private constant ELIGIBILITY_GAS_CAP = 50_000;
 
     // ── Types ──────────────────────────────────────────────────────────────
-
-    struct Observation {
-        uint64 timestamp;
-        uint192 price; // ETH wei per WAD of token, already movement-capped
-        uint256 cumulative; // price-seconds accumulator
-    }
-
-    struct Constituent {
-        IIndexPriceSource source;
-        uint64 rampStart;
-        uint64 rampDuration;
-        uint256 rawTargetWeightBps; // pre-curve intent, informational
-        uint256 metric; // fee revenue + locked LP, timelocked input to √ curve
-        uint256 reserve; // credited balance, NEVER balanceOf()
-        bool listed;
-        bool active; // false = weight target 0, but reserves still redeemable
-        uint8 obsCount;
-        uint8 obsHead;
-        // ── Part E: the LONG realized-variance calibration window ──────────
-        // A two-bucket TUMBLING window: `cur` fills for VARIANCE_WINDOW, then
-        // rolls into `prev` and `cur` restarts. Reading prev+cur therefore
-        // always covers at least one full window of history and at most two,
-        // which is what makes a short burst of manufactured checkpoints a
-        // vanishing fraction of the denominator. A ring buffer of individual
-        // samples would be strictly more precise and strictly more expensive;
-        // two accumulators is the honest on-chain shape.
-        // Deliberately full-width uint256 rather than tightly packed: the
-        // packing arithmetic costs more CODE than the slots it saves, and this
-        // contract is against the EIP-170 size limit, not against gas.
-        uint256 varWindowStart;
-        uint256 varPrevSumSq; // sum of (per-checkpoint move in bps)^2
-        uint256 varPrevSamples;
-        uint256 varCurSumSq;
-        uint256 varCurSamples;
-        Observation[OBS_SLOTS] obs;
-    }
 
     struct QueuedParam {
         uint256 value;
@@ -416,7 +384,11 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      */
     mapping(address => uint256) public ecosystemFeesWei;
 
-    /// @notice The appointed sink (in practice IndexDividendDistributor).
+    /// @notice The appointed sink. In practice THIS CONTRACT — it implements
+    /// the whole two-function `IEcosystemFeeSink` surface itself, so the
+    /// harvest can be pointed here and fund holders' dividends directly with
+    /// no second contract in the path. An external sink remains appointable,
+    /// and that branch of `harvestEcosystemFees` is unchanged.
     /// Timelocked, and it is a DESTINATION, not a permission: it can call
     /// nothing on this contract and reach no reserve.
     address public ecosystemSink;
@@ -430,6 +402,153 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     /// @notice Fraction of the imbalance fee diverted to `ecosystemFeesWei`,
     /// in bps. Timelocked, ceilinged at `CEIL_ECOSYSTEM_SPLIT_BPS`.
     uint256 public ecosystemFeeSplitBps;
+
+    /**
+     * @notice ── ON-CHAIN DIVIDEND ACCRUAL, TO HOLDERS, WITH NO STAKING ──
+     *
+     * WHY THIS LIVES HERE AND NOT IN A SECOND CONTRACT (the design decision,
+     * and it reverses an earlier one in this repo — deliberately, and with the
+     * old argument answered rather than ignored).
+     *
+     * `IndexDividendDistributor.sol` used to hold this, on two stated grounds.
+     * Both are addressed, not waived:
+     *
+     *  1. "The vault must not be an ETH custodian, because its own suite
+     *     asserts it cannot hold ETH at all — no `receive`, no payable path."
+     *     That property is UNCHANGED and still asserted. This mechanism is
+     *     denominated in an ERC-20, `dividendAsset`, not in raw ETH. There is
+     *     still no `receive()` and still no payable function on this contract.
+     *     Nothing was traded away, because the fee flow that funds this was
+     *     ALREADY WETH-denominated — `harvestEcosystemFees` pushes WETH, and
+     *     the old distributor's only reason to hold ETH was that it unwrapped
+     *     that WETH on arrival so it could re-pay it as ETH. Unwrapping in
+     *     order to pay out something the payer will usually re-wrap is
+     *     ceremony, and dropping it removes an ETH custodian from the design
+     *     instead of adding one. A holder who wants ETH calls `WETH.withdraw`
+     *     themselves; that is one call, trustless, and it was already implicit.
+     *
+     *  2. "A transfer hook on the share token would hand an admin a share
+     *     FREEZE: point the hook at something that reverts and every transfer,
+     *     mint and redeem bricks — and a redeem burns shares, so freezing
+     *     redemption is the anchor rule violated from the other side."
+     *     That objection is exactly right, and it is an objection to a hook
+     *     that CALLS OUT to an admin-settable address. This hook calls nothing.
+     *     It is arithmetic over this contract's own storage — one SLOAD, two
+     *     SSTOREs, no external call, no address to point anywhere, and no
+     *     parameter that can make it fail. There is no lever to hand anyone,
+     *     which is a stronger statement than "the lever is guarded".
+     *
+     *     That is also precisely why routing this through a separate contract
+     *     is the WORSE option now rather than the safer one: to keep the
+     *     accounting correct without staking, SOMETHING has to run on every
+     *     balance change, and only the contract that owns the balances can do
+     *     that without an external call. A cross-contract hook would put a
+     *     third-party call on every transfer of this token — including
+     *     third-party DEX trades — and would re-create the freeze lever the
+     *     old header rightly refused. Collapsing it inward removes a contract,
+     *     removes a trust boundary, and removes the external call at once.
+     *
+     * THE MECHANISM (EIP-2222 FundsDistributionToken / "magnified dividend per
+     * share", the same shape as Compound's checkpointed vote weight).
+     *
+     * One global accumulator, and one per-holder CORRECTION term:
+     *
+     *     accumulativeOf(a) = (magnifiedDividendPerShare * balanceOf(a)
+     *                          + magnifiedDividendCorrections[a]) / MAGNITUDE
+     *     withdrawableOf(a) = accumulativeOf(a) - withdrawnDividends[a]
+     *
+     * On every balance change of `value`, the hook adds
+     * `magnifiedDividendPerShare * value` to the SENDER's correction and
+     * subtracts it from the RECEIVER's. That is the whole trick, and what it
+     * buys is the property the design is for: `accumulativeOf(a)` is invariant
+     * across the transfer itself, so a buyer cannot reach back for a
+     * distribution that predates them and a seller keeps every wei that
+     * accrued while they held. Mint is the `from == address(0)` case and burn
+     * is the `to == address(0)` case of the same identity, so a REDEEMER's
+     * accrued dividend survives their shares being burned to zero — the
+     * entitlement is for value already earned, not a function of what they
+     * still hold.
+     *
+     * No snapshot. No Merkle root and therefore no publisher to trust — which
+     * is a genuine and not merely rhetorical improvement over the rejected
+     * root design: there is no off-chain input to this mechanism at all, so
+     * there is no party who could publish a wrong one. No staking, so no
+     * custody transfer and no illiquidity. No holder list, so nothing iterates
+     * and gas is O(1) everywhere. Holders do nothing but hold.
+     *
+     * THE SEED'S SHARE IS EXCLUDED, EXACTLY. The permanently-locked seed at
+     * `SEED_LOCK` can never claim, so crediting it would strand a slice of
+     * every distribution forever. The push therefore divides by
+     * `totalSupply() - balanceOf(SEED_LOCK)` and immediately cancels the
+     * seed's own accrual through the same correction term, in O(1). The
+     * conservation identity still closes: the corrections sum to
+     * `-magnifiedDividendPerShare * seedBalance`, so the sum of every holder's
+     * accumulative is `magnifiedDividendPerShare * eligibleSupply / MAGNITUDE`
+     * — which is what was actually received, minus flooring dust.
+     *
+     * THE CEILING, AND WHY IT IS STRUCTURAL. Every division here floors, so a
+     * push credits marginally LESS than it delivered and the remainder stays
+     * in this contract forever. Total withdrawable across all holders is
+     * therefore bounded above by total received, always, with no admin action
+     * and no monitoring — the randomized suite asserts it directly.
+     *
+     * INERT BY DEFAULT: with `dividendAsset` unset (address(0)) there is no
+     * push path at all, the accumulator is permanently zero, and the hook's arithmetic
+     * is a no-op on a zero accumulator.
+     */
+    /// @notice The ERC-20 dividends are denominated in. IMMUTABLE on purpose:
+    /// a mutable dividend denomination is a mutable definition of what every
+    /// outstanding, already-accrued claim is worth, and retargeting it would
+    /// strand claims in the old asset. There is no governance lever over this
+    /// and no timelocked key for it — the answer to "who can change what my
+    /// accrued dividend is paid in" is nobody.
+    address public immutable dividendAsset;
+
+    /**
+     * @dev The magnification constant, 2**64.
+     *
+     * NOT 2**128, and the reason is a real trade rather than a preference. The
+     * hook multiplies `magnifiedDividendPerShare` by a transfer amount, and
+     * that product must not overflow `int256` — because if it ever could, a
+     * legitimate transfer of the share token would revert, which is the one
+     * failure this mechanism is forbidden to have. 2**64 buys ~19 decimal
+     * digits of sub-wei precision, which is far more than a wei-denominated
+     * distribution needs, and it leaves 2**191 of headroom for the product.
+     * The remaining headroom is then pinned by two compile-time bounds
+     * (`MAX_MAGNIFIED_PER_SHARE`, `MAX_SHARE_SUPPLY`) so the hook's arithmetic
+     * is provably in range rather than merely unlikely to leave it.
+     */
+    uint256 private constant MAGNITUDE = 2 ** 64;
+
+    /// @dev Push-side ceiling on the accumulator. Enforced where reverting is
+    /// HARMLESS — at the push, which is a donation nobody is owed — precisely
+    /// so it never has to be enforced on the transfer path, where reverting
+    /// would brick transferability.
+    uint256 private constant MAX_MAGNIFIED_PER_SHARE = 2 ** 126;
+
+    /// @dev Mint-side ceiling on total share supply, for the same reason. At
+    /// 2**128 base units this is ~3.4e20 whole shares and is unreachable by
+    /// any real deposit; it exists to make the overflow argument a proof
+    /// instead of an estimate. It gates MINTS only — it can never block a
+    /// transfer, a burn, or a redemption.
+    uint256 private constant MAX_SHARE_SUPPLY = 2 ** 128;
+
+    uint256 public magnifiedDividendPerShare;
+    /// @dev Implementation detail, deliberately not a public getter: the
+    /// meaningful surface is `accumulativeDividendOf` / `withdrawableDividendOf`,
+    /// and a raw signed correction term read on its own invites being
+    /// misread as a balance.
+    mapping(address => int256) private magnifiedDividendCorrections;
+    mapping(address => uint256) public withdrawnDividends;
+
+    /// @notice Lifetime totals. `totalDividendsWithdrawn <= totalDividendsReceived`, always.
+    uint256 public totalDividendsReceived;
+    uint256 public totalDividendsWithdrawn;
+
+    /// @notice Pushed while no eligible share existed. Held, never lost, never
+    /// reverted; folds into the accumulator on the first push that has holders.
+    uint256 public undistributedDividends;
+
 
     // ── Part A: oracle-free, self-sourced eligibility bar ──────────────────
 
@@ -476,6 +595,8 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     event MetricUpdated(address indexed token, uint256 metric);
     event EligibleCountUpdated(uint256 eligibleCount, uint256 effectiveCapBps);
     event EcosystemFeesHarvested(address indexed token, address indexed sink, uint256 amount);
+    event DividendsReceived(address indexed from, uint256 amount, uint256 eligibleSupply);
+    event DividendClaimed(address indexed account, uint256 amount);
 
     // ── Errors ─────────────────────────────────────────────────────────────
 
@@ -503,6 +624,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     error AllocationCapExceeded();
     error EcosystemSinkUnset();
     error ApprovalNotConsumed();
+    error DividendAccumulatorFull();
 
     // ── Construction ───────────────────────────────────────────────────────
 
@@ -522,7 +644,8 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         address[4] memory roles_,
         address seeder_,
         uint256 timelockDelay_,
-        Params memory params_
+        Params memory params_,
+        address dividendAsset_
     ) ERC20(name_, symbol_) {
         if (seeder_ == address(0)) revert BadParam();
         if (timelockDelay_ < MIN_TIMELOCK_DELAY || timelockDelay_ > MAX_TIMELOCK_DELAY) {
@@ -536,6 +659,8 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         _initRole(ROLE_PLATFORM_ALLOCATION, roles_[3]);
         seeder = seeder_;
         timelockDelay = timelockDelay_;
+        dividendAsset = dividendAsset_; // may be address(0): dividends simply off
+
         IndexParams.validate(params_);
         params = params_;
         platformAllocationBps = DEFAULT_PLATFORM_ALLOCATION_BPS; // inert: no treasury yet
@@ -974,50 +1099,22 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      * the harder-to-fake proxy, and the claim made for it is bounded — faking
      * it costs real wash volume, continuously, over `minEligibilityBlocks`.
      */
+    /// @notice Is `constituent` eligible, by its OWN on-chain fee accounting?
+    /// The whole read — the gas cap, the fail-closed decode guards and the two
+    /// bars — lives in IndexEligibility.sol; see that file's header for why it
+    /// never reverts the caller and why there is no wallet-count signal in it.
     function checkEligibility(address constituent)
         public
         view
         returns (bool eligible, uint256 feesWei, uint256 elapsedBlocks)
     {
-        (bool okFees, uint256 fees) = _readEligibilityUint(
-            constituent,
-            IEligibilitySource.totalFeesCollectedWei.selector
-        );
-        if (!okFees) return (false, 0, 0);
-        feesWei = fees;
-
-        (bool okFirst, uint256 firstBlock) = _readEligibilityUint(
-            constituent,
-            IEligibilitySource.firstActivityBlock.selector
-        );
-        if (!okFirst) return (false, feesWei, 0);
-        if (firstBlock == 0 || firstBlock > block.number) return (false, feesWei, 0);
-
-        elapsedBlocks = block.number - firstBlock;
-        eligible = feesWei >= minEligibilityFeesWei && elapsedBlocks >= minEligibilityBlocks;
-    }
-
-    /**
-     * @dev One gas-capped, fail-closed uint256 getter read. Returns
-     * `(false, 0)` for every failure mode rather than propagating any of them.
-     *
-     * A low-level `staticcall` rather than `try/catch` DELIBERATELY: a `try`
-     * on a call that SUCCEEDS but returns undecodable data raises in the
-     * CALLING contract and is NOT caught by the `catch` clause. That is
-     * precisely the fail-OPEN case this read has to rule out, so the decode is
-     * guarded by hand instead.
-     */
-    function _readEligibilityUint(address target, bytes4 selector)
-        private
-        view
-        returns (bool ok, uint256 value)
-    {
-        if (target.code.length == 0) return (false, 0);
-        (bool success, bytes memory data) = target.staticcall{gas: ELIGIBILITY_GAS_CAP}(
-            abi.encodeWithSelector(selector)
-        );
-        if (!success || data.length < 32) return (false, 0);
-        return (true, abi.decode(data, (uint256)));
+        return
+            IndexEligibility.checkEligibility(
+                constituent,
+                minEligibilityFeesWei,
+                minEligibilityBlocks,
+                ELIGIBILITY_GAS_CAP
+            );
     }
 
     /**
@@ -1192,57 +1289,24 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      * ahead of the fill. Publishing a target vector is safe; publishing an
      * executable rebalance order is what gets front-run.
      */
-    function targetWeightsBps() public view returns (address[] memory tokens, uint256[] memory bps) {
-        uint256 n = constituentList.length;
-        tokens = new address[](n);
-        bps = new uint256[](n);
-        uint256[] memory raw = new uint256[](n);
-        uint256[] memory factor = new uint256[](n);
-        uint256 total;
-        for (uint256 i = 0; i < n; i++) {
-            tokens[i] = constituentList[i];
-            Constituent storage c = constituents[tokens[i]];
-            // A ramp factor of zero means "contributes nothing", which covers
-            // both a brand-new constituent at t=0 and a fully ramped-out one.
-            // It must also be excluded from the normalising total, or a
-            // long-dead constituent would silently depress every live leg.
-            factor[i] = _rampFactorBps(c);
-            if (factor[i] == 0) continue;
-            uint256 r = Math.sqrt(c.metric);
-            raw[i] = r;
-            total += r;
-        }
-        if (total == 0) return (tokens, bps);
-
-        uint256 cap = effectiveConcentrationCapBps();
-        for (uint256 i = 0; i < n; i++) bps[i] = (raw[i] * BPS) / total;
-
-        // Cap-and-redistribute, iterated: capping one constituent inflates the
-        // others, which may push a second over the cap. Bounded to n passes.
-        for (uint256 pass = 0; pass < n; pass++) {
-            uint256 excess;
-            uint256 uncapped;
-            for (uint256 i = 0; i < n; i++) {
-                if (bps[i] > cap) {
-                    excess += bps[i] - cap;
-                    bps[i] = cap;
-                } else if (bps[i] > 0) {
-                    uncapped += bps[i];
-                }
-            }
-            if (excess == 0 || uncapped == 0) break;
-            for (uint256 i = 0; i < n; i++) {
-                if (bps[i] < cap && bps[i] > 0) {
-                    bps[i] += (excess * bps[i]) / uncapped;
-                }
-            }
-        }
-
-        // Gradual ramp, in BOTH directions (see `_rampFactorBps`).
-        for (uint256 i = 0; i < n; i++) {
-            if (factor[i] == BPS) continue;
-            bps[i] = (bps[i] * factor[i]) / BPS;
-        }
+    /// @notice Target weights: square-root curve over each constituent's
+    /// metric, then the hard concentration cap with the excess redistributed,
+    /// then each constituent's ramp progress. The whole vector is computed in
+    /// IndexValuation.sol — see that file's header for the derivation and for
+    /// why a `storage`-pointer library call is the extraction that pays where
+    /// a `memory`-array one did not.
+    function targetWeightsBps()
+        public
+        view
+        returns (address[] memory tokens, uint256[] memory bps)
+    {
+        return
+            IndexValuation.targetWeightsBps(
+                constituentList,
+                constituents,
+                effectiveConcentrationCapBps(),
+                params.staleAfter
+            );
     }
 
     /**
@@ -1798,15 +1862,181 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         amount = ecosystemFeesWei[asset];
         if (amount == 0) revert ZeroAmount();
         ecosystemFeesWei[asset] = 0; // effects before interactions
-        IERC20(asset).forceApprove(sink, amount);
-        IEcosystemFeeSink(sink).receiveDividendsWrapped(amount);
-        // The sink must consume the WHOLE allowance. Asserting it is strictly
-        // cheaper than re-approving to zero and strictly stronger than
-        // trusting it: this contract can never be left with a standing
-        // approval over a token balance, including the balance backing
-        // `reserve`. A sink that under-pulls reverts the harvest instead.
-        if (IERC20(asset).allowance(address(this), sink) != 0) revert ApprovalNotConsumed();
+        if (sink == address(this)) {
+            // SELF-SINK. The vault is its own `IEcosystemFeeSink`, which is the
+            // production shape now that dividend accrual lives here: the tokens
+            // are already in this contract's balance, so there is nothing to
+            // approve, nothing to pull, and no external call to make. Moving
+            // them would be `transferFrom(self, self)` — a no-op that credits a
+            // zero delta and would revert. Booking them straight into the
+            // accumulator is the same operation with the round trip removed.
+            _creditDividends(amount);
+        } else {
+            IERC20(asset).forceApprove(sink, amount);
+            IEcosystemFeeSink(sink).receiveDividendsWrapped(amount);
+            // The sink must consume the WHOLE allowance. Asserting it is
+            // strictly cheaper than re-approving to zero and strictly stronger
+            // than trusting it: this contract can never be left with a standing
+            // approval over a token balance, including the balance backing
+            // `reserve`. A sink that under-pulls reverts the harvest instead.
+            if (IERC20(asset).allowance(address(this), sink) != 0) revert ApprovalNotConsumed();
+        }
         emit EcosystemFeesHarvested(asset, sink, amount);
+    }
+
+    // ══ Dividends: in, accrued, out ═══════════════════════════════════════
+
+    /**
+     * @notice The asset an ecosystem sink is expected to expose. Implementing
+     * it — together with `receiveDividendsWrapped` below — makes THIS CONTRACT
+     * a valid `IEcosystemFeeSink`, so `ecosystemSink` can be pointed at the
+     * vault itself through the ordinary timelock and `harvestEcosystemFees`
+     * then funds holders directly with no second contract in the path.
+     *
+     * The name is the sink interface's, not this contract's preference; it is
+     * `dividendAsset` everywhere else here.
+     */
+    function reinvestAsset() external view returns (address) {
+        return dividendAsset;
+    }
+
+    /**
+     * @notice Push dividends to every share holder, pro rata, permissionlessly.
+     *
+     * Anyone may call. Making it privileged would buy nothing — a griefer's
+     * "attack" is donating money — and would add a key to lose. The pusher in
+     * practice is `harvestEcosystemFees`, which is itself permissionless with a
+     * fixed destination.
+     *
+     * Credits the ACTUAL balance delta, never the nominal amount: the same
+     * Balancer-STA discipline `_pullCredited` applies on every other inbound
+     * path in this contract.
+     */
+    function receiveDividendsWrapped(uint256 amount) external nonReentrant {
+        address asset = dividendAsset;
+        if (asset == address(0)) revert BadParam();
+        if (amount == 0) revert ZeroAmount();
+        uint256 before = IERC20(asset).balanceOf(address(this));
+        IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
+        _creditDividends(IERC20(asset).balanceOf(address(this)) - before);
+    }
+
+    /**
+     * @dev The ONE accumulator write. Shared by the external push and by
+     * `harvestEcosystemFees`'s self-sink branch.
+     *
+     * Note the divisor: `totalSupply()` MINUS the permanently-locked seed, and
+     * the seed's own accrual cancelled through its correction term in the same
+     * breath. See the module header for why the conservation identity still
+     * closes.
+     */
+    function _creditDividends(uint256 amount) private {
+        if (amount == 0) revert ZeroAmount();
+        totalDividendsReceived += amount;
+        uint256 pot = amount + undistributedDividends;
+
+        uint256 seedBal = balanceOf(SEED_LOCK);
+        uint256 eligible = totalSupply() - seedBal;
+        if (eligible == 0) {
+            // Nobody to credit. Held, never lost, never reverted — the same
+            // honest-queryable-state discipline the rest of this file uses.
+            undistributedDividends = pot;
+            emit DividendsReceived(msg.sender, amount, 0);
+            return;
+        }
+        undistributedDividends = 0;
+
+        // Floors. The remainder stays in this contract forever, which is what
+        // makes "total withdrawable <= total received" structural rather than
+        // hopeful.
+        uint256 delta = Math.mulDiv(pot, MAGNITUDE, eligible);
+        uint256 acc = magnifiedDividendPerShare + delta;
+        // Enforced HERE, at the push, because a push is the one place in this
+        // mechanism where reverting is harmless: the pusher keeps their money
+        // and no holder loses anything. This is what lets the transfer hook be
+        // unconditionally revert-free.
+        if (acc > MAX_MAGNIFIED_PER_SHARE) revert DividendAccumulatorFull();
+        magnifiedDividendPerShare = acc;
+
+        // Cancel the locked seed's accrual, in O(1), so no slice of any
+        // distribution is credited to an address that can never claim it.
+        if (seedBal > 0) {
+            magnifiedDividendCorrections[SEED_LOCK] -= int256(delta * seedBal);
+        }
+        emit DividendsReceived(msg.sender, amount, eligible);
+    }
+
+    /// @notice Everything `account` has ever been credited, claimed or not.
+    function accumulativeDividendOf(address account) public view returns (uint256) {
+        return
+            uint256(
+                int256(magnifiedDividendPerShare * balanceOf(account)) +
+                    magnifiedDividendCorrections[account]
+            ) / MAGNITUDE;
+    }
+
+    /**
+     * @notice What `account` can claim right now. Always already correct, with
+     * no action ever required from them and nothing to prove.
+     *
+     * This does NOT go to zero when a holder's balance goes to zero. A redeemer
+     * who burns every share they own keeps every wei that accrued while they
+     * held them, because the burn moved the same quantity into their correction
+     * term. The entitlement is for value already earned.
+     */
+    function withdrawableDividendOf(address account) public view returns (uint256) {
+        return accumulativeDividendOf(account) - withdrawnDividends[account];
+    }
+
+    /**
+     * @notice Claim your own dividend. Permissionless, no proof, no root, no
+     * snapshot, no staking — you held the token, so it is already yours.
+     *
+     * Paying zero is a successful transaction, not an error.
+     * Checks-effects-interactions: every state change lands before the
+     * transfer, so a re-entrant token finds `withdrawableDividendOf` already
+     * zero even with the guard removed. `nonReentrant` is defence in depth on
+     * top of that, not the thing holding it up.
+     */
+    function claimDividend() external nonReentrant returns (uint256 amount) {
+        amount = withdrawableDividendOf(msg.sender);
+        if (amount == 0) return 0;
+        withdrawnDividends[msg.sender] += amount;
+        totalDividendsWithdrawn += amount;
+        IERC20(dividendAsset).safeTransfer(msg.sender, amount);
+        emit DividendClaimed(msg.sender, amount);
+    }
+
+    /**
+     * @dev THE HOOK. The single point at which a balance change is made not to
+     * matter, and the only new code that runs on an ordinary transfer.
+     *
+     * `magnifiedDividendPerShare * value` is added to the sender's correction
+     * and subtracted from the receiver's, which leaves `accumulativeDividendOf`
+     * numerically unchanged for both across the move. Mint is `from == 0`,
+     * burn is `to == 0`, and a plain transfer is both branches — one identity,
+     * three cases, no special-casing anywhere.
+     *
+     * IT CANNOT REVERT A TRANSFER, AND THAT IS A PROOF, NOT AN INTENTION.
+     * There is no external call, no `require`, no revert statement and no
+     * division on the transfer path. The only arithmetic that could fault is
+     * the multiplication, and it is bounded at both ends by compile-time
+     * constants enforced elsewhere: `magnifiedDividendPerShare` can never
+     * exceed 2**126 (refused at the push) and `value <= totalSupply()` can
+     * never exceed 2**128 (refused at the mint), so the product is at most
+     * 2**254 and `int256` holds it. A bug in dividend bookkeeping therefore
+     * cannot brick share transferability, which is the transfer-side statement
+     * of the same doctrine that makes `redeemProRata` unblockable.
+     *
+     * The mint bound is checked in the `from == address(0)` branch only. It
+     * gates MINTS, so it can never stand between a holder and a transfer, a
+     * burn, or a redemption.
+     */
+    function _afterTokenTransfer(address from, address to, uint256 value) internal override {
+        if (from == address(0) && totalSupply() > MAX_SHARE_SUPPLY) revert BadParam();
+        int256 correction = int256(magnifiedDividendPerShare * value);
+        if (from != address(0)) magnifiedDividendCorrections[from] += correction;
+        if (to != address(0)) magnifiedDividendCorrections[to] -= correction;
     }
 
     /// @notice The mint-side fee a deposit of `amountIn` into `token` would
