@@ -105,7 +105,8 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
       [admin.address, admin.address, risk.address, allocation.address],
       seeder.address,
       TIMELOCK,
-      paramsTuple(defaultParams)
+      paramsTuple(defaultParams),
+      addrs[0] // the WETH leg: dividends are denominated in it
     );
     const vaultAddr = await vault.getAddress();
 
@@ -124,12 +125,14 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
       }
     }
 
-    const Dist = await ethers.getContractFactory("IndexDividendDistributor");
-    const dist: any = await Dist.deploy(vaultAddr, vaultAddr, addrs[0]);
-    const distAddr = await dist.getAddress();
-    for (const who of [alice, bob, carol]) {
-      await vault.connect(who).approve(distAddr, ethers.MaxUint256);
-    }
+    // THE SINK IS THE VAULT ITSELF. `GlobalIndexVault` implements the whole
+    // two-function `IEcosystemFeeSink` surface (`reinvestAsset()` +
+    // `receiveDividendsWrapped()`), so the harvest can be pointed at it through
+    // the ordinary timelock and the fee lands directly in the on-chain
+    // dividend accumulator, with no second contract and no staking step. The
+    // external-sink branch of `harvestEcosystemFees` is unchanged and is still
+    // exercised by the negative tests below.
+    const distAddr = vaultAddr;
 
     for (let i = 0; i < 8; i++) {
       await time.increase(MIN_CHECKPOINT + 1);
@@ -138,7 +141,7 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
 
     return {
       admin, seeder, alice, bob, carol, risk, allocation,
-      vault, vaultAddr, dist, distAddr, weth, tokens, sources, addrs,
+      vault, vaultAddr, distAddr, weth, tokens, sources, addrs,
     };
   }
 
@@ -159,7 +162,7 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
     await warm(fx);
   }
 
-  /** Appoint the distributor as the sink (timelocked, allocation role). */
+  /** Appoint the sink (timelocked, allocation role). */
   async function appointSink(fx: any, sink?: string) {
     await setParam(fx, fx.allocation, SINK_KEY, sink ?? fx.distAddr);
   }
@@ -192,7 +195,7 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
     const fx = await fixture();
     await appointSink(fx);
     expect(await fx.vault.ecosystemAsset()).to.equal(fx.addrs[0]);
-    expect(await fx.vault.ecosystemAsset()).to.equal(await fx.dist.reinvestAsset());
+    expect(await fx.vault.ecosystemAsset()).to.equal(await fx.vault.reinvestAsset());
 
     // A fee-generating mint on a NON-WETH leg books nothing at all — the
     // scoping decision, asserted rather than assumed. There is no ledger
@@ -344,11 +347,12 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
     await appointSink(fx);
     await feeMint(fx, fx.alice, E("60"));
 
-    // Retire the sink to a contract that cannot receive: the vault itself has
-    // no `receiveDividendsWrapped`, so an appointment to it cannot even be
-    // executed — the pinning call reverts. That is the RIGHT failure: a bad
-    // appointment fails closed at appointment time, not at redemption time.
-    await fx.vault.connect(fx.allocation).queueParam(SINK_KEY, fx.vaultAddr);
+    // Appoint a sink that is not a sink at all: a plain ERC-20 (constituent B)
+    // has no `reinvestAsset()`, so the pinning call inside the appointment
+    // reverts and the appointment cannot even be EXECUTED. That is the RIGHT
+    // failure: a bad appointment fails closed at appointment time, not at
+    // redemption time.
+    await fx.vault.connect(fx.allocation).queueParam(SINK_KEY, fx.addrs[1]);
     await time.increase(TIMELOCK + 1);
     await expect(fx.vault.executeParam(SINK_KEY)).to.be.reverted;
     await warm(fx);
@@ -560,36 +564,38 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
 
   // ══ 7. The harvest: permissionless trigger, fixed destination ══════════
 
-  it("harvest is permissionless and pays the DISTRIBUTOR's stakers, chosen by nobody at call time", async () => {
+  it("harvest is permissionless and pays HOLDERS, chosen by nobody at call time", async () => {
     const fx = await fixture();
     await appointSink(fx);
 
-    // Alice stakes; the fee revenue must reach HER, not the caller.
+    // Alice HOLDS. She stakes nothing, signs nothing, and registers nowhere —
+    // the entire point of the collapsed mechanism.
     await fx.vault.connect(fx.alice).mintProRata(E("100"), [
       ethers.MaxUint256, ethers.MaxUint256, ethers.MaxUint256,
     ]);
-    await fx.dist.connect(fx.alice).stake(E("100"));
 
     await feeMint(fx, fx.bob, E("150"));
     const owed: bigint = await fx.vault.ecosystemFeesWei(fx.addrs[0]);
     expect(owed).to.be.greaterThan(0n);
 
-    // Carol — an unrelated EOA with no role, no stake, and no relationship to
+    // Carol — an unrelated EOA with no role, no shares, and no relationship to
     // this vault — triggers it. That is the whole point of a permissionless
     // trigger with a fixed destination.
-    const carolBefore: bigint = await ethers.provider.getBalance(fx.carol.address);
     await fx.vault.connect(fx.carol).harvestEcosystemFees();
 
     expect(await fx.vault.ecosystemFeesWei(fx.addrs[0])).to.equal(0n);
-    // The WETH was unwrapped by the distributor and credited as ETH dividends.
-    expect(await ethers.provider.getBalance(fx.distAddr)).to.equal(owed);
-    expect(await fx.dist.claimable(fx.alice.address)).to.equal(owed);
-    // The trigger-er received nothing but a gas bill.
-    expect(await ethers.provider.getBalance(fx.carol.address)).to.be.lessThan(carolBefore);
-    expect(await fx.dist.claimable(fx.carol.address)).to.equal(0n);
+    expect(await fx.vault.totalDividendsReceived()).to.equal(owed);
 
-    // And it really is claimable — end to end, fee to dividend.
-    await expect(fx.dist.connect(fx.alice).claim()).to.not.be.reverted;
+    // The trigger-er, who holds no shares, received nothing at all.
+    expect(await fx.vault.withdrawableDividendOf(fx.carol.address)).to.equal(0n);
+
+    // Alice's entitlement is live, already correct, and really claimable —
+    // end to end, imbalance fee to dividend, with no step in between.
+    const aliceOwed: bigint = await fx.vault.withdrawableDividendOf(fx.alice.address);
+    expect(aliceOwed).to.be.greaterThan(0n);
+    const before: bigint = await fx.tokens[0].balanceOf(fx.alice.address);
+    await expect(fx.vault.connect(fx.alice).claimDividend()).to.not.be.reverted;
+    expect((await fx.tokens[0].balanceOf(fx.alice.address)) - before).to.equal(aliceOwed);
   });
 
   it("harvest has NO destination argument and leaves NO standing allowance", async () => {
@@ -634,8 +640,18 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
 
     await fx.vault.connect(fx.carol).harvestEcosystemFees();
 
+    // The RESERVE — the only thing a redeemer is ever paid from — is
+    // bit-for-bit untouched. That is the whole claim of this test and it is
+    // unchanged by the sink being the vault itself.
     expect(await fx.vault.reserveOf(fx.addrs[0])).to.equal(reserve);
-    expect(await fx.weth.balanceOf(fx.vaultAddr)).to.equal(heldBefore - ledger);
+    // With the vault as its own sink the tokens do not LEAVE — they move from
+    // one segregated ledger (`ecosystemFeesWei`) to another (the dividend
+    // pot). So the held balance is flat, the fee ledger is emptied, and
+    // exactly `ledger` arrived as dividends. Nothing was created and nothing
+    // escaped: the three numbers have to agree, and they do.
+    expect(await fx.weth.balanceOf(fx.vaultAddr)).to.equal(heldBefore);
+    expect(await fx.vault.ecosystemFeesWei(fx.addrs[0])).to.equal(0n);
+    expect(await fx.vault.totalDividendsReceived()).to.equal(ledger);
     // Still fully backed after the harvest.
     expect(await fx.weth.balanceOf(fx.vaultAddr)).to.be.greaterThanOrEqual(reserve);
   });

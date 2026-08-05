@@ -427,7 +427,8 @@ describe("Self-deal redirect (PlankGauge) and direction symmetry (GlobalIndexVau
         roles,
         seeder.address,
         TIMELOCK,
-        paramsTuple(defaultParams)
+        paramsTuple(defaultParams),
+        ethers.ZeroAddress // dividends off: this fixture never pushes one
       );
       const vaultAddr = await vault.getAddress();
       for (let i = 0; i < 3; i++) {

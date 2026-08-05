@@ -760,7 +760,8 @@ describe("GlobalIndexVault", () => {
         [a.address, b.address, c.address, d.address],
         seeder.address,
         3_600,
-        paramsTuple(defaultParams)
+        paramsTuple(defaultParams),
+        ethers.ZeroAddress
       )
     ).to.be.revertedWithCustomError(Vault, "BadParam");
   });
@@ -829,7 +830,8 @@ describe("GlobalIndexVault — real MarketplankVaultV3 constituent", () => {
       [admin.address, admin.address, admin.address, admin.address],
       seeder.address,
       TIMELOCK,
-      paramsTuple(defaultParams)
+      paramsTuple(defaultParams),
+        ethers.ZeroAddress // dividends off: this fixture never pushes one
     );
     const indexAddr = await index.getAddress();
 
@@ -1060,7 +1062,8 @@ describe("GlobalIndexVault — hardening pass", () => {
       [admin.address, admin.address, admin.address, admin.address],
       seeder.address,
       TIMELOCK,
-      paramsTuple(defaultParams)
+      paramsTuple(defaultParams),
+        ethers.ZeroAddress // dividends off: this fixture never pushes one
     );
     const vaultAddr = await vault.getAddress();
 
