@@ -119,6 +119,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IIndexPriceSource} from "./IIndexPriceSource.sol";
+import {IEligibilitySource} from "./IEligibilitySource.sol";
 
 contract GlobalIndexVault is ERC20, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -185,6 +186,37 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     /// not vote on it. It is inert until a treasury is appointed anyway.
     uint256 private constant DEFAULT_PLATFORM_ALLOCATION_BPS = 200;
 
+    // ── Part D: dynamic HHI-derived concentration cap ──────────────────────
+    /// @dev Target basket HHI as a fraction of BPS. 2_000 = HHI 2000/10000 =
+    /// 0.20, the level at which US antitrust guidelines call a market
+    /// "moderately concentrated" and the same level index methodologies
+    /// (UCITS 5/10/40, S&P capped indices) sit near. Timelocked, ceilinged.
+    uint256 private constant DEFAULT_TARGET_HHI_BPS = 2_000;
+    /// @dev An HHI target of 1.0 is "no constraint"; below ~2% no basket of
+    /// realistic size can satisfy it and the cap degenerates to equal weights.
+    uint256 private constant MIN_TARGET_HHI_BPS = 200; // 0.02
+    uint256 private constant MAX_TARGET_HHI_BPS = BPS; // 1.00, i.e. unconstrained
+
+    // ── Part E: realized-variance persistence calibration ──────────────────
+    /// @dev The LONG calibration window. Structurally separate from — and, at
+    /// 90 days against a `minCheckpointInterval` measured in minutes, three
+    /// to four ORDERS OF MAGNITUDE harder to move than — the short
+    /// persistence window it scales. See `realizedVolBps`.
+    uint256 private constant VARIANCE_WINDOW = 90 days;
+    /// @dev One extra required checkpoint per this much RMS per-checkpoint
+    /// move. 100 bps = 1%.
+    uint256 private constant VOL_STEP_BPS = 100;
+    /// @dev HARD floor and ceiling on the adaptive requirement. Compile-time,
+    /// so no admin, no timelock, and no manipulation of the calibration window
+    /// can drive the requirement to zero or to infinity. The ceiling is the
+    /// ring-buffer depth because a requirement deeper than the retained
+    /// history is unsatisfiable and would brick the priced paths outright.
+    uint256 private constant MIN_REQUIRED_CHECKPOINTS = 2;
+    uint256 private constant MAX_REQUIRED_CHECKPOINTS = OBS_SLOTS;
+    /// @dev Gas cap on every eligibility read. A hostile constituent must not
+    /// be able to out-of-gas a whole-basket recount.
+    uint256 private constant ELIGIBILITY_GAS_CAP = 50_000;
+
     // ── Types ──────────────────────────────────────────────────────────────
 
     struct Observation {
@@ -204,6 +236,22 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         bool active; // false = weight target 0, but reserves still redeemable
         uint8 obsCount;
         uint8 obsHead;
+        // ── Part E: the LONG realized-variance calibration window ──────────
+        // A two-bucket TUMBLING window: `cur` fills for VARIANCE_WINDOW, then
+        // rolls into `prev` and `cur` restarts. Reading prev+cur therefore
+        // always covers at least one full window of history and at most two,
+        // which is what makes a short burst of manufactured checkpoints a
+        // vanishing fraction of the denominator. A ring buffer of individual
+        // samples would be strictly more precise and strictly more expensive;
+        // two accumulators is the honest on-chain shape.
+        // Deliberately full-width uint256 rather than tightly packed: the
+        // packing arithmetic costs more CODE than the slots it saves, and this
+        // contract is against the EIP-170 size limit, not against gas.
+        uint256 varWindowStart;
+        uint256 varPrevSumSq; // sum of (per-checkpoint move in bps)^2
+        uint256 varPrevSamples;
+        uint256 varCurSumSq;
+        uint256 varCurSamples;
         Observation[OBS_SLOTS] obs;
     }
 
@@ -289,6 +337,33 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     address public platformTreasury;
     uint256 public platformAllocationBps;
 
+    // ── Part A: oracle-free, self-sourced eligibility bar ──────────────────
+
+    /// @notice Minimum lifetime fee revenue (wei) a constituent must have
+    /// collected ITSELF, read through IEligibilitySource. Timelocked.
+    uint256 public minEligibilityFeesWei;
+
+    /// @notice Minimum blocks a constituent must have been live for, measured
+    /// from its own `firstActivityBlock()`. Timelocked.
+    uint256 public minEligibilityBlocks;
+
+    // ── Part D: dynamic HHI-derived concentration cap ──────────────────────
+
+    /// @notice Target basket HHI, as a fraction of BPS (2_000 = 0.20).
+    /// Timelocked, and hard-ceilinged at compile time like every other
+    /// economically significant parameter.
+    uint256 public targetHhiBps;
+
+    /**
+     * @notice How many currently-listed, active constituents pass the Part A
+     * eligibility bar. CACHED, and recomputed only when the constituent set
+     * changes (admission, deactivation, delisting) or when anyone calls
+     * `refreshEligibleCount` — never per trade. The cap is O(1) to read on
+     * every operation and O(n) to recompute at most a handful of times a year,
+     * which is the whole reason it is a stored number and not a live loop.
+     */
+    uint256 public eligibleConstituentCount;
+
     // ── Events ─────────────────────────────────────────────────────────────
 
     event ConstituentQueued(address indexed token, uint64 eta, bool removal);
@@ -307,6 +382,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     event MintedSingle(address indexed to, address indexed token, uint256 amountIn, uint256 shares);
     event RedeemedSingle(address indexed from, address indexed token, uint256 shares, uint256 amountOut);
     event MetricUpdated(address indexed token, uint256 metric);
+    event EligibleCountUpdated(uint256 eligibleCount, uint256 effectiveCapBps);
 
     // ── Errors ─────────────────────────────────────────────────────────────
 
@@ -354,6 +430,14 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         _validateParams(params_);
         params = params_;
         platformAllocationBps = DEFAULT_PLATFORM_ALLOCATION_BPS; // inert: no treasury yet
+        targetHhiBps = DEFAULT_TARGET_HHI_BPS;
+        // Placeholder bars, deliberately modest and deliberately timelocked:
+        // the honest calibration for a real chain is an operational decision,
+        // and shipping an aggressive default would gate constituents on a
+        // number nobody chose. Note that a constituent failing the bar is
+        // never excluded from the basket — the bar only feeds `capBpsFor`.
+        minEligibilityFeesWei = 0.1 ether;
+        minEligibilityBlocks = 100;
     }
 
     modifier onlyAdmin() {
@@ -487,7 +571,36 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         });
         c.obsHead = uint8(head);
         if (c.obsCount < OBS_SLOTS) c.obsCount += 1;
+
+        // Part E: fold this settled move into the LONG calibration window.
+        // Measured on the CAPPED price, not the raw spot — the accumulator is
+        // a record of what the oracle actually priced, so a rejected spike
+        // cannot inflate the calibration any more than it can inflate NAV.
+        uint256 prevPrice = uint256(prev.price);
+        uint256 delta = capped > prevPrice ? capped - prevPrice : prevPrice - capped;
+        uint256 moveBps = (delta * BPS) / prevPrice; // <= priceCapBps by construction
+        _accrueVariance(c, moveBps * moveBps);
+
         emit Checkpointed(token, capped);
+    }
+
+    /// @dev Two-bucket tumbling window over squared per-checkpoint moves. No
+    /// division, no price history, no per-sample storage — one add and a
+    /// counter, plus a bucket roll at most once per VARIANCE_WINDOW.
+    function _accrueVariance(Constituent storage c, uint256 squaredBps) private {
+        if (c.varWindowStart == 0) c.varWindowStart = block.timestamp;
+        if (block.timestamp >= c.varWindowStart + VARIANCE_WINDOW) {
+            c.varPrevSumSq = c.varCurSumSq;
+            c.varPrevSamples = c.varCurSamples;
+            c.varCurSumSq = 0;
+            c.varCurSamples = 0;
+            c.varWindowStart = block.timestamp;
+        }
+        // Cannot overflow in any reachable configuration: a squared move is at
+        // most CEIL_PRICE_CAP_BPS^2 = 4e6 and the sample count is bounded by
+        // 2*VARIANCE_WINDOW / minCheckpointInterval.
+        c.varCurSumSq += squaredBps;
+        c.varCurSamples += 1;
     }
 
     function _spotPrice(IIndexPriceSource source) private view returns (uint256) {
@@ -603,6 +716,100 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         return required > OBS_SLOTS ? OBS_SLOTS : required;
     }
 
+    /**
+     * @notice A constituent's REALIZED per-checkpoint volatility, in bps: the
+     * root-mean-square of its settled checkpoint-to-checkpoint price moves
+     * over the long calibration window.
+     *
+     * WHAT THIS IS, AND — MORE IMPORTANTLY — WHAT IT IS NOT
+     * ----------------------------------------------------
+     * This is a ROLLING REALIZED-VARIANCE PROXY. It is NOT a Generalized
+     * Pareto / extreme-value tail fit, and it must never be described as one.
+     * The difference is not cosmetic:
+     *
+     *   - A GPD maximum-likelihood fit estimates shape and scale parameters
+     *     for the distribution of EXCEEDANCES over a threshold, which is what
+     *     actually characterises tail risk, and can extrapolate beyond the
+     *     worst move ever observed.
+     *   - This computes the second moment of ALL moves. It is dominated by the
+     *     ordinary middle of the distribution, it says nothing about tail
+     *     shape, and it can by construction never anticipate a move larger
+     *     than the ones it has seen.
+     *
+     * So this is STRICTLY LESS STATISTICALLY RIGOROUS than an EVT tail fit,
+     * and it is chosen anyway, for one reason: an MLE fit is not practically
+     * Solidity-computable. It needs iterative optimisation over logarithms in
+     * fixed point, which means it would in practice be computed off-chain and
+     * SUBMITTED — reintroducing exactly the oracle-trust problem the rest of
+     * this contract refuses everywhere else, on the single parameter that
+     * governs how much confirmation a large operation needs. A cruder number
+     * this contract computes itself from its own settled observations is worth
+     * more than a sharper number it has to be told. That is the whole trade,
+     * and it is a trade, not a free win.
+     *
+     * THE CIRCULARITY DEFENCE. This value scales the SHORT persistence window
+     * (a handful of checkpoints, minutes to hours) and is itself measured over
+     * a LONG one (VARIANCE_WINDOW = 90 days, thousands of checkpoints). The
+     * two are structurally separate — different storage, different cadence,
+     * different horizon — and moving the long one is ~3-4 orders of magnitude
+     * more expensive than moving the short one, because a single manufactured
+     * checkpoint changes the mean of thousands. On top of that,
+     * `requiredCheckpointsFor` CLAMPS the result between compile-time floor
+     * and ceiling constants, so even an attacker who somehow dominates the
+     * whole 90-day window cannot drive the requirement to zero or past the
+     * ring-buffer depth. The clamp is the defence that does not depend on the
+     * statistics being right.
+     *
+     * Note also the direction the accumulator is fed from: it records CAPPED
+     * observations, so a spike the truncated oracle rejected is not in here.
+     */
+    function realizedVolBps(address token) public view returns (uint256) {
+        Constituent storage c = _get(token);
+        uint256 samples = c.varPrevSamples + c.varCurSamples;
+        if (samples == 0) return 0;
+        return Math.sqrt((c.varPrevSumSq + c.varCurSumSq) / samples); // RMS bps
+    }
+
+    /**
+     * @notice VARIANCE-CALIBRATED, SIZE-PROPORTIONAL persistence: how many
+     * settled checkpoints an operation worth `ethValue` on `token` must see
+     * that constituent's band hold across.
+     *
+     *     required = clamp( requiredCheckpoints(ethValue)
+     *                       + realizedVolBps(token) / VOL_STEP_BPS,
+     *                       floor, ceiling )
+     *
+     * WHY MORE VOLATILITY MEANS MORE CONFIRMATION. In a constituent that has
+     * historically been quiet, a given price move is a large number of its own
+     * standard deviations — it is anomalous, and anomalous is exactly when a
+     * short confirmation window is informative. In one that has historically
+     * thrashed, the identical move is unremarkable, carries little information,
+     * and a short window will happily confirm noise. The requirement therefore
+     * rises with measured historical volatility. This is the same instinct as
+     * a volatility-scaled band, applied to TIME rather than to price.
+     *
+     * THE CLAMP IS NOT OPTIONAL AND IS NOT A DETAIL. `floor` is the greater of
+     * the timelocked `persistenceCheckpoints` and the compile-time
+     * MIN_REQUIRED_CHECKPOINTS; `ceiling` is the compile-time
+     * MAX_REQUIRED_CHECKPOINTS (the ring-buffer depth, since a requirement
+     * deeper than the retained history is unsatisfiable and would brick both
+     * priced paths). Neither is reachable by governance and neither is
+     * reachable by anything an attacker can do to the calibration input. The
+     * adaptive term can move the requirement WITHIN that box and nowhere else.
+     */
+    function requiredCheckpointsFor(address token, uint256 ethValue)
+        public
+        view
+        returns (uint256)
+    {
+        uint256 required = requiredCheckpoints(ethValue) + realizedVolBps(token) / VOL_STEP_BPS;
+        uint256 floorReq = params.persistenceCheckpoints;
+        if (floorReq < MIN_REQUIRED_CHECKPOINTS) floorReq = MIN_REQUIRED_CHECKPOINTS;
+        if (required < floorReq) required = floorReq;
+        if (required > MAX_REQUIRED_CHECKPOINTS) required = MAX_REQUIRED_CHECKPOINTS;
+        return required;
+    }
+
     /// @notice `persistenceHolds`, but against an explicit checkpoint count.
     function persistenceHoldsFor(address token, uint256 required) public view returns (bool) {
         Constituent storage c = _get(token);
@@ -620,6 +827,234 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
             if (diff > tol) return false;
         }
         return true;
+    }
+
+    // ══ Part A: eligibility, read from the constituent's own books ════════
+
+    /**
+     * @notice Is `constituent` eligible, by its OWN on-chain fee accounting?
+     *
+     * Reads `IEligibilitySource` directly off the constituent. That interface
+     * is a getter over state the constituent vault already maintains for its
+     * own purposes — it is not an oracle, not a submission, and not a number
+     * any privileged caller here can type in. There is no admin override on
+     * this function and no stored per-constituent eligibility flag: the answer
+     * is recomputed from the constituent's books every time it is asked.
+     *
+     * FAILS CLOSED, ALWAYS, AND NEVER REVERTS THE CALLER. The read is a
+     * gas-capped low-level `staticcall`, so every failure mode a hostile or
+     * merely-old constituent can produce — no code at the address, no such
+     * selector, an outright revert, short or undecodable returndata, or an
+     * attempt to burn the caller's whole gas budget — resolves to
+     * `(false, 0, 0)`. A constituent that does not implement the interface at
+     * all is simply not eligible; it does not brick the basket, it does not
+     * brick a recount, and it keeps every redemption path it already had.
+     *
+     * NO WALLET-COUNT SIGNAL EXISTS HERE, ON PURPOSE. See IEligibilitySource's
+     * header: address-cardinality is not sybil-resistant without identity, and
+     * a bar an attacker can set for themselves is not a bar. Fee revenue is
+     * the harder-to-fake proxy, and the claim made for it is bounded — faking
+     * it costs real wash volume, continuously, over `minEligibilityBlocks`.
+     */
+    function checkEligibility(address constituent)
+        public
+        view
+        returns (bool eligible, uint256 feesWei, uint256 elapsedBlocks)
+    {
+        (bool okFees, uint256 fees) = _readEligibilityUint(
+            constituent,
+            IEligibilitySource.totalFeesCollectedWei.selector
+        );
+        if (!okFees) return (false, 0, 0);
+        feesWei = fees;
+
+        (bool okFirst, uint256 firstBlock) = _readEligibilityUint(
+            constituent,
+            IEligibilitySource.firstActivityBlock.selector
+        );
+        if (!okFirst) return (false, feesWei, 0);
+        if (firstBlock == 0 || firstBlock > block.number) return (false, feesWei, 0);
+
+        elapsedBlocks = block.number - firstBlock;
+        eligible = feesWei >= minEligibilityFeesWei && elapsedBlocks >= minEligibilityBlocks;
+    }
+
+    /**
+     * @dev One gas-capped, fail-closed uint256 getter read. Returns
+     * `(false, 0)` for every failure mode rather than propagating any of them.
+     *
+     * A low-level `staticcall` rather than `try/catch` DELIBERATELY: a `try`
+     * on a call that SUCCEEDS but returns undecodable data raises in the
+     * CALLING contract and is NOT caught by the `catch` clause. That is
+     * precisely the fail-OPEN case this read has to rule out, so the decode is
+     * guarded by hand instead.
+     */
+    function _readEligibilityUint(address target, bytes4 selector)
+        private
+        view
+        returns (bool ok, uint256 value)
+    {
+        if (target.code.length == 0) return (false, 0);
+        (bool success, bytes memory data) = target.staticcall{gas: ELIGIBILITY_GAS_CAP}(
+            abi.encodeWithSelector(selector)
+        );
+        if (!success || data.length < 32) return (false, 0);
+        return (true, abi.decode(data, (uint256)));
+    }
+
+    /**
+     * @notice Recount eligible constituents and refresh the dynamic cap.
+     * PERMISSIONLESS: this moves no value, grants nobody anything, and the
+     * honest party always wants it current. Bounded at MAX_CONSTITUENTS reads,
+     * each itself gas-capped.
+     */
+    function refreshEligibleCount() external {
+        _recomputeEligibleCount();
+    }
+
+    function _recomputeEligibleCount() private {
+        uint256 count;
+        uint256 n = constituentList.length;
+        for (uint256 i = 0; i < n; i++) {
+            address t = constituentList[i];
+            if (!constituents[t].active) continue;
+            (bool ok, , ) = checkEligibility(t);
+            if (ok) count++;
+        }
+        eligibleConstituentCount = count;
+        emit EligibleCountUpdated(count, effectiveConcentrationCapBps());
+    }
+
+    // ══ Part D: dynamic, HHI-derived concentration cap ════════════════════
+
+    /**
+     * @notice The maximum single-constituent weight, in bps, consistent with a
+     * basket HHI of `targetHhiBps` across `n` eligible constituents.
+     *
+     * THE DERIVATION, worked rather than asserted.
+     *
+     * The Herfindahl-Hirschman Index of a weight vector is HHI = sum_i w_i^2.
+     * The binding configuration for a single-name cap is the one that makes a
+     * given maximum weight as CHEAP as possible in HHI terms: one constituent
+     * at w, and the remaining mass (1 - w) spread perfectly evenly over the
+     * other (n - 1). Any other spread of that remainder has a strictly higher
+     * sum of squares (by Cauchy-Schwarz / QM-AM), so this is the configuration
+     * that admits the largest w for a given HHI. Hence
+     *
+     *     HHI(w) = w^2 + (n - 1) * ((1 - w) / (n - 1))^2
+     *            = w^2 + (1 - w)^2 / (n - 1)
+     *
+     * Setting HHI(w) = T and writing m = n - 1:
+     *
+     *     m*w^2 + (1 - w)^2         = T*m
+     *     m*w^2 + 1 - 2w + w^2      = T*m
+     *     (m + 1)*w^2 - 2w + 1 - T*m = 0
+     *     n*w^2 - 2w + (1 - T*(n - 1)) = 0
+     *
+     * which is a quadratic in w with a = n, b = -2, c = 1 - T*(n-1):
+     *
+     *     w = [2 +/- sqrt(4 - 4*n*(1 - T*(n-1)))] / (2n)
+     *       = [1 +/- sqrt(1 - n*(1 - T*(n-1)))] / n
+     *
+     * The MAXIMUM feasible weight is the upper root, so the cap is
+     *
+     *     w = (1 + sqrt(1 - n*(1 - T*(n-1)))) / n                          (*)
+     *
+     * VERIFICATION, n = 10, T = 0.20:
+     *     1 - 10*(1 - 0.2*9) = 1 - 10*(1 - 1.8) = 1 + 8 = 9; sqrt = 3
+     *     w = (1 + 3)/10 = 0.40  ->  4000 bps.
+     *     Check: 0.4^2 + 0.6^2/9 = 0.16 + 0.04 = 0.20 = T. Exact.
+     * VERIFICATION, n = 50, T = 0.20:
+     *     1 - 50*(1 - 0.2*49) = 1 - 50*(1 - 9.8) = 1 + 440 = 441; sqrt = 21
+     *     w = (1 + 21)/50 = 0.44  ->  4400 bps.
+     *     Check: 0.44^2 + 0.56^2/49 = 0.1936 + 0.0064 = 0.20 = T. Exact.
+     *
+     * AN HONEST CORRECTION TO THE OBVIOUS INTUITION. (*) is INCREASING in n,
+     * not decreasing. That is not a bug in the algebra, it is what fixed-HHI
+     * means: the more legs there are to absorb the remainder, the less a given
+     * large leg costs in sum-of-squares, so a fixed HHI budget buys a LARGER
+     * single name. The cap runs from 1/n at the feasibility boundary up to an
+     * asymptote of sqrt(T) (0.4472 at T = 0.20) as n grows. The quantity that
+     * does fall with n is the AVERAGE weight 1/n, which is a different number.
+     * This is stated here because the intuition "more constituents must mean a
+     * tighter single-name cap" is natural, widespread, and false, and a
+     * contract that silently implemented the intuition instead of the algebra
+     * would be wrong in a way nobody would notice.
+     *
+     * DEGENERATE AND INFEASIBLE CASES.
+     *  - n <= 1: a single constituent is trivially 100% of the basket and the
+     *    formula's (n-1) denominator is undefined. Cap = 100%.
+     *  - T < 1/n: the discriminant goes negative. This is not a numerical
+     *    accident either — the MINIMUM achievable HHI for n names is 1/n
+     *    (equal weights), so a target below it is unreachable by any
+     *    allocation. The tightest honest answer is the equal-weight cap, 1/n,
+     *    and that is what is returned. (At T = 0.20 this covers n = 2, 3, 4.)
+     *
+     * KNOWN, REAL, UNCLOSED GAP: CORRELATION BLINDNESS.
+     * HHI measures SIZE concentration and nothing else. Ten constituents at
+     * 10% each score a perfect HHI of 0.10 whether they are ten unrelated
+     * collections or ten wrappers around the same underlying asset, moving
+     * together, drawing down together, and going bid-less together. This cap
+     * therefore bounds "how much of the basket is one NAME", not "how much of
+     * the basket is one BET", and the two can be arbitrarily far apart. Closing
+     * it would need a real correlation estimate over per-constituent price
+     * history — a covariance matrix over n series, recomputed as prices move —
+     * which this contract cannot compute cheaply or honestly on-chain, and
+     * which would reintroduce exactly the off-chain-submission trust problem
+     * the rest of this design refuses. It is flagged as open rather than
+     * approximated: a correlation check that is cheap enough to run here would
+     * be too crude to trust, and trusting a crude one is worse than knowing
+     * the gap is there.
+     */
+    function capBpsFor(uint256 n) public view returns (uint256) {
+        if (n <= 1) return BPS; // one leg IS the basket
+
+        uint256 t = targetHhiBps;
+        // lhs/rhs are (*)'s discriminant, multiplied through by BPS to stay in
+        // integers: sign(1 - n + T*n*(n-1)) == sign(BPS + T_bps*n*(n-1) - BPS*n).
+        uint256 lhs = t * n * (n - 1) + BPS;
+        uint256 rhs = BPS * n;
+        if (lhs <= rhs) return BPS / n; // infeasible target: equal weights is the tightest there is
+
+        uint256 dNum = lhs - rhs; // == BPS * discriminant
+        // sqrt(discriminant) * BPS == sqrt(dNum * BPS), so the whole result
+        // stays in bps with a single integer square root and no fixed-point
+        // scaling error. `Math.sqrt` floors, which floors the cap — the
+        // conservative direction.
+        uint256 w = (BPS + Math.sqrt(dNum * BPS)) / n;
+
+        uint256 equalWeight = BPS / n;
+        if (w < equalWeight) w = equalWeight; // flooring can never take it below 1/n
+        if (w > BPS) w = BPS;
+        return w;
+    }
+
+    /**
+     * @notice The concentration cap actually enforced right now.
+     *
+     * `min(capBpsFor(eligibleConstituentCount), params.concentrationCapBps)`.
+     *
+     * The flat, timelocked `concentrationCapBps` is retained as a HARD
+     * BACKSTOP CEILING rather than deleted, and the dynamic cap can only ever
+     * bind TIGHTER than it. That is a deliberate conservative choice at an
+     * ambiguity the design left open, resolved in existing holders' favour:
+     * since `capBpsFor` RISES with n (see the derivation above), letting it
+     * replace the flat cap outright would mean admitting constituents could
+     * LOOSEN the single-name cap past the level that was audited — an
+     * admission path that buys concentration. Taking the minimum means the
+     * dynamic term can tighten the basket and can never relax it, and the
+     * compile-time ceiling on `concentrationCapBps` (50%) still bounds the
+     * whole thing regardless of what any parameter is set to.
+     *
+     * With no constituent implementing IEligibilitySource the eligible count
+     * is zero, `capBpsFor(0)` is 100%, and the effective cap is exactly the
+     * flat parameter — i.e. the pre-existing behaviour, unchanged, which is
+     * the correct default for a basket that has no eligibility data at all.
+     */
+    function effectiveConcentrationCapBps() public view returns (uint256) {
+        uint256 dyn = capBpsFor(eligibleConstituentCount);
+        uint256 flat = params.concentrationCapBps;
+        return dyn < flat ? dyn : flat;
     }
 
     // ══ NAV ═══════════════════════════════════════════════════════════════
@@ -680,7 +1115,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         }
         if (total == 0) return (tokens, bps);
 
-        uint256 cap = params.concentrationCapBps;
+        uint256 cap = effectiveConcentrationCapBps();
         for (uint256 i = 0; i < n; i++) bps[i] = (raw[i] * BPS) / total;
 
         // Cap-and-redistribute, iterated: capping one constituent inflates the
@@ -1002,6 +1437,34 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
             platformAllocationBps = q.value;
             emit ParamApplied(key, q.value);
             return;
+        } else if (
+            key == "targetHhiBps" || key == "minEligibilityFeesWei" || key == "minEligibilityBlocks"
+        ) {
+            // Part D. Hard ceilings re-checked HERE, at execution, same
+            // doctrine as everything else: a timelock bounds when a bad change
+            // lands, never how bad it can be. Note that even a maximally bad
+            // value cannot LOOSEN the enforced cap past
+            // `params.concentrationCapBps`, because the effective cap is the
+            // minimum of the two.
+            //
+            // Part A's two bars need no ceiling: they are MINIMUMS, so setting
+            // one absurdly high makes every constituent ineligible, which
+            // drives the eligible count to zero, which makes `capBpsFor`
+            // return 100%, which is then clamped by the flat cap — i.e. the
+            // worst an admin can do is fall back to the pre-existing flat
+            // behaviour. Both are timelocked regardless.
+            if (key == "targetHhiBps") {
+                if (q.value < MIN_TARGET_HHI_BPS || q.value > MAX_TARGET_HHI_BPS) {
+                    revert BadParam();
+                }
+                targetHhiBps = q.value;
+            } else if (key == "minEligibilityFeesWei") {
+                minEligibilityFeesWei = q.value;
+            } else {
+                minEligibilityBlocks = q.value;
+            }
+            emit ParamApplied(key, q.value);
+            return;
         } else revert BadParam();
 
         _validateParams(p); // hard ceilings re-checked at EXECUTION, not queue
@@ -1070,6 +1533,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
             c.rampStart = uint64(block.timestamp);
             c.rampDuration = uint64(params.rampDuration);
             emit ConstituentDeactivated(token);
+            _recomputeEligibleCount(); // the eligible set shrank
         } else {
             _list(
                 token,
@@ -1097,6 +1561,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         }
         delete constituents[token];
         emit ConstituentDelisted(token);
+        _recomputeEligibleCount();
     }
 
     function queueAdmin(address next) external onlyAdmin {
@@ -1292,6 +1757,10 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         constituentList.push(token);
         _observe(token, c, true);
         emit ConstituentListed(token, address(source), rawTargetWeightBps);
+        // The eligible-constituent count changed, so the dynamic cap must be
+        // recomputed. Done HERE (admission) rather than per trade, which is
+        // what keeps the cap gas-bounded.
+        _recomputeEligibleCount();
     }
 
     /// @dev Read the ACTUAL balance delta, never the nominal amount (§2.9,
@@ -1355,6 +1824,41 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
      * concentrated the ask. `d` is the requested amount as a fraction of what
      * the constituent has left, in bps; the fee is base + slope*d, capped.
      * A withdrawal that takes 100% of the remaining leg pays base + slope.
+     *
+     * DIRECTION SYMMETRY (audited, and the finding stated in full).
+     * This is the ONE fee formula, and BOTH priced paths charge it:
+     * `mintSingleAsset` (buy side) and `_previewSingleExit` (sell side) each
+     * call exactly this function with exactly the same shape of arguments —
+     * (the non-pro-rata amount, the depth it is charged against). There is no
+     * `isBuy` argument, no direction branch, no second fee table, and no
+     * directional multiplier anywhere in it: for identical (amount, against),
+     * a buy and a sell are charged the identical number of bps. That is what
+     * makes a round trip strictly loss-making rather than free in one
+     * direction, and the audit suite asserts it directly.
+     *
+     * The ONE asymmetry that does exist is `_mintFeeBps`, and it is worth
+     * being precise about what kind of asymmetry it is, because "the buy side
+     * has an extra term" reads like a directional multiplier and is not one.
+     * `_mintFeeBps` adjusts by how far the leg sits from its own TARGET
+     * WEIGHT — it discounts a deposit that rebalances and surcharges one that
+     * unbalances. It is a function of (current weight, target weight) only.
+     * Two consequences: it vanishes identically when a leg is AT target (the
+     * gap is zero, so both branches return `depthFee` untouched), and it is
+     * not keyed on buy-versus-sell at all — a buy into an overweight leg is
+     * surcharged for the same reason and by the same slope as a buy into an
+     * underweight leg is discounted.
+     *
+     * It is deliberately not mirrored onto the redeem side, and that decision
+     * is left standing here after re-auditing it. The redeem path's properties
+     * (monotone in size, strictly worse than pro-rata, retained in reserves)
+     * are asserted directly by the audit suite and are the reason the
+     * single-asset exit is safe at all; adding a directional term there is a
+     * separate change with its own proofs to redo, and it would have to
+     * SURCHARGE an exit that unbalances the basket — i.e. make leaving more
+     * expensive — which is the one direction this contract should be most
+     * reluctant to move. Charging less to rebalance on the way in is a
+     * discount; charging more to leave is a lock-in, and the conservative
+     * resolution of that asymmetry favours the holder.
      */
     function _imbalanceFeeBps(uint256 amount, uint256 against) private view returns (uint256 fee) {
         if (against == 0) return params.maxImbalanceFeeBps;
@@ -1376,7 +1880,11 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
      */
     function _requireCapNotWorsened(uint256[] memory weightsBefore) private view {
         uint256[] memory now_ = _allWeightsBps();
-        uint256 cap = params.concentrationCapBps;
+        // The DYNAMIC cap (Part D), not the flat parameter. `capBpsFor` is
+        // O(1) and the eligible count is cached, so this stays one SLOAD and a
+        // sqrt on the hot path — the recount is what is gas-bounded to
+        // set changes, never this check.
+        uint256 cap = effectiveConcentrationCapBps();
         for (uint256 i = 0; i < now_.length; i++) {
             if (now_[i] > cap && now_[i] > weightsBefore[i]) revert ConcentrationCapExceeded();
         }
@@ -1405,7 +1913,10 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     /// `requiredCheckpoints`).
     function _requirePersistenceIfLarge(address token, uint256 ethValue) private view {
         if (ethValue < params.largeOpValueWei) return;
-        if (!persistenceHoldsFor(token, requiredCheckpoints(ethValue))) {
+        // The VARIANCE-CALIBRATED requirement (Part E), not the size-only one.
+        // `requiredCheckpoints` is retained unchanged as the pure size term
+        // and as the figure a UI or monitor should read.
+        if (!persistenceHoldsFor(token, requiredCheckpointsFor(token, ethValue))) {
             revert PersistenceCheckFailed();
         }
     }
