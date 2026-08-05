@@ -554,8 +554,16 @@ describe("WrappedIndexShare — N-asset reward streams (round 9d)", () => {
       owed[fx.vaultAddr.toLowerCase()]
     );
     expect((await fx.div.balanceOf(fx.alice.address)) - divBefore).to.be.gt(0n);
-    expect(await good.balanceOf(fx.alice.address)).to.equal(owed[gAddr.toLowerCase()]);
-    expect(await good.balanceOf(fx.alice.address)).to.be.gt(0n);
+    // Round 9f: Bob's `deposit` on line 537 displaced a slice of the GOOD
+    // stream into a linear re-vest, so a stream leg — exactly like the
+    // dividend leg the header already documents — quotes as a LOWER BOUND from
+    // a view and pays at least that much one block later when the vest has
+    // ticked. Assert both halves: never under-quoted, and the drift is one
+    // block of a 300-block schedule, not a pricing error.
+    const aliceGood = await good.balanceOf(fx.alice.address);
+    expect(aliceGood).to.be.gte(owed[gAddr.toLowerCase()]);
+    expect(aliceGood).to.be.lt((owed[gAddr.toLowerCase()] * 1001n) / 1000n);
+    expect(aliceGood).to.be.gt(0n);
 
     // (d) and Bob, a completely different user, is equally unaffected.
     await expect(

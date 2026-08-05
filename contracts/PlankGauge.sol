@@ -116,6 +116,99 @@ pragma solidity ^0.8.24;
  *  construction. You may pick two of {anti-whale, sybil-proof, identity-free}
  *  and this contract picks the first two words of the first one.
  *
+ *  ROUND 9f — AND AN EVEN MORE UNCOMFORTABLE CORRECTION
+ *  ----------------------------------------------------
+ *  A game-theory audit drove the paragraph above to its equilibrium and found
+ *  that "anti-whale" does not survive contact with a rational actor either:
+ *
+ *   (a) ANTI-WHALE IS ACTUALLY ANTI-MINNOW. A whale that splits into N
+ *       addresses in PROPORTION to its size restores EXACT linearity:
+ *       C_w/C_m = sqrt(N_w*W_w)/sqrt(N_m*W_m) = sqrt(X*X) = X, not sqrt(X).
+ *       Splitting cost was purely GAS, and gas is an ABSOLUTE cost, so a whale
+ *       can afford proportionally more addresses than a minnow can. The
+ *       dampening therefore bound only on actors too small to pay the gas
+ *       floor to fragment — i.e. on exactly the people it was meant to protect.
+ *   (b) THE TWO PUBLISHED NUMBERS REWARDED OPPOSITE STRUCTURES. `gaugeWeight`
+ *       aggregates across addresses, so weight-optimal N is unbounded (the
+ *       audit derived N* ~= [V*R/(2*sqrt(W)*G*p)]^(2/3), in the THOUSANDS at
+ *       real L2 gas prices, with no interior optimum — only gas stops it).
+ *       `boostMultiplier` reads ONE address's share `c_i/T`, which strictly
+ *       FALLS as N rises, so boost-optimal N is 1. And a SOLE burner's weight
+ *       is exactly ZERO, because `1 - rawShare^k` vanishes at rawShare = 1. So
+ *       anybody who wants real influence is FORCED to fragment and thereby
+ *       forfeits the boost entirely. The mechanism did not merely tolerate
+ *       sybils, it mandated them.
+ *
+ *  THE REPAIR: A REGISTRATION COST DENOMINATED IN THE BURNED ASSET
+ *  --------------------------------------------------------------
+ *  The impossibility result above is real and is not repealed here: you still
+ *  may pick two of {anti-whale, sybil-proof, identity-free}. What CAN be fixed
+ *  is that the marginal cost of one more address was GAS, which is roughly
+ *  constant in the actor's wealth and therefore not a proportional cost at all.
+ *
+ *  `registrationBurnPlank` is a fixed PLANK amount that must be DESTROYED —
+ *  same `BURN_ADDRESS`, same one-way transfer, same measured-delta discipline
+ *  as every other burn path — the first time an account acquires nonzero weight
+ *  in a given gauge in a given epoch. It buys NO weight and NO boost. It is a
+ *  cost of having an identity in this epoch's book, and it is denominated in
+ *  the very asset the attack spends.
+ *
+ *  WHAT THAT DOES TO N*, exactly. With a total PLANK budget B and a per-address
+ *  registration cost `p`, an attacker splitting into N addresses has only
+ *  `B - N*p` left to actually burn for weight, so their aggregate contribution
+ *  is
+ *
+ *      A(N) = sqrt( N * (B - N*p) * mult )
+ *
+ *  which is a downward parabola in N. It is maximised at
+ *
+ *      N* = B / (2p)                     and is ZERO for N >= B/p.
+ *
+ *  Three things follow, and they are the whole point:
+ *    - N* NO LONGER DEPENDS ON GAS AT ALL. It is set by the attacker's own
+ *      budget divided by an asset-denominated cost, so a cheap-gas L2 does not
+ *      hand anyone a thousand-fold larger sybil fleet.
+ *    - AT THE OPTIMUM THE COST IS PROPORTIONAL. `N* = B/(2p)` scales with the
+ *      actor's own budget, so an actor playing it destroys HALF their entire
+ *      budget on registrations and never gets a unit of weight for it. A
+ *      ten-times-larger actor therefore pays ten times more to sybil. Stated
+ *      precisely because it is only true AT the optimum: `p` is an absolute
+ *      per-address cost, the same SHAPE gas was, so at a matched per-shard
+ *      budget a splitting whale still realises exactly linear weight. That
+ *      negative result is not repealed, and it is asserted by test rather than
+ *      quietly stepped around (see PlankGaugeSybilCost.audit.test.ts).
+ *    - THERE IS NOW A HARD CEILING, AND THAT IS THE REAL REPAIR. Beyond `B/p`
+ *      addresses the attacker has nothing left to burn and their weight is
+ *      ZERO. An interior optimum exists where before there was none, so
+ *      finding (b) softens too: the weight leg's optimum is no longer N -> inf
+ *      against the boost leg's N = 1, it is a FINITE `B/(2p)`, and the actor
+ *      faces a bounded, priced trade-off between the two published numbers
+ *      instead of an unbounded corner that forfeits the boost outright.
+ *
+ *  Governance sets `p` (timelocked, ROLE_GAUGE_TUNING, hard-capped by
+ *  `MAX_REGISTRATION_BURN`). It DEFAULTS TO ZERO, and that default is a
+ *  deliberate refusal rather than an oversight: a nonzero default would be this
+ *  contract asserting a relationship between PLANK's token units and economic
+ *  value that it has no way to know — the same unfounded valuation claim
+ *  WrappedIndexShare refuses to make when it declines to price unlike backing
+ *  legs against each other. The right `p` is a fraction of a typical honest
+ *  burn on the deployed token, which is a deployment-time fact. Shipped at
+ *  zero, calibrated at listing, bounded forever by a compile-time constant no
+ *  governance can raise — the same doctrine as every other parameter here.
+ *
+ *  WHAT THIS DOES NOT CLAIM. It does not make sybils unprofitable, and no
+ *  identity-free mechanism can. It converts an UNBOUNDED, gas-limited sybil
+ *  count into a BOUNDED, budget-limited one, and it makes the marginal address
+ *  cost scale with the actor rather than with the chain. The residual — that
+ *  splitting still lowers the price of influence — remains open, known, and
+ *  measured by test, exactly as before.
+ *
+ *  NO CUSTODY IS CREATED. The registration cost is a BURN, not a payment: the
+ *  PLANK goes from `msg.sender` to `BURN_ADDRESS` and this contract never holds
+ *  it, never has a balance of it, and has no function that could move it. The
+ *  "this contract pays none of it, it cannot" property below is unchanged, and
+ *  is still proved by the ABI/bytecode enumeration in PlankGauge.audit.test.ts.
+ *
  *  So: sqrt dampening is retained because anti-whale dampening is what it was
  *  actually wanted for, and the sybil exposure is DOCUMENTED AND TESTED
  *  rather than papered over. PlankGauge.audit.test.ts contains a test that
@@ -233,6 +326,14 @@ contract PlankGauge is ReentrancyGuard, ScopedRoles {
     uint256 private constant MAX_EXPONENT_HALVES = 8;
     /// @dev Absolute boost ceiling. No governance can publish a 100x boost.
     uint256 private constant CEIL_BOOST_BPS = 5 * BPS; // 5.0x
+    /**
+     * @dev Hard ceiling on the per-address, per-gauge, per-epoch registration
+     * burn. Compile-time, so no governance can set a registration cost so high
+     * that honest participation becomes impossible — the ceiling exists to
+     * bound HOW BAD a bad retune can be, exactly as every other bound here
+     * does. 1,000,000 units at 18 decimals.
+     */
+    uint256 private constant MAX_REGISTRATION_BURN = 1_000_000 * 1e18;
 
     /// @dev Burn paths, in the order their multipliers are stored.
     uint8 public constant PATH_RAW = 0;
@@ -291,6 +392,19 @@ contract PlankGauge is ReentrancyGuard, ScopedRoles {
     /// @notice Boost floor and ceiling in bps. 10_000 = 1.0x. Timelocked.
     uint256 public baseBoostBps;
     uint256 public maxBoostBps;
+
+    /**
+     * @notice PLANK destroyed the FIRST time an account acquires nonzero weight
+     * in a gauge in an epoch. Buys no weight and no boost — it is the
+     * asset-denominated per-identity cost that turns the sybil count from
+     * gas-limited-and-unbounded into budget-limited-with-an-interior-optimum
+     * at `N* = B/(2p)`. See "ROUND 9f" in the header for the derivation.
+     *
+     * Timelocked (ROLE_GAUGE_TUNING), bounded by `MAX_REGISTRATION_BURN`, and
+     * ZERO BY DEFAULT — see the header for why shipping a nonzero default would
+     * be a valuation claim this contract cannot support.
+     */
+    uint256 public registrationBurnPlank;
 
     /**
      * @notice SELF-DEAL REDIRECT SINK. Timelocked, and it is an ADDRESS THIS
@@ -383,6 +497,9 @@ contract PlankGauge is ReentrancyGuard, ScopedRoles {
     event GaugeUnregistered(address indexed gauge);
     event PlankEthLpApproved(address indexed token, bool approved);
     event CollectionLpApproved(address indexed gauge, address token, address vault);
+    /// @notice A per-identity registration cost was DESTROYED (not paid) so
+    /// `account` could hold weight in `gauge` this epoch. Buys no weight.
+    event RegistrationBurned(address indexed gauge, address indexed account, uint256 amount);
     event RedirectSinkQueued(address indexed next, uint64 eta);
     event RedirectSinkApplied(address indexed next);
     /// @notice A burn whose directing address was provably the same address as
@@ -555,6 +672,16 @@ contract PlankGauge is ReentrancyGuard, ScopedRoles {
         uint256 e = currentEpoch();
         uint256 prevWeighted = epochWeightedBurn[e][gauge][beneficiary];
         uint256 prevContribution = epochContribution[e][gauge][beneficiary];
+
+        // ROUND 9f — THE PER-IDENTITY REGISTRATION BURN. Charged once per
+        // (epoch, gauge, beneficiary), on the first burn that gives that
+        // address weight. It buys NOTHING: the PLANK is destroyed and no
+        // weight, contribution or boost is credited for it. Keyed on
+        // `beneficiary` rather than `msg.sender` so a redirected self-deal
+        // cannot register the sink for free, and so one address paying for
+        // many gauges pays once per gauge, which is the unit the sybil count
+        // is actually measured in.
+        if (prevContribution == 0) _chargeRegistration(gauge, beneficiary);
         uint256 nextWeighted = prevWeighted + weighted;
         // sqrt DAMPENING. Applied to the account's epoch TOTAL rather than to
         // each burn separately, deliberately: per-burn sqrt would mean ten
@@ -777,7 +904,8 @@ contract PlankGauge is ReentrancyGuard, ScopedRoles {
             key == "epochDuration" ||
             key == "concentrationExponentHalves" ||
             key == "baseBoostBps" ||
-            key == "maxBoostBps"
+            key == "maxBoostBps" ||
+            key == "registrationBurnPlank"
         ) return ROLE_GAUGE_TUNING;
         revert BadParam();
     }
@@ -827,6 +955,9 @@ contract PlankGauge is ReentrancyGuard, ScopedRoles {
         } else if (key == "maxBoostBps") {
             if (q.value < baseBoostBps || q.value > CEIL_BOOST_BPS) revert BadParam();
             maxBoostBps = q.value;
+        } else if (key == "registrationBurnPlank") {
+            if (q.value > MAX_REGISTRATION_BURN) revert BadParam();
+            registrationBurnPlank = q.value;
         } else {
             revert BadParam();
         }
@@ -984,6 +1115,23 @@ contract PlankGauge is ReentrancyGuard, ScopedRoles {
     }
 
     // ── Internals ──────────────────────────────────────────────────────────
+
+    /**
+     * @dev Destroy the registration cost. A BURN, never a payment: the PLANK
+     * moves from `msg.sender` straight to `BURN_ADDRESS`, this contract is
+     * never in the path and never holds a unit of it, so the no-custody /
+     * no-payment-surface property is untouched. Same measured-delta discipline
+     * as the weight-bearing paths — a token that under-delivers cannot register
+     * an address for less than the posted cost.
+     */
+    function _chargeRegistration(address gauge, address account) private {
+        uint256 fee = registrationBurnPlank;
+        if (fee == 0) return;
+        uint256 before = plank.balanceOf(BURN_ADDRESS);
+        plank.safeTransferFrom(msg.sender, BURN_ADDRESS, fee);
+        if (plank.balanceOf(BURN_ADDRESS) - before < fee) revert ShortBurn();
+        emit RegistrationBurned(gauge, account, fee);
+    }
 
     function _validateMultiplier(uint256 bps) private pure {
         if (bps < MIN_MULTIPLIER_BPS || bps > MAX_MULTIPLIER_BPS) revert BadParam();
