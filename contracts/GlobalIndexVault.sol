@@ -1860,6 +1860,60 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         }
     }
 
+    /**
+     * @notice Credit value that is ALREADY held by this contract but accounted
+     * nowhere into `token`'s redeemable reserve. Permissionless.
+     *
+     * THE PROBLEM THIS SOLVES. This vault accounts exclusively through
+     * `constituents[t].reserve`, credited only by `seedDeposit`, `mintProRata`
+     * and `mintSingleAsset`. A RAW `IERC20.transfer` into the vault writes no
+     * ledger anywhere, so the value is held and owned by nobody: not in
+     * `reserve`, not in NAV, not in any redemption. That is not hypothetical —
+     * it is exactly what `TBAValueSweeper.sweepTBAERC20` does, and pointing its
+     * `reserveSink` at this vault is the production configuration its own
+     * header documents. Every wei swept that way was silently stranded.
+     *
+     * WHY THIS IS SAFE, stated as the four things it cannot do:
+     *  1. it can never fabricate value. `credited` is the measured surplus of
+     *     the REAL held balance over everything already accounted, so the
+     *     reserve can only ever be raised to something the contract actually
+     *     holds — the same measured-balance-delta discipline `_pullCredited`
+     *     applies on every other inbound path (§2.9, Balancer STA).
+     *  2. it can never move value OUT. There is no transfer on this path and no
+     *     recipient argument. It is arithmetic over this contract's own books.
+     *  3. it can never touch another ledger. `ecosystemFeesWei`,
+     *     `reservedClaims` and the whole dividend liability are SUBTRACTED, not
+     *     written — they are held balances owed elsewhere, and a sync that
+     *     ignored them would re-credit somebody's deferred redemption leg or
+     *     somebody's accrued dividend into the pro-rata pool. That subtraction
+     *     is the load-bearing line in this function.
+     *  4. it can never be aimed. The credit lands in the reserve of the token
+     *     named, where it is redeemable pro rata by every holder — including
+     *     the caller only in proportion to shares they already hold.
+     *
+     * Not gated on `whenOpen`: reconciling a donation into a basket that has
+     * not opened yet is strictly better than leaving it stranded.
+     */
+    function syncConstituentBalance(address token)
+        external
+        nonReentrant
+        returns (uint256 credited)
+    {
+        Constituent storage c = _get(token);
+        uint256 accounted = c.reserve + reservedClaims[token] + ecosystemFeesWei[token];
+        if (token == dividendAsset) {
+            // Everything ever received as a dividend is either already
+            // withdrawn or still owed to holders (including the carry). Owed
+            // is not reserve, and this is what keeps the two apart.
+            accounted += totalDividendsReceived - totalDividendsWithdrawn;
+        }
+        uint256 bal = IERC20(token).balanceOf(address(this));
+        if (bal <= accounted) return 0;
+        credited = bal - accounted;
+        c.reserve += credited;
+        emit ConstituentSynced(token, credited);
+    }
+
     /// @notice Drop a deactivated, fully-redeemed constituent. Permissionless
     /// and only ever possible when there is nothing left to strand.
     function delistEmpty(address token) external nonReentrant {
