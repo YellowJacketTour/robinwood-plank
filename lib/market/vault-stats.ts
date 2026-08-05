@@ -5,7 +5,7 @@ import { V3_IFACE } from "@/lib/market/vault-v3";
 import { feeModelForVault, type FeeModel } from "@/lib/market/vault-registry";
 import { getVaultHeldTokenIds } from "@/lib/market/vault-held";
 import { getEthUsdPrice } from "@/lib/eth-price";
-import { fetchActivity } from "@/lib/market/activity";
+import { readChainActivity } from "@/lib/market/chain-events";
 import { getVaultActivity, type VaultTradeEvent } from "@/lib/market/vault-activity";
 import { MARKET_DEFAULT_FEE_BPS } from "@/lib/constants";
 import { withTimeout } from "@/lib/market/rpc-budget";
@@ -470,11 +470,23 @@ export async function getVaultStats(
   };
 }
 
+/**
+ * Reads the permanent ledger instead of a raw 40-event live-fetch window.
+ * That old window mixed in mints/transfers, so 40 raw events could contain
+ * very few (or zero) real sales — this reads the last 200 real sale rows
+ * specifically, the same recent-window convention app/api/market/token/route.ts
+ * uses for its own ledger reads.
+ */
 async function estimateMarketplaceFeeRevenue(): Promise<bigint> {
   try {
-    const events = await fetchActivity(40);
-    const total = events.reduce((sum, e) => {
-      if (e.kind !== "sale" || e.priceWei == null) return sum;
+    const page = await readChainActivity({
+      limit: 200,
+      offset: 0,
+      kinds: ["sale"],
+      source: "nft",
+    });
+    const total = page.events.reduce((sum, e) => {
+      if (e.priceWei == null) return sum;
       return sum + BigInt(e.priceWei);
     }, BigInt(0));
     return (total * BigInt(MARKET_DEFAULT_FEE_BPS)) / BigInt(10_000);
