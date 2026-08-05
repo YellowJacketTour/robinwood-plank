@@ -121,6 +121,12 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IIndexPriceSource} from "./IIndexPriceSource.sol";
 import {IEligibilitySource} from "./IEligibilitySource.sol";
 import {ScopedRoles} from "./ScopedRoles.sol";
+import {IndexMath} from "./lib/IndexMath.sol";
+// The parameter SET itself is declared in IndexParams.sol and imported under
+// this contract's historical name, so the key-space dispatch can be moved out
+// of this bytecode without an encode/decode shim at the boundary. Field order
+// and the public `params()` getter's ABI are unchanged.
+import {IndexParams, IndexParamSet as Params} from "./lib/IndexParams.sol";
 
 /**
  * @notice The two functions this vault needs from an ecosystem fee sink, and
@@ -185,13 +191,10 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     // timelock, and no future governance can raise them.
     uint256 private constant MIN_TIMELOCK_DELAY = 48 hours;
     uint256 private constant MAX_TIMELOCK_DELAY = 30 days;
-    uint256 private constant MIN_CONCENTRATION_CAP_BPS = 1_000; // 10%
-    uint256 private constant MAX_CONCENTRATION_CAP_BPS = 5_000; // 50%
-    uint256 private constant CEIL_IMBALANCE_FEE_BPS = 1_000; // 10%, absolute
-    uint256 private constant CEIL_BAND_BPS = 2_000; // 20% band widening
-    uint256 private constant CEIL_PRICE_CAP_BPS = 2_000; // 20% per observation
-    uint256 private constant MIN_RAMP_DURATION = 7 days;
-    uint256 private constant MAX_RAMP_DURATION = 365 days;
+    // The risk-parameter ceilings themselves now live in IndexParams.sol,
+    // next to the validator that enforces them — one file, one set of
+    // constants, so a ceiling cannot be raised in one place and left in the
+    // other. They are compile-time constants there exactly as they were here.
     /// @dev Absolute ceiling on the platform/operator share allocation. 5%.
     /// Compile-time, so no admin and no timelock can raise it.
     uint256 private constant CEIL_PLATFORM_ALLOCATION_BPS = 500;
@@ -292,21 +295,6 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         uint256 varCurSumSq;
         uint256 varCurSamples;
         Observation[OBS_SLOTS] obs;
-    }
-
-    struct Params {
-        uint256 concentrationCapBps;
-        uint256 baseImbalanceFeeBps;
-        uint256 imbalanceSlopeBps;
-        uint256 maxImbalanceFeeBps;
-        uint256 bandBps;
-        uint256 priceCapBps;
-        uint256 minCheckpointInterval;
-        uint256 staleAfter;
-        uint256 persistenceCheckpoints;
-        uint256 persistenceToleranceBps;
-        uint256 largeOpValueWei;
-        uint256 rampDuration;
     }
 
     struct QueuedParam {
@@ -548,7 +536,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         _initRole(ROLE_PLATFORM_ALLOCATION, roles_[3]);
         seeder = seeder_;
         timelockDelay = timelockDelay_;
-        _validateParams(params_);
+        IndexParams.validate(params_);
         params = params_;
         platformAllocationBps = DEFAULT_PLATFORM_ALLOCATION_BPS; // inert: no treasury yet
         ecosystemFeeSplitBps = DEFAULT_ECOSYSTEM_SPLIT_BPS; // inert: no sink yet
@@ -837,12 +825,13 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      * so the step unit is reused rather than a second, weaker signal invented.
      */
     function requiredCheckpoints(uint256 ethValue) public view returns (uint256) {
-        uint256 base = params.persistenceCheckpoints;
-        uint256 unit = params.largeOpValueWei;
-        if (ethValue < unit) return base; // not a large op at all
-        uint256 steps = ethValue / unit; // >= 1
-        uint256 required = base + steps - 1;
-        return required > OBS_SLOTS ? OBS_SLOTS : required;
+        return
+            IndexMath.requiredCheckpoints(
+                ethValue,
+                params.persistenceCheckpoints,
+                params.largeOpValueWei,
+                OBS_SLOTS
+            );
     }
 
     /**
@@ -1136,26 +1125,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      * the gap is there.
      */
     function capBpsFor(uint256 n) public view returns (uint256) {
-        if (n <= 1) return BPS; // one leg IS the basket
-
-        uint256 t = targetHhiBps;
-        // lhs/rhs are (*)'s discriminant, multiplied through by BPS to stay in
-        // integers: sign(1 - n + T*n*(n-1)) == sign(BPS + T_bps*n*(n-1) - BPS*n).
-        uint256 lhs = t * n * (n - 1) + BPS;
-        uint256 rhs = BPS * n;
-        if (lhs <= rhs) return BPS / n; // infeasible target: equal weights is the tightest there is
-
-        uint256 dNum = lhs - rhs; // == BPS * discriminant
-        // sqrt(discriminant) * BPS == sqrt(dNum * BPS), so the whole result
-        // stays in bps with a single integer square root and no fixed-point
-        // scaling error. `Math.sqrt` floors, which floors the cap — the
-        // conservative direction.
-        uint256 w = (BPS + Math.sqrt(dNum * BPS)) / n;
-
-        uint256 equalWeight = BPS / n;
-        if (w < equalWeight) w = equalWeight; // flooring can never take it below 1/n
-        if (w > BPS) w = BPS;
-        return w;
+        return IndexMath.capBpsFor(n, targetHhiBps);
     }
 
     /**
@@ -1302,19 +1272,13 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      * help an attacker rather than the basket.
      */
     function _rampFactorBps(Constituent storage c) private view returns (uint256) {
-        if (c.active) {
-            if (c.rampDuration == 0) return BPS;
-            uint256 elapsed = block.timestamp - uint256(c.rampStart);
-            if (block.timestamp > uint256(_last(c).timestamp) + params.staleAfter) {
-                elapsed = 0;
-            }
-            if (elapsed >= c.rampDuration) return BPS;
-            return (elapsed * BPS) / c.rampDuration;
-        }
-        if (c.rampDuration == 0) return 0;
-        uint256 e = block.timestamp - uint256(c.rampStart);
-        if (e >= c.rampDuration) return 0;
-        return BPS - (e * BPS) / c.rampDuration;
+        return
+            IndexMath.rampFactorBps(
+                c.active,
+                block.timestamp - uint256(c.rampStart),
+                c.rampDuration,
+                block.timestamp > uint256(_last(c).timestamp) + params.staleAfter
+            );
     }
 
     // ══ Mint ══════════════════════════════════════════════════════════════
@@ -1561,38 +1525,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      *    through the back door. Whitelisting the key space closes that.
      */
     function roleForParamKey(bytes32 key) public pure returns (bytes32) {
-        // `ecosystemFeeSplitBps` is keyed to the VALUE-FLOW role, not the risk
-        // role, on purpose. It does not change what anyone is charged — the
-        // fee schedule is untouched by it — it changes where an already-
-        // charged fee is booked. That is the same kind of decision
-        // `platformAllocationBps` makes, so it lives behind the same role, and
-        // the risk role (which owns the fee SCHEDULE) cannot reach it. Neither
-        // role can reach the other's half, which is the point.
-        if (
-            key == "platformAllocationBps" ||
-            key == "ecosystemFeeSplitBps" ||
-            key == "ecosystemSink"
-        ) {
-            return ROLE_PLATFORM_ALLOCATION;
-        }
-        if (
-            key == "concentrationCapBps" ||
-            key == "baseImbalanceFeeBps" ||
-            key == "imbalanceSlopeBps" ||
-            key == "maxImbalanceFeeBps" ||
-            key == "bandBps" ||
-            key == "priceCapBps" ||
-            key == "minCheckpointInterval" ||
-            key == "staleAfter" ||
-            key == "persistenceCheckpoints" ||
-            key == "persistenceToleranceBps" ||
-            key == "largeOpValueWei" ||
-            key == "rampDuration" ||
-            key == "targetHhiBps" ||
-            key == "minEligibilityFeesWei" ||
-            key == "minEligibilityBlocks"
-        ) return ROLE_RISK_PARAM;
-        revert BadParam();
+        return IndexParams.roleForParamKey(key, ROLE_PLATFORM_ALLOCATION, ROLE_RISK_PARAM);
     }
 
     function queueParam(bytes32 key, uint256 value) external {
@@ -1609,27 +1542,27 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         if (block.timestamp < q.eta) revert TimelockNotElapsed();
         delete queuedParams[key];
 
-        Params memory p = params;
-        if (key == "concentrationCapBps") p.concentrationCapBps = q.value;
-        else if (key == "baseImbalanceFeeBps") p.baseImbalanceFeeBps = q.value;
-        else if (key == "imbalanceSlopeBps") p.imbalanceSlopeBps = q.value;
-        else if (key == "maxImbalanceFeeBps") p.maxImbalanceFeeBps = q.value;
-        else if (key == "bandBps") p.bandBps = q.value;
-        else if (key == "priceCapBps") p.priceCapBps = q.value;
-        else if (key == "minCheckpointInterval") p.minCheckpointInterval = q.value;
-        else if (key == "staleAfter") p.staleAfter = q.value;
-        else if (key == "persistenceCheckpoints") p.persistenceCheckpoints = q.value;
-        else if (key == "persistenceToleranceBps") p.persistenceToleranceBps = q.value;
-        else if (key == "largeOpValueWei") p.largeOpValueWei = q.value;
-        else if (key == "rampDuration") p.rampDuration = q.value;
-        else if (key == "platformAllocationBps") {
-            // Hard ceiling re-checked HERE, at execution, not at queue time —
-            // same doctrine as _validateParams: a timelock bounds when a bad
-            // change lands, never how bad it can be.
-            if (q.value > CEIL_PLATFORM_ALLOCATION_BPS) revert AllocationCapExceeded();
-            platformAllocationBps = q.value;
+        // The RISK half of the key space — the twelve fields of `Params` —
+        // is dispatched and re-validated in IndexParams. It is one large
+        // straight-line chain of 32-byte constant comparisons reached from
+        // exactly one place, which is precisely the shape that pays for an
+        // external library call (see IndexParams.sol's header). `handled`
+        // comes back false for every key outside that set, and those keys are
+        // applied HERE because each writes a standalone storage variable and
+        // enforces its own ceiling — neither of which a `pure` library can do.
+        (Params memory p, bool handled) = IndexParams.applyRiskParam(params, key, q.value);
+        if (handled) {
+            params = p;
             emit ParamApplied(key, q.value);
             return;
+        }
+
+        if (key == "platformAllocationBps") {
+            // Hard ceiling re-checked HERE, at execution, not at queue time —
+            // same doctrine as IndexParams.validate: a timelock bounds when a
+            // bad change lands, never how bad it can be.
+            if (q.value > CEIL_PLATFORM_ALLOCATION_BPS) revert AllocationCapExceeded();
+            platformAllocationBps = q.value;
         } else if (key == "ecosystemFeeSplitBps") {
             // Same doctrine, same place: the ceiling is re-checked at
             // EXECUTION. A timelock bounds when a bad value lands, never how
@@ -1638,44 +1571,28 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
             // NAV appreciation.
             if (q.value > CEIL_ECOSYSTEM_SPLIT_BPS) revert AllocationCapExceeded();
             ecosystemFeeSplitBps = q.value;
-            emit ParamApplied(key, q.value);
-            return;
         } else if (key == "ecosystemSink") {
             _applyEcosystemSink(q.value);
-            emit ParamApplied(key, q.value);
-            return;
-        } else if (
-            key == "targetHhiBps" || key == "minEligibilityFeesWei" || key == "minEligibilityBlocks"
-        ) {
+        } else if (key == "targetHhiBps") {
             // Part D. Hard ceilings re-checked HERE, at execution, same
-            // doctrine as everything else: a timelock bounds when a bad change
-            // lands, never how bad it can be. Note that even a maximally bad
+            // doctrine as everything else. Note that even a maximally bad
             // value cannot LOOSEN the enforced cap past
             // `params.concentrationCapBps`, because the effective cap is the
             // minimum of the two.
-            //
+            if (q.value < MIN_TARGET_HHI_BPS || q.value > MAX_TARGET_HHI_BPS) revert BadParam();
+            targetHhiBps = q.value;
+        } else if (key == "minEligibilityFeesWei") {
             // Part A's two bars need no ceiling: they are MINIMUMS, so setting
             // one absurdly high makes every constituent ineligible, which
             // drives the eligible count to zero, which makes `capBpsFor`
             // return 100%, which is then clamped by the flat cap — i.e. the
             // worst an admin can do is fall back to the pre-existing flat
             // behaviour. Both are timelocked regardless.
-            if (key == "targetHhiBps") {
-                if (q.value < MIN_TARGET_HHI_BPS || q.value > MAX_TARGET_HHI_BPS) {
-                    revert BadParam();
-                }
-                targetHhiBps = q.value;
-            } else if (key == "minEligibilityFeesWei") {
-                minEligibilityFeesWei = q.value;
-            } else {
-                minEligibilityBlocks = q.value;
-            }
-            emit ParamApplied(key, q.value);
-            return;
+            minEligibilityFeesWei = q.value;
+        } else if (key == "minEligibilityBlocks") {
+            minEligibilityBlocks = q.value;
         } else revert BadParam();
 
-        _validateParams(p); // hard ceilings re-checked at EXECUTION, not queue
-        params = p;
         emit ParamApplied(key, q.value);
     }
 
@@ -2184,11 +2101,15 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      * resolution of that asymmetry favours the holder.
      */
     function _imbalanceFeeBps(uint256 amount, uint256 against) private view returns (uint256 fee) {
-        if (against == 0) return params.maxImbalanceFeeBps;
-        uint256 d = (amount * BPS) / against;
-        if (d > BPS) d = BPS;
-        fee = params.baseImbalanceFeeBps + (params.imbalanceSlopeBps * d) / BPS;
-        if (fee > params.maxImbalanceFeeBps) fee = params.maxImbalanceFeeBps;
+        Params memory p = params;
+        return
+            IndexMath.imbalanceFeeBps(
+                amount,
+                against,
+                p.baseImbalanceFeeBps,
+                p.imbalanceSlopeBps,
+                p.maxImbalanceFeeBps
+            );
     }
 
     /**
@@ -2342,41 +2263,17 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
 
         uint256 t = target[idx];
         if (t == 0) return params.maxImbalanceFeeBps; // unknown target => max
-        uint256 cur = current[idx];
 
-        if (cur < t) {
-            // UNDERWEIGHT: discount, proportional to how far below target it
-            // sits, floored at the base fee.
-            uint256 gap = ((t - cur) * BPS) / t; // 0..BPS
-            uint256 relief = (depthFee * gap) / BPS;
-            uint256 fee = depthFee > relief ? depthFee - relief : 0;
-            return fee < params.baseImbalanceFeeBps ? params.baseImbalanceFeeBps : fee;
-        }
-
-        // OVERWEIGHT: surcharge on the same slope the depth fee uses, capped.
-        uint256 over = ((cur - t) * BPS) / t;
-        if (over > BPS) over = BPS;
-        uint256 up = depthFee + (params.imbalanceSlopeBps * over) / BPS;
-        return up > params.maxImbalanceFeeBps ? params.maxImbalanceFeeBps : up;
+        Params memory p = params;
+        return
+            IndexMath.mintFeeBps(
+                depthFee,
+                current[idx],
+                t,
+                p.baseImbalanceFeeBps,
+                p.imbalanceSlopeBps,
+                p.maxImbalanceFeeBps
+            );
     }
 
-    function _validateParams(Params memory p) private pure {
-        if (
-            p.concentrationCapBps < MIN_CONCENTRATION_CAP_BPS ||
-            p.concentrationCapBps > MAX_CONCENTRATION_CAP_BPS
-        ) revert BadParam();
-        if (p.maxImbalanceFeeBps > CEIL_IMBALANCE_FEE_BPS) revert BadParam();
-        if (p.baseImbalanceFeeBps > p.maxImbalanceFeeBps) revert BadParam();
-        if (p.imbalanceSlopeBps > CEIL_IMBALANCE_FEE_BPS) revert BadParam();
-        if (p.bandBps > CEIL_BAND_BPS) revert BadParam();
-        if (p.priceCapBps == 0 || p.priceCapBps > CEIL_PRICE_CAP_BPS) revert BadParam();
-        if (p.minCheckpointInterval == 0 || p.minCheckpointInterval > 1 days) revert BadParam();
-        if (p.staleAfter < p.minCheckpointInterval * 2 || p.staleAfter > 30 days) revert BadParam();
-        if (p.persistenceCheckpoints < 2 || p.persistenceCheckpoints > OBS_SLOTS) revert BadParam();
-        if (p.persistenceToleranceBps == 0 || p.persistenceToleranceBps > BPS) revert BadParam();
-        if (p.largeOpValueWei == 0) revert BadParam();
-        if (p.rampDuration < MIN_RAMP_DURATION || p.rampDuration > MAX_RAMP_DURATION) {
-            revert BadParam();
-        }
-    }
 }

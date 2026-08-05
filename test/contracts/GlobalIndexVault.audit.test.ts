@@ -19,6 +19,7 @@ import {
   warmCheckpoints,
   zeroOut,
   type IndexFixture,
+  indexVaultFactory,
 } from "./helpers/index-vault";
 
 /**
@@ -750,7 +751,7 @@ describe("GlobalIndexVault", () => {
 
   it("a below-floor timelock delay cannot be deployed at all", async () => {
     const [, a, seeder, b, c, d] = await ethers.getSigners();
-    const Vault = await ethers.getContractFactory("GlobalIndexVault");
+    const Vault = await indexVaultFactory();
     const { defaultParams, paramsTuple } = await import("./helpers/index-vault");
     await expect(
       Vault.deploy(
@@ -821,7 +822,7 @@ describe("GlobalIndexVault — real MarketplankVaultV3 constituent", () => {
     await v3.connect(seeder).seedShares(3n * WAD, { value: ethers.parseEther("6") });
     await v3.connect(seeder).openPool();
 
-    const Vault = await ethers.getContractFactory("GlobalIndexVault");
+    const Vault = await indexVaultFactory();
     const index: any = await Vault.deploy(
       "gPLNK",
       "gPLNK",
@@ -1052,7 +1053,7 @@ describe("GlobalIndexVault — hardening pass", () => {
   it("SEEDING: the very first constituent cannot be seeded into a manipulable share price", async () => {
     const { defaultParams, paramsTuple } = await import("./helpers/index-vault");
     const [, admin, seeder, alice] = await ethers.getSigners();
-    const Vault = await ethers.getContractFactory("GlobalIndexVault");
+    const Vault = await indexVaultFactory();
     const vault: any = await Vault.deploy(
       "gPLNK",
       "gPLNK",
