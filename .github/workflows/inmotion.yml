@@ -442,6 +442,12 @@ jobs:
       INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
       INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
       RELAYER_PRIVATE_KEY: ${{ secrets.RELAYER_PRIVATE_KEY }}
+      # Same repo Variable relay-drand.yml reads — keeping both relayers
+      # (this cron and the GitHub Actions fallback) pointed at one source
+      # of truth so a vault added to one is never silently missing from
+      # the other. Falls back to the pre-V3 V2,V1 list if unset, same as
+      # relay-drand.yml, so behavior is unchanged until it's set.
+      RELAY_VAULT_ADDRESSES: ${{ vars.RELAY_VAULT_ADDRESSES }}
     steps:
       - name: Validate relayer and SSH inputs
         shell: bash
@@ -476,7 +482,7 @@ jobs:
             printf 'RPC_URL=%s\n' 'https://rpc.mainnet.chain.robinhood.com'
             printf 'BEACON_ADDRESS=%s\n' '0x87d584df130FED0Fe540954eD48CE2691A18D619'
             printf 'DRAND_CHAIN_HASH=%s\n' '04f1e9062b8a81f848fded9c12306733282b2727ecced50032187751166ec8c3'
-            printf 'VAULT_ADDRESSES=%s\n' '0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04,0xb2019Fd4cA24502e812C0C73b751Fa49979BF708'
+            printf 'VAULT_ADDRESSES=%s\n' "${RELAY_VAULT_ADDRESSES:-0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04,0xb2019Fd4cA24502e812C0C73b751Fa49979BF708}"
           } > "$relayer_env"
           port="${INMOTION_PORT:-2222}"
           staged="$INMOTION_APP_DIR/shared/runtime-secrets/.relayer-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.env"
