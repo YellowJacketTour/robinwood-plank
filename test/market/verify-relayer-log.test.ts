@@ -10,6 +10,11 @@ const execFileAsync = promisify(execFile);
 const verifier = path.resolve("scripts/verify-relayer-log.mjs");
 const vaults = [
   {
+    vault: "0xace28f72fc3e15ea1671e689806694a9b0ce047d",
+    state: "idle",
+    actionable: false,
+  },
+  {
     vault: "0xc4b29d7a01603d2a5937b1fc86ea85e488d72e04",
     state: "idle",
     actionable: false,
@@ -20,8 +25,9 @@ const vaults = [
     actionable: false,
   },
 ];
+const vaultAddressList = vaults.map(({ vault }) => vault).join(",");
 
-test("relayer log verifier accepts a recent two-vault success", async () => {
+test("relayer log verifier accepts a recent all-vault success", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "plank-relayer-log-"));
   try {
     const log = path.join(directory, "relayer.log");
@@ -36,6 +42,7 @@ test("relayer log verifier accepts a recent two-vault success", async () => {
       verifier,
       "--require-hours=0",
       "--max-age-minutes=10",
+      `--vault-addresses=${vaultAddressList}`,
       log,
     ]);
     assert.match(stdout, /RELAYER_LOG_VERIFICATION=.*"status":"ok"/);
@@ -52,7 +59,10 @@ test("relayer log verifier rejects an actionable vault status", async () => {
       log,
       `RELAYER_STATUS=${JSON.stringify({
         timestamp: new Date().toISOString(),
-        vaults: [{ ...vaults[0], state: "error", actionable: true }, vaults[1]],
+        vaults: [
+          { ...vaults[0], state: "error", actionable: true },
+          ...vaults.slice(1),
+        ],
       })}\n`
     );
     await assert.rejects(
@@ -60,6 +70,7 @@ test("relayer log verifier rejects an actionable vault status", async () => {
         verifier,
         "--require-hours=0",
         "--max-age-minutes=10",
+        `--vault-addresses=${vaultAddressList}`,
         log,
       ]),
       /actionable\/error vault status/
