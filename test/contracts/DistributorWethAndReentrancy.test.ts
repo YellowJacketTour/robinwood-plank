@@ -524,8 +524,11 @@ describe("IndexDividendDistributor — real WETH, restricted receive, re-entranc
         "stake",
         "unstake",
       ]);
-      // `receiveDividends` is the one deliberately-unguarded entry: it only
-      // ever ADDS value and calls out to nothing.
+      // `receiveDividends` USED to be the one unguarded entry, on the reasoning
+      // that it only ever ADDS value and calls out to nothing. Both halves of
+      // that are still true and it is guarded anyway, because the risk was
+      // never to `receiveDividends` — it was to the balance-moving windows it
+      // could be nested INSIDE. See DistributorReinvestReentrancy.test.ts.
       expect(await dist.capabilities()).to.deep.equal([true, false, true, 1n]);
     });
   });

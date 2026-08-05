@@ -244,8 +244,34 @@ contract IndexDividendDistributor is ReentrancyGuard {
      * @notice Push ETH to every staked holder, pro rata. Permissionless on
      * purpose: making it a privileged role would buy nothing (a griefer's
      * "attack" is donating money) and would add a key to lose.
+     *
+     * `nonReentrant` EVEN THOUGH THIS FUNCTION MAKES NO EXTERNAL CALL. It is
+     * not here to protect this function; it is here to protect the OTHER ones
+     * from it. `receiveDividends` is the only thing in this contract that
+     * raises `accEthPerShareWad`, and the header's settle -> change -> re-sync
+     * argument depends on `acc` being FROZEN across every balance-moving
+     * window. `claimAndReinvest` holds such a window open across two external
+     * calls (`weth.deposit` and `indexVault.mintSingleAsset`): if `acc` could
+     * rise inside it, the `_resync` that follows would assign the caller's
+     * debt at the NEW height and silently destroy the accrual they earned in
+     * between. Tracing the real call graph, no such path exists today — the
+     * canonical WETH9's `deposit` only credits a balance, and every external
+     * read `mintSingleAsset` performs is a `view`/`staticcall` that cannot
+     * mutate anything — so the window is closed by the callees' shape rather
+     * than by this guard. But "closed because of what someone else's code
+     * happens to do" is a property that a future WETH swap or a new vault
+     * call would revoke silently. The guard makes it closed HERE, by this
+     * contract, unconditionally. It also makes the header's claim that "every
+     * entry point is nonReentrant" literally true rather than aspirational.
+     *
+     * Costs legitimate callers nothing and changes no behaviour: this
+     * contract never calls `receiveDividends` from anywhere, internally or
+     * externally, so no honest flow is ever nested inside another guarded
+     * function. In particular `receiveDividendsWrapped` reaches the same
+     * accumulator through the SHARED PRIVATE `_credit`, not by calling this
+     * function, so the two push paths never nest.
      */
-    function receiveDividends() external payable {
+    function receiveDividends() external payable nonReentrant {
         _credit(msg.value);
     }
 
