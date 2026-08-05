@@ -53,7 +53,7 @@ describe("AUDIT PoC — GlobalIndexVault", () => {
   // A. IDX-01 — permanent, irreversible poisoning of the dividend accumulator
   // ══════════════════════════════════════════════════════════════════════════
 
-  it("IDX-01: one unprivileged actor permanently bricks ALL future dividends, at zero net cost", async () => {
+  it("IDX-01 (CLOSED): the one-transaction poisoning is clamped, carried, and now costs the attacker", async () => {
     const fx = await deployOpenIndex();
     const attacker = fx.alice;
     const divAsset = fx.tokens[0]; // the vault's immutable dividendAsset
@@ -77,43 +77,40 @@ describe("AUDIT PoC — GlobalIndexVault", () => {
     const attackerBefore: bigint = await divAsset.balanceOf(attacker.address);
     await fx.vault.connect(attacker).receiveDividendsWrapped(pot);
 
+    // ROUND 10: CLAMPED. This landed EXACTLY on MAX_MAGNIFIED_PER_SHARE
+    // before the per-push headroom cap; it now lands on one step of it.
     expect(await fx.vault.magnifiedDividendPerShare()).to.equal(
+      MAX_MAGNIFIED_PER_SHARE / 2n ** 32n
+    );
+    expect(await fx.vault.magnifiedDividendPerShare()).to.be.lessThan(
       MAX_MAGNIFIED_PER_SHARE
     );
 
-    // ── Step 3. The attacker takes every wei of it straight back out. Their
-    // net cost for permanently disabling the mechanism is gas.
+    // ── Step 3. ROUND 10: THE ATTACK NOW COSTS THE ATTACKER. Before, they
+    // took every wei straight back out and their net cost was gas. Now only
+    // ONE STEP of headroom (room / 2**32) was applied, so only what that step
+    // distributes is claimable and the rest of their push is carried.
     await fx.vault.connect(attacker).claimDividend();
     const attackerAfter: bigint = await divAsset.balanceOf(attacker.address);
-    expect(attackerBefore - attackerAfter).to.equal(0n); // full recovery
+    expect(attackerBefore - attackerAfter).to.be.greaterThan(0n); // was 0n
 
-    // ── Step 4. The damage. `magnifiedDividendPerShare` only ever increases,
-    // and the guard is `acc > MAX`, so every future push of any size reverts.
-    // Honest holders arrive, hold real size, and can never be paid.
+    // ── Step 4. THE DAMAGE IS GONE. The accumulator sits at 2**94, not on its
+    // ceiling, and the mechanism keeps working for the honest holders who
+    // arrive afterwards.
     await fx.vault.connect(fx.bob).mintProRata(100n * WAD, maxIn(3));
     await fx.tokens[0].connect(fx.carol).approve(fx.vaultAddr, ethers.MaxUint256);
 
-    await expect(
-      fx.vault.connect(fx.carol).receiveDividendsWrapped(1n * WAD)
-    ).to.be.revertedWithCustomError(fx.vault, "DividendAccumulatorFull");
+    await fx.vault.connect(fx.carol).receiveDividendsWrapped(1n * WAD);
+    expect(await fx.vault.withdrawableDividendOf(fx.bob.address)).to.be.greaterThan(0n);
 
-    // The ONLY pushes that still "succeed" are ones so small that
-    // `delta = floor(pot * MAGNITUDE / eligible)` rounds to zero — i.e. the
-    // funds are transferred in, counted in `totalDividendsReceived`, and
-    // credited to NOBODY. Silent absorption, not a working mechanism.
+    // Nothing is silently absorbed either: a push too small to move the
+    // accumulator is carried, not vanished.
     const recvBefore: bigint = await fx.vault.totalDividendsReceived();
     await fx.vault.connect(fx.carol).receiveDividendsWrapped(1n);
     expect((await fx.vault.totalDividendsReceived()) - recvBefore).to.equal(1n);
-    expect(await fx.vault.magnifiedDividendPerShare()).to.equal(
-      MAX_MAGNIFIED_PER_SHARE
-    ); // unchanged: the wei was absorbed, never distributed
-
-    // The mechanism is permanently dead while every other path still works —
-    // which is exactly why this survives an "is the exit door open?" test.
-    expect(await fx.vault.withdrawableDividendOf(fx.bob.address)).to.equal(0n);
   });
 
-  it("IDX-01b: the same poisoning permanently TRAPS the segregated ecosystem-fee ledger", async () => {
+  it("IDX-01b (CLOSED): the segregated ecosystem-fee ledger can no longer be trapped", async () => {
     // With the vault appointed as its own sink (the production shape the
     // header names), `harvestEcosystemFees` routes through `_creditDividends`.
     // A poisoned accumulator therefore makes the ONLY exit from
@@ -150,23 +147,28 @@ describe("AUDIT PoC — GlobalIndexVault", () => {
     const trapped: bigint = await fx.vault.ecosystemFeesWei(fx.addrs[0]);
     expect(trapped).to.be.greaterThan(0n);
 
-    // ...and the one and only harvest path is permanently shut.
-    await expect(
-      fx.vault.connect(fx.carol).harvestEcosystemFees()
-    ).to.be.revertedWithCustomError(fx.vault, "DividendAccumulatorFull");
-
-    // The ledger keeps growing with every priced operation, with no exit.
-    await fx.vault.connect(fx.bob).mintSingleAsset(fx.addrs[0], 5n * WAD, 0n);
-    expect(await fx.vault.ecosystemFeesWei(fx.addrs[0])).to.be.greaterThan(
-      trapped
+    // ...and ROUND 10 re-opens the one and only harvest path. It is still
+    // permissionless with a fixed destination; what changed is that no push
+    // can refuse, so the ledger can never be sealed behind one.
+    await expect(fx.vault.connect(fx.carol).harvestEcosystemFees()).to.emit(
+      fx.vault,
+      "EcosystemFeesHarvested"
     );
+    expect(await fx.vault.ecosystemFeesWei(fx.addrs[0])).to.equal(0n);
+
+    // Fees keep accruing on priced operations and keep being harvestable.
+    await fx.vault.connect(fx.bob).mintSingleAsset(fx.addrs[0], 5n * WAD, 0n);
+    expect(await fx.vault.ecosystemFeesWei(fx.addrs[0])).to.be.greaterThan(0n);
+    await fx.vault.connect(fx.carol).harvestEcosystemFees();
+    expect(await fx.vault.ecosystemFeesWei(fx.addrs[0])).to.equal(0n);
+    void trapped;
   });
 
   // ══════════════════════════════════════════════════════════════════════════
   // B. IDX-02 — the "never blockable" exit door, blocked, with no recovery
   // ══════════════════════════════════════════════════════════════════════════
 
-  it("IDX-02: one constituent with a reverting transfer bricks redeemProRata for EVERY holder, permanently", async () => {
+  it("IDX-02 (CLOSED): a reverting constituent defers its own leg and blocks nobody", async () => {
     const fx = await deployOpenIndex();
 
     // A token that behaves perfectly at listing time and turns hostile later —

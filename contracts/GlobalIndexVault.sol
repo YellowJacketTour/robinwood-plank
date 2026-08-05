@@ -583,11 +583,70 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
      */
     uint256 private constant MAGNITUDE = 2 ** 64;
 
-    /// @dev Push-side ceiling on the accumulator. Enforced where reverting is
-    /// HARMLESS — at the push, which is a donation nobody is owed — precisely
-    /// so it never has to be enforced on the transfer path, where reverting
-    /// would brick transferability.
+    /// @dev Absolute ceiling on the accumulator. It is what makes the transfer
+    /// hook's overflow argument a proof rather than an estimate, and it is
+    /// never enforced by REVERTING — see `MAX_PUSH_HEADROOM_DIVISOR`.
     uint256 private constant MAX_MAGNIFIED_PER_SHARE = 2 ** 126;
+
+    /**
+     * @dev ── THE ACCUMULATOR CANNOT BE POISONED IN ONE TRANSACTION (round 10)
+     *
+     * THE FINDING (AuditPoC IDX-01/IDX-01b). `magnifiedDividendPerShare` is
+     * monotonically non-decreasing with no reset anywhere, and the ceiling used
+     * to be enforced by REVERTING the push. So an unprivileged actor could:
+     * mint ONE base unit while the eligible supply was otherwise zero (the seed
+     * is excluded by design, so the divisor became exactly 1), push
+     * `pot = 2**62` — about 4.6 whole tokens, not a whale and not a flash loan
+     * — and land `delta = pot * MAGNITUDE / 1 = 2**126` EXACTLY on the ceiling
+     * in a single transaction. They then claimed the whole push straight back,
+     * so their net cost was gas. After that every future push reverted forever,
+     * and because `harvestEcosystemFees` routes through the same accumulator,
+     * the segregated ecosystem-fee ledger was permanently trapped too.
+     *
+     * THE FIX — two changes, and the first is the one that matters.
+     *
+     * 1. CAP THE PER-PUSH DELTA AT A FIXED FRACTION OF THE REMAINING HEADROOM,
+     *    `room / 2**32`. This is what makes the ONE-TRANSACTION attack
+     *    impossible rather than merely expensive: exhausting the accumulator
+     *    now takes on the order of 2**32 — over four billion — separate
+     *    transactions, which is not a cost, it is an impossibility. It also
+     *    inverts the attack's economics outright: the attacker above now has
+     *    `2**94` applied instead of `2**126`, so of the `2**62` they pushed
+     *    they can claim back only `2**30`. Poisoning went from free to
+     *    self-destructive.
+     *
+     * 2. NEVER REVERT. The unaccommodated REMAINDER of the pot — not the whole
+     *    pot, just the fraction that did not fit — is held in
+     *    `undistributedDividends` and folded into a future push, which is the
+     *    same "carry" discipline `WrappedIndexShare.carry` already uses for the
+     *    zero-denominator case and which `undistributedDividends` was already
+     *    doing for `eligible == 0`. A legitimate push is therefore never lost
+     *    and never refused; at worst it is partially deferred until the
+     *    eligible supply grows and the delta it implies is ordinary again. That
+     *    is self-healing: the deferral condition is "the implied per-share
+     *    amount is astronomically large", which is exactly the condition a
+     *    growing supply removes.
+     *
+     * DOES THE CEILING STILL ARRIVE ORGANICALLY? No, and the arithmetic is
+     * worth stating rather than asserting. A real push against a real supply —
+     * say one whole token spread over a thousand whole shares — implies a delta
+     * around `2**64 / 1000`, roughly `1.8e16`. A single step of headroom at a
+     * fresh accumulator is `2**126 / 2**32 = 2**94`, roughly `2e28`: TWELVE
+     * ORDERS OF MAGNITUDE larger. Reaching the ceiling by ordinary use would
+     * take on the order of `1e21` pushes. So no periodic re-basing or
+     * "compaction" mechanism is introduced here, and that is a deliberate
+     * choice: a mechanism that could move the accumulator DOWN would have to
+     * move every holder's correction term with it, which is O(holders) — the
+     * one thing this whole design exists to avoid — and it would be new
+     * privileged machinery guarding against a state no honest timeline reaches.
+     * The cheap attack is closed; the expensive non-attack is left alone.
+     *
+     * The `step == 0` fallback (`room` smaller than the divisor, i.e. an
+     * accumulator already within `2**-32` of full) is deliberate: at that point
+     * there is nothing left to protect, and clamping the step to zero instead
+     * would strand every subsequent push in the carry forever.
+     */
+    uint256 private constant MAX_PUSH_HEADROOM_DIVISOR = 2 ** 32;
 
     /// @dev Mint-side ceiling on total share supply, for the same reason. At
     /// 2**128 base units this is ~3.4e20 whole shares and is unreachable by
@@ -608,8 +667,14 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     uint256 public totalDividendsReceived;
     uint256 public totalDividendsWithdrawn;
 
-    /// @notice Pushed while no eligible share existed. Held, never lost, never
-    /// reverted; folds into the accumulator on the first push that has holders.
+    /// @notice Value received but not yet credited to the accumulator. Two
+    /// causes, one behaviour: nobody was eligible to be credited
+    /// (`eligible == 0`), or the implied per-share delta exceeded this push's
+    /// share of the accumulator's remaining headroom (see
+    /// `MAX_PUSH_HEADROOM_DIVISOR`). In both cases the value is HELD, never
+    /// lost and never reverted, and folds into the next push whose arithmetic
+    /// has room for it. There is no input to this contract that can refuse a
+    /// dividend push or strand one permanently.
     uint256 public undistributedDividends;
 
 
@@ -691,7 +756,14 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     error AllocationCapExceeded();
     error EcosystemSinkUnset();
     error ApprovalNotConsumed();
-    error DividendAccumulatorFull();
+    // `DividendAccumulatorFull` was retired in round 10. It was the revert that
+    // made the accumulator poisonable — a single cheap push could land the
+    // accumulator on its ceiling and every subsequent push, including every
+    // ecosystem-fee harvest, reverted with it forever. The ceiling is now
+    // enforced by CLAMPING and CARRYING (see MAX_PUSH_HEADROOM_DIVISOR), so
+    // there is no longer any input that can refuse a push. The error is removed
+    // rather than left declared-and-unreachable: a phantom failure mode in an
+    // audited ABI is a lie about what this contract can do.
 
     // ── Construction ───────────────────────────────────────────────────────
 
@@ -1996,25 +2068,39 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
             emit DividendsReceived(msg.sender, amount, 0);
             return;
         }
-        undistributedDividends = 0;
-
-        // Floors. The remainder stays in this contract forever, which is what
-        // makes "total withdrawable <= total received" structural rather than
-        // hopeful.
+        // Floors. The remainder stays in this contract, which is what makes
+        // "total withdrawable <= total received" structural rather than hopeful.
         uint256 delta = Math.mulDiv(pot, MAGNITUDE, eligible);
-        uint256 acc = magnifiedDividendPerShare + delta;
-        // Enforced HERE, at the push, because a push is the one place in this
-        // mechanism where reverting is harmless: the pusher keeps their money
-        // and no holder loses anything. This is what lets the transfer hook be
-        // unconditionally revert-free.
-        if (acc > MAX_MAGNIFIED_PER_SHARE) revert DividendAccumulatorFull();
-        magnifiedDividendPerShare = acc;
+
+        // ── THE PER-PUSH HEADROOM CAP. See MAX_PUSH_HEADROOM_DIVISOR for why
+        // this, and not a revert, is what closes the one-transaction poisoning
+        // attack — and for why the ceiling is unreachable by honest use.
+        uint256 room = MAX_MAGNIFIED_PER_SHARE - magnifiedDividendPerShare;
+        // `step == 0` means the accumulator is already within 2**-32 of full,
+        // at which point there is nothing left to ration and rationing anyway
+        // would strand every future push in the carry forever. The residual
+        // room is then the whole allowance — still a hard clamp, never a revert.
+        uint256 step = room / MAX_PUSH_HEADROOM_DIVISOR;
+        if (step == 0) step = room;
+        uint256 carried;
+        if (delta > step) {
+            delta = step;
+            // What this delta actually distributes, floored — so the carry is
+            // the honest remainder and can never exceed the pot.
+            carried = pot - Math.mulDiv(delta, eligible, MAGNITUDE);
+        }
+        undistributedDividends = carried;
+        // In range UNCONDITIONALLY: `delta <= step <= room`. The transfer
+        // hook's overflow bound therefore still holds as a proof, which is the
+        // property that must survive this change untouched.
+        magnifiedDividendPerShare += delta;
 
         // Cancel the locked seed's accrual, in O(1), so no slice of any
         // distribution is credited to an address that can never claim it.
         if (seedBal > 0) {
             magnifiedDividendCorrections[SEED_LOCK] -= int256(delta * seedBal);
         }
+        if (carried > 0) emit DividendsDeferred(pot, carried);
         emit DividendsReceived(msg.sender, amount, eligible);
     }
 
