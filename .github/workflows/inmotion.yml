@@ -441,6 +441,7 @@ jobs:
       INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
       INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
       INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      RELAY_VAULT_ADDRESSES: ${{ vars.RELAY_VAULT_ADDRESSES }}
       RELAYER_PRIVATE_KEY: ${{ secrets.RELAYER_PRIVATE_KEY }}
     steps:
       - name: Validate relayer and SSH inputs
@@ -454,6 +455,7 @@ jobs:
           test -n "$INMOTION_HOST_KEY"
           test -n "$INMOTION_APP_DIR"
           test -n "$INMOTION_NODE_BIN"
+          test -n "$RELAY_VAULT_ADDRESSES"
 
       - name: Configure trusted SSH host
         shell: bash
@@ -476,7 +478,7 @@ jobs:
             printf 'RPC_URL=%s\n' 'https://rpc.mainnet.chain.robinhood.com'
             printf 'BEACON_ADDRESS=%s\n' '0x87d584df130FED0Fe540954eD48CE2691A18D619'
             printf 'DRAND_CHAIN_HASH=%s\n' '04f1e9062b8a81f848fded9c12306733282b2727ecced50032187751166ec8c3'
-            printf 'VAULT_ADDRESSES=%s\n' '0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04,0xb2019Fd4cA24502e812C0C73b751Fa49979BF708'
+            printf 'VAULT_ADDRESSES=%s\n' "$RELAY_VAULT_ADDRESSES"
           } > "$relayer_env"
           port="${INMOTION_PORT:-2222}"
           staged="$INMOTION_APP_DIR/shared/runtime-secrets/.relayer-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.env"
@@ -489,11 +491,12 @@ jobs:
 
           ssh -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
-            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "$staged" <<'REMOTE'
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "$staged" "$RELAY_VAULT_ADDRESSES" <<'REMOTE'
           set -euo pipefail
           app_dir="$1"
           node_bin="$2"
           staged="$3"
+          expected_vaults="$4"
           case "$app_dir" in
             /home/*/plank.tanggang.life) ;;
             *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
@@ -531,7 +534,8 @@ jobs:
             "$node_bin" --env-file="$secret_file" "$artifact" \
             >> "$log_file" 2>&1
           "$node_bin" "$verifier" \
-            --require-hours=0 --max-age-minutes=10 "$log_file"
+            --require-hours=0 --max-age-minutes=10 \
+            --vault-addresses="$expected_vaults" "$log_file"
 
           cron_before="$(mktemp)"
           cron_after="$(mktemp)"
@@ -587,6 +591,7 @@ jobs:
       INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
       INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
       INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      RELAY_VAULT_ADDRESSES: ${{ vars.RELAY_VAULT_ADDRESSES }}
       CONFIRMATION: ${{ inputs.confirmation }}
     steps:
       - name: Validate disable confirmation
@@ -594,6 +599,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$CONFIRMATION" = "DISABLE_GITHUB_RELAY"
+          test -n "$RELAY_VAULT_ADDRESSES"
 
       - name: Configure trusted SSH host
         shell: bash
@@ -612,10 +618,11 @@ jobs:
           port="${INMOTION_PORT:-2222}"
           ssh -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
-            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" <<'REMOTE'
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "$RELAY_VAULT_ADDRESSES" <<'REMOTE'
           set -euo pipefail
           app_dir="$1"
           node_bin="$2"
+          expected_vaults="$3"
           case "$app_dir" in
             /home/*/plank.tanggang.life) ;;
             *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
@@ -636,7 +643,8 @@ jobs:
             "$node_bin" --env-file="$secret_file" "$artifact" \
             >> "$log_file" 2>&1
           "$node_bin" "$verifier" \
-            --require-hours=24 --max-age-minutes=10 "$log_file"
+            --require-hours=24 --max-age-minutes=10 \
+            --vault-addresses="$expected_vaults" "$log_file"
           REMOTE
 
       - name: Disable the GitHub scheduled relay

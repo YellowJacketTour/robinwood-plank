@@ -462,7 +462,7 @@ Dispatch `operation=provision-relayer`. The job:
 2. writes `shared/runtime-secrets/relayer.env`;
 3. enforces directory mode `700` and file mode `600`;
 4. refuses the key if it appears in Passenger's `.env.production`;
-5. runs the relayer once and verifies both vaults;
+5. runs the relayer once and verifies every vault in `RELAY_VAULT_ADDRESSES`;
 6. replaces old relayer cron lines while preserving unrelated jobs;
 7. installs one managed one-minute cron through `current`; and
 8. verifies that cron appended a structured status.
@@ -475,6 +475,12 @@ Managed entry:
 
 The key is a dedicated gas-only wallet. It has no custody or contract-admin
 authority. Owners must retain an offline backup.
+
+`RELAY_VAULT_ADDRESSES` is the single source of truth for the managed cron's
+`VAULT_ADDRESSES` setting. It must contain every configured production vault,
+currently V3, V2, and V1, in comma-separated form. The provisioning operation
+fails closed if the variable is missing, so a new vault cannot silently be
+left out of the relayer.
 
 The GitHub scheduled workflow may overlap temporarily because submission and
 settlement are permissionless and designed to be safe on repeated runs.
