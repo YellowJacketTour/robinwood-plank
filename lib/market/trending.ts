@@ -1,14 +1,22 @@
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
-import { readSalesCatalog, type SaleRecord } from "@/lib/market/sales-catalog";
+import { readChainActivity } from "@/lib/market/chain-events";
 import { getListings } from "@/lib/market/orders-store";
 import { collectionFloorWei } from "@/lib/market/floors";
 
+/** The subset of a ledger sale event these signal computations actually need. */
+type TrendingSale = { priceWei: string; timestamp: string | null; txHash: string };
+
 /**
  * "Trending Collections" ranking — signal-driven, no static/manual curation
- * list. Pulls from the sales catalog (lib/market/sales-catalog.ts, the
- * existing royalty-verified sale history source) and the live order book
+ * list. Pulls from the permanent chain-event ledger (lib/market/chain-events.ts,
+ * migration 008_chain_events.sql — the same complete, evidence-based sale
+ * history Activity and Highest Sale read) and the live order book
  * (lib/market/orders-store.ts) — the same data sources Buy & Sell and
- * Activity already use, not a new one invented for this rail.
+ * Activity already use, not a new one invented for this rail. This used to
+ * read lib/market/sales-catalog.ts's royalty-gated, bounded-rebuild KV blob —
+ * same wrongness fixed in app/api/market/sales-stats/route.ts: a real sale
+ * that didn't route EIP-2981 royalty was invisible here too, meaning a
+ * collection's trending score could be understated by real missing volume.
  *
  * Signals, each over rolling 24h vs 7d windows:
  *  - volumeVelocity: 24h volume as a multiple of the 7d-average daily
@@ -48,7 +56,7 @@ export type TrendingCollectionSignal = {
   score: number;
 };
 
-function windowSales(sales: readonly SaleRecord[], sinceMs: number, untilMs: number): SaleRecord[] {
+function windowSales(sales: readonly TrendingSale[], sinceMs: number, untilMs: number): TrendingSale[] {
   return sales.filter((s) => {
     if (!s.timestamp) return false;
     const t = Date.parse(s.timestamp);
@@ -57,7 +65,7 @@ function windowSales(sales: readonly SaleRecord[], sinceMs: number, untilMs: num
   });
 }
 
-function sumWei(sales: readonly SaleRecord[]): bigint {
+function sumWei(sales: readonly TrendingSale[]): bigint {
   let total = BigInt(0);
   for (const s of sales) {
     try {
@@ -70,7 +78,7 @@ function sumWei(sales: readonly SaleRecord[]): bigint {
   return total;
 }
 
-function minWei(sales: readonly SaleRecord[]): bigint | null {
+function minWei(sales: readonly TrendingSale[]): bigint | null {
   let min: bigint | null = null;
   for (const s of sales) {
     try {
@@ -87,17 +95,41 @@ function minWei(sales: readonly SaleRecord[]): bigint | null {
 /** Buyers can't be recovered from SaleRecord alone (no `to` field there);
  * approximate uniqueness by distinct tx hash, which is a reasonable proxy
  * for distinct trade events until sales-catalog records the buyer address. */
-function uniqueTrades(sales: readonly SaleRecord[]): number {
+function uniqueTrades(sales: readonly TrendingSale[]): number {
   return new Set(sales.map((s) => s.txHash)).size;
+}
+
+async function ledgerSalesForContract(contractAddress: string): Promise<TrendingSale[]> {
+  const sales: TrendingSale[] = [];
+  let offset = 0;
+  for (;;) {
+    const page = await readChainActivity({
+      limit: 1_000,
+      offset,
+      kinds: ["sale"],
+      source: "nft",
+      contract: contractAddress,
+    });
+    for (const e of page.events) {
+      if (e.priceWei == null) continue;
+      sales.push({ priceWei: e.priceWei, timestamp: e.timestamp, txHash: e.txHash });
+    }
+    if (page.nextOffset == null) break;
+    offset = page.nextOffset;
+  }
+  return sales;
 }
 
 export async function computeTrendingSignal(
   slug: string,
   name: string,
-  image: string
+  image: string,
+  contractAddress: string
 ): Promise<TrendingCollectionSignal> {
-  const [catalog, listings] = await Promise.all([readSalesCatalog(), getListings(slug)]);
-  const sales = catalog?.sales ?? [];
+  const [sales, listings] = await Promise.all([
+    ledgerSalesForContract(contractAddress),
+    getListings(slug),
+  ]);
 
   const now = Date.now();
   const last24h = windowSales(sales, now - DAY_MS, now);
@@ -148,7 +180,9 @@ export async function computeTrendingSignal(
 
 export async function getTrendingCollections(): Promise<TrendingCollectionSignal[]> {
   const signals = await Promise.all(
-    MARKET_COLLECTIONS.map((c) => computeTrendingSignal(c.slug, c.name, c.image))
+    MARKET_COLLECTIONS.map((c) =>
+      computeTrendingSignal(c.slug, c.name, c.image, c.contractAddress)
+    )
   );
   return signals.sort((a, b) => b.score - a.score);
 }
