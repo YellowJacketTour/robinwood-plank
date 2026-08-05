@@ -43,7 +43,7 @@ const V3_ERROR_MESSAGES: Record<string, string> = {
   InsufficientOutput: "Price moved past your slippage tolerance. Raise it or retry.",
   InsufficientLiquidity: "Not enough liquidity in the pool for that size.",
   RandomnessNotAvailable: "The drand round for your redeem isn't on-chain yet — wait a few seconds and claim again.",
-  RandomnessExpired: "Your redeem's drand round expired. You can forfeit it for a refund and retry.",
+  RandomnessExpired: "Your redeem's drand round expired. Forfeiting it does NOT refund your share or fee — the share is burned to the treasury as an anti-reroll penalty. You'll need to deposit again to redeem.",
   DrawNotPinned: "The random draw hasn't been pinned yet — wait a moment and retry.",
   NoRequest: "There's no pending redeem for that wallet.",
   TooSoon: "Too soon — the request hasn't expired yet.",
