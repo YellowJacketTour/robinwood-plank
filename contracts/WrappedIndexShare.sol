@@ -215,6 +215,65 @@ interface IIndexDividendShare is IERC20 {
  *  it is unreachable, it is unreachable because the issuer of that one token
  *  says so, and the user's OTHER assets came out in the same call regardless.
  *
+ *  THE ZERO-DENOMINATOR CARRY — ROUND 9e
+ *  -------------------------------------
+ *  A live-balance backing pool has no `index += donation / W_global` step and
+ *  therefore cannot suffer the divide-by-zero half of the classic MasterChef
+ *  bug: a push into this wrapper never reverts on the funder and never strands
+ *  the value. But it DID suffer the other half — the one that was audited as
+ *  CRITICAL in a sister design under the name "lone-staker vault drain".
+ *
+ *  Concretely, and this was measured, not theorised: with `totalSupply() == 0`
+ *  (everyone has unwrapped, or nobody has wrapped yet), a `depositStream` of
+ *  100 units of a bribe token sits in the backing pool with no holder to
+ *  divide it among. The next actor to call `deposit` — for one wei of raw
+ *  share — owns 100% of a one-holder supply and `withdraw`s in the SAME
+ *  TRANSACTION with 99.999999999999999999 of the 100 units and their raw share
+ *  back. Zero capital, zero duration, zero risk, and the funder's entire
+ *  intended reward to holders captured by whoever happened to be watching.
+ *
+ *  That is not the disclosed stream-leg dilution documented above. Disclosed
+ *  dilution is bounded by `w / (S + w + VIRTUAL_SHARES)` and therefore requires
+ *  capital proportional to the pool. At `S == 0` that bound degenerates to 1
+ *  for an arbitrarily small `w`, which is a different thing entirely.
+ *
+ *  THE FIX, and it is the same shape as the sister design's `donation_carry`:
+ *  value that arrives while there is NO eligible holder is not counted as
+ *  backing. It is held in `carry[token]` — subtracted from every backing read
+ *  by the same `_netOf` that already subtracts `reserved` — and it rejoins the
+ *  pool the moment real, held-across-a-block stake exists, pro rata to
+ *  EVERYONE present then, not to whoever re-entered first.
+ *
+ *  Why the release is one BLOCK after supply becomes real, rather than
+ *  instantly on the mint: releasing on the mint itself hands the pot to the
+ *  sole depositor who just created the supply, which is the identical capture
+ *  with one more step. A block boundary is the minimum condition under which
+ *  "eligible" means anything at all — the holder must carry the position
+ *  across a block, at real risk, and anyone else may join before the release,
+ *  so the pot is genuinely shared by whoever is present rather than won by
+ *  transaction ordering. This is a deliberate design choice, stated here and
+ *  proved by test, not a silently-inherited property.
+ *
+ *  WHAT THE CARRY IS NOT. It is not a lever, not a pause, and not a delay on
+ *  anybody's exit:
+ *    - No role can read it, write it, extend it, or reach it. There is no
+ *      setter and no parameter.
+ *    - It never blocks `withdraw`. Carried value simply is not yet backing;
+ *      every other leg pays out exactly as before, and a holder's own
+ *      previously-earned backing is never carried.
+ *    - It cannot trap. Release is unconditional and automatic on the first
+ *      interaction at or after the unlock block. `pruneStream` additionally
+ *      refuses to drop a token with a live carry, so a carried balance can
+ *      never be orphaned off the iteration list.
+ *    - It is unreachable in the normal case: with any wrapped supply at all,
+ *      `_accrueCarry` is a no-op and every push lands in backing instantly,
+ *      exactly as before.
+ *
+ *  RESIDUAL, stated rather than hidden: a raw `transfer` of a stream token
+ *  straight to this address while supply is zero is invisible to this contract
+ *  and is NOT carried. `depositStream` is the supported funding path and is the
+ *  one that carries. A funder who bypasses it accepts first-comer capture.
+ *
  *  PER-STREAM ISOLATION
  *  --------------------
  *  A listed token that later turns hostile, breaks, or self-destructs must
@@ -341,6 +400,23 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
     /// @notice user => asset => amount owed from a bounced payout leg.
     /// Claimable forever, by that user, with no role able to touch it.
     mapping(address => mapping(address => uint256)) public pendingClaim;
+
+    /**
+     * @notice Per-asset value that arrived while there was NO eligible holder,
+     * held out of backing until real stake exists again. See "THE
+     * ZERO-DENOMINATOR CARRY" in the header. No role can reach this.
+     */
+    mapping(address => uint256) public carry;
+
+    /**
+     * @dev Carry state machine, in one slot:
+     *   0                  — nothing is carried.
+     *   type(uint256).max   — carried, and the wrapper is (or was last seen)
+     *                        empty, so there is nothing to release to yet.
+     *   any other value n   — carried, releasing on the first interaction at
+     *                        block height >= n (always `transition + 1`).
+     */
+    uint256 private _carryUnlockBlock;
 
     error ZeroAmount();
     error NothingToMint();
@@ -547,7 +623,18 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
      * stream can affect it.
      */
     function harvest() external nonReentrant returns (uint256 claimed) {
+        _foldCarry();
         claimed = _harvest();
+    }
+
+    /**
+     * @notice Observability for the zero-denominator carry: the block height at
+     * or after which carried value rejoins backing. `0` means nothing is
+     * carried; `type(uint256).max` means something is carried and the wrapper
+     * has no holders to release it to yet.
+     */
+    function carryUnlockBlock() external view returns (uint256) {
+        return _carryUnlockBlock;
     }
 
     /**
@@ -568,6 +655,10 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
         returns (uint256 wrappedOut)
     {
         if (rawSharesIn == 0) revert ZeroAmount();
+
+        // Release anything carried from a no-holder window BEFORE pricing, so
+        // it is shared with the holders who were already here.
+        _foldCarry();
 
         // Bank the pending entitlement BEFORE pricing, so the incoming
         // depositor cannot buy a slice of dividends that predate them.
@@ -609,6 +700,11 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
         if (wrappedOut == 0) revert NothingToMint();
         _mint(msg.sender, wrappedOut);
 
+        // Supply just went 0 -> nonzero with a pot carried: start the release
+        // clock at the NEXT block, so this depositor cannot round-trip it out
+        // in the same transaction and anyone else may join first.
+        if (supply == 0) _armCarry();
+
         emit Wrapped(msg.sender, rawCredited, divCredited, wrappedOut);
     }
 
@@ -633,6 +729,10 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
         returns (uint256 rawSharesOut, uint256 dividendAssetOut)
     {
         if (wrappedIn == 0) revert ZeroAmount();
+
+        // Never blocks: this only ever ADDS carried value back into the pool
+        // this exit is about to be priced against.
+        _foldCarry();
 
         _harvest();
 
@@ -755,11 +855,15 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
     {
         if (!isStream[token]) revert NotAStream();
         if (amount == 0) revert ZeroAmount();
+        _foldCarry();
         uint256 before = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         uint256 nowBal = IERC20(token).balanceOf(address(this));
         credited = nowBal > before ? nowBal - before : 0;
         if (credited == 0) revert NothingCredited();
+        // No-op with any wrapped supply. With none, held aside rather than
+        // left for the next actor to flash-capture. See the header.
+        _accrueCarry(token, credited);
         emit StreamFunded(token, msg.sender, credited);
     }
 
@@ -876,7 +980,13 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
     function pruneStream(address token) external {
         if (!_tracked[token]) revert NotAStream();
         if (isStream[token]) revert StreamStillListed();
-        if (_probeBalance(token) != 0 || reserved[token] != 0) revert StreamNotEmpty();
+        // `carry` is checked alongside `reserved` because `_probeBalance`
+        // subtracts it: a token holding nothing BUT a carried balance would
+        // otherwise probe as empty, get pruned off `_streamList`, and never be
+        // reachable by `_foldCarry` again — trapping the carry permanently.
+        if (_probeBalance(token) != 0 || reserved[token] != 0 || carry[token] != 0) {
+            revert StreamNotEmpty();
+        }
 
         uint256 n = _streamList.length;
         for (uint256 i = 0; i < n; ++i) {
@@ -908,8 +1018,50 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
     /// zero rather than reverting: an underflow here would brick every path in
     /// the contract, which is a far worse failure than reading a hair low.
     function _netOf(address token, uint256 bal) private view returns (uint256) {
-        uint256 res = reserved[token];
+        uint256 res = reserved[token] + carry[token];
         return bal > res ? bal - res : 0;
+    }
+
+    /**
+     * @dev THE ONE CARRY WRITE. Every inbound push routes through here, so the
+     * zero-denominator rule is one code path rather than a special case bolted
+     * onto each funding function.
+     *
+     * With any wrapped supply at all this is a no-op and the value is backing
+     * immediately, exactly as before round 9e. With none, the value is held
+     * aside and the release clock is re-armed to "locked", so a second push
+     * into a still-empty wrapper cannot inherit a stale unlock height.
+     */
+    function _accrueCarry(address token, uint256 amount) private {
+        if (amount == 0 || totalSupply() != 0) return;
+        carry[token] += amount;
+        _carryUnlockBlock = type(uint256).max;
+    }
+
+    /**
+     * @dev Fold every carried balance back into backing once real stake has
+     * been held across a block boundary. Unconditional, permissionless,
+     * reachable from `deposit`, `withdraw` and `depositStream` — i.e. from any
+     * interaction at all, so carried value can never sit out indefinitely
+     * while the wrapper is in use.
+     *
+     * Bounded by `MAX_STREAMS + 1`, the same bound `withdraw` already carries.
+     */
+    function _foldCarry() private {
+        uint256 unlock_ = _carryUnlockBlock;
+        if (unlock_ == 0 || block.number < unlock_ || totalSupply() == 0) return;
+        carry[address(dividendAsset)] = 0;
+        uint256 n = _streamList.length;
+        for (uint256 i = 0; i < n; ++i) carry[_streamList[i]] = 0;
+        _carryUnlockBlock = 0;
+    }
+
+    /// @dev Arm the release clock when supply transitions 0 -> nonzero with
+    /// something carried. `block.number + 1`: the sole depositor who just
+    /// created the supply cannot capture the pot in their own transaction, and
+    /// anyone may join before it lands.
+    function _armCarry() private {
+        if (_carryUnlockBlock != 0) _carryUnlockBlock = block.number + 1;
     }
 
     /**
@@ -978,6 +1130,11 @@ contract WrappedIndexShare is ERC20, ReentrancyGuard, ScopedRoles {
         indexShare.claimDividend();
         uint256 after_ = dividendAssetHeld();
         claimed = after_ > before ? after_ - before : 0;
-        if (claimed > 0) emit Harvested(msg.sender, claimed);
+        if (claimed > 0) {
+            // Same rule, same entrypoint, for the dividend leg: a harvest into
+            // a wrapper with no holders is carried, not left for the taking.
+            _accrueCarry(address(dividendAsset), claimed);
+            emit Harvested(msg.sender, claimed);
+        }
     }
 }
