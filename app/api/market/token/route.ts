@@ -2,7 +2,7 @@ import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import { fetchNftMetadata, resolveIpfsUrl } from "@/lib/ipfs";
 import { getOwnerFromIndex } from "@/lib/market/owner-index";
 import { robinwoodTokenUri, resolveTokenImage } from "@/lib/market/token-image";
-import { fetchActivity } from "@/lib/market/activity";
+import { readChainActivity } from "@/lib/market/chain-events";
 import { fetchTokenInstanceTransfers } from "@/lib/market/blockscout";
 import { compactRarityFor, getRaritySnapshot } from "@/lib/market/rarity-snapshot";
 import { cachedPublicJson } from "@/lib/http-cache";
@@ -135,11 +135,18 @@ export async function GET(req: Request) {
           to: t.to?.hash ?? "",
         }));
       } catch {
-        // Blockscout rate-limits hard. Fall back to the old collection scan
-        // rather than showing nothing — partial history beats none.
+        // Blockscout rate-limits hard. Fall back to the permanent ledger
+        // (migration 008_chain_events.sql) rather than showing nothing —
+        // partial history beats none. Reads this token's real, complete
+        // history, not a capped recent-events window like the old fallback.
         try {
-          const all = await fetchActivity(200);
-          history = all.filter((e) => e.tokenId === tokenId).slice(0, 12);
+          const page = await readChainActivity({
+            limit: 12,
+            offset: 0,
+            tokenId,
+            source: "nft",
+          });
+          history = page.events;
         } catch {
           history = [];
         }
