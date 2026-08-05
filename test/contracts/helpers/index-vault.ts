@@ -105,7 +105,7 @@ export async function indexVaultFactory() {
   // as well as into the vault. Order matters: deploy the leaf first.
   const indexMath = await (await ethers.getContractFactory("IndexMath")).deploy();
   libraries.IndexMath = await indexMath.getAddress();
-  for (const name of ["IndexParams", "IndexEligibility"]) {
+  for (const name of ["IndexParams", "IndexEligibility", "IndexOracle"]) {
     const c = await (await ethers.getContractFactory(name)).deploy();
     libraries[name] = await c.getAddress();
   }

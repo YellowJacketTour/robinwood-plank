@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Constituent} from "./IndexTypes.sol";
 import {IndexMath} from "./IndexMath.sol";
+import {IndexOracle} from "./IndexOracle.sol";
+import {IndexParamSet} from "./IndexParams.sol";
 
 /**
  * ============================================================================
@@ -45,6 +47,135 @@ import {IndexMath} from "./IndexMath.sol";
  */
 library IndexValuation {
     uint256 private constant BPS = 10_000;
+    uint256 private constant WAD = 1e18;
+
+    /// @dev Re-declared rather than imported so this file has no compile-time
+    /// dependency on the vault. Selectors match by name.
+    error StalePrice();
+    error ReserveWouldEmpty();
+
+    /**
+     * @notice The basket's NAV BAND in ETH wei. Never one number, anywhere.
+     * @dev Moved verbatim from GlobalIndexVault.nav. `IndexOracle.band` is
+     * `internal` and therefore inlined into this loop — one delegatecall for
+     * the whole basket, not one per leg.
+     */
+    function navBand(
+        address[] storage list,
+        mapping(address => Constituent) storage cs,
+        uint256 bandBps,
+        uint256 staleAfter
+    ) external view returns (uint256 navLow, uint256 navHigh) {
+        uint256 n = list.length;
+        for (uint256 i = 0; i < n; i++) {
+            Constituent storage c = cs[list[i]];
+            (uint256 lo, uint256 hi, ) = IndexOracle.band(c, bandBps, staleAfter);
+            navLow += Math.mulDiv(c.reserve, lo, WAD);
+            navHigh += Math.mulDiv(c.reserve, hi, WAD);
+        }
+    }
+
+    /// @dev Every constituent's share of NAV_low in one O(n) pass. Moved
+    /// verbatim from GlobalIndexVault._allWeightsBps.
+    function allWeightsBps(
+        address[] storage list,
+        mapping(address => Constituent) storage cs,
+        uint256 bandBps,
+        uint256 staleAfter
+    ) external view returns (uint256[] memory w) {
+        uint256 n = list.length;
+        w = new uint256[](n);
+        uint256[] memory v = new uint256[](n);
+        uint256 navLow;
+        for (uint256 i = 0; i < n; i++) {
+            Constituent storage c = cs[list[i]];
+            (uint256 lo, , ) = IndexOracle.band(c, bandBps, staleAfter);
+            v[i] = Math.mulDiv(c.reserve, lo, WAD);
+            navLow += v[i];
+        }
+        if (navLow == 0) return w;
+        for (uint256 i = 0; i < n; i++) w[i] = (v[i] * BPS) / navLow;
+    }
+
+    /**
+     * @notice The single-asset exit, computed exactly as Balancer decomposes a
+     * non-proportional exit:
+     *   1. the SAME strict pro-rata payout as `redeemProRata`, computed
+     *      virtually for every constituent (identical expression, floored);
+     *   2. the non-target legs valued at their band LOW (undervalue what the
+     *      redeemer gives up) and converted into target units at the target's
+     *      band HIGH (overvalue what they receive) — conservative on both
+     *      sides of the internal swap, so a round trip is never free;
+     *   3. a Curve-`remove_liquidity_one_coin`-style imbalance fee on the
+     *      swapped portion only. The pro-rata portion is always free, which is
+     *      what keeps the balanced path strictly cheaper than the concentrated
+     *      one for every input.
+     *
+     * @dev Moved verbatim from GlobalIndexVault._previewSingleExit. `denom` is
+     * `totalSupply() + VIRTUAL_SHARES`, computed by the caller, so this library
+     * never needs a reach into the share token.
+     */
+    function previewSingleExit(
+        address[] storage list,
+        mapping(address => Constituent) storage cs,
+        address token,
+        uint256 sharesIn,
+        uint256 denom,
+        IndexParamSet memory p
+    ) external view returns (uint256 amountOut, uint256 feeAmount) {
+        Constituent storage target = cs[token];
+        (uint256 targetLo, uint256 targetHi, ) = IndexOracle.band(target, p.bandBps, p.staleAfter);
+        if (targetHi == 0 || targetLo == 0) revert StalePrice();
+
+        uint256 proRataTarget = Math.mulDiv(sharesIn, target.reserve, denom);
+
+        uint256 extra = Math.mulDiv(
+            _otherLegsEth(list, cs, token, sharesIn, denom, p.bandBps, p.staleAfter),
+            WAD,
+            targetHi
+        );
+        uint256 remaining = target.reserve > proRataTarget ? target.reserve - proRataTarget : 0;
+        if (remaining == 0) revert ReserveWouldEmpty();
+        // `feeAmount` is the fee this exit charges, in TARGET-token units —
+        // the same number that was already being retained implicitly by paying
+        // out less. Naming it is what lets the ecosystem split be taken out of
+        // the fee rather than out of the reserve.
+        feeAmount =
+            (extra *
+                IndexMath.imbalanceFeeBps(
+                    extra,
+                    remaining,
+                    p.baseImbalanceFeeBps,
+                    p.imbalanceSlopeBps,
+                    p.maxImbalanceFeeBps
+                )) /
+            BPS;
+        extra -= feeAmount;
+        amountOut = proRataTarget + extra;
+    }
+
+    /// @dev The pro-rata slice of every NON-target leg, valued at that leg's
+    /// band LOW, summed in ETH wei. Split out of `previewSingleExit` purely to
+    /// keep that function's stack inside the EVM's 16-slot reach — the
+    /// arithmetic is identical to the loop it replaced.
+    function _otherLegsEth(
+        address[] storage list,
+        mapping(address => Constituent) storage cs,
+        address token,
+        uint256 sharesIn,
+        uint256 denom,
+        uint256 bandBps,
+        uint256 staleAfter
+    ) private view returns (uint256 otherEth) {
+        uint256 n = list.length;
+        for (uint256 i = 0; i < n; i++) {
+            address t = list[i];
+            if (t == token) continue;
+            Constituent storage c = cs[t];
+            (uint256 lo, , ) = IndexOracle.band(c, bandBps, staleAfter);
+            otherEth += Math.mulDiv(Math.mulDiv(sharesIn, c.reserve, denom), lo, WAD);
+        }
+    }
 
     /**
      * @notice Target weights: square-root curve over each constituent's
