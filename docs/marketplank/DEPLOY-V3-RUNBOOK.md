@@ -72,7 +72,8 @@ premium ≤0.1 ETH. Non-zero mint/redeem is enforced by the workflow (audit Low-
 3. Dispatch `inmotion.yml` (`operation=deploy`) → rebuild bakes the new address, ships,
    health-verifies, auto-rolls-back on failure.
 4. `gh variable set RELAY_VAULT_ADDRESSES --body <V3>,0xc4B29D7a01603D2A5937b1FC86ea85E488d72e04,0xb2019Fd4cA24502e812C0C73b751Fa49979BF708`
-   so the drand relayer services V3 (if the cPanel cron `relayer.env` is live, update its `VAULT_ADDRESSES` too).
+   so both relayers service V3. The managed `provision-relayer` operation
+   reads this variable and updates the cPanel cron secret and cron entry.
 
 ## Step 5 — Go-live
 `MARKET_ENABLED` is a runtime `/admin` flag (no rebuild) — flip it only on the explicit
