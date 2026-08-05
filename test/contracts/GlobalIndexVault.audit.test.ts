@@ -22,7 +22,7 @@ import {
 } from "./helpers/index-vault";
 
 /**
- * Audit-style suite for GlobalIndexVault + VePlank, written to the bar
+ * Audit-style suite for GlobalIndexVault, written to the bar
  * VaultV3.audit.test.ts set: one test per NAMED defense in
  * docs/marketplank/SPEC-PLANK-CHECKS-AND-INDEX.md §2.7/§2.8/§2.9 and
  * docs/marketplank/SPEC-GLOBAL-INDEX-ULTIMATE-FORM.md §1-§5, each attacking
@@ -34,8 +34,8 @@ import {
  */
 describe("GlobalIndexVault", () => {
 
-  // These suites advance the shared Hardhat clock by YEARS (four-year vePLANK
-  // locks, month-long weight ramps). Mocha shares one network across files, so
+  // These suites advance the shared Hardhat clock by MONTHS (month-long weight
+  // ramps, 48h timelocks). Mocha shares one network across files, so
   // without restoring the snapshot afterwards every later suite runs in the
   // future — which silently expires the fixed-endTime Seaport orders in
   // SeaportPerTokenApproval/SeaportCriteriaFulfill. Snapshot in, restore out.
@@ -735,8 +735,8 @@ describe("GlobalIndexVault", () => {
 
 describe("GlobalIndexVault — real MarketplankVaultV3 constituent", () => {
 
-  // These suites advance the shared Hardhat clock by YEARS (four-year vePLANK
-  // locks, month-long weight ramps). Mocha shares one network across files, so
+  // These suites advance the shared Hardhat clock by MONTHS (month-long weight
+  // ramps, 48h timelocks). Mocha shares one network across files, so
   // without restoring the snapshot afterwards every later suite runs in the
   // future — which silently expires the fixed-endTime Seaport orders in
   // SeaportPerTokenApproval/SeaportCriteriaFulfill. Snapshot in, restore out.
@@ -820,16 +820,15 @@ describe("GlobalIndexVault — real MarketplankVaultV3 constituent", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-//  VePlank, and the wall between it and the basket
+//  "Every facet, forward and backward" — the second hardening pass
+//
+//  Four facets the first round did not attack head-on: cross-constituent fee
+//  isolation, add/remove mid-flight, the initial-seeding trust model, and the
+//  claimed-vs-unclaimed collection distinction. Each test says in its name
+//  which one it pins.
 // ══════════════════════════════════════════════════════════════════════════
 
-describe("VePlank", () => {
-
-  // These suites advance the shared Hardhat clock by YEARS (four-year vePLANK
-  // locks, month-long weight ramps). Mocha shares one network across files, so
-  // without restoring the snapshot afterwards every later suite runs in the
-  // future — which silently expires the fixed-endTime Seaport orders in
-  // SeaportPerTokenApproval/SeaportCriteriaFulfill. Snapshot in, restore out.
+describe("GlobalIndexVault — hardening pass", () => {
   let clockSnapshot: SnapshotRestorer;
   before(async () => {
     clockSnapshot = await takeSnapshot();
@@ -837,200 +836,343 @@ describe("VePlank", () => {
   after(async () => {
     await clockSnapshot.restore();
   });
-  const YEAR = 365 * 24 * 3_600;
 
-  async function veFixture() {
-    // Deliberately offset past the index fixture's signers (admin/seeder/
-    // alice/bob/carol) so the whale can never coincidentally BE a privileged
-    // role — that would make the privilege-separation test pass for the wrong
-    // reason.
-    const all = await ethers.getSigners();
-    const [gaugeAdmin, whale, minnow] = [all[6], all[7], all[8]];
-    const Plank = await ethers.getContractFactory("MockIndexToken");
-    const plank: any = await Plank.deploy("PLANK", "PLANK");
-    const Ve = await ethers.getContractFactory("VePlank");
-    const ve: any = await Ve.deploy(await plank.getAddress(), gaugeAdmin.address);
-    const veAddr = await ve.getAddress();
+  // Deliberately lopsided: leg 1 is 200x leg 0 by unit count.
+  const LOPSIDED = [10n * WAD, 2000n * WAD, 1000n * WAD];
 
-    // The real distribution: one wallet holds 56.78% of supply.
-    await plank.mint(whale.address, 5_678_000n * WAD);
-    await plank.mint(minnow.address, 100_000n * WAD);
-    await plank.connect(whale).approve(veAddr, ethers.MaxUint256);
-    await plank.connect(minnow).approve(veAddr, ethers.MaxUint256);
-    return { gaugeAdmin, whale, minnow, plank, ve, veAddr };
-  }
+  // ── Facet 1: fee/reward accounting across very differently-sized legs ──
 
-  it("voting power decays linearly to zero at unlock", async () => {
-    const { ve, whale } = await veFixture();
-    const now = await time.latest();
-    await ve.connect(whale).createLock(1_000_000n * WAD, now + 4 * YEAR);
+  it("ISOLATION: a large constituent's flow never debits a small one's reserve", async () => {
+    const fx = await deployOpenIndex({}, LOPSIDED);
+    const { vault, alice, addrs } = fx;
+    await warmCheckpoints(fx, 4);
 
-    const start: bigint = await ve.balanceOf(whale.address);
-    expect(start).to.be.gt(0n);
-    await time.increase(2 * YEAR);
-    const mid: bigint = await ve.balanceOf(whale.address);
-    expect(mid).to.be.lt(start);
-    expect(mid).to.be.gt(start / 3n); // roughly half, not a cliff
-    await time.increase(2 * YEAR + 10);
-    expect(await ve.balanceOf(whale.address)).to.equal(0n);
-  });
+    const V = 1000n;
+    const smallBefore: bigint = await vault.reserveOf(addrs[0]);
+    const supplyBefore: bigint = await vault.totalSupply();
+    const [navLowBefore] = await vault.nav();
 
-  it("locked PLANK only ever comes back to its own locker, and only at expiry", async () => {
-    const { ve, whale, minnow, plank } = await veFixture();
-    const now = await time.latest();
-    await ve.connect(whale).createLock(1_000n * WAD, now + 2 * YEAR);
-    await expect(ve.connect(whale).withdraw()).to.be.revertedWithCustomError(
-      ve,
-      "LockNotExpired"
-    );
-    await expect(ve.connect(minnow).withdraw()).to.be.revertedWithCustomError(ve, "NoLock");
-    await time.increase(2 * YEAR + 10);
-    const before: bigint = await plank.balanceOf(whale.address);
-    await ve.connect(whale).withdraw();
-    expect(await plank.balanceOf(whale.address)).to.equal(before + 1_000n * WAD);
-
-    // And no admin path exists over locked PLANK.
-    const fns = ve.interface.fragments
-      .filter((f: any) => f.type === "function" && f.stateMutability !== "view")
-      .map((f: any) => f.name.toLowerCase());
-    for (const bad of ["sweep", "rescue", "emergency", "recover", "withdrawfor", "seize"]) {
-      expect(fns.some((n: string) => n.includes(bad))).to.equal(false, `found ${bad}`);
+    // Heavy, repeated single-asset traffic on the BIG leg only.
+    for (let i = 0; i < 5; i++) {
+      await vault.connect(alice).mintSingleAsset(addrs[1], 50n * WAD, 0n);
     }
-  });
+    // (No single-asset REDEEM here: in a 200x-lopsided basket, shrinking the
+    // big leg mechanically pushes the others past the concentration cap and
+    // the cap correctly refuses it — that guard has its own test above.)
 
-  it("gauge weight is contestable: a longer lock out-votes a bigger unlocked one", async () => {
-    const { ve, gaugeAdmin, whale, minnow } = await veFixture();
-    const gauge = ethers.Wallet.createRandom().address;
-    await ve.connect(gaugeAdmin).addGauge(gauge);
-    const now = await time.latest();
+    const smallAfter: bigint = await vault.reserveOf(addrs[0]);
+    const supplyAfter: bigint = await vault.totalSupply();
 
-    await ve.connect(whale).createLock(200_000n * WAD, now + 8 * 7 * 24 * 3_600); // 8 weeks
-    await ve.connect(minnow).createLock(100_000n * WAD, now + 4 * YEAR);
-    await ve.connect(whale).voteGaugeWeight(gauge, 10_000);
-    await ve.connect(minnow).voteGaugeWeight(gauge, 10_000);
+    // The small leg's credited reserve is EXACTLY untouched — reserves are a
+    // per-constituent mapping, never a shared pot, so there is no channel for
+    // a big leg's fee or flow to reach into a small one's accounting.
+    expect(smallAfter).to.equal(smallBefore, "small leg's reserve moved");
 
-    const whaleNow: bigint = await ve.balanceOf(whale.address);
-    const minnowNow: bigint = await ve.balanceOf(minnow.address);
-    expect(minnowNow).to.be.gt(whaleNow, "a 4-year lock must out-weigh a 2x 8-week lock");
-    expect(await ve.gaugeWeight(gauge)).to.be.gt(0n);
-  });
-
-  it("gauge weight decays as its voters' locks expire", async () => {
-    const { ve, gaugeAdmin, whale } = await veFixture();
-    const gauge = ethers.Wallet.createRandom().address;
-    await ve.connect(gaugeAdmin).addGauge(gauge);
-    const now = await time.latest();
-    await ve.connect(whale).createLock(500_000n * WAD, now + YEAR);
-    await ve.connect(whale).voteGaugeWeight(gauge, 10_000);
-
-    const w0: bigint = await ve.gaugeWeight(gauge);
-    expect(w0).to.be.gt(0n);
-    await time.increase(YEAR / 2);
-    const w1: bigint = await ve.gaugeWeight(gauge);
-    expect(w1).to.be.lt(w0).and.to.be.gt(0n);
-    await time.increase(YEAR);
-    expect(await ve.gaugeWeight(gauge)).to.equal(0n);
-  });
-
-  it("a voter cannot allocate more than 100% of their power", async () => {
-    const { ve, gaugeAdmin, whale } = await veFixture();
-    const g1 = ethers.Wallet.createRandom().address;
-    const g2 = ethers.Wallet.createRandom().address;
-    await ve.connect(gaugeAdmin).addGauge(g1);
-    await ve.connect(gaugeAdmin).addGauge(g2);
-    const now = await time.latest();
-    await ve.connect(whale).createLock(1_000n * WAD, now + YEAR);
-    await ve.connect(whale).voteGaugeWeight(g1, 7_000);
-    await expect(ve.connect(whale).voteGaugeWeight(g2, 4_000)).to.be.revertedWithCustomError(
-      ve,
-      "AllocationExceeded"
+    // What must NOT be asserted here, and why it is worth naming: the small
+    // leg's PER-LEG backing (reserve_0 / (S + V)) does fall across a
+    // single-asset mint into leg 1, and that is correct, not a leak — new
+    // shares were bought with new value that landed in a different leg. The
+    // invariant that actually covers the single-asset paths is value per
+    // share at the vault's own band, exactly as GlobalIndexVault.fuzz.test.ts
+    // property 1b states. A small constituent's holders are protected by
+    // THAT, and by the imbalance fee being retained in reserves, so the big
+    // leg's traffic can only ever raise it.
+    const [navLowAfter] = await vault.nav();
+    expect(navLowAfter * (supplyBefore + V)).to.be.gte(
+      navLowBefore * (supplyAfter + V),
+      "value per share fell on big-leg traffic — a cross-subsidy from the small leg"
     );
-    await ve.connect(whale).voteGaugeWeight(g2, 3_000);
-    expect(await ve.userUsedBps(whale.address)).to.equal(10_000n);
   });
 
-  it("re-voting replaces rather than stacks a previous allocation", async () => {
-    const { ve, gaugeAdmin, whale } = await veFixture();
-    const g = ethers.Wallet.createRandom().address;
-    await ve.connect(gaugeAdmin).addGauge(g);
-    const now = await time.latest();
-    await ve.connect(whale).createLock(1_000n * WAD, now + YEAR);
-    await ve.connect(whale).voteGaugeWeight(g, 10_000);
-    const full: bigint = await ve.gaugeWeight(g);
-    await ve.connect(whale).voteGaugeWeight(g, 5_000);
-    const half: bigint = await ve.gaugeWeight(g);
-    expect(half * 2n).to.be.closeTo(full, full / 100n);
-  });
-
-  // ══ §5.1 — THE closed gap ══════════════════════════════════════════════
-
-  it("PRIVILEGE SEPARATION: a maximally-vePLANK'd whale has no power over the basket", async () => {
-    const { ve, gaugeAdmin, whale } = await veFixture();
-    const fx = await deployOpenIndex({}, [1000n * WAD, 2000n * WAD, 500n * WAD]);
+  it("ISOLATION: the imbalance fee is charged against the acting leg's own depth", async () => {
+    const fx = await deployOpenIndex({}, LOPSIDED);
     const { vault, addrs } = fx;
-
-    // The whale locks its entire 56.78% for the maximum four years and votes
-    // every gauge to 100% — the strongest position the ve system can produce.
-    const now = await time.latest();
-    await ve.connect(whale).createLock(5_678_000n * WAD, now + 4 * YEAR);
-    for (const a of addrs) {
-      await ve.connect(gaugeAdmin).addGauge(a);
-    }
-    await ve.connect(whale).voteGaugeWeight(addrs[0], 10_000);
-    expect(await ve.balanceOf(whale.address)).to.be.gt(0n);
-    expect(await ve.gaugeWeight(addrs[0])).to.be.gt(0n);
-
-    // Now: every privileged basket function, called by that whale.
-    const adminFns = [
-      ["queueParam", [ethers.encodeBytes32String("bandBps"), 1n]],
-      ["queueMetric", [addrs[0], 10n ** 24n]],
-      ["queueListing", [addrs[0], addrs[0], 5_000n, true]],
-      ["queueAdmin", [whale.address]],
-    ] as const;
-    for (const [name, args] of adminFns) {
-      await expect(
-        (vault.connect(whale) as any)[name](...args),
-        name
-      ).to.be.revertedWithCustomError(vault, "NotAdmin");
-    }
-    await expect(
-      vault.connect(whale).seedConstituent(addrs[0], addrs[0], 1_000)
-    ).to.be.revertedWithCustomError(vault, "NotSeeder");
-    await expect(vault.connect(whale).openIndex(10n ** 18n)).to.be.revertedWithCustomError(
-      vault,
-      "NotSeeder"
-    );
-
-    // Nothing moved, and admin is still admin.
-    expect(await vault.admin()).to.equal(fx.admin.address);
-    expect((await vault.params()).concentrationCapBps).to.equal(CONCENTRATION_CAP_BPS);
+    // The fee is a function of (amount, that leg's remaining depth) only. The
+    // same absolute ask is expensive against the thin leg and cheap against
+    // the deep one — there is no basket-wide fee term that would let the deep
+    // leg's size subsidise the thin leg's ask, or the reverse.
+    const thin: bigint = await vault.imbalanceFeeBps(5n * WAD, await vault.reserveOf(addrs[0]));
+    const deep: bigint = await vault.imbalanceFeeBps(5n * WAD, await vault.reserveOf(addrs[1]));
+    expect(thin).to.be.gt(deep, "fee did not scale with the acting leg's own depth");
   });
 
-  it("STRUCTURAL: neither contract references the other, in either direction", async () => {
-    const fx = await deployOpenIndex({}, [1000n * WAD, 2000n * WAD, 500n * WAD]);
-    const { ve } = await veFixture();
+  // ── Facet 2: adding and removing constituents mid-flight ──────────────
 
-    // No vault function names, or takes an argument named after, any ve/gauge
-    // concept — there is no lever to reach, not merely a guard to pass.
-    for (const f of fx.vault.interface.fragments.filter((x: any) => x.type === "function") as any[]) {
-      const blob = (f.name + " " + f.inputs.map((i: any) => i.name).join(" ")).toLowerCase();
-      for (const bad of ["gauge", "veplank", "escrow", "vote", "plank"]) {
-        expect(blob.includes(bad)).to.equal(false, `vault.${f.name} mentions ${bad}`);
-      }
-    }
-    // ...and symmetrically, VePlank knows nothing about the basket.
-    for (const f of ve.interface.fragments.filter((x: any) => x.type === "function") as any[]) {
-      const blob = (f.name + " " + f.inputs.map((i: any) => i.name).join(" ")).toLowerCase();
-      for (const bad of ["index", "basket", "constituent", "reserve", "redeem"]) {
-        expect(blob.includes(bad)).to.equal(false, `ve.${f.name} mentions ${bad}`);
-      }
-    }
+  it("RAMP-OUT: a removed constituent's target weight decays, it never cliffs to zero", async () => {
+    const fx = await deployOpenIndex({}, LOPSIDED);
+    const { vault, admin, addrs } = fx;
+    const weightOf = async (t: string) => {
+      const [tokens, bps] = await vault.targetWeightsBps();
+      const i = tokens.findIndex((x: string) => x.toLowerCase() === t.toLowerCase());
+      return bps[i] as bigint;
+    };
 
-    // The vault's deployed bytecode contains no reference to the VePlank
-    // address, because it was never given one.
-    const code = await ethers.provider.getCode(fx.vaultAddr);
-    expect(code.toLowerCase()).to.not.include(
-      (await ve.getAddress()).slice(2).toLowerCase()
+    const before = await weightOf(addrs[1]);
+    expect(before).to.be.gt(0n);
+
+    await vault.connect(admin).queueListing(addrs[1], addrs[1], 0, true);
+    await time.increase(TIMELOCK + 1);
+    await vault.executeListing(addrs[1]);
+
+    // The cliff this fix removes: pre-fix, this read zero in the same block
+    // the removal executed — a public "sell all of this leg now" broadcast to
+    // every rebalancing solver, for the leg most likely to be illiquid.
+    const atRemoval = await weightOf(addrs[1]);
+    expect(atRemoval).to.be.gt(0n, "removal cliffed the target weight to zero");
+    expect(atRemoval).to.be.closeTo(before, before / 100n);
+
+    await time.increase(RAMP_DURATION / 2);
+    const half = await weightOf(addrs[1]);
+    expect(half).to.be.lt(atRemoval, "ramp-out did not progress");
+    expect(half).to.be.gt(0n);
+
+    await time.increase(RAMP_DURATION / 2 + 10);
+    expect(await weightOf(addrs[1])).to.equal(0n, "ramp-out never completed");
+
+    // Once fully ramped out it stops depressing the survivors: it drops out of
+    // the normalising total entirely, so the two remaining legs split the
+    // vector evenly — and, being 50% each, are then held at the 40%
+    // concentration cap with nowhere left to redistribute the excess to. That
+    // is the honest answer for a two-leg basket under a 40% cap, and it is
+    // reported rather than papered over.
+    const [, bps] = await vault.targetWeightsBps();
+    expect(bps[0]).to.equal(bps[2], "survivors did not split the vector evenly");
+    expect(bps[0]).to.equal(CONCENTRATION_CAP_BPS);
+  });
+
+  it("MID-FLIGHT: a constituent can be added while another is mid-removal", async () => {
+    const fx = await deployOpenIndex({}, LOPSIDED);
+    const { vault, admin, addrs } = fx;
+    const d = await deployConstituent("cD", 100n * WAD, 100n * WAD);
+
+    // Removal of leg 1 and admission of D queued together and executed in the
+    // same block — the adversarial overlap.
+    await vault.connect(admin).queueListing(addrs[1], addrs[1], 0, true);
+    await vault.connect(admin).queueListing(d.addr, await d.source.getAddress(), 3_333, false);
+    await time.increase(TIMELOCK + 1);
+    await vault.executeListing(addrs[1]);
+    await vault.executeListing(d.addr);
+
+    const read = async () => {
+      await vault.checkpointAll();
+      const [tokens, bps] = await vault.targetWeightsBps();
+      const at = (t: string) =>
+        bps[tokens.findIndex((x: string) => x.toLowerCase() === t.toLowerCase())] as bigint;
+      return { out: at(addrs[1]), inn: at(d.addr) };
+    };
+
+    // The two ramps are independent and run in opposite directions.
+    const t0 = await read();
+    expect(t0.out).to.be.gt(0n, "outgoing leg cliffed");
+    expect(t0.inn).to.equal(0n, "incoming leg jumped");
+    await time.increase(RAMP_DURATION / 2);
+    const t1 = await read();
+    expect(t1.out).to.be.lt(t0.out);
+    expect(t1.inn).to.be.gt(t0.inn);
+    await time.increase(RAMP_DURATION / 2 + 10);
+    const t2 = await read();
+    expect(t2.out).to.equal(0n);
+    expect(t2.inn).to.be.gt(t1.inn);
+
+    // Throughout, the outgoing leg's reserves stayed fully redeemable.
+    const [, out] = await vault.previewRedeemProRata(10n * WAD);
+    expect(out[1]).to.be.gt(0n, "outgoing leg stopped paying out");
+  });
+
+  it("MID-FLIGHT: removing a leg that holds most of NAV is allowed and moves no value", async () => {
+    // Blocking a large-NAV removal is the tempting rule and it is the wrong
+    // one: it would make a broken or captured constituent permanently
+    // un-removable precisely when it matters most. The safe property is not
+    // "you cannot remove it" but "removing it moves nothing" — deactivation
+    // only decays a target-weight VIEW, and the reserves stay in the pro-rata
+    // payout set until they are redeemed to zero.
+    const fx = await deployOpenIndex({}, [1n * WAD, 10_000n * WAD, 1n * WAD]);
+    const { vault, admin, alice, addrs, tokens, vaultAddr } = fx;
+    await vault.connect(alice).mintProRata(100n * WAD, maxIn(3));
+    await warmCheckpoints(fx, 3);
+    expect(await vault.weightBps(addrs[1])).to.be.gt(9_000n, "leg is not actually dominant");
+
+    const before = await Promise.all(addrs.map((a) => vault.reserveOf(a)));
+    const balBefore = await Promise.all(tokens.map((t) => t.balanceOf(vaultAddr)));
+
+    await vault.connect(admin).queueListing(addrs[1], addrs[1], 0, true);
+    await time.increase(TIMELOCK + 1);
+    await vault.executeListing(addrs[1]);
+
+    for (let i = 0; i < 3; i++) {
+      expect(await vault.reserveOf(addrs[i])).to.equal(before[i], "reserve moved on removal");
+      expect(await tokens[i].balanceOf(vaultAddr)).to.equal(balBefore[i], "balance moved");
+    }
+    // Still redeemable, still un-delistable while it holds value.
+    await expect(vault.delistEmpty(addrs[1])).to.be.revertedWithCustomError(
+      vault,
+      "ReservesOutstanding"
     );
+    await expect(vault.connect(alice).redeemProRata(50n * WAD, zeroOut(3))).to.not.be.reverted;
+  });
+
+  // ── Facet 3: the initial-seeding trust model ─────────────────────────
+
+  it("SEEDING: the very first constituent cannot be seeded into a manipulable share price", async () => {
+    const { defaultParams, paramsTuple } = await import("./helpers/index-vault");
+    const [, admin, seeder, alice] = await ethers.getSigners();
+    const Vault = await ethers.getContractFactory("GlobalIndexVault");
+    const vault: any = await Vault.deploy(
+      "gPLNK",
+      "gPLNK",
+      admin.address,
+      seeder.address,
+      TIMELOCK,
+      paramsTuple(defaultParams)
+    );
+    const vaultAddr = await vault.getAddress();
+
+    // The most adversarial seed the seeder role can construct: ONE constituent,
+    // the smallest reserve the contract will accept (1 wei).
+    const c = await deployConstituent("cSEED", 100n * WAD, 100n * WAD);
+    await vault.connect(seeder).seedConstituent(c.addr, await c.source.getAddress(), 10_000);
+    await c.token.mint(seeder.address, 10n ** 24n);
+    await c.token.connect(seeder).approve(vaultAddr, ethers.MaxUint256);
+
+    // A zero-reserve open is refused outright...
+    await expect(vault.connect(seeder).openIndex(10n ** 6n)).to.be.revertedWithCustomError(
+      vault,
+      "ZeroAmount"
+    );
+    await vault.connect(seeder).seedDeposit(c.addr, 1n);
+    // ...and so is a seed-share count below the MIN_SEED_SHARES floor, which
+    // is what keeps the locked seed large enough to matter.
+    await expect(vault.connect(seeder).openIndex(999n)).to.be.revertedWithCustomError(
+      vault,
+      "BadParam"
+    );
+    await vault.connect(seeder).openIndex(10n ** 6n);
+
+    await c.token.mint(alice.address, 10n ** 24n);
+    await c.token.connect(alice).approve(vaultAddr, ethers.MaxUint256);
+
+    // The attacker (here: the seeder itself, the maximally-privileged case)
+    // takes the smallest possible position and donates hugely, trying to make
+    // the first real depositor's mint round to zero.
+    await vault.connect(seeder).mintProRata(1n, [ethers.MaxUint256]);
+    await c.token.connect(seeder).transfer(vaultAddr, 10n ** 23n);
+
+    const victim = 10n * WAD;
+    await vault.connect(alice).mintProRata(victim, [ethers.MaxUint256]);
+    expect(await vault.balanceOf(alice.address)).to.equal(victim);
+
+    // The victim gets a real slice back, and the donation is inert: it was
+    // never credited, so the attacker cannot redeem it out again.
+    const [, out] = await vault.previewRedeemProRata(victim);
+    expect(out[0]).to.be.gt(0n, "victim's shares redeem to nothing");
+    const attackerBefore: bigint = await c.token.balanceOf(seeder.address);
+    await vault.connect(seeder).redeemProRata(1n, [0n]);
+    expect(await c.token.balanceOf(seeder.address)).to.be.lte(
+      attackerBefore + 1n,
+      "the donation came back to the attacker"
+    );
+  });
+
+  it("SEEDING: the seeder cannot add a constituent once the index is open", async () => {
+    const fx = await deployOpenIndex({}, LOPSIDED);
+    const d = await deployConstituent("cE", 100n * WAD, 100n * WAD);
+    await expect(
+      fx.vault.connect(fx.seeder).seedConstituent(d.addr, await d.source.getAddress(), 1_000)
+    ).to.be.revertedWithCustomError(fx.vault, "IndexAlreadyOpen");
+    // Post-open admission is the timelocked admin's, and nobody else's.
+    await expect(
+      fx.vault.connect(fx.seeder).queueListing(d.addr, await d.source.getAddress(), 1_000, false)
+    ).to.be.revertedWithCustomError(fx.vault, "NotAdmin");
+  });
+
+  // ── Facet 4: trustless vs. owner-claimed collections ─────────────────
+
+  it("CLAIMED-VS-NOT: admission reads no ownership, and a claimed owner gets no path in", async () => {
+    const fx = await deployOpenIndex({}, LOPSIDED);
+    const { vault, admin, vaultAddr, tokens, addrs } = fx;
+    const all = await ethers.getSigners();
+    const collectionOwner = all[10]; // stands in for a deployer who claimed
+
+    // 1. Nothing in the admission surface names or reads an owner concept.
+    //    ERC-20's own allowance(owner, spender) is excluded: that is the share
+    //    token's standard surface, not the constituent-admission surface.
+    const ERC20_SURFACE = new Set([
+      "name",
+      "symbol",
+      "decimals",
+      "totalSupply",
+      "balanceOf",
+      "transfer",
+      "transferFrom",
+      "approve",
+      "allowance",
+      "increaseAllowance",
+      "decreaseAllowance",
+    ]);
+    for (const f of vault.interface.fragments.filter(
+      (x: any) => x.type === "function" && !ERC20_SURFACE.has(x.name)
+    ) as any[]) {
+      const blob = (f.name + " " + f.inputs.map((i: any) => i.name).join(" ")).toLowerCase();
+      for (const bad of ["owner", "claimed", "verified", "creator", "deployer"]) {
+        expect(blob.includes(bad)).to.equal(false, "admission surface mentions " + bad);
+      }
+    }
+
+    // 2. Two constituents admitted through the identical code path: one whose
+    //    deployer has "claimed" it (holds its supply), one permissionlessly
+    //    listed and never claimed. The vault treats them the same because it
+    //    has no notion of the difference.
+    const claimed = await deployConstituent("cCLAIMED", 100n * WAD, 100n * WAD);
+    const unclaimed = await deployConstituent("cUNCLAIMED", 100n * WAD, 100n * WAD);
+    await claimed.token.mint(collectionOwner.address, 10_000n * WAD);
+    for (const c of [claimed, unclaimed]) {
+      await vault.connect(admin).queueListing(c.addr, await c.source.getAddress(), 2_000, false);
+    }
+    await time.increase(TIMELOCK + 1);
+    for (const c of [claimed, unclaimed]) await vault.executeListing(c.addr);
+
+    const infoA = await vault.constituentInfo(claimed.addr);
+    const infoB = await vault.constituentInfo(unclaimed.addr);
+    expect(infoA[5]).to.equal(true); // listed
+    expect(infoA[6]).to.equal(true); // active
+    // Same ramp treatment, same ramp duration — the only difference between
+    // the two is which block they were admitted in.
+    expect(infoA[3]).to.be.closeTo(infoB[3], 5n, "ramp start differed by claim status");
+    expect(infoA[4]).to.equal(infoB[4], "ramp duration differed by claim status");
+    expect(infoA[4]).to.equal(BigInt(RAMP_DURATION));
+
+    // 3. Guarantee #4, specifically for the claimed owner: enumerate the whole
+    //    non-view ABI as that owner and prove no reserve moves anywhere.
+    const before = await Promise.all(addrs.map((a) => vault.reserveOf(a)));
+    const balBefore = await Promise.all(tokens.map((t) => t.balanceOf(vaultAddr)));
+    const fns = vault.interface.fragments.filter(
+      (f: any) => f.type === "function" && !["view", "pure"].includes(f.stateMutability)
+    );
+    const argFor = (t: string): any => {
+      if (t === "address") return claimed.addr;
+      if (t.startsWith("uint")) return 10n ** 24n;
+      if (t === "bool") return true;
+      if (t === "bytes32") return ethers.encodeBytes32String("concentrationCapBps");
+      if (t.endsWith("[]")) return [0n, 0n, 0n, 0n, 0n];
+      if (t === "string") return "x";
+      return 0n;
+    };
+    for (const f of fns as any[]) {
+      const args = f.inputs.map((i: any) => argFor(i.type));
+      try {
+        await (vault.connect(collectionOwner) as any)[f.format("sighash")](...args);
+      } catch {
+        /* a guard firing is correct behaviour */
+      }
+    }
+    for (let i = 0; i < 3; i++) {
+      expect(await vault.reserveOf(addrs[i])).to.equal(before[i], "reserve moved");
+      expect(await tokens[i].balanceOf(vaultAddr)).to.equal(balBefore[i], "vault balance moved");
+      expect(await tokens[i].balanceOf(collectionOwner.address)).to.equal(
+        0n,
+        "claimed owner took a leg"
+      );
+    }
+    expect(await vault.admin()).to.equal(admin.address);
   });
 });

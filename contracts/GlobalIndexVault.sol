@@ -54,10 +54,11 @@ pragma solidity ^0.8.24;
  *     GlobalIndexVault.audit.test.ts enumerates the ABI and proves it.
  *
  *  5. PLANK'S CONCENTRATION CAN NEVER REACH BASKET ADMIN. This contract has no
- *     reference to PLANK, to VePlank, or to any gauge state anywhere in its
- *     authorisation logic. vePLANK governs gauge-weight voting only, in a
- *     wholly separate contract with no hook into this one (ultimate-form §5.1
- *     — the most important closed gap, and it is closed by keeping it closed).
+ *     reference to PLANK, to PlankGauge, or to any gauge state anywhere in its
+ *     authorisation logic. Gauge direction is bought by burning, in a wholly
+ *     separate contract (PlankGauge.sol) with no hook into this one, holding
+ *     its own pushed funds and never this vault's (ultimate-form §5.1 — the
+ *     most important closed gap, and it is closed by keeping it closed).
  *
  *  ORACLE TRADEOFF, STATED PLAINLY
  *  -------------------------------
@@ -574,11 +575,17 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         tokens = new address[](n);
         bps = new uint256[](n);
         uint256[] memory raw = new uint256[](n);
+        uint256[] memory factor = new uint256[](n);
         uint256 total;
         for (uint256 i = 0; i < n; i++) {
             tokens[i] = constituentList[i];
             Constituent storage c = constituents[tokens[i]];
-            if (!c.active) continue;
+            // A ramp factor of zero means "contributes nothing", which covers
+            // both a brand-new constituent at t=0 and a fully ramped-out one.
+            // It must also be excluded from the normalising total, or a
+            // long-dead constituent would silently depress every live leg.
+            factor[i] = _rampFactorBps(c);
+            if (factor[i] == 0) continue;
             uint256 r = Math.sqrt(c.metric);
             raw[i] = r;
             total += r;
@@ -609,19 +616,53 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
             }
         }
 
-        // Gradual ramp-in: a new constituent reaches its target over a real
-        // window, never in one block (§2.7 step 4). A stale constituent's ramp
-        // is FROZEN — §2.9's "freeze further weight ramp-in" rule.
+        // Gradual ramp, in BOTH directions (see `_rampFactorBps`).
         for (uint256 i = 0; i < n; i++) {
-            Constituent storage c = constituents[tokens[i]];
-            if (c.rampDuration == 0) continue;
+            if (factor[i] == BPS) continue;
+            bps[i] = (bps[i] * factor[i]) / BPS;
+        }
+    }
+
+    /**
+     * @dev A constituent's target-weight scaling, 0..BPS.
+     *
+     * RAMP-IN (active): a new constituent reaches its target over a real
+     * window, never in one block (§2.7 step 4). A stale constituent's ramp-in
+     * is FROZEN at zero progress — §2.9's "freeze further weight ramp-in".
+     *
+     * RAMP-OUT (deactivated): symmetric, and it was MISSING before. A queued
+     * removal used to drop the target weight from full to zero the instant it
+     * executed, which is exactly the cliff §2.7 forbids on the way in: it
+     * publishes "sell all of this leg, now" to every rebalancing solver in one
+     * block, and it does so for the constituent most likely to be illiquid,
+     * since illiquidity is usually why it is being removed. Removal is
+     * therefore NOT blocked even when the leg holds a large fraction of NAV —
+     * blocking it would leave the basket unable to ever exit a broken
+     * constituent, and deactivation moves no value in any case (reserves stay
+     * fully redeemable pro-rata, which is what `delistEmpty`'s
+     * ReservesOutstanding guard already enforces). Instead the target decays
+     * linearly to zero over the same `rampDuration`, so the intent is public
+     * and gradual and the order is not.
+     *
+     * Staleness does NOT freeze a ramp-OUT. Freezing it would pin a silent,
+     * being-removed constituent at full target weight — the opposite of the
+     * conservative direction, and the one case where "freeze on stale" would
+     * help an attacker rather than the basket.
+     */
+    function _rampFactorBps(Constituent storage c) private view returns (uint256) {
+        if (c.active) {
+            if (c.rampDuration == 0) return BPS;
             uint256 elapsed = block.timestamp - uint256(c.rampStart);
             if (block.timestamp > uint256(_last(c).timestamp) + params.staleAfter) {
                 elapsed = 0;
             }
-            if (elapsed >= c.rampDuration) continue;
-            bps[i] = (bps[i] * elapsed) / c.rampDuration;
+            if (elapsed >= c.rampDuration) return BPS;
+            return (elapsed * BPS) / c.rampDuration;
         }
+        if (c.rampDuration == 0) return 0;
+        uint256 e = block.timestamp - uint256(c.rampStart);
+        if (e >= c.rampDuration) return 0;
+        return BPS - (e * BPS) / c.rampDuration;
     }
 
     // ══ Mint ══════════════════════════════════════════════════════════════
@@ -924,6 +965,10 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         if (q.isRemoval) {
             Constituent storage c = _get(token);
             c.active = false;
+            // Start the ramp-OUT clock. Without this the target weight fell
+            // off a cliff at execution; see `_rampFactorBps`.
+            c.rampStart = uint64(block.timestamp);
+            c.rampDuration = uint64(params.rampDuration);
             emit ConstituentDeactivated(token);
         } else {
             _list(
