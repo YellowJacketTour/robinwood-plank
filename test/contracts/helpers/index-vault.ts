@@ -90,6 +90,28 @@ export interface IndexFixture {
  * Three constituents at 1.0 / 0.5 / 2.0 ETH each, 1000 units of each seeded,
  * 1000e18 seed shares locked to address(0), index open.
  */
+/**
+ * The vault's math and parameter key-space now live in two external
+ * `library`s (contracts/lib/IndexMath.sol, contracts/lib/IndexParams.sol),
+ * which the compiler reaches by DELEGATECALL and which therefore have to be
+ * deployed and LINKED before the vault can be deployed at all. Every test that
+ * deploys a GlobalIndexVault goes through this one helper so the link map is
+ * written once — a per-test copy would be twelve places for the two names to
+ * drift apart.
+ */
+export async function indexVaultFactory() {
+  const IndexMath = await ethers.getContractFactory("IndexMath");
+  const indexMath = await IndexMath.deploy();
+  const IndexParams = await ethers.getContractFactory("IndexParams");
+  const indexParams = await IndexParams.deploy();
+  return ethers.getContractFactory("GlobalIndexVault", {
+    libraries: {
+      IndexMath: await indexMath.getAddress(),
+      IndexParams: await indexParams.getAddress(),
+    },
+  });
+}
+
 export async function deployOpenIndex(
   overrides: Partial<ParamStruct> = {},
   reserves: bigint[] = [1000n * WAD, 1000n * WAD, 1000n * WAD]
@@ -102,7 +124,7 @@ export async function deployOpenIndex(
   const c2 = await deployConstituent("cC", 200n * WAD, 100n * WAD); // 2.0
   const cs = [c0, c1, c2];
 
-  const Vault = await ethers.getContractFactory("GlobalIndexVault");
+  const Vault = await indexVaultFactory();
   const vault: any = await Vault.deploy(
     "Marketplank Global Index",
     "gPLNK",

@@ -7,6 +7,7 @@ import {
   WAD,
   defaultParams,
   paramsTuple,
+  indexVaultFactory,
 } from "./helpers/index-vault";
 
 /**
@@ -97,7 +98,7 @@ describe("IndexDividendDistributor — the claimAndReinvest accumulator window",
     const addrs: string[] = [];
     for (const t of tokens) addrs.push(await t.getAddress());
 
-    const Vault = await ethers.getContractFactory("GlobalIndexVault");
+    const Vault = await indexVaultFactory();
     const vault: any = await Vault.deploy(
       "Marketplank Global Index",
       "gPLNK",

@@ -8,7 +8,9 @@ import {
   time,
   type SnapshotRestorer,
 } from "@nomicfoundation/hardhat-network-helpers";
-import { TIMELOCK, WAD, defaultParams, paramsTuple } from "./helpers/index-vault";
+import { TIMELOCK, WAD, defaultParams, paramsTuple,
+  indexVaultFactory,
+} from "./helpers/index-vault";
 
 /**
  * Audit-style suite for two properties that are easy to CLAIM and easy to get
@@ -418,7 +420,7 @@ describe("Self-deal redirect (PlankGauge) and direction symmetry (GlobalIndexVau
       }
       const addrs = await Promise.all(tokens.map((t) => t.getAddress()));
 
-      const Vault = await ethers.getContractFactory("GlobalIndexVault");
+      const Vault = await indexVaultFactory();
       const vault: any = await Vault.deploy(
         "gi",
         "gi",

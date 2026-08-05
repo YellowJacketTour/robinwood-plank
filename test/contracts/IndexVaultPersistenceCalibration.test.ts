@@ -1,7 +1,9 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { takeSnapshot, time, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
-import { TIMELOCK, WAD, defaultParams, paramsTuple } from "./helpers/index-vault";
+import { TIMELOCK, WAD, defaultParams, paramsTuple,
+  indexVaultFactory,
+} from "./helpers/index-vault";
 
 /**
  * Audit-style suite for GlobalIndexVault Part E: the REALIZED-VARIANCE
@@ -75,7 +77,7 @@ describe("GlobalIndexVault — realized-variance persistence calibration (Part E
     const source: any = await Source.deploy(100n * WAD, 100n * WAD);
     const addr = await token.getAddress();
 
-    const Vault = await ethers.getContractFactory("GlobalIndexVault");
+    const Vault = await indexVaultFactory();
     const vault: any = await Vault.deploy(
       "gi",
       "gi",

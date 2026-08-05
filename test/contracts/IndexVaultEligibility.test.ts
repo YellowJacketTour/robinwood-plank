@@ -13,6 +13,7 @@ import {
   deployOpenIndex,
   paramsTuple,
   defaultParams,
+  indexVaultFactory,
 } from "./helpers/index-vault";
 
 /**
@@ -131,7 +132,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
     }
     const addrs = await Promise.all(tokens.map((t) => t.getAddress()));
 
-    const Vault = await ethers.getContractFactory("GlobalIndexVault");
+    const Vault = await indexVaultFactory();
     const vault: any = await Vault.deploy(
       "Marketplank Global Index",
       "gPLNK",
@@ -344,7 +345,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
       const p1: any = await Price.deploy(100n * WAD, 100n * WAD);
       const p2: any = await Price.deploy(100n * WAD, 100n * WAD);
 
-      const Vault = await ethers.getContractFactory("GlobalIndexVault");
+      const Vault = await indexVaultFactory();
       const vault: any = await Vault.deploy(
         "gi",
         "gi",
