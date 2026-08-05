@@ -140,6 +140,22 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
         role: ROLE_ALLOC,
         holder: allocation,
       },
+      // The ecosystem fee split and its sink appointment are VALUE-FLOW keys,
+      // not risk keys: they decide where an already-charged fee is booked,
+      // never what anyone is charged. Same role as `platformAllocationBps`,
+      // and the risk role must not reach either of them.
+      {
+        name: "queueParam",
+        args: [b32("ecosystemFeeSplitBps"), 500n],
+        role: ROLE_ALLOC,
+        holder: allocation,
+      },
+      {
+        name: "queueParam",
+        args: [b32("ecosystemSink"), 0n],
+        role: ROLE_ALLOC,
+        holder: allocation,
+      },
       {
         name: "queuePlatformTreasury",
         args: [alice.address],
@@ -169,6 +185,10 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       "executeMetric",
       "executeListing",
       "executePlatformTreasury",
+      // Permissionless BY DESIGN, and it is the point of the function: a
+      // fixed, timelock-appointed destination with no recipient argument, so
+      // triggering it is not a privilege. Same shape as V3's `withdrawFees`.
+      "harvestEcosystemFees",
       "executeRole",
       "delistEmpty",
       "refreshEligibleCount",
