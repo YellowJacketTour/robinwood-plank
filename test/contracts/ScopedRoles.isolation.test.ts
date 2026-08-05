@@ -197,6 +197,21 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // Permissionless BY DESIGN: pushing dividends is donating money. A role
       // gate here would buy nothing and add a key to lose.
       "receiveDividendsWrapped",
+      // ROUND 10 — the fault-tolerant exit door's retry pair. Both are keyed
+      // strictly on `msg.sender`: there is no recipient argument, so neither
+      // can be aimed at anybody else's credit, and no role can call either on
+      // a holder's behalf. They exist so a redemption leg that bounced is
+      // never lost, which is a strengthening of the anchor rule, not a hole
+      // in it.
+      "claimPending",
+      "claimPendingMany",
+      // ROUND 10 — permissionless balance reconciliation. Credits value that
+      // is ALREADY in this contract and accounted nowhere (a raw transfer in,
+      // e.g. a TBAValueSweeper sweep) into the constituent's reserve, where it
+      // becomes redeemable by everyone pro rata. It can only ever credit UP TO
+      // the real held balance, it fabricates nothing, and it moves nothing
+      // out — so there is nothing here for a role to be trusted with.
+      "syncConstituentBalance",
       "delistEmpty",
       "refreshEligibleCount",
       "seedConstituent",

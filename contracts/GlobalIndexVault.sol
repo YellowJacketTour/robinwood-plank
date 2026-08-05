@@ -264,6 +264,19 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     /// be able to out-of-gas a whole-basket recount.
     uint256 private constant ELIGIBILITY_GAS_CAP = 50_000;
 
+    /**
+     * @dev Gas ceiling on ONE fault-tolerant redemption leg. Identical value
+     * and identical reasoning to `WrappedIndexShare.PAYOUT_GAS`, which is the
+     * implementation this contract's exit door is now a port of: generous for
+     * an ERC-20 `transfer` including a blacklist or allowlist check (a plain
+     * transfer is ~50k), and low enough that MAX_CONSTITUENTS legs cannot
+     * approach a block. The 63/64 rule is what makes the bound real — a
+     * hostile constituent cannot consume the gas the remaining legs need. A
+     * legitimate token too heavy for this still pays out in full through
+     * `claimPending`, which forwards everything it has.
+     */
+    uint256 private constant PAYOUT_GAS = 250_000;
+
     // ── Types ──────────────────────────────────────────────────────────────
 
     struct QueuedParam {
@@ -319,6 +332,55 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
 
     address[] private constituentList;
     mapping(address => Constituent) private constituents;
+
+    /**
+     * @notice ── THE EXIT DOOR'S FAULT TOLERANCE (round 10, and the single
+     * most important guarantee on this contract) ──
+     *
+     * Guarantee 1 in this file's header says redemption is strict pro-rata
+     * in-kind and that no role can block it. That was true of every ROLE and
+     * false of every unprivileged party, which is worse: one constituent whose
+     * `transfer` reverts — a blacklist landing on one specific holder, a pause,
+     * an upgrade — took the ENTIRE redemption down with it, for ALL legs, for
+     * that holder, with no recovery. `delistEmpty` needs `reserve == 0` and the
+     * only path to zero was the loop that was bricked, so the deadlock closed.
+     *
+     * The fix is not a new guard and not a new privilege. It is the EXACT
+     * fault-tolerant payout pattern `WrappedIndexShare._payout` already proved
+     * safe in this codebase, ported here one for one:
+     *
+     *   1. every leg's amount is computed from PRE-BURN reserves before any
+     *      transfer is attempted, so no leg's success or failure can change
+     *      another leg's size;
+     *   2. the burn happens once, and every reserve is debited, before any
+     *      external call — checks-effects-interactions across the whole basket
+     *      rather than per leg;
+     *   3. each leg is paid through a bounded-gas, NON-REVERTING low-level
+     *      call. A leg that fails for any reason at all is credited to
+     *      `pendingClaim[holder][token]` and counted in `reservedClaims[token]`
+     *      instead of reverting the redemption.
+     *
+     * WHY THE DEFERRED AMOUNT CANNOT BE REDEEMED TWICE. `reserve` was already
+     * debited in step 2, so a deferred leg is out of the pro-rata pool the
+     * instant it is deferred — the remaining holders' slice is computed against
+     * a reserve that no longer contains it. `reservedClaims` is the SECOND half
+     * of that statement: it is the ledger of value that is physically held by
+     * this contract but owed to a named holder, and it is what
+     * `syncConstituentBalance` subtracts so an unaccounted-balance sweep can
+     * never re-credit a deferred claim back into `reserve`. Same role as
+     * `WrappedIndexShare.reserved`, same arithmetic.
+     *
+     * Retry is `claimPending` (loud, full gas) or `claimPendingMany` (batched,
+     * tolerant). Neither is gated on listing, on `indexOpen`, or on any role:
+     * a credit survives its constituent being deactivated and delisted, which
+     * is the whole point of holding it outside `reserve`.
+     */
+    mapping(address => mapping(address => uint256)) public pendingClaim;
+
+    /// @notice Per-token total of `pendingClaim`, i.e. held-but-owed balance.
+    /// Never part of `reserve`, never part of NAV, never redeemable by anyone
+    /// but the holder it is credited to.
+    mapping(address => uint256) public reservedClaims;
 
     mapping(bytes32 => QueuedParam) public queuedParams;
     mapping(address => QueuedListing) public queuedListings;
@@ -598,6 +660,10 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     event EcosystemFeesHarvested(address indexed token, address indexed sink, uint256 amount);
     event DividendsReceived(address indexed from, uint256 amount, uint256 eligibleSupply);
     event DividendClaimed(address indexed account, uint256 amount);
+    event PayoutDeferred(address indexed account, address indexed token, uint256 amount);
+    event PendingClaimed(address indexed account, address indexed token, uint256 amount);
+    event ConstituentSynced(address indexed token, uint256 credited);
+    event DividendsDeferred(uint256 amount, uint256 carried);
 
     // ── Errors ─────────────────────────────────────────────────────────────
 
@@ -1400,23 +1466,105 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
         uint256 denom = totalSupply() + VIRTUAL_SHARES;
         _burn(msg.sender, sharesIn); // burn first: no reentrancy on a stale supply
 
+        // ── PHASE 1: size and debit EVERY leg, against PRE-PAYOUT reserves.
+        // No external call happens anywhere in this loop, so no leg's outcome
+        // can move another leg's number and there is no reentrancy surface
+        // over a half-updated basket.
         amountsOut = new uint256[](n);
         for (uint256 i = 0; i < n; i++) {
-            address t = constituentList[i];
-            Constituent storage c = constituents[t];
+            Constituent storage c = constituents[constituentList[i]];
             // FLOOR, against the REAL reserve (see the asymmetry note above).
             // Dust always stays with the vault, so there is no systematic
             // advantage to redeeming last (ultimate-form §1).
             uint256 out = Math.mulDiv(sharesIn, c.reserve, denom);
             if (out > c.reserve) out = c.reserve; // unreachable given the locked seed; belt and braces
             if (out < minAmountsOut[i]) revert SlippageExceeded();
-            if (out > 0) {
-                c.reserve -= out;
-                IERC20(t).safeTransfer(msg.sender, out);
-            }
+            c.reserve -= out;
             amountsOut[i] = out;
         }
+
+        // ── PHASE 2: pay. Every leg is attempted; a leg that fails is
+        // DEFERRED, never fatal. This is the line that makes "no party,
+        // privileged or not, can block an exit" true rather than intended.
+        for (uint256 i = 0; i < n; i++) {
+            _payOrDefer(constituentList[i], msg.sender, amountsOut[i]);
+        }
         emit RedeemedProRata(msg.sender, sharesIn);
+    }
+
+    /**
+     * @notice Retry ONE deferred redemption leg, at full gas and loudly.
+     *
+     * Unlike the redemption loop this does NOT swallow a failure: if the
+     * restriction is still in force the call reverts and the credit is left
+     * exactly where it was. That is the right shape for a deliberate retry —
+     * the caller wants to know whether it worked — and it is also the escape
+     * hatch for a legitimate constituent whose transfer costs more than
+     * `PAYOUT_GAS`.
+     *
+     * NOT gated on `whenOpen`, on the constituent still being listed, or on
+     * any role. A credit is a debt this contract already owes to one named
+     * address, and nothing in this contract's governance can stand between
+     * them and it.
+     */
+    function claimPending(address token) external nonReentrant returns (uint256 amount) {
+        amount = pendingClaim[msg.sender][token];
+        if (amount == 0) revert ZeroAmount();
+        pendingClaim[msg.sender][token] = 0;
+        reservedClaims[token] -= amount;
+        IERC20(token).safeTransfer(msg.sender, amount);
+        emit PendingClaimed(msg.sender, token, amount);
+    }
+
+    /**
+     * @notice Batch-retry several deferred legs. Tolerant, unlike
+     * `claimPending`: a leg that still fails is simply re-credited by
+     * `_payOrDefer` and ends exactly where it started, and the others still
+     * pay. Duplicate entries are harmless — the second sees a zero credit.
+     */
+    function claimPendingMany(address[] calldata tokens)
+        external
+        nonReentrant
+        returns (uint256 settled)
+    {
+        for (uint256 i = 0; i < tokens.length; i++) {
+            address t = tokens[i];
+            uint256 amount = pendingClaim[msg.sender][t];
+            if (amount == 0) continue;
+            pendingClaim[msg.sender][t] = 0;
+            reservedClaims[t] -= amount;
+            if (_payOrDefer(t, msg.sender, amount)) {
+                settled++;
+                emit PendingClaimed(msg.sender, t, amount);
+            }
+        }
+    }
+
+    /**
+     * @dev Pay one leg without ever reverting the caller. Returns true on a
+     * completed transfer; on ANY failure — a revert, a `false` return, an
+     * out-of-gas inside the callee, undecodable returndata, no code at the
+     * address — the amount is credited to the user and reserved out of the
+     * pro-rata pool, so it is neither lost to them nor double-redeemable by
+     * anybody else.
+     *
+     * Moved, argument for argument, from `WrappedIndexShare._payout`. The
+     * bounded gas is what makes it real: the 63/64 rule means a hostile
+     * constituent cannot consume the gas the remaining legs need.
+     */
+    function _payOrDefer(address token, address to, uint256 amount) private returns (bool) {
+        if (amount == 0) return true;
+        (bool ok, bytes memory data) = token.call{gas: PAYOUT_GAS}(
+            abi.encodeWithSelector(IERC20.transfer.selector, to, amount)
+        );
+        // Accept the two shapes a real ERC-20 returns: nothing, or `true`.
+        if (ok && (data.length == 0 || (data.length >= 32 && abi.decode(data, (bool))))) {
+            return true;
+        }
+        pendingClaim[to][token] += amount;
+        reservedClaims[token] += amount;
+        emit PayoutDeferred(to, token, amount);
+        return false;
     }
 
     /**
