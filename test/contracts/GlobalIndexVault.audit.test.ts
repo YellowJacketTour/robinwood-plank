@@ -221,7 +221,11 @@ describe("GlobalIndexVault", () => {
     const { vault, alice, bob, addrs } = fx;
     await vault.connect(alice).mintProRata(1000n * WAD, maxIn(3));
     await vault.connect(bob).mintProRata(1000n * WAD, maxIn(3));
-    await warmCheckpoints(fx, 3);
+    // Warmed to a FULL observation buffer: the persistence gate is now
+    // size-proportional (requiredCheckpoints), and every operation below is
+    // large enough to demand the maximum. The mechanism under test is
+    // unchanged; only the setup has to clear a stricter gate.
+    await warmCheckpoints(fx, 7);
 
     const V = 1000n;
     const before = await reservesOf(fx);
@@ -250,7 +254,11 @@ describe("GlobalIndexVault", () => {
   it("a single-asset mint -> single-asset redeem round trip is unprofitable", async () => {
     const fx = await fixture();
     const { vault, alice, tokens, addrs } = fx;
-    await warmCheckpoints(fx, 4);
+    // Warmed to a FULL observation buffer: the persistence gate is now
+    // size-proportional (requiredCheckpoints), and every operation below is
+    // large enough to demand the maximum. The mechanism under test is
+    // unchanged; only the setup has to clear a stricter gate.
+    await warmCheckpoints(fx, 7);
     const before: bigint = await tokens[0].balanceOf(alice.address);
     const shares: bigint = await vault
       .connect(alice)
@@ -334,7 +342,11 @@ describe("GlobalIndexVault", () => {
     // derived from the credited delta rather than fixed in advance — so a
     // short delivery buys proportionally fewer shares and dilutes nobody.
     const vaultBalBefore: bigint = await tokens[0].balanceOf(fx.vaultAddr);
-    await warmCheckpoints(fx, 3);
+    // Warmed to a FULL observation buffer: the persistence gate is now
+    // size-proportional (requiredCheckpoints), and every operation below is
+    // large enough to demand the maximum. The mechanism under test is
+    // unchanged; only the setup has to clear a stricter gate.
+    await warmCheckpoints(fx, 7);
     await vault.connect(alice).mintSingleAsset(addrs[0], 100n * WAD, 0n);
     const credited = (await vault.reserveOf(addrs[0])) - before;
     const realDelta = (await tokens[0].balanceOf(fx.vaultAddr)) - vaultBalBefore;
@@ -538,7 +550,11 @@ describe("GlobalIndexVault", () => {
 
     // The 56.78% holder's move: dump/pump the PLANK/ETH pool and mint against
     // the spot. The capped band means the spot is simply not what gets used.
-    await warmCheckpoints(fx, 4);
+    // Warmed to a FULL observation buffer: the persistence gate is now
+    // size-proportional (requiredCheckpoints), and every operation below is
+    // large enough to demand the maximum. The mechanism under test is
+    // unchanged; only the setup has to clear a stricter gate.
+    await warmCheckpoints(fx, 7);
     const quoteBefore: bigint = await vault
       .connect(alice)
       .mintSingleAsset.staticCall(addrs[0], 100n * WAD, 0n);

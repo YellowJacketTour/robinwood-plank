@@ -14,14 +14,27 @@ import {
 } from "./helpers/index-vault";
 
 /**
- * Audit-style suite for PlankGauge, the burn-directed replacement for the
- * vote-escrow contract this branch originally carried. One test per named
- * property of contracts/PlankGauge.sol's header, each attacking the vector the
- * property exists for rather than asserting a happy path — same bar as
- * GlobalIndexVault.audit.test.ts and VaultV3.audit.test.ts.
+ * Audit-style suite for PlankGauge generation 2: the epoch-scoped
+ * burn-voting-and-boost PUBLISHER that replaced the permanent-claim,
+ * threshold-accumulate, ETH-custodying generation 1.
  *
- * LOCAL HARDHAT ONLY. Nothing in this repo may deploy either contract until the
- * external audit gate (§2.6) clears.
+ * One test per named property of contracts/PlankGauge.sol's header, each
+ * attacking the vector the property exists for rather than asserting a happy
+ * path — same bar as GlobalIndexVault.audit.test.ts and VaultV3.audit.test.ts.
+ *
+ * WHAT WAS DELETED FROM THIS FILE AND WHY. Generation 1's reward tests
+ * (proportional claim share, "a later burn cannot claw back a folded pot",
+ * double-claim, non-burner claims nothing, soulbound claim ledger,
+ * below-threshold accumulation, per-gauge earmarking, "no admin path over
+ * pushed reward ETH") are gone because the MECHANISM they covered is gone —
+ * there is no claim, no pot, no threshold, no fold, and no ETH. Coverage was
+ * not dropped: the property those tests ultimately protected (nobody can
+ * extract value through this contract) is now proven far more strongly by
+ * `NO PAYMENT MECHANISM`, which asserts the contract cannot hold or move
+ * value AT ALL rather than that its accounting for held value is correct.
+ *
+ * LOCAL HARDHAT ONLY. Nothing in this repo may deploy either contract until
+ * the external audit gate (§2.6) clears.
  */
 describe("PlankGauge", () => {
   let clockSnapshot: SnapshotRestorer;
@@ -36,7 +49,21 @@ describe("PlankGauge", () => {
   const RAW_MULT = 10_000n;
   const LP_MULT = 25_000n;
   const COLL_MULT = 30_000n;
-  const THRESHOLD = ethers.parseEther("1");
+  const EPOCH = 7 * 24 * 3_600;
+  const BASE_BOOST = 10_000n;
+  const MAX_BOOST = 25_000n;
+
+  /** Integer sqrt, matching OpenZeppelin Math.sqrt's floor semantics. */
+  function isqrt(n: bigint): bigint {
+    if (n < 2n) return n;
+    let x = n;
+    let y = (x + 1n) / 2n;
+    while (y < x) {
+      x = y;
+      y = (x + n / x) / 2n;
+    }
+    return x;
+  }
 
   async function fixture() {
     // Offset past the index fixture's signers so a gauge whale can never
@@ -56,7 +83,7 @@ describe("PlankGauge", () => {
       gaugeAdmin.address,
       TIMELOCK,
       [RAW_MULT, LP_MULT, COLL_MULT],
-      THRESHOLD
+      EPOCH
     );
     const gaugeAddr = await gauge.getAddress();
 
@@ -77,7 +104,7 @@ describe("PlankGauge", () => {
     await gauge.executePlankEthLp(await plankEthLp.getAddress());
     await gauge.executeCollectionLp(gA);
 
-    for (const who of [whale, minnow]) {
+    for (const who of [whale, minnow, funder]) {
       for (const t of [plank, plankEthLp, collLp, impostorLp]) {
         await t.mint(who.address, 1_000_000n * WAD);
         await t.connect(who).approve(gaugeAddr, ethers.MaxUint256);
@@ -101,22 +128,28 @@ describe("PlankGauge", () => {
     };
   }
 
-  // ══ Burn paths and their multipliers ═══════════════════════════════════
+  // ══ Burn paths and their multipliers (carried over, unchanged mechanism) ══
 
   it("an LP burn earns a real multiplier over an identical raw PLANK burn", async () => {
     const fx = await fixture();
     const { gauge, whale, minnow, gA, plankEthLp } = fx;
     const amount = 1_000n * WAD;
+    const e: bigint = await gauge.currentEpoch();
 
     await gauge.connect(whale).burnPlank(gA, amount);
     await gauge.connect(minnow).burnPlankEthLp(gA, await plankEthLp.getAddress(), amount);
 
-    const raw: bigint = await gauge.claimantWeightedBurns(gA, whale.address);
-    const lp: bigint = await gauge.claimantWeightedBurns(gA, minnow.address);
-    expect(raw).to.equal(amount);
-    expect(lp).to.equal((amount * LP_MULT) / RAW_MULT);
+    // The MULTIPLIER is applied to the raw burn, before the sqrt dampening.
+    expect(await gauge.epochWeightedBurn(e, gA, whale.address)).to.equal(amount);
+    expect(await gauge.epochWeightedBurn(e, gA, minnow.address)).to.equal(
+      (amount * LP_MULT) / RAW_MULT
+    );
+    const raw: bigint = await gauge.accountWeight(gA, whale.address);
+    const lp: bigint = await gauge.accountWeight(gA, minnow.address);
+    expect(raw).to.equal(isqrt(amount));
+    expect(lp).to.equal(isqrt((amount * LP_MULT) / RAW_MULT));
     expect(lp).to.be.gt(raw, "LP burn must strictly dominate a raw burn");
-    expect(await gauge.totalWeightedBurns(gA)).to.equal(raw + lp);
+    expect(await gauge.gaugeWeight(gA)).to.equal(raw + lp);
   });
 
   it("a collection v-token LP burn earns at least the PLANK/ETH LP rate", async () => {
@@ -125,10 +158,10 @@ describe("PlankGauge", () => {
     const amount = 500n * WAD;
     await gauge.connect(whale).burnPlankEthLp(gA, await plankEthLp.getAddress(), amount);
     await gauge.connect(minnow).burnCollectionLp(gA, amount);
-    const lp: bigint = await gauge.claimantWeightedBurns(gA, whale.address);
-    const coll: bigint = await gauge.claimantWeightedBurns(gA, minnow.address);
+    const lp: bigint = await gauge.accountWeight(gA, whale.address);
+    const coll: bigint = await gauge.accountWeight(gA, minnow.address);
     expect(coll).to.be.gte(lp, "the exact-market LP burn must never be worth less");
-    expect(coll).to.equal((amount * COLL_MULT) / RAW_MULT);
+    expect(coll).to.equal(isqrt((amount * COLL_MULT) / RAW_MULT));
   });
 
   it("an impostor LP token — same name, same symbol — earns nothing", async () => {
@@ -139,7 +172,7 @@ describe("PlankGauge", () => {
     await expect(
       gauge.connect(whale).burnPlankEthLp(gA, await impostorLp.getAddress(), 100n * WAD)
     ).to.be.revertedWithCustomError(gauge, "NotApprovedLp");
-    expect(await gauge.claimantWeightedBurns(gA, whale.address)).to.equal(0n);
+    expect(await gauge.accountWeight(gA, whale.address)).to.equal(0n);
   });
 
   it("a collection LP burn cannot be pointed at a different collection's gauge", async () => {
@@ -178,176 +211,474 @@ describe("PlankGauge", () => {
     const { gauge, whale, gA, plank } = fx;
     await plank.setFeeBps(1_000); // 10% skimmed... to the dead address as well
     const deadBefore: bigint = await plank.balanceOf(DEAD);
+    const e: bigint = await gauge.currentEpoch();
     await gauge.connect(whale).burnPlank(gA, 1_000n * WAD);
     const reallyBurnt = (await plank.balanceOf(DEAD)) - deadBefore;
     // MockIndexToken's fee also goes to dead, so the observed delta is the
     // full amount here — the point of the assertion is that the credited
     // weight equals the OBSERVED delta, never the nominal argument.
-    expect(await gauge.claimantWeightedBurns(gA, whale.address)).to.equal(reallyBurnt);
+    expect(await gauge.epochWeightedBurn(e, gA, whale.address)).to.equal(reallyBurnt);
   });
 
-  // ══ Claim accounting: simple, proportional, soulbound ══════════════════
+  // ══ EPOCH RESET — the whole point of generation 2 ═══════════════════════
 
-  it("a claimant's share is a live fraction of the CURRENT total, so later burns dilute", async () => {
+  it("EPOCH: a gauge's weight is zero in a fresh epoch until someone burns into it", async () => {
+    const fx = await fixture();
+    const { gauge, whale, gA } = fx;
+    expect(await gauge.gaugeWeight(gA)).to.equal(0n);
+    await gauge.connect(whale).burnPlank(gA, 100n * WAD);
+    expect(await gauge.gaugeWeight(gA)).to.be.gt(0n);
+  });
+
+  it("EPOCH: weight resets to zero the instant the boundary is crossed", async () => {
+    const fx = await fixture();
+    const { gauge, whale, gA } = fx;
+    await gauge.connect(whale).burnPlank(gA, 900n * WAD);
+    const e0: bigint = await gauge.currentEpoch();
+    const weight: bigint = await gauge.gaugeWeight(gA);
+    expect(weight).to.equal(isqrt(900n * WAD));
+
+    // One second before the boundary the weight is still fully live...
+    const endsAt: bigint = await gauge.epochEndsAt();
+    await time.increaseTo(endsAt - 2n);
+    expect(await gauge.currentEpoch()).to.equal(e0);
+    expect(await gauge.gaugeWeight(gA)).to.equal(weight);
+
+    // ...and one second after it, it is ZERO. Not decayed. Zero.
+    await time.increaseTo(endsAt + 1n);
+    expect(await gauge.currentEpoch()).to.equal(e0 + 1n);
+    expect(await gauge.gaugeWeight(gA)).to.equal(0n);
+    expect(await gauge.accountWeight(gA, whale.address)).to.equal(0n);
+    expect(await gauge.rawShareWad(gA, whale.address)).to.equal(0n);
+    expect(await gauge.boostMultiplier(gA, whale.address)).to.equal(BASE_BOOST);
+
+    // The old epoch's record is still readable — the reset is a change of
+    // storage key, not a deletion of history.
+    expect(await gauge.gaugeWeightAt(gA, e0)).to.equal(weight);
+  });
+
+  it("EPOCH: there is NO carry-forward — influence must be re-bought every epoch", async () => {
     const fx = await fixture();
     const { gauge, whale, minnow, gA } = fx;
-    await gauge.connect(whale).burnPlank(gA, 100n * WAD);
-    expect(await gauge.claimShareBps(gA, whale.address)).to.equal(10_000n);
-    await gauge.connect(minnow).burnPlank(gA, 300n * WAD);
-    expect(await gauge.claimShareBps(gA, whale.address)).to.equal(2_500n);
-    expect(await gauge.claimShareBps(gA, minnow.address)).to.equal(7_500n);
+    // Epoch 1: the whale buys total control with an enormous burn.
+    await gauge.connect(whale).burnPlank(gA, 1_000_000n * WAD);
+    expect(await gauge.rawShareWad(gA, whale.address)).to.equal(WAD);
+
+    await time.increaseTo((await gauge.epochEndsAt()) + 1n);
+
+    // Epoch 2: a minnow burns a thousandth of what the whale burned, and owns
+    // the gauge outright, because the whale's purchase did not renew.
+    await gauge.connect(minnow).burnPlank(gA, 1_000n * WAD);
+    expect(await gauge.rawShareWad(gA, whale.address)).to.equal(0n);
+    expect(await gauge.rawShareWad(gA, minnow.address)).to.equal(WAD);
+    expect(await gauge.gaugeWeight(gA)).to.equal(isqrt(1_000n * WAD));
   });
 
-  it("a later burn cannot claw back a pot that was already distributed", async () => {
+  it("EPOCH: retuning the duration jumps the index forward, never onto live storage", async () => {
     const fx = await fixture();
-    const { gauge, whale, minnow, funder, gA } = fx;
-    await gauge.connect(whale).burnPlank(gA, 100n * WAD);
-    await gauge.connect(funder).receiveRewards(gA, { value: ethers.parseEther("4") });
-    await gauge.distribute(gA); // folded while the whale owned 100%
+    const { gauge, gaugeAdmin, whale, gA } = fx;
+    await gauge.connect(whale).burnPlank(gA, 500n * WAD);
+    const before: bigint = await gauge.currentEpoch();
+    const weight: bigint = await gauge.gaugeWeight(gA);
 
-    // Now a much bigger burner arrives. It dilutes FUTURE revenue only.
-    await gauge.connect(minnow).burnPlank(gA, 900n * WAD);
-    expect(await gauge.claimableNow(gA, whale.address)).to.equal(ethers.parseEther("4"));
-    expect(await gauge.claimableNow(gA, minnow.address)).to.equal(0n);
+    const key = ethers.encodeBytes32String("epochDuration");
+    await gauge.connect(gaugeAdmin).queueParam(key, 24 * 3_600);
+    await time.increase(TIMELOCK + 1);
+    await gauge.executeParam(key);
 
-    await gauge.connect(funder).receiveRewards(gA, { value: ethers.parseEther("10") });
-    await gauge.distribute(gA);
-    expect(await gauge.claimableNow(gA, minnow.address)).to.equal(ethers.parseEther("9"));
-    expect(await gauge.claimableNow(gA, whale.address)).to.equal(ethers.parseEther("5"));
+    const after: bigint = await gauge.currentEpoch();
+    expect(after).to.be.gt(before, "the rebase must move strictly forward");
+    // The retune therefore cannot resurrect the pre-retune epoch's weights.
+    expect(await gauge.gaugeWeight(gA)).to.equal(0n);
+    expect(await gauge.gaugeWeightAt(gA, before)).to.equal(weight);
+    expect(await gauge.epochDuration()).to.equal(24n * 3_600n);
   });
 
-  it("claims pay out once and cannot be double-drawn", async () => {
+  it("EPOCH: the duration is bounded and timelocked", async () => {
     const fx = await fixture();
-    const { gauge, whale, funder, gA } = fx;
-    await gauge.connect(whale).burnPlank(gA, 100n * WAD);
-    await gauge.connect(funder).receiveRewards(gA, { value: ethers.parseEther("3") });
+    const { gauge, gaugeAdmin } = fx;
+    const key = ethers.encodeBytes32String("epochDuration");
+    for (const bad of [3_600n, BigInt(200 * 24 * 3_600)]) {
+      await gauge.connect(gaugeAdmin).queueParam(key, bad);
+      await time.increase(TIMELOCK + 1);
+      await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "BadParam");
+    }
+    expect(await gauge.epochDuration()).to.equal(BigInt(EPOCH));
+  });
 
-    const before: bigint = await ethers.provider.getBalance(whale.address);
-    const tx = await gauge.connect(whale).claim(gA);
-    const rc = await tx.wait();
-    const gas: bigint = BigInt(rc!.gasUsed) * BigInt(rc!.gasPrice);
-    expect(await ethers.provider.getBalance(whale.address)).to.equal(
-      before + ethers.parseEther("3") - gas
+  // ══ sqrt DAMPENING, and the honest sybil finding ═══════════════════════
+
+  it("SQRT: doubling a burn buys ~1.41x the weight, not 2x", async () => {
+    const fx = await fixture();
+    const { gauge, whale, minnow, gA } = fx;
+    await gauge.connect(minnow).burnPlank(gA, 1_000n * WAD);
+    await gauge.connect(whale).burnPlank(gA, 2_000n * WAD);
+    const small: bigint = await gauge.accountWeight(gA, minnow.address);
+    const big: bigint = await gauge.accountWeight(gA, whale.address);
+    // 2x the money buys strictly less than 2x the weight — the anti-whale
+    // property this curve is actually here for.
+    expect(big).to.be.lt(small * 2n, "dampening did not bite");
+    expect(big).to.be.gt(small, "dampening inverted the ordering");
+    // ...and it is sqrt-shaped: big/small ~= sqrt(2) ~= 1.4142.
+    const ratio = (big * 10_000n) / small;
+    expect(ratio).to.be.gte(14_130n).and.to.be.lte(14_152n);
+  });
+
+  it("SQRT: repeated small burns from ONE wallet are worth exactly one large one", async () => {
+    // The dampening is applied to the wallet's epoch TOTAL, not per call, so
+    // transaction chunking is economically neutral. If it were per-call, ten
+    // small burns would beat one large one from the same address, which is
+    // the sybil incentive turned inward and would make the accounting depend
+    // on how the caller happened to batch.
+    const fx = await fixture();
+    const { gauge, whale, minnow, gA, gB } = fx;
+    for (let i = 0; i < 10; i++) await gauge.connect(whale).burnPlank(gA, 100n * WAD);
+    await gauge.connect(minnow).burnPlank(gB, 1_000n * WAD);
+    expect(await gauge.accountWeight(gA, whale.address)).to.equal(
+      await gauge.accountWeight(gB, minnow.address)
     );
-    // A second claim pays zero rather than reverting or paying twice.
-    expect(await gauge.claimableNow(gA, whale.address)).to.equal(0n);
-    await gauge.connect(whale).claim(gA);
-    expect(await ethers.provider.getBalance(fx.gaugeAddr)).to.equal(0n);
   });
 
-  it("a non-burner can never claim anything", async () => {
+  it("SYBIL, HONESTLY: splitting a burn across two wallets yields MORE weight, not less", async () => {
+    /**
+     * The design note asking for this mechanism claimed sqrt dampening makes
+     * splitting "strictly worse" via `sqrt(a) + sqrt(b) < sqrt(a+b)`. That
+     * inequality is BACKWARDS and this test exists to pin the direction that
+     * is really true, rather than shipping a suite that asserts a false
+     * theorem and a comment that repeats it.
+     *
+     * (sqrt(a)+sqrt(b))^2 = a + b + 2*sqrt(a*b) > a + b, so for all a,b > 0
+     *
+     *     sqrt(a) + sqrt(b) > sqrt(a + b)
+     *
+     * sqrt is CONCAVE and every concave weighting strictly rewards splitting.
+     * This is the same reason quadratic funding needs a personhood layer: the
+     * sqrt is what CREATES the sybil incentive, not what removes it. The
+     * contract keeps sqrt because anti-whale dampening is what it was really
+     * wanted for, and the exposure is documented and measured here.
+     */
+    const fx = await fixture();
+    const { gauge, whale, minnow, funder, gA, gB } = fx;
+    const total = 4_000n * WAD;
+
+    // One wallet, one burn.
+    await gauge.connect(whale).burnPlank(gA, total);
+    const undivided: bigint = await gauge.gaugeWeight(gA);
+
+    // The same money, same epoch, split across two wallets.
+    await gauge.connect(minnow).burnPlank(gB, total / 2n);
+    await gauge.connect(funder).burnPlank(gB, total / 2n);
+    const split: bigint = await gauge.gaugeWeight(gB);
+
+    expect(split).to.be.gt(undivided, "sqrt is concave; splitting must gain");
+    expect(split).to.equal(isqrt(total / 2n) * 2n);
+    expect(undivided).to.equal(isqrt(total));
+    // The gain is the sqrt(2) factor and nothing more: splitting reduces the
+    // PRICE of a given amount of influence by ~41%, it never makes influence
+    // free, and every sybil wallet still permanently destroys real tokens.
+    const gain = (split * 10_000n) / undivided;
+    expect(gain).to.be.gte(14_130n).and.to.be.lte(14_152n);
+  });
+
+  // ══ CONCENTRATION PENALTY ══════════════════════════════════════════════
+
+  it("PENALTY: the retention rate strictly decreases as a burner's raw share rises", async () => {
+    /**
+     * The claim that IS true and provable. `effectiveShare_i / rawShare_i =
+     * 1 - rawShare_i^k` is strictly decreasing in rawShare_i.
+     *
+     * Note what is deliberately NOT asserted: `effectiveShare_i` itself is
+     * NOT monotone in rawShare_i. d/ds [s - s^2.5] = 1 - 2.5*s^1.5 vanishes at
+     * s = 0.4^(2/3) ~= 0.5429, so effectiveShare rises up to ~54% share and
+     * falls after. Asserting "effectiveShare strictly decreases as rawShare
+     * increases" would assert something false over most of the domain, and
+     * the suite says so out loud rather than picking three points where it
+     * happens to hold.
+     */
     const fx = await fixture();
     const { gauge, whale, minnow, funder, gA } = fx;
-    await gauge.connect(whale).burnPlank(gA, 100n * WAD);
-    await gauge.connect(funder).receiveRewards(gA, { value: ethers.parseEther("2") });
-    await gauge.distribute(gA);
-    expect(await gauge.claimableNow(gA, minnow.address)).to.equal(0n);
-    const before: bigint = await ethers.provider.getBalance(fx.gaugeAddr);
-    await gauge.connect(minnow).claim(gA);
-    expect(await ethers.provider.getBalance(fx.gaugeAddr)).to.equal(before);
+    // Three very different sizes in one epoch on one gauge.
+    await gauge.connect(whale).burnPlank(gA, 1_000_000n * WAD);
+    await gauge.connect(minnow).burnPlank(gA, 10_000n * WAD);
+    await gauge.connect(funder).burnPlank(gA, 100n * WAD);
+
+    const who = [whale, minnow, funder];
+    const raws: bigint[] = [];
+    const retention: bigint[] = [];
+    for (const a of who) {
+      const raw: bigint = await gauge.rawShareWad(gA, a.address);
+      const eff: bigint = await gauge.effectiveShareWad(gA, a.address);
+      expect(raw).to.be.gt(0n);
+      raws.push(raw);
+      retention.push((eff * WAD) / raw);
+    }
+    // Sizes are strictly decreasing, so raw shares must be too...
+    expect(raws[0]).to.be.gt(raws[1]);
+    expect(raws[1]).to.be.gt(raws[2]);
+    // ...and retention must move strictly the OTHER way. That is concavity.
+    expect(retention[0]).to.be.lt(retention[1], "bigger share kept a bigger fraction");
+    expect(retention[1]).to.be.lt(retention[2], "bigger share kept a bigger fraction");
+    // Every retention is a real fraction of one, never above it: the penalty
+    // can only ever take away.
+    for (const r of retention) expect(r).to.be.lte(WAD);
   });
 
-  it("SOULBOUND: there is no transfer, approve, or admin path over a claim", async () => {
+  it("PENALTY: a sole burner is penalised to zero effective share", async () => {
     const fx = await fixture();
-    const { gauge, whale, minnow, gaugeAdmin, gA } = fx;
+    const { gauge, whale, gA } = fx;
+    await gauge.connect(whale).burnPlank(gA, 5_000n * WAD);
+    expect(await gauge.rawShareWad(gA, whale.address)).to.equal(WAD);
+    expect(await gauge.concentrationPenaltyWad(gA, whale.address)).to.equal(WAD);
+    expect(await gauge.effectiveShareWad(gA, whale.address)).to.equal(0n);
+    // ...and the whole epoch's share is therefore reported as protocol share.
+    expect(await gauge.protocolShareWad(gA)).to.equal(WAD);
+  });
+
+  it("PENALTY: dilution by a second burner moves the whale's effective share UP", async () => {
+    const fx = await fixture();
+    const { gauge, whale, minnow, funder, gA } = fx;
+    await gauge.connect(whale).burnPlank(gA, 10_000n * WAD);
+    const alone: bigint = await gauge.effectiveShareWad(gA, whale.address);
+    const rawAlone: bigint = await gauge.rawShareWad(gA, whale.address);
+
+    // A second burner arrives and dilutes the whale's RAW share...
+    await gauge.connect(minnow).burnPlank(gA, 10_000n * WAD);
+    const rawDiluted: bigint = await gauge.rawShareWad(gA, whale.address);
+    const diluted: bigint = await gauge.effectiveShareWad(gA, whale.address);
+    expect(rawDiluted).to.be.lt(rawAlone, "dilution did not reduce the raw share");
+    expect(diluted).to.be.gt(alone, "effective share did not recover on dilution");
+
+    // AND THE HONEST OTHER HALF, measured rather than assumed. Recovery is
+    // not unbounded, because effectiveShare = s - s^2.5 is a HUMP with its
+    // maximum at s = 0.4^(2/3) ~= 0.5429. Diluting from 1/1 to 1/2 climbs
+    // toward that peak; diluting on to 1/3 walks back DOWN the far side. A
+    // suite that only checked "more dilution is always better" would be
+    // asserting something the curve does not do.
+    await gauge.connect(funder).burnPlank(gA, 10_000n * WAD);
+    const raw3: bigint = await gauge.rawShareWad(gA, whale.address);
+    const eff3: bigint = await gauge.effectiveShareWad(gA, whale.address);
+    expect(raw3).to.be.lt(rawDiluted);
+    expect(eff3).to.be.lt(diluted, "the hump is not where the maths says it is");
+    expect(eff3).to.be.gt(alone, "still strictly better than sole-whale zero");
+    // The retention RATE, which is the monotone quantity, keeps improving.
+    expect((eff3 * WAD) / raw3).to.be.gt((diluted * WAD) / rawDiluted);
+  });
+
+  it("PENALTY: the remainder is a REPORTING figure with no claim path anywhere", async () => {
+    const fx = await fixture();
+    const { gauge, whale, minnow, gA } = fx;
+    await gauge.connect(whale).burnPlank(gA, 40_000n * WAD);
+    await gauge.connect(minnow).burnPlank(gA, 10_000n * WAD);
+
+    // It is exactly what is left after every burner's effective share.
+    let assigned = 0n;
+    const n: bigint = await gauge.burnerCount(gA);
+    expect(n).to.equal(2n);
+    for (let i = 0n; i < n; i++) {
+      assigned += await gauge.effectiveShareWad(gA, await gauge.burnerAt(gA, i));
+    }
+    expect(await gauge.protocolShareWad(gA)).to.equal(WAD - assigned);
+    expect(await gauge.protocolShareWad(gA)).to.be.gt(0n);
+
+    // And there is no function anywhere that could ever pay it to anybody.
+    const names = gauge.interface.fragments
+      .filter((f: any) => f.type === "function")
+      .map((f: any) => f.name.toLowerCase());
+    for (const bad of ["claim", "withdraw", "distribute", "settle", "payout", "payto"]) {
+      expect(names.some((x: string) => x.includes(bad))).to.equal(false, `found ${bad}`);
+    }
+  });
+
+  it("PENALTY: the exponent k is timelocked and bounded below 1.0x", async () => {
+    const fx = await fixture();
+    const { gauge, gaugeAdmin, whale, minnow, gA } = fx;
+    await gauge.connect(whale).burnPlank(gA, 40_000n * WAD);
+    await gauge.connect(minnow).burnPlank(gA, 10_000n * WAD);
+    const before: bigint = await gauge.concentrationPenaltyWad(gA, whale.address);
+
+    const key = ethers.encodeBytes32String("concentrationExponentHalves");
+    // k below 1.0 would make the penalty CONVEX in share and reward
+    // concentration — the opposite of the parameter's purpose. Hard floor.
+    await gauge.connect(gaugeAdmin).queueParam(key, 1n);
+    await time.increase(TIMELOCK + 1);
+    await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "BadParam");
+    await gauge.connect(gaugeAdmin).queueParam(key, 99n);
+    await time.increase(TIMELOCK + 1);
+    await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "BadParam");
+    expect(await gauge.concentrationExponentHalves()).to.equal(3n);
+
+    // A legal retune is queued, never instant.
+    await gauge.connect(gaugeAdmin).queueParam(key, 4n); // k = 2.0
+    expect(await gauge.concentrationPenaltyWad(gA, whale.address)).to.equal(before);
+    await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(
+      gauge,
+      "TimelockNotElapsed"
+    );
+    await time.increase(TIMELOCK + 1);
+    await gauge.executeParam(key);
+    // A higher k means a smaller penalty for a sub-1.0 share (s^2 < s^1.5).
+    expect(await gauge.concentrationPenaltyWad(gA, whale.address)).to.be.lt(before);
+  });
+
+  // ══ THE PUBLISHED BOOST ════════════════════════════════════════════════
+
+  it("BOOST: the multiplier follows the veCRV shape and is capped", async () => {
+    const fx = await fixture();
+    const { gauge, whale, minnow, gA } = fx;
+    // Nobody has burned: everyone sits at the floor, and nobody is excluded.
+    expect(await gauge.boostMultiplier(gA, whale.address)).to.equal(BASE_BOOST);
+
+    await gauge.connect(whale).burnPlank(gA, 4_000n * WAD);
+    // A sole burner is at 100% of the weight, so exactly at the ceiling.
+    expect(await gauge.boostMultiplier(gA, whale.address)).to.equal(MAX_BOOST);
+
+    await gauge.connect(minnow).burnPlank(gA, 4_000n * WAD);
+    // Two identical burners: contribution ratio 1/2 each, so
+    // 10000 + (25000-10000)/2 = 17500 bps for both.
+    expect(await gauge.boostMultiplier(gA, whale.address)).to.equal(17_500n);
+    expect(await gauge.boostMultiplier(gA, minnow.address)).to.equal(17_500n);
+
+    // A non-burner never falls below the floor and never exceeds the cap.
+    const b: bigint = await gauge.boostMultiplier(gA, fx.funder.address);
+    expect(b).to.equal(BASE_BOOST);
+    for (const who of [whale, minnow, fx.funder]) {
+      const m: bigint = await gauge.boostMultiplier(gA, who.address);
+      expect(m).to.be.gte(BASE_BOOST).and.to.be.lte(MAX_BOOST);
+    }
+  });
+
+  it("BOOST: the formula matches the published expression exactly, at every size", async () => {
+    const fx = await fixture();
+    const { gauge, whale, minnow, funder, gA } = fx;
+    await gauge.connect(whale).burnPlank(gA, 900_000n * WAD);
+    await gauge.connect(minnow).burnPlank(gA, 40_000n * WAD);
+    await gauge.connect(funder).burnPlank(gA, 900n * WAD);
+    const total: bigint = await gauge.gaugeWeight(gA);
+    for (const who of [whale, minnow, funder]) {
+      const c: bigint = await gauge.accountWeight(gA, who.address);
+      const expected = BASE_BOOST + ((MAX_BOOST - BASE_BOOST) * c) / total;
+      expect(await gauge.boostMultiplier(gA, who.address)).to.equal(expected);
+    }
+  });
+
+  it("BOOST: the ceiling is timelocked and itself hard-capped at 5x", async () => {
+    const fx = await fixture();
+    const { gauge, gaugeAdmin } = fx;
+    const key = ethers.encodeBytes32String("maxBoostBps");
+    await gauge.connect(gaugeAdmin).queueParam(key, 1_000_000n); // 100x
+    await time.increase(TIMELOCK + 1);
+    await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "BadParam");
+    expect(await gauge.maxBoostBps()).to.equal(MAX_BOOST);
+
+    await gauge.connect(gaugeAdmin).queueParam(key, 40_000n); // 4x, legal
+    await time.increase(TIMELOCK + 1);
+    await gauge.executeParam(key);
+    expect(await gauge.maxBoostBps()).to.equal(40_000n);
+
+    // The floor can never be pushed above the ceiling, in either order.
+    const baseKey = ethers.encodeBytes32String("baseBoostBps");
+    await gauge.connect(gaugeAdmin).queueParam(baseKey, 50_000n);
+    await time.increase(TIMELOCK + 1);
+    await expect(gauge.executeParam(baseKey)).to.be.revertedWithCustomError(gauge, "BadParam");
+    // ...and never below 1.0x either, which would publish a PENALTY dressed
+    // as a boost.
+    await gauge.connect(gaugeAdmin).queueParam(baseKey, 5_000n);
+    await time.increase(TIMELOCK + 1);
+    await expect(gauge.executeParam(baseKey)).to.be.revertedWithCustomError(gauge, "BadParam");
+    expect(await gauge.baseBoostBps()).to.equal(BASE_BOOST);
+  });
+
+  // ══ The wall between this contract and everything that holds value ═════
+
+  it("NO PAYMENT MECHANISM: the contract cannot receive, hold, or move value at all", async () => {
+    const fx = await fixture();
+    const { gauge, gaugeAddr, funder, whale, gA } = fx;
     await gauge.connect(whale).burnPlank(gA, 100n * WAD);
 
-    const fns = gauge.interface.fragments
-      .filter((f: any) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))
+    // 1. Not one payable function on the whole ABI. Generation 1 had
+    //    `receiveRewards`; there is now nothing to replace it with.
+    const payable = gauge.interface.fragments.filter(
+      (f: any) => f.type === "function" && f.stateMutability === "payable"
+    );
+    expect(payable.length).to.equal(0, "a payable function exists");
+
+    // 2. No bare receive/fallback either — a plain send bounces.
+    await expect(funder.sendTransaction({ to: gaugeAddr, value: WAD })).to.be.reverted;
+    expect(await ethers.provider.getBalance(gaugeAddr)).to.equal(0n);
+
+    // 3. No reward/claim/distribution surface of ANY kind, and no ERC-20 or
+    //    ERC-721 surface over the burn record either — the whole point of
+    //    generation 2 is that there is nothing here to own or trade.
+    const names = gauge.interface.fragments
+      .filter((f: any) => f.type === "function")
       .map((f: any) => f.name.toLowerCase());
     for (const bad of [
-      "transfer",
-      "approve",
-      "permit",
-      "delegate",
-      "seize",
+      "reward",
+      "claim",
+      "distribute",
+      "payout",
+      "withdraw",
+      "harvest",
       "sweep",
       "rescue",
       "emergency",
       "recover",
-      "setclaim",
-      "mint",
+      "seize",
+      "balanceof",
+      "ownerof",
+      "allowance",
+      "totalsupply",
     ]) {
-      expect(fns.some((n: string) => n.includes(bad))).to.equal(false, `found ${bad}`);
+      expect(names.some((n: string) => n.includes(bad))).to.equal(false, `found ${bad}`);
     }
-    // No ERC-20/721 surface at all.
-    const all = gauge.interface.fragments
-      .filter((f: any) => f.type === "function")
-      .map((f: any) => f.name);
-    for (const bad of ["balanceOf", "ownerOf", "allowance", "totalSupply"]) {
-      expect(all).to.not.include(bad);
+    // ...and no MUTATING function that could move a token or a balance. (The
+    // `approvedPlankEthLp` allowlist getter is a view and is exactly the sort
+    // of read a blanket name filter would false-positive on, so the
+    // value-moving names are checked against the non-view surface only.)
+    const mutating = gauge.interface.fragments
+      .filter((f: any) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))
+      .map((f: any) => f.name.toLowerCase());
+    for (const bad of ["transfer", "approve", "permit", "mint", "delegate", "setweight"]) {
+      expect(mutating.some((n: string) => n.includes(bad))).to.equal(false, `found ${bad}`);
     }
-    // ...and the admin cannot move the whale's weight to itself or to anyone.
-    expect(await gauge.claimantWeightedBurns(gA, gaugeAdmin.address)).to.equal(0n);
-    expect(await gauge.claimantWeightedBurns(gA, minnow.address)).to.equal(0n);
-    expect(await gauge.claimantWeightedBurns(gA, whale.address)).to.equal(100n * WAD);
+
+    // 4. And it holds no token of any kind: every burn went to dEaD, never here.
+    for (const t of [fx.plank, fx.plankEthLp, fx.collLp]) {
+      expect(await t.balanceOf(gaugeAddr)).to.equal(0n);
+    }
+    expect((await gauge.capabilities())[2]).to.equal(false, "capabilities claims it pays");
   });
-
-  // ══ Threshold-accumulate ═══════════════════════════════════════════════
-
-  it("below the threshold funds accumulate honestly — no dust payout, no revert", async () => {
-    const fx = await fixture();
-    const { gauge, whale, funder, gA } = fx;
-    await gauge.connect(whale).burnPlank(gA, 100n * WAD);
-    await gauge.connect(funder).receiveRewards(gA, { value: ethers.parseEther("0.3") });
-
-    let [acc, thr, ok] = await gauge.gaugeStatus(gA);
-    expect(acc).to.equal(ethers.parseEther("0.3"));
-    expect(thr).to.equal(THRESHOLD);
-    expect(ok).to.equal(false, "dust must not be claimable");
-    await expect(gauge.distribute(gA)).to.be.revertedWithCustomError(gauge, "BelowThreshold");
-
-    // A claim is NOT an error here — it simply pays zero and leaves the pot.
-    await gauge.connect(whale).claim(gA);
-    expect(await ethers.provider.getBalance(fx.gaugeAddr)).to.equal(ethers.parseEther("0.3"));
-
-    // Top it up past the threshold and the same call now pays everything.
-    await gauge.connect(funder).receiveRewards(gA, { value: ethers.parseEther("0.8") });
-    [acc, thr, ok] = await gauge.gaugeStatus(gA);
-    expect(ok).to.equal(true);
-    await gauge.connect(whale).claim(gA);
-    expect(await ethers.provider.getBalance(fx.gaugeAddr)).to.equal(0n);
-  });
-
-  it("a pot pushed before anyone has burned is held, never lost", async () => {
-    const fx = await fixture();
-    const { gauge, whale, funder, gA } = fx;
-    await gauge.connect(funder).receiveRewards(gA, { value: ethers.parseEther("5") });
-    await expect(gauge.distribute(gA)).to.be.revertedWithCustomError(gauge, "NoClaim");
-    await gauge.connect(whale).burnPlank(gA, 10n * WAD);
-    await gauge.distribute(gA);
-    expect(await gauge.claimableNow(gA, whale.address)).to.equal(ethers.parseEther("5"));
-  });
-
-  it("rewards are earmarked per gauge and never leak between gauges", async () => {
-    const fx = await fixture();
-    const { gauge, whale, minnow, funder, gA, gB } = fx;
-    await gauge.connect(whale).burnPlank(gA, 100n * WAD);
-    await gauge.connect(minnow).burnPlank(gB, 100n * WAD);
-    await gauge.connect(funder).receiveRewards(gA, { value: ethers.parseEther("6") });
-    await gauge.distribute(gA);
-    expect(await gauge.claimableNow(gA, whale.address)).to.equal(ethers.parseEther("6"));
-    expect(await gauge.claimableNow(gB, minnow.address)).to.equal(0n);
-    expect(await gauge.pendingRewards(gB)).to.equal(0n);
-  });
-
-  // ══ The wall between this contract and the basket ══════════════════════
 
   it("ANCHOR RULE: PlankGauge has no reach into GlobalIndexVault, in ABI or bytecode", async () => {
     const fx = await fixture();
     const { gauge, gaugeAddr } = fx;
     const idx = await deployOpenIndex({}, [1000n * WAD, 2000n * WAD, 500n * WAD]);
 
-    // 1. No function name or argument name anywhere mentions a vault concept.
+    // 1. No function name or argument name anywhere mentions a vault concept,
+    //    or any external payment/reward mechanism at all.
     for (const f of gauge.interface.fragments.filter((x: any) => x.type === "function") as any[]) {
       const blob = (f.name + " " + f.inputs.map((i: any) => i.name).join(" ")).toLowerCase();
-      for (const bad of ["index", "basket", "constituent", "reserve", "redeem", "nav"]) {
+      for (const bad of [
+        "index",
+        "basket",
+        "constituent",
+        "reserve",
+        "redeem",
+        "nav",
+        "treasury",
+        "fee",
+        "revenue",
+        "dividend",
+        "payer",
+        "router",
+      ]) {
         expect(blob.includes(bad)).to.equal(false, `gauge.${f.name} mentions ${bad}`);
       }
     }
     // 2. No vault address appears in this contract's deployed bytecode,
     //    because it was never given one — there is no constructor argument,
-    //    no setter, and no storage slot that could hold one.
+    //    no setter, and no storage slot that could hold one. Same for the
+    //    dividend distributor, the other value-holding contract in this repo.
     const code = await ethers.provider.getCode(gaugeAddr);
     expect(code.toLowerCase()).to.not.include(idx.vaultAddr.slice(2).toLowerCase());
     for (const a of idx.addrs) {
@@ -359,7 +690,7 @@ describe("PlankGauge", () => {
       (x: any) => x.type === "function"
     ) as any[]) {
       const blob = (f.name + " " + f.inputs.map((i: any) => i.name).join(" ")).toLowerCase();
-      for (const bad of ["gauge", "burn", "plank", "claim", "reward"]) {
+      for (const bad of ["gauge", "burn", "plank", "claim", "reward", "boost", "epoch"]) {
         expect(blob.includes(bad)).to.equal(false, `vault.${f.name} mentions ${bad}`);
       }
     }
@@ -410,44 +741,7 @@ describe("PlankGauge", () => {
     expect((await idx.vault.params()).concentrationCapBps).to.equal(CONCENTRATION_CAP_BPS);
     expect(await idx.vault.admin()).to.equal(idx.admin.address);
     // The gauge's own book is likewise untouched by the sweep.
-    expect(await gauge.totalWeightedBurns(gA)).to.equal(0n);
-  });
-
-  it("no admin path exists over pushed reward ETH", async () => {
-    const fx = await fixture();
-    const { gauge, gaugeAdmin, whale, funder, gA, gaugeAddr } = fx;
-    await gauge.connect(whale).burnPlank(gA, 100n * WAD);
-    await gauge.connect(funder).receiveRewards(gA, { value: ethers.parseEther("9") });
-
-    const adminBefore: bigint = await ethers.provider.getBalance(gaugeAdmin.address);
-    const fns = gauge.interface.fragments.filter(
-      (f: any) => f.type === "function" && !["view", "pure"].includes(f.stateMutability)
-    );
-    for (const f of fns as any[]) {
-      const args = f.inputs.map((i: any) => {
-        if (i.type === "address") return gaugeAdmin.address;
-        if (i.type.startsWith("uint")) return 10n ** 24n;
-        if (i.type === "bool") return true;
-        if (i.type === "bytes32") return ethers.encodeBytes32String("distributionThresholdWei");
-        return 0n;
-      });
-      try {
-        await (gauge.connect(gaugeAdmin) as any)[f.format("sighash")](...args);
-      } catch {
-        /* expected */
-      }
-    }
-    expect(await ethers.provider.getBalance(gaugeAddr)).to.equal(ethers.parseEther("9"));
-    // Gas spent only; the admin never received a wei of the pot.
-    expect(await ethers.provider.getBalance(gaugeAdmin.address)).to.be.lte(adminBefore);
-  });
-
-  it("the contract accepts ETH only through receiveRewards — no bare receive", async () => {
-    const fx = await fixture();
-    await expect(
-      fx.funder.sendTransaction({ to: fx.gaugeAddr, value: WAD })
-    ).to.be.reverted;
-    expect(await ethers.provider.getBalance(fx.gaugeAddr)).to.equal(0n);
+    expect(await gauge.gaugeWeight(gA)).to.equal(0n);
   });
 
   // ══ Timelocked administration — the vault's exact pattern ══════════════
@@ -473,7 +767,6 @@ describe("PlankGauge", () => {
     for (const [name, value] of [
       ["multiplierCollectionLpBps", 1_000_000n], // 100x
       ["multiplierRawBps", 1n], // below 1.0x
-      ["distributionThresholdWei", ethers.parseEther("1000")],
     ] as const) {
       const key = ethers.encodeBytes32String(name);
       await gauge.connect(gaugeAdmin).queueParam(key, value);
@@ -482,6 +775,15 @@ describe("PlankGauge", () => {
     }
     expect(await gauge.multiplierBps(0)).to.equal(RAW_MULT);
     expect(await gauge.multiplierBps(2)).to.equal(COLL_MULT);
+  });
+
+  it("an unknown parameter key can never be applied", async () => {
+    const fx = await fixture();
+    const { gauge, gaugeAdmin } = fx;
+    const key = ethers.encodeBytes32String("distributionThresholdWei"); // generation 1's
+    await gauge.connect(gaugeAdmin).queueParam(key, 1n);
+    await time.increase(TIMELOCK + 1);
+    await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "BadParam");
   });
 
   it("the path ordering (raw <= plank/eth LP <= collection LP) cannot be inverted", async () => {
@@ -499,12 +801,12 @@ describe("PlankGauge", () => {
         gaugeAdmin.address,
         TIMELOCK,
         [30_000n, 20_000n, 10_000n],
-        THRESHOLD
+        EPOCH
       )
     ).to.be.revertedWithCustomError(Gauge, "BadParam");
   });
 
-  it("a below-floor timelock delay cannot be deployed at all", async () => {
+  it("a below-floor timelock delay or epoch duration cannot be deployed at all", async () => {
     const fx = await fixture();
     const Gauge = await ethers.getContractFactory("PlankGauge");
     await expect(
@@ -513,7 +815,16 @@ describe("PlankGauge", () => {
         fx.gaugeAdmin.address,
         3_600,
         [RAW_MULT, LP_MULT, COLL_MULT],
-        THRESHOLD
+        EPOCH
+      )
+    ).to.be.revertedWithCustomError(Gauge, "BadParam");
+    await expect(
+      Gauge.deploy(
+        await fx.plank.getAddress(),
+        fx.gaugeAdmin.address,
+        TIMELOCK,
+        [RAW_MULT, LP_MULT, COLL_MULT],
+        60 // one minute — an epoch nobody could re-buy into
       )
     ).to.be.revertedWithCustomError(Gauge, "BadParam");
   });
@@ -565,12 +876,12 @@ describe("PlankGauge", () => {
     expect(await gauge.admin()).to.equal(minnow.address);
   });
 
-  it("un-registering a gauge stops new burns but confiscates nothing", async () => {
+  it("un-registering a gauge stops new burns but erases no record", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin, whale, funder, gA } = fx;
+    const { gauge, gaugeAdmin, whale, gA } = fx;
     await gauge.connect(whale).burnPlank(gA, 100n * WAD);
-    await gauge.connect(funder).receiveRewards(gA, { value: ethers.parseEther("2") });
-    await gauge.distribute(gA);
+    const e: bigint = await gauge.currentEpoch();
+    const weight: bigint = await gauge.gaugeWeight(gA);
 
     await gauge.connect(gaugeAdmin).queueGauge(gA, true);
     await time.increase(TIMELOCK + 1);
@@ -581,15 +892,15 @@ describe("PlankGauge", () => {
       gauge,
       "UnknownGauge"
     );
-    // The book survives intact...
-    expect(await gauge.claimantWeightedBurns(gA, whale.address)).to.equal(100n * WAD);
-    // ...but claiming needs the gauge back, and re-registering restores it
-    // exactly, so a removal can never be used to strand an existing claim.
+    // The record survives intact — un-registering is not a confiscation, and
+    // with epoch scoping its blast radius expires at the boundary anyway.
+    expect(await gauge.gaugeWeightAt(gA, e)).to.equal(weight);
+    expect(await gauge.epochWeightedBurn(e, gA, whale.address)).to.equal(100n * WAD);
+
+    // Re-registering restores exactly the same book.
     await gauge.connect(gaugeAdmin).queueGauge(gA, false);
     await time.increase(TIMELOCK + 1);
     await gauge.executeGauge(gA);
-    expect(await gauge.claimableNow(gA, whale.address)).to.equal(ethers.parseEther("2"));
-    await gauge.connect(whale).claim(gA);
-    expect(await ethers.provider.getBalance(fx.gaugeAddr)).to.equal(0n);
+    expect(await gauge.gaugeWeightAt(gA, e)).to.equal(weight);
   });
 });

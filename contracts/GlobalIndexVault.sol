@@ -175,6 +175,15 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     uint256 private constant CEIL_PRICE_CAP_BPS = 2_000; // 20% per observation
     uint256 private constant MIN_RAMP_DURATION = 7 days;
     uint256 private constant MAX_RAMP_DURATION = 365 days;
+    /// @dev Absolute ceiling on the platform/operator share allocation. 5%.
+    /// Compile-time, so no admin and no timelock can raise it.
+    uint256 private constant CEIL_PLATFORM_ALLOCATION_BPS = 500;
+    /// @dev Value the allocation is born at. 2% — the low end of the range
+    /// index products actually charge, and chosen at the low end deliberately:
+    /// an operator cut is the one parameter in this contract whose default
+    /// should favour the depositor, since the depositor is the party who did
+    /// not vote on it. It is inert until a treasury is appointed anyway.
+    uint256 private constant DEFAULT_PLATFORM_ALLOCATION_BPS = 200;
 
     // ── Types ──────────────────────────────────────────────────────────────
 
@@ -250,6 +259,35 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     mapping(bytes32 => QueuedParam) public queuedParams;
     mapping(address => QueuedListing) public queuedListings;
     QueuedParam public queuedAdmin;
+    QueuedParam public queuedPlatformTreasury;
+
+    /**
+     * @notice PLATFORM/OPERATOR SHARE ALLOCATION (§2.8-compatible dilution).
+     *
+     * On every mint, `platformAllocationBps` of the shares that mint would
+     * have produced are minted to `platformTreasury` INSTEAD of to the
+     * depositor. The total share count minted is bit-for-bit what it would
+     * have been with the parameter at zero, so:
+     *
+     *   - existing holders' NAV-per-share is EXACTLY unaffected. This is the
+     *     load-bearing difference from the naive implementation, which mints
+     *     the operator's cut ON TOP and silently taxes everyone who already
+     *     held. That version would be a withdrawal path over pooled reserves
+     *     wearing a different hat, and §2.8 forbids it.
+     *   - the depositor still pays full value in and receives shares for
+     *     (1 - bps) of it. That is the whole cost, it is on-chain, and it is
+     *     bounded by a compile-time ceiling no governance can raise.
+     *   - reserves are never touched. Nothing is ever transferred to the
+     *     treasury; it receives SHARES, redeemable only through the same
+     *     strict pro-rata path as everybody else's.
+     *
+     * INERT BY DEFAULT: with `platformTreasury` unset (address(0)) the whole
+     * mechanism is skipped and every mint behaves exactly as it did before
+     * this parameter existed. Turning it on requires a timelocked treasury
+     * appointment, and the bps itself is separately timelocked and ceilinged.
+     */
+    address public platformTreasury;
+    uint256 public platformAllocationBps;
 
     // ── Events ─────────────────────────────────────────────────────────────
 
@@ -293,6 +331,8 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     error ReservesOutstanding();
     error BadBatch();
     error ShortDelivery();
+    error ConstituentExiting();
+    error AllocationCapExceeded();
 
     // ── Construction ───────────────────────────────────────────────────────
 
@@ -313,6 +353,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         timelockDelay = timelockDelay_;
         _validateParams(params_);
         params = params_;
+        platformAllocationBps = DEFAULT_PLATFORM_ALLOCATION_BPS; // inert: no treasury yet
     }
 
     modifier onlyAdmin() {
@@ -515,10 +556,57 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
      * independent settlement checkpoints before the basket will price a
      * basket-moving trade against them. Enforced only above
      * `largeOpValueWei`, so ordinary retail flow stays instant.
+     *
+     * This overload keeps the ORIGINAL fixed-N meaning and is what a UI or an
+     * off-chain monitor should read. The size-proportional form the two
+     * priced paths actually gate on is `persistenceHoldsFor` — see
+     * `requiredCheckpoints`.
      */
     function persistenceHolds(address token) public view returns (bool) {
+        return persistenceHoldsFor(token, params.persistenceCheckpoints);
+    }
+
+    /**
+     * @notice SIZE-PROPORTIONAL PERSISTENCE. How many settled checkpoints an
+     * operation worth `ethValue` must see a constituent's band hold across.
+     *
+     * A fixed N is defeatable by a patient attacker with a simple, cheap
+     * plan: hold the pushed price for exactly N checkpoints, take the whole
+     * basket-moving trade on checkpoint N, and let the price fall on N+1. The
+     * cost of holding is linear in N and the profit is linear in SIZE, so at
+     * a fixed N there is always a size at which the attack pays. Making the
+     * requirement grow with size removes that: the bigger the extraction, the
+     * longer the push has to be financed before it can be cashed.
+     *
+     *     required = persistenceCheckpoints + floor(ethValue / largeOpValueWei) - 1
+     *
+     * clamped to [persistenceCheckpoints, OBS_SLOTS].
+     *
+     * WHY A FLAT ADMIN-SET THRESHOLD AND NOT RECENT VOLUME. The alternative
+     * — scale against the constituent's own recent volume — was considered
+     * and rejected on the same grounds §2.5 rejects a privileged PLANK price:
+     * an on-chain volume figure is a number an attacker can manufacture. Wash
+     * trading a thin v-token pool for one window would INFLATE the
+     * denominator and therefore SHRINK the number of checkpoints the attacker
+     * then has to survive — the metric would actively pay for its own
+     * manipulation, and it would do so most on precisely the thin, illiquid
+     * constituents this gate exists to protect. `largeOpValueWei` is already
+     * a timelocked, ceilinged parameter and it is not forgeable by trading,
+     * so the step unit is reused rather than a second, weaker signal invented.
+     */
+    function requiredCheckpoints(uint256 ethValue) public view returns (uint256) {
+        uint256 base = params.persistenceCheckpoints;
+        uint256 unit = params.largeOpValueWei;
+        if (ethValue < unit) return base; // not a large op at all
+        uint256 steps = ethValue / unit; // >= 1
+        uint256 required = base + steps - 1;
+        return required > OBS_SLOTS ? OBS_SLOTS : required;
+    }
+
+    /// @notice `persistenceHolds`, but against an explicit checkpoint count.
+    function persistenceHoldsFor(address token, uint256 required) public view returns (bool) {
         Constituent storage c = _get(token);
-        if (c.obsCount < params.persistenceCheckpoints) return false;
+        if (c.obsCount < required) return false;
         if (block.timestamp > uint256(_last(c).timestamp) + params.staleAfter) return false;
 
         (, , uint256 twap) = priceBand(token);
@@ -711,7 +799,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
             amountsIn[i] = credited;
         }
 
-        _mint(msg.sender, sharesOut);
+        _mintWithAllocation(msg.sender, sharesOut);
         emit MintedProRata(msg.sender, sharesOut);
     }
 
@@ -734,6 +822,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     ) external nonReentrant whenOpen returns (uint256 sharesOut) {
         if (amountIn == 0) revert ZeroAmount();
         Constituent storage c = _get(token);
+        _requireNotExiting(token, c);
 
         (uint256 lo, , ) = priceBand(token);
         if (lo == 0) revert StalePrice();
@@ -746,14 +835,17 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
 
         // Pro-rata-equivalent shares, floored, against the OVER-stated basket.
         sharesOut = Math.mulDiv(ethValue, totalSupply() + VIRTUAL_SHARES, navHigh + VIRTUAL_ASSETS);
-        uint256 feeBps = _imbalanceFeeBps(credited, c.reserve);
+        uint256 feeBps = _mintFeeBps(token, _imbalanceFeeBps(credited, c.reserve));
         sharesOut -= (sharesOut * feeBps) / BPS;
         if (sharesOut == 0) revert ZeroAmount();
-        if (sharesOut < minSharesOut) revert SlippageExceeded();
 
         uint256[] memory weightsBefore = _allWeightsBps();
         c.reserve += credited;
-        _mint(msg.sender, sharesOut);
+        // The slippage guard is checked against what the DEPOSITOR actually
+        // receives, not the pre-allocation gross — a guard that can be
+        // satisfied by shares the caller never gets is not a guard.
+        sharesOut = _mintWithAllocation(msg.sender, sharesOut);
+        if (sharesOut < minSharesOut) revert SlippageExceeded();
         _requireCapNotWorsened(weightsBefore);
 
         emit MintedSingle(msg.sender, token, credited, sharesOut);
@@ -902,7 +994,15 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         else if (key == "persistenceToleranceBps") p.persistenceToleranceBps = q.value;
         else if (key == "largeOpValueWei") p.largeOpValueWei = q.value;
         else if (key == "rampDuration") p.rampDuration = q.value;
-        else revert BadParam();
+        else if (key == "platformAllocationBps") {
+            // Hard ceiling re-checked HERE, at execution, not at queue time —
+            // same doctrine as _validateParams: a timelock bounds when a bad
+            // change lands, never how bad it can be.
+            if (q.value > CEIL_PLATFORM_ALLOCATION_BPS) revert AllocationCapExceeded();
+            platformAllocationBps = q.value;
+            emit ParamApplied(key, q.value);
+            return;
+        } else revert BadParam();
 
         _validateParams(p); // hard ceilings re-checked at EXECUTION, not queue
         params = p;
@@ -1013,6 +1113,46 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         delete queuedAdmin;
         admin = address(uint160(q.value));
         emit AdminApplied(admin);
+    }
+
+    /// @notice Appoint (or retire, with address(0)) the platform treasury that
+    /// receives the mint-side allocation. Timelocked like everything else, and
+    /// like everything else it grants NO reach over pooled reserves: the
+    /// treasury receives shares and redeems them through the identical strict
+    /// pro-rata path as any other holder.
+    function queuePlatformTreasury(address treasury) external onlyAdmin {
+        uint64 eta = uint64(block.timestamp + timelockDelay);
+        queuedPlatformTreasury = QueuedParam({
+            value: uint256(uint160(treasury)),
+            eta: eta,
+            pending: true
+        });
+        emit ParamQueued("platformTreasury", uint256(uint160(treasury)), eta);
+    }
+
+    function executePlatformTreasury() external {
+        QueuedParam memory q = queuedPlatformTreasury;
+        if (!q.pending) revert NothingQueued();
+        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        delete queuedPlatformTreasury;
+        platformTreasury = address(uint160(q.value));
+        emit ParamApplied("platformTreasury", q.value);
+    }
+
+    /// @notice The mint-side fee a deposit of `amountIn` into `token` would
+    /// pay, directional term included. Shown before signature, per
+    /// CONTRIBUTING.md's pre-signature transparency rule.
+    function previewMintFeeBps(address token, uint256 amountIn) external view returns (uint256) {
+        return _mintFeeBps(token, _imbalanceFeeBps(amountIn, constituents[token].reserve));
+    }
+
+    /// @notice Whether `token` is frozen to NEW single-asset deposits because
+    /// a removal is queued against it or already executed.
+    function isExiting(address token) external view returns (bool) {
+        if (!constituents[token].listed) return false;
+        if (!constituents[token].active) return true;
+        QueuedListing storage q = queuedListings[token];
+        return q.pending && q.isRemoval;
     }
 
     // ══ Views ═════════════════════════════════════════════════════════════
@@ -1260,10 +1400,130 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     }
 
     /// @dev Above `largeOpValueWei`, a constituent's band must have HELD
-    /// across independent checkpoints before the basket prices against it.
+    /// across independent checkpoints before the basket prices against it —
+    /// and across MORE of them the larger the operation is (see
+    /// `requiredCheckpoints`).
     function _requirePersistenceIfLarge(address token, uint256 ethValue) private view {
         if (ethValue < params.largeOpValueWei) return;
-        if (!persistenceHolds(token)) revert PersistenceCheckFailed();
+        if (!persistenceHoldsFor(token, requiredCheckpoints(ethValue))) {
+            revert PersistenceCheckFailed();
+        }
+    }
+
+    /**
+     * @dev RAMP-OUT IS REDEMPTION-ONLY. The instant a removal is QUEUED — not
+     * when it executes, the instant it is queued and therefore public — the
+     * constituent stops accepting new single-asset deposits. Existing holders
+     * keep every exit they had: `redeemProRata` and `redeemSingleAsset` are
+     * untouched for the whole ramp-out and beyond.
+     *
+     * The gap this closes is a real one. Between queue and execution there is
+     * a full timelock in which the removal is public knowledge; without this
+     * check a constituent that is being removed BECAUSE it is broken stays
+     * open for deposits for the entire window, and the last people in hold a
+     * leg the basket has already decided to unwind.
+     *
+     * Deliberately NOT applied to `mintProRata`. That path is strictly
+     * proportional: the depositor cannot choose to enter the exiting leg, they
+     * enter every leg at the ratio the basket already holds, and refusing it
+     * would shut the basket's primary, no-oracle entry point for the whole
+     * timelock plus ramp — a liveness cost paid by everyone to prevent a
+     * concentration nobody can actually choose. The freeze belongs on the path
+     * where "newly enter THIS constituent" is a thing you can ask for.
+     */
+    function _requireNotExiting(address token, Constituent storage c) private view {
+        if (!c.active) revert ConstituentExiting();
+        QueuedListing storage q = queuedListings[token];
+        if (q.pending && q.isRemoval) revert ConstituentExiting();
+    }
+
+    /**
+     * @dev Mint `grossShares` in total, splitting off the platform allocation.
+     * Returns what `to` actually received.
+     *
+     * The two `_mint` calls sum to EXACTLY `grossShares`, which is what makes
+     * existing holders' NAV-per-share provably unaffected: the denominator
+     * moves by the same amount it would have moved with the allocation at
+     * zero. Rounding on the cut floors, so an ambiguous base unit goes to the
+     * depositor rather than the operator — the conservative direction is the
+     * one that favours the party who did not set the parameter.
+     */
+    function _mintWithAllocation(address to, uint256 grossShares) private returns (uint256) {
+        address treasury = platformTreasury;
+        uint256 bps = platformAllocationBps;
+        if (treasury == address(0) || bps == 0) {
+            _mint(to, grossShares);
+            return grossShares;
+        }
+        uint256 cut = (grossShares * bps) / BPS; // floors, in the depositor's favour
+        uint256 net = grossShares - cut;
+        if (net == 0) revert ZeroAmount();
+        _mint(to, net);
+        if (cut > 0) _mint(treasury, cut);
+        return net;
+    }
+
+    /**
+     * @dev DIRECTIONAL mint-side imbalance fee, layered on top of the
+     * depth-based fee `_imbalanceFeeBps` already charges.
+     *
+     * A deposit into an UNDERWEIGHT constituent moves the basket toward its
+     * target vector, so it is discounted; a deposit into an OVERWEIGHT one
+     * moves it away, so it is surcharged. Both are measured against the same
+     * `targetWeightsBps()` vector the rest of the contract publishes, so there
+     * is no second, private notion of "correct" anywhere.
+     *
+     * TWO CONSERVATIVE CHOICES, both resolved in existing holders' favour
+     * where the spec left the edge open (§2.9 doctrine):
+     *
+     *  1. The discount FLOORS AT `baseImbalanceFeeBps` and can never reach
+     *     zero, let alone go negative. A true negative fee — paying someone to
+     *     rebalance — would be a transfer from the pool to a depositor, i.e.
+     *     an externalisation path, i.e. exactly the class of thing §2.8's
+     *     anchor rule exists to keep off this contract. Rebalancing is
+     *     rewarded by charging less, never by paying out.
+     *  2. A constituent with a ZERO target weight (ramping in from t=0, or a
+     *     leg whose metric is unset) pays the maximum. Unknown is treated as
+     *     overweight, never as underweight.
+     *
+     * The redeem side keeps its existing DEPTH-based fee and is deliberately
+     * not changed here: its properties (monotone in size, strictly worse than
+     * pro-rata, retained in reserves) are directly asserted by the audit suite
+     * and are the reason the single-asset exit is safe. Adding a directional
+     * term there is a separate change with its own proofs to redo, and
+     * bundling it into this one would put a proven exit path at risk to
+     * improve a convenience.
+     */
+    function _mintFeeBps(address token, uint256 depthFee) private view returns (uint256) {
+        (address[] memory tokens, uint256[] memory target) = targetWeightsBps();
+        uint256[] memory current = _allWeightsBps();
+        uint256 idx = type(uint256).max;
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (tokens[i] == token) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx == type(uint256).max) return params.maxImbalanceFeeBps;
+
+        uint256 t = target[idx];
+        if (t == 0) return params.maxImbalanceFeeBps; // unknown target => max
+        uint256 cur = current[idx];
+
+        if (cur < t) {
+            // UNDERWEIGHT: discount, proportional to how far below target it
+            // sits, floored at the base fee.
+            uint256 gap = ((t - cur) * BPS) / t; // 0..BPS
+            uint256 relief = (depthFee * gap) / BPS;
+            uint256 fee = depthFee > relief ? depthFee - relief : 0;
+            return fee < params.baseImbalanceFeeBps ? params.baseImbalanceFeeBps : fee;
+        }
+
+        // OVERWEIGHT: surcharge on the same slope the depth fee uses, capped.
+        uint256 over = ((cur - t) * BPS) / t;
+        if (over > BPS) over = BPS;
+        uint256 up = depthFee + (params.imbalanceSlopeBps * over) / BPS;
+        return up > params.maxImbalanceFeeBps ? params.maxImbalanceFeeBps : up;
     }
 
     function _validateParams(Params memory p) private pure {
