@@ -200,6 +200,40 @@ export function planScan(input: {
   return { windows, targetCursor, caughtUp: targetCursor >= safeHead };
 }
 
+/**
+ * The per-token price a NATIVE-ETH fill is allowed to claim from `tx.value`.
+ *
+ * ONE TOKEN ONLY, and that restriction is the entire point. `tx.value` is a
+ * single lump for the WHOLE transaction, so attributing it to every token the
+ * transaction moved records the total N times over instead of a price.
+ *
+ * Observed in production on 2026-08-05: transaction
+ * 0x5174cfb4d8fa0e63d1d9cb1e5e5b5bb2b4f52b1b… moved 7 planks and carried
+ * 0.0007 ETH, and the ledger stored "0.0007 ETH" as the sale price of all
+ * seven — three different rarities, one identical price, which is what made
+ * the feed look like a rarity-blind market. The lump was not a price at all
+ * there (it was 7 × the vault's flat 0.0001 ETH fee), which is precisely why an
+ * unsplittable lump must never be rendered as a per-item price.
+ *
+ * Dividing by the token count is deliberately NOT the fix: a genuine
+ * multi-token native fill is already priced per token by Seaport's
+ * OrderFulfilled legs (see readCachedSalePriceWei — verified live on
+ * 0xc98841c58b…, three tokens, 0.032 each rather than the 0.096 the buyer
+ * sent), so anything that reaches this fallback with several tokens has no
+ * per-token price anyone can know. Honestly unpriced beats confidently wrong —
+ * the same rule orderFulfilledSettlement applies to foreign-ERC-20 legs.
+ */
+export function nativeFillPriceWei(input: {
+  kind: string;
+  txValue: bigint | null;
+  tokensInTx: number;
+}): bigint | null {
+  if (input.kind !== "sale") return null;
+  if (input.txValue == null || input.txValue <= BigInt(0)) return null;
+  if (input.tokensInTx !== 1) return null;
+  return input.txValue;
+}
+
 /* ---------------- *
  * Log fetching     *
  * ---------------- */
@@ -354,6 +388,15 @@ async function buildNftRows(logs: RawLog[]): Promise<ChainEventRow[]> {
     );
   }
 
+  // How many of OUR tokens each transaction moved. A transaction's `value` is
+  // ONE lump for the whole transaction, so it can only ever be read as a
+  // per-token price when the transaction moved exactly one token — see the
+  // priceWei rule below.
+  const tokensPerTx = new Map<string, number>();
+  for (const log of transfers) {
+    tokensPerTx.set(log.transactionHash, (tokensPerTx.get(log.transactionHash) ?? 0) + 1);
+  }
+
   const rows: ChainEventRow[] = [];
   for (const log of transfers) {
     let from: string;
@@ -400,7 +443,11 @@ async function buildNftRows(logs: RawLog[]): Promise<ChainEventRow[]> {
 
     // Same price rule as the live feed: a native fill moves value via tx.value,
     // a WETH fill moves it as a Seaport consideration leg (decoded above).
-    const nativeWei = kind === "sale" && tx != null && tx.value > BigInt(0) ? tx.value : null;
+    const nativeWei = nativeFillPriceWei({
+      kind,
+      txValue: tx?.value ?? null,
+      tokensInTx: tokensPerTx.get(log.transactionHash) ?? 1,
+    });
     const settledWei =
       kind === "sale" ? readCachedSalePriceWei(log.transactionHash, tokenId) : null;
     // The decoded settlement wins over tx.value when both exist: tx.value is
