@@ -22,7 +22,7 @@ import {
  *   `IEligibilitySource` off the constituent itself through a gas-capped
  *   low-level staticcall. The properties that matter, and that this file
  *   attacks rather than confirms, are: it is self-sourced (no submission, no
- *   privileged setter, no stored flag an admin can flip), and it FAILS CLOSED
+ *   privileged setter, no stored flag any role can flip), and it FAILS CLOSED
  *   against every hostile or merely-absent implementation without ever
  *   reverting the caller or bricking a whole-basket recount.
  *
@@ -118,7 +118,8 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
    * priced at 1.0 ETH, all seeded equally, all genesis (rampDuration 0).
    */
   async function openIndexOfSources(n: number, paramOverrides: any = {}) {
-    const [, admin, seeder, alice, bob] = await ethers.getSigners();
+    const [, roleAdmin, seeder, alice, bob, , admission, risk, allocation] =
+      await ethers.getSigners();
     const Src = await ethers.getContractFactory("MockEligibilitySource");
     const Price = await ethers.getContractFactory("MockIndexPriceSource");
 
@@ -134,7 +135,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
     const vault: any = await Vault.deploy(
       "Marketplank Global Index",
       "gPLNK",
-      admin.address,
+      [roleAdmin.address, admission.address, risk.address, allocation.address],
       seeder.address,
       TIMELOCK,
       paramsTuple({ ...defaultParams, ...paramOverrides })
@@ -153,7 +154,20 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
     // really is old enough, whatever block the fixture happened to land on.
     await mine(200);
 
-    return { admin, seeder, alice, bob, vault, vaultAddr, tokens, prices, addrs };
+    return {
+      roleAdmin,
+      admission,
+      risk,
+      allocation,
+      seeder,
+      alice,
+      bob,
+      vault,
+      vaultAddr,
+      tokens,
+      prices,
+      addrs,
+    };
   }
 
   /** Make `token` pass both bars. */
@@ -163,17 +177,17 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
   }
 
   /** Set a constituent's weight metric through the timelock. */
-  async function setMetrics(vault: any, admin: any, addrs: string[], metrics: bigint[]) {
+  async function setMetrics(vault: any, admission: any, addrs: string[], metrics: bigint[]) {
     for (let i = 0; i < addrs.length; i++) {
-      await vault.connect(admin).queueMetric(addrs[i], metrics[i]);
+      await vault.connect(admission).queueMetric(addrs[i], metrics[i]);
     }
     await time.increase(TIMELOCK + 1);
     for (const a of addrs) await vault.executeMetric(a);
   }
 
   /** Push a timelocked scalar parameter through queue + execute. */
-  async function setParam(vault: any, admin: any, key: string, value: bigint) {
-    await vault.connect(admin).queueParam(ethers.encodeBytes32String(key), value);
+  async function setParam(vault: any, risk: any, key: string, value: bigint) {
+    await vault.connect(risk).queueParam(ethers.encodeBytes32String(key), value);
     await time.increase(TIMELOCK + 1);
     await vault.executeParam(ethers.encodeBytes32String(key));
   }
@@ -183,7 +197,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
   // ══════════════════════════════════════════════════════════════════════
 
   describe("PART A: the signal is self-sourced, and there is no oracle and no override", () => {
-    it("there is NO admin path that sets an eligibility flag — the answer is only ever recomputed", async () => {
+    it("there is NO privileged path that sets an eligibility flag — the answer is only ever recomputed", async () => {
       const fx = await deployOpenIndex();
       const names = fx.vault.interface.fragments
         .filter((f: any) => f.type === "function")
@@ -207,16 +221,16 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
       expect(names.some((n: string) => /^set/i.test(n))).to.equal(false);
     });
 
-    it("the admin cannot make an ineligible constituent eligible by any call available to it", async () => {
+    it("no role can make an ineligible constituent eligible by any call available to it", async () => {
       const fx = await openIndexOfSources(3);
-      const { vault, admin, addrs, tokens } = fx;
+      const { vault, risk, admission, addrs, tokens } = fx;
       expect((await vault.checkEligibility(addrs[0]))[0]).to.equal(false);
 
-      // The only lever the admin has is the BAR, and lowering it to zero fees
+      // The only lever the risk role has is the BAR, and lowering it to zero fees
       // still cannot help a constituent whose `firstActivityBlock` is zero —
-      // the signal is the constituent's, not the admin's.
-      await setParam(vault, admin, "minEligibilityFeesWei", 0n);
-      await setParam(vault, admin, "minEligibilityBlocks", 0n);
+      // the signal is the constituent's, not any role's.
+      await setParam(vault, risk, "minEligibilityFeesWei", 0n);
+      await setParam(vault, risk, "minEligibilityBlocks", 0n);
       expect(await tokens[0].firstActivityBlock()).to.not.equal(0n);
       await tokens[0].setFirstActivityBlock(0);
       expect((await vault.checkEligibility(addrs[0]))[0]).to.equal(false);
@@ -315,6 +329,12 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
       // recount loop must survive it. This is the griefing case the
       // ELIGIBILITY_GAS_CAP exists for.
       const [, admin, seeder, alice] = await ethers.getSigners();
+      const roles: [string, string, string, string] = [
+        admin.address,
+        admin.address,
+        admin.address,
+        admin.address,
+      ];
       const Bomb = await ethers.getContractFactory("GasBombEligibilitySource");
       const Src = await ethers.getContractFactory("MockEligibilitySource");
       const Price = await ethers.getContractFactory("MockIndexPriceSource");
@@ -328,7 +348,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
       const vault: any = await Vault.deploy(
         "gi",
         "gi",
-        admin.address,
+        roles,
         seeder.address,
         TIMELOCK,
         paramsTuple(defaultParams)
@@ -376,7 +396,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
 
     it("the count is recomputed automatically when the constituent set changes, with no manual refresh", async () => {
       const fx = await openIndexOfSources(3);
-      const { vault, admin, seeder, tokens, addrs, vaultAddr } = fx;
+      const { vault, admission, seeder, tokens, addrs, vaultAddr } = fx;
       for (const t of tokens) await makeEligible(t);
       await vault.refreshEligibleCount();
       expect(await vault.eligibleConstituentCount()).to.equal(3n);
@@ -388,13 +408,13 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
       const p4: any = await Price.deploy(100n * WAD, 100n * WAD);
       const a4 = await t4.getAddress();
       await makeEligible(t4);
-      await vault.connect(admin).queueListing(a4, await p4.getAddress(), 1_000, false);
+      await vault.connect(admission).queueListing(a4, await p4.getAddress(), 1_000, false);
       await time.increase(TIMELOCK + 1);
       await vault.executeListing(a4);
       expect(await vault.eligibleConstituentCount()).to.equal(4n);
 
       // DEACTIVATION recounts too, with no refresh call in between.
-      await vault.connect(admin).queueListing(addrs[0], ethers.ZeroAddress, 0, true);
+      await vault.connect(admission).queueListing(addrs[0], ethers.ZeroAddress, 0, true);
       await time.increase(TIMELOCK + 1);
       await vault.executeListing(addrs[0]);
       expect(await vault.eligibleConstituentCount()).to.equal(3n);
@@ -422,16 +442,15 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
       expect(await vault.eligibleConstituentCount()).to.equal(3n);
     });
 
-    it("the two bars are TIMELOCKED and admin-only, like every other economically significant parameter", async () => {
+    it("the two bars are TIMELOCKED and risk-role-only, like every other economically significant parameter", async () => {
       const fx = await openIndexOfSources(2);
-      const { vault, admin, alice } = fx;
+      const { vault, risk, alice } = fx;
       const key = ethers.encodeBytes32String("minEligibilityFeesWei");
 
-      await expect(vault.connect(alice).queueParam(key, 1n)).to.be.revertedWithCustomError(
-        vault,
-        "NotAdmin"
-      );
-      await vault.connect(admin).queueParam(key, 12_345n);
+      await expect(vault.connect(alice).queueParam(key, 1n))
+        .to.be.revertedWithCustomError(vault, "NotRoleHolder")
+        .withArgs(await vault.ROLE_RISK_PARAM());
+      await vault.connect(risk).queueParam(key, 12_345n);
       await expect(vault.executeParam(key)).to.be.revertedWithCustomError(
         vault,
         "TimelockNotElapsed"
@@ -450,13 +469,13 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
 
     it("an absurdly high bar degrades to the pre-existing FLAT cap and nothing worse", async () => {
       const fx = await openIndexOfSources(6);
-      const { vault, admin, tokens } = fx;
+      const { vault, risk, tokens } = fx;
       for (const t of tokens) await makeEligible(t);
       await vault.refreshEligibleCount();
       // Six eligible legs bind TIGHTER than the flat 40% cap.
       expect(await vault.effectiveConcentrationCapBps()).to.equal(3_333n);
 
-      await setParam(vault, admin, "minEligibilityFeesWei", ethers.parseEther("1000000"));
+      await setParam(vault, risk, "minEligibilityFeesWei", ethers.parseEther("1000000"));
       await vault.refreshEligibleCount();
       expect(await vault.eligibleConstituentCount()).to.equal(0n);
       // capBpsFor(0) is 100%, min'd with the flat cap -> the flat cap exactly.
@@ -536,9 +555,9 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
 
     it("matches the independent reference across every n from 0 to 96 and several HHI targets", async () => {
       const fx = await deployOpenIndex();
-      const { vault, admin } = fx;
+      const { vault, risk } = fx;
       for (const t of [DEFAULT_TARGET_HHI, 200n, 500n, 1_000n, 5_000n, BPS]) {
-        if (t !== DEFAULT_TARGET_HHI) await setParam(vault, admin, "targetHhiBps", t);
+        if (t !== DEFAULT_TARGET_HHI) await setParam(vault, risk, "targetHhiBps", t);
         expect(await vault.targetHhiBps()).to.equal(t);
         for (let n = 0n; n <= 96n; n++) {
           expect(await vault.capBpsFor(n), `T=${t} n=${n}`).to.equal(referenceCapBps(n, t));
@@ -548,10 +567,10 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
 
     it("targetHhiBps is ceilinged at EXECUTION, not merely at queue time", async () => {
       const fx = await deployOpenIndex();
-      const { vault, admin } = fx;
+      const { vault, risk } = fx;
       const key = ethers.encodeBytes32String("targetHhiBps");
       for (const bad of [0n, 199n, BPS + 1n, 2n ** 32n]) {
-        await vault.connect(admin).queueParam(key, bad);
+        await vault.connect(risk).queueParam(key, bad);
         await time.increase(TIMELOCK + 1);
         await expect(vault.executeParam(key)).to.be.revertedWithCustomError(
           vault,
@@ -560,9 +579,9 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
         expect(await vault.targetHhiBps()).to.equal(DEFAULT_TARGET_HHI);
       }
       // The two admissible extremes do land.
-      await setParam(vault, admin, "targetHhiBps", 200n);
+      await setParam(vault, risk, "targetHhiBps", 200n);
       expect(await vault.targetHhiBps()).to.equal(200n);
-      await setParam(vault, admin, "targetHhiBps", BPS);
+      await setParam(vault, risk, "targetHhiBps", BPS);
       expect(await vault.targetHhiBps()).to.equal(BPS);
       // T = 1.0 is "no constraint", so the dynamic cap stops binding entirely
       // and the flat parameter is all that is left.
@@ -603,7 +622,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
   describe("PART D: the cap flows through clamp-and-redistribute and through the trade guard", () => {
     it("targetWeightsBps matches the reference clamp-and-redistribute at the EFFECTIVE cap", async () => {
       const fx = await openIndexOfSources(6);
-      const { vault, admin, addrs, tokens } = fx;
+      const { vault, risk, admission, addrs, tokens } = fx;
 
       // A deliberately lopsided metric vector: one dominant leg plus five
       // small ones, so the cap really has to bite and then redistribute.
@@ -615,7 +634,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
         10_000n,
         10_000n,
       ];
-      await setMetrics(vault, admin, addrs, metrics);
+      await setMetrics(vault, admission, addrs, metrics);
 
       // First with NO eligible constituents: the flat 4000 cap governs.
       expect(await vault.effectiveConcentrationCapBps()).to.equal(CONCENTRATION_CAP_BPS);
@@ -637,7 +656,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
 
     it("no leg is left above the cap after redistribution, even when several are over at once", async () => {
       const fx = await openIndexOfSources(6);
-      const { vault, admin, addrs, tokens } = fx;
+      const { vault, risk, admission, addrs, tokens } = fx;
       for (const t of tokens) await makeEligible(t);
       await vault.refreshEligibleCount();
       const cap: bigint = await vault.effectiveConcentrationCapBps();
@@ -646,7 +665,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
       // Two dominant legs, so capping the first inflates the second past the
       // cap — the case the iteration exists for.
       const metrics = [1_000_000n, 900_000n, 100n, 100n, 100n, 100n];
-      await setMetrics(vault, admin, addrs, metrics);
+      await setMetrics(vault, admission, addrs, metrics);
 
       const [, bps] = await vault.targetWeightsBps();
       for (let i = 0; i < 6; i++) {

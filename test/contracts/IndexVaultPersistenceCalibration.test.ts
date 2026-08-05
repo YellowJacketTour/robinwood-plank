@@ -15,7 +15,7 @@ import { TIMELOCK, WAD, defaultParams, paramsTuple } from "./helpers/index-vault
  * PROXY and explicitly not an EVT / GPD tail fit, and it rests its safety on
  * two things rather than on the statistics being right:
  *
- *   - THE CLAMP. Compile-time floor and ceiling that no admin, no timelock and
+ *   - THE CLAMP. Compile-time floor and ceiling that no role, no timelock and
  *     no amount of manufactured checkpoint history can move. This file proves
  *     the box holds from both sides.
  *   - THE ASYMMETRY. The calibration window is LONG (90 days, thousands of
@@ -67,7 +67,8 @@ describe("GlobalIndexVault — realized-variance persistence calibration (Part E
    * than approximate.
    */
   async function singleLegIndex(overrides: any = {}) {
-    const [, admin, seeder, alice] = await ethers.getSigners();
+    const [, roleAdmin, seeder, alice, , , admission, risk, allocation] =
+      await ethers.getSigners();
     const Token = await ethers.getContractFactory("MockIndexToken");
     const Source = await ethers.getContractFactory("MockIndexPriceSource");
     const token: any = await Token.deploy("v", "v");
@@ -78,7 +79,7 @@ describe("GlobalIndexVault — realized-variance persistence calibration (Part E
     const vault: any = await Vault.deploy(
       "gi",
       "gi",
-      admin.address,
+      [roleAdmin.address, admission.address, risk.address, allocation.address],
       seeder.address,
       TIMELOCK,
       paramsTuple({ ...defaultParams, ...overrides })
@@ -99,7 +100,7 @@ describe("GlobalIndexVault — realized-variance persistence calibration (Part E
     // samples/sumSq mirror the contract's accumulator exactly, starting from
     // the one zero-move sample seedDeposit produced.
     return {
-      admin,
+      risk,
       seeder,
       alice,
       vault,
@@ -148,8 +149,8 @@ describe("GlobalIndexVault — realized-variance persistence calibration (Part E
 
   const expectedVol = (fx: any) => isqrt(BigInt(fx.sumSq) / BigInt(fx.samples));
 
-  async function setParam(vault: any, admin: any, key: string, value: bigint) {
-    await vault.connect(admin).queueParam(ethers.encodeBytes32String(key), value);
+  async function setParam(vault: any, risk: any, key: string, value: bigint) {
+    await vault.connect(risk).queueParam(ethers.encodeBytes32String(key), value);
     await time.increase(TIMELOCK + 1);
     await vault.executeParam(ethers.encodeBytes32String(key));
   }
@@ -313,7 +314,7 @@ describe("GlobalIndexVault — realized-variance persistence calibration (Part E
 
     it("THE FLOOR HOLDS: a perfectly quiet constituent still needs `persistenceCheckpoints`, and governance cannot go below 2", async () => {
       const fx = await singleLegIndex();
-      const { vault, admin, addr } = fx;
+      const { vault, risk, addr } = fx;
       for (let i = 0; i < 8; i++) await step(fx, 10_000n);
       expect(await vault.realizedVolBps(addr)).to.equal(0n);
       expect(await vault.requiredCheckpointsFor(addr, 0n)).to.equal(
@@ -323,12 +324,12 @@ describe("GlobalIndexVault — realized-variance persistence calibration (Part E
       // The lowest value governance can install is 2, which is exactly
       // MIN_REQUIRED_CHECKPOINTS — so the compile-time floor is belt-and-braces
       // rather than the only thing holding the line. Both are asserted.
-      await setParam(vault, admin, "persistenceCheckpoints", 2n);
+      await setParam(vault, risk, "persistenceCheckpoints", 2n);
       expect(await vault.requiredCheckpointsFor(addr, 0n)).to.equal(MIN_REQUIRED);
 
       const key = ethers.encodeBytes32String("persistenceCheckpoints");
       for (const bad of [0n, 1n, 9n]) {
-        await vault.connect(admin).queueParam(key, bad);
+        await vault.connect(risk).queueParam(key, bad);
         await time.increase(TIMELOCK + 1);
         await expect(vault.executeParam(key)).to.be.revertedWithCustomError(vault, "BadParam");
       }

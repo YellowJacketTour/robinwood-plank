@@ -93,7 +93,7 @@ describe("IndexDividendDistributor", () => {
     const vault: any = await Vault.deploy(
       "Marketplank Global Index",
       "gPLNK",
-      admin.address,
+      [admin.address, admin.address, admin.address, admin.address],
       seeder.address,
       TIMELOCK,
       paramsTuple(defaultParams)

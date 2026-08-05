@@ -54,7 +54,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
 
   it("RAMP-OUT: a queued removal freezes NEW deposits into that leg immediately", async () => {
     const fx = await fixture();
-    const { vault, admin, alice, addrs } = fx;
+    const { vault, admission, alice, addrs } = fx;
     await warmCheckpoints(fx, 7);
     await vault.connect(alice).mintProRata(500n * WAD, maxIn(3));
 
@@ -66,7 +66,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
     // executes. Between queue and execution the intent is already public, and
     // a constituent being removed BECAUSE it is broken must not keep taking
     // deposits for the whole timelock.
-    await vault.connect(admin).queueListing(addrs[1], addrs[1], 0, true);
+    await vault.connect(admission).queueListing(addrs[1], addrs[1], 0, true);
     expect(await vault.isExiting(addrs[1])).to.equal(true);
     await expect(
       vault.connect(alice).mintSingleAsset(addrs[1], 10n * WAD, 0n)
@@ -90,7 +90,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
 
   it("RAMP-OUT: every exit stays open for the whole ramp-out, at every stage", async () => {
     const fx = await fixture();
-    const { vault, admin, alice, addrs, tokens } = fx;
+    const { vault, admission, alice, addrs, tokens } = fx;
     await warmCheckpoints(fx, 7);
     await vault.connect(alice).mintProRata(2000n * WAD, maxIn(3));
 
@@ -113,7 +113,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
       ).to.not.be.revertedWithCustomError(vault, "ConstituentExiting");
     };
 
-    await vault.connect(admin).queueListing(addrs[1], addrs[1], 0, true);
+    await vault.connect(admission).queueListing(addrs[1], addrs[1], 0, true);
     await canStillExit("queued");
     await time.increase(TIMELOCK + 1);
     await vault.executeListing(addrs[1]);
@@ -133,8 +133,8 @@ describe("GlobalIndexVault — timing and allocation", () => {
     // entry point for the whole timelock plus ramp, a liveness cost paid by
     // everyone to prevent a concentration nobody can actually ask for.
     const fx = await fixture();
-    const { vault, admin, alice, addrs } = fx;
-    await vault.connect(admin).queueListing(addrs[1], addrs[1], 0, true);
+    const { vault, admission, alice, addrs } = fx;
+    await vault.connect(admission).queueListing(addrs[1], addrs[1], 0, true);
     await expect(vault.connect(alice).mintProRata(100n * WAD, maxIn(3))).to.not.be.reverted;
   });
 
@@ -285,7 +285,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
     await expect(vault.delistEmpty(addrs[0])).to.be.revertedWithCustomError(vault, "BadParam");
 
     // Structurally: only ONE pair of functions can deactivate anything, and
-    // both are admin+timelock. No price/NAV/band input appears in either.
+    // both are admission-role+timelock. No price/NAV/band input appears in either.
     const deactivators = vault.interface.fragments
       .filter((f: any) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))
       .map((f: any) => f.name);
@@ -294,10 +294,12 @@ describe("GlobalIndexVault — timing and allocation", () => {
     for (const bad of ["prune", "evict", "autoRemove", "liquidate", "kick", "deactivate"]) {
       expect(deactivators).to.not.include(bad);
     }
-    // A non-admin cannot even queue it.
+    // A key without the admission role cannot even queue it.
     await expect(
       vault.connect(alice).queueListing(addrs[0], addrs[0], 0, true)
-    ).to.be.revertedWithCustomError(vault, "NotAdmin");
+    )
+      .to.be.revertedWithCustomError(vault, "NotRoleHolder")
+      .withArgs(await vault.ROLE_CONSTITUENT_ADMISSION());
   });
 
   // ══ D. Directional mint-side imbalance fee ═════════════════════════════
@@ -373,7 +375,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
     const fx = await deployOpenIndex({}, reserves);
     const all = await ethers.getSigners();
     const treasury = all[11];
-    await fx.vault.connect(fx.admin).queuePlatformTreasury(treasury.address);
+    await fx.vault.connect(fx.allocation).queuePlatformTreasury(treasury.address);
     await time.increase(TIMELOCK + 1);
     await fx.vault.executePlatformTreasury();
     return { ...fx, treasury };
@@ -381,7 +383,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
 
   it("ALLOCATION: inert until a treasury is appointed, and the appointment is timelocked", async () => {
     const fx = await fixture();
-    const { vault, admin, alice } = fx;
+    const { vault, allocation, alice } = fx;
     const all = await ethers.getSigners();
     const treasury = all[11];
 
@@ -391,7 +393,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
     await vault.connect(alice).mintProRata(100n * WAD, maxIn(3));
     expect(await vault.balanceOf(alice.address)).to.equal(100n * WAD, "diluted with no treasury");
 
-    await vault.connect(admin).queuePlatformTreasury(treasury.address);
+    await vault.connect(allocation).queuePlatformTreasury(treasury.address);
     expect(await vault.platformTreasury()).to.equal(ethers.ZeroAddress, "applied on queue");
     await expect(vault.executePlatformTreasury()).to.be.revertedWithCustomError(
       vault,
@@ -400,10 +402,12 @@ describe("GlobalIndexVault — timing and allocation", () => {
     await time.increase(TIMELOCK + 1);
     await vault.executePlatformTreasury();
     expect(await vault.platformTreasury()).to.equal(treasury.address);
-    // Only the admin could ever have queued it.
+    // Only the platform-allocation role could ever have queued it.
     await expect(
       vault.connect(alice).queuePlatformTreasury(alice.address)
-    ).to.be.revertedWithCustomError(vault, "NotAdmin");
+    )
+      .to.be.revertedWithCustomError(vault, "NotRoleHolder")
+      .withArgs(await vault.ROLE_PLATFORM_ALLOCATION());
   });
 
   it("ALLOCATION (a): the depositor's value in matches their redeem out, net of exactly the bps", async () => {
@@ -490,18 +494,18 @@ describe("GlobalIndexVault — timing and allocation", () => {
 
   it("ALLOCATION (c): the 5% ceiling is enforced at execution, and the change is timelocked", async () => {
     const fx = await withTreasury();
-    const { vault, admin } = fx;
+    const { vault, allocation } = fx;
     const key = ethers.encodeBytes32String("platformAllocationBps");
 
     // Past the compile-time ceiling: queueable (the timelock queue is dumb by
     // design), never executable.
-    await vault.connect(admin).queueParam(key, 501n);
+    await vault.connect(allocation).queueParam(key, 501n);
     await time.increase(TIMELOCK + 1);
     await expect(vault.executeParam(key)).to.be.revertedWithCustomError(
       vault,
       "AllocationCapExceeded"
     );
-    await vault.connect(admin).queueParam(key, 10_000n); // 100%
+    await vault.connect(allocation).queueParam(key, 10_000n); // 100%
     await time.increase(TIMELOCK + 1);
     await expect(vault.executeParam(key)).to.be.revertedWithCustomError(
       vault,
@@ -510,7 +514,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
     expect(await vault.platformAllocationBps()).to.equal(200n);
 
     // A legal change is queued, never instant.
-    await vault.connect(admin).queueParam(key, 500n);
+    await vault.connect(allocation).queueParam(key, 500n);
     expect(await vault.platformAllocationBps()).to.equal(200n, "applied on queue");
     await expect(vault.executeParam(key)).to.be.revertedWithCustomError(
       vault,
@@ -521,7 +525,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
     expect(await vault.platformAllocationBps()).to.equal(500n);
 
     // ...and it can always be turned off entirely.
-    await vault.connect(admin).queueParam(key, 0n);
+    await vault.connect(allocation).queueParam(key, 0n);
     await time.increase(TIMELOCK + 1);
     await vault.executeParam(key);
     expect(await vault.platformAllocationBps()).to.equal(0n);
@@ -536,7 +540,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
     expect(await vault.balanceOf(treasury.address)).to.be.gt(0n);
 
     // Enumerate the whole non-view ABI as the treasury and prove no reserve
-    // moves — the same anchor-rule sweep the admin and seeder get.
+    // moves — the same anchor-rule sweep every role and the seeder get.
     const before = await Promise.all(addrs.map((a) => vault.reserveOf(a)));
     const balBefore = await Promise.all(tokens.map((t) => t.balanceOf(vaultAddr)));
     const fns = vault.interface.fragments.filter(
@@ -564,7 +568,9 @@ describe("GlobalIndexVault — timing and allocation", () => {
       expect(await tokens[i].balanceOf(vaultAddr)).to.equal(balBefore[i], `balance ${i} moved`);
       expect(await tokens[i].balanceOf(treasury.address)).to.equal(0n, "treasury took a leg");
     }
-    expect(await vault.admin()).to.equal(fx.admin.address);
+    expect(await vault.roleHolder(await vault.ROLE_PLATFORM_ALLOCATION())).to.equal(
+      fx.allocation.address
+    );
 
     // The only thing it can do with its shares is what anyone else can: a
     // strict pro-rata redemption, at the same price, through the same code.

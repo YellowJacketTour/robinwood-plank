@@ -25,7 +25,7 @@ import {
  * WHAT WAS DELETED FROM THIS FILE AND WHY. Generation 1's reward tests
  * (proportional claim share, "a later burn cannot claw back a folded pot",
  * double-claim, non-burner claims nothing, soulbound claim ledger,
- * below-threshold accumulation, per-gauge earmarking, "no admin path over
+ * below-threshold accumulation, per-gauge earmarking, "no privileged path over
  * pushed reward ETH") are gone because the MECHANISM they covered is gone —
  * there is no claim, no pot, no threshold, no fold, and no ETH. Coverage was
  * not dropped: the property those tests ultimately protected (nobody can
@@ -69,7 +69,11 @@ describe("PlankGauge", () => {
     // Offset past the index fixture's signers so a gauge whale can never
     // coincidentally BE a privileged basket role.
     const all = await ethers.getSigners();
-    const [gaugeAdmin, whale, minnow, funder] = [all[6], all[7], all[8], all[9]];
+    const [whale, minnow, funder] = [all[12], all[13], all[14]];
+    // Two SEPARATELY KEYED gauge roles plus the role-management key. Nothing
+    // holds more than one of them, which is what makes the isolation suite's
+    // cross-role attempts meaningful rather than tautological.
+    const [gaugeRoleAdmin, registry, tuning] = [all[15], all[16], all[17]];
 
     const Token = await ethers.getContractFactory("MockIndexToken");
     const plank: any = await Token.deploy("PLANK", "PLANK");
@@ -80,7 +84,7 @@ describe("PlankGauge", () => {
     const Gauge = await ethers.getContractFactory("PlankGauge");
     const gauge: any = await Gauge.deploy(
       await plank.getAddress(),
-      gaugeAdmin.address,
+      [gaugeRoleAdmin.address, registry.address, tuning.address],
       TIMELOCK,
       [RAW_MULT, LP_MULT, COLL_MULT],
       EPOCH
@@ -92,11 +96,11 @@ describe("PlankGauge", () => {
     const gB = ethers.Wallet.createRandom().address;
     const vaultA = ethers.Wallet.createRandom().address;
 
-    await gauge.connect(gaugeAdmin).queueGauge(gA, false);
-    await gauge.connect(gaugeAdmin).queueGauge(gB, false);
-    await gauge.connect(gaugeAdmin).queuePlankEthLp(await plankEthLp.getAddress(), false);
+    await gauge.connect(registry).queueGauge(gA, false);
+    await gauge.connect(registry).queueGauge(gB, false);
+    await gauge.connect(registry).queuePlankEthLp(await plankEthLp.getAddress(), false);
     await gauge
-      .connect(gaugeAdmin)
+      .connect(registry)
       .queueCollectionLp(gA, await collLp.getAddress(), vaultA, false);
     await time.increase(TIMELOCK + 1);
     await gauge.executeGauge(gA);
@@ -112,7 +116,9 @@ describe("PlankGauge", () => {
     }
 
     return {
-      gaugeAdmin,
+      gaugeRoleAdmin,
+      registry,
+      tuning,
       whale,
       minnow,
       funder,
@@ -276,13 +282,13 @@ describe("PlankGauge", () => {
 
   it("EPOCH: retuning the duration jumps the index forward, never onto live storage", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin, whale, gA } = fx;
+    const { gauge, tuning, whale, gA } = fx;
     await gauge.connect(whale).burnPlank(gA, 500n * WAD);
     const before: bigint = await gauge.currentEpoch();
     const weight: bigint = await gauge.gaugeWeight(gA);
 
     const key = ethers.encodeBytes32String("epochDuration");
-    await gauge.connect(gaugeAdmin).queueParam(key, 24 * 3_600);
+    await gauge.connect(tuning).queueParam(key, 24 * 3_600);
     await time.increase(TIMELOCK + 1);
     await gauge.executeParam(key);
 
@@ -296,10 +302,10 @@ describe("PlankGauge", () => {
 
   it("EPOCH: the duration is bounded and timelocked", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin } = fx;
+    const { gauge, tuning } = fx;
     const key = ethers.encodeBytes32String("epochDuration");
     for (const bad of [3_600n, BigInt(200 * 24 * 3_600)]) {
-      await gauge.connect(gaugeAdmin).queueParam(key, bad);
+      await gauge.connect(tuning).queueParam(key, bad);
       await time.increase(TIMELOCK + 1);
       await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "BadParam");
     }
@@ -491,7 +497,7 @@ describe("PlankGauge", () => {
 
   it("PENALTY: the exponent k is timelocked and bounded below 1.0x", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin, whale, minnow, gA } = fx;
+    const { gauge, tuning, whale, minnow, gA } = fx;
     await gauge.connect(whale).burnPlank(gA, 40_000n * WAD);
     await gauge.connect(minnow).burnPlank(gA, 10_000n * WAD);
     const before: bigint = await gauge.concentrationPenaltyWad(gA, whale.address);
@@ -499,16 +505,16 @@ describe("PlankGauge", () => {
     const key = ethers.encodeBytes32String("concentrationExponentHalves");
     // k below 1.0 would make the penalty CONVEX in share and reward
     // concentration — the opposite of the parameter's purpose. Hard floor.
-    await gauge.connect(gaugeAdmin).queueParam(key, 1n);
+    await gauge.connect(tuning).queueParam(key, 1n);
     await time.increase(TIMELOCK + 1);
     await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "BadParam");
-    await gauge.connect(gaugeAdmin).queueParam(key, 99n);
+    await gauge.connect(tuning).queueParam(key, 99n);
     await time.increase(TIMELOCK + 1);
     await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "BadParam");
     expect(await gauge.concentrationExponentHalves()).to.equal(3n);
 
     // A legal retune is queued, never instant.
-    await gauge.connect(gaugeAdmin).queueParam(key, 4n); // k = 2.0
+    await gauge.connect(tuning).queueParam(key, 4n); // k = 2.0
     expect(await gauge.concentrationPenaltyWad(gA, whale.address)).to.equal(before);
     await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(
       gauge,
@@ -563,26 +569,26 @@ describe("PlankGauge", () => {
 
   it("BOOST: the ceiling is timelocked and itself hard-capped at 5x", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin } = fx;
+    const { gauge, tuning } = fx;
     const key = ethers.encodeBytes32String("maxBoostBps");
-    await gauge.connect(gaugeAdmin).queueParam(key, 1_000_000n); // 100x
+    await gauge.connect(tuning).queueParam(key, 1_000_000n); // 100x
     await time.increase(TIMELOCK + 1);
     await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "BadParam");
     expect(await gauge.maxBoostBps()).to.equal(MAX_BOOST);
 
-    await gauge.connect(gaugeAdmin).queueParam(key, 40_000n); // 4x, legal
+    await gauge.connect(tuning).queueParam(key, 40_000n); // 4x, legal
     await time.increase(TIMELOCK + 1);
     await gauge.executeParam(key);
     expect(await gauge.maxBoostBps()).to.equal(40_000n);
 
     // The floor can never be pushed above the ceiling, in either order.
     const baseKey = ethers.encodeBytes32String("baseBoostBps");
-    await gauge.connect(gaugeAdmin).queueParam(baseKey, 50_000n);
+    await gauge.connect(tuning).queueParam(baseKey, 50_000n);
     await time.increase(TIMELOCK + 1);
     await expect(gauge.executeParam(baseKey)).to.be.revertedWithCustomError(gauge, "BadParam");
     // ...and never below 1.0x either, which would publish a PENALTY dressed
     // as a boost.
-    await gauge.connect(gaugeAdmin).queueParam(baseKey, 5_000n);
+    await gauge.connect(tuning).queueParam(baseKey, 5_000n);
     await time.increase(TIMELOCK + 1);
     await expect(gauge.executeParam(baseKey)).to.be.revertedWithCustomError(gauge, "BadParam");
     expect(await gauge.baseBoostBps()).to.equal(BASE_BOOST);
@@ -698,7 +704,7 @@ describe("PlankGauge", () => {
 
   it("ANCHOR RULE: every gauge function, called by every role, moves no vault reserve", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin, whale, gA } = fx;
+    const { gauge, gaugeRoleAdmin, registry, tuning, whale, gA } = fx;
     const idx = await deployOpenIndex({}, [1000n * WAD, 2000n * WAD, 500n * WAD]);
     await idx.vault.connect(idx.alice).mintProRata(500n * WAD, maxIn(3));
     const before = await Promise.all(idx.addrs.map((a) => idx.vault.reserveOf(a)));
@@ -718,7 +724,7 @@ describe("PlankGauge", () => {
       if (t.endsWith("[]")) return [];
       return 0n;
     };
-    for (const who of [gaugeAdmin, whale]) {
+    for (const who of [gaugeRoleAdmin, registry, tuning, whale]) {
       for (const f of fns as any[]) {
         const args = f.inputs.map((i: any) => argFor(i.type));
         try {
@@ -739,7 +745,9 @@ describe("PlankGauge", () => {
     }
     // ...and the vault's parameters are exactly where they were.
     expect((await idx.vault.params()).concentrationCapBps).to.equal(CONCENTRATION_CAP_BPS);
-    expect(await idx.vault.admin()).to.equal(idx.admin.address);
+    expect(await idx.vault.roleHolder(await idx.vault.ROLE_RISK_PARAM())).to.equal(
+      idx.risk.address
+    );
     // The gauge's own book is likewise untouched by the sweep.
     expect(await gauge.gaugeWeight(gA)).to.equal(0n);
   });
@@ -748,9 +756,9 @@ describe("PlankGauge", () => {
 
   it("a multiplier change is QUEUED, never applied instantly", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin } = fx;
+    const { gauge, tuning } = fx;
     const key = ethers.encodeBytes32String("multiplierCollectionLpBps");
-    await gauge.connect(gaugeAdmin).queueParam(key, 40_000n);
+    await gauge.connect(tuning).queueParam(key, 40_000n);
     expect(await gauge.multiplierBps(2)).to.equal(COLL_MULT, "applied on queue");
     await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(
       gauge,
@@ -763,13 +771,13 @@ describe("PlankGauge", () => {
 
   it("the hard multiplier ceiling holds even after the timelock elapses", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin } = fx;
+    const { gauge, tuning } = fx;
     for (const [name, value] of [
       ["multiplierCollectionLpBps", 1_000_000n], // 100x
       ["multiplierRawBps", 1n], // below 1.0x
     ] as const) {
       const key = ethers.encodeBytes32String(name);
-      await gauge.connect(gaugeAdmin).queueParam(key, value);
+      await gauge.connect(tuning).queueParam(key, value);
       await time.increase(TIMELOCK + 1);
       await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "BadParam");
     }
@@ -777,20 +785,28 @@ describe("PlankGauge", () => {
     expect(await gauge.multiplierBps(2)).to.equal(COLL_MULT);
   });
 
-  it("an unknown parameter key can never be applied", async () => {
+  it("an unknown parameter key can never be QUEUED, let alone applied", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin } = fx;
+    const { gauge, tuning } = fx;
     const key = ethers.encodeBytes32String("distributionThresholdWei"); // generation 1's
-    await gauge.connect(gaugeAdmin).queueParam(key, 1n);
+    // The key whitelist in `roleForParamKey` now rejects it one step EARLIER
+    // than the old executor did — an unknown key has no owning role, so no
+    // caller can put it in the queue at all.
+    await expect(gauge.connect(tuning).queueParam(key, 1n)).to.be.revertedWithCustomError(
+      gauge,
+      "BadParam"
+    );
+    // And the executor's own rejection is still there behind it: nothing that
+    // somehow reached the queue could ever be applied.
     await time.increase(TIMELOCK + 1);
-    await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "BadParam");
+    await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "NothingQueued");
   });
 
   it("the path ordering (raw <= plank/eth LP <= collection LP) cannot be inverted", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin } = fx;
+    const { gauge, tuning } = fx;
     const key = ethers.encodeBytes32String("multiplierRawBps");
-    await gauge.connect(gaugeAdmin).queueParam(key, 40_000n); // above the LP rate
+    await gauge.connect(tuning).queueParam(key, 40_000n); // above the LP rate
     await time.increase(TIMELOCK + 1);
     await expect(gauge.executeParam(key)).to.be.revertedWithCustomError(gauge, "BadParam");
     // And a constructor that inverts them will not deploy at all.
@@ -798,7 +814,7 @@ describe("PlankGauge", () => {
     await expect(
       Gauge.deploy(
         await fx.plank.getAddress(),
-        gaugeAdmin.address,
+        [fx.gaugeRoleAdmin.address, fx.registry.address, fx.tuning.address],
         TIMELOCK,
         [30_000n, 20_000n, 10_000n],
         EPOCH
@@ -812,7 +828,7 @@ describe("PlankGauge", () => {
     await expect(
       Gauge.deploy(
         await fx.plank.getAddress(),
-        fx.gaugeAdmin.address,
+        [fx.gaugeRoleAdmin.address, fx.registry.address, fx.tuning.address],
         3_600,
         [RAW_MULT, LP_MULT, COLL_MULT],
         EPOCH
@@ -821,7 +837,7 @@ describe("PlankGauge", () => {
     await expect(
       Gauge.deploy(
         await fx.plank.getAddress(),
-        fx.gaugeAdmin.address,
+        [fx.gaugeRoleAdmin.address, fx.registry.address, fx.tuning.address],
         TIMELOCK,
         [RAW_MULT, LP_MULT, COLL_MULT],
         60 // one minute — an epoch nobody could re-buy into
@@ -831,9 +847,9 @@ describe("PlankGauge", () => {
 
   it("the LP allowlist is itself timelocked, so a fake pair cannot be slipped in", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin, whale, gA, impostorLp } = fx;
+    const { gauge, registry, whale, gA, impostorLp } = fx;
     const addr = await impostorLp.getAddress();
-    await gauge.connect(gaugeAdmin).queuePlankEthLp(addr, false);
+    await gauge.connect(registry).queuePlankEthLp(addr, false);
     // Not approved yet, and no way to shorten the wait.
     await expect(
       gauge.connect(whale).burnPlankEthLp(gA, addr, WAD)
@@ -847,7 +863,7 @@ describe("PlankGauge", () => {
     expect(await gauge.approvedPlankEthLp(addr)).to.equal(true);
   });
 
-  it("only the admin can queue anything", async () => {
+  it("an unprivileged key can queue nothing at all", async () => {
     const fx = await fixture();
     const { gauge, whale, gA } = fx;
     const calls: [string, any[]][] = [
@@ -855,35 +871,41 @@ describe("PlankGauge", () => {
       ["queueGauge", [gA, true]],
       ["queuePlankEthLp", [whale.address, false]],
       ["queueCollectionLp", [gA, whale.address, whale.address, false]],
-      ["queueAdmin", [whale.address]],
+      ["queueRedirectSink", [whale.address]],
+      ["queueRole", [await gauge.ROLE_GAUGE_TUNING(), whale.address]],
+      ["cancelRole", [await gauge.ROLE_GAUGE_TUNING()]],
     ];
     for (const [name, args] of calls) {
       await expect((gauge.connect(whale) as any)[name](...args), name).to.be.revertedWithCustomError(
         gauge,
-        "NotAdmin"
+        "NotRoleHolder"
       );
     }
   });
 
-  it("an admin handover is itself timelocked", async () => {
+  it("a role handover is itself timelocked", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin, minnow } = fx;
-    await gauge.connect(gaugeAdmin).queueAdmin(minnow.address);
-    expect(await gauge.admin()).to.equal(gaugeAdmin.address);
-    await expect(gauge.executeAdmin()).to.be.revertedWithCustomError(gauge, "TimelockNotElapsed");
+    const { gauge, gaugeRoleAdmin, registry, minnow } = fx;
+    const ROLE_REG = await gauge.ROLE_GAUGE_REGISTRY();
+    await gauge.connect(gaugeRoleAdmin).queueRole(ROLE_REG, minnow.address);
+    expect(await gauge.roleHolder(ROLE_REG)).to.equal(registry.address, "applied on queue");
+    await expect(gauge.executeRole(ROLE_REG)).to.be.revertedWithCustomError(
+      gauge,
+      "RoleTimelockNotElapsed"
+    );
     await time.increase(TIMELOCK + 1);
-    await gauge.executeAdmin();
-    expect(await gauge.admin()).to.equal(minnow.address);
+    await gauge.executeRole(ROLE_REG);
+    expect(await gauge.roleHolder(ROLE_REG)).to.equal(minnow.address);
   });
 
   it("un-registering a gauge stops new burns but erases no record", async () => {
     const fx = await fixture();
-    const { gauge, gaugeAdmin, whale, gA } = fx;
+    const { gauge, registry, whale, gA } = fx;
     await gauge.connect(whale).burnPlank(gA, 100n * WAD);
     const e: bigint = await gauge.currentEpoch();
     const weight: bigint = await gauge.gaugeWeight(gA);
 
-    await gauge.connect(gaugeAdmin).queueGauge(gA, true);
+    await gauge.connect(registry).queueGauge(gA, true);
     await time.increase(TIMELOCK + 1);
     await gauge.executeGauge(gA);
 
@@ -898,7 +920,7 @@ describe("PlankGauge", () => {
     expect(await gauge.epochWeightedBurn(e, gA, whale.address)).to.equal(100n * WAD);
 
     // Re-registering restores exactly the same book.
-    await gauge.connect(gaugeAdmin).queueGauge(gA, false);
+    await gauge.connect(registry).queueGauge(gA, false);
     await time.increase(TIMELOCK + 1);
     await gauge.executeGauge(gA);
     expect(await gauge.gaugeWeightAt(gA, e)).to.equal(weight);

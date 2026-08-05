@@ -120,8 +120,9 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IIndexPriceSource} from "./IIndexPriceSource.sol";
 import {IEligibilitySource} from "./IEligibilitySource.sol";
+import {ScopedRoles} from "./ScopedRoles.sol";
 
-contract GlobalIndexVault is ERC20, ReentrancyGuard {
+contract GlobalIndexVault is ERC20, ReentrancyGuard, ScopedRoles {
     using SafeERC20 for IERC20;
 
     /// @notice Generation marker so the client never has to sniff bytecode.
@@ -290,8 +291,28 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     /// mutable timelock delay is a timelock that can be shortened to zero.
     uint256 public immutable timelockDelay;
 
-    /// @notice Sets FUTURE parameters only. Has no withdrawal path, ever.
-    address public admin;
+    // ── Scoped administration roles (see ScopedRoles.sol) ──────────────────
+    //
+    // There is NO blanket admin. Each role below sets FUTURE parameters only,
+    // within its own enumerated scope, and none of them — separately or all
+    // four colluding — has a withdrawal path or any way to block a redemption.
+
+    /// @notice Admits, removes and re-weights constituents: `queueListing`,
+    /// `queueMetric`. Cannot touch risk parameters or the platform cut.
+    bytes32 public constant ROLE_CONSTITUENT_ADMISSION = "vault.admission";
+
+    /// @notice Tunes the risk surface: concentration cap, HHI target, fee
+    /// band/slope/ceiling, persistence calibration, staleness, ramp duration,
+    /// and the two eligibility bars. Cannot admit a constituent and cannot
+    /// touch the platform cut.
+    bytes32 public constant ROLE_RISK_PARAM = "vault.risk";
+
+    /// @notice The ONLY role over the operator-facing value flow:
+    /// `platformAllocationBps` and the `platformTreasury` appointment. Kept
+    /// separately keyed precisely because it is the one parameter surface
+    /// that redirects newly minted shares to an operator — even though it can
+    /// never touch reserves or existing holders' NAV per share.
+    bytes32 public constant ROLE_PLATFORM_ALLOCATION = "vault.allocation";
 
     /// @notice Seeds the basket before it opens; zero privilege after (§2.1).
     address public immutable seeder;
@@ -306,7 +327,6 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
 
     mapping(bytes32 => QueuedParam) public queuedParams;
     mapping(address => QueuedListing) public queuedListings;
-    QueuedParam public queuedAdmin;
     QueuedParam public queuedPlatformTreasury;
 
     /**
@@ -372,8 +392,6 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     event ConstituentDelisted(address indexed token);
     event ParamQueued(bytes32 indexed key, uint256 value, uint64 eta);
     event ParamApplied(bytes32 indexed key, uint256 value);
-    event AdminQueued(address indexed next, uint64 eta);
-    event AdminApplied(address indexed next);
     event Seeded(address indexed token, uint256 amount);
     event IndexOpened(uint256 lockedSeedShares);
     event Checkpointed(address indexed token, uint256 price);
@@ -386,7 +404,6 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
 
     // ── Errors ─────────────────────────────────────────────────────────────
 
-    error NotAdmin();
     error NotSeeder();
     error IndexNotOpen();
     error IndexAlreadyOpen();
@@ -412,19 +429,34 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
 
     // ── Construction ───────────────────────────────────────────────────────
 
+    /**
+     * @param roles_ The four scoped role holders, in the fixed order
+     *        [ROLE_ADMIN, ROLE_CONSTITUENT_ADMISSION, ROLE_RISK_PARAM,
+     *        ROLE_PLATFORM_ALLOCATION]. They MAY be set to the same address —
+     *        nothing here can stop a deployer from recreating the very
+     *        concentration this design exists to remove — but the contract
+     *        treats them as independent from the first block, so separating
+     *        them later costs one timelocked `queueRole` per role and no
+     *        redeploy.
+     */
     constructor(
         string memory name_,
         string memory symbol_,
-        address admin_,
+        address[4] memory roles_,
         address seeder_,
         uint256 timelockDelay_,
         Params memory params_
     ) ERC20(name_, symbol_) {
-        if (admin_ == address(0) || seeder_ == address(0)) revert BadParam();
+        if (seeder_ == address(0)) revert BadParam();
         if (timelockDelay_ < MIN_TIMELOCK_DELAY || timelockDelay_ > MAX_TIMELOCK_DELAY) {
             revert BadParam();
         }
-        admin = admin_;
+        // `_initRole` rejects address(0) for each, so a role can never be born
+        // unassigned — an unassigned role is an ungoverned parameter.
+        _initRole(ROLE_ADMIN, roles_[0]);
+        _initRole(ROLE_CONSTITUENT_ADMISSION, roles_[1]);
+        _initRole(ROLE_RISK_PARAM, roles_[2]);
+        _initRole(ROLE_PLATFORM_ALLOCATION, roles_[3]);
         seeder = seeder_;
         timelockDelay = timelockDelay_;
         _validateParams(params_);
@@ -440,9 +472,16 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         minEligibilityBlocks = 100;
     }
 
-    modifier onlyAdmin() {
-        if (msg.sender != admin) revert NotAdmin();
-        _;
+    function _timelockDelay() internal view override returns (uint256) {
+        return timelockDelay;
+    }
+
+    function _isKnownRole(bytes32 role) internal pure override returns (bool) {
+        return
+            role == ROLE_ADMIN ||
+            role == ROLE_CONSTITUENT_ADMISSION ||
+            role == ROLE_RISK_PARAM ||
+            role == ROLE_PLATFORM_ALLOCATION;
     }
 
     modifier whenOpen() {
@@ -1404,7 +1443,46 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     // a convention here — the contract has no code path at all that transfers
     // a reserve anywhere except to a share-burning redeemer.
 
-    function queueParam(bytes32 key, uint256 value) external onlyAdmin {
+    /**
+     * @notice Which role may queue `key`. Reverts for anything that is not a
+     * recognised parameter.
+     *
+     * @dev This is load-bearing for role isolation, in two directions:
+     *
+     *  - it routes `platformAllocationBps` — the one key that redirects value
+     *    to an operator — to ROLE_PLATFORM_ALLOCATION, so the risk key cannot
+     *    reach it;
+     *  - it REJECTS unrecognised keys outright. Without that, any parameter
+     *    role could write a `keccak256("metric", token)` key into the shared
+     *    `queuedParams` mapping and have `executeMetric` apply it, which
+     *    would hand the risk role the admission role's re-weighting power
+     *    through the back door. Whitelisting the key space closes that.
+     */
+    function roleForParamKey(bytes32 key) public pure returns (bytes32) {
+        if (key == "platformAllocationBps") return ROLE_PLATFORM_ALLOCATION;
+        if (
+            key == "concentrationCapBps" ||
+            key == "baseImbalanceFeeBps" ||
+            key == "imbalanceSlopeBps" ||
+            key == "maxImbalanceFeeBps" ||
+            key == "bandBps" ||
+            key == "priceCapBps" ||
+            key == "minCheckpointInterval" ||
+            key == "staleAfter" ||
+            key == "persistenceCheckpoints" ||
+            key == "persistenceToleranceBps" ||
+            key == "largeOpValueWei" ||
+            key == "rampDuration" ||
+            key == "targetHhiBps" ||
+            key == "minEligibilityFeesWei" ||
+            key == "minEligibilityBlocks"
+        ) return ROLE_RISK_PARAM;
+        revert BadParam();
+    }
+
+    function queueParam(bytes32 key, uint256 value) external {
+        bytes32 role = roleForParamKey(key);
+        if (msg.sender != roleHolder[role]) revert NotRoleHolder(role);
         uint64 eta = uint64(block.timestamp + timelockDelay);
         queuedParams[key] = QueuedParam({value: value, eta: eta, pending: true});
         emit ParamQueued(key, value, eta);
@@ -1475,7 +1553,10 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
     /// @notice Update a constituent's weight metric (fee revenue + locked LP).
     /// Timelocked like any other economically significant parameter, and it
     /// only ever changes a target-weight VIEW — it moves no value.
-    function queueMetric(address token, uint256 metric) external onlyAdmin {
+    function queueMetric(address token, uint256 metric)
+        external
+        onlyRole(ROLE_CONSTITUENT_ADMISSION)
+    {
         _get(token);
         bytes32 key = keccak256(abi.encodePacked("metric", token));
         uint64 eta = uint64(block.timestamp + timelockDelay);
@@ -1498,7 +1579,7 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         IIndexPriceSource source,
         uint256 rawTargetWeightBps,
         bool isRemoval
-    ) external onlyAdmin {
+    ) external onlyRole(ROLE_CONSTITUENT_ADMISSION) {
         uint64 eta = uint64(block.timestamp + timelockDelay);
         queuedListings[token] = QueuedListing({
             source: source,
@@ -1564,28 +1645,20 @@ contract GlobalIndexVault is ERC20, ReentrancyGuard {
         _recomputeEligibleCount();
     }
 
-    function queueAdmin(address next) external onlyAdmin {
-        if (next == address(0)) revert BadParam();
-        uint64 eta = uint64(block.timestamp + timelockDelay);
-        queuedAdmin = QueuedParam({value: uint256(uint160(next)), eta: eta, pending: true});
-        emit AdminQueued(next, eta);
-    }
-
-    function executeAdmin() external {
-        QueuedParam memory q = queuedAdmin;
-        if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
-        delete queuedAdmin;
-        admin = address(uint160(q.value));
-        emit AdminApplied(admin);
-    }
+    // Role handover lives in ScopedRoles: `queueRole` / `executeRole`, on the
+    // same `timelockDelay` the old single-admin handover used. There is no
+    // per-contract shortcut around it here, and no second path that writes
+    // `roleHolder`.
 
     /// @notice Appoint (or retire, with address(0)) the platform treasury that
     /// receives the mint-side allocation. Timelocked like everything else, and
     /// like everything else it grants NO reach over pooled reserves: the
     /// treasury receives shares and redeems them through the identical strict
     /// pro-rata path as any other holder.
-    function queuePlatformTreasury(address treasury) external onlyAdmin {
+    function queuePlatformTreasury(address treasury)
+        external
+        onlyRole(ROLE_PLATFORM_ALLOCATION)
+    {
         uint64 eta = uint64(block.timestamp + timelockDelay);
         queuedPlatformTreasury = QueuedParam({
             value: uint256(uint160(treasury)),
