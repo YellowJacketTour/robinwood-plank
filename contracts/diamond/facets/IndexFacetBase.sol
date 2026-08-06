@@ -30,6 +30,7 @@ import {
     WeightStorage,
     PoolStorage,
     DevFundStorage,
+    PlatformTreasuryStorage,
     ReentrancyStorage,
     HooksStorage,
     ReserveVestStorage
@@ -144,6 +145,24 @@ abstract contract IndexFacetBase {
      * exposure small, not a claim that the value itself is untouchable.
      */
     uint256 internal constant CEIL_DEV_FUND_BPS = 200;
+
+    /**
+     * @dev §7.12 hard ceiling on `PlatformTreasuryStorage.carveOutBps` — 5%,
+     * the design doc's own recommended magnitude for this section
+     * ("recommend a low ceiling, e.g. 500 bps / 5%"). Enforced in bytecode at
+     * `IndexSocialFiTreasuryFacet._applySocialFiTreasuryBps`, the one
+     * execution point, exactly like `CEIL_BUYBACK_SPLIT_BPS` and
+     * `CEIL_DEV_FUND_BPS` above — a timelock bounds WHEN a change lands,
+     * never HOW BIG it can be, and this is the third bucket that doctrine
+     * applies to.
+     *
+     * UNLIKE `CEIL_BUYBACK_SPLIT_BPS`, and LIKE `CEIL_DEV_FUND_BPS`, this
+     * bucket is spendable, team-directed value (design doc §7.12's own
+     * framing) rather than a trustless accounting slot — the low ceiling is
+     * what keeps that exposure small, not a claim that the value itself is
+     * untouchable.
+     */
+    uint256 internal constant CEIL_PLATFORM_TREASURY_BPS = 500;
 
     uint256 internal constant DEFAULT_TARGET_HHI_BPS = 2_000;
     uint256 internal constant MIN_TARGET_HHI_BPS = 200;
@@ -319,6 +338,23 @@ abstract contract IndexFacetBase {
     event DevFundTreasurySet(address indexed treasury);
     event DevFundBpsQueued(uint256 bps, uint64 eta);
     event DevFundBpsSet(uint256 bps);
+
+    // ── §7.12 platform socialfi treasury carve-out (design doc §7.12) ─────
+    //
+    // DELIBERATELY NOT DESCRIBED as "no admin path" or "no one can touch it"
+    // anywhere in this codebase, including here — this is a real, spendable,
+    // team-directed treasury by design, exactly like §7.11's dev fund. See
+    // `PlatformTreasuryStorage`'s and `IndexPlatformTreasuryFacet`'s headers.
+
+    /// @notice A routed-fee credit was carved before §7.3's three-way split
+    /// ran, and the carved amount was delivered to `treasury` by a plain
+    /// transfer. `amount` is the ACTUAL amount carved out of that credit,
+    /// never a caller-supplied figure.
+    event SocialFiTreasuryCarvedOut(address indexed token, uint256 amount, address indexed treasury);
+    event SocialFiTreasuryQueued(address indexed treasury, uint64 eta);
+    event SocialFiTreasurySet(address indexed treasury);
+    event SocialFiTreasuryBpsQueued(uint256 bps, uint64 eta);
+    event SocialFiTreasuryBpsSet(uint256 bps);
 
     // Streams (ported from WrappedIndexShare)
     event StreamQueued(address indexed token, uint64 eta);
@@ -1090,8 +1126,34 @@ abstract contract IndexFacetBase {
      * `unvested`/`last`/`end` shape, same linear release, applied to
      * `c.reserve`'s freshly-credited increment instead of a probed stream
      * balance.
+     *
+     * §7.12 PLATFORM SOCIALFI TREASURY CARVE-OUT: BEFORE any of the three-way
+     * split above runs, `PlatformTreasuryStorage.carveOutBps` of `amount` is
+     * carved off and delivered to `PlatformTreasuryStorage.treasury` by a
+     * plain `safeTransfer` — the exact push-then-opportunistic-reconcile
+     * plumbing §7.2 already built (atomic, cannot brick this call), never a
+     * swap through an external venue the way §7.11's dev-fund buy is. The
+     * split ratios below then apply to the POST-CARVE-OUT REMAINDER, not the
+     * original `amount` — this is the one place a subtle math-ordering bug
+     * could hide, and it is the reason `amount` is reassigned in place rather
+     * than a second variable being threaded through. A zero-configured
+     * namespace (the default — see `PlatformTreasuryStorage`'s header) is a
+     * no-op, so every existing §7.3 three-way-split test observes byte-for-
+     * byte the same split behaviour as before this section existed.
      */
     function _creditRoutedValue(address token, Constituent storage c, uint256 amount) internal {
+        PlatformTreasuryStorage.Layout storage pt = PlatformTreasuryStorage.layout();
+        address ptTreasury = pt.treasury;
+        uint256 ptBps = pt.carveOutBps;
+        if (ptTreasury != address(0) && ptBps != 0) {
+            uint256 carveOut = Math.mulDiv(amount, ptBps, BPS); // floors, in the index's favour
+            if (carveOut > 0) {
+                amount -= carveOut;
+                IERC20(token).safeTransfer(ptTreasury, carveOut);
+                emit SocialFiTreasuryCarvedOut(token, carveOut, ptTreasury);
+            }
+        }
+
         ValueAccrualStorage.Layout storage va = ValueAccrualStorage.layout();
         uint256 dividendShare = token == CoreStorage.layout().dividendAsset
             ? Math.mulDiv(amount, va.dividendBps, BPS)

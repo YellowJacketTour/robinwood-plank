@@ -683,6 +683,83 @@ library DevFundStorage {
     }
 }
 
+/**
+ * @notice §7.12's platform socialfi treasury carve-out (design doc
+ * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.12).
+ *
+ * @dev THE SAME DIFFERENT TRUST MODEL AS `DevFundStorage` ABOVE, RESTATED
+ * BECAUSE IT IS EASY TO BLUR THE TWO TOGETHER. Every trustless value-routing
+ * namespace this file declares (`ValueAccrualStorage`'s buyback earmark,
+ * `DividendStorage`) is engineered so nobody — including the team — has a
+ * spending path over the value it tracks. This one, like `DevFundStorage`,
+ * is the opposite by design: `treasury` is a REAL, SPENDABLE address under
+ * team control, intended in production to be a timelocked multisig (never
+ * enforced on-chain — a deployment decision, not something a Solidity type
+ * can check), and `treasury`/`carveOutBps` changes are governed and
+ * timelocked the same way every other privileged parameter in this codebase
+ * is, but the value they route is genuinely spendable, never locked or
+ * burned. See `IndexSocialFiTreasuryFacet.sol`'s header for the full framing.
+ *
+ * UNLIKE `DevFundStorage`, there is no `router` field here: §7.12 reuses the
+ * exact push-then-opportunistic-reconcile plumbing already built and tested
+ * in §7.2 — a plain `IERC20.safeTransfer` to `treasury`, atomic, cannot brick
+ * a vault — never a swap through an external venue.
+ *
+ * Both fields default to their zero value, the same "opt-in, not a silent
+ * behavior change" doctrine `DevFundStorage`, `ValueAccrualStorage` and
+ * `PoolStorage` already use here: `IndexFacetBase._creditRoutedValue`'s
+ * carve-out step is a no-op whenever `treasury == address(0) ||
+ * carveOutBps == 0`, so every existing §7.3 three-way-split test — none of
+ * which ever configures this namespace — observes byte-for-byte the same
+ * split behaviour as before this section existed.
+ */
+library PlatformTreasuryStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.platformtreasury.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    /// @dev Same shape as `DevFundStorage.QueuedAddress`, re-declared locally
+    /// for the same "no cross-namespace compile-time dependency" reason
+    /// `DevFundStorage` itself already documents.
+    struct QueuedAddress {
+        address value;
+        uint64 eta;
+        bool pending;
+    }
+
+    /// @dev Same shape as `DevFundStorage.QueuedUint256`, re-declared locally.
+    struct QueuedUint256 {
+        uint256 value;
+        uint64 eta;
+        bool pending;
+    }
+
+    struct Layout {
+        /// @notice Where the carved-out share of every routed fee lands.
+        /// Real, spendable, team-directed — see this library's own header.
+        /// Earmarked, per the design doc, to fund future PLANK airdrops tied
+        /// to a socialfi leaderboard system — a later, separate product
+        /// design this section only funds, never specifies.
+        address treasury;
+        /// @notice Governed share of value reaching `_creditRoutedValue`,
+        /// carved out BEFORE §7.3's three-way split runs, in bps. Hard-capped
+        /// at `IndexFacetBase.CEIL_PLATFORM_TREASURY_BPS` (500 = 5%),
+        /// enforced at execution by
+        /// `IndexSocialFiTreasuryFacet._applySocialFiTreasuryBps`.
+        uint256 carveOutBps;
+        QueuedAddress queuedTreasury;
+        QueuedUint256 queuedCarveOutBps;
+        uint256[12] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
 /// @notice Registered observe-only extension hooks (design doc section 8).
 library HooksStorage {
     bytes32 internal constant SLOT =
