@@ -1265,9 +1265,22 @@ jobs:
           # same SSH argument-vanishing case the caller-side sentinel already
           # guards, in case a future caller ever invokes this without one.
           to_block_raw="${4:-auto}"
-          to_block=""
-          if [ "$to_block_raw" != "auto" ]; then
-            to_block="$to_block_raw"
+          to_block="$to_block_raw"
+          if [ "$to_block_raw" = "auto" ]; then
+            # reindex-chain-events.ts's own auto mode is NOT "from here to the
+            # current head" — omitting --to falls back to
+            # unpricedSaleBlockRanges(), which only finds NULL-priced rows.
+            # This repair is specifically for rows that are WRONGLY priced,
+            # not unpriced, so --to must be a real block number or the run
+            # silently skips exactly the rows it exists to fix. Resolve the
+            # current head directly rather than rely on the script's default.
+            head_hex="$(curl -fsS -X POST https://rpc.mainnet.chain.robinhood.com \
+              -H 'content-type: application/json' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' \
+              | sed -n 's/.*"result":"\(0x[0-9a-fA-F]*\)".*/\1/p')"
+            test -n "$head_hex"
+            to_block="$(( head_hex ))"
+            test "$to_block" -gt 0
           fi
           case "$app_dir" in
             /home/*/plank.tanggang.life) ;;
