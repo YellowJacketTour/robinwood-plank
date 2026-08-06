@@ -489,6 +489,54 @@ library WeightStorage {
     }
 }
 
+/**
+ * @notice The dedicated index-coin/payment-token pool's address (design doc
+ * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.10).
+ *
+ * @dev ONE pool per diamond, set once via `IndexPoolFacet.setIndexPool` and
+ * never cleared — the same one-way-latch shape `CoreStorage.indexOpen` and
+ * `DiamondStorage.finalized` already use. `address(0)` (the default) means
+ * "no pool yet": `IndexFacetBase._nav()` treats that as "the pool contributes
+ * nothing", not as an error, so every existing test that never sets a pool is
+ * completely unaffected by this namespace's existence.
+ */
+library PoolStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.pool.v1")) - 1)) & ~bytes32(uint256(0xff));
+
+    struct Layout {
+        /// @notice The `IndexCoinPool` this diamond deploys protocol-owned
+        /// liquidity into and reads live reserves from for NAV. `address(0)`
+        /// until `IndexPoolFacet.executeIndexPool` applies a queued value.
+        address pool;
+        /// @notice The queued (not-yet-effective) pool address, timelocked
+        /// exactly like every other risk-surface change in this facet set
+        /// (`GovernanceStorage.QueuedParam`'s own shape, reused verbatim) —
+        /// there is no direct, un-timelocked setter anywhere in this facet
+        /// set, and this namespace does not become the first one.
+        GovernanceQueuedAddress queuedPool;
+        uint256[16] __gap;
+    }
+
+    /// @dev Shaped identically to `GovernanceStorage.QueuedParam`, declared
+    /// locally rather than imported so `PoolStorage` has no compile-time
+    /// dependency on `GovernanceStorage` — the same "re-declare rather than
+    /// import" convention `IndexValuation`'s errors already use in this
+    /// codebase.
+    struct GovernanceQueuedAddress {
+        address value;
+        uint64 eta;
+        bool pending;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
 /// @notice Registered observe-only extension hooks (design doc section 8).
 library HooksStorage {
     bytes32 internal constant SLOT =

@@ -185,7 +185,20 @@ export async function deployIndexDiamond(
     // an ungoverned parameter and there is no renounce path anywhere in the
     // facet set that could later vacate one.
     fullInit(init),
-    committedHash
+    committedHash,
+    // Explicit gas ceiling on the one-shot atomic deploy-cut-finalize
+    // transaction. This transaction deploys-and-cuts every facet in the
+    // manifest in a single call, so its real cost scales with the manifest
+    // size and grows every time a facet is added (design doc section 12
+    // item 2's own flagged risk). Automatic `eth_estimateGas` binary search
+    // is what actually broke here when the manifest crossed ~16.9M gas —
+    // not because the transaction was invalid, but because of an unrelated
+    // estimation-path quirk that a plain `sendTransaction` with an explicit
+    // limit does not hit (confirmed: the identical calldata mines
+    // successfully with an explicit `gasLimit`). A generous fixed ceiling,
+    // well under the 60,000,000 block gas limit this suite's Hardhat network
+    // config uses, is the direct fix rather than a workaround.
+    { gasLimit: 40_000_000n }
   );
   await deployer.waitForDeployment();
 

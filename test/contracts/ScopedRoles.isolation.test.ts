@@ -184,6 +184,16 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
         role: ROLE_ALLOC,
         holder: allocation,
       },
+      // IndexPoolFacet (design doc §7.10, 2026-08-06 task brief). Same
+      // queue/execute timelock shape as `queuePlatformTreasury` immediately
+      // above, and the same role — bootstrap infrastructure wiring is a
+      // risk-surface change like any other, never a direct setter.
+      {
+        name: "queueIndexPool",
+        args: [alice.address],
+        role: ROLE_RISK,
+        holder: risk,
+      },
       {
         name: "queueRole",
         args: [ROLE_RISK, alice.address],
@@ -283,6 +293,21 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // `executeStream` — permissionless after the eta, the timelock is the
       // gate rather than a second discretionary approval.
       "executeHook",
+      // IndexPoolFacet (design doc §7.10, 2026-08-06 task brief).
+      // `executeIndexPool` is the timelock-gated apply, same shape as
+      // `executePlatformTreasury`/`executeStream`/`executeHook` — permissionless
+      // after the eta, the timelock is the gate rather than a second
+      // discretionary approval.
+      "executeIndexPool",
+      // `deployToIndexPool` is permissionless BY DESIGN, same reasoning as
+      // `syncConstituentBalance`/`reconcile` immediately above: it only ever
+      // draws down an amount already capped at real reserve depth, prices it
+      // through the identical, unmodified `mintSingleAsset` formula (no
+      // caller-favourable pricing lever), and moves the result into
+      // protocol-owned liquidity that nobody — including every role in this
+      // table — has any special claim on. There is nothing here for a role
+      // to be trusted with either.
+      "deployToIndexPool",
     ]);
     const abiNames = (vault.interface.fragments as any[])
       .filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))

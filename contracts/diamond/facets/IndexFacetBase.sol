@@ -12,6 +12,8 @@ import {IndexValuation} from "../../lib/IndexValuation.sol";
 import {IndexOracle} from "../../lib/IndexOracle.sol";
 import {IndexEligibility} from "../../lib/IndexEligibility.sol";
 import {IndexParams, IndexParamSet as Params} from "../../lib/IndexParams.sol";
+import {IndexPoolValuation} from "../../lib/IndexPoolValuation.sol";
+import {IIndexCoinPool} from "../../IIndexCoinPool.sol";
 
 import {
     CoreStorage,
@@ -25,6 +27,7 @@ import {
     ValueAccrualStorage,
     StreamStorage,
     WeightStorage,
+    PoolStorage,
     ReentrancyStorage,
     HooksStorage
 } from "../storage/IndexStorage.sol";
@@ -317,6 +320,11 @@ abstract contract IndexFacetBase {
     error EcosystemSinkUnset();
     error ApprovalNotConsumed();
 
+    // §7.10 — the dedicated index-coin pool
+    error PoolAlreadySet();
+    error PoolActedThisBlock();
+    error InsufficientPoolFunding();
+
     error NotRoleHolder(bytes32 role);
     error UnknownRole(bytes32 role);
     error BadRoleHolder();
@@ -602,10 +610,52 @@ abstract contract IndexFacetBase {
 
     // ══ Valuation ═════════════════════════════════════════════════════════
 
+    /**
+     * @dev §7.10: the dedicated index-coin/payment-token pool's own live
+     * position (see `IndexPoolValuation`'s header for the closed-form
+     * derivation) is folded in HERE, at the one place every NAV consumer in
+     * this facet set already reads through — `IndexLensFacet.nav()`,
+     * `IndexTradeFacet.mintSingleAsset`/`redeemSingleAsset` (both via
+     * `_nav`/`_previewSingleExit`), and `IndexPoolFacet.deployToIndexPool`
+     * itself. `redeemProRata` in `IndexCoreFacet` deliberately never reaches
+     * this function at all (see that file's header — "it reads no price"),
+     * so the pool's valuation has no bearing on the free exit door either
+     * before or after this change.
+     *
+     * `PoolStorage.layout().pool == address(0)` (no pool configured yet) is
+     * the untouched default, and `IndexPoolValuation.includePool` treats an
+     * all-zero pool position identically to "no pool" — so every existing
+     * test, none of which ever calls `setIndexPool`, observes byte-for-byte
+     * the same `_nav()` this function returned before this change.
+     */
     function _nav() internal view returns (uint256 navLow, uint256 navHigh) {
         CoreStorage.Layout storage cs = CoreStorage.layout();
         Params storage p = _params();
-        return IndexValuation.navBand(cs.constituentList, cs.constituents, p.bandBps, p.staleAfter);
+        (navLow, navHigh) = IndexValuation.navBand(cs.constituentList, cs.constituents, p.bandBps, p.staleAfter);
+        address pool = PoolStorage.layout().pool;
+        if (pool != address(0)) {
+            (uint256 poolPayment, uint256 poolCoin) = IIndexCoinPool(pool).getReserves();
+            (navLow, navHigh) = IndexPoolValuation.includePool(navLow, navHigh, poolPayment, poolCoin, _totalSupply());
+        }
+    }
+
+    /**
+     * @dev §7.10 test-5's same-block staleness guard: refuse a NAV-priced
+     * mutation if the pool's reserves moved (a swap OR a `deploy`) in THIS
+     * block. A same-block swap-then-mint/redeem is the one shape where the
+     * closed-form valuation's live reserve read is momentarily off the
+     * pool's own no-fee marginal price (the trade that just landed paid the
+     * pool's 1% fee, which is real value the pool keeps, but the two
+     * reserves are transiently away from the ratio a stateless external
+     * observer would infer) — bounding WHEN a NAV-priced action may run
+     * relative to a pool action is what makes "cannot extract value through
+     * staleness" a proven property instead of an assumption. No-op when no
+     * pool is configured.
+     */
+    function _requirePoolQuiescent() internal view {
+        address pool = PoolStorage.layout().pool;
+        if (pool == address(0)) return;
+        if (IIndexCoinPool(pool).lastActionBlock() == block.number) revert PoolActedThisBlock();
     }
 
     function _allWeightsBps() internal view returns (uint256[] memory) {

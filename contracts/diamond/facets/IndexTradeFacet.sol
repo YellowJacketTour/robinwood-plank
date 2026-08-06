@@ -50,6 +50,7 @@ contract IndexTradeFacet is IndexFacetBase {
         if (amountIn == 0) revert ZeroAmount();
         Constituent storage c = _get(token);
         _requireNotExiting(token, c);
+        _requirePoolQuiescent();
 
         (uint256 lo, , ) = _priceBand(token);
         if (lo == 0) revert StalePrice();
@@ -108,6 +109,7 @@ contract IndexTradeFacet is IndexFacetBase {
     ) external nonReentrant whenOpen returns (uint256 amountOut) {
         if (sharesIn == 0) revert ZeroAmount();
         Constituent storage target = _get(token);
+        _requirePoolQuiescent();
 
         uint256 feeAmount;
         (amountOut, feeAmount) = _previewSingleExit(sharesIn, token);
