@@ -70,9 +70,15 @@ contract IndexTradeFacet is IndexFacetBase {
 
         uint256[] memory weightsBefore = _allWeightsBps();
         // The fee this mint charged, expressed in the DEPOSITED token. The
-        // split is taken out of THAT and nothing else; whatever is not split
-        // off still lands in the reserve and still lifts NAV per share.
-        c.reserve += credited - _accrueEcosystem(token, (credited * feeBps) / BPS);
+        // ecosystem split is taken out of THAT and nothing else; whatever is
+        // not split off still lands in the reserve and still lifts NAV per
+        // share.
+        uint256 netForReserve = credited - _accrueEcosystem(token, (credited * feeBps) / BPS);
+        // §7.11: a small, governed slice of what remains may route to a
+        // PLANK buy for the dev-fund treasury before the rest backs the
+        // newly-minted shares — see `_routeDevFundBuy`'s header for why this
+        // can never revert or reduce what the depositor receives in shares.
+        c.reserve += _routeDevFundBuy(token, netForReserve);
         // The slippage guard is checked against what the DEPOSITOR actually
         // receives, not the pre-allocation gross — a guard that can be
         // satisfied by shares the caller never gets is not a guard.

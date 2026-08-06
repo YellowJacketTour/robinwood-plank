@@ -609,6 +609,80 @@ library PoolStorage {
     }
 }
 
+/**
+ * @notice §7.11's dev-fund PLANK market-buy allocation (design doc
+ * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.11).
+ *
+ * @dev DELIBERATELY A DIFFERENT TRUST MODEL FROM EVERY OTHER NAMESPACE IN
+ * THIS FILE, AND DOCUMENTED AS SUCH RATHER THAN GLOSSED OVER. Every other
+ * value-routing namespace here (`ValueAccrualStorage`'s buyback earmark,
+ * `DividendStorage`) is engineered so nobody — including the team — has a
+ * spending path over the value it tracks. This one is the opposite by
+ * design: `treasury` is a REAL, SPENDABLE address under team control,
+ * intended in production to be a timelocked multisig (never enforced
+ * on-chain — that is a deployment decision, not something a Solidity type
+ * can check), and `router`/`treasury`/`devFundBps` changes are governed and
+ * timelocked the same way every other privileged parameter in this codebase
+ * is, but the fund they route into is genuinely spendable, not locked or
+ * burned. See `IndexDevFundFacet.sol`'s header for the full framing.
+ *
+ * All three fields default to their zero value, which is the same
+ * "opt-in, not a silent behavior change" doctrine `ValueAccrualStorage` and
+ * `PoolStorage` already use here: `IndexFacetBase._routeDevFundBuy` is a
+ * no-op whenever `router == address(0) || treasury == address(0) ||
+ * devFundBps == 0`, so every existing test — none of which ever configures
+ * this namespace — observes byte-for-byte the same mint behaviour as before
+ * this section existed.
+ */
+library DevFundStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.devfund.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    /// @dev Same shape as `PoolStorage.GovernanceQueuedAddress`, re-declared
+    /// locally for the same "no cross-namespace compile-time dependency"
+    /// reason `PoolStorage` itself already documents.
+    struct QueuedAddress {
+        address value;
+        uint64 eta;
+        bool pending;
+    }
+
+    /// @dev Same shape as `PoolStorage.QueuedUint256`, re-declared locally.
+    struct QueuedUint256 {
+        uint256 value;
+        uint64 eta;
+        bool pending;
+    }
+
+    struct Layout {
+        /// @notice The external swap venue PLANK is bought through. A
+        /// deployment-time / governance parameter — see
+        /// `IExternalSwapRouter.sol`'s header for why the real PLANK venue
+        /// is never hardcoded here.
+        address router;
+        /// @notice Where bought PLANK lands. Real, spendable, team-directed
+        /// — see this library's own header.
+        address treasury;
+        /// @notice Governed share of a mint's payment routed toward buying
+        /// PLANK, in bps. Hard-capped at `IndexFacetBase.CEIL_DEV_FUND_BPS`
+        /// (200 = 2%), enforced at execution by
+        /// `IndexDevFundFacet._applyDevFundBps`.
+        uint256 devFundBps;
+        QueuedAddress queuedRouter;
+        QueuedAddress queuedTreasury;
+        QueuedUint256 queuedDevFundBps;
+        uint256[11] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
 /// @notice Registered observe-only extension hooks (design doc section 8).
 library HooksStorage {
     bytes32 internal constant SLOT =
