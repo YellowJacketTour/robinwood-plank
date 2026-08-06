@@ -65,7 +65,7 @@ library IndexValuation {
         mapping(address => Constituent) storage cs,
         uint256 bandBps,
         uint256 staleAfter
-    ) external view returns (uint256 navLow, uint256 navHigh) {
+    ) internal view returns (uint256 navLow, uint256 navHigh) {
         uint256 n = list.length;
         for (uint256 i = 0; i < n; i++) {
             Constituent storage c = cs[list[i]];
@@ -82,7 +82,7 @@ library IndexValuation {
         mapping(address => Constituent) storage cs,
         uint256 bandBps,
         uint256 staleAfter
-    ) external view returns (uint256[] memory w) {
+    ) internal view returns (uint256[] memory w) {
         return _weights(list, cs, bandBps, staleAfter);
     }
 
@@ -132,7 +132,7 @@ library IndexValuation {
         uint256 sharesIn,
         uint256 denom,
         IndexParamSet memory p
-    ) external view returns (uint256 amountOut, uint256 feeAmount) {
+    ) internal view returns (uint256 amountOut, uint256 feeAmount) {
         Constituent storage target = cs[token];
         (uint256 targetLo, uint256 targetHi, ) = IndexOracle.band(target, p.bandBps, p.staleAfter);
         if (targetHi == 0 || targetLo == 0) revert StalePrice();
@@ -185,7 +185,7 @@ library IndexValuation {
         uint256 denom,
         uint256 virtualAssets,
         bool roundUp
-    ) external view returns (address[] memory tokens, uint256[] memory amounts) {
+    ) internal view returns (address[] memory tokens, uint256[] memory amounts) {
         uint256 n = list.length;
         tokens = new address[](n);
         amounts = new uint256[](n);
@@ -217,7 +217,7 @@ library IndexValuation {
         uint256 depthFee,
         uint256 cap,
         IndexParamSet memory p
-    ) external view returns (uint256) {
+    ) internal view returns (uint256) {
         (address[] memory tokens, uint256[] memory target) = _targets(list, cs, cap, p.staleAfter);
         uint256 idx = type(uint256).max;
         for (uint256 i = 0; i < tokens.length; i++) {
@@ -286,7 +286,7 @@ library IndexValuation {
         mapping(address => Constituent) storage cs,
         uint256 cap,
         uint256 staleAfter
-    ) external view returns (address[] memory tokens, uint256[] memory bps) {
+    ) internal view returns (address[] memory tokens, uint256[] memory bps) {
         return _targets(list, cs, cap, staleAfter);
     }
 

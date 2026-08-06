@@ -1,7 +1,8 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { deployIndexDiamond, selectorsOf, facetSetHash } from "./helpers/diamond";
+import { deployIndexDiamond, selectorsOf, facetSetHash ,
+  fullInit} from "./helpers/diamond";
 
 /**
  * ============================================================================
@@ -45,7 +46,7 @@ import { deployIndexDiamond, selectorsOf, facetSetHash } from "./helpers/diamond
 describe("Diamond finalization — the renouncement window", () => {
   const SEEDER = "0x0000000000000000000000000000000000000B0B";
   const DIVIDEND = "0x000000000000000000000000000000000000dEaD";
-  const INIT = { timelockDelay: 48 * 3600, seeder: SEEDER, dividendAsset: DIVIDEND };
+  const INIT = fullInit({ timelockDelay: 48 * 3600, seeder: SEEDER, dividendAsset: DIVIDEND });
   const FACETS = ["DiamondLoupeFacet", "CoreProbeFacetA", "CoreProbeFacetB"];
 
   async function fx() {

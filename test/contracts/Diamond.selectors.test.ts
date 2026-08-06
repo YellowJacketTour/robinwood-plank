@@ -1,7 +1,8 @@
 import { expect } from "chai";
 import { ethers, artifacts } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { deployIndexDiamond, selectorsOf, facetSetHash } from "./helpers/diamond";
+import { deployIndexDiamond, selectorsOf, facetSetHash ,
+  fullInit} from "./helpers/diamond";
 
 /**
  * ============================================================================
@@ -23,11 +24,11 @@ import { deployIndexDiamond, selectorsOf, facetSetHash } from "./helpers/diamond
  * ============================================================================
  */
 describe("Diamond selector routing", () => {
-  const INIT = {
+  const INIT = fullInit({
     timelockDelay: 48 * 3600,
     seeder: "0x0000000000000000000000000000000000000B0B",
     dividendAsset: "0x000000000000000000000000000000000000dEaD",
-  };
+    });
   const FACETS = ["DiamondLoupeFacet", "CoreProbeFacetA", "CoreProbeFacetB"];
 
   async function fx() {

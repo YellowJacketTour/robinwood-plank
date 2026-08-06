@@ -763,7 +763,19 @@ describe("GlobalIndexVault", () => {
         paramsTuple(defaultParams),
         ethers.ZeroAddress
       )
-    ).to.be.revertedWithCustomError(Vault, "BadParam");
+    )
+      // RE-DERIVED FOR THE DIAMOND, and the CLAIM is unchanged: a below-floor
+      // delay still cannot be DEPLOYED AT ALL. What changed is where the check
+      // lives and therefore what it is called. On the monolith it was one of
+      // several constructor `BadParam` guards; on the diamond `timelockDelay`
+      // is written by `Diamond`'s own constructor (it had to leave `immutable`,
+      // since under DELEGATECALL an `immutable` resolves per-FACET), and that
+      // constructor names the failure `TimelockDelayBelowFloor`. Keeping the
+      // check in a CONSTRUCTOR rather than moving it to a setter is what
+      // preserves the strong form of the property — "cannot be deployed" is a
+      // strictly stronger claim than "cannot be set" — and the revert reverts
+      // the whole `IndexDeployer` transaction, so no diamond exists afterwards.
+      .to.be.revertedWithCustomError(Vault, "TimelockDelayBelowFloor");
   });
 });
 

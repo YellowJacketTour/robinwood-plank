@@ -1,7 +1,8 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { deployIndexDiamond, combinedHandle } from "./helpers/diamond";
+import { deployIndexDiamond, combinedHandle ,
+  fullInit} from "./helpers/diamond";
 
 /**
  * ============================================================================
@@ -26,7 +27,7 @@ describe("Diamond storage namespaces", () => {
   async function fx() {
     const d = await deployIndexDiamond(
       ["DiamondLoupeFacet", "CoreProbeFacetA", "CoreProbeFacetB"],
-      { timelockDelay: TIMELOCK, seeder: SEEDER, dividendAsset: DIVIDEND }
+      fullInit({ timelockDelay: TIMELOCK, seeder: SEEDER, dividendAsset: DIVIDEND })
     );
     const handle = await combinedHandle(d.address, [
       "DiamondLoupeFacet",
@@ -198,7 +199,7 @@ describe("Diamond storage namespaces", () => {
     async function stressFx() {
       const d = await deployIndexDiamond(
         ["DiamondLoupeFacet", "NamespaceStressFacet"],
-        { timelockDelay: TIMELOCK, seeder: SEEDER, dividendAsset: DIVIDEND }
+        fullInit({ timelockDelay: TIMELOCK, seeder: SEEDER, dividendAsset: DIVIDEND })
       );
       const handle = await combinedHandle(d.address, [
         "DiamondLoupeFacet",

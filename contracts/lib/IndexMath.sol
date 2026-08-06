@@ -144,7 +144,7 @@ library IndexMath {
      * be too crude to trust, and trusting a crude one is worse than knowing
      * the gap is there.
      */
-    function capBpsFor(uint256 n, uint256 targetHhiBps) external pure returns (uint256) {
+    function capBpsFor(uint256 n, uint256 targetHhiBps) internal pure returns (uint256) {
         if (n <= 1) return BPS; // one leg IS the basket
 
         uint256 t = targetHhiBps;
@@ -190,7 +190,7 @@ library IndexMath {
         uint256 baseBps,
         uint256 slopeBps,
         uint256 maxBps
-    ) external pure returns (uint256 fee) {
+    ) internal pure returns (uint256 fee) {
         if (against == 0) return maxBps;
         uint256 d = (amount * BPS) / against;
         if (d > BPS) d = BPS;
@@ -230,7 +230,7 @@ library IndexMath {
         uint256 baseBps,
         uint256 slopeBps,
         uint256 maxBps
-    ) external pure returns (uint256) {
+    ) internal pure returns (uint256) {
         if (currentBps < targetBps) {
             // UNDERWEIGHT: discount, proportional to how far below target it
             // sits, floored at the base fee.
@@ -268,7 +268,7 @@ library IndexMath {
         uint256 base,
         uint256 unit,
         uint256 obsSlots
-    ) external pure returns (uint256) {
+    ) internal pure returns (uint256) {
         if (ethValue < unit) return base; // not a large op at all
         uint256 steps = ethValue / unit; // >= 1
         uint256 required = base + steps - 1;
@@ -303,7 +303,7 @@ library IndexMath {
         uint256 elapsed,
         uint256 rampDuration,
         bool frozen
-    ) external pure returns (uint256) {
+    ) internal pure returns (uint256) {
         if (active) {
             if (rampDuration == 0) return BPS;
             if (frozen) elapsed = 0;

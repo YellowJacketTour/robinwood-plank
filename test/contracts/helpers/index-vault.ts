@@ -1,5 +1,6 @@
-import { ethers } from "hardhat";
+import { ethers, artifacts } from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
+import { deployIndexDiamond, combinedHandle } from "./diamond";
 
 /**
  * Shared fixture for the GlobalIndexVault suites. Mirrors the shape
@@ -91,31 +92,125 @@ export interface IndexFixture {
  * 1000e18 seed shares locked to address(0), index open.
  */
 /**
- * The vault's math and parameter key-space now live in two external
- * `library`s (contracts/lib/IndexMath.sol, contracts/lib/IndexParams.sol),
- * which the compiler reaches by DELEGATECALL and which therefore have to be
- * deployed and LINKED before the vault can be deployed at all. Every test that
- * deploys a GlobalIndexVault goes through this one helper so the link map is
- * written once — a per-test copy would be twelve places for the two names to
- * drift apart.
+ * The FACET SET the index diamond is cut from, in manifest order.
+ *
+ * This list is the single declaration site. `deployOpenIndex` cuts exactly
+ * these, `combinedHandle` unions exactly these ABIs, and
+ * `Diamond.selectors.test.ts` asserts the union is 4-byte-unique — so a facet
+ * cannot be added to the deployment without also being added to the surface the
+ * tests enumerate.
+ *
+ * `DiamondCutFacet` is deliberately absent: it is installed by `IndexDeployer`
+ * and REMOVED again by `finalize`, inside the same transaction, so it is never
+ * part of the live set. See docs/DESIGN-DIAMOND-UNIFIED-ARCHITECTURE.md section 6.
+ */
+export const INDEX_FACETS = [
+  "DiamondLoupeFacet",
+  "IndexShareFacet",
+  "IndexCoreFacet",
+  "IndexBootstrapFacet",
+  "IndexTradeFacet",
+  "IndexOracleFacet",
+  "IndexEligibilityFacet",
+  "IndexGovernanceFacet",
+  "IndexDividendFacet",
+  "IndexLensFacet",
+] as const;
+
+/**
+ * Deploy the index diamond, frozen, and hand back a combined-ABI handle.
+ *
+ * WHAT REPLACED WHAT. This helper used to deploy five `public` libraries, build
+ * a link map, and hand back a `GlobalIndexVault` factory. All of that is gone:
+ * the libraries are `internal` now (design doc section 2.4 — five DELEGATECALL
+ * targets removed from the runtime graph, and required anyway, because
+ * `LibBytecodeScan` rejects opcode 0xf4 in any facet), and there is no link map
+ * to reproduce.
+ *
+ * The returned handle is an ethers Contract over the UNION of every facet ABI,
+ * pointed at the diamond. `IndexFixture.vault` is typed `any`, so every existing
+ * call site — `vault.redeemProRata(...)`, `vault.balanceOf(...)` — resolves
+ * exactly as it did through the monolith's ABI. The CLAIM each test makes is
+ * unchanged; only the address it lands on and the dispatch behind it.
+ */
+export async function deployIndexVault(args: {
+  name: string;
+  symbol: string;
+  roles: [string, string, string, string, string];
+  seeder: string;
+  timelockDelay: number | bigint;
+  params: any[];
+  dividendAsset: string;
+}): Promise<{ vault: any; vaultAddr: string; diamond: any }> {
+  const d = await deployIndexDiamond([...INDEX_FACETS], {
+    timelockDelay: args.timelockDelay,
+    seeder: args.seeder,
+    dividendAsset: args.dividendAsset,
+    name: args.name,
+    symbol: args.symbol,
+    roles: args.roles,
+    params: args.params,
+  });
+  const vault = await combinedHandle(d.address, [...INDEX_FACETS]);
+  return { vault, vaultAddr: d.address, diamond: d };
+}
+
+/**
+ * BACKWARDS-COMPATIBLE DEPLOY SHIM for the suites that build a bespoke vault
+ * rather than using `deployOpenIndex`.
+ *
+ * It keeps the monolith's exact constructor CALL SHAPE —
+ * `(name, symbol, roles[4], seeder, timelockDelay, params, dividendAsset)` —
+ * and deploys the diamond behind it. That is deliberate: the claims those
+ * suites make are about SEEDING, PRICING and GOVERNANCE, not about how many
+ * arguments a constructor takes, so re-pointing them at the diamond without
+ * touching their bodies is the honest adaptation. `.interface` is the union of
+ * every facet's ABI plus the deployer's and the diamond's own errors, so
+ * `revertedWithCustomError(Vault, ...)` still resolves.
  */
 export async function indexVaultFactory() {
-  const libraries: Record<string, string> = {};
-  // IndexValuation itself calls IndexMath, so IndexMath must be linked into it
-  // as well as into the vault. Order matters: deploy the leaf first.
-  const indexMath = await (await ethers.getContractFactory("IndexMath")).deploy();
-  libraries.IndexMath = await indexMath.getAddress();
-  for (const name of ["IndexParams", "IndexEligibility", "IndexOracle"]) {
-    const c = await (await ethers.getContractFactory(name)).deploy();
-    libraries[name] = await c.getAddress();
+  const abi: any[] = [];
+  const seen = new Set<string>();
+  for (const n of [...INDEX_FACETS, "IndexDeployer", "Diamond"]) {
+    const art = await artifacts.readArtifact(n);
+    for (const frag of art.abi) {
+      const key = JSON.stringify(frag);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      abi.push(frag);
+    }
   }
-  const valuation = await (
-    await ethers.getContractFactory("IndexValuation", {
-      libraries: { IndexMath: libraries.IndexMath },
-    })
-  ).deploy();
-  libraries.IndexValuation = await valuation.getAddress();
-  return ethers.getContractFactory("GlobalIndexVault", { libraries });
+  return {
+    interface: new ethers.Interface(abi),
+    async deploy(
+      name: string,
+      symbol: string,
+      roles: string[],
+      seeder: string,
+      timelockDelay: number | bigint,
+      params: any[],
+      dividendAsset: string
+    ) {
+      const { vault } = await deployIndexVault({
+        name,
+        symbol,
+        // ROLE_STREAM_LISTER joins the set under unification. Seeded to the
+        // admission holder, exactly as `deployOpenIndex` does.
+        roles: [roles[0], roles[1], roles[2], roles[3], roles[1]] as [
+          string,
+          string,
+          string,
+          string,
+          string
+        ],
+        seeder,
+        timelockDelay,
+        params,
+        dividendAsset,
+      });
+      return vault;
+    },
+  };
 }
 
 export async function deployOpenIndex(
@@ -130,19 +225,28 @@ export async function deployOpenIndex(
   const c2 = await deployConstituent("cC", 200n * WAD, 100n * WAD); // 2.0
   const cs = [c0, c1, c2];
 
-  const Vault = await indexVaultFactory();
-  const vault: any = await Vault.deploy(
-    "Marketplank Global Index",
-    "gPLNK",
-    [roleAdmin.address, admission.address, risk.address, allocation.address],
-    seeder.address,
-    TIMELOCK,
-    paramsTuple({ ...defaultParams, ...overrides }),
-    // Dividends are denominated in the first constituent. Immutable, so every
-    // fixture-based test exercises a vault whose dividend asset is real.
-    c0.addr
-  );
-  const vaultAddr = await vault.getAddress();
+  const { vault, vaultAddr } = await deployIndexVault({
+    name: "Marketplank Global Index",
+    symbol: "gPLNK",
+    roles: [
+      roleAdmin.address,
+      admission.address,
+      risk.address,
+      allocation.address,
+      // ROLE_STREAM_LISTER. The wrapper's listing capability joins the vault's
+      // role set under unification (design doc section 2.3); it is seeded to
+      // the admission holder so the fixture has a live holder for it, and it
+      // reaches no value path either way.
+      admission.address,
+    ],
+    seeder: seeder.address,
+    timelockDelay: TIMELOCK,
+    params: paramsTuple({ ...defaultParams, ...overrides }),
+    // Dividends are denominated in the first constituent. Written once at
+    // deploy and reachable by no function, so every fixture-based test
+    // exercises a vault whose dividend asset is real.
+    dividendAsset: c0.addr,
+  });
 
   for (let i = 0; i < cs.length; i++) {
     await vault

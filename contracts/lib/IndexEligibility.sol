@@ -58,7 +58,7 @@ library IndexEligibility {
         uint256 minFeesWei,
         uint256 minBlocks,
         uint256 gasCap
-    ) external view returns (bool eligible, uint256 feesWei, uint256 elapsedBlocks) {
+    ) internal view returns (bool eligible, uint256 feesWei, uint256 elapsedBlocks) {
         (bool okFees, uint256 fees) = _readUint(
             constituent,
             IEligibilitySource.totalFeesCollectedWei.selector,

@@ -1,7 +1,8 @@
 import { expect } from "chai";
 import { ethers, artifacts } from "hardhat";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { deployIndexDiamond, combinedHandle, selectorsOf } from "./helpers/diamond";
+import { deployIndexDiamond, combinedHandle, selectorsOf ,
+  fullInit} from "./helpers/diamond";
 
 /**
  * ============================================================================
@@ -42,7 +43,7 @@ describe("Diamond — the three migrated immutables have no writer", () => {
   const SEEDER = "0x0000000000000000000000000000000000000B0B";
   const DIVIDEND = "0x000000000000000000000000000000000000dEaD";
   const TIMELOCK = 48 * 3600;
-  const INIT = { timelockDelay: TIMELOCK, seeder: SEEDER, dividendAsset: DIVIDEND };
+  const INIT = fullInit({ timelockDelay: TIMELOCK, seeder: SEEDER, dividendAsset: DIVIDEND });
   const FACETS = ["DiamondLoupeFacet", "CoreProbeFacetA", "CoreProbeFacetB"];
 
   /** CoreStorage.SLOT + member offset. */

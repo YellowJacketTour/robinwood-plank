@@ -99,7 +99,7 @@ library IndexParams {
      * point.
      */
     function roleForParamKey(bytes32 key, bytes32 allocationRole, bytes32 riskRole)
-        external
+        internal
         pure
         returns (bytes32)
     {
@@ -145,7 +145,7 @@ library IndexParams {
      * BAD it can be.
      */
     function applyRiskParam(IndexParamSet memory p, bytes32 key, uint256 value)
-        external
+        internal
         pure
         returns (IndexParamSet memory, bool handled)
     {
@@ -170,7 +170,7 @@ library IndexParams {
     /// @notice Every compile-time ceiling and floor on the risk parameter set,
     /// in one place. No admin, no timelock and no future governance can raise
     /// any of them — they are constants in this file's bytecode.
-    function validate(IndexParamSet memory p) public pure {
+    function validate(IndexParamSet memory p) internal pure {
         if (
             p.concentrationCapBps < MIN_CONCENTRATION_CAP_BPS ||
             p.concentrationCapBps > MAX_CONCENTRATION_CAP_BPS
