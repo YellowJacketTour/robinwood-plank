@@ -984,7 +984,16 @@ abstract contract IndexFacetBase {
             // treated identically to a failure — no standing approval is
             // ever left behind, the same discipline
             // `IndexBuybackFacet.executeBuyback` already proves.
-            if (IERC20(token).allowance(address(this), router) != 0) {
+            //
+            // A router that DID fully spend its approval but delivered zero
+            // PLANK (e.g. `MockExternalSwapRouter.Mode.SHORT_MINT`) is the
+            // same failure in different clothes: it pulled the skim and gave
+            // nothing back. Gating success on `plankOut > 0` closes that
+            // gap — only a router that both consumes its approval AND
+            // delivers a nonzero amount of PLANK is treated as a genuine
+            // buy; anything else routes through the identical
+            // failure path below, so the skim is never lost.
+            if (IERC20(token).allowance(address(this), router) != 0 || plankOut == 0) {
                 IERC20(token).forceApprove(router, 0);
                 emit DevFundBuyFailed(token, skim);
                 return remainder;

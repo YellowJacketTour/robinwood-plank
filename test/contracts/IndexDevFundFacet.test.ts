@@ -319,6 +319,75 @@ describe("IndexDevFundFacet (design doc §7.11)", () => {
     expect(await tokenC.balanceOf(routerAddr)).to.equal(0n);
   });
 
+  it("a router that pulls the skim but mints zero PLANK (SHORT_MINT) is treated as a failure too — no value lost, no silent reserve drain, DevFundBuyFailed not DevFundBuyExecuted", async () => {
+    // Adversarial-review finding (2nd independent pass, §7.11): a router that
+    // fully consumes its approval via `transferFrom` but delivers
+    // `plankOut == 0` used to pass the old "leftover allowance == 0" success
+    // check and emit `DevFundBuyExecuted` with `plankOut == 0` — indistin-
+    // guishable on-chain from a healthy buy, and in direct contradiction of
+    // this function's own doc comment ("only a genuinely successful buy ever
+    // reduces what backs the newly-minted shares"). Fixed by gating success
+    // on `plankOut > 0` in `_routeDevFundBuy`, reusing the exact same
+    // failure path (`forceApprove(router, 0)` + `DevFundBuyFailed`) already
+    // proven by the REVERT/NO_PULL cases above.
+    const bps = 200n; // ceiling — the worst-case skim size
+    const fx = await deployOpenIndex();
+    const { router, routerAddr } = await deployRouter();
+    await router.setMode(2n); // Mode.SHORT_MINT
+    await setRouter(fx, routerAddr);
+    await setTreasury(fx, fx.carol.address);
+    await setBps(fx, bps);
+
+    const shareToken = fx.addrs[1];
+    const depositAmount = 10n * WAD;
+    const tokenC = await ethers.getContractAt("MockIndexToken", shareToken);
+
+    // Baseline: shares minted under a healthy router, on an independent vault
+    // (its own constituent addresses, per the REVERT test's own pattern).
+    const fxHealthy = await fixtureWired(bps);
+    const sharesHealthy: bigint = await fxHealthy.vault
+      .connect(fxHealthy.alice)
+      .mintSingleAsset.staticCall(fxHealthy.addrs[1], depositAmount, 0n);
+    await fx.vault.checkpointAll();
+
+    const sharesOut: bigint = await fx.vault
+      .connect(fx.alice)
+      .mintSingleAsset.staticCall(shareToken, depositAmount, 0n);
+    // A SHORT_MINT router — which pulls tokens but delivers nothing — must
+    // still cost the depositor nothing: the mint's reserve credit must not
+    // be reduced, so shares out must be at least as many as the healthy path.
+    expect(sharesOut).to.be.gte(sharesHealthy);
+
+    const tx = await fx.vault.connect(fx.alice).mintSingleAsset(shareToken, depositAmount, 0n);
+    const receipt = await tx.wait();
+    await expect(tx).to.emit(fx.vault, "MintedSingle");
+
+    const iface = fx.vault.interface;
+    const parsed = receipt.logs
+      .map((l: any) => {
+        try {
+          return iface.parseLog(l);
+        } catch {
+          return null;
+        }
+      })
+      .filter((e: any) => e !== null);
+
+    expect(
+      parsed.find((e: any) => e.name === "DevFundBuyExecuted"),
+      "DevFundBuyExecuted must NOT be emitted for a zero-plankOut buy"
+    ).to.equal(undefined);
+    const failEvent = parsed.find((e: any) => e.name === "DevFundBuyFailed");
+    expect(failEvent, "DevFundBuyFailed not emitted").to.not.equal(undefined);
+    expect(failEvent!.args.amountAttempted).to.equal((depositAmount * bps) / BPS);
+
+    // The router DID pull the skim (unlike NO_PULL) — that's the whole point
+    // of this mode — but it must not be lost: no standing approval is left
+    // behind, proving the fix goes through the same reset-and-fail path.
+    expect(await tokenC.allowance(fx.vaultAddr, routerAddr)).to.equal(0n);
+    expect(await tokenC.balanceOf(routerAddr)).to.equal((depositAmount * bps) / BPS);
+  });
+
   it("a reverting router does not block mintProRata — mint still succeeds and credits full reserves", async () => {
     const bps = 200n;
     const fx = await deployOpenIndex();
