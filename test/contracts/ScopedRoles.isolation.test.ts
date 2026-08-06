@@ -249,6 +249,15 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // the real held balance, it fabricates nothing, and it moves nothing
       // out — so there is nothing here for a role to be trusted with.
       "syncConstituentBalance",
+      // Same rule as `syncConstituentBalance` immediately above — `reconcile`
+      // is a THIN ALIAS over the identical internal `_sync`, added as the
+      // explicit backstop entry point for the factory-vault
+      // push-then-opportunistic-reconcile mechanism (design doc
+      // DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.2, §3.2).
+      // It credits only an observed balance delta, never a self-reported
+      // amount, and moves nothing out — nothing here for a role to be
+      // trusted with either.
+      "reconcile",
       "delistEmpty",
       "refreshEligibleCount",
       "seedConstituent",
