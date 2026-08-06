@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers, artifacts } from "hardhat";
-import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
+import { loadFixture, time, takeSnapshot, SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
 
 import { deployOpenIndex, warmCheckpoints, maxIn } from "./helpers/index-vault";
 
@@ -19,7 +19,33 @@ function openIndexFixture() {
 
 const HOOK_GAS = 50_000n;
 
+/**
+ * `queueHook` -> wait out the timelock -> `executeHook`, the identical
+ * two-call shape every other `ROLE_RISK_PARAM_`-gated risk-surface change
+ * goes through (`queueParam`/`executeParam`). Registration is no longer a
+ * single-transaction write (Finding 1 fix).
+ */
+async function registerHook(vault: any, risk: any, point: string, hookAddr: string, permissions = 0) {
+  await vault.connect(risk).queueHook(point, hookAddr, permissions);
+  await time.increase(48 * 3_600 + 1);
+  return vault.executeHook(point);
+}
+
 describe("HookRegistryFacet — the de-fanged observer hooks (design doc section 8)", () => {
+  // This file's registerHook() helper now advances the shared Hardhat clock
+  // by a full timelock delay per call (Finding 1 fix: registration queues
+  // rather than writing immediately). Mocha shares one network across files,
+  // so without restoring afterwards the fixed-endTime Seaport orders in
+  // later suites silently expire — same reasoning as
+  // ScopedRoles.isolation.test.ts's identical guard.
+  let clockSnapshot: SnapshotRestorer;
+  before(async () => {
+    clockSnapshot = await takeSnapshot();
+  });
+  after(async () => {
+    await clockSnapshot.restore();
+  });
+
   // ────────────────────────────────────────────────────────────────────────
   //  1. No hook point exists on the exit door, structurally
   // ────────────────────────────────────────────────────────────────────────
@@ -67,7 +93,7 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
     const hook = await Mock.deploy(0); // RECORD
 
     for (const point of forged) {
-      await expect(vault.connect(risk).registerHook(point, await hook.getAddress(), 0))
+      await expect(vault.connect(risk).queueHook(point, await hook.getAddress(), 0))
         .to.be.revertedWithCustomError(vault, "InvalidHookPoint")
         .withArgs(point);
     }
@@ -79,15 +105,38 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
     }
   });
 
-  it("registerHook is ROLE_RISK_PARAM-gated", async () => {
+  it("queueHook is ROLE_RISK_PARAM-gated", async () => {
     const fx = await loadFixture(openIndexFixture);
     const { vault, alice } = fx;
     const Mock = await ethers.getContractFactory("MockHook");
     const hook = await Mock.deploy(0);
     const point = await vault.AFTER_SYNC();
     await expect(
-      vault.connect(alice).registerHook(point, await hook.getAddress(), 0)
+      vault.connect(alice).queueHook(point, await hook.getAddress(), 0)
     ).to.be.revertedWithCustomError(vault, "NotRoleHolder");
+  });
+
+  it("executeHook enforces the timelock — cannot be applied before the queued eta, and cannot be applied twice", async () => {
+    const fx = await loadFixture(openIndexFixture);
+    const { vault, risk } = fx;
+    const Mock = await ethers.getContractFactory("MockHook");
+    const hook = await Mock.deploy(0);
+    const hookAddr = await hook.getAddress();
+    const point = await vault.AFTER_SYNC();
+
+    await expect(vault.executeHook(point)).to.be.revertedWithCustomError(vault, "NothingQueued");
+
+    await vault.connect(risk).queueHook(point, hookAddr, 0);
+    await expect(vault.executeHook(point)).to.be.revertedWithCustomError(vault, "TimelockNotElapsed");
+
+    await time.increase(48 * 3_600 + 1);
+    await expect(vault.executeHook(point))
+      .to.emit(vault, "HookRegistered")
+      .withArgs(point, hookAddr, 0);
+    expect(await vault.hooksFor(point)).to.equal(hookAddr);
+
+    // Cannot be re-applied: the queued entry was consumed.
+    await expect(vault.executeHook(point)).to.be.revertedWithCustomError(vault, "NothingQueued");
   });
 
   // ────────────────────────────────────────────────────────────────────────
@@ -102,7 +151,7 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
     const hook = await Mock.deploy(1); // REVERT
     const hookAddr = await hook.getAddress();
     const point = await vault.AFTER_CHECKPOINT();
-    await vault.connect(risk).registerHook(point, hookAddr, 0);
+    await registerHook(vault, risk, point, hookAddr, 0);
 
     await time.increase(700);
     const tx = await vault.checkpoint(addrs[0]);
@@ -150,7 +199,7 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
     const Mock = await ethers.getContractFactory("MockHook");
     const hook = await Mock.deploy(1); // REVERT
     const point = await vault.AFTER_LISTING();
-    await vault.connect(risk).registerHook(point, await hook.getAddress(), 0);
+    await registerHook(vault, risk, point, await hook.getAddress(), 0);
 
     const Token = await ethers.getContractFactory("MockIndexToken");
     const token = await Token.deploy("cD", "cD");
@@ -180,7 +229,7 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
     const hook = await Mock.deploy(2); // BURN_GAS
     const hookAddr = await hook.getAddress();
     const point = await vault.AFTER_CHECKPOINT();
-    await vault.connect(risk).registerHook(point, hookAddr, 0);
+    await registerHook(vault, risk, point, hookAddr, 0);
 
     await time.increase(700);
 
@@ -215,7 +264,7 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
     const Mock = await ethers.getContractFactory("MockHook");
     const hook = await Mock.deploy(2); // BURN_GAS
     const point = await vault.AFTER_SYNC();
-    await vault.connect(risk).registerHook(point, await hook.getAddress(), 0);
+    await registerHook(vault, risk, point, await hook.getAddress(), 0);
 
     // Strand a surplus balance directly on the vault so there is something to sync.
     await tokens[0].mint(seeder.address, 10n ** 18n);
@@ -261,7 +310,7 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
     const Mock = await ethers.getContractFactory("MockHook");
     const hook = await Mock.deploy(0); // RECORD
     const point = await vault.AFTER_CHECKPOINT();
-    await vault.connect(risk).registerHook(point, await hook.getAddress(), 0);
+    await registerHook(vault, risk, point, await hook.getAddress(), 0);
 
     await time.increase(700);
     await vault.checkpoint(addrs[0]);
@@ -277,7 +326,7 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
   //  5. Registration end-to-end, and it is genuinely observe-only
   // ────────────────────────────────────────────────────────────────────────
 
-  it("registerHook / hooksFor / hookPermissions round-trip, and a hook succeeding changes NOTHING about vault accounting", async () => {
+  it("queueHook / executeHook / hooksFor / hookPermissions round-trip, and a hook succeeding changes NOTHING about vault accounting", async () => {
     const fx = await loadFixture(openIndexFixture);
     const { vault, risk, alice, addrs } = fx;
 
@@ -286,7 +335,11 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
     const hookAddr = await hook.getAddress();
     const point = await vault.AFTER_CHECKPOINT();
 
-    await expect(vault.connect(risk).registerHook(point, hookAddr, 7))
+    await expect(vault.connect(risk).queueHook(point, hookAddr, 7))
+      .to.emit(vault, "HookQueued");
+
+    await time.increase(48 * 3_600 + 1);
+    await expect(vault.executeHook(point))
       .to.emit(vault, "HookRegistered")
       .withArgs(point, hookAddr, 7);
 
@@ -310,8 +363,8 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
     const Mock = await ethers.getContractFactory("MockHook");
     const hook = await Mock.deploy(0);
     const point = await vault.AFTER_CHECKPOINT();
-    await vault.connect(risk).registerHook(point, await hook.getAddress(), 0);
-    await vault.connect(risk).registerHook(point, ethers.ZeroAddress, 0);
+    await registerHook(vault, risk, point, await hook.getAddress(), 0);
+    await registerHook(vault, risk, point, ethers.ZeroAddress, 0);
     expect(await vault.hooksFor(point)).to.equal(ethers.ZeroAddress);
 
     await time.increase(700);
@@ -328,5 +381,83 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
       })
       .filter((p: any) => p && p.name === "HookFailed");
     expect(failed.length).to.equal(0);
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  //  6. checkpoint()/checkpointAll() are nonReentrant (Finding 2)
+  // ────────────────────────────────────────────────────────────────────────
+
+  it("a hostile AFTER_CHECKPOINT hook that tries to reenter checkpoint() is rejected by the shared reentrancy guard", async () => {
+    const fx = await loadFixture(openIndexFixture);
+    const { vault, risk, addrs } = fx;
+
+    const Mock = await ethers.getContractFactory("MockHook");
+    const hook = await Mock.deploy(3); // REENTER
+    const hookAddr = await hook.getAddress();
+    const point = await vault.AFTER_CHECKPOINT();
+    await registerHook(vault, risk, point, hookAddr, 0);
+
+    // Wire the hook to call straight back into `checkpoint(addrs[0])` on the
+    // SAME vault it was fired from — the reentrant attempt.
+    const reentrantCalldata = vault.interface.encodeFunctionData("checkpoint", [addrs[0]]);
+    await hook.setReentrantTarget(await vault.getAddress(), reentrantCalldata);
+
+    await time.increase(700);
+
+    // The outer checkpoint() still commits — a hostile hook never blocks the
+    // operation it observed (rule 3) — but the reentrant call it attempted
+    // must have failed, and specifically with `ReentrantCall`, not merely
+    // "ran out of gas" or some other unrelated failure.
+    const tx = await vault.checkpoint(addrs[0]);
+    const receipt = await tx.wait();
+    expect(receipt.status).to.equal(1);
+
+    expect(await hook.calls()).to.equal(1n);
+    expect(await hook.reentrantOk()).to.equal(false);
+    const returnData: string = await hook.reentrantReturnData();
+    const ReentrantCallSelector = vault.interface.getError("ReentrantCall")!.selector;
+    expect(returnData.slice(0, 10)).to.equal(ReentrantCallSelector);
+
+    // No HookFailed either: the hook's OWN top-level call (onHook) succeeded
+    // — it caught the reentrant sub-call's revert itself via `.call(...)`
+    // rather than propagating it, exactly like a real hostile integration
+    // would to keep probing. This confirms the guard is what stopped the
+    // reentry, not `_fireHook`'s own non-reverting wrapper.
+    const failed = receipt.logs
+      .map((l: any) => {
+        try {
+          return vault.interface.parseLog(l);
+        } catch {
+          return null;
+        }
+      })
+      .filter((p: any) => p && p.name === "HookFailed");
+    expect(failed.length).to.equal(0);
+  });
+
+  it("a hostile AFTER_CHECKPOINT hook that tries to reenter checkpointAll() is rejected by the shared reentrancy guard", async () => {
+    const fx = await loadFixture(openIndexFixture);
+    const { vault, risk, addrs } = fx;
+
+    const Mock = await ethers.getContractFactory("MockHook");
+    const hook = await Mock.deploy(3); // REENTER
+    const hookAddr = await hook.getAddress();
+    const point = await vault.AFTER_CHECKPOINT();
+    await registerHook(vault, risk, point, hookAddr, 0);
+
+    const reentrantCalldata = vault.interface.encodeFunctionData("checkpointAll", []);
+    await hook.setReentrantTarget(await vault.getAddress(), reentrantCalldata);
+
+    await time.increase(700);
+
+    const tx = await vault.checkpointAll();
+    const receipt = await tx.wait();
+    expect(receipt.status).to.equal(1);
+
+    expect(await hook.calls()).to.be.greaterThan(0n);
+    expect(await hook.reentrantOk()).to.equal(false);
+    const returnData: string = await hook.reentrantReturnData();
+    const ReentrantCallSelector = vault.interface.getError("ReentrantCall")!.selector;
+    expect(returnData.slice(0, 10)).to.equal(ReentrantCallSelector);
   });
 });

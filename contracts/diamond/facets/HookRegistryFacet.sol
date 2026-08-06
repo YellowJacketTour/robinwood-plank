@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {IndexFacetBase} from "./IndexFacetBase.sol";
-import {HooksStorage} from "../storage/IndexStorage.sol";
+import {CoreStorage, HooksStorage} from "../storage/IndexStorage.sol";
 
 /**
  * ============================================================================
@@ -71,15 +71,26 @@ contract HookRegistryFacet is IndexFacetBase {
         return HooksStorage.layout().hookPermissions[hook];
     }
 
+    function queuedHooks(bytes32 point)
+        external
+        view
+        returns (address hook, uint16 permissions, uint64 eta, bool pending)
+    {
+        HooksStorage.QueuedHook storage q = HooksStorage.layout().queuedHooks[point];
+        return (q.hook, q.permissions, q.eta, q.pending);
+    }
+
     // ── Registration ───────────────────────────────────────────────────────
 
     /**
-     * @notice Register (or replace, or clear with `hook == address(0)`) the
-     * observer at `point`. `ROLE_RISK_PARAM`-gated, and that gate is itself
-     * only ever reachable through `IndexGovernanceFacet`'s timelocked role
-     * handover (`queueRole` / `executeRole`) — so a hostile hook can only
-     * ever be installed by an actor who already cleared the same timelock
-     * every other risk-surface change goes through.
+     * @notice Queue registering (or replacing, or clearing with
+     * `hook == address(0)`) the observer at `point`. `ROLE_RISK_PARAM`-gated,
+     * and it lands no sooner than the vault's own timelock from now —
+     * IDENTICAL to every other `ROLE_RISK_PARAM_`-gated risk-surface change
+     * (`IndexGovernanceFacet.queueParam`/`executeParam`), rather than a
+     * bespoke immediate write. A hostile hook therefore cannot be installed
+     * in one transaction even by a holder of the risk role: the change is
+     * always publicly visible and contestable before it can take effect.
      *
      * `permissions` is stored and readable but consulted by NOTHING in this
      * codebase today — it exists as a forward-declared bitmap for an
@@ -87,11 +98,28 @@ contract HookRegistryFacet is IndexFacetBase {
      * deliberate: rule 6 is that nothing a hook (or its registration)
      * returns is used in arithmetic anywhere in this facet set.
      */
-    function registerHook(bytes32 point, address hook, uint16 permissions) external onlyRole(ROLE_RISK_PARAM_) {
+    function queueHook(bytes32 point, address hook, uint16 permissions) external onlyRole(ROLE_RISK_PARAM_) {
         if (!_isKnownHookPoint(point)) revert InvalidHookPoint(point);
+        uint64 eta = uint64(block.timestamp + CoreStorage.layout().timelockDelay);
+        HooksStorage.layout().queuedHooks[point] =
+            HooksStorage.QueuedHook({hook: hook, permissions: permissions, eta: eta, pending: true});
+        emit HookQueued(point, hook, permissions, eta);
+    }
+
+    /**
+     * @notice Apply a queued hook registration once the delay has elapsed.
+     * Permissionless after the eta — the timelock is the gate, not a second
+     * discretionary approval. Same shape as `executeParam`/`executeListing`/
+     * `executeStream`.
+     */
+    function executeHook(bytes32 point) external {
         HooksStorage.Layout storage h = HooksStorage.layout();
-        h.hooks[point] = hook;
-        h.hookPermissions[hook] = permissions;
-        emit HookRegistered(point, hook, permissions);
+        HooksStorage.QueuedHook memory q = h.queuedHooks[point];
+        if (!q.pending) revert NothingQueued();
+        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        delete h.queuedHooks[point];
+        h.hooks[point] = q.hook;
+        h.hookPermissions[q.hook] = q.permissions;
+        emit HookRegistered(point, q.hook, q.permissions);
     }
 }

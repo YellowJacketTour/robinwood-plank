@@ -436,6 +436,37 @@ describe("GlobalIndexVault", () => {
     expect(full).to.be.gt(half, "ramp did not progress");
   });
 
+  it("a token already registered as a reward stream cannot ALSO be admitted as a constituent (Finding 3 — stream/constituent registration collision)", async () => {
+    const fx = await fixture();
+    const { vault, admission } = fx;
+
+    // Register `streamTok` as a live reward stream first.
+    const Token = await ethers.getContractFactory("MockIndexToken");
+    const streamTok: any = await Token.deploy("STRM", "STRM");
+    const streamTokAddr = await streamTok.getAddress();
+    await vault.connect(admission).queueStream(streamTokAddr);
+    await time.increase(TIMELOCK + 1);
+    await vault.executeStream(streamTokAddr);
+    expect(await vault.isStream(streamTokAddr)).to.equal(true);
+
+    // Now try to list the SAME token as a priced constituent. queueListing
+    // itself does no validation (same as every other queue), so the
+    // collision must be caught where `_list` actually runs — inside
+    // `executeListing`.
+    const Source = await ethers.getContractFactory("MockIndexPriceSource");
+    const source: any = await Source.deploy(100n * WAD, 100n * WAD);
+    await vault.connect(admission).queueListing(streamTokAddr, await source.getAddress(), 1_000, false);
+    await time.increase(TIMELOCK + 1);
+    await expect(vault.executeListing(streamTokAddr)).to.be.revertedWithCustomError(
+      vault,
+      "TokenIsRegisteredStream"
+    );
+
+    // The token genuinely never landed as a constituent.
+    const listed = await vault.listConstituents();
+    expect(listed.map((a: string) => a.toLowerCase())).to.not.include(streamTokAddr.toLowerCase());
+  });
+
   it("a stale constituent's ramp-in freezes (§2.9 silent-constituent breaker)", async () => {
     const fx = await fixture();
     const { vault, admission } = fx;

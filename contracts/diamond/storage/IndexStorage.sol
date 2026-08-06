@@ -400,6 +400,16 @@ library HooksStorage {
     bytes32 internal constant SLOT =
         keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.hooks.v1")) - 1)) & ~bytes32(uint256(0xff));
 
+    /// @dev A queued (not-yet-effective) hook registration, timelocked exactly
+    /// like every other `ROLE_RISK_PARAM_`-gated risk-surface change (see
+    /// `IndexGovernanceFacet.queueParam`/`executeParam`).
+    struct QueuedHook {
+        address hook;
+        uint16 permissions;
+        uint64 eta;
+        bool pending;
+    }
+
     struct Layout {
         /// @dev point => hook contract. `point` is drawn from a COMPILE-TIME
         /// enumerated set, so governance chooses who, never where — and that
@@ -407,6 +417,8 @@ library HooksStorage {
         /// `claimPendingMany`.
         mapping(bytes32 => address) hooks;
         mapping(address => uint16) hookPermissions;
+        /// @dev point => the queued registration awaiting `executeHook`.
+        mapping(bytes32 => QueuedHook) queuedHooks;
         uint256[16] __gap;
     }
 

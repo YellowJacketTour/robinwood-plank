@@ -200,7 +200,7 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // risk-surface change — a hostile hook can only ever be installed by an
       // actor who already cleared ROLE_RISK_PARAM's own timelocked handover.
       {
-        name: "registerHook",
+        name: "queueHook",
         args: [await vault.AFTER_SYNC(), hookAddr, 0],
         role: ROLE_RISK,
         holder: risk,
@@ -269,6 +269,11 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       "executeStream",
       "depositStream",
       "pruneStream",
+      // HookRegistryFacet (design doc §8, Stage 6). `executeHook` is the
+      // timelock-gated apply, same shape as `executeParam`/`executeListing`/
+      // `executeStream` — permissionless after the eta, the timelock is the
+      // gate rather than a second discretionary approval.
+      "executeHook",
     ]);
     const abiNames = (vault.interface.fragments as any[])
       .filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))

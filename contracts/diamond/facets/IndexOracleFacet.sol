@@ -35,13 +35,13 @@ contract IndexOracleFacet is IndexFacetBase {
      * step, and reverting it in the same block costs the attacker the whole
      * round trip for nothing.
      */
-    function checkpoint(address token) external {
+    function checkpoint(address token) external nonReentrant {
         Constituent storage c = _get(token);
         _observe(token, c, false);
     }
 
     /// @notice Checkpoint every listed constituent. Convenience, same rules.
-    function checkpointAll() external {
+    function checkpointAll() external nonReentrant {
         CoreStorage.Layout storage cs = CoreStorage.layout();
         uint256 minInterval = _params().minCheckpointInterval;
         uint256 n = cs.constituentList.length;
