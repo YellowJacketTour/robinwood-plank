@@ -321,6 +321,16 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // timelock-gated apply for the §7.10 dilution cap, same shape as
       // `executeIndexPool` immediately above — permissionless after the eta.
       "executeMaxPoolShareBps",
+      // IndexBuybackFacet (design doc §7.7). `executeBuyback` is permissionless
+      // BY DESIGN, same reasoning as `deployToIndexPool` immediately above:
+      // it can only ever spend UP TO the already-governed, already-earmarked
+      // `buybackEarmarkWei` slice (§7.3's own accounting, itself capped by
+      // the hard-coded `CEIL_BUYBACK_SPLIT_BPS` ceiling), through the
+      // identical, unmodified pool `swap()` every other trader uses, and the
+      // bought coin always lands at the same fixed `SEED_LOCK_ADDR` — no
+      // caller-chosen destination, no favourable pricing lever. There is
+      // nothing here for a role to be trusted with either.
+      "executeBuyback",
     ]);
     const abiNames = (vault.interface.fragments as any[])
       .filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))

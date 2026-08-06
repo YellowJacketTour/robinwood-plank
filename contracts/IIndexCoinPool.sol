@@ -14,6 +14,16 @@ interface IIndexCoinPool {
 
     function deploy(uint256 minPaymentIn, uint256 minCoinIn) external returns (uint256 paymentIn, uint256 coinIn);
 
+    /// @notice §7.7: the buyback's ONE spend path — the identical permissionless
+    /// swap any other trader on this pool uses, never a second, favorable
+    /// pricing route.
+    function swap(
+        bool paymentIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        address to
+    ) external returns (uint256 amountOut);
+
     function paymentToken() external view returns (address);
 
     function indexCoin() external view returns (address);

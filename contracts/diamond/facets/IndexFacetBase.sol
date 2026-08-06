@@ -114,6 +114,19 @@ abstract contract IndexFacetBase {
     uint256 internal constant CEIL_ECOSYSTEM_SPLIT_BPS = 3_000;
     uint256 internal constant DEFAULT_ECOSYSTEM_SPLIT_BPS = 2_000;
 
+    /**
+     * @dev §7.7 real risk, enforced rather than merely documented: the design
+     * doc names a comparable protocol that routed 100% of fee revenue to
+     * buybacks and drew criticism for leaving nothing for other needs. This
+     * bounds `ValueAccrualStorage.buybackBps` — itself already a governed,
+     * timelocked sub-split of whatever routed value reaches the index via
+     * §7.2/§7.3, never a second bucket — to at most HALF of every routed
+     * fee, hard-coded in bytecode so no governance vote, however extreme,
+     * can push it past this ceiling. `IndexGovernanceFacet._applyValueAccrualSplit`
+     * is the one enforcement point.
+     */
+    uint256 internal constant CEIL_BUYBACK_SPLIT_BPS = 5_000;
+
     uint256 internal constant DEFAULT_TARGET_HHI_BPS = 2_000;
     uint256 internal constant MIN_TARGET_HHI_BPS = 200;
     uint256 internal constant MAX_TARGET_HHI_BPS = BPS;
