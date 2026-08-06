@@ -1,6 +1,7 @@
 import { expect } from "chai";
 import { ethers, artifacts } from "hardhat";
-import { scanOpcodes, deployedSize, EIP170_LIMIT, selectorsOf } from "./helpers/diamond";
+import { scanOpcodes, deployedSize, EIP170_LIMIT, selectorsOf ,
+  fullInit} from "./helpers/diamond";
 
 /**
  * ============================================================================
@@ -25,11 +26,11 @@ import { scanOpcodes, deployedSize, EIP170_LIMIT, selectorsOf } from "./helpers/
  * ============================================================================
  */
 describe("Diamond facet bytecode guard", () => {
-  const INIT = {
+  const INIT = fullInit({
     timelockDelay: 48 * 3600,
     seeder: "0x0000000000000000000000000000000000000B0B",
     dividendAsset: "0x000000000000000000000000000000000000dEaD",
-  };
+    });
 
   /** Build a one-facet diamond deployment attempt around `facetName`. */
   async function tryDeployWith(facetName: string) {

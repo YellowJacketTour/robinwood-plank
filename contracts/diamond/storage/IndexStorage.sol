@@ -162,6 +162,13 @@ library CoreStorage {
         /// backing read, so a reserved slice cannot be redeemed a second time.
         mapping(address => uint256) reservedClaims;
         uint256 eligibleConstituentCount;
+        /// @dev ERC-7575: asset => the registered per-asset entry point (Pipe).
+        /// Reads as `address(0)` for every asset with no pipe registered, which
+        /// `IndexShareFacet.vault()` reports as the diamond itself rather than
+        /// as "unsupported". A pipe holds nothing and is not privileged — it can
+        /// only call functions the diamond already exposes permissionlessly —
+        /// so this map is a directory, never an authorisation.
+        mapping(address => address) assetPipe;
         uint256[16] __gap;
     }
 

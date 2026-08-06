@@ -68,7 +68,7 @@ library IndexOracle {
         uint256 priceCapBps,
         uint256 minCheckpointInterval,
         bool bootstrap
-    ) external returns (uint256 priced) {
+    ) internal returns (uint256 priced) {
         uint256 spot = spotPrice(c.source);
         if (spot == 0) revert NoPriceData();
 
@@ -182,7 +182,7 @@ library IndexOracle {
 
     /// @notice `band`, reachable by the vault as one delegatecall.
     function priceBand(Constituent storage c, uint256 bandBps, uint256 staleAfter)
-        external
+        internal
         view
         returns (uint256, uint256, uint256)
     {
@@ -200,7 +200,7 @@ library IndexOracle {
         uint256 bandBps,
         uint256 staleAfter,
         uint256 tolBps
-    ) external view returns (bool) {
+    ) internal view returns (bool) {
         if (c.obsCount < required) return false;
         if (block.timestamp > uint256(c.obs[c.obsHead].timestamp) + staleAfter) return false;
 
@@ -219,7 +219,7 @@ library IndexOracle {
 
     /// @notice RMS of settled per-checkpoint moves, in bps, over the long
     /// calibration window. Moved verbatim from GlobalIndexVault.realizedVolBps.
-    function realizedVol(Constituent storage c) external view returns (uint256) {
+    function realizedVol(Constituent storage c) internal view returns (uint256) {
         uint256 samples = c.varPrevSamples + c.varCurSamples;
         if (samples == 0) return 0;
         return Math.sqrt((c.varPrevSumSq + c.varCurSumSq) / samples);

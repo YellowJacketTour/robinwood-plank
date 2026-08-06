@@ -72,6 +72,29 @@ export function facetSetHash(manifest: FacetManifestEntry[]): string {
   return ethers.zeroPadValue(ethers.toBeHex(acc), 32);
 }
 
+/**
+ * Fill a partial `CoreInit` out to the full struct the diamond's constructor
+ * decodes.
+ *
+ * The structural diamond suites care about the SELECTOR TABLE, the storage
+ * namespaces and the freeze — not about basket economics — so they name only
+ * the fields their claim is about and let this supply the rest. It is a helper,
+ * not a default: the diamond itself still refuses a zero seeder, a zero role
+ * holder, a below-floor delay and an invalid risk set, and the suites that
+ * assert those refusals pass the offending value explicitly.
+ */
+export function fullInit(p: CoreInit): any {
+  return {
+    timelockDelay: p.timelockDelay,
+    seeder: p.seeder,
+    dividendAsset: p.dividendAsset,
+    name: p.name ?? "Index Diamond",
+    symbol: p.symbol ?? "IDX",
+    roles: p.roles ?? new Array(5).fill(p.seeder),
+    params: p.params ?? STRUCTURAL_PARAMS,
+  };
+}
+
 /** Deploy a facet contract and return {name, facet, selectors}. */
 export async function deployFacet(name: string): Promise<FacetManifestEntry> {
   const f = await (await ethers.getContractFactory(name)).deploy();
@@ -83,11 +106,41 @@ export async function deployFacet(name: string): Promise<FacetManifestEntry> {
   };
 }
 
+/**
+ * The whole deployment initialiser, written by the DIAMOND'S OWN CONSTRUCTOR
+ * before any facet exists to be called.
+ *
+ * `timelockDelay`, `seeder` and `dividendAsset` used to be `immutable` on the
+ * monolith and had to move to storage (design doc section 3.3 rule 2): under
+ * DELEGATECALL an `immutable` resolves to the value baked into whichever FACET
+ * is executing, so two facets would silently disagree. Everything else here —
+ * the ERC-20 metadata, the five role holders, the risk set — was constructor
+ * state on the monolith and is written in the same place for the same reason:
+ * there must be no post-construction initialiser to call twice.
+ */
 export interface CoreInit {
   timelockDelay: bigint | number;
   seeder: string;
   dividendAsset: string;
+  /** ERC-20 name/symbol of the unified share. */
+  name?: string;
+  symbol?: string;
+  /** [ADMIN, ADMISSION, RISK, ALLOCATION, STREAM_LISTER]. None may be zero. */
+  roles?: string[];
+  /** The twelve-field risk set, in `IndexParamSet` order. */
+  params?: any[];
 }
+
+/**
+ * A risk set that passes `IndexParams.validate`, for the diamond-structure
+ * suites that care about the SELECTOR TABLE and not about basket economics.
+ * Deliberately a local constant rather than an import from the vault fixture:
+ * the diamond tests must be able to stand up a diamond without pulling in the
+ * whole basket bootstrap.
+ */
+export const STRUCTURAL_PARAMS = [
+  4_000n, 10n, 500n, 600n, 100n, 500n, 600n, 7_200n, 3n, 500n, 10n ** 19n, 30n * 24n * 3_600n,
+];
 
 export interface DeployedDiamond {
   /** The frozen diamond's address. */
@@ -127,7 +180,11 @@ export async function deployIndexDiamond(
     cutAddr,
     manifest.map((m) => ({ facet: m.facet, selectors: m.selectors })),
     interfaceIds,
-    { timelockDelay: init.timelockDelay, seeder: init.seeder, dividendAsset: init.dividendAsset },
+    // A structural fixture still needs five NON-ZERO role holders, because the
+    // diamond refuses to be born with an unassigned role — an unassigned role is
+    // an ungoverned parameter and there is no renounce path anywhere in the
+    // facet set that could later vacate one.
+    fullInit(init),
     committedHash
   );
   await deployer.waitForDeployment();

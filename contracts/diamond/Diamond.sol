@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {DiamondStorage, CoreStorage, ReentrancyStorage} from "./storage/IndexStorage.sol";
+import {
+    DiamondStorage,
+    CoreStorage,
+    ERC20Storage,
+    ParamsStorage,
+    RolesStorage,
+    AllocationStorage,
+    EcosystemStorage,
+    ReentrancyStorage
+} from "./storage/IndexStorage.sol";
+import {IndexParams, IndexParamSet} from "../lib/IndexParams.sol";
 
 /**
  * ============================================================================
@@ -32,6 +42,8 @@ contract Diamond {
     error CutterCannotBeZeroAddress();
     error BadSeeder();
     error TimelockDelayBelowFloor(uint256 given, uint256 floor);
+    error TimelockDelayAboveCeiling(uint256 given, uint256 ceiling);
+    error BadRoleHolder();
 
     /**
      * @notice The floor under `timelockDelay`, enforced at construction.
@@ -42,7 +54,23 @@ contract Diamond {
      * diamond's constructor keeps it a deployment-time impossibility rather
      * than a runtime revert, which is what the original proof asserts.
      */
-    uint256 internal constant MIN_TIMELOCK_DELAY = 24 hours;
+    uint256 internal constant MIN_TIMELOCK_DELAY = 48 hours;
+    uint256 internal constant MAX_TIMELOCK_DELAY = 30 days;
+
+    /// @dev Born-at values, carried over from GlobalIndexVault's constructor.
+    /// Both are INERT until their respective destination is appointed, which is
+    /// why shipping them as defaults costs nothing.
+    uint256 internal constant DEFAULT_PLATFORM_ALLOCATION_BPS = 200;
+    uint256 internal constant DEFAULT_ECOSYSTEM_SPLIT_BPS = 2_000;
+    uint256 internal constant DEFAULT_TARGET_HHI_BPS = 2_000;
+
+    bytes32 internal constant ROLE_ADMIN = "role.admin";
+    bytes32 internal constant ROLE_CONSTITUENT_ADMISSION = "vault.admission";
+    bytes32 internal constant ROLE_RISK_PARAM = "vault.risk";
+    bytes32 internal constant ROLE_PLATFORM_ALLOCATION = "vault.allocation";
+    bytes32 internal constant ROLE_STREAM_LISTER = "vault.streams";
+
+    event RoleApplied(bytes32 indexed role, address indexed previous, address indexed next);
 
     /**
      * @notice The values that used to be `immutable` on GlobalIndexVault.
@@ -66,6 +94,25 @@ contract Diamond {
         uint256 timelockDelay;
         address seeder;
         address dividendAsset;
+        /// @notice ERC-20 metadata for the unified share.
+        string name;
+        string symbol;
+        /**
+         * @notice The five scoped role holders, in the fixed order
+         * [ADMIN, CONSTITUENT_ADMISSION, RISK_PARAM, PLATFORM_ALLOCATION,
+         * STREAM_LISTER]. They MAY be the same address — nothing here can stop
+         * a deployer from recreating the very concentration this design exists
+         * to remove — but the system treats them as independent from the first
+         * block, so separating them later costs one timelocked `queueRole` per
+         * role and no redeploy.
+         *
+         * NONE may be the zero address. An unassigned role is an ungoverned
+         * parameter, and there is no renounce path anywhere in the facet set
+         * that could later vacate one.
+         */
+        address[5] roles;
+        /// @notice The initial risk/fee parameter set, validated here.
+        IndexParamSet params;
     }
 
     /**
@@ -84,11 +131,55 @@ contract Diamond {
             revert TimelockDelayBelowFloor(init.timelockDelay, MIN_TIMELOCK_DELAY);
         }
 
+        if (init.timelockDelay > MAX_TIMELOCK_DELAY) {
+            revert TimelockDelayAboveCeiling(init.timelockDelay, MAX_TIMELOCK_DELAY);
+        }
+
         CoreStorage.Layout storage cs = CoreStorage.layout();
         cs.timelockDelay = init.timelockDelay;
         cs.seeder = init.seeder;
-        cs.dividendAsset = init.dividendAsset;
+        cs.dividendAsset = init.dividendAsset; // may be address(0): dividends simply off
         cs.indexOpen = false;
+
+        ERC20Storage.Layout storage es20 = ERC20Storage.layout();
+        es20.name = init.name;
+        es20.symbol = init.symbol;
+
+        // The risk set is validated by the SAME validator the timelocked
+        // executor uses, so a parameter that could not be set later cannot be
+        // born either.
+        IndexParams.validate(init.params);
+        ParamsStorage.Layout storage ps = ParamsStorage.layout();
+        ps.params = init.params;
+        ps.targetHhiBps = DEFAULT_TARGET_HHI_BPS;
+        // Placeholder bars, deliberately modest and deliberately timelocked. A
+        // constituent failing the bar is never excluded from the basket — the
+        // bar only feeds `capBpsFor`.
+        ps.minEligibilityFeesWei = 0.1 ether;
+        ps.minEligibilityBlocks = 100;
+
+        AllocationStorage.layout().platformAllocationBps = DEFAULT_PLATFORM_ALLOCATION_BPS; // inert: no treasury yet
+        EcosystemStorage.layout().ecosystemFeeSplitBps = DEFAULT_ECOSYSTEM_SPLIT_BPS; // inert: no sink yet
+
+        // Role seeding. This is the ONE place `roleHolder` is written outside
+        // the timelocked `executeRole`, and it happens in the DIAMOND's own
+        // constructor — before any facet is installed, before any selector
+        // routes anywhere, and inside the same transaction that later freezes
+        // the facet set. There is no post-construction shortcut and no second
+        // write path anywhere in the finalized set.
+        RolesStorage.Layout storage rs = RolesStorage.layout();
+        bytes32[5] memory keys = [
+            ROLE_ADMIN,
+            ROLE_CONSTITUENT_ADMISSION,
+            ROLE_RISK_PARAM,
+            ROLE_PLATFORM_ALLOCATION,
+            ROLE_STREAM_LISTER
+        ];
+        for (uint256 i; i < 5; i++) {
+            if (init.roles[i] == address(0)) revert BadRoleHolder();
+            rs.roleHolder[keys[i]] = init.roles[i];
+            emit RoleApplied(keys[i], address(0), init.roles[i]);
+        }
 
         // One shared reentrancy word for the whole diamond, primed here so no
         // facet ever pays the cold-zero-to-nonzero SSTORE on a user path.

@@ -57,62 +57,63 @@ const config: HardhatUserConfig = {
       },
     ],
     /**
-     * PER-FILE OVERRIDE, scoped as narrowly as it can be.
+     * NO PER-FILE OVERRIDES.
      *
-     * GlobalIndexVault.sol crossed the EIP-170 24576-byte deployed-code limit
-     * (23780 -> 26252 bytes) when the eligibility read, the dynamic HHI cap
-     * and the realized-variance calibration landed. Two settings bring it
-     * back under, at 21379 bytes:
+     * There used to be one here, for `contracts/GlobalIndexVault.sol`: that
+     * contract had crossed EIP-170 at 26,252 bytes and `runs: 1` + `viaIR`
+     * bought it back under, after which five library extractions were spent to
+     * hold it there — ending at 24,528 bytes with 48 bytes of headroom. That is
+     * a dead end, and the diamond refactor is what ends it: the monolith is
+     * gone, its logic lives in facets, and each facet carries a full 24,576-byte
+     * budget of its own with the routing stub paid once in the proxy fallback
+     * rather than at every library call site.
      *
-     *   - `runs: 1` optimises for DEPLOYMENT SIZE rather than repeated-call
-     *     gas, which is the right trade for a contract that is deployed once
-     *     and whose hot paths are already O(n <= 32).
-     *   - `viaIR: true` routes through the Yul IR pipeline, whose optimiser
-     *     is materially better at cross-function code sharing. This is the
-     *     setting doing most of the work (~4KB of the ~4.9KB saved).
+     * Deleting the override also RESTORES a property the override cost: every
+     * contract in this repo is now compiled with the identical settings, so
+     * there is no file whose bytecode depends on a per-file exception a reader
+     * has to know about. MarketplankVault / MarketplankVaultV3 are unaffected
+     * either way — they were never in the override and their 200-runs source
+     * verification is unchanged.
      *
-     * The alternative considered and rejected was extracting the new math
-     * into an external `library` with `public` functions. It works, but it
-     * saves less (the delegatecall stubs and their ABI encoding cost most of
-     * what the moved bodies save — measured, not assumed: moving the
-     * array-passing `applyCapAndRedistribute` out made the contract BIGGER),
-     * and it forces every test that deploys the vault to link a library
-     * address. A compiler setting on a not-for-deployment contract is the
-     * smaller change.
+     * ONE narrow exception remains, and it is a different KIND of problem from
+     * the one above. `Diamond.sol` and `IndexDeployer.sol` take the whole
+     * deployment initialiser — ERC-20 metadata, five role addresses and the
+     * twelve-field risk set — as a single struct argument, and the legacy
+     * codegen's ABI DECODER for that struct runs out of stack ("Variable
+     * headStart is 1 slot too deep"). That is a decoder limit, not a size
+     * limit: no amount of optimisation setting fixes it, and the alternative is
+     * to flatten the initialiser into a dozen loose constructor arguments,
+     * which would make the deployment calldata less legible at exactly the
+     * place a reviewer most needs to read it. `viaIR` compiles it directly.
      *
-     * Applied to this ONE file on purpose. Changing the global setting would
-     * silently change the compiled bytecode of MarketplankVaultV3.sol and
-     * MarketplankVault.sol, which are ALREADY DEPLOYED and whose published
-     * source verification is pinned to the 200-runs build — a recompile that
-     * no longer reproduces deployed bytecode is a verification break, and it
-     * would be caused by an unrelated change to a contract that has never been
-     * deployed at all. Every other contract's output is bit-identical.
+     * Scoped to these two files only, so no facet's bytecode and no already
+     * deployed contract's bytecode is touched.
      */
-    overrides: {
-      "contracts/GlobalIndexVault.sol": {
-        version: "0.8.24",
-        settings: {
-          optimizer: { enabled: true, runs: 1 },
-          viaIR: true,
-          evmVersion: "paris",
-          // Same output selection as the default profile; an override replaces
-          // the whole settings object, so omitting it here would silently drop
-          // storageLayout for this one file.
-          outputSelection: {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata",
-                "storageLayout",
-              ],
+    overrides: Object.fromEntries(
+      ["contracts/diamond/Diamond.sol", "contracts/diamond/IndexDeployer.sol"].map((f) => [
+        f,
+        {
+          version: "0.8.24",
+          settings: {
+            optimizer: { enabled: true, runs: 200 },
+            viaIR: true,
+            evmVersion: "paris",
+            outputSelection: {
+              "*": {
+                "*": [
+                  "abi",
+                  "evm.bytecode",
+                  "evm.deployedBytecode",
+                  "evm.methodIdentifiers",
+                  "metadata",
+                  "storageLayout",
+                ],
+              },
             },
           },
         },
-      },
-    },
+      ])
+    ),
   },
   paths: {
     sources: "./contracts",

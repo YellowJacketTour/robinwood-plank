@@ -711,7 +711,21 @@ describe("PlankGauge", () => {
         // "claim*" appearing on the vault still trips this assertion.
         if (
           bad === "claim" &&
-          ["claimDividend", "claimPending", "claimPendingMany", "pendingClaim", "reservedClaims"].includes(f.name)
+          // The diamond refactor adds ONE more, and it is a READ: ERC-7540's
+          // `claimableRedeemRequest` reports the deferred credit this contract
+          // already owes the caller. It is a view over the same `pendingClaim`
+          // ledger the three exemptions above pay out of — no gauge, no PLANK,
+          // no reward stream, and no write at all. Named rather than the
+          // keyword dropped, exactly as the others are, so any OTHER "claim*"
+          // appearing anywhere in the FINALIZED FACET SET still trips this.
+          [
+            "claimDividend",
+            "claimPending",
+            "claimPendingMany",
+            "pendingClaim",
+            "reservedClaims",
+            "claimableRedeemRequest",
+          ].includes(f.name)
         ) continue;
         expect(blob.includes(bad)).to.equal(false, `vault.${f.name} mentions ${bad}`);
       }
