@@ -237,6 +237,10 @@ abstract contract IndexFacetBase {
     event RoleApplied(bytes32 indexed role, address indexed previous, address indexed next);
 
     // Hooks (design doc section 8)
+    /// @notice A hook registration was queued. Mirrors `ParamQueued`/
+    /// `ConstituentQueued`/`StreamQueued` — every risk-surface change queues
+    /// through the vault's one timelock before it can take effect.
+    event HookQueued(bytes32 indexed point, address indexed hook, uint16 permissions, uint64 eta);
     event HookRegistered(bytes32 indexed point, address indexed hook, uint16 permissions);
     /// @notice A registered hook reverted, ran out of its bounded gas, or was
     /// not a contract. Emitted instead of propagating — see `_fireHook`: the
@@ -263,6 +267,14 @@ abstract contract IndexFacetBase {
     error StalePrice();
     error PersistenceCheckFailed();
     error ReservesOutstanding();
+    /// @dev The mirror image of `InvalidStream`'s already-a-constituent check
+    /// in `IndexStreamFacet._validateStreamCandidate`: a token already tracked
+    /// as a reward stream cannot ALSO be admitted as a constituent. Two
+    /// registries claiming the same token would let a stream deposit (no
+    /// weight, no price source, no pro-rata accounting) collide with a
+    /// constituent's priced, weighted, capped accounting for the identical
+    /// balance.
+    error TokenIsRegisteredStream();
     error BadBatch();
     error ShortDelivery();
     error ConstituentExiting();
@@ -736,6 +748,12 @@ abstract contract IndexFacetBase {
         CoreStorage.Layout storage cs = CoreStorage.layout();
         Constituent storage c = cs.constituents[token];
         if (c.listed) revert AlreadyListed();
+        // Mirror of `_validateStreamCandidate`'s reverse check: a token
+        // already tracked as a reward stream (queued OR live — `tracked` is
+        // set the moment `executeStream` lands, before `isStream` even
+        // matters) can never also be admitted as a priced, weighted
+        // constituent of the same basket.
+        if (StreamStorage.layout().tracked[token]) revert TokenIsRegisteredStream();
         if (cs.constituentList.length >= MAX_CONSTITUENTS) revert TooManyConstituents();
 
         c.source = source;
