@@ -7,7 +7,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {IndexFacetBase} from "./IndexFacetBase.sol";
 import {Constituent} from "../../lib/IndexTypes.sol";
-import {CoreStorage} from "../storage/IndexStorage.sol";
+import {CoreStorage, StreamStorage} from "../storage/IndexStorage.sol";
 
 /**
  * ============================================================================
@@ -78,7 +78,8 @@ contract IndexCoreFacet is IndexFacetBase {
         uint256 n = cs.constituentList.length;
         if (maxAmountsIn.length != n) revert BadBatch();
 
-        uint256 denom = _totalSupply() + VIRTUAL_SHARES;
+        uint256 supplyBefore = _totalSupply();
+        uint256 denom = supplyBefore + VIRTUAL_SHARES;
         amountsIn = new uint256[](n);
         for (uint256 i = 0; i < n; i++) {
             address t = cs.constituentList[i];
@@ -96,6 +97,19 @@ contract IndexCoreFacet is IndexFacetBase {
         }
 
         _mintWithAllocation(msg.sender, sharesOut);
+
+        // Round 9f, ported verbatim from WrappedIndexShare (design doc §5.4).
+        // Runs LAST: the mint is already priced and already done, so nothing
+        // here can influence it. Offsets the stream-leg dilution this mint
+        // just imposed by displacing that backing out of the redeemable pool
+        // and re-vesting it linearly, which is what makes an atomic
+        // mint->redeem round trip capture ~nothing of stream backing.
+        // (Supply is never zero here in practice: `whenOpen` requires
+        // `openIndex` to have already minted the permanently-locked seed
+        // shares — see IndexBootstrapFacet.openIndex, the actual 0->nonzero
+        // transition point, which is where `_armCarry` is called.)
+        _revestOnMint(sharesOut, supplyBefore);
+
         emit MintedProRata(msg.sender, sharesOut);
     }
 
@@ -130,6 +144,12 @@ contract IndexCoreFacet is IndexFacetBase {
         uint256 n = cs.constituentList.length;
         if (minAmountsOut.length != n) revert BadBatch();
 
+        // Never blocks: this only ever ADDS carried stream value back into the
+        // pool this exit is about to be priced against. Must run BEFORE the
+        // denominator and stream amounts are sized, exactly as
+        // WrappedIndexShare's `withdraw` folded carry before pricing.
+        _foldCarry();
+
         uint256 denom = _totalSupply() + VIRTUAL_SHARES;
         _burnShares(msg.sender, sharesIn); // burn first: no reentrancy on a stale supply
 
@@ -141,6 +161,23 @@ contract IndexCoreFacet is IndexFacetBase {
             if (out < minAmountsOut[i]) revert SlippageExceeded();
             c.reserve -= out;
             amountsOut[i] = out;
+        }
+
+        // Stream legs, sized from the SAME pre-burn denominator, credited
+        // DIRECTLY to the deferred-claim ledger with NO external call at all
+        // (design doc §5.5). This is what keeps the exit door's external-call
+        // count independent of the stream count: still exactly `n` calls
+        // below, plus O(1) SSTOREs per stream with no failure mode to defer
+        // from in the first place.
+        StreamStorage.Layout storage ss = StreamStorage.layout();
+        uint256 sn = ss.streamList.length;
+        for (uint256 i = 0; i < sn; i++) {
+            address t = ss.streamList[i];
+            uint256 amt = Math.mulDiv(sharesIn, _probeStreamBalance(t), denom);
+            if (amt == 0) continue;
+            cs.pendingClaim[msg.sender][t] += amt;
+            cs.reservedClaims[t] += amt;
+            emit PayoutDeferred(msg.sender, t, amt);
         }
 
         for (uint256 i = 0; i < n; i++) {

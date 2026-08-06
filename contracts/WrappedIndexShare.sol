@@ -1,6 +1,46 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+/**
+ * ============================================================================
+ *  DEPRECATED — SUPERSEDED BY contracts/diamond/facets/IndexStreamFacet.sol
+ *  ============================================================================
+ *
+ *  Design doc docs/DESIGN-DIAMOND-UNIFIED-ARCHITECTURE.md §9 Stage 5 ports this
+ *  contract's mechanism — round-9f's dilution re-vest, round-9e's zero-
+ *  denominator carry, `_netOf`'s three-term subtraction, and the whole
+ *  admission model — into `IndexStreamFacet`, a facet of the SAME diamond the
+ *  index share already lives on. There is no second token any more: reward
+ *  streams back the unified share directly, and redemption pays constituent
+ *  AND stream legs from one function, `IndexCoreFacet.redeemProRata`, with
+ *  stream legs settling as deferred credits (§5.5) rather than through a
+ *  separate `withdraw`.
+ *
+ *  THIS FILE IS KEPT, NOT DELETED, and that is a deliberate call, not an
+ *  oversight. §9 Stage 5's own exit criterion is that the wrapper's ENTIRE
+ *  proven property set — every one of `WrappedIndexShare.audit`,
+ *  `WrappedIndexShareStreams.audit`, `WrapStreamRevest.audit`,
+ *  `RedTeam.StreamSlotGrief.poc` and `RedTeam.WrapStreamDilution.poc` — is
+ *  re-proven on the unified token before deletion is safe (§7.5's retirement
+ *  checklist). `test/contracts/IndexStreamFacet.audit.test.ts` re-proves the
+ *  two headline hardening properties (round 9f's flash-extraction bound and
+ *  round 9e's zero-denominator carry) plus the facet's structural admission
+ *  and isolation properties, but does not yet re-derive the FULL enumerated
+ *  checklist item-for-item (e.g. the 60/70-op mixed-asset solvency fuzzes,
+ *  every individually-named PoC-A through PoC-F). Deleting this file before
+ *  that full re-proof would silently drop real regression coverage this
+ *  codebase currently has, which is the one thing this migration must not do.
+ *
+ *  This contract is otherwise exactly what it always was: "NOT FOR DEPLOYMENT,
+ *  same gate as GlobalIndexVault.sol. Local Hardhat only." It is retained
+ *  purely so its own test suites keep exercising the ORIGINAL, independently-
+ *  verified implementation the facet's arithmetic was ported from — useful as
+ *  a live reference to diff `IndexStreamFacet` against, not as a second
+ *  deployable surface. No new code should be built against it; extend
+ *  `IndexStreamFacet` instead.
+ * ============================================================================
+ */
+
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
