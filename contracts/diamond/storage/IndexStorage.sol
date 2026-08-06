@@ -490,6 +490,46 @@ library WeightStorage {
 }
 
 /**
+ * @notice §7.6 — the generalized maturity-vesting guard's per-constituent
+ * displacement ledger (design doc DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-
+ * 2026-08-06.md §7.6).
+ *
+ * @dev THE SAME SHAPE AS `StreamStorage.StreamVest`, reused verbatim rather
+ * than re-derived (`IndexFacetBase._addReserveVest`/`_reserveUnvestedOf`'s
+ * own header: "reuse this mathematical/timing pattern, don't invent a new
+ * one"). Kept in its own namespace rather than folded into `StreamStorage` or
+ * `CoreStorage.Constituent` because it tracks a DIFFERENT quantity than
+ * either: not a stream's own probed balance, and not `c.reserve` itself —
+ * `c.reserve` is NEVER rewritten by this mechanism (see
+ * `IndexFacetBase._creditRoutedValue`'s header for why `c.reserve` stays the
+ * untouched, physically accurate figure and this ledger is purely a
+ * displaced-until-vested overlay read alongside it, ONLY by
+ * `IndexCoreFacet.redeemProRata` and `IndexLensFacet.previewRedeemProRata`).
+ */
+library ReserveVestStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.reservevest.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    struct Layout {
+        /// @dev token => the same (unvested, last, end) shape
+        /// `StreamStorage.StreamVest` already proves. One entry per
+        /// constituent that has ever received a routed-value credit via
+        /// `IndexFacetBase._creditRoutedValue`; written ONLY there, through
+        /// `IndexFacetBase._addReserveVest`.
+        mapping(address => StreamStorage.StreamVest) vest;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/**
  * @notice The dedicated index-coin/payment-token pool's address (design doc
  * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.10).
  *

@@ -155,8 +155,17 @@ contract IndexCoreFacet is IndexFacetBase {
 
         amountsOut = new uint256[](n);
         for (uint256 i = 0; i < n; i++) {
-            Constituent storage c = cs.constituents[cs.constituentList[i]];
-            uint256 out = Math.mulDiv(sharesIn, c.reserve, denom);
+            address t = cs.constituentList[i];
+            Constituent storage c = cs.constituents[t];
+            // §7.6: sized against reserve NET of whatever `_creditRoutedValue`
+            // has freshly displaced into `ReserveVestStorage` for this token
+            // (see `IndexFacetBase._reserveNetOfVest`'s header) — the
+            // generalized round-9f guard, enforced at the SAME free exit door
+            // the stream legs below are already vesting-gated at.
+            // `c.reserve` itself is never rewritten by the netting; only the
+            // amount actually PAID out shrinks.
+            uint256 net = _reserveNetOfVest(t, c.reserve);
+            uint256 out = Math.mulDiv(sharesIn, net, denom);
             if (out > c.reserve) out = c.reserve; // unreachable given the locked seed; belt and braces
             if (out < minAmountsOut[i]) revert SlippageExceeded();
             c.reserve -= out;

@@ -1,6 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { time, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { time, mine, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
 import { deployBeaconMock } from "./helpers/beacon";
 import { deployOpenIndex, warmCheckpoints, WAD, TIMELOCK, maxIn } from "./helpers/index-vault";
 
@@ -120,11 +120,22 @@ describe("Index constituent sync — swept value becomes redeemable (round 10)",
       .withArgs(assetAddr, 777n * WAD);
     expect(await fx.vault.reserveOf(assetAddr)).to.equal(reserveBefore + 777n * WAD);
 
-    // ── AND IT IS GENUINELY REDEEMABLE. A holder's pro-rata slice of this leg
-    // strictly increased because of the sweep, and they can take it out.
+    // ── §7.6: the credit landed in `c.reserve` (asserted above), but the
+    // freshly-swept increment now vests linearly over `STREAM_VEST_BLOCKS`
+    // before it counts toward a pro-rata redemption — the same guard round
+    // 9f already applied to streams, generalized to every value injection.
+    // Immediately after the sweep, this fresh leg is still almost entirely
+    // unvested, so a pro-rata quote captures almost none of it yet.
     await fx.vault.connect(fx.alice).mintProRata(100n * WAD, maxIn(3));
+    const [, quotedImmediate] = await fx.vault.previewRedeemProRata(100n * WAD);
+
+    // ── AND IT IS GENUINELY REDEEMABLE once matured. A holder's pro-rata
+    // slice of this leg strictly increased because of the sweep, and they
+    // can take it out in full once the vesting window has elapsed.
+    await mine(300);
     const held: bigint = await asset.balanceOf(fx.alice.address);
     const [, quoted] = await fx.vault.previewRedeemProRata(100n * WAD);
+    expect(quotedImmediate[1]).to.be.lessThan(quoted[1]);
     await fx.vault.connect(fx.alice).redeemProRata(100n * WAD, [0n, 0n, 0n]);
     expect((await asset.balanceOf(fx.alice.address)) - held).to.equal(quoted[1]);
     expect(quoted[1]).to.be.greaterThan(0n);
@@ -283,6 +294,11 @@ describe("Index constituent sync — swept value becomes redeemable (round 10)",
     await fx.tokens[1].mint(fx.vaultAddr, 500n * WAD);
     // Carol, who holds nothing at all, calls it. She gains nothing.
     await fx.vault.connect(fx.carol).syncConstituentBalance(fx.addrs[1]);
+    // §7.6: the fresh 500 WAD credit vests linearly over `STREAM_VEST_BLOCKS`
+    // before it counts toward a pro-rata quote (same guard as the sweep test
+    // above) — mine past the window so this assertion is about the pro-rata
+    // LIFT itself, not about whether the injection has finished vesting yet.
+    await mine(300);
     const [, afterQuote] = await fx.vault.previewRedeemProRata(100n * WAD);
 
     expect(afterQuote[1]).to.be.greaterThan(beforeQuote[1]);
