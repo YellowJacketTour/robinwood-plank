@@ -190,6 +190,87 @@ describe("Diamond storage namespaces", () => {
     });
   });
 
+  describe("the FULL, populated layouts do not collide", () => {
+    // The layouts are no longer placeholders: they carry dynamic arrays, nested
+    // mappings and structs-inside-mappings, which derive slots by hashing and
+    // write all over the address space. A one-member namespace cannot plausibly
+    // reach a neighbour; these can, so the proof is run against the real shapes.
+    async function stressFx() {
+      const d = await deployIndexDiamond(
+        ["DiamondLoupeFacet", "NamespaceStressFacet"],
+        { timelockDelay: TIMELOCK, seeder: SEEDER, dividendAsset: DIVIDEND }
+      );
+      const handle = await combinedHandle(d.address, [
+        "DiamondLoupeFacet",
+        "NamespaceStressFacet",
+      ]);
+      return { ...d, handle };
+    }
+
+    it("every member of every namespace reads back its OWN value after a write to all twelve", async () => {
+      const { handle } = await loadFixture(stressFx);
+      const TAG = 1_000_000n;
+      await handle.stressWrite(TAG);
+      const v: bigint[] = await handle.stressRead(TAG);
+
+      // Each field was written a value derived from a DISTINCT offset off the
+      // tag, so a collision surfaces as a field carrying another field's value
+      // rather than as a zero — which a mere "is it non-zero?" check would miss.
+      const expected = [
+        1n, 2n, 3n, 10n, 11n, 12n, 13n, 15n, 16n, 20n, 21n, 22n, 23n, 24n, 30n,
+        34n, 36n, 40n, 41n, 50n, 51n, 60n, 61n, 63n, 70n, 71n, 73n, 75n, 80n,
+        84n, 86n, 90n,
+      ].map((o) => TAG + o);
+
+      expect(v.length).to.equal(expected.length);
+      for (let i = 0; i < expected.length; i++) {
+        expect(v[i], `namespace field ${i} collided`).to.equal(expected[i]);
+      }
+    });
+
+    it("the twelve-namespace write leaves the migrated immutables and the open latch untouched", async () => {
+      const { handle } = await loadFixture(stressFx);
+      await handle.stressWrite(7n);
+      const [delay, seeder, dividend, open] = await handle.stressCoreInvariants();
+      expect(delay).to.equal(TIMELOCK);
+      expect(seeder).to.equal(ethers.getAddress(SEEDER));
+      expect(dividend).to.equal(ethers.getAddress(DIVIDEND));
+      expect(open).to.equal(false);
+    });
+
+    it("the twelve-namespace write leaves the selector table intact and the diamond dispatching", async () => {
+      const { handle, loupe, manifest } = await loadFixture(stressFx);
+      const before = await loupe.facetAddresses();
+      await handle.stressWrite(ethers.MaxUint256 / 2n);
+      expect(await loupe.facetAddresses()).to.deep.equal(before);
+      expect(before.length).to.equal(manifest.length);
+      expect(await loupe.isFinalized()).to.equal(true);
+    });
+
+    it("two writes with different tags do not overwrite each other's regions", async () => {
+      // Catches a namespace whose HASHED derivation (mapping/array slots)
+      // aliases another's, which a single-tag write cannot see.
+      const { handle } = await loadFixture(stressFx);
+      await handle.stressWrite(1_000n);
+      await handle.stressWrite(9_000_000n);
+
+      const a: bigint[] = await handle.stressRead(1_000n);
+      // Index 3 and 28 read the array TAIL, which the second write moved on
+      // purpose; every other field is keyed by tag and must be undisturbed.
+      const offsets = [
+        1n, 2n, null, null, 11n, 12n, 13n, 15n, null, null, null, null, null,
+        null, 30n, 34n, null, 40n, 41n, null, null, 60n, null, null, null, 71n,
+        null, null, null, 84n, 86n, 90n,
+      ];
+      for (let i = 0; i < offsets.length; i++) {
+        if (offsets[i] === null) continue;
+        expect(a[i], `field ${i} was clobbered by the second write`).to.equal(
+          1_000n + (offsets[i] as bigint)
+        );
+      }
+    });
+  });
+
   describe("no facet declares storage of its own", () => {
     it("every production facet's compiler-emitted storageLayout is empty", async () => {
       // The rule (design doc section 3.3 rule 1) is checked against the

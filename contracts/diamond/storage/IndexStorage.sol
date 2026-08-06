@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {Constituent} from "../../lib/IndexTypes.sol";
+import {IndexParamSet} from "../../lib/IndexParams.sol";
+
 /**
  * ============================================================================
  *  IndexStorage — every namespaced storage region in the Index diamond.
@@ -136,8 +139,29 @@ library CoreStorage {
         uint256 timelockDelay;
         address seeder;
         address dividendAsset;
-        // --- basket state (populated in Stage 2) ---
+        // --- basket custody ---
+        /// @dev The one-way latch. False until `openIndex`; there is no path
+        /// that sets it back, which is what makes `finalize`'s
+        /// `indexOpen == false` precondition meaningful.
         bool indexOpen;
+        address[] constituentList;
+        /// @dev `Constituent` is a MAPPING VALUE, not a dynamic-array element,
+        /// so appending a member to it is layout-safe: each key hashes to its
+        /// own region. (Appending to a struct used as an ARRAY element would
+        /// change the stride and shift every element.) It embeds
+        /// `Observation obs[OBS_SLOTS]` — a fixed array inside a struct inside
+        /// a mapping — which is layout-stable and unchanged from the monolith.
+        mapping(address => Constituent) constituents;
+        // --- the deferred-claim ledger ---
+        /// @dev holder => token => owed. Under the unified token this ledger
+        /// carries BOTH constituent legs that deferred during redemption and
+        /// stream legs credited during it, which is what keeps the exit door's
+        /// external-call count independent of the stream count.
+        mapping(address => mapping(address => uint256)) pendingClaim;
+        /// @dev token => total owed across all holders. Subtracted from every
+        /// backing read, so a reserved slice cannot be redeemed a second time.
+        mapping(address => uint256) reservedClaims;
+        uint256 eligibleConstituentCount;
         uint256[16] __gap;
     }
 
@@ -155,6 +179,13 @@ library ParamsStorage {
         keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.params.v1")) - 1)) & ~bytes32(uint256(0xff));
 
     struct Layout {
+        /// @dev Field order tracks `IndexParamSet` in lib/IndexParams.sol,
+        /// which is the canonical declaration. Reordering it there silently
+        /// reinterprets this region.
+        IndexParamSet params;
+        uint256 minEligibilityFeesWei;
+        uint256 minEligibilityBlocks;
+        uint256 targetHhiBps;
         uint256[16] __gap;
     }
 
@@ -172,7 +203,27 @@ library GovernanceStorage {
         keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.governance.v1")) - 1))
             & ~bytes32(uint256(0xff));
 
+    struct QueuedParam {
+        uint256 value;
+        uint64 eta;
+        bool pending;
+    }
+
+    struct QueuedListing {
+        address source;
+        uint256 rawTargetWeightBps;
+        uint64 eta;
+        bool pending;
+        bool isRemoval;
+    }
+
     struct Layout {
+        /// @dev The shared queue mapping. `ScopedRoles.isolation` proves it is
+        /// not a back door between roles; under the diamond that proof has to
+        /// hold ACROSS FACETS too, since several facets now reach this one map.
+        mapping(bytes32 => QueuedParam) queuedParams;
+        mapping(address => QueuedListing) queuedListings;
+        QueuedParam queuedPlatformTreasury;
         uint256[16] __gap;
     }
 
@@ -216,6 +267,8 @@ library AllocationStorage {
             & ~bytes32(uint256(0xff));
 
     struct Layout {
+        address platformTreasury;
+        uint256 platformAllocationBps;
         uint256[16] __gap;
     }
 
@@ -234,6 +287,11 @@ library EcosystemStorage {
             & ~bytes32(uint256(0xff));
 
     struct Layout {
+        /// @dev token => fees accrued, in that token's own units.
+        mapping(address => uint256) ecosystemFeesWei;
+        address ecosystemSink;
+        address ecosystemAsset;
+        uint256 ecosystemFeeSplitBps;
         uint256[16] __gap;
     }
 
@@ -258,6 +316,18 @@ library DividendStorage {
         keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.dividend.v1")) - 1)) & ~bytes32(uint256(0xff));
 
     struct Layout {
+        uint256 magnifiedDividendPerShare;
+        /// @dev The EIP-2222 correction term. SIGNED, deliberately: a mint adds
+        /// a negative correction so a holder who arrives after a push earns
+        /// exactly zero from it, and a burn adds a positive one so value
+        /// already accrued is not destroyed.
+        mapping(address => int256) magnifiedDividendCorrections;
+        mapping(address => uint256) withdrawnDividends;
+        uint256 totalDividendsReceived;
+        uint256 totalDividendsWithdrawn;
+        /// @dev The self-healing carry: a push with no eligible holder is
+        /// PARKED here rather than lost or reverted.
+        uint256 undistributedDividends;
         uint256[16] __gap;
     }
 
@@ -282,7 +352,31 @@ library StreamStorage {
     bytes32 internal constant SLOT =
         keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.stream.v1")) - 1)) & ~bytes32(uint256(0xff));
 
+    struct QueuedStream {
+        uint64 eta;
+        bool pending;
+    }
+
+    /// @dev The round-9f re-vest schedule, ported verbatim from
+    /// WrappedIndexShare. `unvested` degrades linearly to zero between `last`
+    /// and `end`; `unvestedOf` is a pure function of these three fields and
+    /// `block.number`, with no setter anywhere and no role that can reach it.
+    struct StreamVest {
+        uint256 unvested;
+        uint64 last;
+        uint64 end;
+    }
+
     struct Layout {
+        address[] streamList;
+        mapping(address => bool) tracked;
+        mapping(address => bool) isStream;
+        mapping(address => QueuedStream) queuedStreams;
+        /// @dev The zero-denominator carry: value pushed while there is nobody
+        /// to credit, held until there is.
+        mapping(address => uint256) carry;
+        uint256 carryUnlockBlock;
+        mapping(address => StreamVest) vest;
         uint256[16] __gap;
     }
 
@@ -300,6 +394,12 @@ library HooksStorage {
         keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.hooks.v1")) - 1)) & ~bytes32(uint256(0xff));
 
     struct Layout {
+        /// @dev point => hook contract. `point` is drawn from a COMPILE-TIME
+        /// enumerated set, so governance chooses who, never where — and that
+        /// set contains no point on `redeemProRata`, `claimPending` or
+        /// `claimPendingMany`.
+        mapping(bytes32 => address) hooks;
+        mapping(address => uint16) hookPermissions;
         uint256[16] __gap;
     }
 
