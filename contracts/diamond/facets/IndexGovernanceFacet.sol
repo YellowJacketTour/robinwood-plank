@@ -252,6 +252,10 @@ contract IndexGovernanceFacet is IndexFacetBase {
     function _applyValueAccrualSplit(uint256 value) private {
         uint256 buybackBps = value % BPS;
         uint256 dividendBps = value / BPS;
+        // §7.7's hard ceiling, re-checked HERE at execution — same doctrine
+        // as every other hard ceiling in this function (a timelock bounds
+        // WHEN a bad change lands, never HOW BAD it can be).
+        if (buybackBps > CEIL_BUYBACK_SPLIT_BPS) revert BadParam();
         if (dividendBps > BPS || dividendBps + buybackBps > BPS) revert BadParam();
         ValueAccrualStorage.Layout storage va = ValueAccrualStorage.layout();
         va.dividendBps = dividendBps;
