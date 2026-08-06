@@ -92,8 +92,13 @@ contract IndexCoreFacet is IndexFacetBase {
             // `sharesOut`, so absorbing a transfer fee would mint full shares
             // against a partial deposit and dilute every existing holder.
             if (credited < want) revert ShortDelivery();
-            c.reserve += credited;
-            amountsIn[i] = credited;
+            amountsIn[i] = credited; // the depositor's real cost, UNAFFECTED by §7.11 below
+            // §7.11: a small, governed slice of THIS leg's payment may route
+            // to a PLANK buy for the dev-fund treasury before the remainder
+            // backs the newly-minted shares — see `_routeDevFundBuy`'s
+            // header for why this can never revert or shrink what the
+            // depositor is credited with minting.
+            c.reserve += _routeDevFundBuy(t, credited);
         }
 
         _mintWithAllocation(msg.sender, sharesOut);

@@ -102,9 +102,26 @@ describe("GlobalIndexVault — intent/front-running surface (§4, §5.4)", () =>
   it("exposes no rebalance/swap/solver/intent execution entrypoint at all", async () => {
     const { vault } = await fixture();
     const forbidden = /rebalance|swap|solver|intent|settle|execute(Trade|Order|Swap)|route/i;
+    // §7.11's dev-fund PLANK market-buy (design doc §7.11) is a DELIBERATE,
+    // DISCLOSED carve-out, not an oversight this regex should have caught.
+    // It is NOT the front-running surface this suite's header describes:
+    // the vault never publishes an executable trade a third party can
+    // front-run, because the dev-fund router call happens AFTER a mint's own
+    // price is already locked in (the oracle-band pricing above is
+    // completely unaffected by it — see `IndexFacetBase._routeDevFundBuy`'s
+    // header), spends only a small governed skim of an amount the DEPOSITOR
+    // themselves just paid in, and — per `IndexDevFundFacet.test.ts` — a
+    // hostile/adversarial router can only ever cost the protocol one missed
+    // dev-fund contribution, never a worse price or a blocked mint. The
+    // router ADDRESS is real and named on purpose (§7.11's own framing: "a
+    // real, spendable, team-directed treasury", not a trustless mechanism),
+    // which is exactly why its four functions are named `*DevFundRouter*`
+    // rather than hidden — excluded here by NAME, not by weakening the
+    // regex, so any FUTURE function matching this pattern still fails loudly.
+    const allowedException = /DevFundRouter/i;
     const offenders = vault.interface.fragments
       .filter((f: any) => f.type === "function")
-      .filter((f: any) => forbidden.test(f.name))
+      .filter((f: any) => forbidden.test(f.name) && !allowedException.test(f.name))
       .map((f: any) => f.name);
     expect(offenders, `vault grew a trade-execution surface: ${offenders}`).to.deep.equal([]);
   });

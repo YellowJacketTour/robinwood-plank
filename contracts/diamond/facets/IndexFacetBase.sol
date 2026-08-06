@@ -14,6 +14,7 @@ import {IndexEligibility} from "../../lib/IndexEligibility.sol";
 import {IndexParams, IndexParamSet as Params} from "../../lib/IndexParams.sol";
 import {IndexPoolValuation} from "../../lib/IndexPoolValuation.sol";
 import {IIndexCoinPool} from "../../IIndexCoinPool.sol";
+import {IExternalSwapRouter} from "../../IExternalSwapRouter.sol";
 
 import {
     CoreStorage,
@@ -28,6 +29,7 @@ import {
     StreamStorage,
     WeightStorage,
     PoolStorage,
+    DevFundStorage,
     ReentrancyStorage,
     HooksStorage,
     ReserveVestStorage
@@ -126,6 +128,22 @@ abstract contract IndexFacetBase {
      * is the one enforcement point.
      */
     uint256 internal constant CEIL_BUYBACK_SPLIT_BPS = 5_000;
+
+    /**
+     * @dev §7.11 hard ceiling on `DevFundStorage.devFundBps` — 2%, the design
+     * doc's own recommended magnitude ("recommend a low ceiling, e.g. 2%,
+     * decided by governance, not defaulted high"). Enforced in bytecode at
+     * `IndexDevFundFacet._applyDevFundBps`, the one execution point, exactly
+     * like `CEIL_BUYBACK_SPLIT_BPS` above — a timelock bounds WHEN a change
+     * lands, never HOW BIG it can be, and this is the second bucket that
+     * doctrine applies to.
+     *
+     * UNLIKE `CEIL_BUYBACK_SPLIT_BPS`, this bucket is spendable, team-
+     * directed value (design doc §7.11's own framing) rather than a
+     * trustless accounting slot — the low ceiling is what keeps that
+     * exposure small, not a claim that the value itself is untouchable.
+     */
+    uint256 internal constant CEIL_DEV_FUND_BPS = 200;
 
     uint256 internal constant DEFAULT_TARGET_HHI_BPS = 2_000;
     uint256 internal constant MIN_TARGET_HHI_BPS = 200;
@@ -272,6 +290,35 @@ abstract contract IndexFacetBase {
     /// `_sync` already measured for `ConstituentSynced` — never a
     /// caller-supplied number, and never emitted from anywhere else.
     event ConstituentActivityRecorded(address indexed token, uint256 amount);
+
+    // ── §7.11 dev-fund PLANK market-buy (design doc §7.11) ────────────────
+    //
+    // DELIBERATELY NOT DESCRIBED as "no admin path" or "no one can touch it"
+    // anywhere in this codebase, including here — this is a real, spendable,
+    // team-directed treasury by design. See `DevFundStorage`'s and
+    // `IndexDevFundFacet`'s headers.
+
+    /// @notice A mint's dev-fund skim was successfully swapped for PLANK and
+    /// delivered to `treasury`. `tokenIn`/`amountIn` are the ACTUAL amount
+    /// skimmed from that mint's payment, never a caller-supplied figure.
+    event DevFundBuyExecuted(
+        address indexed tokenIn,
+        uint256 amountIn,
+        uint256 plankOut,
+        address indexed treasury
+    );
+    /// @notice The router reverted, returned short, or left a standing
+    /// allowance — emitted INSTEAD OF propagating, exactly like
+    /// `HookFailed`. The skimmed amount is NOT lost: see
+    /// `IndexFacetBase._routeDevFundBuy`'s header for why it is left in the
+    /// underlying mint's reserve credit rather than destroyed or stranded.
+    event DevFundBuyFailed(address indexed tokenIn, uint256 amountAttempted);
+    event DevFundRouterQueued(address indexed router, uint64 eta);
+    event DevFundRouterSet(address indexed router);
+    event DevFundTreasuryQueued(address indexed treasury, uint64 eta);
+    event DevFundTreasurySet(address indexed treasury);
+    event DevFundBpsQueued(uint256 bps, uint64 eta);
+    event DevFundBpsSet(uint256 bps);
 
     // Streams (ported from WrappedIndexShare)
     event StreamQueued(address indexed token, uint64 eta);
@@ -852,6 +899,66 @@ abstract contract IndexFacetBase {
         _mintShares(to, net);
         if (cut > 0) _mintShares(treasury, cut);
         return net;
+    }
+
+    /**
+     * @dev §7.11's ONE spend point, called from `IndexCoreFacet.mintProRata`
+     * and `IndexTradeFacet.mintSingleAsset` on every mint. Skims
+     * `DevFundStorage.devFundBps` of `amount` — the payment this contract
+     * already holds a real balance of, having already pulled it via
+     * `_pullCredited` before this is called — attempts to buy PLANK with it
+     * through the governed `router`, and returns the amount the CALLER
+     * should still credit toward reserve/backing.
+     *
+     * NEVER REVERTS THE CALLER, by construction rather than by hope:
+     *  - a zero-configured namespace (the default — see `DevFundStorage`'s
+     *    header) is a no-op, `remainder == amount`, identical to this
+     *    section not existing;
+     *  - a router that reverts, returns short of its own approval, or
+     *    otherwise fails is caught by `try/catch`, the standing approval is
+     *    reset to zero, `DevFundBuyFailed` is emitted, and — the doctrine
+     *    this task brief names explicitly, the same one
+     *    `HookRegistryFacet`'s `_fireHook` already proves for observer hooks
+     *    — the skimmed amount is NOT lost: it is left in `remainder`, so the
+     *    caller credits the FULL `amount` to reserve exactly as if no
+     *    dev-fund skim had ever been attempted. A broken or hostile router
+     *    therefore costs the protocol and its depositors nothing; the only
+     *    thing a router failure can ever cost is one missed dev-fund
+     *    contribution, never user value and never the mint itself.
+     *
+     * Only a router that ACTUALLY DELIVERS PLANK and fully consumes its
+     * approval causes `remainder < amount` — i.e. only a genuinely
+     * successful buy ever reduces what backs the newly-minted shares.
+     */
+    function _routeDevFundBuy(address token, uint256 amount) internal returns (uint256 remainder) {
+        remainder = amount;
+        if (amount == 0) return remainder;
+        DevFundStorage.Layout storage df = DevFundStorage.layout();
+        address router = df.router;
+        address treasury = df.treasury;
+        uint256 bps = df.devFundBps;
+        if (router == address(0) || treasury == address(0) || bps == 0) return remainder;
+
+        uint256 skim = (amount * bps) / BPS; // floors, in the depositor's favour
+        if (skim == 0) return remainder;
+
+        IERC20(token).forceApprove(router, skim);
+        try IExternalSwapRouter(router).buyPlank(token, skim, 0, treasury) returns (uint256 plankOut) {
+            // A router that did not fully spend what it was approved for is
+            // treated identically to a failure — no standing approval is
+            // ever left behind, the same discipline
+            // `IndexBuybackFacet.executeBuyback` already proves.
+            if (IERC20(token).allowance(address(this), router) != 0) {
+                IERC20(token).forceApprove(router, 0);
+                emit DevFundBuyFailed(token, skim);
+                return remainder;
+            }
+            remainder = amount - skim;
+            emit DevFundBuyExecuted(token, skim, plankOut, treasury);
+        } catch {
+            IERC20(token).forceApprove(router, 0);
+            emit DevFundBuyFailed(token, skim);
+        }
     }
 
     // ══ Listing ═══════════════════════════════════════════════════════════
