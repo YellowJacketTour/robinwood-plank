@@ -139,6 +139,7 @@ contract IndexBootstrapFacet is IndexFacetBase {
         credited = bal - accounted;
         c.reserve += credited;
         emit ConstituentSynced(token, credited);
+        _fireHook(HOOK_AFTER_SYNC_, abi.encode(token, credited));
     }
 
     /// @notice Drop a deactivated, fully-redeemed constituent. Permissionless
