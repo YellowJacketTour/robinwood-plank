@@ -233,6 +233,14 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       { name: "queueDevFundRouter", args: [alice.address], role: ROLE_RISK, holder: risk },
       { name: "queueDevFundTreasury", args: [alice.address], role: ROLE_RISK, holder: risk },
       { name: "queueDevFundBps", args: [100n], role: ROLE_RISK, holder: risk },
+      // IndexSocialFiTreasuryFacet (design doc §7.12) — the platform socialfi
+      // treasury carve-out. DELIBERATELY the same different trust model as
+      // §7.11 immediately above (a real, spendable, team-directed treasury —
+      // see that facet's own header), but the GOVERNANCE SURFACE over it is
+      // timelocked and role-gated exactly like every other risk-surface
+      // change in this table, same role as `queueDevFundRouter` etc.
+      { name: "queueSocialFiTreasury", args: [alice.address], role: ROLE_RISK, holder: risk },
+      { name: "queueSocialFiTreasuryBps", args: [100n], role: ROLE_RISK, holder: risk },
     ];
 
     // The enumeration must be COMPLETE. Every non-view function on the ABI is
@@ -351,6 +359,16 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       "executeDevFundRouter",
       "executeDevFundTreasury",
       "executeDevFundBps",
+      // IndexSocialFiTreasuryFacet (design doc §7.12). `executeSocialFiTreasury`
+      // / `executeSocialFiTreasuryBps` are the timelock-gated applies, same
+      // shape as `executeDevFundTreasury`/`executeDevFundBps` immediately
+      // above — permissionless after the eta, the timelock (not a second
+      // discretionary approval) is the gate. The GOVERNED value they apply is
+      // still real, spendable treasury money once applied (§7.12's own
+      // honesty framing) — but that is a property of WHAT gets set, not of
+      // WHO may flip the already-queued, already-delayed switch.
+      "executeSocialFiTreasury",
+      "executeSocialFiTreasuryBps",
     ]);
     const abiNames = (vault.interface.fragments as any[])
       .filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))

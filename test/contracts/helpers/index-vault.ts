@@ -120,6 +120,7 @@ export const INDEX_FACETS = [
   "IndexPoolFacet",
   "IndexBuybackFacet",
   "IndexDevFundFacet",
+  "IndexSocialFiTreasuryFacet",
 ] as const;
 
 /**
