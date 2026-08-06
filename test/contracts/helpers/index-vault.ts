@@ -116,6 +116,7 @@ export const INDEX_FACETS = [
   "IndexDividendFacet",
   "IndexLensFacet",
   "IndexStreamFacet",
+  "HookRegistryFacet",
 ] as const;
 
 /**

@@ -138,6 +138,10 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
     await time.increase(TIMELOCK + 1);
     await vault.executeStream(delistTokAddr);
 
+    const Hook = await ethers.getContractFactory("MockHook");
+    const hook: any = await Hook.deploy(0); // RECORD
+    const hookAddr = await hook.getAddress();
+
     /**
      * The complete privileged surface of the vault: every non-view function
      * that carries a role check, paired with the ONE role that may call it.
@@ -192,6 +196,15 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       { name: "queueStream", args: [queueTokAddr], role: ROLE_STREAM, holder: admission },
       { name: "cancelStream", args: [cancelTokAddr], role: ROLE_STREAM, holder: admission },
       { name: "delistStream", args: [delistTokAddr], role: ROLE_STREAM, holder: admission },
+      // HookRegistryFacet (design doc §8, Stage 6). Same role as every other
+      // risk-surface change — a hostile hook can only ever be installed by an
+      // actor who already cleared ROLE_RISK_PARAM's own timelocked handover.
+      {
+        name: "registerHook",
+        args: [await vault.AFTER_SYNC(), hookAddr, 0],
+        role: ROLE_RISK,
+        holder: risk,
+      },
     ];
 
     // The enumeration must be COMPLETE. Every non-view function on the ABI is

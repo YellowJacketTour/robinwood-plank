@@ -23,7 +23,8 @@ import {
     EcosystemStorage,
     DividendStorage,
     StreamStorage,
-    ReentrancyStorage
+    ReentrancyStorage,
+    HooksStorage
 } from "../storage/IndexStorage.sol";
 
 /**
@@ -124,6 +125,15 @@ abstract contract IndexFacetBase {
     /// is a liability.
     uint256 internal constant PROBE_GAS = 100_000;
 
+    /// @dev Gas ceiling on an observer hook `CALL` (design doc section 8, rule
+    /// 2). Same 63/64-rule reasoning as `PAYOUT_GAS` / `PROBE_GAS`: bounding
+    /// the gas FORWARDED is what makes the bound on what a hostile hook can
+    /// consume real, rather than a hope. Sized generously above `PROBE_GAS`
+    /// (a handful of COLD `SSTORE`s, EIP-2929-priced, plus dispatch) so an
+    /// honest observer that records a couple of words is not starved by the
+    /// same bound that exists to stop a hostile one.
+    uint256 internal constant HOOK_GAS = 150_000;
+
     /// @notice Disclosed, deliberate bound on iterated stream assets. Same
     /// value as MAX_CONSTITUENTS, same reasoning: `redeemProRata` must stay
     /// gas-safe as the stream count grows, and 32 is generous headroom.
@@ -171,6 +181,21 @@ abstract contract IndexFacetBase {
     /// role set as design doc section 2.3 specifies. It reaches no value path.
     bytes32 internal constant ROLE_STREAM_LISTER_ = "vault.streams";
 
+    // ── Hook points (design doc section 8) ──────────────────────────────────
+    //
+    // COMPILE-TIME CONSTANTS, not caller input — `HookRegistryFacet.registerHook`
+    // can only ever populate one of these three keys (§8 rule 4), and NONE of
+    // them fires anywhere on `redeemProRata`, `claimPending` or
+    // `claimPendingMany` (§8 rule 5, asserted by `Hooks.exitDoorFree.test.ts`).
+
+    bytes32 internal constant HOOK_AFTER_LISTING_ = keccak256("hook.after_listing");
+    bytes32 internal constant HOOK_AFTER_CHECKPOINT_ = keccak256("hook.after_checkpoint");
+    bytes32 internal constant HOOK_AFTER_SYNC_ = keccak256("hook.after_sync");
+
+    function _isKnownHookPoint(bytes32 point) internal pure returns (bool) {
+        return point == HOOK_AFTER_LISTING_ || point == HOOK_AFTER_CHECKPOINT_ || point == HOOK_AFTER_SYNC_;
+    }
+
     // ── Events (verbatim) ──────────────────────────────────────────────────
 
     event ConstituentQueued(address indexed token, uint64 eta, bool removal);
@@ -211,6 +236,13 @@ abstract contract IndexFacetBase {
     event RoleQueued(bytes32 indexed role, address indexed next, uint64 eta);
     event RoleApplied(bytes32 indexed role, address indexed previous, address indexed next);
 
+    // Hooks (design doc section 8)
+    event HookRegistered(bytes32 indexed point, address indexed hook, uint16 permissions);
+    /// @notice A registered hook reverted, ran out of its bounded gas, or was
+    /// not a contract. Emitted instead of propagating — see `_fireHook`: the
+    /// underlying operation this hook observed has already fully committed.
+    event HookFailed(bytes32 indexed point, address indexed hook);
+
     // ── Errors (verbatim) ──────────────────────────────────────────────────
 
     error NotSeeder();
@@ -245,6 +277,9 @@ abstract contract IndexFacetBase {
     error RoleTimelockNotElapsed();
 
     error ReentrantCall();
+
+    // Hooks (design doc section 8)
+    error InvalidHookPoint(bytes32 point);
 
     // Streams (ported from WrappedIndexShare)
     error InvalidStream();
@@ -408,7 +443,9 @@ abstract contract IndexFacetBase {
 
     function _observe(address token, Constituent storage c, bool bootstrap) internal {
         Params storage p = _params();
-        emit Checkpointed(token, IndexOracle.observe(c, p.priceCapBps, p.minCheckpointInterval, bootstrap));
+        uint256 price = IndexOracle.observe(c, p.priceCapBps, p.minCheckpointInterval, bootstrap);
+        emit Checkpointed(token, price);
+        _fireHook(HOOK_AFTER_CHECKPOINT_, abi.encode(token, price));
     }
 
     function _last(Constituent storage c) internal view returns (Observation memory) {
@@ -617,6 +654,42 @@ abstract contract IndexFacetBase {
         return false;
     }
 
+    /**
+     * @dev Fire an observer hook, if one is registered at `point`. This is the
+     * ENTIRE hook call surface (design doc section 8) — every non-negotiable
+     * lives in this one function:
+     *
+     *  1. `CALL`, never `DELEGATECALL` — `hook.call{...}(...)` on an EXTERNAL
+     *     address is opcode 0xF1, and `hook` is never `address(this)` or any
+     *     value derived from `this`, so the hook runs entirely in its own
+     *     storage and can never touch a diamond namespace.
+     *  2. BOUNDED GAS — `HOOK_GAS` forwarded, not all remaining gas. The
+     *     63/64 rule (EIP-150) means the CALLER always keeps at least 1/64th
+     *     of what it had, so a hook that tries to burn its entire stipend
+     *     cannot starve the caller's own remaining execution.
+     *  3. NON-REVERTING — the outer `bool ok` is read and NEVER propagated;
+     *     a reverting, out-of-gas, or nonexistent hook only emits
+     *     `HookFailed` and execution continues exactly as if no hook were
+     *     registered.
+     *  4. `point` is always one of the three compile-time constants declared
+     *     above, passed in by the caller of `_fireHook` — never anything
+     *     built from user input.
+     *  5. NEVER called from `IndexCoreFacet` — `Hooks.exitDoorFree.test.ts`
+     *     and `Diamond.facets.test.ts`'s source-level scan both assert
+     *     `IndexCoreFacet` never imports `HooksStorage` at all, so there is
+     *     no code path from `redeemProRata`, `claimPending` or
+     *     `claimPendingMany` into this function.
+     *  6. NEVER ON A VALUE PATH — the return data is discarded entirely.
+     *     Nothing a hook returns, or whether it succeeds, is used in any
+     *     arithmetic anywhere.
+     */
+    function _fireHook(bytes32 point, bytes memory data) internal {
+        address hook = HooksStorage.layout().hooks[point];
+        if (hook == address(0)) return;
+        (bool ok, ) = hook.call{gas: HOOK_GAS}(abi.encodeWithSignature("onHook(bytes32,bytes)", point, data));
+        if (!ok) emit HookFailed(point, hook);
+    }
+
     /// @dev The ONE writer of `ecosystemFeesWei`.
     function _accrueEcosystem(address token, uint256 feeAmount) internal returns (uint256 cut) {
         EcosystemStorage.Layout storage es = EcosystemStorage.layout();
@@ -675,6 +748,7 @@ abstract contract IndexFacetBase {
         cs.constituentList.push(token);
         _observe(token, c, true);
         emit ConstituentListed(token, address(source), rawTargetWeightBps);
+        _fireHook(HOOK_AFTER_LISTING_, abi.encode(token, address(source), rawTargetWeightBps));
         _recomputeEligibleCount();
     }
 
