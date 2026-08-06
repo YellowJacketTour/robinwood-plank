@@ -1249,7 +1249,11 @@ jobs:
           # passed explicitly so a manual re-run with a different range still
           # goes through the exact same path.
           from_block="${REPAIR_FROM_BLOCK:-27935949}"
-          to_block="${REPAIR_TO_BLOCK:-}"
+          # SSH reconstructs the remote command as one joined string, so a
+          # genuinely empty positional argument can vanish entirely instead
+          # of arriving as an empty $4 — a sentinel survives that reliably,
+          # an empty string does not.
+          to_block="${REPAIR_TO_BLOCK:-auto}"
           ssh -i "$HOME/.ssh/inmotion" -p "$port" \
             "${INMOTION_USER}@${INMOTION_HOST}" \
             bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "$from_block" "$to_block" <<'REMOTE'
@@ -1257,7 +1261,14 @@ jobs:
           app_dir="$1"
           node_bin="$2"
           from_block="$3"
-          to_block="$4"
+          # "${4:-auto}" rather than a bare "$4": belt-and-braces against the
+          # same SSH argument-vanishing case the caller-side sentinel already
+          # guards, in case a future caller ever invokes this without one.
+          to_block_raw="${4:-auto}"
+          to_block=""
+          if [ "$to_block_raw" != "auto" ]; then
+            to_block="$to_block_raw"
+          fi
           case "$app_dir" in
             /home/*/plank.tanggang.life) ;;
             *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
