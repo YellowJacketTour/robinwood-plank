@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Deploy, provision/verify the drand relayer, set the admin allowlist, install the vault-deploy dispatch token, or purge and rebuild the market snapshots.
+        description: Deploy, provision/verify the drand relayer, set the admin allowlist, install the vault-deploy dispatch token, purge and rebuild the market snapshots, or repair mislabelled chain-event ledger rows.
         required: true
         type: choice
         default: deploy
@@ -27,6 +27,21 @@ on:
           - set-admin-allowlist
           - set-dispatch-token
           - purge-market-data
+          - repair-activity
+      repair_from_block:
+        description: >-
+          repair-activity only — first block to re-derive. Defaults to
+          27935949, the block NEXT_PUBLIC_MARKET_VAULT_ADDRESS drifted stale
+          and V3 deposits/redeems started being stored as open-market sales
+          (see commit dd750d1).
+        required: false
+        type: string
+      repair_to_block:
+        description: >-
+          repair-activity only — last block to re-derive. Empty resolves to
+          the current chain head at run time.
+        required: false
+        type: string
       confirmation:
         description: Relay-disable confirmation, when required.
         required: false
@@ -122,6 +137,7 @@ jobs:
       - run: npm run build
       - run: npm run build:relayer
       - run: npm run build:market-refresh
+      - run: npm run build:reindex
 
       - name: Package standalone Passenger release
         if: github.event_name != 'pull_request'
@@ -139,9 +155,11 @@ jobs:
           cp scripts/postgres-maintenance.mjs .next/standalone/scripts/postgres-maintenance.mjs
           cp scripts/backup-postgres.mjs .next/standalone/scripts/backup-postgres.mjs
           cp scripts/snapshot-vault-state.mjs .next/standalone/scripts/snapshot-vault-state.mjs
-          # Bundled by build:market-refresh — the standalone tree has no tsx,
-          # so the cron runs the esbuild output, same as the drand relayer.
+          # Bundled by build:market-refresh / build:reindex — the standalone
+          # tree has no tsx, so both run the esbuild output, same as the
+          # drand relayer.
           test -s .next/standalone/scripts/refresh-market-data.mjs
+          test -s .next/standalone/scripts/reindex-chain-events.mjs
           test -s .next/standalone/ops/drand-relayer/relay-drand.mjs
           cp scripts/verify-relayer-log.mjs .next/standalone/ops/drand-relayer/verify-log.mjs
           tar -C .next/standalone -czf passenger-release.tgz .
@@ -1189,6 +1207,91 @@ jobs:
             echo "::error::$stubs token(s) still carry a pre-reveal stub — the rebuild did not fully land."
             exit 1
           fi
+
+  repair-activity:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'repair-activity'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+      INMOTION_NODE_BIN: ${{ vars.INMOTION_NODE_BIN }}
+      REPAIR_FROM_BLOCK: ${{ inputs.repair_from_block }}
+      REPAIR_TO_BLOCK: ${{ inputs.repair_to_block }}
+    steps:
+      - name: Configure trusted SSH host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$INMOTION_HOST"
+          test -n "$INMOTION_USER"
+          test -n "$INMOTION_APP_DIR"
+          test -n "$INMOTION_NODE_BIN"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Backup, then repair the ledger's derived columns
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          # 27935949 is the default baked into the remote script below too —
+          # passed explicitly so a manual re-run with a different range still
+          # goes through the exact same path.
+          from_block="${REPAIR_FROM_BLOCK:-27935949}"
+          to_block="${REPAIR_TO_BLOCK:-}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" "$INMOTION_NODE_BIN" "$from_block" "$to_block" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          node_bin="$2"
+          from_block="$3"
+          to_block="$4"
+          case "$app_dir" in
+            /home/*/plank.tanggang.life) ;;
+            *) echo "Refusing unexpected application directory." >&2; exit 1 ;;
+          esac
+          test -x "$node_bin"
+          env_file="$app_dir/shared/.env.production"
+          script="$app_dir/current/scripts/reindex-chain-events.mjs"
+          backup_script="$app_dir/current/scripts/backup-postgres.mjs"
+          test -s "$env_file"
+          test -s "$script"
+          test -s "$backup_script"
+
+          # Same backup-before-mutate discipline the deploy's own migration
+          # step uses (inmotion.yml's `deploy` job) — this touches the same
+          # ledger table via UPDATE, so it gets the same rollback point.
+          INMOTION_APP_DIR="$app_dir" \
+          PLANK_BACKUP_DIR="$app_dir/shared/backups" \
+          PLANK_BACKUP_LABEL="prerepair" \
+          PLANK_BACKUP_KEEP=14 \
+            "$node_bin" --env-file="$env_file" "$backup_script"
+
+          args="--from=$from_block"
+          if [ -n "$to_block" ]; then
+            args="$args --to=$to_block"
+          fi
+          echo "repairing range: $args"
+          "$node_bin" --env-file="$env_file" "$script" $args
+          REMOTE
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "Repair pass complete. Only kind/venue/price_wei on already-stored" \
+               "rows can change (repairChainEvents), and price_wei is filled, never erased."
 
   # ---------------------------------------------------------------------------
   # Keep dev from drifting behind master.
