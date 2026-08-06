@@ -219,6 +219,41 @@ test("a vault mechanic stays a vault transfer even when a receipt shows payment"
   assert.equal(r.venue?.kind, "vault");
 });
 
+/**
+ * The production regression this branch exists for (live feed, 2026-08-06):
+ * the V3 pool 0xacE28f72… dropped out of the indexer's env vault list, so
+ * `depositMany` was written to the permanent ledger as a "sale" priced at the
+ * 0.0001 ETH deposit fee, and `redeemTargetMany` as an unpriced "sale". The env
+ * list can drift; the vault's own event log cannot.
+ */
+test("a vault the env list has never heard of is still a vault transfer, from its own event", () => {
+  const r = classifyTransfer({
+    from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",
+    txTo: VAULT,
+    seaportAddress: SEAPORT,
+    nftContractAddress: NFT,
+    // Deliberately empty — this is exactly the misconfigured deployment.
+    vaultAddresses: [],
+    saleEvidence: "native-value",
+    vaultEventContract: VAULT.toLowerCase(),
+  });
+  assert.equal(r.kind, "transfer");
+  assert.deepEqual(r.venue, { kind: "vault", contract: VAULT.toLowerCase() });
+});
+
+test("no vault event in the receipt leaves a genuine sale a sale", () => {
+  const r = classifyTransfer({
+    from: "0xAaAaAaAAAaaAAaAaAAaAAAAAaAAaAAaAAaAaAaAa",
+    txTo: OTHER_MARKETPLACE,
+    seaportAddress: SEAPORT,
+    nftContractAddress: NFT,
+    saleEvidence: "native-value",
+    vaultEventContract: null,
+  });
+  assert.equal(r.kind, "sale");
+  assert.deepEqual(r.venue, { kind: "other", contract: OTHER_MARKETPLACE });
+});
+
 test("with NO evidence supplied, classification is byte-for-byte what it always was", () => {
   // An unreadable receipt must leave behaviour unchanged rather than guess in
   // the other direction — silently demoting real sales would be a worse bug.

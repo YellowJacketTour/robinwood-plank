@@ -55,6 +55,7 @@ import {
   isMarketplankAttributed,
   readCachedSalePriceWei,
   resolveMarketplankAttribution,
+  vaultEventContractFor,
   type ActivityEvent,
 } from "@/lib/market/activity";
 import { VAULT_TOPIC_SET, decodeVaultLog } from "@/lib/market/vault-activity";
@@ -434,6 +435,11 @@ async function buildNftRows(logs: RawLog[]): Promise<ChainEventRow[]> {
       // deposit/redeem into the ledger as an unpriced "sale" — and the ledger
       // is append-only, so a misclassification here is permanent.
       vaultAddresses: MARKET_VAULT_ADDRESSES,
+      // Receipt-proven vault mechanic, for the vault that the env list above
+      // does not know about. This is not belt-and-braces: it is the only
+      // defence against the env list drifting, and it has drifted in
+      // production — see classifyTransfer's vaultEventContract doc comment.
+      vaultEventContract: vaultEventContractFor(log.transactionHash),
       saleEvidence,
     });
 
