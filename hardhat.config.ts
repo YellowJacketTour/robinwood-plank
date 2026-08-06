@@ -21,6 +21,38 @@ const config: HardhatUserConfig = {
           // Cancun support is unconfirmed. Paris is the conservative,
           // broadly-supported target.
           evmVersion: "paris",
+          /**
+           * Emit solc's storage layout for every contract.
+           *
+           * WHY THIS IS SAFE TO ADD to a config whose header warns that
+           * changing compiler settings breaks source verification for the
+           * ALREADY-DEPLOYED MarketplankVault contracts: `outputSelection`
+           * selects which artefacts solc EMITS. It is not a codegen setting and
+           * does not participate in optimisation, so every contract's bytecode
+           * is bit-identical with and without it. (Verified: the deployed
+           * bytecode of MarketplankVault and MarketplankVaultV3 is unchanged
+           * across this edit.)
+           *
+           * WHY IT IS NEEDED: the diamond's most important structural rule —
+           * "no facet declares a state variable, ever" (design doc section 3.3
+           * rule 1) — cannot be checked by reading facet source, because the
+           * dangerous case is INHERITED storage: a facet that looks clean but
+           * extends OpenZeppelin's ERC20 or ReentrancyGuard and silently lands
+           * a mapping on the diamond's own slot 0. Only the compiler knows the
+           * resolved layout. Diamond.storage.test.ts reads it from here.
+           */
+          outputSelection: {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata",
+                "storageLayout",
+              ],
+            },
+          },
         },
       },
     ],
@@ -63,6 +95,21 @@ const config: HardhatUserConfig = {
           optimizer: { enabled: true, runs: 1 },
           viaIR: true,
           evmVersion: "paris",
+          // Same output selection as the default profile; an override replaces
+          // the whole settings object, so omitting it here would silently drop
+          // storageLayout for this one file.
+          outputSelection: {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata",
+                "storageLayout",
+              ],
+            },
+          },
         },
       },
     },
