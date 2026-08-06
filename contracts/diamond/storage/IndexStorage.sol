@@ -515,7 +515,30 @@ library PoolStorage {
         /// there is no direct, un-timelocked setter anywhere in this facet
         /// set, and this namespace does not become the first one.
         GovernanceQueuedAddress queuedPool;
-        uint256[16] __gap;
+        /// @notice §7.10 dilution bound (adversarial-review fix, 2026-08-06):
+        /// cumulative index-coin shares ever minted TO the pool by
+        /// `IndexPoolFacet.deployToIndexPool`. `redeemProRata`
+        /// (`IndexCoreFacet.sol`) and `_previewSingleExit`'s pricing path
+        /// (`IndexValuation.previewSingleExit`) both divide by raw
+        /// `totalSupply` and never read the pool, so shares minted here are
+        /// permanently unredeemable dead weight in that denominator — see
+        /// `IndexPoolFacet.deployToIndexPool`'s header for the full
+        /// derivation of why this is bounded here rather than folded into
+        /// those two price-free paths.
+        uint256 poolSharesMinted;
+        /// @notice Governed ceiling, in bps of `totalSupply`, on
+        /// `poolSharesMinted`. Checked on every `deployToIndexPool` call.
+        /// Zero until `executeIndexPool` seeds the initial safe default
+        /// alongside first pool activation (that call is itself already
+        /// timelocked via `queueIndexPool`, so this is not a bypass of the
+        /// timelock discipline — it is establishing the initial value at the
+        /// same moment the surface it bounds becomes reachable at all).
+        uint256 maxPoolShareBps;
+        /// @notice Timelocked change to `maxPoolShareBps`, same
+        /// queue/execute shape as `queuedPool` above and every other
+        /// risk-surface change in this facet set.
+        QueuedUint256 queuedMaxPoolShareBps;
+        uint256[13] __gap;
     }
 
     /// @dev Shaped identically to `GovernanceStorage.QueuedParam`, declared
@@ -525,6 +548,15 @@ library PoolStorage {
     /// codebase.
     struct GovernanceQueuedAddress {
         address value;
+        uint64 eta;
+        bool pending;
+    }
+
+    /// @dev Same shape as `GovernanceQueuedAddress` above, over a `uint256`
+    /// instead of an `address` — `GovernanceStorage.QueuedParam`'s own shape,
+    /// reused verbatim, re-declared locally for the same reason.
+    struct QueuedUint256 {
+        uint256 value;
         uint64 eta;
         bool pending;
     }

@@ -194,6 +194,15 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
         role: ROLE_RISK,
         holder: risk,
       },
+      // Adversarial-review fix (2026-08-06): the §7.10 dilution-cap governor.
+      // Same queue/execute timelock shape and role as `queueIndexPool`
+      // immediately above.
+      {
+        name: "queueMaxPoolShareBps",
+        args: [1_000n],
+        role: ROLE_RISK,
+        holder: risk,
+      },
       {
         name: "queueRole",
         args: [ROLE_RISK, alice.address],
@@ -308,6 +317,10 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // table — has any special claim on. There is nothing here for a role
       // to be trusted with either.
       "deployToIndexPool",
+      // Adversarial-review fix (2026-08-06). `executeMaxPoolShareBps` is the
+      // timelock-gated apply for the §7.10 dilution cap, same shape as
+      // `executeIndexPool` immediately above — permissionless after the eta.
+      "executeMaxPoolShareBps",
     ]);
     const abiNames = (vault.interface.fragments as any[])
       .filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))
