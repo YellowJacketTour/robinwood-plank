@@ -31,12 +31,17 @@ test("relayer log verifier accepts a recent all-vault success", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "plank-relayer-log-"));
   try {
     const log = path.join(directory, "relayer.log");
+    const legacyStatus = `RELAYER_STATUS=${JSON.stringify({
+      timestamp: new Date(Date.now() - 60_000).toISOString(),
+      vaults: vaults.slice(1),
+    })}\n`;
     await writeFile(
       log,
-      `RELAYER_STATUS=${JSON.stringify({
-        timestamp: new Date().toISOString(),
-        vaults,
-      })}\n`
+      legacyStatus +
+        `RELAYER_STATUS=${JSON.stringify({
+          timestamp: new Date().toISOString(),
+          vaults,
+        })}\n`
     );
     const { stdout } = await execFileAsync(process.execPath, [
       verifier,
