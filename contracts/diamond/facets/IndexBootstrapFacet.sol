@@ -125,6 +125,37 @@ contract IndexBootstrapFacet is IndexFacetBase {
      * of the token named, redeemable pro rata by every holder).
      */
     function syncConstituentBalance(address token) external nonReentrant returns (uint256 credited) {
+        return _sync(token);
+    }
+
+    /**
+     * @notice Permissionless backstop for the factory-vault push-then-
+     * opportunistic-reconcile mechanism (design doc
+     * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.2, §3.2).
+     *
+     * A factory-deployed `CollectionVault` pushes its mandatory sink cut to
+     * this Diamond's own address with a PLAIN `IERC20.transfer` on every fee
+     * event — no cross-contract call back into this Diamond, so a problem on
+     * this side can never brick an unrelated vault's mint/redeem/swap. The
+     * hot mint/redeem paths that already touch a constituent opportunistically
+     * absorb that surplus (same discipline as `_sync` below); `reconcile` is
+     * the explicit, callable-by-anyone entry point for the case where nobody
+     * happens to touch that constituent afterward — the same category as
+     * calling `sync()` on a Uniswap pool: required of no one, harmless to
+     * call with nothing pending (returns 0), and never trusts a self-reported
+     * amount — it is a THIN ALIAS over the identical `_sync` logic
+     * `syncConstituentBalance` already uses, so there is exactly one place
+     * this "credit only an observed balance delta" rule is implemented.
+     */
+    function reconcile(address token) external nonReentrant returns (uint256 credited) {
+        return _sync(token);
+    }
+
+    /// @dev THE ONE implementation of "credit only what has already,
+    /// physically, verifiably arrived" — see the header note on
+    /// `syncConstituentBalance` above. Both public entry points call this and
+    /// nothing else, so they can never drift out of parity with each other.
+    function _sync(address token) private returns (uint256 credited) {
         CoreStorage.Layout storage cs = CoreStorage.layout();
         Constituent storage c = _get(token);
         uint256 accounted = c.reserve
