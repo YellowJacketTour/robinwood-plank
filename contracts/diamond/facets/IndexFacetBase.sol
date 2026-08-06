@@ -22,6 +22,7 @@ import {
     AllocationStorage,
     EcosystemStorage,
     DividendStorage,
+    ValueAccrualStorage,
     StreamStorage,
     ReentrancyStorage,
     HooksStorage
@@ -220,6 +221,8 @@ abstract contract IndexFacetBase {
     event PendingClaimed(address indexed account, address indexed token, uint256 amount);
     event ConstituentSynced(address indexed token, uint256 credited);
     event DividendsDeferred(uint256 amount, uint256 carried);
+    event ValueAccrualSplitApplied(uint256 dividendBps, uint256 buybackBps);
+    event BuybackEarmarked(address indexed token, uint256 amount);
 
     // Streams (ported from WrappedIndexShare)
     event StreamQueued(address indexed token, uint64 eta);
@@ -819,6 +822,45 @@ abstract contract IndexFacetBase {
         }
         if (carried > 0) emit DividendsDeferred(pot, carried);
         emit DividendsReceived(msg.sender, amount, eligible);
+    }
+
+    /**
+     * @dev §7.3's three-way split, applied at the ONE place newly-routed
+     * value is credited (`IndexBootstrapFacet._sync`, reached through both
+     * `syncConstituentBalance` and the `reconcile` alias — see that file's
+     * header). `amount` is value ALREADY physically held by this contract
+     * (measured as a balance-delta surplus by the caller), so this function
+     * only ever re-labels accounting, never transfers or fabricates.
+     *
+     * The dividend leg is credited ONLY when `token == dividendAsset` — the
+     * EIP-2222 accumulator is deliberately single-asset (design doc §5.4,
+     * `DividendStorage`'s own header), so a share denominated in any other
+     * token cannot be force-fit into it. When it does not apply, that share
+     * is NEVER stranded: it falls back into `reserveShare` below, which is
+     * exactly the "no input can strand a routed dividend" doctrine
+     * `IndexDividendFacet` already documents, extended to this split.
+     *
+     * The buyback leg is a pure accounting increment
+     * (`ValueAccrualStorage.buybackEarmarkWei`) — §7.7's mechanism is not
+     * built, so there is no transfer, no sink call and no spend path here;
+     * the earmarked value remains part of this contract's own balance and
+     * therefore part of what `_sync`'s `accounted` subtraction already
+     * protects from being re-credited a second time.
+     */
+    function _creditRoutedValue(address token, Constituent storage c, uint256 amount) internal {
+        ValueAccrualStorage.Layout storage va = ValueAccrualStorage.layout();
+        uint256 dividendShare = token == CoreStorage.layout().dividendAsset
+            ? Math.mulDiv(amount, va.dividendBps, BPS)
+            : 0;
+        uint256 buybackShare = Math.mulDiv(amount, va.buybackBps, BPS);
+        uint256 reserveShare = amount - dividendShare - buybackShare;
+
+        if (reserveShare > 0) c.reserve += reserveShare;
+        if (buybackShare > 0) {
+            va.buybackEarmarkWei[token] += buybackShare;
+            emit BuybackEarmarked(token, buybackShare);
+        }
+        if (dividendShare > 0) _creditDividends(dividendShare);
     }
 
     // ══ Streams — ported verbatim from WrappedIndexShare (design doc §5.4/§5.5) ══
