@@ -148,6 +148,32 @@ const config: HardhatUserConfig = {
     ],
   },
   networks: {
+    // The in-process test network's EVM RULES (distinct from the compiler's
+    // `evmVersion: "paris"` target above — this repo's own facet bytecode is
+    // compiled conservatively for a pre-Cancun chain, but the LOCAL TEST
+    // NETWORK is a separate, superset-compatible sandbox and does not need
+    // the same restriction; paris-targeted bytecode runs unmodified on a
+    // later hardfork). Pinned to "cancun" for two independent reasons found
+    // wiring §7.10's pool facet into the deployment manifest:
+    //   1. `SeaportCriteriaFulfill.test.ts` / `SeaportPerTokenApproval.test.ts`
+    //      plant Seaport 1.6's REAL deployed bytecode via `hardhat_setCode`,
+    //      which uses `PUSH0` (EIP-3855, Shanghai+) — Hardhat's default
+    //      network hardfork must be at least Shanghai for that bytecode to
+    //      execute at all (pre-existing requirement, just never pinned).
+    //   2. Hardhat's own CURRENT default hardfork (as of the version pinned
+    //      in package.json) is past FUSAKA, which enforces EIP-7825's
+    //      16,777,216 PER-TRANSACTION gas cap. `IndexDeployer`'s one-shot
+    //      atomic deploy-cut-finalize transaction genuinely needs slightly
+    //      MORE than that once a 13th facet (`IndexPoolFacet`) joined the
+    //      manifest (~16.8-17M gas, confirmed by direct measurement) — real
+    //      on a Fusaka chain, irrelevant on the pre-Cancun chain this repo
+    //      actually targets (see the `evmVersion: "paris"` note above).
+    // "cancun" is the newest hardfork that satisfies (1) without
+    // reintroducing (2) — anything from "shanghai" through "cancun" would
+    // equally fix both; "cancun" is chosen as the newest hardfork this
+    // Hardhat version supports that still predates Fusaka's gas cap.
+    hardhat: { hardfork: "cancun" },
+
     // LOCAL ONLY. `npx hardhat node` serves this on 127.0.0.1:8545 (chainId
     // 31337); scripts/local-v3-setup.ts deploys the V3 dev stack here so the
     // frontend can be exercised without touching mainnet.
