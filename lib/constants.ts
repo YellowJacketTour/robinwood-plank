@@ -230,6 +230,7 @@ export const NAV_LINKS = [
 
 export const SOCIAL_LINKS = {
   twitter: "https://x.com/RobinWoodPlank",
+  telegram: "https://t.me/PlankLove",
 } as const;
 
 // Official Wood List thread — drop your wallet address in the replies.
