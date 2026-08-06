@@ -119,6 +119,24 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
     const ROLE_ADMISSION = await vault.ROLE_CONSTITUENT_ADMISSION();
     const ROLE_RISK = await vault.ROLE_RISK_PARAM();
     const ROLE_ALLOC = await vault.ROLE_PLATFORM_ALLOCATION();
+    const ROLE_STREAM = await vault.ROLE_STREAM_LISTER();
+
+    // ROLE_STREAM_LISTER is seeded to `admission` in `deployOpenIndex` (see
+    // its comment there). Pre-stage the queued/listed states `cancelStream`
+    // and `delistStream` need so the ONE successful call inside the loop
+    // below (the designated holder's) lands on real state, exactly as the
+    // other entries rely on `d`/`addrs[0]` already existing.
+    const Token = await ethers.getContractFactory("MockIndexToken");
+    const queueTok: any = await Token.deploy("ISOQ", "ISOQ");
+    const cancelTok: any = await Token.deploy("ISOC", "ISOC");
+    const delistTok: any = await Token.deploy("ISOD", "ISOD");
+    const queueTokAddr = await queueTok.getAddress();
+    const cancelTokAddr = await cancelTok.getAddress();
+    const delistTokAddr = await delistTok.getAddress();
+    await vault.connect(admission).queueStream(cancelTokAddr);
+    await vault.connect(admission).queueStream(delistTokAddr);
+    await time.increase(TIMELOCK + 1);
+    await vault.executeStream(delistTokAddr);
 
     /**
      * The complete privileged surface of the vault: every non-view function
@@ -168,6 +186,12 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
         role: ROLE_ADMIN,
         holder: roleAdmin,
       },
+      // IndexStreamFacet (design doc §9 Stage 5) — the ONLY administered
+      // surface streams have. It whitelists reward tokens and reaches no
+      // value path.
+      { name: "queueStream", args: [queueTokAddr], role: ROLE_STREAM, holder: admission },
+      { name: "cancelStream", args: [cancelTokAddr], role: ROLE_STREAM, holder: admission },
+      { name: "delistStream", args: [delistTokAddr], role: ROLE_STREAM, holder: admission },
     ];
 
     // The enumeration must be COMPLETE. Every non-view function on the ABI is
@@ -223,6 +247,15 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       "transferFrom",
       "increaseAllowance",
       "decreaseAllowance",
+      // IndexStreamFacet (design doc §9 Stage 5). `executeStream` is the
+      // timelock-gated apply, same shape as `executeParam`/`executeListing`.
+      // `depositStream` and `pruneStream` are permissionless BY DESIGN — see
+      // IndexStreamFacet.sol's header — and neither can touch value the
+      // caller does not already own or that is not already promised to
+      // every holder pro rata.
+      "executeStream",
+      "depositStream",
+      "pruneStream",
     ]);
     const abiNames = (vault.interface.fragments as any[])
       .filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))

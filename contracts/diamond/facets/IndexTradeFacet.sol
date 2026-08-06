@@ -61,7 +61,8 @@ contract IndexTradeFacet is IndexFacetBase {
         _requirePersistenceIfLarge(token, ethValue, false);
 
         // Pro-rata-equivalent shares, floored, against the OVER-stated basket.
-        sharesOut = Math.mulDiv(ethValue, _totalSupply() + VIRTUAL_SHARES, navHigh + VIRTUAL_ASSETS);
+        uint256 supplyBefore = _totalSupply();
+        sharesOut = Math.mulDiv(ethValue, supplyBefore + VIRTUAL_SHARES, navHigh + VIRTUAL_ASSETS);
         uint256 feeBps = _mintFeeBps(token, _imbalanceFeeBps(credited, c.reserve));
         sharesOut -= (sharesOut * feeBps) / BPS;
         if (sharesOut == 0) revert ZeroAmount();
@@ -74,9 +75,18 @@ contract IndexTradeFacet is IndexFacetBase {
         // The slippage guard is checked against what the DEPOSITOR actually
         // receives, not the pre-allocation gross — a guard that can be
         // satisfied by shares the caller never gets is not a guard.
+        uint256 grossMinted = sharesOut;
         sharesOut = _mintWithAllocation(msg.sender, sharesOut);
         if (sharesOut < minSharesOut) revert SlippageExceeded();
         _requireCapNotWorsened(weightsBefore);
+
+        // Round 9f, ported verbatim (design doc §5.4): this path also grows
+        // `totalSupply`, so it also displaces stream backing proportionally.
+        // `grossMinted` — not the net paid to the depositor — is the actual
+        // growth in `totalSupply`, which is the quantity the derivation in
+        // WrappedIndexShare.sol's header is stated in terms of. (Supply is
+        // never zero here in practice — see IndexCoreFacet.mintProRata.)
+        _revestOnMint(grossMinted, supplyBefore);
 
         emit MintedSingle(msg.sender, token, credited, sharesOut);
     }

@@ -119,6 +119,28 @@ abstract contract IndexFacetBase {
 
     uint256 internal constant PAYOUT_GAS = 250_000;
 
+    /// @dev Gas ceiling on a stream `balanceOf` probe, ported verbatim from
+    /// WrappedIndexShare. A view that needs more than this is not a token, it
+    /// is a liability.
+    uint256 internal constant PROBE_GAS = 100_000;
+
+    /// @notice Disclosed, deliberate bound on iterated stream assets. Same
+    /// value as MAX_CONSTITUENTS, same reasoning: `redeemProRata` must stay
+    /// gas-safe as the stream count grows, and 32 is generous headroom.
+    uint256 internal constant MAX_STREAMS = 32;
+
+    /**
+     * @dev Round-9f re-vest window, ported verbatim from WrappedIndexShare. A
+     * CONSTANT, deliberately: nothing settable here, because anything settable
+     * would be a lever over when users can redeem. See WrappedIndexShare.sol's
+     * header ("ROUND 9f") for the full derivation.
+     */
+    uint256 internal constant STREAM_VEST_BLOCKS = 300;
+
+    /// @dev The `M` in `revest = net * M * w / (S + w + VIRTUAL_SHARES)`.
+    /// `M = 25` bounds atomic capture at 1% and the salami-sliced limit at 4%.
+    uint256 internal constant DILUTION_REVEST_MULTIPLE = 25;
+
     uint256 internal constant MAGNITUDE = 2 ** 64;
     uint256 internal constant MAX_MAGNIFIED_PER_SHARE = 2 ** 126;
     uint256 internal constant MAX_PUSH_HEADROOM_DIVISOR = 2 ** 32;
@@ -174,6 +196,13 @@ abstract contract IndexFacetBase {
     event ConstituentSynced(address indexed token, uint256 credited);
     event DividendsDeferred(uint256 amount, uint256 carried);
 
+    // Streams (ported from WrappedIndexShare)
+    event StreamQueued(address indexed token, uint64 eta);
+    event StreamListed(address indexed token);
+    event StreamDelisted(address indexed token);
+    event StreamPruned(address indexed token);
+    event StreamFunded(address indexed token, address indexed from, uint256 credited);
+
     // ERC-20
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(address indexed owner, address indexed spender, uint256 value);
@@ -216,6 +245,17 @@ abstract contract IndexFacetBase {
     error RoleTimelockNotElapsed();
 
     error ReentrantCall();
+
+    // Streams (ported from WrappedIndexShare)
+    error InvalidStream();
+    error StreamAlreadyListed();
+    error StreamCapReached();
+    error NotAStream();
+    error NoStreamQueued();
+    error StreamTimelockNotElapsed();
+    error StreamStillListed();
+    error StreamNotEmpty();
+    error NothingCredited();
 
     /// @dev Named rather than folded into `ZeroAmount`: an ERC-20 balance or
     /// allowance shortfall is a different failure from a zero-amount call, and
@@ -687,5 +727,114 @@ abstract contract IndexFacetBase {
         }
         if (carried > 0) emit DividendsDeferred(pot, carried);
         emit DividendsReceived(msg.sender, amount, eligible);
+    }
+
+    // ══ Streams — ported verbatim from WrappedIndexShare (design doc §5.4/§5.5) ══
+    //
+    // NO PER-HOLDER STATE, ever — the architectural rule WrappedIndexShare.sol
+    // states and this port does not relax it. Value accrues to the BACKING
+    // POOL, read live and net of `reservedClaims + carry + unvestedOf`, so a
+    // passive third-party custodian (an LP pool holding the unified share)
+    // gets richer automatically, with zero action of its own.
+
+    /// @dev A stream's backing net of everything already owed or displaced.
+    /// `reservedClaims` is the SAME per-token ledger `_payOrDefer` writes for
+    /// constituent legs — one deferred-claim ledger for the whole diamond.
+    function _netOfStream(address token, uint256 bal) internal view returns (uint256) {
+        StreamStorage.Layout storage ss = StreamStorage.layout();
+        uint256 res = CoreStorage.layout().reservedClaims[token] + ss.carry[token] + _unvestedOf(token);
+        return bal > res ? bal - res : 0;
+    }
+
+    /// @dev Pure function of storage and `block.number`. No setter anywhere;
+    /// no role can read, write, extend or reach it.
+    function _unvestedOf(address token) internal view returns (uint256) {
+        StreamStorage.StreamVest storage v = StreamStorage.layout().vest[token];
+        uint256 u = v.unvested;
+        if (u == 0) return 0;
+        uint256 end_ = v.end;
+        if (block.number >= end_) return 0;
+        // `last < end` always holds: `_addVest` writes them together as
+        // (n, n + STREAM_VEST_BLOCKS) with STREAM_VEST_BLOCKS > 0.
+        return Math.mulDiv(u, end_ - block.number, end_ - v.last);
+    }
+
+    /// @dev A stream's net backing, read through a bounded-gas STATICCALL that
+    /// cannot revert the caller. Any failure or short return reads as zero —
+    /// a broken stream becomes invisible, never fatal.
+    function _probeStreamBalance(address token) internal view returns (uint256) {
+        (bool ok, bytes memory data) = token.staticcall{gas: PROBE_GAS}(
+            abi.encodeWithSelector(IERC20.balanceOf.selector, address(this))
+        );
+        if (!ok || data.length < 32) return 0;
+        return _netOfStream(token, abi.decode(data, (uint256)));
+    }
+
+    /// @dev THE ONE CARRY WRITE. With any wrapped supply at all this is a
+    /// no-op; with none, the value is held aside rather than left for the next
+    /// depositor to flash-capture. See "THE ZERO-DENOMINATOR CARRY" in
+    /// WrappedIndexShare.sol (round 9e).
+    function _accrueCarry(address token, uint256 amount) internal {
+        if (amount == 0 || _totalSupply() != 0) return;
+        StreamStorage.Layout storage ss = StreamStorage.layout();
+        ss.carry[token] += amount;
+        ss.carryUnlockBlock = type(uint256).max;
+    }
+
+    /// @dev Fold every carried balance back into backing once real stake has
+    /// been held across a block boundary. Unconditional and permissionless.
+    function _foldCarry() internal {
+        StreamStorage.Layout storage ss = StreamStorage.layout();
+        uint256 unlock_ = ss.carryUnlockBlock;
+        if (unlock_ == 0 || block.number < unlock_ || _totalSupply() == 0) return;
+        uint256 n = ss.streamList.length;
+        for (uint256 i = 0; i < n; i++) ss.carry[ss.streamList[i]] = 0;
+        ss.carryUnlockBlock = 0;
+    }
+
+    /// @dev Arm the release clock when supply transitions 0 -> nonzero with
+    /// something carried. `block.number + 1`: the sole minter who just created
+    /// the supply cannot capture the pot in their own transaction.
+    function _armCarry() internal {
+        StreamStorage.Layout storage ss = StreamStorage.layout();
+        if (ss.carryUnlockBlock != 0) ss.carryUnlockBlock = block.number + 1;
+    }
+
+    /**
+     * @dev THE FIX for the atomic mint->redeem stream-backing extraction
+     * (round 9f). Runs AFTER a mint, so it cannot affect the mint's own
+     * pricing, and reads streams only through the bounded-gas
+     * `_probeStreamBalance`, so a hostile stream can neither revert a mint nor
+     * consume its gas.
+     *
+     * `minted == 0` is a no-op: `mintProRata`/`mintSingleAsset` always mint a
+     * nonzero amount on success, so this only ever short-circuits a caller
+     * that reverted before reaching here.
+     */
+    function _revestOnMint(uint256 minted, uint256 supplyBefore) internal {
+        if (minted == 0) return;
+        StreamStorage.Layout storage ss = StreamStorage.layout();
+        uint256 denom = supplyBefore + minted + VIRTUAL_SHARES;
+        uint256 n = ss.streamList.length;
+        for (uint256 i = 0; i < n; i++) {
+            address t = ss.streamList[i];
+            uint256 net = _probeStreamBalance(t);
+            if (net == 0) continue;
+            uint256 amt = minted >= denom / DILUTION_REVEST_MULTIPLE
+                ? net
+                : Math.mulDiv(net, minted * DILUTION_REVEST_MULTIPLE, denom);
+            _addVest(t, amt);
+        }
+    }
+
+    /// @dev Commit the time-based release so far, then displace `amount` more
+    /// and re-arm the window.
+    function _addVest(address token, uint256 amount) internal {
+        if (amount == 0) return;
+        StreamStorage.Layout storage ss = StreamStorage.layout();
+        StreamStorage.StreamVest storage v = ss.vest[token];
+        v.unvested = _unvestedOf(token) + amount;
+        v.last = uint64(block.number);
+        v.end = uint64(block.number + STREAM_VEST_BLOCKS);
     }
 }

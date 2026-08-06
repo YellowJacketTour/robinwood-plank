@@ -99,6 +99,13 @@ contract IndexBootstrapFacet is IndexFacetBase {
         }
         cs.indexOpen = true;
         _mintShares(SEED_LOCK_ADDR, seedShares); // permanently locked, unredeemable
+        // THE 0 -> NONZERO TRANSITION, and the only one that ever occurs: see
+        // the header above. This is the sole call site for `_armCarry` in the
+        // whole facet set. If anything was carried by a stream pushed while
+        // supply was zero (pre-open), the release clock starts at the NEXT
+        // block — never this one — so the seeder who just opened the index
+        // cannot capture it in this same transaction (round 9e).
+        _armCarry();
         emit IndexOpened(seedShares);
     }
 
