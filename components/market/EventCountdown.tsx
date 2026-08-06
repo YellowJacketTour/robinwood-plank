@@ -4,9 +4,6 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 
-/** 8/8/26 04:20 CDT (UTC-5, Central US local clock time in August). */
-const TARGET_ISO = "2026-08-08T09:20:00Z";
-
 type Remaining = {
   days: number;
   hours: number;
@@ -32,23 +29,32 @@ function pad(n: number | undefined) {
 
 type RecordSale = { tokenId: string; priceWei: string; buyer: string; image: string | null };
 
+type KothResponse = {
+  available: boolean;
+  deadline?: string;
+  leadingSale?: { tokenId: string | null; priceWei: string; wallet: string | null } | null;
+  finalized?: boolean;
+  winner?: { tokenId: string | null; priceWei: string; wallet: string | null } | null;
+};
+
+type KothLive = { target: number | null; record: RecordSale | null | undefined; finalized: boolean };
+
 /**
- * Highest confirmed marketplace sale — from the durable on-chain sales
- * catalog (/api/market/sales-stats), seeded from Blockscout marketplace
- * fills (Seaport + other venues). Vault AMM is excluded.
+ * King of the Hill — the real, server-persisted round (deadline + leading
+ * sale + permanent winner once finalized) from /api/market/king-of-the-hill
+ * (lib/market/king-of-the-hill.ts, migration 009_king_of_the_hill.sql).
+ * Replaces the previous hardcoded client-only TARGET_ISO constant and the
+ * separate /api/market/sales-stats "highest sale" fetch with this single
+ * authoritative source, matching the tweet's stated king-of-the-hill rules.
  */
-function useRecordSale(): RecordSale | null | undefined {
-  const [record, setRecord] = useState<RecordSale | null | undefined>(undefined);
+function useKingOfTheHill(): KothLive {
+  const [state, setState] = useState<KothLive>({ target: null, record: undefined, finalized: false });
 
   useEffect(() => {
     let cancelled = false;
     import("@/lib/market/swr-fetch")
       .then(({ swrJson }) =>
-        swrJson<{
-          highestWei?: string | null;
-          highestTokenId?: string | null;
-          highestPlatform?: string | null;
-        }>("/api/market/sales-stats", {
+        swrJson<KothResponse>("/api/market/king-of-the-hill", {
           ttlMs: 60_000,
           swrMs: 300_000,
           session: true,
@@ -56,49 +62,60 @@ function useRecordSale(): RecordSale | null | undefined {
       )
       .then((data) => {
         if (cancelled) return;
-        if (!data.highestWei || !data.highestTokenId) {
-          setRecord(null);
+        if (!data.available) {
+          setState({ target: null, record: null, finalized: false });
           return;
         }
-        setRecord({
-          tokenId: data.highestTokenId,
-          priceWei: data.highestWei,
-          buyer: data.highestPlatform === "seaport" ? "OpenSea/Seaport" : data.highestPlatform || "",
-          image: null,
+        const leading = data.finalized ? data.winner : data.leadingSale;
+        const record: RecordSale | null =
+          leading && leading.tokenId
+            ? {
+                tokenId: leading.tokenId,
+                priceWei: leading.priceWei,
+                buyer: leading.wallet ? shortAddress(leading.wallet) : "",
+                image: null,
+              }
+            : null;
+        setState({
+          target: data.deadline ? Date.parse(data.deadline) : null,
+          record,
+          finalized: Boolean(data.finalized),
         });
-        fetch(`/api/market/token?tokenId=${encodeURIComponent(data.highestTokenId)}`)
-          .then((r) => (r.ok ? r.json() : null))
-          .then((t) => {
-            if (!cancelled && t?.image) {
-              setRecord((prev) => (prev ? { ...prev, image: t.image } : prev));
-            }
-          })
-          .catch(() => {});
+        if (record?.tokenId) {
+          fetch(`/api/market/token?tokenId=${encodeURIComponent(record.tokenId)}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((t) => {
+              if (!cancelled && t?.image) {
+                setState((prev) =>
+                  prev.record ? { ...prev, record: { ...prev.record, image: t.image } } : prev
+                );
+              }
+            })
+            .catch(() => {});
+        }
       })
       .catch(() => {
-        if (!cancelled) setRecord(null);
+        if (!cancelled) setState({ target: null, record: null, finalized: false });
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  return record;
+  return state;
 }
 
 /**
- * Compact event banner for the Buy & Sell / Activity tab headers: the
- * countdown to 8/4/26 alongside the highest confirmed sale to date —
- * TODO: the specific event feature/name wasn't fully specified ("features
- * the king of the...", message cut off), so the countdown side reads
- * generically as "Special event" until that's confirmed.
+ * Compact event banner for the Buy & Sell / Activity tab headers: the real
+ * King of the Hill countdown alongside the current leading sale (or, once
+ * the round is finalized, the permanent winner).
  */
 export default function EventCountdown() {
-  const target = Date.parse(TARGET_ISO);
+  const { target, record, finalized } = useKingOfTheHill();
   const [remaining, setRemaining] = useState<Remaining | null>(null);
-  const record = useRecordSale();
 
   useEffect(() => {
+    if (target == null) return;
     // The banner shows day/hour/minute precision (finalized mockup) — a
     // minute cadence is enough and avoids a whole-banner re-render every second.
     const update = () => setRemaining(getRemaining(target));
@@ -107,7 +124,8 @@ export default function EventCountdown() {
     return () => window.clearInterval(timer);
   }, [target]);
 
-  if (remaining?.complete) return null;
+  if (target == null) return null;
+  if (remaining?.complete && !finalized) return null;
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel px-3 py-2">
@@ -122,22 +140,21 @@ export default function EventCountdown() {
           )}
           <div className="min-w-0 leading-tight">
             <p className="truncate text-[0.72rem] font-bold text-gold-300">
-              Record sale: Plank #{record.tokenId} · {formatTokenAmount(record.priceWei, 18, 4)} ETH
+              {finalized ? "Winner" : "King of the Hill"}: Plank #{record.tokenId} ·{" "}
+              {formatTokenAmount(record.priceWei, 18, 4)} ETH
             </p>
             <p className="truncate text-[0.62rem] text-foreground/55">
-              {record.buyer
-                ? `on ${record.buyer.startsWith("0x") ? shortAddress(record.buyer) : record.buyer} · `
-                : ""}
-              royalty paid · verified order
+              {record.buyer ? `${record.buyer} · ` : ""}
+              {finalized ? "round closed" : "verified order"}
             </p>
           </div>
         </div>
       ) : (
-        <p className="text-xs font-bold uppercase tracking-wide text-gold-300">Special event</p>
+        <p className="text-xs font-bold uppercase tracking-wide text-gold-300">King of the Hill</p>
       )}
       <div className="shrink-0 text-right leading-tight" role="timer" aria-live="off">
         <p className="text-[0.58rem] font-bold uppercase tracking-wider text-foreground/45">
-          Event closes in
+          {finalized ? "Event closed" : "Event closes in"}
         </p>
         <p className="font-mono text-sm font-bold text-foreground">
           {pad(remaining?.days)}d {pad(remaining?.hours)}h {pad(remaining?.minutes)}m
