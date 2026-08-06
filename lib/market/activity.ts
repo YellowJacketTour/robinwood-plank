@@ -21,6 +21,7 @@ import {
   hasDurableKv,
 } from "@/lib/market/durable-kv";
 import { readSalesCatalog } from "@/lib/market/sales-catalog";
+import { VAULT_TOPIC_SET } from "@/lib/market/vault-activity";
 
 // Canonical Seaport 1.6 OrderFulfilled event, copied from
 // @opensea/seaport-js's own compiled artifact (src/artifacts/seaport/...),
@@ -172,6 +173,23 @@ export function classifyTransfer(input: {
    *   "none"          — receipt read, no fill and no value moved. NOT a sale.
    */
   saleEvidence?: "seaport-fill" | "native-value" | "none";
+  /**
+   * The vault contract that emitted a vault event (Bought/Sold/Deposited/
+   * Redeemed/LP) in THIS transaction's own receipt, when one did.
+   *
+   * Evidence, not configuration — and that is the entire point. The
+   * `vaultAddresses` list above comes from NEXT_PUBLIC_MARKET_VAULT_* env, which
+   * is maintained by hand in the InMotion server's shared/.env.production and
+   * has drifted from reality before: the V3 pool
+   * (0xacE28f72Fc3e15eA1671e689806694A9b0cE047D) fell out of the indexer's copy
+   * of that list around block 28.0M, and from there every deposit and redeem on
+   * the live pool was written to the append-only ledger as a "sale" — a
+   * depositMany priced at the 0.0001 ETH deposit FEE, a redeemTargetMany priced
+   * at nothing. A vault's own event log cannot go stale that way, so when the
+   * receipt proves a vault executed the transfer, that wins regardless of what
+   * any env list happens to say today.
+   */
+  vaultEventContract?: string | null;
 }): { kind: ActivityKind; venue: ActivityEvent["venue"] } {
   const nftContract = input.nftContractAddress.toLowerCase();
   const seaport = input.seaportAddress.toLowerCase();
@@ -203,6 +221,13 @@ export function classifyTransfer(input: {
   // as broken sales).
   if (txTo != null && vaults.has(txTo)) {
     return { kind: "transfer", venue: { kind: "vault", contract: input.txTo! } };
+  }
+  // Same conclusion, reached from the receipt instead of the env list — see
+  // vaultEventContract above. Deliberately ahead of every sale branch: a
+  // transfer a vault itself emitted a Deposited/Redeemed/Bought/Sold for is a
+  // pool mechanic no matter which address the transaction was sent to.
+  if (input.vaultEventContract) {
+    return { kind: "transfer", venue: { kind: "vault", contract: input.vaultEventContract } };
   }
   // Seaport itself executed the call: a fill, unconditionally. Deliberately
   // ahead of the evidence checks below — a receipt that failed to read must
@@ -259,6 +284,9 @@ const attributionResolvedTxs = new Set<string>();
 // "txHash:tokenId" for every token a Seaport OrderFulfilled in that
 // transaction actually settled — the sale evidence classifyTransfer consumes.
 const seaportFillKeys = new Set<string>();
+// txHash -> the vault contract that emitted a vault event in that transaction.
+// Permanent for the same reason as the caches above: a receipt never changes.
+const vaultEventTxs = new Map<string, string>();
 
 /**
  * Readers for the two caches above, so the permanent event indexer
@@ -292,6 +320,14 @@ export function hasResolvedReceipt(txHash: string): boolean {
  */
 export function hasSeaportFillFor(txHash: string, tokenId: string): boolean {
   return seaportFillKeys.has(`${txHash}:${tokenId}`);
+}
+
+/**
+ * The vault contract that emitted a vault event in this transaction, if the
+ * receipt was read and one did. Feeds classifyTransfer's vaultEventContract.
+ */
+export function vaultEventContractFor(txHash: string): string | null {
+  return vaultEventTxs.get(txHash) ?? null;
 }
 
 /** An OrderFulfilled item, in the only shape this module needs. */
@@ -379,6 +415,12 @@ export async function resolveMarketplankAttribution(txHash: string): Promise<voi
     attributionResolvedTxs.add(txHash);
 
     for (const log of receipt.logs || []) {
+      // A vault mechanic proves itself from its own event log, whatever the
+      // env vault list currently says. Recorded before the Seaport filter
+      // because it is about a different contract entirely.
+      if (log.topics[0] && VAULT_TOPIC_SET.has(log.topics[0].toLowerCase())) {
+        vaultEventTxs.set(txHash, log.address.toLowerCase());
+      }
       if (log.address.toLowerCase() !== SEAPORT_ADDRESS.toLowerCase()) continue;
       if (log.topics[0] !== ORDER_FULFILLED_IFACE.getEvent("OrderFulfilled")!.topicHash) continue;
 
@@ -1060,6 +1102,7 @@ export async function fetchActivity(
       nftContractAddress: NFT_CONTRACT_ADDRESS,
       vaultAddress: MARKET_VAULT_ADDRESS,
       vaultAddresses: MARKET_VAULT_ADDRESSES,
+      vaultEventContract: vaultEventContractFor(log.transactionHash),
     });
 
     // Upgrade "seaport" (unattributed) to "marketplank" ONLY on a positive
