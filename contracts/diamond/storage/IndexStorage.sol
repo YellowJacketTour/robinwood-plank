@@ -437,6 +437,58 @@ library StreamStorage {
     }
 }
 
+/**
+ * @notice §7.5's continuous, sybil-resistant constituent weight (design doc
+ * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.5): a per-constituent
+ * maturity-and-decay schedule, driven ONLY from confirmed on-chain fee receipts
+ * already flowing through §7.2's push-then-reconcile mechanism
+ * (`IndexBootstrapFacet._sync` -> `IndexFacetBase._creditRoutedValue`).
+ *
+ * @dev Deliberately NOT the same namespace as `StreamStorage`, even though the
+ * shape of `WeightVest` mirrors `StreamStorage.StreamVest` (round 9e/9f) —
+ * constituent weight and stream vesting are different concerns tracked over
+ * different keys (`constituents` vs `streamList`), and §7.6 explicitly keeps
+ * the vesting-guard's block-based timing pattern reusable rather than a single
+ * shared struct that would couple the two.
+ *
+ * `matured` never decreases on its own — decay is applied WHEN READ
+ * (`IndexFacetBase._constituentWeight`), never written to storage, so a vault
+ * nobody has touched in a long time costs nothing to keep "weighing" less: the
+ * decay is a pure function of `block.number - last`, exactly like
+ * `StreamStorage.StreamVest.unvested` is a pure function of `block.number`,
+ * `last` and `end`. No setter anywhere reaches `matured`, `unvested`, `last`
+ * or `end` except `IndexFacetBase._recordConstituentActivity`, which is only
+ * ever called with a balance-delta `credited` amount `_sync` already measured
+ * — never a caller-supplied number.
+ */
+library WeightStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.weight.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    /// @dev Same shape as `StreamStorage.StreamVest`, plus `matured`: the
+    /// portion of past receipts that has already finished vesting-in and is
+    /// carried forward (subject to read-time decay) rather than re-derived.
+    struct WeightVest {
+        uint256 matured;
+        uint256 unvested;
+        uint64 last;
+        uint64 end;
+    }
+
+    struct Layout {
+        mapping(address => WeightVest) vest;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
 /// @notice Registered observe-only extension hooks (design doc section 8).
 library HooksStorage {
     bytes32 internal constant SLOT =
