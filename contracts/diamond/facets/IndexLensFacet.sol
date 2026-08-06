@@ -178,16 +178,21 @@ contract IndexLensFacet is IndexFacetBase {
         view
         returns (address[] memory tokens, uint256[] memory amounts)
     {
+        // §7.6: NOT `IndexValuation.previewProRata` (that shared body reads
+        // raw `c.reserve`, correct for the mint-side preview but not this
+        // one) — mirrors `IndexCoreFacet.redeemProRata`'s actual net-of-vest
+        // sizing exactly, so this preview and the real payout never diverge.
         CoreStorage.Layout storage cs = CoreStorage.layout();
-        return
-            IndexValuation.previewProRata(
-                cs.constituentList,
-                cs.constituents,
-                sharesIn,
-                _totalSupply() + VIRTUAL_SHARES,
-                0,
-                false
-            );
+        uint256 n = cs.constituentList.length;
+        tokens = new address[](n);
+        amounts = new uint256[](n);
+        uint256 denom = _totalSupply() + VIRTUAL_SHARES;
+        for (uint256 i = 0; i < n; i++) {
+            address t = cs.constituentList[i];
+            tokens[i] = t;
+            uint256 net = _reserveNetOfVest(t, cs.constituents[t].reserve);
+            amounts[i] = Math.mulDiv(sharesIn, net, denom);
+        }
     }
 
     function previewMintProRata(uint256 sharesOut)

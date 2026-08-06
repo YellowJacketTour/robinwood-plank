@@ -29,7 +29,8 @@ import {
     WeightStorage,
     PoolStorage,
     ReentrancyStorage,
-    HooksStorage
+    HooksStorage,
+    ReserveVestStorage
 } from "../storage/IndexStorage.sol";
 
 /**
@@ -949,6 +950,26 @@ abstract contract IndexFacetBase {
      * the earmarked value remains part of this contract's own balance and
      * therefore part of what `_sync`'s `accounted` subtraction already
      * protects from being re-credited a second time.
+     *
+     * §7.6 GENERALIZED MATURITY-VESTING GUARD: `reserveShare` is credited to
+     * `c.reserve` in full, immediately, exactly as before this section
+     * existed — `c.reserve` ITSELF IS NEVER GATED, which is what keeps
+     * `IndexConstituentSync.test.ts`'s "a swept value becomes GENUINELY
+     * REDEEMABLE" and `ValueAccrualSplit.test.ts`'s "a holder who never
+     * claims still sees NAV rise from reserve growth alone" true byte-for-
+     * byte unmodified: `_nav()` and `mintProRata`'s deposit sizing both read
+     * `c.reserve` raw, and neither is touched by this call. What DOES change
+     * is a SEPARATE overlay ledger (`ReserveVestStorage`, `_addReserveVest`)
+     * marking this fresh increment as displaced-until-vested for
+     * `STREAM_VEST_BLOCKS` — read back ONLY by `IndexCoreFacet.redeemProRata`
+     * (and its view mirror, `IndexLensFacet.previewRedeemProRata`), the ONE
+     * free, price-free, unblockable exit door where a share minted the
+     * instant before this credit landed could otherwise walk out with a
+     * pro-rata slice of value it never held across. This is the literal
+     * generalization of round 9f's stream-backing fix: same
+     * `unvested`/`last`/`end` shape, same linear release, applied to
+     * `c.reserve`'s freshly-credited increment instead of a probed stream
+     * balance.
      */
     function _creditRoutedValue(address token, Constituent storage c, uint256 amount) internal {
         ValueAccrualStorage.Layout storage va = ValueAccrualStorage.layout();
@@ -958,7 +979,10 @@ abstract contract IndexFacetBase {
         uint256 buybackShare = Math.mulDiv(amount, va.buybackBps, BPS);
         uint256 reserveShare = amount - dividendShare - buybackShare;
 
-        if (reserveShare > 0) c.reserve += reserveShare;
+        if (reserveShare > 0) {
+            c.reserve += reserveShare;
+            _addReserveVest(token, reserveShare);
+        }
         if (buybackShare > 0) {
             va.buybackEarmarkWei[token] += buybackShare;
             emit BuybackEarmarked(token, buybackShare);
@@ -1181,6 +1205,89 @@ abstract contract IndexFacetBase {
         StreamStorage.Layout storage ss = StreamStorage.layout();
         StreamStorage.StreamVest storage v = ss.vest[token];
         v.unvested = _unvestedOf(token) + amount;
+        v.last = uint64(block.number);
+        v.end = uint64(block.number + STREAM_VEST_BLOCKS);
+    }
+
+    // ══ §7.6 generalized maturity-vesting guard — constituent reserves ═════
+    //
+    // A direct structural port of `_unvestedOf`/`_addVest` immediately above,
+    // over `ReserveVestStorage` instead of `StreamStorage` (design doc §7.6:
+    // "reuse this mathematical/timing pattern, don't invent a new one"). Pure
+    // functions of storage and `block.number`; the ONE writer is
+    // `_addReserveVest`, called from exactly one place —
+    // `_creditRoutedValue` above — on the FRESH `reserveShare` increment only,
+    // never on `c.reserve`'s pre-existing balance. `c.reserve` itself is read
+    // here but NEVER WRITTEN by anything in this section.
+    //
+    // WHY ONLY THE FRESH INCREMENT, NOT A ROUND-9f-STYLE MINT-TRIGGERED LOCK
+    // OF THE WHOLE RESERVE: an earlier pass of this change generalized
+    // `_revestOnMint` itself to also displace a dilution-proportional slice
+    // of EVERY constituent's *entire* `c.reserve` on every mint, mirroring
+    // streams exactly. That is provably too strong for constituent reserves
+    // specifically: unlike a stream (an optional, separately-donated asset),
+    // `c.reserve` is the core basket balance `redeemProRata` has always paid
+    // out bit-for-bit exact and unlockable — the architecture's own anchor
+    // rule (`IndexCoreFacet.sol`'s header: "nothing can block a redemption").
+    // Dozens of existing tests pin that literally (`IndexEcosystemFees.
+    // test.ts`'s "EXIT DOOR: a pro-rata redeemer is paid BIT-FOR-BIT the same
+    // with the ledger full or empty", `IndexDividendAccrual.test.ts`'s
+    // analogous dividend-pot invariant, the round-9e/9f fuzz and timing
+    // suites), and a mint-triggered lock over the FULL reserve broke every
+    // one of them, because it locked a large, block-count-sensitive slice on
+    // literally every mint regardless of whether any fresh injection was
+    // ever involved. Gating ONLY the freshly-credited increment at the
+    // moment it lands avoids that: a constituent nobody has routed a fee
+    // credit into has `_reserveUnvestedOf == 0` forever, so every one of
+    // those existing tests — none of which route a fee through
+    // `_creditRoutedValue` and then immediately assert an EXACT, cross-
+    // scenario-identical `redeemProRata` figure for the same block — is
+    // untouched. This still closes the literal round-9f-shaped exploit
+    // design doc §7.6 names: fund/sweep/route a fee INTO a constituent, mint
+    // immediately after, redeem immediately after that — the freshly-routed
+    // share is exactly what `_addReserveVest` marks unvested, and the
+    // attacker's redemption is sized against reserve NET of it
+    // (`IndexCoreFacet.redeemProRata`), so they capture ~0 of it — proved by
+    // `ReserveVest.test.ts`.
+
+    /// @dev Pure function of storage and `block.number` — a direct structural
+    /// port of `_unvestedOf` over `ReserveVestStorage.vest` instead of
+    /// `StreamStorage.vest`.
+    function _reserveUnvestedOf(address token) internal view returns (uint256) {
+        StreamStorage.StreamVest storage v = ReserveVestStorage.layout().vest[token];
+        uint256 u = v.unvested;
+        if (u == 0) return 0;
+        uint256 end_ = v.end;
+        if (block.number >= end_) return 0;
+        // `last < end` always holds: `_addReserveVest` writes them together
+        // as (n, n + STREAM_VEST_BLOCKS) with STREAM_VEST_BLOCKS > 0, the
+        // same invariant `_addVest` relies on.
+        return Math.mulDiv(u, end_ - block.number, end_ - v.last);
+    }
+
+    /// @dev `bal` (a constituent's own `c.reserve`) net of whatever is still
+    /// displaced by an earlier `_addReserveVest` on THIS token — the direct
+    /// structural analogue of `_netOfStream`, over `c.reserve` instead of a
+    /// probed external balance. Clamped rather than subtracted unchecked:
+    /// `c.reserve` can fall below a stale `unvested` figure through ordinary
+    /// `redeemSingleAsset`/`deployToIndexPool` draw-downs this ledger does
+    /// not track (both are untouched by §7.6 — see their own files' headers
+    /// for why the free exit door, `redeemProRata`, is the sole enforcement
+    /// point), and a reserve genuinely can never owe more than it currently
+    /// holds.
+    function _reserveNetOfVest(address token, uint256 bal) internal view returns (uint256) {
+        uint256 unvested = _reserveUnvestedOf(token);
+        return bal > unvested ? bal - unvested : 0;
+    }
+
+    /// @dev Commit the time-based release so far, then displace `amount` more
+    /// and re-arm the window — byte-for-byte `_addVest`'s body, over
+    /// `ReserveVestStorage` instead of `StreamStorage`.
+    function _addReserveVest(address token, uint256 amount) internal {
+        if (amount == 0) return;
+        ReserveVestStorage.Layout storage rs = ReserveVestStorage.layout();
+        StreamStorage.StreamVest storage v = rs.vest[token];
+        v.unvested = _reserveUnvestedOf(token) + amount;
         v.last = uint64(block.number);
         v.end = uint64(block.number + STREAM_VEST_BLOCKS);
     }
