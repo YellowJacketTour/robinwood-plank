@@ -324,6 +324,11 @@ abstract contract IndexFacetBase {
     error PoolAlreadySet();
     error PoolActedThisBlock();
     error InsufficientPoolFunding();
+    /// @dev Adversarial-review fix (2026-08-06): `deployToIndexPool` would
+    /// exceed the governed cap on cumulative shares minted to the pool
+    /// (`PoolStorage.maxPoolShareBps` of `totalSupply`) — see that function's
+    /// header for why this cap exists at all.
+    error PoolShareCapExceeded();
 
     error NotRoleHolder(bytes32 role);
     error UnknownRole(bytes32 role);
@@ -651,6 +656,22 @@ abstract contract IndexFacetBase {
      * relative to a pool action is what makes "cannot extract value through
      * staleness" a proven property instead of an assumption. No-op when no
      * pool is configured.
+     *
+     * DOCUMENTED RESIDUAL RISK (adversarial review, 2026-08-06), left
+     * explicitly unaddressed rather than silently: this guard is a SAME-BLOCK
+     * check only. It blocks an atomic swap-then-price-dependent-action in one
+     * transaction, but it does NOT block a swap in block N followed by a
+     * NAV-priced action in block N+1 — no guard anywhere fires on that shape,
+     * because `lastActionBlock()` has already moved on by the time block N+1
+     * starts. A price distortion that persists across a block boundary (e.g.
+     * a large swap left unarbitraged for one block) is therefore still
+     * usable against `deployToIndexPool`/`mintSingleAsset`/`redeemSingleAsset`
+     * within that window. A TWAP-style multi-block average, or widening this
+     * guard's window past same-block, would close it, at the cost of real
+     * added complexity (an accumulator in `IndexCoinPool` itself) this pass
+     * does not take on. Treated as a bounded, disclosed residual: the same
+     * class of risk every AMM-price-consuming integration carries, not a
+     * silent gap.
      */
     function _requirePoolQuiescent() internal view {
         address pool = PoolStorage.layout().pool;

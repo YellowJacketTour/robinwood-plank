@@ -59,6 +59,21 @@ contract IndexPoolFacet is IndexFacetBase {
         uint256 paymentAmountDeployed,
         uint256 coinMinted
     );
+    /// @notice Adversarial-review fix (2026-08-06). See `maxPoolShareBps()`'s
+    /// header for the full derivation.
+    event MaxPoolShareBpsQueued(uint256 value, uint64 eta);
+    event MaxPoolShareBpsSet(uint256 value);
+
+    /// @dev Hard, non-governable ceiling on `maxPoolShareBps` — 20%. Governance
+    /// can tune the cap anywhere from 0 up to this, timelocked, but can never
+    /// raise it past a bound fixed in this file's bytecode. Mirrors
+    /// `IndexParams.validate`'s "a timelock bounds WHEN a bad change lands,
+    /// never HOW BAD it can be" doctrine.
+    uint256 private constant MAX_POOL_SHARE_BPS_CEIL = 2_000;
+    /// @dev The initial value `executeIndexPool` seeds alongside first pool
+    /// activation — 5%, chosen conservative rather than maximal. Changeable
+    /// afterward only through `queueMaxPoolShareBps`/`executeMaxPoolShareBps`.
+    uint256 private constant DEFAULT_MAX_POOL_SHARE_BPS = 500;
 
     // ── Admin wiring ──────────────────────────────────────────────────────
 
@@ -105,7 +120,57 @@ contract IndexPoolFacet is IndexFacetBase {
         if (IIndexCoinPool(q.value).paymentToken() != CoreStorage.layout().dividendAsset) revert BadParam();
         if (IIndexCoinPool(q.value).indexCoin() != address(this)) revert BadParam();
         ps.pool = q.value;
+        // Adversarial-review fix (2026-08-06): seed the initial dilution cap
+        // in the SAME already-timelocked call that first makes
+        // `deployToIndexPool` reachable at all, so there is never a window
+        // where the pool is wired but the cap is still its zero default
+        // (which would otherwise block every deploy outright, not permit one).
+        ps.maxPoolShareBps = DEFAULT_MAX_POOL_SHARE_BPS;
         emit IndexPoolSet(q.value);
+        emit MaxPoolShareBpsSet(DEFAULT_MAX_POOL_SHARE_BPS);
+    }
+
+    // ── §7.10 dilution-cap governance (adversarial-review fix) ───────────
+
+    function maxPoolShareBps() external view returns (uint256) {
+        return PoolStorage.layout().maxPoolShareBps;
+    }
+
+    function poolSharesMinted() external view returns (uint256) {
+        return PoolStorage.layout().poolSharesMinted;
+    }
+
+    function queuedMaxPoolShareBps() external view returns (uint256 value, uint64 eta, bool pending) {
+        PoolStorage.QueuedUint256 storage q = PoolStorage.layout().queuedMaxPoolShareBps;
+        return (q.value, q.eta, q.pending);
+    }
+
+    /**
+     * @notice Queue a new dilution cap. `ROLE_RISK_PARAM_`, timelocked —
+     * same queue/execute shape as `queueIndexPool` and every other
+     * risk-surface change in this facet set.
+     */
+    function queueMaxPoolShareBps(uint256 value) external onlyRole(ROLE_RISK_PARAM_) {
+        if (value > MAX_POOL_SHARE_BPS_CEIL) revert BadParam();
+        uint64 eta = uint64(block.timestamp + CoreStorage.layout().timelockDelay);
+        PoolStorage.layout().queuedMaxPoolShareBps = PoolStorage.QueuedUint256({
+            value: value,
+            eta: eta,
+            pending: true
+        });
+        emit MaxPoolShareBpsQueued(value, eta);
+    }
+
+    /// @notice Apply a queued cap change once its timelock has elapsed.
+    /// Permissionless, like every other `execute*` in this facet set.
+    function executeMaxPoolShareBps() external {
+        PoolStorage.Layout storage ps = PoolStorage.layout();
+        PoolStorage.QueuedUint256 memory q = ps.queuedMaxPoolShareBps;
+        if (!q.pending) revert NothingQueued();
+        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        delete ps.queuedMaxPoolShareBps;
+        ps.maxPoolShareBps = q.value;
+        emit MaxPoolShareBpsSet(q.value);
     }
 
     // ── The one new action ──────────────────────────────────────────────
@@ -134,6 +199,54 @@ contract IndexPoolFacet is IndexFacetBase {
      * (worth exactly `ethValue` when the payment token's own band-low sits
      * at true parity, and strictly more whenever a nonzero `bandBps` holds
      * it below parity — see the band-reconciliation note below).
+     *
+     * ADVERSARIAL-REVIEW FIX (2026-08-06): AN INDEPENDENT, GENUINE DILUTION
+     * FINDING AND WHY IT IS BOUNDED HERE RATHER THAN ELIMINATED AT THE SOURCE.
+     *
+     * `_mintShares(pool, sharesMinted)` below grows `totalSupply` the same as
+     * any other mint. `_nav()` folds the pool's live position back in
+     * (`IndexFacetBase._nav`'s header), so NAV-priced consumers see the
+     * correct picture. But `IndexCoreFacet.redeemProRata` and
+     * `_previewSingleExit`'s pricing path (`IndexValuation.previewSingleExit`)
+     * are BOTH deliberately price-free — `IndexCoreFacet.sol`'s own header:
+     * "it reads no price. `redeemProRata` works with every constituent
+     * stale." They divide by raw `totalSupply` and pay out raw `c.reserve`
+     * per constituent, never reading the pool at all. The pool itself is not
+     * a listed constituent and has no redemption path, so `sharesMinted`
+     * here is PERMANENTLY unredeemable weight added to that denominator —
+     * every call dilutes every other holder's `redeemProRata`/
+     * `redeemSingleAsset` payout with nothing added back on that path.
+     *
+     * TWO FIXES WERE WEIGHED, NOT GUESSED:
+     *
+     *  (a) Fold the pool's position into `redeemProRata`'s per-leg reserve.
+     *      For the `paymentToken` leg this is dimensionally free (the pool's
+     *      payment-side balance IS payment-token, no price conversion
+     *      needed) and for the shares-in-pool weight it is exactly offset by
+     *      excluding `poolSharesMinted` from the denominator — algebraically
+     *      exact, verified by hand against the review's own worked example.
+     *      IT FAILS FOR A DIFFERENT REASON: `redeemProRata`/`_payOrDefer` pay
+     *      out of THIS CONTRACT's own token balance, never the pool's.
+     *      `IndexCoinPool` exposes no withdraw path back to the vault (design
+     *      doc §7.10: "permanently deepening, protocol-owned pool", no LP
+     *      token, push-only `deploy`) — crediting the pool's payment reserve
+     *      into the payout ratio would entitle holders to more `paymentToken`
+     *      than this contract physically holds, which is not a rounding
+     *      slack, it is `_payOrDefer` transferring tokens this contract does
+     *      not have. Reachability, not merely price, is the anchor rule
+     *      `IndexCoreFacet.sol`'s header states — "no privileged function can
+     *      reach reserves already pooled" — and the pool's reserves are
+     *      categorically outside this contract's balance once transferred.
+     *  (b) BOUND the dilution instead of eliminating it: cap
+     *      `poolSharesMinted` (cumulative, `PoolStorage`) to a governed
+     *      fraction of `totalSupply` (`maxPoolShareBps`, default 5%, hard
+     *      ceiling 20%), enforced on every call below. This is what ships.
+     *      It does not restore exact non-decrease — that is architecturally
+     *      unreachable per (a) above without a pool withdraw path this
+     *      design deliberately does not have — but it turns "unbounded,
+     *      compounding, permanent dilution" into "a disclosed, governed,
+     *      hard-capped one-time-per-cap-increment maximum", proven by
+     *      `IndexPoolFacet.dilutionCap.test.ts`.
      */
     function deployToIndexPool(address shareToken, uint256 shareAmount)
         external
@@ -170,6 +283,20 @@ contract IndexPoolFacet is IndexFacetBase {
             uint256 feeBps = _mintFeeBps(shareToken, _imbalanceFeeBps(shareAmount, c.reserve));
             sharesMinted -= (sharesMinted * feeBps) / BPS;
             if (sharesMinted == 0) revert ZeroAmount();
+        }
+
+        // ── Adversarial-review fix: the governed dilution cap, checked
+        // BEFORE either reserve moves, against the supply/pool-share totals
+        // this call WOULD produce. See the header above for the full
+        // derivation of why this bounds rather than eliminates the finding.
+        {
+            PoolStorage.Layout storage ps = PoolStorage.layout();
+            uint256 newPoolShares = ps.poolSharesMinted + sharesMinted;
+            uint256 newSupply = supplyBefore + sharesMinted;
+            if (Math.mulDiv(newPoolShares, BPS, newSupply) > ps.maxPoolShareBps) {
+                revert PoolShareCapExceeded();
+            }
+            ps.poolSharesMinted = newPoolShares;
         }
 
         uint256 paymentAmount;
