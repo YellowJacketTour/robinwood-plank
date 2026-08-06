@@ -311,6 +311,48 @@ library EcosystemStorage {
 }
 
 /**
+ * @notice §7.3's three-way split of newly-routed value (design doc
+ * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.3): every fee
+ * surplus reconciled into a constituent (§7.2/§3.2's push-then-reconcile) now
+ * divides across (a) direct `c.reserve` growth — the NAV-appreciation stream,
+ * unaffected by this namespace, (b) the existing EIP-2222 dividend
+ * accumulator, and (c) a reserved, earmarked accounting slot for §7.7's
+ * buyback-and-lock, NOT built here — only the bucket is reserved.
+ *
+ * @dev `dividendBps` and `buybackBps` are the only two governed fields;
+ * `reserveBps` is always the BPS remainder (`10_000 - dividendBps -
+ * buybackBps`), never stored separately, so the three shares can never drift
+ * out of summing to exactly 100% — there is no code path that writes one
+ * without deriving the other two consistently. Both default to zero, which is
+ * DELIBERATE: an unconfigured index behaves exactly as it did before this
+ * section existed (100% of routed surplus into `c.reserve`), so this section
+ * is opt-in, not a silent behavior change, until governance queues a split.
+ */
+library ValueAccrualStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.valueaccrual.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    struct Layout {
+        uint256 dividendBps;
+        uint256 buybackBps;
+        /// @dev token => value earmarked for §7.7's not-yet-built buyback
+        /// mechanism. A pure accounting slot: no transfer, no sink call, no
+        /// spend path exists anywhere in the finalized facet set. §7.7's own
+        /// future pass is the only thing that may ever draw it down.
+        mapping(address => uint256) buybackEarmarkWei;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/**
  * @notice The EIP-2222 magnified-dividend accumulator. ONE asset, O(1).
  *
  * @dev Design doc section 5.4 rejects generalising this to a per-token map over

@@ -11,7 +11,8 @@ import {
     GovernanceStorage,
     RolesStorage,
     AllocationStorage,
-    EcosystemStorage
+    EcosystemStorage,
+    ValueAccrualStorage
 } from "../storage/IndexStorage.sol";
 
 interface IEcosystemFeeSinkView {
@@ -118,6 +119,33 @@ contract IndexGovernanceFacet is IndexFacetBase {
         return AllocationStorage.layout().platformAllocationBps;
     }
 
+    // ── §7.3 value-accrual split views ─────────────────────────────────────
+
+    /// @notice Share of newly-routed value (design doc §7.3) credited to the
+    /// EIP-2222 dividend accumulator. Zero until governance queues a split —
+    /// see `ValueAccrualStorage`'s header for why that default is safe.
+    function valueAccrualDividendBps() external view returns (uint256) {
+        return ValueAccrualStorage.layout().dividendBps;
+    }
+
+    /// @notice Share earmarked toward §7.7's not-yet-built buyback-and-lock.
+    function valueAccrualBuybackBps() external view returns (uint256) {
+        return ValueAccrualStorage.layout().buybackBps;
+    }
+
+    /// @notice The remainder — always `BPS - dividendBps - buybackBps`, never
+    /// stored, so it can never drift from the other two.
+    function valueAccrualReserveBps() external view returns (uint256) {
+        ValueAccrualStorage.Layout storage va = ValueAccrualStorage.layout();
+        return BPS - va.dividendBps - va.buybackBps;
+    }
+
+    /// @notice Value earmarked for `token` toward §7.7's buyback-and-lock, not
+    /// yet spent by anything (nothing can spend it yet — see `ValueAccrualStorage`).
+    function buybackEarmarkWei(address token) external view returns (uint256) {
+        return ValueAccrualStorage.layout().buybackEarmarkWei[token];
+    }
+
     // ══ Parameters ════════════════════════════════════════════════════════
 
     /**
@@ -171,6 +199,8 @@ contract IndexGovernanceFacet is IndexFacetBase {
             EcosystemStorage.layout().ecosystemFeeSplitBps = q.value;
         } else if (key == "ecosystemSink") {
             _applyEcosystemSink(q.value);
+        } else if (key == "valueAccrualSplitBps") {
+            _applyValueAccrualSplit(q.value);
         } else if (key == "targetHhiBps") {
             if (q.value < MIN_TARGET_HHI_BPS || q.value > MAX_TARGET_HHI_BPS) revert BadParam();
             ps.targetHhiBps = q.value;
@@ -207,6 +237,26 @@ contract IndexGovernanceFacet is IndexFacetBase {
         es.ecosystemAsset = sink == address(0)
             ? address(0)
             : IEcosystemFeeSinkView(sink).reinvestAsset();
+    }
+
+    /**
+     * @dev §7.3's three-way split, applied atomically. `value` packs BOTH bps
+     * fields into one queue slot (`dividendBps * BPS + buybackBps`) rather
+     * than using two independent keys, so a single queue/execute pair can
+     * never leave the split in a state where the two governed shares were
+     * changed at different times and briefly summed past 100% — the same
+     * "hard ceilings re-checked at execution" doctrine as everywhere else in
+     * this file, applied to keep the pair atomic rather than just bounded.
+     * `reserveBps` is never stored: it is always the derived remainder.
+     */
+    function _applyValueAccrualSplit(uint256 value) private {
+        uint256 buybackBps = value % BPS;
+        uint256 dividendBps = value / BPS;
+        if (dividendBps > BPS || dividendBps + buybackBps > BPS) revert BadParam();
+        ValueAccrualStorage.Layout storage va = ValueAccrualStorage.layout();
+        va.dividendBps = dividendBps;
+        va.buybackBps = buybackBps;
+        emit ValueAccrualSplitApplied(dividendBps, buybackBps);
     }
 
     // ══ Metrics ═══════════════════════════════════════════════════════════

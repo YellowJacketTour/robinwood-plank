@@ -6,7 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IndexFacetBase} from "./IndexFacetBase.sol";
 import {IIndexPriceSource} from "../../IIndexPriceSource.sol";
 import {Constituent} from "../../lib/IndexTypes.sol";
-import {CoreStorage, EcosystemStorage, DividendStorage} from "../storage/IndexStorage.sol";
+import {CoreStorage, EcosystemStorage, DividendStorage, ValueAccrualStorage} from "../storage/IndexStorage.sol";
 
 /**
  * ============================================================================
@@ -160,7 +160,8 @@ contract IndexBootstrapFacet is IndexFacetBase {
         Constituent storage c = _get(token);
         uint256 accounted = c.reserve
             + cs.reservedClaims[token]
-            + EcosystemStorage.layout().ecosystemFeesWei[token];
+            + EcosystemStorage.layout().ecosystemFeesWei[token]
+            + ValueAccrualStorage.layout().buybackEarmarkWei[token];
         if (token == cs.dividendAsset) {
             DividendStorage.Layout storage d = DividendStorage.layout();
             accounted += d.totalDividendsReceived - d.totalDividendsWithdrawn;
@@ -168,7 +169,10 @@ contract IndexBootstrapFacet is IndexFacetBase {
         uint256 bal = IERC20(token).balanceOf(address(this));
         if (bal <= accounted) return 0;
         credited = bal - accounted;
-        c.reserve += credited;
+        // §7.3: the observed surplus splits three ways (NAV reserve / dividend
+        // accumulator / buyback earmark) rather than landing wholly in
+        // `c.reserve` — see `IndexFacetBase._creditRoutedValue`'s header.
+        _creditRoutedValue(token, c, credited);
         emit ConstituentSynced(token, credited);
         _fireHook(HOOK_AFTER_SYNC_, abi.encode(token, credited));
     }

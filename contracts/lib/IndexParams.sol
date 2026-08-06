@@ -106,7 +106,8 @@ library IndexParams {
         if (
             key == "platformAllocationBps" ||
             key == "ecosystemFeeSplitBps" ||
-            key == "ecosystemSink"
+            key == "ecosystemSink" ||
+            key == "valueAccrualSplitBps"
         ) {
             return allocationRole;
         }
