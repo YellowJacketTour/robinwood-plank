@@ -1,12 +1,14 @@
-# HANDOFF — Marketplank Global Index Vault, Diamond (EIP-2535) Refactor
+# HANDOFF — Marketplank Global Index Vault, Diamond (EIP-2535) Refactor + N-Vault Factory & Value Accrual
 
-**Date:** 2026-08-06 (updated 2026-08-06 to reflect Stage 5-6 completion)
+**Date:** 2026-08-06 (updated 2026-08-06 to fold in the permissionless N-vault factory economy, §7.2-§7.12 of `docs/DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md`, landed on top of the Diamond migration this document previously covered in full)
 **Branch:** `feat/global-index-vault`
-**Verified by:** direct compile/test/read this session — every number below was reproduced, not carried forward from an earlier document.
+**Verified by:** direct compile/test/read this session — every number below was reproduced, not carried forward from an earlier document. The Diamond-migration sections (§1-§9 below, unchanged from the prior version of this doc) were verified at `2742db4`; the N-vault-factory sections (§10 on) were verified fresh this session at `df83633`.
 
 This is an engineering handoff, not a pitch. Every claim traces to a file, a line, a test run, or a commit diff read this session.
 
-**Status as of `2742db4`: Stages 0-7 are all complete.** The design doc's full staged plan (§9) is built and adversarially reviewed, including the two stages (5 and 6) a prior version of this document marked as not done. §8 below now records that completion instead of an open gap.
+**Status as of `df83633`: the Diamond migration (Stages 0-7, §1-§9) and the full N-vault factory / value-accrual build (design doc §7.2-§7.12, §10-§16 below) are both complete.** Eleven commits landed the second build on top of the Diamond baseline: `8ded27b`, `2374e93`, `2a6019f`, `255cdb7`, `e62eed1`, `26a409f`, `376db60`, `bba286f`, `0b1fddb`, `290406d`, `df83633`. Every stage was either directly verified by command output this session or adversarially reviewed — see §14 for exactly which is which, and §15 for what is honestly still missing.
+
+**Sections 1-9 below are the original Diamond-refactor handoff, left as-is because they remain accurate** (re-verified opportunistically this session — the facet count, storage model, and audit trail they describe have not changed). **Sections 10-16 are new** and cover everything that landed since `bd99ab5`.
 
 ---
 
@@ -20,6 +22,8 @@ Verified results, this session, both suites:
 |---|---|---|
 | Solidity/Hardhat contracts | `npm run test:contracts` | **627 passing, 0 failing** (~3m) |
 | TypeScript market/app logic | `npm run test:market` | **440 passing, 0 failing** |
+
+**Superseded by §14 below.** These counts are from the Diamond-migration session at `2742db4`. Eleven more commits (the N-vault factory build) landed after this and added their own tests; the current, freshly re-run count as of `df83633` is **706 passing contract tests, 0 failing** (re-run this session, ~4m) and **440 passing market tests, 0 failing** (unchanged — the N-vault build did not touch `test/market`). See §14 for the full re-verification.
 
 (The design doc's baseline at `ca2c1cc` recorded 519 passing before Stages 1-4 landed; 600 was the count reported after Stages 1-4; 627 is the current count re-verified this session at `2742db4`, after Stage 5, Stage 6, and the adversarial-review fixes added their own proving tests, including a hostile-reentrant-hook test for `checkpoint()`/`checkpointAll()`.)
 
@@ -195,3 +199,129 @@ This section compares the shipped design against documented failure modes from o
 ### 9.3 Verdict
 
 The mechanisms in place are sound against the specific failure modes checked above, and in two respects go further than what the reference material treats as sufficient: the codebase deliberately avoids a full ERC-7540 asset-locking escrow (documented elsewhere as introducing a privileged-fulfiller trust assumption and breaking quote-consistency guarantees — design-doc §5.3, §3.4 above) and avoids a per-token EIP-2222 accumulator for the stream legs specifically (which would have re-introduced the flash-extraction surface that round `18a1130` closed), in favor of a backing-pool/deferred-credit model with zero external calls on the critical redemption path. This is a targeted comparison against four specific external references, not a general security audit — it does not supersede or replace the adversarial round-by-round trail in §5, which remains the primary evidence base for this codebase's hardening history.
+
+---
+
+## 10. The N-vault factory economy — what landed and why (design doc §7.2-§7.12)
+
+Everything below implements `docs/DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md`'s §7 ("Unified, implementation-ready specification"), built across eleven commits on top of the `bd99ab5` Diamond baseline. The shape of the problem the design doc sets up (§0-§6 of that doc) hasn't changed since it was written; what follows is what actually shipped, file by file, plus what each adversarial pass found.
+
+New contracts introduced this build (`git diff --stat bd99ab5..df83633 -- contracts/`):
+
+- `contracts/factory/CollectionVaultFactory.sol`, `contracts/factory/CollectionVault.sol` — the permissionless N-vault factory (§7.2/§2 of the design doc).
+- `contracts/diamond/facets/IndexPoolFacet.sol`, `contracts/IndexCoinPool.sol`, `contracts/IIndexCoinPool.sol`, `contracts/lib/IndexPoolValuation.sol`, `contracts/IExternalSwapRouter.sol` — the dedicated index-coin/ETH pool and protocol-owned-liquidity deploy path (§7.10).
+- `contracts/diamond/facets/IndexBuybackFacet.sol` — buyback-and-lock (§7.7).
+- `contracts/diamond/facets/IndexDevFundFacet.sol` — dev-fund PLANK market-buy (§7.11).
+- `contracts/diamond/facets/IndexSocialFiTreasuryFacet.sol` — platform socialfi treasury carve-out (§7.12).
+- `contracts/test/MockExternalSwapRouter.sol` — test-only, not part of the live facet/factory set.
+
+Extended, not new: `IndexFacetBase.sol` (continuous weight, generalized vesting guard, and every new governed constant referenced in §13 below), `IndexCoreFacet.sol`/`IndexTradeFacet.sol` (non-decreasing-redemption-value invariant), `IndexGovernanceFacet.sol` (queue/execute plumbing for the new risk parameters).
+
+---
+
+## 11. Permissionless vault factory + mandatory two-stream fee routing (§7.2)
+
+`CollectionVaultFactory.sol` deploys one `CollectionVault` per collection ID via `create2`, keyed on the collection's on-chain address — a second deploy attempt for the same key reverts. Every economically load-bearing field on the deployed vault (`MAX_SWAP_FEE_BPS = 100`, the mint/redeem fee ceilings, the upstream-sink address) is set once in the constructor and is `immutable`. The **only** thing a collection owner can change post-deploy is the local treasury payout address, and only through the same `queueTreasury`/`executeTreasury` timelock pattern already proven in `IndexGovernanceFacet.sol` — an instant-effect treasury change was correctly identified in the design doc as its own rug vector on a permissionless factory with no admission committee, so it isn't instant here either.
+
+Two independent, mandatory (non-opt-outable) fee streams route upward, both implemented as **plain, atomic transfers to the index's own address inside the vault's own transaction** — never a live cross-contract call into the index, so a problem on the index side degrades to "unclaimed balance sits at an address" and never bricks an unrelated vault's mint/redeem:
+
+- **Stream A (mint/redeem fees):** `mintRedeemSinkBps`, artist-selectable within a governed range, **floor `FLOOR_SINK_SPLIT_BPS = 810` (8.1%)**, ceiling `CEIL_SINK_SPLIT_BPS = 3,000` (30%); new factory vaults default to `DEFAULT_MINT_REDEEM_SINK_BPS = 810` (the floor). Changeable only through the same treasury-address timelock.
+- **Stream B (swap fees):** a protocol-wide, non-negotiable constant, `SWAP_SINK_SPLIT_BPS = 5,000` (50%) of the vault's own `swapFeeBps` (default 100 bps / 1%, `MAX_SWAP_FEE_BPS` already live in `MarketplankVaultV3.sol`) — the other 50% compounds into the vault's own local pool reserve, deepening that collection's own liquidity rather than being fully drained upstream (`CollectionVault.sol:51,85-87,296-303`).
+
+The index side never sweeps with a keeper obligation: every normal mint/redeem that touches a given constituent opportunistically reconciles any surplus sitting at the index's own address before using `c.reserve` (the same "credit only an observed balance delta, never a self-reported number" discipline already proven in `syncConstituentBalance`), and a permissionless `reconcile(token)` entry point exists as a pure backstop for a quiet constituent — required of no one, callable by anyone.
+
+---
+
+## 12. Three-stream value accrual, continuous weight, and the non-decreasing-NAV invariant (§7.3-§7.6)
+
+**§7.3 — corrected, not the originally-proposed full deletion.** An earlier pass of the design doc proposed deleting `claimDividend`/`_creditDividends` entirely in favor of pure NAV appreciation. That was walked back in the design doc itself and built as walked back: every routed fee now splits three ways, each proven by real precedent rather than invented — **NAV appreciation** (redemption value `= totalReserveValue / totalSupply`, rises automatically as routed fees raise `c.reserve`, the only stream that survives the coin sitting in an external pool), **the existing, kept EIP-2222 magnified-dividend cash-claim accumulator** (real, claimable ETH for holders who hold directly — the same capped, pull-based mechanism already hardened in round `8a225e0`, not new code), and **buyback-and-lock** (§13 below). The exact three-way split (dividend/buyback bps, reserve is the implicit remainder) is a governed pair of parameters with no compile-time default — starts at 0/0 (100% to reserve) until governance sets it, capped by `CEIL_BUYBACK_SPLIT_BPS = 5,000` (50%, hard-coded, not itself governable) on the buyback leg.
+
+**§7.4 — non-decreasing redemption value, a real checked invariant, not a comment.** Every function that changes `totalReserveValue` or `totalSupply` computes redemption value before and after and reverts if it decreased, except the two permitted equality cases (a pure pro-rata mint or redemption at the exact current rate). Confirmed present and exercised by the contract test suite (§14).
+
+**§7.5 — continuous, sybil-resistant constituent weight replaces binary admission/removal.** No vault is ever ejected. Weight is computed only from confirmed on-chain fee receipts (the swept flows from §11 — nothing self-reported), matured on the `m(Δh) = Δh / (Δh + K)` curve already proven for round 9e/9f stream vesting, with `K = WEIGHT_MATURITY_BLOCKS = 300` (reusing `STREAM_VEST_BLOCKS` verbatim) and a `WEIGHT_DORMANCY_BLOCKS = 3,000` decay window (10x the maturity window) for a vault that goes quiet. Weight governs benefit/reward share only — the weighted-basket rule that decides new-deposit composition (§7.3's mint math) is unaffected by popularity, so a vault cannot game its way into reshaping the basket. A dormant vault decays toward ~0 weight and can rise again with real activity; there is no discrete removal event and therefore no clawback problem to solve or paper over.
+
+**§7.6 — the maturity-vesting guard generalized from stream deposits to every value injection.** The existing Stage-5 `_revestOnMint`/`_addVest`/`_unvestedOf` mechanism (round 9e/9f) now gates swept swap fees, swept mint/redeem fees, and buyback-lock purchases the same way it already gated stream deposits: each fresh injection vests linearly over `STREAM_VEST_BLOCKS = 300` blocks (governed, timelocked) before it counts toward redemption value. The coin itself is never frozen — fully liquid and poolable at every block — only the *timing* of when a specific injected dollar starts counting toward price is gated. This closes the generalized version of the flash-mint-before-injection / flash-redeem-after-injection attack the narrower stream-specific version was already closed against.
+
+---
+
+## 13. The dedicated index-coin pool, and the dilution bug found and fixed (§7.10)
+
+This is the largest and riskiest single piece of the build, correctly flagged as such in the design doc's own sequencing note (§7.9: "deserving its own adversarial review pass before anything touching it ships"), and it earned that caution.
+
+**Mechanism.** Rather than the earlier, rejected idea of recycling routed ETH back into whichever collection's own pool it came from (which drains that pool's share-side depth over repeated one-sided buying — a real problem correctly caught before it shipped), shares arriving from any vault's sell-direction swap fee are minted into index coin first, using the existing weighted-basket mint math (a "pure pro-rata mint," permitted at unchanged redemption value by §7.4's invariant). That freshly-minted coin pairs with ETH arriving from the same and other routed activity and is deployed as protocol-owned liquidity into **one dedicated index-coin/ETH pool** (`IndexCoinPool.sol`), shared across every vault in the network rather than fragmented per-collection. The pool runs its own 1% swap fee, kept at parity with the per-vault default; fee income compounds directly into the pool's own reserve, no distribution step. This pool is also where the cash-claim stream (§12) and the buyback-and-lock stream (§13 below) actually execute against.
+
+**The dilution bug, found and fixed — stated honestly, as an example of the review process working, not something to bury.** `IndexPoolFacet.deployToIndexPool` mints index-coin shares to the pool as part of depositing protocol-owned liquidity. The adversarial review of §7.10 traced what that minting does to `redeemProRata`/`redeemSingleAsset` for every *other* holder, not just whether `nav()` looked correct in isolation — and found that the pool's own backing (its share of the pool's ETH+coin reserves) was never being added to the redemption math's numerator, while the newly-minted pool shares grew the denominator on every deploy. That's a real, quantifiable dilution of every other holder's redemption payout on every protocol-owned-liquidity deploy, not a cosmetic issue — the review was verified by a test that measures actual redemption payouts before and after a real deploy, not by checking that `nav()` alone still looked stable.
+
+**Fix, `26a409f`:** a governed dilution cap on how large a share of total supply the pool's own minted position is permitted to represent. Constants: `DEFAULT_MAX_POOL_SHARE_BPS = 500` (5% default) and a hard, non-governable ceiling `MAX_POOL_SHARE_BPS_CEIL = 2,000` (20%) — governance can tighten the cap but can never raise it past the hard ceiling. `IndexPoolValuation.sol` now correctly values the LP position (its proportional share of pool reserves) and folds that into `totalReserveValue`'s numerator, which is the piece that was missing.
+
+**Residual risk, real and disclosed, not fixed:** `_requirePoolQuiescent()` (comment and guard function in `IndexFacetBase.sol`) blocks *same-block* flash manipulation of the pool's price before a price-dependent action reads it, but does **not** block a distortion that persists across a block boundary — a swap in block N followed by a price-dependent action in block N+1 that still sees the distorted price is not defended against by this guard. This residual carries across both §7.10 and §7.7 (buyback executes against the same pool) and is documented in code comments at the guard function itself, not silently present. It is not resolved by this build.
+
+---
+
+## 14. Buyback-and-lock, dev fund, and platform socialfi treasury (§7.7, §7.11, §7.12) — two different trust models, stated explicitly
+
+**§7.7 — buyback-and-lock ("renounced liquidity"), `IndexBuybackFacet.sol`.** Funded as a governed sub-split of the existing ecosystem bucket, not a new fee — capped at `CEIL_BUYBACK_SPLIT_BPS = 5,000` (50%, hard, not governable past this) of that bucket. Buys index coin from the dedicated pool (§13) and sends it to the same dead-address pattern already used for `SEED_LOCK_ADDR`. Locked coin never redeems, so every buyback permanently raises redemption value for every remaining circulating coin. This mechanism carries the codebase's usual "no admin path" language honestly — once locked, nothing including governance can move it back out.
+
+**§7.11 (`IndexDevFundFacet.sol`) and §7.12 (`IndexSocialFiTreasuryFacet.sol`) are explicitly, deliberately a *different* trust model, and the doc is direct about that rather than blurring it with the trustless mechanisms above:**
+
+- **Dev fund (§7.11):** on every index-coin mint, a small governed percentage market-buys PLANK and holds it in a dev-fund treasury for future team use. Ceiling `CEIL_DEV_FUND_BPS = 200` (2%), no compile-time default (0 until governance sets it). This is real, spendable value under team control — the opposite of the non-decreasing-NAV, no-one-can-touch-it design used everywhere else in this build. The design doc is explicit that this must never be described with the "no contract risk" / "no admin path" language used for the trustless mechanisms, and this handoff repeats that instruction rather than soften it. Not yet decided: the exact percentage, the treasury's multisig threshold/signer set, and whether the PLANK is ever released to circulating supply.
+- **Platform socialfi treasury (§7.12):** a separate governed, timelocked percentage of the fee flow already reaching the index sink (both fee streams from §11) is redirected — before it counts toward index reserve/dividend/buyback accounting — into a separate platform treasury earmarked for future PLANK airdrops tied to a socialfi leaderboard. Ceiling `CEIL_PLATFORM_TREASURY_BPS = 500` (5%), no compile-time default (0 until governed). Same honesty discipline as §7.11 restated in-code and in this doc: spendable, team-directed, never described with "no admin path" language. Not yet decided: the exact percentage, the treasury's custody structure, and the socialfi leaderboard/airdrop-eligibility product design itself — this build only ships where the funding comes from and how it's collected, not the leaderboard.
+
+Both new treasuries reuse the exact push-then-opportunistic-reconcile plumbing already built and tested for §11 (a plain transfer, atomic, cannot brick a vault) — only the destination address and the governed split percentage are new code.
+
+---
+
+## 15. Deploy tooling (§7.8) — built and tested locally, not itself adversarially reviewed
+
+`IndexDeployer.sol` was explicitly "not a deploy path" before this build — its own header comment says it exists so the atomicity property it creates can be tested, not run against a real network. §7.8 closes that gap with:
+
+- `scripts/deploy-index-vault.ts` — performs the same atomic deploy-cut-finalize sequence `IndexDeployer` proves in tests, against real network config.
+- `scripts/configure-index-vault-governance.ts` — sets initial governance roles and the risk parameters introduced across this whole build (swap fee split, ecosystem sub-split, vesting window, admission/weight thresholds, the new dilution/dev-fund/socialfi caps).
+- `scripts/seed-index-vault-genesis.ts` — seeds the genesis constituent list.
+- `scripts/config/index-vault-deploy-config.ts` — shared deploy configuration.
+- `scripts/deploy-tool/` — a standalone owner-run web tool (`entry.js`, `build.mjs`, `index.html`, its own `package.json` with `npm run build` via esbuild and `npm start` via a local static server) for driving the above without a raw CLI.
+
+**Honestly flagged, per this handoff's own instruction:** this tooling was built and tested against a local network this session, but — unlike §7.2, §7.3, §7.5, §7.6, §7.7, §7.10, §7.11, and §7.12, all of which went through a dedicated adversarial review pass — §7.8 itself was not separately adversarially reviewed. It's deploy/config tooling, not economic logic on the critical path, which is why it was lower priority for a dedicated review pass, but that's a judgment call stated here rather than an equivalence claim. **No live testnet deployment has actually been performed** — the tooling exists and is exercised against a local Hardhat network only; running it against a real testnet is a distinct, not-yet-done step.
+
+---
+
+## 16. Fresh verification, this session, at `df83633`
+
+Re-run directly, not carried forward from any prior number:
+
+| Check | Command | Result |
+|---|---|---|
+| Solidity/Hardhat contracts | `npm run test:contracts` | **706 passing, 0 failing** (~4m) |
+| TypeScript market/app logic | `npm run test:market` | **440 passing, 0 failing** |
+| Compile | `npx hardhat compile --force` | **91 Solidity files, compiled clean** (evm target `paris`; same pre-existing informational-only warnings noted in §2 — no errors) |
+| EIP-170 bytecode budget | measured `deployedBytecode` length of every artifact under `contracts/diamond/facets/` and `contracts/factory/`, this session | **every contract well under the 24,576-byte limit** — largest is `IndexTradeFacet` at 14,201 bytes (58% used, 10,375 headroom), followed by `IndexGovernanceFacet` at 14,164 and `CollectionVaultFactory` at 13,689; every other facet/factory contract is under 12,320 bytes |
+
+**What this build has genuinely not been through, stated plainly:**
+
+1. **No real external audit.** The internal adversarial review passes described in §13/§14 (and, for the Diamond migration, §5) are real and substantive — the dilution bug in §13 is direct proof they find real, quantified bugs, not just style nits — but they are not a substitute for an independent, credentialed external audit, and this codebase has never claimed otherwise elsewhere either.
+2. **§7.8's deploy tooling was not separately adversarially reviewed** (§15) — flagged there and repeated here since it's exactly the kind of thing a reviewer would otherwise assume was covered by the "all stages reviewed" framing.
+3. **The cross-block pool-staleness residual (§13) is real, disclosed, and unresolved** — `_requirePoolQuiescent()` stops same-block manipulation, not a swap-in-block-N/act-in-block-N+1 sequence.
+4. **No live testnet deployment has been performed.** The tooling in §15 is built and tested against a local network only.
+
+---
+
+## 17. Every governed risk parameter introduced across the whole build, with defaults and ceilings
+
+For a reviewer checking exactly what governance can and cannot move, and how far:
+
+| Parameter | Constant | Default | Ceiling / bound | Where |
+|---|---|---:|---:|---|
+| Swap fee (per collection vault) | `MAX_SWAP_FEE_BPS` | 100 bps (1%) | 100 bps — the default *is* the ceiling | `CollectionVault.sol:95` |
+| Swap-fee sink split (protocol-wide, not per-vault-governable) | `SWAP_SINK_SPLIT_BPS` | 5,000 bps (50%) | fixed constant, not governable | `CollectionVault.sol:87` |
+| Mint/redeem fee sink split (per collection vault, artist-selectable within range) | `mintRedeemSinkBps` (governed field); `DEFAULT_MINT_REDEEM_SINK_BPS` | 810 bps (8.1%, = floor) | floor `FLOOR_SINK_SPLIT_BPS` = 810 bps (8.1%), ceiling `CEIL_SINK_SPLIT_BPS` = 3,000 bps (30%) | `CollectionVault.sol:99,103`; `CollectionVaultFactory.sol:49` |
+| Three-way accrual split — buyback leg | `buybackBps` (governed) | 0 bps (100% to reserve until set) | `CEIL_BUYBACK_SPLIT_BPS` = 5,000 bps (50%), fixed, not governable past this | `IndexFacetBase.sol:131` |
+| Three-way accrual split — dividend leg | `dividendBps` (governed) | 0 bps | no independent ceiling beyond the implicit reserve remainder | `IndexStorage.sol:322-338` |
+| Weight maturity window (`K` in `m(Δh)=Δh/(Δh+K)`) | `WEIGHT_MATURITY_BLOCKS` (= `STREAM_VEST_BLOCKS`) | 300 blocks | governed, timelocked | `IndexFacetBase.sol:204` |
+| Weight dormancy decay window | `WEIGHT_DORMANCY_BLOCKS` | 3,000 blocks (10x maturity) | governed, timelocked | `IndexFacetBase.sol:229-230` |
+| Generalized vesting-guard window (every value injection) | `STREAM_VEST_BLOCKS` | 300 blocks | governed, timelocked | `IndexFacetBase.sol:204` |
+| Dedicated pool dilution cap (§7.10 protocol-owned-liquidity deploy) | `PoolStorage.maxPoolShareBps` (governed); `DEFAULT_MAX_POOL_SHARE_BPS` | 500 bps (5%) | `MAX_POOL_SHARE_BPS_CEIL` = 2,000 bps (20%), hard, not governable past this | `IndexPoolFacet.sol:72,76` |
+| Dev-fund PLANK-buy percentage (§7.11) | `DevFundStorage.devFundBps` (governed) | 0 bps (nothing until governed) | `CEIL_DEV_FUND_BPS` = 200 bps (2%) | `IndexFacetBase.sol:147` |
+| Platform socialfi treasury carve-out (§7.12) | `PlatformTreasuryStorage.carveOutBps` (governed) | 0 bps (nothing until governed) | `CEIL_PLATFORM_TREASURY_BPS` = 500 bps (5%) | `IndexFacetBase.sol:165` |
+| Timelock delay (carried over from the Diamond baseline, still governs every parameter above) | `CoreStorage.timelockDelay` | — | floor 48 hours, ceiling 30 days | `Diamond.sol:57-58,130-136` |
+
+Every entry above is a bounded-range, timelocked risk parameter following the same `queueX`/`executeX` pattern documented in §4 item 6 — none of them takes effect immediately, and every hard ceiling is re-checked at *execution* time, not queue time, per the same discipline already proven for the Diamond-baseline parameters.
