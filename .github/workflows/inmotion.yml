@@ -1294,6 +1294,16 @@ jobs:
           test -s "$script"
           test -s "$backup_script"
 
+          # Diagnostic, not a secret: this address is meant to be public
+          # (NEXT_PUBLIC_*). depositMany rows can only ever classify correctly
+          # via this exact value, since the contract emits no per-batch event
+          # for the reindex script's evidence-based fallback to read instead.
+          echo "--- vault address as this script's own runtime will see it ---"
+          grep -E '^NEXT_PUBLIC_MARKET_VAULT_ADDRESS=' "$env_file" || echo "(not present in $env_file)"
+          grep -E '^NEXT_PUBLIC_MARKET_VAULT_LEGACY_ADDRESSES=' "$env_file" || echo "(legacy list not present in $env_file)"
+          "$node_bin" --env-file="$env_file" -e \
+            'console.log("resolved MARKET_VAULT_ADDRESS:", process.env.NEXT_PUBLIC_MARKET_VAULT_ADDRESS ?? "(undefined)")'
+
           # Same backup-before-mutate discipline the deploy's own migration
           # step uses (inmotion.yml's `deploy` job) — this touches the same
           # ledger table via UPDATE, so it gets the same rollback point.
