@@ -24,6 +24,7 @@ import {
     DividendStorage,
     ValueAccrualStorage,
     StreamStorage,
+    WeightStorage,
     ReentrancyStorage,
     HooksStorage
 } from "../storage/IndexStorage.sol";
@@ -148,6 +149,32 @@ abstract contract IndexFacetBase {
      */
     uint256 internal constant STREAM_VEST_BLOCKS = 300;
 
+    /**
+     * @dev §7.5/§7.6 continuous constituent weight, ported block-based timing
+     * from `STREAM_VEST_BLOCKS`/`_addVest`/`_unvestedOf` above and adapted from
+     * a per-stream vest AMOUNT to a per-constituent weight SCORE (design doc
+     * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.5, §7.6).
+     *
+     * `WEIGHT_MATURITY_BLOCKS` is the window a freshly-recorded fee receipt
+     * takes to finish converting from `unvested` into `matured` — same shape
+     * as `STREAM_VEST_BLOCKS`, reused at the same value so a burst of activity
+     * at Δh = 0 contributes m(0) = 0 exactly, matching the round-9f-style bound
+     * already proven for stream vesting.
+     *
+     * `WEIGHT_DORMANCY_BLOCKS` is deliberately a LARGER, separate window: it is
+     * the horizon over which an already-`matured` weight decays toward zero
+     * from pure inactivity (no analogue in the stream-vest port, because
+     * streams never decay — only constituent weight does, per §7.5 rule 4).
+     * Keeping it wider than the maturity window matters: if the two windows
+     * were equal, a constituent's weight would finish maturing at the exact
+     * block its decay clock also finishes zeroing it out, so sustained
+     * activity could never actually reach near-full weight. Ten maturity
+     * windows of headroom is what makes "sustained activity over the maturity
+     * window produces weight approaching full value" achievable in practice.
+     */
+    uint256 internal constant WEIGHT_MATURITY_BLOCKS = STREAM_VEST_BLOCKS;
+    uint256 internal constant WEIGHT_DORMANCY_BLOCKS = STREAM_VEST_BLOCKS * 10;
+
     /// @dev The `M` in `revest = net * M * w / (S + w + VIRTUAL_SHARES)`.
     /// `M = 25` bounds atomic capture at 1% and the salami-sliced limit at 4%.
     uint256 internal constant DILUTION_REVEST_MULTIPLE = 25;
@@ -223,6 +250,11 @@ abstract contract IndexFacetBase {
     event DividendsDeferred(uint256 amount, uint256 carried);
     event ValueAccrualSplitApplied(uint256 dividendBps, uint256 buybackBps);
     event BuybackEarmarked(address indexed token, uint256 amount);
+    /// @notice §7.5: a confirmed on-chain fee receipt was recorded toward
+    /// `token`'s continuous weight. `amount` is always the SAME balance-delta
+    /// `_sync` already measured for `ConstituentSynced` — never a
+    /// caller-supplied number, and never emitted from anywhere else.
+    event ConstituentActivityRecorded(address indexed token, uint256 amount);
 
     // Streams (ported from WrappedIndexShare)
     event StreamQueued(address indexed token, uint64 eta);
@@ -861,6 +893,116 @@ abstract contract IndexFacetBase {
             emit BuybackEarmarked(token, buybackShare);
         }
         if (dividendShare > 0) _creditDividends(dividendShare);
+
+        // §7.5: every confirmed routed-value credit is also a fee receipt
+        // toward `token`'s continuous weight. Recorded on the FULL `amount`
+        // (not a sub-share) — weight tracks confirmed activity, not any one
+        // leg of where that activity's value ultimately landed.
+        _recordConstituentActivity(token, amount);
+    }
+
+    // ══ §7.5 continuous constituent weight ═══════════════════════════════
+    //
+    // Reuses the exact block-based timing pattern `_addVest`/`_unvestedOf`
+    // already prove for stream vesting (round 9e/9f), adapted from a per-
+    // stream vest AMOUNT to a per-constituent weight SCORE. See design doc
+    // §7.5/§7.6 and the header on `WeightStorage` for the full derivation.
+    //
+    // THE ONE WRITER: `_recordConstituentActivity`, called from exactly one
+    // place — `_creditRoutedValue` above, itself reached only through
+    // `IndexBootstrapFacet._sync`'s balance-delta measurement. No function
+    // anywhere accepts a caller-supplied weight, activity amount, or score;
+    // the only input this mechanism ever sees is `_sync`'s own `credited`
+    // value, which is itself a measured surplus, never a nominal argument.
+    //
+    // NO REMOVAL: nothing in this section ever touches `CoreStorage`'s
+    // `constituentList` — a constituent's weight can fall to (near) zero from
+    // sustained inactivity, and rise again from renewed activity, but the
+    // constituent itself is never ejected from the list by anything here.
+    //
+    // NO EFFECT ON MINTING: nothing in this section is read by
+    // `IndexCoreFacet`'s `mintProRata` or any other deposit-routing path —
+    // `Diamond.facets.test.ts`-style source scanning would catch an import of
+    // `WeightStorage` from that facet, and `IndexWeight.*.test.ts` exercises
+    // the behavioural side directly.
+
+    /// @dev The still-unvested remainder of `token`'s most recent activity
+    /// window, read live — a direct structural port of `_unvestedOf` over
+    /// `WeightStorage.WeightVest` instead of `StreamStorage.StreamVest`.
+    function _weightPendingRemaining(address token) internal view returns (uint256) {
+        WeightStorage.WeightVest storage v = WeightStorage.layout().vest[token];
+        uint256 u = v.unvested;
+        if (u == 0) return 0;
+        uint256 end_ = v.end;
+        if (block.number >= end_) return 0;
+        // `last < end` always holds: `_recordConstituentActivity` writes them
+        // together as (n, n + WEIGHT_MATURITY_BLOCKS) with
+        // WEIGHT_MATURITY_BLOCKS > 0, the same invariant `_addVest` relies on.
+        return Math.mulDiv(u, end_ - block.number, end_ - v.last);
+    }
+
+    /// @dev The portion of `token`'s tracked activity that has finished
+    /// converting from `unvested` into `matured` as of NOW, without writing
+    /// anything — used by both the write path (`_recordConstituentActivity`,
+    /// to roll it into storage) and the read path (`_constituentWeight`, to
+    /// include it in the live baseline before decay is applied).
+    function _weightFreshlyMatured(address token) internal view returns (uint256) {
+        WeightStorage.WeightVest storage v = WeightStorage.layout().vest[token];
+        return v.unvested - _weightPendingRemaining(token);
+    }
+
+    /**
+     * @dev THE ONE WRITE to `WeightStorage`. Rolls forward whatever has
+     * already matured since the last recorded receipt (never lost, never
+     * re-decayed at write time — decay is read-time only, see
+     * `_constituentWeight`), then adds the newly-measured `amount` as a fresh
+     * fully-`unvested` increment and re-arms the maturity window — exactly
+     * the `_addVest` pattern, over a different struct and constant.
+     *
+     * `amount == 0` is a no-op, mirroring `_addVest`'s own guard.
+     */
+    function _recordConstituentActivity(address token, uint256 amount) internal {
+        if (amount == 0) return;
+        WeightStorage.Layout storage ws = WeightStorage.layout();
+        WeightStorage.WeightVest storage v = ws.vest[token];
+        v.matured += _weightFreshlyMatured(token);
+        v.unvested = _weightPendingRemaining(token) + amount;
+        v.last = uint64(block.number);
+        v.end = uint64(block.number + WEIGHT_MATURITY_BLOCKS);
+        emit ConstituentActivityRecorded(token, amount);
+    }
+
+    /**
+     * @dev `token`'s current §7.5 weight: a PURE function of storage and
+     * `block.number`, exactly like `_unvestedOf` — no setter anywhere reaches
+     * it, and nothing here is settable by any role or caller.
+     *
+     * Baseline = already-`matured` weight + whatever has freshly finished
+     * maturing since the last recorded receipt (read live, never written back
+     * here). That baseline then decays LINEARLY toward zero over
+     * `WEIGHT_DORMANCY_BLOCKS` measured from the SAME `v.last` the maturity
+     * window uses, so:
+     *
+     *  - a burst of activity at Δh = 0 (this block) has `matured == 0` and
+     *    `freshlyMatured == 0` (the whole receipt is still fully `unvested`
+     *    the instant it lands), so the baseline itself is zero — m(0) = 0,
+     *    without decay even entering into it;
+     *  - sustained activity (repeated receipts, each within
+     *    `WEIGHT_DORMANCY_BLOCKS` of the last) keeps resetting `v.last`,
+     *    so `elapsed` stays small and the accumulated `matured` baseline
+     *    is read back at close to full value;
+     *  - a constituent nobody has touched for `WEIGHT_DORMANCY_BLOCKS` or
+     *    more reads back as exactly zero, with its entry in `constituentList`
+     *    completely untouched — decay is a view-time reinterpretation of
+     *    existing storage, never a write that could remove anything.
+     */
+    function _constituentWeight(address token) internal view returns (uint256) {
+        WeightStorage.WeightVest storage v = WeightStorage.layout().vest[token];
+        uint256 baseline = v.matured + _weightFreshlyMatured(token);
+        if (baseline == 0) return 0;
+        uint256 elapsed = block.number - v.last;
+        if (elapsed >= WEIGHT_DORMANCY_BLOCKS) return 0;
+        return Math.mulDiv(baseline, WEIGHT_DORMANCY_BLOCKS - elapsed, WEIGHT_DORMANCY_BLOCKS);
     }
 
     // ══ Streams — ported verbatim from WrappedIndexShare (design doc §5.4/§5.5) ══

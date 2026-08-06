@@ -135,6 +135,37 @@ contract IndexLensFacet is IndexFacetBase {
         return q.pending && q.isRemoval;
     }
 
+    // ── §7.5 continuous constituent weight ─────────────────────────────────
+
+    /**
+     * @notice `token`'s current §7.5 weight — a maturity-and-decay score
+     * derived ONLY from confirmed on-chain fee receipts already reconciled
+     * through `IndexBootstrapFacet._sync`. Governs benefit/reward-share
+     * attribution only; has no bearing on `mintProRata`'s accept/reject logic
+     * or the weighted-basket rule that decides deposit routing (§7.3, §7.5).
+     */
+    function constituentWeight(address token) external view returns (uint256) {
+        return _constituentWeight(token);
+    }
+
+    /**
+     * @notice `token`'s §7.5 weight as a share, in bps, of the SUM of every
+     * listed constituent's weight — the concrete "attributes value across
+     * constituents" quantity design doc §7.5 describes. Returns 0 if every
+     * listed constituent currently has zero weight (nothing has ever landed,
+     * or everything has fully decayed), rather than dividing by zero.
+     */
+    function constituentWeightBps(address token) external view returns (uint256) {
+        CoreStorage.Layout storage cs = CoreStorage.layout();
+        uint256 n = cs.constituentList.length;
+        uint256 total;
+        for (uint256 i = 0; i < n; i++) {
+            total += _constituentWeight(cs.constituentList[i]);
+        }
+        if (total == 0) return 0;
+        return (_constituentWeight(token) * BPS) / total;
+    }
+
     // ── Previews ───────────────────────────────────────────────────────────
 
     /// @notice What a pro-rata redemption of `sharesIn` pays today. Pure math
