@@ -115,6 +115,8 @@ test("AUDIT-6: collection-wide offers are disabled (fail closed)", async () => {
         considerationTokenAddress: COLLECTION.contractAddress,
         expiresAt: new Date(Date.now() + 3600_000).toISOString(),
         feeBps: 0,
+        royaltyBps: 0,
+        royaltyRecipient: "0x0000000000000000000000000000000000000000",
       }),
     /disabled/i,
     "buildOffer still signs unfillable collection-wide criteria orders"

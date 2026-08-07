@@ -197,7 +197,7 @@ a valid maker signature.
 | Surface | Current rule |
 | --- | --- |
 | Official Uniswap-routed widget | `0.4207%` integrator fee (`42.07` bips) to `0xfa987d386c4f61b27cb67a1e4e1239866fe8d9ba` |
-| RobinWood Seaport listings/offers | `0%` marketplace fee |
+| RobinWood Seaport listings/offers | `0%` marketplace fee; new Marketplank orders include the collection's `8.1%` EIP-2981 creator royalty |
 | Future approved collections | `0.5%` default, configured per collection |
 | Vault mint / redeem / targeted redeem (V1, V2) | Immutable share-denominated parameters; deploy-tool defaults are `1%` / `1%` / `2.5%` premium |
 | Vault mint / redeem / targeted redeem (V3) | Immutable flat **ETH** fees fixed at deployment, under wei ceilings enforced in the constructor. Deposit mints exactly one share; redeem burns exactly one — no share-fee dust |

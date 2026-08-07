@@ -657,8 +657,8 @@ export default function MarketView() {
         const derived = validateOfferOrder(full.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY);
         const { assertAcceptableOffer } = await loadSeaport();
         assertAcceptableOffer(full, derived);
-        // derived.priceWei is the seller's NET proceeds (order-validation
-        // OFFER semantics) — the number the seller must see before signing.
+        // derived.priceWei is the seller's NET proceeds after marketplace fee
+        // and creator royalty (order-validation OFFER semantics).
         setAcceptTarget({
           offer: full,
           verifiedNetWei: derived.priceWei,
