@@ -19,6 +19,13 @@ import type { DerivedOrder } from "@/lib/market/order-validation";
 import { assertSweepTotal } from "@/lib/market/sweep";
 import type { SweepItem } from "@/lib/market/sweep";
 import type { MarketCollection } from "@/lib/market/types";
+import {
+  assertRoyaltyConfig,
+  bpsFromRoyaltyAmount,
+  decodeRoyaltyInfo,
+  encodeRoyaltyInfo,
+  ROYALTY_PROBE_PRICE_WEI,
+} from "@/lib/market/royalty";
 import type { Eip1193Provider } from "@/lib/wallet";
 import {
   ensureRobinhoodChain,
@@ -32,9 +39,49 @@ import {
  * from the collection's own config (lib/market/collections.ts) — 0 means no
  * fee item is added at all, not a fee item worth zero.
  */
-function feesFor(feeBps: number): Fee[] | undefined {
-  if (!feeBps || feeBps <= 0) return undefined;
-  return [{ recipient: MARKET_FEE_RECIPIENT, basisPoints: feeBps }];
+function feesFor(feeBps: number, royalty?: Fee): Fee[] | undefined {
+  const fees = royalty ? [royalty] : [];
+  if (feeBps > 0) {
+    fees.push({ recipient: MARKET_FEE_RECIPIENT, basisPoints: feeBps });
+  }
+  return fees.length > 0 ? fees : undefined;
+}
+
+/**
+ * Reads the live EIP-2981 response immediately before signing. The collection
+ * config is an expected deployment value; the wallet's chain read is the
+ * source that decides whether signing may continue. This catches a changed
+ * receiver or royalty rate instead of silently signing an order that the
+ * collection no longer describes.
+ */
+async function royaltyFeeFor(
+  tokenAddress: string,
+  tokenId: string,
+  expectedBps: number,
+  expectedRecipient: string
+): Promise<Fee | undefined> {
+  if (!expectedBps || expectedBps <= 0) return undefined;
+  const expected = assertRoyaltyConfig({ bps: expectedBps, receiver: expectedRecipient });
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+  const raw = await provider.request({
+    method: "eth_call",
+    params: [
+      {
+        to: tokenAddress,
+        data: encodeRoyaltyInfo(BigInt(tokenId).toString(), ROYALTY_PROBE_PRICE_WEI),
+      },
+      "latest",
+    ],
+  });
+  const live = decodeRoyaltyInfo(String(raw));
+  const liveBps = bpsFromRoyaltyAmount(live.amountWei, ROYALTY_PROBE_PRICE_WEI);
+  if (liveBps !== expected.bps || live.receiver !== expected.receiver) {
+    throw new Error(
+      `Royalty changed on-chain: expected ${expected.bps} bps to ${expected.receiver}.`
+    );
+  }
+  return { recipient: live.receiver, basisPoints: liveBps };
 }
 
 const ERC721_IFACE = new Interface([
@@ -258,19 +305,22 @@ async function executeActionsViaWallet(
 export type ListInput = {
   offerTokenAddress: string;
   offerTokenId: string;
+  /** Gross buyer payment; Seaport deducts the configured fees from the seller leg. */
   considerationWei: string;
   /** ISO 8601; converted to unix seconds for Seaport internally. */
   expiresAt: string;
   /** From the collection's config (lib/market/collections.ts) — 0 for $PLANK. */
   feeBps: number;
+  /** EIP-2981 royalty config expected for this collection. */
+  royaltyBps: number;
+  royaltyRecipient: string;
 };
 
 /**
- * Builds and signs a fixed-price sell order. When feeBps > 0, seaport-js
- * appends the fee as an additional consideration item automatically — the
- * seller's `considerationWei` amount is what they receive net, the fee is
- * added on top for the buyer to pay, matching how OpenSea's own fee mechanic
- * works.
+ * Builds and signs a fixed-price sell order. Seaport-js deducts the configured
+ * creator royalty and marketplace fee from the seller's consideration leg,
+ * then appends those amounts as signed consideration items. `considerationWei`
+ * is therefore the gross buyer payment; the seller receives the remainder.
  *
  * exactApproval=true: seaport-js grants a single-token ERC-721 `approve`
  * instead of `setApprovalForAll(Seaport, true)` over the whole collection —
@@ -280,6 +330,12 @@ export type ListInput = {
 export async function buildListing(accountAddress: string, input: ListInput) {
   const seaport = await getSeaport();
   const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
+  const royalty = await royaltyFeeFor(
+    input.offerTokenAddress,
+    input.offerTokenId,
+    input.royaltyBps,
+    input.royaltyRecipient
+  );
 
   const { actions } = await seaport.createOrder(
     {
@@ -297,7 +353,7 @@ export async function buildListing(accountAddress: string, input: ListInput) {
           recipient: accountAddress,
         },
       ],
-      fees: feesFor(input.feeBps),
+      fees: feesFor(input.feeBps, royalty),
       endTime,
     },
     accountAddress,
@@ -327,11 +383,16 @@ export type OfferInput = {
   expiresAt: string;
   /** From the collection's config (lib/market/collections.ts) — 0 for $PLANK. */
   feeBps: number;
+  /** EIP-2981 royalty config expected for this collection. */
+  royaltyBps: number;
+  royaltyRecipient: string;
 };
 
 /**
  * Builds and signs an item-level offer, denominated in WETH (Seaport cannot
- * pull native ETH from an offerer at fulfillment).
+ * pull native ETH from an offerer at fulfillment). Creator royalty and the
+ * marketplace fee are consideration legs deducted from the offer amount, so
+ * the seller receives the validated net amount.
  *
  * COLLECTION-WIDE OFFERS REMAIN DISABLED (fail closed, audit 2026-07-27): the
  * original criteria-based build produced orders that were unfillable — the
@@ -381,6 +442,18 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
   }
   const seaport = await getSeaport();
   const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
+  const royaltyTokenId = input.considerationTokenId ?? input.criteriaTokenIds?.[0];
+  if (input.royaltyBps > 0 && !royaltyTokenId) {
+    throw new Error("A royalty-bearing offer needs a token or trait snapshot.");
+  }
+  const royalty = royaltyTokenId
+    ? await royaltyFeeFor(
+        input.considerationTokenAddress,
+        royaltyTokenId,
+        input.royaltyBps,
+        input.royaltyRecipient
+      )
+    : undefined;
 
   const { actions } = await seaport.createOrder(
     {
@@ -391,7 +464,7 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
         },
       ],
       consideration: [considerationItem],
-      fees: feesFor(input.feeBps),
+      fees: feesFor(input.feeBps, royalty),
       endTime,
     },
     accountAddress,
