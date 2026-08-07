@@ -241,6 +241,10 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // change in this table, same role as `queueDevFundRouter` etc.
       { name: "queueSocialFiTreasury", args: [alice.address], role: ROLE_RISK, holder: risk },
       { name: "queueSocialFiTreasuryBps", args: [100n], role: ROLE_RISK, holder: risk },
+      // IndexPoolFacet (design doc §7.10 automation, 2026-08-06) — the
+      // auto-deploy dust floor. Same queue/execute timelock shape and role
+      // as `queueMaxPoolShareBps` above.
+      { name: "queueMinAutoDeployWei", args: [1_000n], role: ROLE_RISK, holder: risk },
     ];
 
     // The enumeration must be COMPLETE. Every non-view function on the ABI is
@@ -369,6 +373,19 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // WHO may flip the already-queued, already-delayed switch.
       "executeSocialFiTreasury",
       "executeSocialFiTreasuryBps",
+      // IndexPoolFacet (design doc §7.10 automation, 2026-08-06).
+      // `autoDeployToIndexPool` is stricter than permissionless: it reverts
+      // for every caller except `address(this)` (the diamond calling itself
+      // mid-`_sync`), so no externally-owned account or role can ever reach
+      // it directly. It shares the exact same core logic, pricing, and
+      // governed dilution cap as `deployToIndexPool` immediately above —
+      // there is nothing here for a role to be trusted with either.
+      "autoDeployToIndexPool",
+      // `executeMinAutoDeployWei` is the timelock-gated apply for the
+      // auto-deploy dust floor, same shape as every other `execute*` above —
+      // permissionless after the eta, gated at the `queue` side by
+      // `ROLE_RISK_PARAM_` instead.
+      "executeMinAutoDeployWei",
     ]);
     const abiNames = (vault.interface.fragments as any[])
       .filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))
