@@ -236,7 +236,7 @@ boundaries, relayer logic, CI, and secrets as security-sensitive.
 - Internal audits are documented under [`docs/marketplank`](docs/marketplank).
   They are not a substitute for an independent third-party audit.
 - The current dependency posture is recorded in
-  [Dependabot status](docs/DEPENDABOT_INMOTION.md), last verified 2026-07-30.
+  [dependency health](docs/DEPENDENCY_HEALTH.md), last verified 2026-08-07.
 
 ## Contracts and addresses
 
@@ -287,7 +287,7 @@ Version numbers are internal. The UI presents each vault by product name
 - [Security policy](SECURITY.md)
 - [Release and versioning policy](docs/RELEASES.md)
 - [InMotion deployment runbook](docs/INMOTION_DEPLOYMENT.md)
-- [Dependabot status](docs/DEPENDABOT_INMOTION.md)
+- [Dependency health](docs/DEPENDENCY_HEALTH.md)
 - [Marketplank engineering specification](docs/marketplank/SPEC.md)
 - [V3 internal audit](docs/marketplank/AUDIT-2026-08-01-v3-internal.md)
 - [V3 deploy runbook](docs/marketplank/DEPLOY-V3-RUNBOOK.md)

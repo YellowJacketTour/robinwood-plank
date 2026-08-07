@@ -1,0 +1,48 @@
+name: Dependency health
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - master
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-health-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-health:
+    name: Dependency health
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm install -g npm@11.6.2
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Report deprecated packages
+        run: npm run dependencies:report
+      - name: Audit production dependency tree
+        run: npm audit --omit=dev --audit-level=high
+      - name: Report full dependency tree audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+      - name: Report remaining outdated direct dependencies
+        shell: bash
+        run: |
+          set +e
+          npm outdated --long
+          status=$?
+          if [ "$status" -gt 1 ]; then
+            exit "$status"
+          fi

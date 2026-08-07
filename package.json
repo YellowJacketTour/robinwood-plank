@@ -24,7 +24,8 @@
     "market:refresh": "tsx scripts/refresh-market-data.ts",
     "market:refresh:full": "tsx scripts/refresh-market-data.ts --full",
     "market:reindex": "tsx scripts/reindex-chain-events.ts",
-    "discover:compute-rarity": "tsx scripts/compute-rarity.ts"
+    "discover:compute-rarity": "tsx scripts/compute-rarity.ts",
+    "dependencies:report": "node scripts/check-dependency-health.mjs"
   },
   "engines": {
     "node": ">=20.9.0"
