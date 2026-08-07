@@ -1,4 +1,5 @@
-import "@nomicfoundation/hardhat-toolbox";
+import hardhatToolboxMochaEthers from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
+import { defineConfig } from "hardhat/config";
 import type { HardhatUserConfig } from "hardhat/config";
 
 /**
@@ -8,7 +9,8 @@ import type { HardhatUserConfig } from "hardhat/config";
  * by accident. Deployment happens via an explicit, reviewed script once the
  * audit gate (docs/marketplank/SPEC.md §7) is cleared.
  */
-const config: HardhatUserConfig = {
+const config = defineConfig({
+  plugins: [hardhatToolboxMochaEthers],
   solidity: {
     version: "0.8.24",
     settings: {
@@ -26,37 +28,50 @@ const config: HardhatUserConfig = {
     cache: "./.hardhat-cache",
     artifacts: "./.hardhat-artifacts",
   },
+  chainDescriptors: {
+    4663: {
+      name: "Robinhood Chain",
+      blockExplorers: {
+        etherscan: {
+          name: "Robinhood Chain Explorer",
+          url: "https://robinhoodchain.blockscout.com",
+          apiUrl: "https://robinhoodchain.blockscout.com/api",
+        },
+        blockscout: {
+          name: "Robinhood Chain Explorer",
+          url: "https://robinhoodchain.blockscout.com",
+          apiUrl: "https://robinhoodchain.blockscout.com/api",
+        },
+      },
+    },
+    46630: {
+      name: "Robinhood Chain Testnet",
+      blockExplorers: {
+        etherscan: {
+          name: "Robinhood Chain Testnet Explorer",
+          url: "https://explorer.testnet.chain.robinhood.com",
+          apiUrl: "https://explorer.testnet.chain.robinhood.com/api",
+        },
+        blockscout: {
+          name: "Robinhood Chain Testnet Explorer",
+          url: "https://explorer.testnet.chain.robinhood.com",
+          apiUrl: "https://explorer.testnet.chain.robinhood.com/api",
+        },
+      },
+    },
+  },
   // Block-explorer (Blockscout) source verification for the Robinhood chains.
   // Blockscout ignores the apiKey but hardhat-verify requires an entry.
-  etherscan: {
-    apiKey: {
-      robinhood: process.env.ROBINHOOD_EXPLORER_KEY || "blockscout",
-      "robinhood-testnet": process.env.ROBINHOOD_EXPLORER_KEY || "blockscout",
+  verify: {
+    etherscan: {
+      apiKey: process.env.ROBINHOOD_EXPLORER_KEY || "blockscout",
     },
-    customChains: [
-      {
-        network: "robinhood",
-        chainId: 4663,
-        urls: {
-          apiURL: "https://robinhoodchain.blockscout.com/api",
-          browserURL: "https://robinhoodchain.blockscout.com",
-        },
-      },
-      {
-        network: "robinhood-testnet",
-        chainId: 46630,
-        urls: {
-          apiURL: "https://explorer.testnet.chain.robinhood.com/api",
-          browserURL: "https://explorer.testnet.chain.robinhood.com",
-        },
-      },
-    ],
   },
   networks: {
     // LOCAL ONLY. `npx hardhat node` serves this on 127.0.0.1:8545 (chainId
     // 31337); scripts/local-v3-setup.ts deploys the V3 dev stack here so the
     // frontend can be exercised without touching mainnet.
-    localhost: { url: "http://127.0.0.1:8545", chainId: 31337 },
+    localhost: { type: "http", url: "http://127.0.0.1:8545", chainId: 31337 },
 
     // Robinhood networks appear ONLY when their RPC URL + DEPLOYER_PK are both
     // present in the environment. Absent those env vars the keys below are
@@ -68,7 +83,7 @@ const config: HardhatUserConfig = {
     // build/runtime (same isolation as RELAYER_PRIVATE_KEY).
     ...robinhoodNetworks(),
   },
-};
+});
 
 /**
  * Build the Robinhood network map from env, omitting any network whose RPC/key
@@ -82,10 +97,11 @@ function robinhoodNetworks(): HardhatUserConfig["networks"] {
   const accounts = key ? [key.startsWith("0x") ? key : `0x${key}`] : [];
   const nets: NonNullable<HardhatUserConfig["networks"]> = {};
   if (accounts.length && process.env.ROBINHOOD_RPC_URL) {
-    nets.robinhood = { url: process.env.ROBINHOOD_RPC_URL, chainId: 4663, accounts };
+    nets.robinhood = { type: "http", url: process.env.ROBINHOOD_RPC_URL, chainId: 4663, accounts };
   }
   if (accounts.length && process.env.ROBINHOOD_TESTNET_RPC_URL) {
     nets["robinhood-testnet"] = {
+      type: "http",
       url: process.env.ROBINHOOD_TESTNET_RPC_URL,
       // Testnet chainId is env-driven — Orbit testnets don't share mainnet's id.
       chainId: process.env.ROBINHOOD_TESTNET_CHAIN_ID

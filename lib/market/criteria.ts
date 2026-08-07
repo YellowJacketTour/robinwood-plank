@@ -7,7 +7,7 @@ import { keccak256, toBeHex, zeroPadValue } from "ethers";
 // against the same tree the signed order committed to. Do not hand-roll a
 // tree here — a construction mismatch (leaf encoding, pair ordering) produces
 // roots that Seaport's on-chain _verifyProof silently never accepts.
-import { MerkleTree } from "@opensea/seaport-js/lib/utils/merkletree";
+import { MerkleTree } from "@opensea/seaport-js/lib/utils/merkletree.js";
 
 /**
  * Trait-scoped criteria bids ("bid on the floor of a trait").

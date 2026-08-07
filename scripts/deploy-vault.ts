@@ -26,7 +26,7 @@
  * hardhat.config.ts — add it yourself when you're ready to actually deploy,
  * so this repo never has a one-command path to mainnet by accident.)
  */
-import { ethers } from "hardhat";
+import hardhat from "hardhat";
 
 // Marketplank's dedicated treasury wallet (lib/constants.ts
 // MARKET_FEE_RECIPIENT) — separate from the Trade section's Uniswap
@@ -44,6 +44,7 @@ const DEFAULT_REDEEM_FEE_BPS = 100; // 1%
 const DEFAULT_TARGET_PREMIUM_BPS = 250; // 2.5% extra to pick a specific token ID
 
 async function main() {
+  const { ethers } = await hardhat.network.create();
   const NFT_COLLECTION_ADDRESS = process.env.MARKET_COLLECTION_ADDRESS;
   if (!NFT_COLLECTION_ADDRESS) {
     throw new Error("Set MARKET_COLLECTION_ADDRESS before deploying.");

@@ -1,7 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { mine, time } from "@nomicfoundation/hardhat-network-helpers";
-import { deployBeaconMock, relayPendingRound } from "./helpers/beacon";
+import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { deployBeaconMock, relayPendingRound } from "./helpers/beacon.js";
 
 /**
  * Revision-3 randomized property test.
@@ -195,8 +194,8 @@ describe("MarketplankVault — randomized solvency & draw-immutability", () => {
           // Push time forward — sometimes past the beacon's expiry window, so
           // the forfeit path is genuinely reachable (rounds are timed now, not
           // counted in blocks).
-          await mine(1);
-          await time.increase(1 + Math.floor(rand() * 40_000));
+          await networkHelpers.mine(1);
+          await networkHelpers.time.increase(1 + Math.floor(rand() * 40_000));
           const r = await vault.pendingRequester();
           if (r !== ethers.ZeroAddress) {
             await vault.connect(who).forfeitExpiredRedeem(r);

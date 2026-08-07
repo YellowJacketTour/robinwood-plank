@@ -1,8 +1,8 @@
 import { expect } from "chai";
-import { ethers, network } from "hardhat";
+import { ethers, provider } from "./helpers/hardhat.js";
 import { Contract, TypedDataEncoder } from "ethers";
 import type { Signer } from "ethers";
-import seaportFixture from "./fixtures/seaport-1.6-bytecode.json";
+import seaportFixture from "./fixtures/seaport-1.6-bytecode.json" with { type: "json" };
 
 /**
  * THE CRITICAL PROOF for the per-token-approval spoof (lib/market/seaport.ts,
@@ -97,9 +97,9 @@ describe("Seaport 1.6 per-token approval fillability (REAL deployed bytecode)", 
   let buyer: Signer;
   let sellerAddr: string;
   let buyerAddr: string;
-  let seaport: Contract;
-  let nft: Contract;
-  let weth: Contract;
+  let seaport: any;
+  let nft: any;
+  let weth: any;
 
   before(async () => {
     [buyer, seller] = await ethers.getSigners();
@@ -109,7 +109,7 @@ describe("Seaport 1.6 per-token approval fillability (REAL deployed bytecode)", 
     // Plant the REAL canonical Seaport 1.6 runtime bytecode — same fixture,
     // same setup discipline as SeaportCriteriaFulfill.test.ts.
     expect((seaportFixture.bytecode.length - 2) / 2).to.equal(23_981);
-    await network.provider.send("hardhat_setCode", [
+    await provider.send("hardhat_setCode", [
       SEAPORT_ADDRESS,
       seaportFixture.bytecode,
     ]);
@@ -277,7 +277,7 @@ describe("Seaport 1.6 per-token approval fillability (REAL deployed bytecode)", 
 
     await expect(
       seaport.connect(buyer).fulfillOrder({ parameters, signature }, ZERO_HASH, { value: PRICE_WEI })
-    ).to.be.reverted;
+    ).to.be.revert(ethers);
 
     // Confirms this is a real on-chain gate, not a library artifact: nothing moved.
     expect(await nft.ownerOf(tokenId)).to.equal(sellerAddr);

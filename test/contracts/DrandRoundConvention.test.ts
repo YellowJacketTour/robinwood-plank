@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers } from "./helpers/hardhat.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -20,7 +20,7 @@ import path from "node:path";
  * it thinks the current round is.
  */
 
-const FIXTURE = path.join(__dirname, "fixtures", "drand-round.json");
+const FIXTURE = path.join(import.meta.dirname, "fixtures", "drand-round.json");
 
 /** drand's real round_at(t), computed independently of any contract. */
 function roundAt(t: number, genesis: number, period: number): number {
