@@ -238,6 +238,80 @@ describe("IndexPoolFacet automatic deployment (2026-08-06 automation pass)", () 
     expect(receipt!.gasUsed).to.be.lt(600_000n);
   });
 
+  // ══ 3b. DIFFERENTIAL gas: skipped attempt vs. attempted-and-caught-failure ═
+  //
+  // Adversarial-review fix (2026-08-06): the two tests above only assert an
+  // absolute ceiling on a sync-with-auto-deploy-attempt in isolation. That
+  // does not prove the ATTEMPT ITSELF is cheap — a test asserting "under
+  // 600k" would still pass even if the attempt-and-catch machinery added,
+  // say, 400k gas over a plain skipped sync, which would be a real
+  // (if bounded) cost this design doc never signs up for ("GAS: skipped
+  // entirely... before the far larger cost of a full pricing/cap
+  // computation" — `_attemptAutoDeploy`'s own header). This measures the
+  // SAME donation amount, same fixture, same everything except the governed
+  // dust floor: one run sets the floor above the donation so
+  // `_attemptAutoDeploy` returns immediately after one `SLOAD` (skip case);
+  // the other sets the floor to allow the attempt but drives the dilution
+  // cap to its ceiling first so `_deployToIndexPoolCore` reverts partway
+  // through real pricing/cap work and the self-call is caught (attempted-
+  // and-failed case).
+  it("DIFFERENTIAL: an attempted-but-failed auto-deploy costs a bounded amount over a floor-skipped sync, not an unbounded one", async () => {
+    const fx = await fixtureWithPool();
+    const shareToken = fx.addrs[1];
+    const donateAmount = 10n * WAD;
+
+    // ── Case A: skipped. Floor set above the donation, so
+    // `_attemptAutoDeploy` returns after one SLOAD comparison — no self-call
+    // is even made.
+    const skipSnap = await takeSnapshot();
+    await fx.vault.connect(fx.risk).queueMinAutoDeployWei(ethers.MaxUint256);
+    await time.increase(TIMELOCK + 1);
+    await fx.vault.executeMinAutoDeployWei();
+    await fx.vault.checkpointAll();
+    await fx.tokens[1].mint(fx.vaultAddr, donateAmount);
+    const skipTx = await fx.vault.connect(fx.carol).reconcile(shareToken);
+    const skipReceipt = await skipTx.wait();
+    await expect(skipTx).to.not.emit(fx.vault, "AutoDeployedToIndexPool");
+    await expect(skipTx).to.not.emit(fx.vault, "AutoDeployToIndexPoolFailed");
+    const skipGas: bigint = skipReceipt!.gasUsed;
+    await skipSnap.restore();
+
+    // ── Case B: attempted, then caught-failed. Floor stays at the default
+    // (zero — every reconcile is attempted), and the dilution cap is driven
+    // to its governed ceiling first (same technique test #2 above uses) so
+    // `_deployToIndexPoolCore` runs its real pricing/cap logic and reverts
+    // on `PoolShareCapExceeded` — a REAL failure, not a cheap early return.
+    for (let i = 0; i < 500; i++) {
+      const poolShares: bigint = await fx.vault.poolSharesMinted();
+      const supplyNow: bigint = await fx.vault.totalSupply();
+      if ((poolShares * BPS) / supplyNow >= 495n) break;
+      await fx.vault.connect(fx.alice).deployToIndexPool(shareToken, 1n * WAD);
+    }
+    await fx.tokens[1].mint(fx.vaultAddr, donateAmount);
+    const failTx = await fx.vault.connect(fx.carol).reconcile(shareToken);
+    const failReceipt = await failTx.wait();
+    await expect(failTx).to.emit(fx.vault, "AutoDeployToIndexPoolFailed");
+    const failGas: bigint = failReceipt!.gasUsed;
+
+    // The delta is the real cost of the attempt-and-catch machinery
+    // (pricing reads, the self-`CALL` boundary, the cap check, the revert,
+    // and unwinding back to the caller) over doing nothing at all. Measured
+    // at ~166,941 gas for this exact scenario: `_deployToIndexPoolCore`'s
+    // pricing path reads two price bands and NAV, computes
+    // `_imbalanceFeeBps`/`_mintFeeBps` (an `IndexValuation` library call
+    // over the whole constituent list), and the dilution cap check before
+    // reverting — real SLOAD-bound work, but bounded (no SSTORE-heavy mint,
+    // no transfer, no pool call ever runs). Budgeted at 220,000: a ~30%
+    // margin over the measured cost so a minor, benign change to the
+    // pricing path does not flake this test, while still being far below
+    // what a regression that let the failure path repeat the full
+    // successful-deploy cost (mint + transfer + pool call, several hundred
+    // thousand gas per the sibling "successful auto-deploy" test's 600k
+    // ceiling) would look like.
+    const delta = failGas - skipGas;
+    expect(delta).to.be.lt(220_000n);
+  });
+
   it("a dust-sized sync below the governed minAutoDeployWei floor skips the auto-deploy attempt entirely (cheap)", async () => {
     const fx = await fixtureWithPool();
     const shareToken = fx.addrs[1];

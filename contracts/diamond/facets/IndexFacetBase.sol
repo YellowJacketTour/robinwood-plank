@@ -353,6 +353,16 @@ abstract contract IndexFacetBase {
     /// reserve exactly as if this attempt had never been made.
     event AutoDeployToIndexPoolFailed(address indexed shareToken, uint256 shareAmountAttempted);
 
+    /// @notice Adversarial-review fix (2026-08-06): a mint/redeem hot path
+    /// (`mintProRata`/`redeemProRata`/`mintSingleAsset`/`redeemSingleAsset`)
+    /// opportunistically tried to reconcile a constituent it was already
+    /// touching (design doc §7.2 — "every normal interaction with that
+    /// constituent... opportunistically reconciles any surplus") and the
+    /// attempt reverted. CAUGHT, never propagated — see
+    /// `_attemptOpportunisticReconcile`'s header. `ConstituentSynced` simply
+    /// does not fire for this token on this call; nothing else is affected.
+    event OpportunisticReconcileFailed(address indexed token);
+
     // ── §7.11 dev-fund PLANK market-buy (design doc §7.11) ────────────────
     //
     // DELIBERATELY NOT DESCRIBED as "no admin path" or "no one can touch it"
@@ -1155,16 +1165,21 @@ abstract contract IndexFacetBase {
     }
 
     /**
-     * @dev Called from exactly one place — `IndexBootstrapFacet._sync`,
+     * @dev Called from exactly one place — `_reconcileCore` below,
      * immediately after a fresh share-type (non-payment-token) surplus is
-     * credited. Non-blocking BY CONSTRUCTION, not by convention: the only way
-     * to `try/catch` a revert from `_deployToIndexPoolCore` without an actual
-     * `CALL`-boundary is to route through one, exactly the way `_fireHook`
-     * routes through a low-level `.call` to catch a hostile hook's revert —
-     * so this issues a low-level self-call back into the diamond's own
-     * `IndexPoolFacet.autoDeployToIndexPool` selector (dispatched by the
-     * diamond's fallback exactly like any other external call would be) and
-     * reads `ok` rather than ever letting a revert propagate.
+     * credited, whether `_reconcileCore` was itself reached from the
+     * explicit `syncConstituentBalance`/`reconcile` entry points or
+     * opportunistically from a mint/redeem hot path via
+     * `_attemptOpportunisticReconcile`'s self-call into `autoReconcile`
+     * (adversarial-review fix, 2026-08-06). Non-blocking BY CONSTRUCTION,
+     * not by convention: the only way to `try/catch` a revert from
+     * `_deployToIndexPoolCore` without an actual `CALL`-boundary is to route
+     * through one, exactly the way `_fireHook` routes through a low-level
+     * `.call` to catch a hostile hook's revert — so this issues a low-level
+     * self-call back into the diamond's own `IndexPoolFacet.
+     * autoDeployToIndexPool` selector (dispatched by the diamond's fallback
+     * exactly like any other external call would be) and reads `ok` rather
+     * than ever letting a revert propagate.
      *
      * THIS SELF-CALL IS SAFE AGAINST REENTRANCY, NOT MERELY CONVENIENT FOR
      * try/catch: `autoDeployToIndexPool` requires `msg.sender == address(this)`,
@@ -1173,16 +1188,17 @@ abstract contract IndexFacetBase {
      * `deploy` calls inside `_deployToIndexPoolCore` arrives with ITS OWN
      * address as `msg.sender`, not the diamond's, and is rejected the same
      * way. The shared reentrancy word is already `ENTERED` for the whole
-     * duration (set by whichever guarded call reached `_sync`), so
+     * duration (set by whichever guarded `nonReentrant` call — `sync`,
+     * `reconcile`, or now a mint/redeem — reached `_reconcileCore`), so
      * `autoDeployToIndexPool` deliberately carries no `nonReentrant` of its
      * own — see that function's header.
      *
      * GAS: skipped entirely, before the self-call is even made, whenever
      * `shareAmount` is below the governed `PoolStorage.minAutoDeployWei`
-     * floor (default zero — every sync is attempted until governance raises
-     * it) OR no pool is configured yet — both are one cheap `SLOAD` each,
-     * avoiding the far larger cost of a full pricing/cap computation that
-     * would only revert anyway.
+     * floor (default zero — every reconcile is attempted until governance
+     * raises it) OR no pool is configured yet — both are one cheap `SLOAD`
+     * each, avoiding the far larger cost of a full pricing/cap computation
+     * that would only revert anyway.
      */
     function _attemptAutoDeploy(address shareToken, uint256 shareAmount) internal {
         PoolStorage.Layout storage ps = PoolStorage.layout();
@@ -1195,6 +1211,99 @@ abstract contract IndexFacetBase {
             emit AutoDeployedToIndexPool(shareToken, shareAmount, abi.decode(data, (uint256)));
         } else {
             emit AutoDeployToIndexPoolFailed(shareToken, shareAmount);
+        }
+    }
+
+    // ══ §7.2 reconciliation — THE ONE shared core, three entry points ═════
+    //
+    // Adversarial-review fix (2026-08-06, follow-up to the §7.10 automation
+    // pass above). `IndexBootstrapFacet.syncConstituentBalance`/`reconcile`
+    // were the only callers of this logic, which meant pool growth only
+    // compounded when someone separately called `sync`/`reconcile` — NOT on
+    // every normal mint/redeem, contradicting design doc §7.2's own words:
+    // "every normal interaction with that constituent (the next mint or
+    // redeem touching it) opportunistically reconciles any surplus". This
+    // pulls the body that used to be `IndexBootstrapFacet._sync` (private,
+    // single-facet) up into the shared base so `IndexCoreFacet.mintProRata`/
+    // `redeemProRata` and `IndexTradeFacet.mintSingleAsset`/`redeemSingleAsset`
+    // can reach the identical logic too — there is still exactly ONE place
+    // "credit only an observed balance delta" is implemented, now just one
+    // inheritance hop up from where it used to live.
+
+    /// @dev THE ONE implementation of "credit only what has already,
+    /// physically, verifiably arrived" — see `IndexBootstrapFacet.
+    /// syncConstituentBalance`'s header for the full accounting derivation.
+    /// Every entry point that reaches reconciliation — explicit
+    /// (`syncConstituentBalance`/`reconcile`) or opportunistic
+    /// (`_attemptOpportunisticReconcile` below, riding a mint/redeem) —
+    /// calls this and nothing else, so they can never drift out of parity.
+    function _reconcileCore(address token) internal returns (uint256 credited) {
+        CoreStorage.Layout storage cs = CoreStorage.layout();
+        Constituent storage c = _get(token);
+        uint256 accounted = c.reserve
+            + cs.reservedClaims[token]
+            + EcosystemStorage.layout().ecosystemFeesWei[token]
+            + ValueAccrualStorage.layout().buybackEarmarkWei[token];
+        if (token == cs.dividendAsset) {
+            DividendStorage.Layout storage d = DividendStorage.layout();
+            accounted += d.totalDividendsReceived - d.totalDividendsWithdrawn;
+        }
+        uint256 bal = IERC20(token).balanceOf(address(this));
+        if (bal <= accounted) return 0;
+        credited = bal - accounted;
+        // §7.3: the observed surplus splits three ways (NAV reserve / dividend
+        // accumulator / buyback earmark) rather than landing wholly in
+        // `c.reserve` — see `_creditRoutedValue`'s header.
+        _creditRoutedValue(token, c, credited);
+        emit ConstituentSynced(token, credited);
+        _fireHook(HOOK_AFTER_SYNC_, abi.encode(token, credited));
+        // 2026-08-06 automation pass (design doc §7.10 follow-up):
+        // opportunistically try to deploy this exact freshly-credited
+        // share-token surplus into the index-coin pool, as a byproduct of
+        // this reconcile — never for the payment/dividend token itself,
+        // which is the pool's OTHER leg, not a share-type constituent
+        // `deployToIndexPool`/`autoDeployToIndexPool` ever accept (both
+        // revert `BadParam` on `shareToken == paymentToken`, so this guard
+        // is an optimization, not a correctness requirement — it just skips
+        // a self-call that would always fail for that token). Non-blocking
+        // by construction — see `_attemptAutoDeploy`'s header.
+        if (token != cs.dividendAsset) {
+            _attemptAutoDeploy(token, credited);
+        }
+    }
+
+    /**
+     * @dev Opportunistic reconcile for a mint/redeem hot path (design doc
+     * §7.2). Called once per constituent a mint/redeem call actually
+     * touches, AFTER that call's own balance-affecting effects on `token`
+     * are already final (see each call site's comment for exactly why that
+     * ordering matters — reconciling against a balance that is about to
+     * move would misattribute an outgoing payment as a credited surplus).
+     *
+     * NON-BLOCKING BY THE SAME CONSTRUCTION AS `_attemptAutoDeploy`: this
+     * cannot be a direct internal call to `_reconcileCore`, because that
+     * would let a real revert inside reconciliation (or the auto-deploy
+     * attempt nested inside it) propagate and revert the mint/redeem riding
+     * on it — exactly what the task requires never happen. Routing through a
+     * low-level self-call to `IndexBootstrapFacet.autoReconcile` gives the
+     * identical `try/catch`-via-`.call` shape `_attemptAutoDeploy` already
+     * uses for the identical reason.
+     *
+     * SAFE AGAINST REENTRANCY THE SAME WAY: `autoReconcile` requires
+     * `msg.sender == address(this)`, so no outside account can ever reach it,
+     * and a hostile token callback trying to reenter mid-transfer arrives
+     * with its own address as `msg.sender`, not the diamond's, and is
+     * rejected identically. The shared reentrancy word is already `ENTERED`
+     * for the whole duration (set by the mint/redeem's own `nonReentrant`),
+     * so `autoReconcile` deliberately carries no `nonReentrant` of its own —
+     * putting one there would deadlock every single opportunistic attempt
+     * against the very call that triggered it, precisely the reasoning
+     * `_deployToIndexPoolCore`'s header already gives for `autoDeployToIndexPool`.
+     */
+    function _attemptOpportunisticReconcile(address token) internal {
+        (bool ok, ) = address(this).call(abi.encodeWithSignature("autoReconcile(address)", token));
+        if (!ok) {
+            emit OpportunisticReconcileFailed(token);
         }
     }
 

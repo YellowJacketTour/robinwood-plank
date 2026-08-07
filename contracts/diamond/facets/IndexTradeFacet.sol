@@ -95,6 +95,16 @@ contract IndexTradeFacet is IndexFacetBase {
         // never zero here in practice — see IndexCoreFacet.mintProRata.)
         _revestOnMint(grossMinted, supplyBefore);
 
+        // Adversarial-review fix (2026-08-06): opportunistically reconcile
+        // the ONE constituent this mint touched (design doc §7.2). Placed
+        // last — the only balance-affecting operation on `token` above was
+        // the `_pullCredited` deposit and `_routeDevFundBuy`'s skim, both
+        // already final by this point, so a reconcile here can only ever
+        // observe a genuine external surplus, never this call's own
+        // in-flight accounting. Non-blocking; see
+        // `_attemptOpportunisticReconcile`'s header.
+        _attemptOpportunisticReconcile(token);
+
         emit MintedSingle(msg.sender, token, credited, sharesOut);
     }
 
@@ -141,6 +151,15 @@ contract IndexTradeFacet is IndexFacetBase {
         // which is its own way of breaching the cap — so the check covers the
         // whole basket, not just the leg the caller named.
         _requireCapNotWorsened(weightsBefore);
+
+        // Adversarial-review fix (2026-08-06): opportunistically reconcile
+        // the ONE constituent this redeem touched (design doc §7.2). Placed
+        // strictly AFTER the `safeTransfer` above — reconciling before that
+        // payout left the contract would misattribute the outgoing amount
+        // as a freshly-observed surplus, the identical double-count
+        // `redeemProRata` avoids by reconciling only after every payout.
+        // Non-blocking; see `_attemptOpportunisticReconcile`'s header.
+        _attemptOpportunisticReconcile(token);
 
         emit RedeemedSingle(msg.sender, token, sharesIn, amountOut);
     }

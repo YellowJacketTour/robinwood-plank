@@ -1144,14 +1144,27 @@ describe("GlobalIndexVault — hardening pass", () => {
     await vault.connect(alice).mintProRata(victim, [ethers.MaxUint256]);
     expect(await vault.balanceOf(alice.address)).to.equal(victim);
 
-    // The victim gets a real slice back, and the donation is inert: it was
-    // never credited, so the attacker cannot redeem it out again.
+    // The victim gets a real slice back. The donation is NO LONGER fully
+    // inert as of the 2026-08-06 adversarial-review fix: `alice`'s own
+    // `mintProRata` call above now opportunistically reconciles the ONE
+    // constituent it touches (design doc §7.2 — "every normal interaction
+    // with that constituent... opportunistically reconciles any surplus"),
+    // so the donation gets credited into `c.reserve` as a byproduct of the
+    // VICTIM's own mint, before the attacker's redeem below ever runs. The
+    // attacker still holds only their original `1n`-wei share out of a
+    // total supply now dominated by the victim's real deposit, so what
+    // they can draw back is bounded by that tiny proportional slice —
+    // real-numbers-checked at ~33 wei out of a 1e23 donation for this exact
+    // scenario, i.e. rounding dust, not a meaningful reclaim. The bound
+    // below is 10,000 wei — generous relative to the measured 33, tight
+    // enough to still catch a real regression where a meaningful fraction
+    // of the donation routes back to the attacker.
     const [, out] = await vault.previewRedeemProRata(victim);
     expect(out[0]).to.be.gt(0n, "victim's shares redeem to nothing");
     const attackerBefore: bigint = await c.token.balanceOf(seeder.address);
     await vault.connect(seeder).redeemProRata(1n, [0n]);
     expect(await c.token.balanceOf(seeder.address)).to.be.lte(
-      attackerBefore + 1n,
+      attackerBefore + 10_000n,
       "the donation came back to the attacker"
     );
   });

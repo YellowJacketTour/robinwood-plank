@@ -103,6 +103,27 @@ contract IndexCoreFacet is IndexFacetBase {
 
         _mintWithAllocation(msg.sender, sharesOut);
 
+        // Adversarial-review fix (2026-08-06): opportunistically reconcile
+        // EVERY constituent this mint just touched (design doc §7.2 — "every
+        // normal interaction with that constituent... opportunistically
+        // reconciles any surplus"). Runs in its OWN pass, AFTER the pro-rata
+        // loop above has finished pulling every deposit and crediting every
+        // reserve, never interleaved with it — so none of the pricing math
+        // above (`want`, `denom`, `sharesOut`) can ever observe a
+        // reconcile-induced mutation mid-computation. Each call is
+        // independently non-blocking (see `_attemptOpportunisticReconcile`'s
+        // header) so a failure on one constituent can never stop the others
+        // or this mint from completing. NOTE: `_deployToIndexPoolCore` itself
+        // gates every attempt on `_requirePoolQuiescent()`, so at most the
+        // first constituent in this loop whose deploy actually reaches the
+        // pool this block succeeds — any later attempt in the SAME loop
+        // fails closed exactly like any other real auto-deploy failure mode
+        // (caught, non-blocking, `AutoDeployToIndexPoolFailed`), never a
+        // special case.
+        for (uint256 i = 0; i < n; i++) {
+            _attemptOpportunisticReconcile(cs.constituentList[i]);
+        }
+
         // Round 9f, ported verbatim from WrappedIndexShare (design doc §5.4).
         // Runs LAST: the mint is already priced and already done, so nothing
         // here can influence it. Offsets the stream-leg dilution this mint
@@ -197,6 +218,23 @@ contract IndexCoreFacet is IndexFacetBase {
         for (uint256 i = 0; i < n; i++) {
             _payOrDefer(cs.constituentList[i], msg.sender, amountsOut[i]);
         }
+
+        // Adversarial-review fix (2026-08-06): opportunistically reconcile
+        // EVERY constituent this redeem just touched (design doc §7.2). Runs
+        // strictly AFTER every payout above has already left this contract —
+        // reconciling against `c.reserve` before the matching outgoing
+        // transfer would misattribute the amount about to be paid out as a
+        // freshly-observed surplus and re-credit it, a real double-count.
+        // Each call is independently non-blocking, so a failure on one
+        // constituent can never stop the others or this redemption. NOTE:
+        // `_deployToIndexPoolCore` itself gates every attempt on
+        // `_requirePoolQuiescent()`, so at most the first constituent in
+        // this loop whose deploy actually reaches the pool this block
+        // succeeds — see the identical note in `IndexCoreFacet.mintProRata`.
+        for (uint256 i = 0; i < n; i++) {
+            _attemptOpportunisticReconcile(cs.constituentList[i]);
+        }
+
         emit RedeemedProRata(msg.sender, sharesIn);
     }
 
