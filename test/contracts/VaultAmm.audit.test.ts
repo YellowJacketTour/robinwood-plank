@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { deployBeaconMock, relayPendingRound } from "./helpers/beacon";
+import { ethers } from "./helpers/hardhat.js";
+import { deployBeaconMock, relayPendingRound } from "./helpers/beacon.js";
 
 /**
  * Second audit pass, focused on the AMM's money math rather than its access
@@ -58,7 +58,8 @@ describe("MarketplankVault — AMM economics (audit round 2)", () => {
     const sellRc = await sellTx.wait();
 
     const after = await ethers.provider.getBalance(bob.address);
-    const gas: bigint = buyRc.gasUsed * buyRc.gasPrice + sellRc.gasUsed * sellRc.gasPrice;
+    const gas: bigint =
+      buyRc.gasUsed * BigInt(buyRc.gasPrice ?? 0) + sellRc.gasUsed * BigInt(sellRc.gasPrice ?? 0);
 
     // Ignoring gas, a round trip must return at most what went in. Anything
     // more would be value minted from the pool by pure arithmetic.
@@ -80,7 +81,7 @@ describe("MarketplankVault — AMM economics (audit round 2)", () => {
     const rc = await tx.wait();
     const ethAfter = await ethers.provider.getBalance(bob.address);
 
-    const proceeds: bigint = ethAfter - ethBefore + rc.gasUsed * rc.gasPrice;
+    const proceeds: bigint = ethAfter - ethBefore + rc.gasUsed * BigInt(rc.gasPrice ?? 0);
     // He gave up 1 full share to receive this. The pool held 4 ETH against
     // 2 shares, so a fair price for half a share is well under 4 ETH — the
     // point is simply that donating did not let him drain the reserve.

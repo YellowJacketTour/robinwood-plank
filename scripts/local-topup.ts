@@ -17,7 +17,7 @@
  * overridden with the same NEXT_PUBLIC_* env vars. NEVER used against real value.
  */
 import hardhat from "hardhat";
-const { ethers } = hardhat as unknown as { ethers: typeof import("ethers") & Record<string, unknown> };
+const { ethers } = await hardhat.network.create();
 
 const E = (n: string) => ethers.parseEther(n);
 

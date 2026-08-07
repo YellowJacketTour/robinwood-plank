@@ -15,7 +15,7 @@
 // Node 24 runs this .ts file with its native (ESM) loader, so `hardhat` (a
 // CommonJS module) can only be default-imported, not named-imported.
 import hardhat from "hardhat";
-const { ethers } = hardhat as unknown as { ethers: typeof import("ethers") & Record<string, unknown> };
+const { ethers } = await hardhat.network.create();
 
 const E = (n: string) => ethers.parseEther(n);
 

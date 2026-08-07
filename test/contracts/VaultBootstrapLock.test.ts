@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { deployBeaconMock } from "./helpers/beacon";
+import { ethers } from "./helpers/hardhat.js";
+import { deployBeaconMock } from "./helpers/beacon.js";
 
 /**
  * Explicit pool activation — replaces the old fixed-ETH bootstrap threshold.
@@ -188,10 +188,10 @@ describe("MarketplankVault — explicit one-way pool activation", () => {
 
     // Everyone else is (still) blocked too — NotTreasury fires first, but the
     // point pinned here is simply: no caller, no argument shape, ever seeds.
-    await expect(vault.connect(alice).seedLiquidity({ value: 1n })).to.be.reverted;
-    await expect(vault.connect(alice).seedLiquidity()).to.be.reverted;
-    await expect(vault.connect(alice).seedShares(0n)).to.be.reverted;
-    await expect(vault.connect(alice).seedShares(SHARE_UNIT, { value: 1n })).to.be.reverted;
+    await expect(vault.connect(alice).seedLiquidity({ value: 1n })).to.be.revert(ethers);
+    await expect(vault.connect(alice).seedLiquidity()).to.be.revert(ethers);
+    await expect(vault.connect(alice).seedShares(0n)).to.be.revert(ethers);
+    await expect(vault.connect(alice).seedShares(SHARE_UNIT, { value: 1n })).to.be.revert(ethers);
   });
 
   it("openPool() is one-way: a second call reverts, even for the treasury", async () => {
