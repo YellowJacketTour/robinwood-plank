@@ -70,6 +70,7 @@ import {
   type ChainEventRow,
   type ChainEventSource,
 } from "@/lib/market/chain-events";
+import { kothCandidateFromSaleRow, offerKingOfTheHillCandidate } from "@/lib/market/king-of-the-hill";
 
 /**
  * Read a non-negative integer override from the environment.
@@ -504,6 +505,30 @@ async function buildVaultRows(logs: RawLog[], vault: string): Promise<ChainEvent
 }
 
 /**
+ * Offer every confirmed sale row in a just-written batch to King of the Hill.
+ *
+ * Called from both ledger write sites (indexSource and reindexNftRange) so a
+ * record sale is detected whether it arrives via live sync OR a historical
+ * re-index — the same "one code path, two regimes" property the ledger
+ * itself relies on. Only source="nft", kind="sale" rows are candidates: a
+ * vault trade or a plain transfer is not a "sale" the tweet's rule is about.
+ * Errors here are logged, not thrown — a King of the Hill hiccup must never
+ * fail the ledger write it rode in on.
+ */
+async function offerSaleRowsToKingOfTheHill(rows: ChainEventRow[]): Promise<void> {
+  const sales = rows.filter((row) => row.source === "nft" && row.kind === "sale");
+  for (const row of sales) {
+    const candidate = kothCandidateFromSaleRow(row);
+    if (!candidate) continue;
+    try {
+      await offerKingOfTheHillCandidate(candidate);
+    } catch (error) {
+      console.error("[king-of-the-hill] failed to offer candidate sale:", error);
+    }
+  }
+}
+
+/**
  * Index one contract forward from its stored cursor.
  *
  * Failure handling is the important part: if a window throws, the cursor is
@@ -570,6 +595,7 @@ export async function indexSource(input: {
   // (tx_hash, log_index) constraint absorbs every duplicate — at-least-once
   // delivery into an idempotent sink. The reverse order would lose events.
   result.rowsInserted = await appendChainEvents(rows);
+  await offerSaleRowsToKingOfTheHill(rows);
   if (reached > startCursor) {
     await writeChainCursor(input.source, input.contract, reached, input.head);
     result.toBlock = reached;
@@ -614,6 +640,7 @@ export async function reindexNftRange(input: {
     logsScanned += found.length;
     const rows = await buildNftRows(found);
     rowsInserted += await appendChainEvents(rows);
+    await offerSaleRowsToKingOfTheHill(rows);
     rowsRepaired += await repairChainEvents(rows);
   }
 

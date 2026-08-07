@@ -26,8 +26,12 @@ export type MarketCollection = {
    * 0 = no fee. Toggle any approved collection's fee on/off or adjust the
    * rate by editing lib/market/collections.ts and redeploying — see
    * MARKET_DEFAULT_FEE_BPS for the default applied to non-PLANK collections.
-   */
+  */
   feeBps: number;
+  /** EIP-2981 creator royalty rate for new signed orders, in basis points. */
+  royaltyBps: number;
+  /** EIP-2981 creator royalty receiver for new signed orders. */
+  royaltyRecipient: string;
 };
 
 export type Listing = {

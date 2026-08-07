@@ -101,6 +101,8 @@ export function makeListingInput(
     considerationWei: priceWei.toString(),
     expiresAt,
     feeBps: collection.feeBps,
+    royaltyBps: collection.royaltyBps,
+    royaltyRecipient: collection.royaltyRecipient,
   };
 }
 

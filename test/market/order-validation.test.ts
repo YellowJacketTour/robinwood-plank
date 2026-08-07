@@ -17,6 +17,7 @@ import type { MarketCollection } from "../../lib/market/types";
  */
 
 const TREASURY = "0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8";
+const ROYALTY_RECEIVER = "0x269a93ec8486fbc3a82e352430e84fd8af8ebb0d";
 const WETH = "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73";
 const NATIVE = "0x0000000000000000000000000000000000000000";
 const NFT = "0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156";
@@ -31,9 +32,16 @@ const freeCollection: MarketCollection = {
   image: "/x.png",
   trustBadges: [],
   feeBps: 0,
+  royaltyBps: 0,
+  royaltyRecipient: "0x0000000000000000000000000000000000000000",
 };
 
 const paidCollection: MarketCollection = { ...freeCollection, slug: "other", feeBps: 50 };
+const royaltyCollection: MarketCollection = {
+  ...freeCollection,
+  royaltyBps: 810,
+  royaltyRecipient: ROYALTY_RECEIVER,
+};
 
 const futureEnd = Math.floor(Date.now() / 1000) + 86_400;
 
@@ -140,6 +148,44 @@ test("accepts a listing that pays the fee correctly", () => {
   assert.equal(d.priceWei, "1000000000000000000");
 });
 
+test("rejects a royalty-bearing listing that omits EIP-2981 consideration", () => {
+  assert.throws(
+    () => validateListingOrder(listing(), royaltyCollection),
+    /creator royalty/i
+  );
+});
+
+test("accepts a royalty-bearing listing and derives the buyer-paid total", () => {
+  const withRoyalty = listing();
+  withRoyalty.parameters.consideration[0].startAmount = "919000000000000000";
+  withRoyalty.parameters.consideration[0].endAmount = "919000000000000000";
+  withRoyalty.parameters.consideration.push({
+    itemType: 0,
+    token: NATIVE,
+    identifierOrCriteria: "0",
+    startAmount: "81000000000000000",
+    endAmount: "81000000000000000",
+    recipient: ROYALTY_RECEIVER,
+  });
+  const d = validateListingOrder(withRoyalty, royaltyCollection);
+  assert.equal(d.priceWei, "1000000000000000000");
+});
+
+test("rejects a royalty-bearing listing that routes royalty elsewhere", () => {
+  const wrongReceiver = listing();
+  wrongReceiver.parameters.consideration[0].startAmount = "919000000000000000";
+  wrongReceiver.parameters.consideration[0].endAmount = "919000000000000000";
+  wrongReceiver.parameters.consideration.push({
+    itemType: 0,
+    token: NATIVE,
+    identifierOrCriteria: "0",
+    startAmount: "81000000000000000",
+    endAmount: "81000000000000000",
+    recipient: ATTACKER,
+  });
+  assert.throws(() => validateListingOrder(wrongReceiver, royaltyCollection), /creator royalty/i);
+});
+
 test("rejects a bid denominated in native ETH (Seaport can never fill it)", () => {
   const nativeBid = {
     parameters: {
@@ -202,6 +248,46 @@ test("accepts a WETH collection-wide bid and derives its amount", () => {
   const d = validateOfferOrder(bid, freeCollection, WETH);
   assert.equal(d.priceWei, "2000000000000000000");
   assert.equal(d.tokenId, undefined, "collection-wide bid has no single token id");
+});
+
+test("accepts a royalty-bearing WETH bid and derives seller net proceeds", () => {
+  const bid = {
+    parameters: {
+      offerer: ATTACKER,
+      offer: [
+        {
+          itemType: 1,
+          token: WETH,
+          identifierOrCriteria: "0",
+          startAmount: "1000000000000000000",
+          endAmount: "1000000000000000000",
+        },
+      ],
+      consideration: [
+        {
+          itemType: 2,
+          token: NFT,
+          identifierOrCriteria: "1106",
+          startAmount: "1",
+          endAmount: "1",
+          recipient: ATTACKER,
+        },
+        {
+          itemType: 1,
+          token: WETH,
+          identifierOrCriteria: "0",
+          startAmount: "81000000000000000",
+          endAmount: "81000000000000000",
+          recipient: ROYALTY_RECEIVER,
+        },
+      ],
+      startTime: "0",
+      endTime: String(futureEnd),
+    },
+    signature: "0xdeadbeef",
+  };
+  const d = validateOfferOrder(bid, royaltyCollection, WETH);
+  assert.equal(d.priceWei, "919000000000000000");
 });
 
 // ── Second audit pass (2026-07-27, round 2) ─────────────────────────────────
