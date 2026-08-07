@@ -1,13 +1,13 @@
 import { expect } from "chai";
-import { ethers, network } from "hardhat";
+import { ethers, provider } from "./helpers/hardhat.js";
 import { Contract, TypedDataEncoder } from "ethers";
 import type { Signer } from "ethers";
-import seaportFixture from "./fixtures/seaport-1.6-bytecode.json";
+import seaportFixture from "./fixtures/seaport-1.6-bytecode.json" with { type: "json" };
 import {
   computeCriteriaProof,
   computeCriteriaRoot,
   verifyCriteriaProof,
-} from "../../lib/market/criteria";
+} from "../../lib/market/criteria.js";
 
 /**
  * THE CRITICAL PROOF for trait-scoped criteria bids (2026-07-28).
@@ -97,9 +97,9 @@ describe("Seaport 1.6 criteria fulfillment (REAL deployed bytecode)", () => {
   let seller: Signer;
   let bidderAddr: string;
   let sellerAddr: string;
-  let seaport: Contract;
-  let nft: Contract;
-  let weth: Contract;
+  let seaport: any;
+  let nft: any;
+  let weth: any;
   let root: string;
 
   before(async () => {
@@ -109,7 +109,7 @@ describe("Seaport 1.6 criteria fulfillment (REAL deployed bytecode)", () => {
 
     // Plant the REAL canonical Seaport 1.6 runtime bytecode.
     expect((seaportFixture.bytecode.length - 2) / 2).to.equal(23_981);
-    await network.provider.send("hardhat_setCode", [
+    await provider.send("hardhat_setCode", [
       SEAPORT_ADDRESS,
       seaportFixture.bytecode,
     ]);
@@ -262,7 +262,7 @@ describe("Seaport 1.6 criteria fulfillment (REAL deployed bytecode)", () => {
         ZERO_HASH,
         sellerAddr
       )
-    ).to.be.reverted; // Seaport InvalidProof()
+    ).to.be.revert(ethers); // Seaport InvalidProof()
   });
 
   it("REJECTED: an in-set token with a tampered proof cannot fill", async () => {
@@ -286,7 +286,7 @@ describe("Seaport 1.6 criteria fulfillment (REAL deployed bytecode)", () => {
         ZERO_HASH,
         sellerAddr
       )
-    ).to.be.reverted;
+    ).to.be.revert(ethers);
   });
 
   it("REJECTED: omitting the criteria resolver entirely (the exact pre-audit failure mode) reverts", async () => {
@@ -298,7 +298,7 @@ describe("Seaport 1.6 criteria fulfillment (REAL deployed bytecode)", () => {
         ZERO_HASH,
         sellerAddr
       )
-    ).to.be.reverted; // UnresolvedConsiderationCriteria()
+    ).to.be.revert(ethers); // UnresolvedConsiderationCriteria()
   });
 
   it("a single-token criteria set also round-trips (edge: proof is empty, root = leaf hash)", async () => {

@@ -55,6 +55,7 @@ data/boards-state.json
 
 .hardhat-cache/
 .hardhat-artifacts/
+/types/
 typechain-types/
 
 # Standalone owner-run deploy tool (scripts/deploy-tool) — its own isolated

@@ -27,7 +27,8 @@
  * hardhat.config.ts — add it yourself when you're ready to actually deploy,
  * so this repo never has a one-command path to mainnet by accident.)
  */
-import { ethers } from "hardhat";
+import hardhat from "hardhat";
+const { ethers } = await hardhat.network.create();
 
 // Marketplank's dedicated treasury wallet (lib/constants.ts MARKET_FEE_RECIPIENT).
 const DEFAULT_TREASURY = "0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8";

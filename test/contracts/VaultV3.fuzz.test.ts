@@ -1,7 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { mine, time } from "@nomicfoundation/hardhat-network-helpers";
-import { deployBeaconMock, relayPendingRound } from "./helpers/beacon";
+import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { deployBeaconMock, relayPendingRound } from "./helpers/beacon.js";
 
 /**
  * Randomized property test for V3, the counterpart of VaultSolvency.fuzz.test.ts.
@@ -165,8 +164,8 @@ describe("MarketplankVaultV3 — randomized invariants", () => {
         } else if (op === 8) {
           await vault.connect(who).withdrawFees();
         } else {
-          await mine(1);
-          await time.increase(1 + Math.floor(rand() * 40_000));
+          await networkHelpers.mine(1);
+          await networkHelpers.time.increase(1 + Math.floor(rand() * 40_000));
           const r = await vault.pendingRequester();
           if (r !== ethers.ZeroAddress) {
             await vault.connect(who).forfeitExpiredRedeem(r);
