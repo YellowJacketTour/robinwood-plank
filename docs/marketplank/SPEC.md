@@ -221,6 +221,15 @@ Decided 2026-07-27, after explicitly rejecting a proposed alternative (see below
   consideration item Seaport computes and enforces on-chain at fulfillment, the same mechanism
   OpenSea's own frontend uses. Zero custom fee-calculation code, zero new attack surface.
 
+**Creator royalty** is separate from the Marketplank fee. RobinWood implements
+EIP-2981 at `810` bps (`8.1%`). Before a new listing or offer is signed, the
+browser reads `royaltyInfo()` from the NFT contract and refuses to sign if the
+live receiver or rate differs from the configured collection value. The
+royalty is included as a signed Seaport consideration leg, and the relay plus
+browser validator require that leg before an order can enter or remain in the
+Marketplank book. Existing signed orders and orders created on external venues
+are not retroactively changed.
+
 **Vault fees** (`contracts/MarketplankVault.sol`, set at deploy in `scripts/deploy-vault.ts`):
 1% mint, 1% redeem, 2.5% target-redemption premium — kept below what NFTX charges in production,
 because the vault only has a reason to exist if it's cheaper/faster than a 0%-fee Seaport

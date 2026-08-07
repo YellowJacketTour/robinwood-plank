@@ -35,6 +35,8 @@ const collection: MarketCollection = {
   image: "/x.png",
   trustBadges: [],
   feeBps: 0,
+  royaltyBps: 0,
+  royaltyRecipient: "0x0000000000000000000000000000000000000000",
 };
 
 const feeCollection: MarketCollection = { ...collection, slug: "other", feeBps: 250 };
@@ -120,6 +122,8 @@ function legacySingleListingInput(
     considerationWei: priceWei.toString(),
     expiresAt,
     feeBps: c.feeBps,
+    royaltyBps: c.royaltyBps,
+    royaltyRecipient: c.royaltyRecipient,
   };
 }
 

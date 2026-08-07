@@ -25,7 +25,8 @@
     "market:refresh": "tsx scripts/refresh-market-data.ts",
     "market:refresh:full": "tsx scripts/refresh-market-data.ts --full",
     "market:reindex": "tsx scripts/reindex-chain-events.ts",
-    "discover:compute-rarity": "tsx scripts/compute-rarity.ts"
+    "discover:compute-rarity": "tsx scripts/compute-rarity.ts",
+    "dependencies:report": "node scripts/check-dependency-health.mjs"
   },
   "engines": {
     "node": ">=20.9.0"
@@ -47,6 +48,24 @@
   "overrides": {
     "postcss": "^8.5.20",
     "sharp": "^0.35.0",
+    "hardhat": {
+      "adm-zip": "0.6.0",
+      "undici": "6.28.0",
+      "uuid": "11.1.1",
+      "lodash": "4.18.1",
+      "@sentry/node": {
+        "cookie": "0.7.2"
+      },
+      "solc": {
+        "tmp": "0.2.7"
+      }
+    },
+    "@nomicfoundation/hardhat-verify": {
+      "undici": "6.28.0"
+    },
+    "@nomicfoundation/ignition-core": {
+      "lodash": "4.18.1"
+    },
     "mocha": {
       "serialize-javascript": "7.0.5"
     },
