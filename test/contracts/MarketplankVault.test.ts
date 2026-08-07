@@ -1,7 +1,7 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { deployBeaconMock, relayPendingRound } from "./helpers/beacon";
+import { ethers } from "./helpers/hardhat.js";
+import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/types";
+import { deployBeaconMock, relayPendingRound } from "./helpers/beacon.js";
 
 /**
  * Test suite for contracts/MarketplankVault.sol — UNAUDITED contract, see its

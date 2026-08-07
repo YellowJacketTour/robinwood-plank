@@ -11,8 +11,7 @@
  */
 import { keccak256, solidityPacked, getBytes, concat, hexlify } from "ethers";
 // @noble/curves 1.9.x is the copy that carries full BN254 pairing support.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { bn254 } = require("../../../node_modules/viem/node_modules/@noble/curves/bn254.js");
+import { bn254 } from "../../../node_modules/viem/node_modules/@noble/curves/bn254.js";
 
 export const P =
   21888242871839275222246405745257275088696311157297823662689037894645226208583n;

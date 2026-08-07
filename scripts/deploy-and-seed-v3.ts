@@ -37,7 +37,7 @@
  */
 import hardhat from "hardhat";
 import { writeFileSync, mkdirSync } from "node:fs";
-const { ethers } = hardhat as unknown as { ethers: typeof import("ethers") & Record<string, unknown> };
+const { ethers } = await hardhat.network.create();
 
 const SHARE_UNIT = 10n ** 18n;
 const DEFAULT_TREASURY = "0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8";

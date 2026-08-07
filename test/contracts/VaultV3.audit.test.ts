@@ -1,7 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
-import { deployBeaconMock, relayPendingRound } from "./helpers/beacon";
+import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { deployBeaconMock, relayPendingRound } from "./helpers/beacon.js";
 
 /**
  * V3 is the fix for the V2 LP drain (audit held privately).
@@ -265,7 +264,7 @@ describe("MarketplankVaultV3", () => {
   it("the audited AMM guards still fire", async () => {
     const { alice, vault } = await seededVault();
     // Zero-output dust buy reverts rather than keeping the ETH.
-    await expect(vault.connect(alice).buyShares(0n, { value: 1n })).to.be.reverted;
+    await expect(vault.connect(alice).buyShares(0n, { value: 1n })).to.be.revert(ethers);
     // Slippage floor holds.
     await expect(
       vault.connect(alice).buyShares(ethers.parseEther("1000"), { value: ethers.parseEther("0.1") })
@@ -310,7 +309,7 @@ describe("MarketplankVaultV3", () => {
     expect(pinned).to.equal(true);
 
     // Unconditional delivery: anyone can push it, the NFT lands, slot frees.
-    await expect(vault.connect(bob).claimRandomRedeemFor(badAddr)).to.not.be.reverted;
+    await expect(vault.connect(bob).claimRandomRedeemFor(badAddr)).to.not.be.revert(ethers);
     expect(await nft.ownerOf(drawn)).to.equal(badAddr);
     expect(await vault.pendingRequester()).to.equal(ethers.ZeroAddress);
     expect(await vault.pendingRedeemCount()).to.equal(0n);
@@ -329,7 +328,7 @@ describe("MarketplankVaultV3", () => {
 
     await vault.connect(alice).requestRandomRedeem({ value: REDEEM_FEE });
     expect(await vault.balanceOf(alice.address)).to.equal(aliceBefore - SHARE_UNIT);
-    await time.increase(30_000); // overshoot ROUND_EXPIRY at the 1s mock period
+    await networkHelpers.time.increase(30_000); // overshoot ROUND_EXPIRY at the 1s mock period
 
     await vault.connect(bob).forfeitExpiredRedeem(alice.address);
     expect(await vault.balanceOf(alice.address)).to.equal(

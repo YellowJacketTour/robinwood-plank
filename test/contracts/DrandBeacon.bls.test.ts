@@ -1,8 +1,8 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers } from "./helpers/hardhat.js";
 import fs from "node:fs";
 import path from "node:path";
-import * as BLS from "./helpers/bls-bn254";
+import * as BLS from "./helpers/bls-bn254.js";
 
 /**
  * THE LOAD-BEARING TEST OF THE WHOLE randomness rework.
@@ -173,7 +173,7 @@ describe("DrandBeacon — BN254 BLS verification (real signatures)", () => {
 
     // A racing relayer submitting the SAME signature must not revert (BLS
     // signatures are deterministic, so this is the only valid one anyway).
-    await expect(beacon.connect(relayerB).submitRound(round, sig)).to.not.be.reverted;
+    await expect(beacon.connect(relayerB).submitRound(round, sig)).to.not.be.revert(ethers);
     expect(await beacon.randomnessAt(round)).to.equal(value);
 
     // Anything different for the same round is rejected outright — the cached
@@ -313,7 +313,7 @@ describe("DrandBeacon — BN254 BLS verification (real signatures)", () => {
    * DO NOT DEPLOY WITH REAL VALUE UNTIL THIS TEST RUNS AND PASSES.
    */
   it("verifies a REAL drand round (skipped unless fixtures/drand-round.json exists)", async function () {
-    const fixturePath = path.join(__dirname, "fixtures", "drand-round.json");
+    const fixturePath = path.join(import.meta.dirname, "fixtures", "drand-round.json");
     if (!fs.existsSync(fixturePath)) {
       this.skip();
       return;

@@ -2,14 +2,22 @@
   "compilerOptions": {
     "target": "ES2020",
     "lib": ["ES2020"],
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "strict": true,
     "resolveJsonModule": true,
     "outDir": ".hardhat-cache/ts-out"
   },
-  "include": ["hardhat.config.ts", "test/contracts/**/*.ts", "scripts/deploy-vault.ts"],
+  "include": [
+    "hardhat.config.ts",
+    "test/contracts/**/*.ts",
+    "scripts/deploy-vault.ts",
+    "scripts/deploy-vault-v3.ts",
+    "scripts/deploy-and-seed-v3.ts",
+    "scripts/local-topup.ts",
+    "scripts/local-v3-setup.ts"
+  ],
   "exclude": ["node_modules"]
 }
