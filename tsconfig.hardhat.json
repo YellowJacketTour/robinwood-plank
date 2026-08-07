@@ -10,6 +10,14 @@
     "resolveJsonModule": true,
     "outDir": ".hardhat-cache/ts-out"
   },
-  "include": ["hardhat.config.ts", "test/contracts/**/*.ts", "scripts/deploy-vault.ts"],
+  "include": [
+    "hardhat.config.ts",
+    "test/contracts/**/*.ts",
+    "scripts/deploy-vault.ts",
+    "scripts/deploy-index-vault.ts",
+    "scripts/seed-index-vault-genesis.ts",
+    "scripts/configure-index-vault-governance.ts",
+    "scripts/config/index-vault-deploy-config.ts"
+  ],
   "exclude": ["node_modules"]
 }

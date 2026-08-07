@@ -1,0 +1,842 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import {Constituent} from "../../lib/IndexTypes.sol";
+import {IndexParamSet} from "../../lib/IndexParams.sol";
+
+/**
+ * ============================================================================
+ *  IndexStorage — every namespaced storage region in the Index diamond.
+ *
+ *  NOT FOR DEPLOYMENT. Pure `internal` libraries; no deployed bytecode of
+ *  their own, and therefore no DELEGATECALL target (which matters: the facet
+ *  bytecode scan in LibBytecodeScan rejects opcode 0xf4 outright, so an
+ *  external `public` library would be un-installable by construction).
+ *
+ *  WHY ONE FILE
+ *  ------------
+ *  Design doc section 3.3 rule: *one namespace per concern, not per facet*, with
+ *  exactly one declaration site per struct. Keeping every derivation in one
+ *  file makes the "are these thirteen slots actually distinct?" review a
+ *  single-screen read rather than a thirteen-file scavenger hunt, and makes it
+ *  impossible to add a fourteenth namespace without seeing the other thirteen.
+ *
+ *  THE DERIVATION
+ *  --------------
+ *      keccak256(abi.encode(uint256(keccak256(id)) - 1)) & ~bytes32(uint256(0xff))
+ *
+ *  This is ERC-7201. Both halves earn their place:
+ *
+ *   - the `- 1` means the slot is not the image of any string under keccak,
+ *     so no attacker-chosen mapping key or array index can be made to land on
+ *     a namespace root by finding a preimage;
+ *   - the `& ~0xff` mask aligns each root to a 256-slot boundary, so appending
+ *     a member to a Layout struct can never walk out of its own region into a
+ *     different namespace's root. The trailing `__gap` in each Layout makes
+ *     that headroom explicit rather than implicit.
+ *
+ *  THE RULE THIS FILE EXISTS TO ENFORCE
+ *  ------------------------------------
+ *  No facet may declare a state variable in its own contract body — not one,
+ *  not ever. A facet body holds `constant`s, `immutable`s, functions, events
+ *  and errors and nothing else. A facet that inherits OpenZeppelin's ERC20,
+ *  ReentrancyGuard or Ownable lands storage at slot 0, which under DELEGATECALL
+ *  is the diamond's own slot 0. `Diamond.bytecode.test.ts` reads every facet's
+ *  compiler-emitted `storageLayout` and fails the build on any non-constant
+ *  entry, so this is a checked rule and not an aspiration.
+ * ============================================================================
+ */
+
+/**
+ * @notice The EIP-2535 selector table, plus this deployment's freeze flags.
+ *
+ * @dev Deliberately kept at the CANONICAL `diamond.standard.diamond.storage`
+ * slot rather than a marketplank-namespaced one, so that third-party loupe
+ * tooling that reads the table directly by slot still works. This is the one
+ * namespace in the file that does NOT use the ERC-7201 derivation, and the
+ * reason is interoperability, not oversight.
+ */
+library DiamondStorage {
+    bytes32 internal constant SLOT = keccak256("diamond.standard.diamond.storage");
+
+    struct FacetAddressAndPosition {
+        address facetAddress;
+        uint96 functionSelectorPosition; // index into facetFunctionSelectors[facet]
+    }
+
+    struct FacetFunctionSelectors {
+        bytes4[] functionSelectors;
+        uint256 facetAddressPosition; // index into facetAddresses
+    }
+
+    struct Layout {
+        mapping(bytes4 => FacetAddressAndPosition) selectorToFacetAndPosition;
+        mapping(address => FacetFunctionSelectors) facetFunctionSelectors;
+        address[] facetAddresses;
+        mapping(bytes4 => bool) supportedInterfaces;
+        /// @notice The address permitted to cut. Set once, in the diamond's
+        /// constructor, to the deployer contract. Never settable afterwards —
+        /// there is no `transferCutter`, by design.
+        address cutter;
+        /// @notice Set by `finalize` and never cleared. There is no code path
+        /// anywhere in the diamond that writes `false` here.
+        bool finalized;
+        /// @notice True only under the `contracts/test` rehearsal deployer.
+        bool devMode;
+        /// @notice The manifest hash `finalize` verified the facet set against.
+        bytes32 facetSetHash;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/// @notice The unified share token (design doc section 4: the diamond IS the share).
+library ERC20Storage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.erc20.v1")) - 1)) & ~bytes32(uint256(0xff));
+
+    struct Layout {
+        mapping(address => uint256) balances;
+        mapping(address => mapping(address => uint256)) allowances;
+        uint256 totalSupply;
+        string name;
+        string symbol;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/**
+ * @notice Basket custody, the deferred-claim ledger, and the three values that
+ * used to be `immutable`.
+ *
+ * @dev THE MIGRATED IMMUTABLES — `timelockDelay`, `seeder`, `dividendAsset`.
+ * Under DELEGATECALL an `immutable` resolves to the value baked into whichever
+ * FACET is executing, not the diamond, so two facets would silently disagree
+ * about the timelock. They live here, are written exactly once by IndexDeployer
+ * inside the deployment transaction, and no function in the finalized facet set
+ * writes them again — which is what `Diamond.noWriteToImmutables.test.ts`
+ * proves, and it is the replacement for the guarantee `immutable` used to give.
+ */
+library CoreStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.core.v1")) - 1)) & ~bytes32(uint256(0xff));
+
+    struct Layout {
+        // --- migrated from `immutable`; written once by IndexDeployer ---
+        uint256 timelockDelay;
+        address seeder;
+        address dividendAsset;
+        // --- basket custody ---
+        /// @dev The one-way latch. False until `openIndex`; there is no path
+        /// that sets it back, which is what makes `finalize`'s
+        /// `indexOpen == false` precondition meaningful.
+        bool indexOpen;
+        address[] constituentList;
+        /// @dev `Constituent` is a MAPPING VALUE, not a dynamic-array element,
+        /// so appending a member to it is layout-safe: each key hashes to its
+        /// own region. (Appending to a struct used as an ARRAY element would
+        /// change the stride and shift every element.) It embeds
+        /// `Observation obs[OBS_SLOTS]` — a fixed array inside a struct inside
+        /// a mapping — which is layout-stable and unchanged from the monolith.
+        mapping(address => Constituent) constituents;
+        // --- the deferred-claim ledger ---
+        /// @dev holder => token => owed. Under the unified token this ledger
+        /// carries BOTH constituent legs that deferred during redemption and
+        /// stream legs credited during it, which is what keeps the exit door's
+        /// external-call count independent of the stream count.
+        mapping(address => mapping(address => uint256)) pendingClaim;
+        /// @dev token => total owed across all holders. Subtracted from every
+        /// backing read, so a reserved slice cannot be redeemed a second time.
+        mapping(address => uint256) reservedClaims;
+        uint256 eligibleConstituentCount;
+        /// @dev ERC-7575: asset => the registered per-asset entry point (Pipe).
+        /// Reads as `address(0)` for every asset with no pipe registered, which
+        /// `IndexShareFacet.vault()` reports as the diamond itself rather than
+        /// as "unsupported". A pipe holds nothing and is not privileged — it can
+        /// only call functions the diamond already exposes permissionlessly —
+        /// so this map is a directory, never an authorisation.
+        mapping(address => address) assetPipe;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/// @notice The risk/fee parameter set and the eligibility bars.
+library ParamsStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.params.v1")) - 1)) & ~bytes32(uint256(0xff));
+
+    struct Layout {
+        /// @dev Field order tracks `IndexParamSet` in lib/IndexParams.sol,
+        /// which is the canonical declaration. Reordering it there silently
+        /// reinterprets this region.
+        IndexParamSet params;
+        uint256 minEligibilityFeesWei;
+        uint256 minEligibilityBlocks;
+        uint256 targetHhiBps;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/// @notice Timelock queues for parameters, listings and the platform treasury.
+library GovernanceStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.governance.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    struct QueuedParam {
+        uint256 value;
+        uint64 eta;
+        bool pending;
+    }
+
+    struct QueuedListing {
+        address source;
+        uint256 rawTargetWeightBps;
+        uint64 eta;
+        bool pending;
+        bool isRemoval;
+    }
+
+    struct Layout {
+        /// @dev The shared queue mapping. `ScopedRoles.isolation` proves it is
+        /// not a back door between roles; under the diamond that proof has to
+        /// hold ACROSS FACETS too, since several facets now reach this one map.
+        mapping(bytes32 => QueuedParam) queuedParams;
+        mapping(address => QueuedListing) queuedListings;
+        QueuedParam queuedPlatformTreasury;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/// @notice `roleHolder` / `queuedRoles` — the ScopedRoles registry, namespaced.
+library RolesStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.roles.v1")) - 1)) & ~bytes32(uint256(0xff));
+
+    struct QueuedRole {
+        address holder;
+        uint64 eta;
+        bool pending;
+    }
+
+    struct Layout {
+        mapping(bytes32 => address) roleHolder;
+        mapping(bytes32 => QueuedRole) queuedRoles;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/// @notice `platformTreasury` / `platformAllocationBps`.
+library AllocationStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.allocation.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    struct Layout {
+        address platformTreasury;
+        uint256 platformAllocationBps;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/// @notice Ecosystem fee accrual and its sink.
+library EcosystemStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.ecosystem.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    struct Layout {
+        /// @dev token => fees accrued, in that token's own units.
+        mapping(address => uint256) ecosystemFeesWei;
+        address ecosystemSink;
+        address ecosystemAsset;
+        uint256 ecosystemFeeSplitBps;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/**
+ * @notice §7.3's three-way split of newly-routed value (design doc
+ * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.3): every fee
+ * surplus reconciled into a constituent (§7.2/§3.2's push-then-reconcile) now
+ * divides across (a) direct `c.reserve` growth — the NAV-appreciation stream,
+ * unaffected by this namespace, (b) the existing EIP-2222 dividend
+ * accumulator, and (c) a reserved, earmarked accounting slot for §7.7's
+ * buyback-and-lock, NOT built here — only the bucket is reserved.
+ *
+ * @dev `dividendBps` and `buybackBps` are the only two governed fields;
+ * `reserveBps` is always the BPS remainder (`10_000 - dividendBps -
+ * buybackBps`), never stored separately, so the three shares can never drift
+ * out of summing to exactly 100% — there is no code path that writes one
+ * without deriving the other two consistently. Both default to zero, which is
+ * DELIBERATE: an unconfigured index behaves exactly as it did before this
+ * section existed (100% of routed surplus into `c.reserve`), so this section
+ * is opt-in, not a silent behavior change, until governance queues a split.
+ */
+library ValueAccrualStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.valueaccrual.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    struct Layout {
+        uint256 dividendBps;
+        uint256 buybackBps;
+        /// @dev token => value earmarked for §7.7's not-yet-built buyback
+        /// mechanism. A pure accounting slot: no transfer, no sink call, no
+        /// spend path exists anywhere in the finalized facet set. §7.7's own
+        /// future pass is the only thing that may ever draw it down.
+        mapping(address => uint256) buybackEarmarkWei;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/**
+ * @notice The EIP-2222 magnified-dividend accumulator. ONE asset, O(1).
+ *
+ * @dev Design doc section 5.4 rejects generalising this to a per-token map over
+ * the stream set. The rejection is load-bearing here: keeping it one-asset is
+ * exactly what keeps the ERC-20 transfer correction hook O(1) and unable to
+ * brick a transfer.
+ */
+library DividendStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.dividend.v1")) - 1)) & ~bytes32(uint256(0xff));
+
+    struct Layout {
+        uint256 magnifiedDividendPerShare;
+        /// @dev The EIP-2222 correction term. SIGNED, deliberately: a mint adds
+        /// a negative correction so a holder who arrives after a push earns
+        /// exactly zero from it, and a burn adds a positive one so value
+        /// already accrued is not destroyed.
+        mapping(address => int256) magnifiedDividendCorrections;
+        mapping(address => uint256) withdrawnDividends;
+        uint256 totalDividendsReceived;
+        uint256 totalDividendsWithdrawn;
+        /// @dev The self-healing carry: a push with no eligible holder is
+        /// PARKED here rather than lost or reverted.
+        uint256 undistributedDividends;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/**
+ * @notice Reward streams and the round-9f re-vest schedule.
+ *
+ * @dev NO PER-HOLDER STATE, ever. WrappedIndexShare.sol's architectural rule
+ * carries over verbatim, and design doc section 5.4 re-derives why: under a
+ * backing-pool model an LP pool holding the share gets richer automatically,
+ * whereas a per-holder accumulator makes the pool ADDRESS the accruer of record
+ * and strands the value from the real holders behind it.
+ */
+library StreamStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.stream.v1")) - 1)) & ~bytes32(uint256(0xff));
+
+    struct QueuedStream {
+        uint64 eta;
+        bool pending;
+    }
+
+    /// @dev The round-9f re-vest schedule, ported verbatim from
+    /// WrappedIndexShare. `unvested` degrades linearly to zero between `last`
+    /// and `end`; `unvestedOf` is a pure function of these three fields and
+    /// `block.number`, with no setter anywhere and no role that can reach it.
+    struct StreamVest {
+        uint256 unvested;
+        uint64 last;
+        uint64 end;
+    }
+
+    struct Layout {
+        address[] streamList;
+        mapping(address => bool) tracked;
+        mapping(address => bool) isStream;
+        mapping(address => QueuedStream) queuedStreams;
+        /// @dev The zero-denominator carry: value pushed while there is nobody
+        /// to credit, held until there is.
+        mapping(address => uint256) carry;
+        uint256 carryUnlockBlock;
+        mapping(address => StreamVest) vest;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/**
+ * @notice §7.5's continuous, sybil-resistant constituent weight (design doc
+ * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.5): a per-constituent
+ * maturity-and-decay schedule, driven ONLY from confirmed on-chain fee receipts
+ * already flowing through §7.2's push-then-reconcile mechanism
+ * (`IndexBootstrapFacet._sync` -> `IndexFacetBase._creditRoutedValue`).
+ *
+ * @dev Deliberately NOT the same namespace as `StreamStorage`, even though the
+ * shape of `WeightVest` mirrors `StreamStorage.StreamVest` (round 9e/9f) —
+ * constituent weight and stream vesting are different concerns tracked over
+ * different keys (`constituents` vs `streamList`), and §7.6 explicitly keeps
+ * the vesting-guard's block-based timing pattern reusable rather than a single
+ * shared struct that would couple the two.
+ *
+ * `matured` never decreases on its own — decay is applied WHEN READ
+ * (`IndexFacetBase._constituentWeight`), never written to storage, so a vault
+ * nobody has touched in a long time costs nothing to keep "weighing" less: the
+ * decay is a pure function of `block.number - last`, exactly like
+ * `StreamStorage.StreamVest.unvested` is a pure function of `block.number`,
+ * `last` and `end`. No setter anywhere reaches `matured`, `unvested`, `last`
+ * or `end` except `IndexFacetBase._recordConstituentActivity`, which is only
+ * ever called with a balance-delta `credited` amount `_sync` already measured
+ * — never a caller-supplied number.
+ */
+library WeightStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.weight.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    /// @dev Same shape as `StreamStorage.StreamVest`, plus `matured`: the
+    /// portion of past receipts that has already finished vesting-in and is
+    /// carried forward (subject to read-time decay) rather than re-derived.
+    struct WeightVest {
+        uint256 matured;
+        uint256 unvested;
+        uint64 last;
+        uint64 end;
+    }
+
+    struct Layout {
+        mapping(address => WeightVest) vest;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/**
+ * @notice §7.6 — the generalized maturity-vesting guard's per-constituent
+ * displacement ledger (design doc DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-
+ * 2026-08-06.md §7.6).
+ *
+ * @dev THE SAME SHAPE AS `StreamStorage.StreamVest`, reused verbatim rather
+ * than re-derived (`IndexFacetBase._addReserveVest`/`_reserveUnvestedOf`'s
+ * own header: "reuse this mathematical/timing pattern, don't invent a new
+ * one"). Kept in its own namespace rather than folded into `StreamStorage` or
+ * `CoreStorage.Constituent` because it tracks a DIFFERENT quantity than
+ * either: not a stream's own probed balance, and not `c.reserve` itself —
+ * `c.reserve` is NEVER rewritten by this mechanism (see
+ * `IndexFacetBase._creditRoutedValue`'s header for why `c.reserve` stays the
+ * untouched, physically accurate figure and this ledger is purely a
+ * displaced-until-vested overlay read alongside it, ONLY by
+ * `IndexCoreFacet.redeemProRata` and `IndexLensFacet.previewRedeemProRata`).
+ */
+library ReserveVestStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.reservevest.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    struct Layout {
+        /// @dev token => the same (unvested, last, end) shape
+        /// `StreamStorage.StreamVest` already proves. One entry per
+        /// constituent that has ever received a routed-value credit via
+        /// `IndexFacetBase._creditRoutedValue`; written ONLY there, through
+        /// `IndexFacetBase._addReserveVest`.
+        mapping(address => StreamStorage.StreamVest) vest;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/**
+ * @notice The dedicated index-coin/payment-token pool's address (design doc
+ * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.10).
+ *
+ * @dev ONE pool per diamond, set once via `IndexPoolFacet.setIndexPool` and
+ * never cleared — the same one-way-latch shape `CoreStorage.indexOpen` and
+ * `DiamondStorage.finalized` already use. `address(0)` (the default) means
+ * "no pool yet": `IndexFacetBase._nav()` treats that as "the pool contributes
+ * nothing", not as an error, so every existing test that never sets a pool is
+ * completely unaffected by this namespace's existence.
+ */
+library PoolStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.pool.v1")) - 1)) & ~bytes32(uint256(0xff));
+
+    struct Layout {
+        /// @notice The `IndexCoinPool` this diamond deploys protocol-owned
+        /// liquidity into and reads live reserves from for NAV. `address(0)`
+        /// until `IndexPoolFacet.executeIndexPool` applies a queued value.
+        address pool;
+        /// @notice The queued (not-yet-effective) pool address, timelocked
+        /// exactly like every other risk-surface change in this facet set
+        /// (`GovernanceStorage.QueuedParam`'s own shape, reused verbatim) —
+        /// there is no direct, un-timelocked setter anywhere in this facet
+        /// set, and this namespace does not become the first one.
+        GovernanceQueuedAddress queuedPool;
+        /// @notice §7.10 dilution bound (adversarial-review fix, 2026-08-06):
+        /// cumulative index-coin shares ever minted TO the pool by
+        /// `IndexPoolFacet.deployToIndexPool`. `redeemProRata`
+        /// (`IndexCoreFacet.sol`) and `_previewSingleExit`'s pricing path
+        /// (`IndexValuation.previewSingleExit`) both divide by raw
+        /// `totalSupply` and never read the pool, so shares minted here are
+        /// permanently unredeemable dead weight in that denominator — see
+        /// `IndexPoolFacet.deployToIndexPool`'s header for the full
+        /// derivation of why this is bounded here rather than folded into
+        /// those two price-free paths.
+        uint256 poolSharesMinted;
+        /// @notice Governed ceiling, in bps of `totalSupply`, on
+        /// `poolSharesMinted`. Checked on every `deployToIndexPool` call.
+        /// Zero until `executeIndexPool` seeds the initial safe default
+        /// alongside first pool activation (that call is itself already
+        /// timelocked via `queueIndexPool`, so this is not a bypass of the
+        /// timelock discipline — it is establishing the initial value at the
+        /// same moment the surface it bounds becomes reachable at all).
+        uint256 maxPoolShareBps;
+        /// @notice Timelocked change to `maxPoolShareBps`, same
+        /// queue/execute shape as `queuedPool` above and every other
+        /// risk-surface change in this facet set.
+        QueuedUint256 queuedMaxPoolShareBps;
+        /// @notice Automatic-deploy gas-dust floor (2026-08-06 automation
+        /// pass): `IndexFacetBase._attemptAutoDeploy` skips the opportunistic
+        /// self-call into `IndexPoolFacet.autoDeployToIndexPool` entirely
+        /// whenever the freshly-`_sync`-credited amount is below this many
+        /// wei of the constituent token, so a stream of dust-sized syncs never
+        /// pays for a self-call + full pricing/cap computation that the
+        /// pool's own economics would reject anyway. Zero by default — the
+        /// same "opt-in, not a silent behavior change" doctrine every other
+        /// namespace here uses — so until governance raises it, every
+        /// sufficiently-large sync is still attempted.
+        uint256 minAutoDeployWei;
+        /// @notice Timelocked change to `minAutoDeployWei`, same
+        /// queue/execute shape as `queuedMaxPoolShareBps` above.
+        QueuedUint256 queuedMinAutoDeployWei;
+        uint256[10] __gap;
+    }
+
+    /// @dev Shaped identically to `GovernanceStorage.QueuedParam`, declared
+    /// locally rather than imported so `PoolStorage` has no compile-time
+    /// dependency on `GovernanceStorage` — the same "re-declare rather than
+    /// import" convention `IndexValuation`'s errors already use in this
+    /// codebase.
+    struct GovernanceQueuedAddress {
+        address value;
+        uint64 eta;
+        bool pending;
+    }
+
+    /// @dev Same shape as `GovernanceQueuedAddress` above, over a `uint256`
+    /// instead of an `address` — `GovernanceStorage.QueuedParam`'s own shape,
+    /// reused verbatim, re-declared locally for the same reason.
+    struct QueuedUint256 {
+        uint256 value;
+        uint64 eta;
+        bool pending;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/**
+ * @notice §7.11's dev-fund PLANK market-buy allocation (design doc
+ * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.11).
+ *
+ * @dev DELIBERATELY A DIFFERENT TRUST MODEL FROM EVERY OTHER NAMESPACE IN
+ * THIS FILE, AND DOCUMENTED AS SUCH RATHER THAN GLOSSED OVER. Every other
+ * value-routing namespace here (`ValueAccrualStorage`'s buyback earmark,
+ * `DividendStorage`) is engineered so nobody — including the team — has a
+ * spending path over the value it tracks. This one is the opposite by
+ * design: `treasury` is a REAL, SPENDABLE address under team control,
+ * intended in production to be a timelocked multisig (never enforced
+ * on-chain — that is a deployment decision, not something a Solidity type
+ * can check), and `router`/`treasury`/`devFundBps` changes are governed and
+ * timelocked the same way every other privileged parameter in this codebase
+ * is, but the fund they route into is genuinely spendable, not locked or
+ * burned. See `IndexDevFundFacet.sol`'s header for the full framing.
+ *
+ * All three fields default to their zero value, which is the same
+ * "opt-in, not a silent behavior change" doctrine `ValueAccrualStorage` and
+ * `PoolStorage` already use here: `IndexFacetBase._routeDevFundBuy` is a
+ * no-op whenever `router == address(0) || treasury == address(0) ||
+ * devFundBps == 0`, so every existing test — none of which ever configures
+ * this namespace — observes byte-for-byte the same mint behaviour as before
+ * this section existed.
+ */
+library DevFundStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.devfund.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    /// @dev Same shape as `PoolStorage.GovernanceQueuedAddress`, re-declared
+    /// locally for the same "no cross-namespace compile-time dependency"
+    /// reason `PoolStorage` itself already documents.
+    struct QueuedAddress {
+        address value;
+        uint64 eta;
+        bool pending;
+    }
+
+    /// @dev Same shape as `PoolStorage.QueuedUint256`, re-declared locally.
+    struct QueuedUint256 {
+        uint256 value;
+        uint64 eta;
+        bool pending;
+    }
+
+    struct Layout {
+        /// @notice The external swap venue PLANK is bought through. A
+        /// deployment-time / governance parameter — see
+        /// `IExternalSwapRouter.sol`'s header for why the real PLANK venue
+        /// is never hardcoded here.
+        address router;
+        /// @notice Where bought PLANK lands. Real, spendable, team-directed
+        /// — see this library's own header.
+        address treasury;
+        /// @notice Governed share of a mint's payment routed toward buying
+        /// PLANK, in bps. Hard-capped at `IndexFacetBase.CEIL_DEV_FUND_BPS`
+        /// (200 = 2%), enforced at execution by
+        /// `IndexDevFundFacet._applyDevFundBps`.
+        uint256 devFundBps;
+        QueuedAddress queuedRouter;
+        QueuedAddress queuedTreasury;
+        QueuedUint256 queuedDevFundBps;
+        uint256[11] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/**
+ * @notice §7.12's platform socialfi treasury carve-out (design doc
+ * DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md §7.12).
+ *
+ * @dev THE SAME DIFFERENT TRUST MODEL AS `DevFundStorage` ABOVE, RESTATED
+ * BECAUSE IT IS EASY TO BLUR THE TWO TOGETHER. Every trustless value-routing
+ * namespace this file declares (`ValueAccrualStorage`'s buyback earmark,
+ * `DividendStorage`) is engineered so nobody — including the team — has a
+ * spending path over the value it tracks. This one, like `DevFundStorage`,
+ * is the opposite by design: `treasury` is a REAL, SPENDABLE address under
+ * team control, intended in production to be a timelocked multisig (never
+ * enforced on-chain — a deployment decision, not something a Solidity type
+ * can check), and `treasury`/`carveOutBps` changes are governed and
+ * timelocked the same way every other privileged parameter in this codebase
+ * is, but the value they route is genuinely spendable, never locked or
+ * burned. See `IndexSocialFiTreasuryFacet.sol`'s header for the full framing.
+ *
+ * UNLIKE `DevFundStorage`, there is no `router` field here: §7.12 reuses the
+ * exact push-then-opportunistic-reconcile plumbing already built and tested
+ * in §7.2 — a plain `IERC20.safeTransfer` to `treasury`, atomic, cannot brick
+ * a vault — never a swap through an external venue.
+ *
+ * Both fields default to their zero value, the same "opt-in, not a silent
+ * behavior change" doctrine `DevFundStorage`, `ValueAccrualStorage` and
+ * `PoolStorage` already use here: `IndexFacetBase._creditRoutedValue`'s
+ * carve-out step is a no-op whenever `treasury == address(0) ||
+ * carveOutBps == 0`, so every existing §7.3 three-way-split test — none of
+ * which ever configures this namespace — observes byte-for-byte the same
+ * split behaviour as before this section existed.
+ */
+library PlatformTreasuryStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.platformtreasury.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    /// @dev Same shape as `DevFundStorage.QueuedAddress`, re-declared locally
+    /// for the same "no cross-namespace compile-time dependency" reason
+    /// `DevFundStorage` itself already documents.
+    struct QueuedAddress {
+        address value;
+        uint64 eta;
+        bool pending;
+    }
+
+    /// @dev Same shape as `DevFundStorage.QueuedUint256`, re-declared locally.
+    struct QueuedUint256 {
+        uint256 value;
+        uint64 eta;
+        bool pending;
+    }
+
+    struct Layout {
+        /// @notice Where the carved-out share of every routed fee lands.
+        /// Real, spendable, team-directed — see this library's own header.
+        /// Earmarked, per the design doc, to fund future PLANK airdrops tied
+        /// to a socialfi leaderboard system — a later, separate product
+        /// design this section only funds, never specifies.
+        address treasury;
+        /// @notice Governed share of value reaching `_creditRoutedValue`,
+        /// carved out BEFORE §7.3's three-way split runs, in bps. Hard-capped
+        /// at `IndexFacetBase.CEIL_PLATFORM_TREASURY_BPS` (500 = 5%),
+        /// enforced at execution by
+        /// `IndexSocialFiTreasuryFacet._applySocialFiTreasuryBps`.
+        uint256 carveOutBps;
+        QueuedAddress queuedTreasury;
+        QueuedUint256 queuedCarveOutBps;
+        uint256[12] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/// @notice Registered observe-only extension hooks (design doc section 8).
+library HooksStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.hooks.v1")) - 1)) & ~bytes32(uint256(0xff));
+
+    /// @dev A queued (not-yet-effective) hook registration, timelocked exactly
+    /// like every other `ROLE_RISK_PARAM_`-gated risk-surface change (see
+    /// `IndexGovernanceFacet.queueParam`/`executeParam`).
+    struct QueuedHook {
+        address hook;
+        uint16 permissions;
+        uint64 eta;
+        bool pending;
+    }
+
+    struct Layout {
+        /// @dev point => hook contract. `point` is drawn from a COMPILE-TIME
+        /// enumerated set, so governance chooses who, never where — and that
+        /// set contains no point on `redeemProRata`, `claimPending` or
+        /// `claimPendingMany`.
+        mapping(bytes32 => address) hooks;
+        mapping(address => uint16) hookPermissions;
+        /// @dev point => the queued registration awaiting `executeHook`.
+        mapping(bytes32 => QueuedHook) queuedHooks;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
+
+/**
+ * @notice The single reentrancy word, shared by every facet.
+ *
+ * @dev This one is not a convenience. OpenZeppelin's ReentrancyGuard would put
+ * a guard at slot 0 of each facet, which under DELEGATECALL all alias to the
+ * SAME diamond slot 0 — colliding with the diamond's own table — and if that
+ * were fixed naively by giving each facet its own namespace, `nonReentrant` on
+ * facet A would no longer exclude a reentrant call into facet B. One shared
+ * word makes the guard cross-facet, which is STRICTLY STRONGER than today's
+ * per-contract guard, not merely equivalent.
+ */
+library ReentrancyStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.reentrancy.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    uint256 internal constant NOT_ENTERED = 1;
+    uint256 internal constant ENTERED = 2;
+
+    struct Layout {
+        uint256 status;
+        uint256[16] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}

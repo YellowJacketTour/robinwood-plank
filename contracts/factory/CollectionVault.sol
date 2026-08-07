@@ -1,0 +1,423 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+
+/**
+ * ============================================================================
+ *  CollectionVault — factory-deployed, one per collection, implementing
+ *  DESIGN-N-VAULT-FACTORY-AND-VALUE-ACCRUAL-2026-08-06.md section 7.2.
+ *
+ *  SCOPE OF THIS PASS: section 7.2's two mandatory fee-routing streams and the
+ *  push-then-opportunistic-reconcile mechanism. Explicitly NOT built here:
+ *  §7.10 (dedicated pool), §7.3 (dividend hybrid), §7.5 (continuous weight
+ *  curve), §7.6 (generalized vesting), §7.7 (buyback).
+ *
+ *  PATTERN PROVENANCE — mirrors MarketplankVaultV3.sol (this repo) exactly
+ *  where that pattern applies:
+ *    - fee ceilings (MAX_MINT_FEE_WEI / MAX_REDEEM_FEE_WEI / MAX_SWAP_FEE_BPS)
+ *      are copied VERBATIM (same values), see MarketplankVaultV3.sol:176-179.
+ *    - immutable-constructor-param style, MarketplankVaultV3.sol:151-159.
+ *    - accruedFees / withdrawFees() pull pattern, MarketplankVaultV3.sol:638-642.
+ *
+ *  DEVIATION FROM V3, DELIBERATE: V3's fees and pool are ETH-denominated. This
+ *  vault's fees and pool are denominated in an ERC-20 `paymentToken` instead.
+ *  This is required by the push-then-reconcile mechanism itself: the Diamond's
+ *  existing `syncConstituentBalance`/`reconcile` machinery (IndexBootstrapFacet)
+ *  only ever credits a constituent's reserve from an ERC-20 balance delta —
+ *  there is no native-ETH constituent type in the Diamond today. Routing the
+ *  sink cut as a plain ERC-20 transfer to the Diamond's own address is what
+ *  makes this mandatory-routing mechanism land as a directly, permissionlessly
+ *  reconcilable surplus rather than stranded, unaccounted ETH. `paymentToken`
+ *  is expected to be a token the Diamond already tracks as a constituent (e.g.
+ *  WETH), so a sweep instantly becomes redeemable NAV.
+ *
+ *  MANDATORY ROUTING, PRECISELY (design doc §7.2)
+ *  ------------------------------------------------
+ *  Stream A — mint/redeem fees. Artist-selectable split between the vault's
+ *  own treasury and the upstream sink, FLOOR 810 bps (8.1%) to the sink,
+ *  ceiling `CEIL_SINK_SPLIT_BPS` (protocol-wide bound, same bounded-range
+ *  shape as IndexFacetBase.CEIL_ECOSYSTEM_SPLIT_BPS). Changeable ONLY via the
+ *  same timelocked queue/execute pair as the treasury address.
+ *
+ *  Stream B — swap fees, default 100 bps (== MAX_SWAP_FEE_BPS, already-vetted
+ *  ceiling, reused verbatim, not a new risk parameter). Split exactly 50/50
+ *  between the pool's own reserve (fee-compounding, deepens local liquidity)
+ *  and the sink. This 50/50 split is `SWAP_SINK_SPLIT_BPS`, a PROTOCOL-WIDE
+ *  CONSTANT baked into every factory vault at construction — never
+ *  creator-settable, matching the "mandatory routing fraction" requirement.
+ *
+ *  PUSH-THEN-OPPORTUNISTIC-RECONCILE
+ *  -----------------------------------
+ *  Every sink cut is pushed with a PLAIN `IERC20.transfer` to `upstreamSink`,
+ *  atomically, in the same transaction as the triggering fee event. A plain
+ *  ERC-20 transfer executes no receiver code, so it cannot revert this
+ *  vault's own transaction even if the sink side has a problem — the same
+ *  isolation MarketplankVaultV3 already guarantees today, extended across
+ *  the vault/index boundary. This vault NEVER calls into the index's logic.
+ * ============================================================================
+ */
+contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
+    using SafeERC20 for IERC20;
+
+    uint256 public constant VAULT_VERSION = 1;
+
+    IERC721 public immutable collection;
+    IERC20 public immutable paymentToken;
+
+    /// @notice Flat fees, fixed forever at deployment. Same ceilings as
+    /// MarketplankVaultV3.sol:176-179, verbatim.
+    uint256 public immutable mintFeeWei;
+    uint256 public immutable redeemFeeWei;
+    /// @notice AMM swap fee in bps. Default 100 == MAX_SWAP_FEE_BPS.
+    uint256 public immutable swapFeeBps;
+
+    /// @notice The Diamond's own address (or a designated collection point).
+    /// Immutable: set once at construction, never a live cross-contract call
+    /// target on the hot path — see header.
+    address public immutable upstreamSink;
+
+    /// @notice PROTOCOL-WIDE constant: 50% of every swap fee routes to the
+    /// sink. Not creator-settable, not governance-settable per-vault.
+    uint256 public constant SWAP_SINK_SPLIT_BPS = 5_000;
+
+    uint256 private constant BPS_DENOMINATOR = 10_000;
+    uint256 private constant SHARE_UNIT = 1e18;
+
+    /// @dev Wei fee ceilings — verbatim from MarketplankVaultV3.
+    uint256 private constant MAX_MINT_FEE_WEI = 0.05 ether;
+    uint256 private constant MAX_REDEEM_FEE_WEI = 0.05 ether;
+    uint256 private constant MAX_SWAP_FEE_BPS = 100;
+
+    /// @notice Floor: no path, artist or governance, can route less than 8.1%
+    /// of Stream A to the sink.
+    uint256 public constant FLOOR_SINK_SPLIT_BPS = 810;
+    /// @notice Ceiling on Stream A's sink split — same bounded-range shape as
+    /// IndexFacetBase.CEIL_ECOSYSTEM_SPLIT_BPS (3_000 there); kept local here
+    /// since this is a per-vault-family bound, not a diamond-wide one.
+    uint256 public constant CEIL_SINK_SPLIT_BPS = 3_000;
+
+    /// @notice Same timelock delay for every mutation this vault allows.
+    uint256 public immutable timelockDelay;
+
+    /// @notice The ONLY mutable address. Starts at the value chosen at
+    /// construction; changeable only through queueTreasury/executeTreasury.
+    address public treasury;
+    /// @notice Stream A's current sink split (bps). Chosen once at
+    /// construction (>= floor, <= ceiling), thereafter only through the
+    /// identical timelock as treasury.
+    uint256 public mintRedeemSinkBps;
+
+    struct Queued {
+        uint256 value;
+        uint64 eta;
+        bool pending;
+    }
+    Queued public queuedTreasury;
+    Queued public queuedMintRedeemSinkBps;
+
+    uint256[] private heldTokenIds;
+    mapping(uint256 => uint256) private heldTokenIndex;
+
+    uint256 public paymentReserve;
+    uint256 public shareReserve;
+    bool public poolOpen;
+    uint256 private constant MIN_INITIAL_LIQUIDITY = 1e3;
+
+    /// @notice ETH... no: paymentToken fees awaiting a withdrawFees() pull,
+    /// exactly MarketplankVaultV3's accruedFees/withdrawFees pattern.
+    uint256 public accruedFees;
+
+    event Deposited(address indexed from, uint256 indexed tokenId, uint256 sinkCut, uint256 treasuryCut);
+    event Redeemed(address indexed to, uint256 indexed tokenId, uint256 sinkCut, uint256 treasuryCut);
+    event Bought(address indexed buyer, uint256 amountIn, uint256 sharesOut, uint256 sinkCut);
+    event Sold(address indexed seller, uint256 sharesIn, uint256 amountOut, uint256 sinkCut);
+    event PoolOpened(uint256 paymentReserve, uint256 shareReserve);
+    event FeesWithdrawn(uint256 amount);
+    event TreasuryQueued(address next, uint64 eta);
+    event TreasuryApplied(address previous, address next);
+    event MintRedeemSinkBpsQueued(uint256 value, uint64 eta);
+    event MintRedeemSinkBpsApplied(uint256 previous, uint256 value);
+    event SweptToSink(uint256 amount);
+
+    error FeeTooHigh();
+    error IncorrectFee();
+    error TokenNotHeld();
+    error InsufficientOutput();
+    error NotTreasury();
+    error EmptyVault();
+    error AlreadyHeld();
+    error PoolNotOpen();
+    error PoolAlreadyOpen();
+    error NothingToSeed();
+    error InsufficientLiquidity();
+    error NoFees();
+    error SplitOutOfRange();
+    error NothingQueued();
+    error TimelockNotElapsed();
+    error ZeroAddress();
+
+    constructor(
+        IERC721 collection_,
+        IERC20 paymentToken_,
+        string memory name_,
+        string memory symbol_,
+        uint256 mintFeeWei_,
+        uint256 redeemFeeWei_,
+        uint256 swapFeeBps_,
+        address upstreamSink_,
+        address treasury_,
+        uint256 mintRedeemSinkBps_,
+        uint256 timelockDelay_
+    ) ERC20(name_, symbol_) {
+        if (mintFeeWei_ > MAX_MINT_FEE_WEI || redeemFeeWei_ > MAX_REDEEM_FEE_WEI || swapFeeBps_ > MAX_SWAP_FEE_BPS) {
+            revert FeeTooHigh();
+        }
+        if (treasury_ == address(0) || upstreamSink_ == address(0)) revert ZeroAddress();
+        if (mintRedeemSinkBps_ < FLOOR_SINK_SPLIT_BPS || mintRedeemSinkBps_ > CEIL_SINK_SPLIT_BPS) {
+            revert SplitOutOfRange();
+        }
+        collection = collection_;
+        paymentToken = paymentToken_;
+        mintFeeWei = mintFeeWei_;
+        redeemFeeWei = redeemFeeWei_;
+        swapFeeBps = swapFeeBps_;
+        upstreamSink = upstreamSink_;
+        treasury = treasury_;
+        mintRedeemSinkBps = mintRedeemSinkBps_;
+        timelockDelay = timelockDelay_;
+    }
+
+    // ── Deposit / redeem, Stream A ─────────────────────────────────────────
+
+    function deposit(uint256 tokenId) external nonReentrant {
+        _pullFee(mintFeeWei);
+        collection.safeTransferFrom(msg.sender, address(this), tokenId);
+        _addHeldToken(tokenId);
+        _mint(msg.sender, SHARE_UNIT);
+        (uint256 sinkCut, uint256 treasuryCut) = _routeStreamA(mintFeeWei);
+        emit Deposited(msg.sender, tokenId, sinkCut, treasuryCut);
+    }
+
+    function redeem(uint256 tokenId) external nonReentrant {
+        if (heldTokenIndex[tokenId] == 0) revert TokenNotHeld();
+        _pullFee(redeemFeeWei);
+        _burn(msg.sender, SHARE_UNIT);
+        _removeHeldToken(tokenId);
+        collection.safeTransferFrom(address(this), msg.sender, tokenId);
+        (uint256 sinkCut, uint256 treasuryCut) = _routeStreamA(redeemFeeWei);
+        emit Redeemed(msg.sender, tokenId, sinkCut, treasuryCut);
+    }
+
+    /// @dev Pulls exactly `fee` of paymentToken from the caller into this
+    /// vault, using the observed-balance-delta discipline (never trusts the
+    /// nominal amount).
+    function _pullFee(uint256 fee) private {
+        if (fee == 0) return;
+        uint256 before = paymentToken.balanceOf(address(this));
+        paymentToken.safeTransferFrom(msg.sender, address(this), fee);
+        uint256 credited = paymentToken.balanceOf(address(this)) - before;
+        if (credited != fee) revert IncorrectFee();
+    }
+
+    /// @dev Splits `fee` between sink (pushed immediately, plain transfer)
+    /// and local treasury (accrued, pulled later via withdrawFees()).
+    function _routeStreamA(uint256 fee) private returns (uint256 sinkCut, uint256 treasuryCut) {
+        if (fee == 0) return (0, 0);
+        sinkCut = (fee * mintRedeemSinkBps) / BPS_DENOMINATOR;
+        treasuryCut = fee - sinkCut;
+        if (sinkCut > 0) {
+            paymentToken.safeTransfer(upstreamSink, sinkCut);
+            emit SweptToSink(sinkCut);
+        }
+        accruedFees += treasuryCut;
+    }
+
+    // ── Constant-product pool, Stream B ────────────────────────────────────
+
+    function buyShares(uint256 amountIn, uint256 minSharesOut) external nonReentrant returns (uint256 sharesOut) {
+        if (!poolOpen) revert PoolNotOpen();
+        if (shareReserve == 0 || paymentReserve == 0) revert EmptyVault();
+        if (amountIn == 0) revert InsufficientOutput();
+
+        uint256 before = paymentToken.balanceOf(address(this));
+        paymentToken.safeTransferFrom(msg.sender, address(this), amountIn);
+        uint256 credited = paymentToken.balanceOf(address(this)) - before;
+
+        uint256 sinkCut = _swapFeeSinkCut(credited);
+        uint256 netIn = credited - sinkCut; // fee-that-stays-local is priced in below, same as V3
+
+        uint256 inNet = (netIn * (BPS_DENOMINATOR - swapFeeBps)) / BPS_DENOMINATOR;
+        sharesOut = (inNet * shareReserve) / (paymentReserve + inNet);
+        if (sharesOut == 0 || sharesOut < minSharesOut) revert InsufficientOutput();
+
+        paymentReserve += netIn;
+        shareReserve -= sharesOut;
+        _transfer(address(this), msg.sender, sharesOut);
+
+        if (sinkCut > 0) {
+            paymentToken.safeTransfer(upstreamSink, sinkCut);
+            emit SweptToSink(sinkCut);
+        }
+        emit Bought(msg.sender, credited, sharesOut, sinkCut);
+    }
+
+    function sellShares(uint256 sharesIn, uint256 minAmountOut) external nonReentrant returns (uint256 amountOut) {
+        if (!poolOpen) revert PoolNotOpen();
+        if (shareReserve == 0 || paymentReserve == 0) revert EmptyVault();
+        if (sharesIn == 0) revert InsufficientOutput();
+
+        uint256 inNet = (sharesIn * (BPS_DENOMINATOR - swapFeeBps)) / BPS_DENOMINATOR;
+        uint256 grossOut = (inNet * paymentReserve) / (shareReserve + inNet);
+        if (grossOut == 0) revert InsufficientOutput();
+
+        uint256 sinkCut = _swapFeeSinkCut(grossOut);
+        amountOut = grossOut - sinkCut;
+        if (amountOut < minAmountOut) revert InsufficientOutput();
+
+        _transfer(msg.sender, address(this), sharesIn);
+        shareReserve += sharesIn;
+        paymentReserve -= grossOut;
+
+        paymentToken.safeTransfer(msg.sender, amountOut);
+        if (sinkCut > 0) {
+            paymentToken.safeTransfer(upstreamSink, sinkCut);
+            emit SweptToSink(sinkCut);
+        }
+        emit Sold(msg.sender, sharesIn, amountOut, sinkCut);
+    }
+
+    /// @dev The swap fee itself is `amount * swapFeeBps / BPS`; exactly half
+    /// of THAT fee (SWAP_SINK_SPLIT_BPS = 5000) is the sink's cut. The other
+    /// half stays embedded in the pool's own reserve pricing (standard AMM
+    /// fee-compounding — see buyShares/sellShares using the FULL swapFeeBps
+    /// discount for pricing while only the sink's half is ever transferred
+    /// out).
+    function _swapFeeSinkCut(uint256 amount) private view returns (uint256) {
+        uint256 fee = (amount * swapFeeBps) / BPS_DENOMINATOR;
+        return (fee * SWAP_SINK_SPLIT_BPS) / BPS_DENOMINATOR;
+    }
+
+    // ── Bootstrap ──────────────────────────────────────────────────────────
+
+    function seedLiquidity(uint256 amount) external nonReentrant {
+        if (msg.sender != treasury) revert NotTreasury();
+        if (poolOpen) revert PoolAlreadyOpen();
+        paymentToken.safeTransferFrom(msg.sender, address(this), amount);
+        paymentReserve += amount;
+    }
+
+    function seedShares(uint256 shares) external nonReentrant {
+        if (msg.sender != treasury) revert NotTreasury();
+        if (poolOpen) revert PoolAlreadyOpen();
+        if (shares == 0) revert NothingToSeed();
+        _transfer(msg.sender, address(this), shares);
+        shareReserve += shares;
+    }
+
+    function openPool() external nonReentrant {
+        if (msg.sender != treasury) revert NotTreasury();
+        if (poolOpen) revert PoolAlreadyOpen();
+        if (paymentReserve == 0 || shareReserve == 0) revert EmptyVault();
+        if (paymentReserve < MIN_INITIAL_LIQUIDITY || shareReserve < MIN_INITIAL_LIQUIDITY) {
+            revert InsufficientLiquidity();
+        }
+        poolOpen = true;
+        emit PoolOpened(paymentReserve, shareReserve);
+    }
+
+    function withdrawFees() external nonReentrant {
+        uint256 amount = accruedFees;
+        if (amount == 0) revert NoFees();
+        accruedFees = 0;
+        paymentToken.safeTransfer(treasury, amount);
+        emit FeesWithdrawn(amount);
+    }
+
+    // ── Treasury: the ONLY mutable address, timelocked ─────────────────────
+
+    function queueTreasury(address next) external {
+        if (msg.sender != treasury) revert NotTreasury();
+        if (next == address(0)) revert ZeroAddress();
+        uint64 eta = uint64(block.timestamp + timelockDelay);
+        queuedTreasury = Queued({value: uint256(uint160(next)), eta: eta, pending: true});
+        emit TreasuryQueued(next, eta);
+    }
+
+    function executeTreasury() external {
+        Queued memory q = queuedTreasury;
+        if (!q.pending) revert NothingQueued();
+        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        delete queuedTreasury;
+        address prev = treasury;
+        treasury = address(uint160(q.value));
+        emit TreasuryApplied(prev, treasury);
+    }
+
+    // ── Stream A split: artist-selectable within [FLOOR, CEIL], timelocked ─
+
+    function queueMintRedeemSinkBps(uint256 next) external {
+        if (msg.sender != treasury) revert NotTreasury();
+        if (next < FLOOR_SINK_SPLIT_BPS || next > CEIL_SINK_SPLIT_BPS) revert SplitOutOfRange();
+        uint64 eta = uint64(block.timestamp + timelockDelay);
+        queuedMintRedeemSinkBps = Queued({value: next, eta: eta, pending: true});
+        emit MintRedeemSinkBpsQueued(next, eta);
+    }
+
+    function executeMintRedeemSinkBps() external {
+        Queued memory q = queuedMintRedeemSinkBps;
+        if (!q.pending) revert NothingQueued();
+        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        // Re-checked at execution, not just at queue time — same doctrine as
+        // IndexGovernanceFacet.executeParam's hard-ceiling re-check.
+        if (q.value < FLOOR_SINK_SPLIT_BPS || q.value > CEIL_SINK_SPLIT_BPS) revert SplitOutOfRange();
+        delete queuedMintRedeemSinkBps;
+        uint256 prev = mintRedeemSinkBps;
+        mintRedeemSinkBps = q.value;
+        emit MintRedeemSinkBpsApplied(prev, q.value);
+    }
+
+    // ── Views ──────────────────────────────────────────────────────────────
+
+    function heldTokenCount() external view returns (uint256) {
+        return heldTokenIds.length;
+    }
+
+    function isTokenHeld(uint256 tokenId) external view returns (bool) {
+        return heldTokenIndex[tokenId] != 0;
+    }
+
+    // ── Internals ──────────────────────────────────────────────────────────
+
+    function _addHeldToken(uint256 tokenId) private {
+        if (heldTokenIndex[tokenId] != 0) revert AlreadyHeld();
+        heldTokenIds.push(tokenId);
+        heldTokenIndex[tokenId] = heldTokenIds.length;
+    }
+
+    function _removeHeldToken(uint256 tokenId) private {
+        uint256 idxPlusOne = heldTokenIndex[tokenId];
+        if (idxPlusOne == 0) revert TokenNotHeld();
+        uint256 idx = idxPlusOne - 1;
+        uint256 lastIdx = heldTokenIds.length - 1;
+        uint256 lastTokenId = heldTokenIds[lastIdx];
+        heldTokenIds[idx] = lastTokenId;
+        heldTokenIndex[lastTokenId] = idx + 1;
+        heldTokenIds.pop();
+        delete heldTokenIndex[tokenId];
+    }
+
+    function onERC721Received(
+        address,
+        address,
+        uint256,
+        bytes calldata
+    ) external pure override returns (bytes4) {
+        return IERC721Receiver.onERC721Received.selector;
+    }
+}
