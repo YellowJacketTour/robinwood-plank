@@ -10,6 +10,10 @@ import {
   fetchTransaction,
 } from "@/lib/market/blockscout";
 import { ethCallDisplay } from "@/lib/market/fetch-rpc";
+import {
+  ROBINWOOD_ROYALTY_BPS,
+  ROBINWOOD_ROYALTY_RECEIVER,
+} from "@/lib/market/royalty";
 
 /**
  * Royalty-aware marketplace sales catalog for RobinWood.
@@ -49,10 +53,10 @@ let lastColdBuildAt = 0;
  * royalty gate would never match) and the catalog would quietly stop growing.
  */
 /** EIP-2981 royaltyInfo(1, 1e18) on RobinWood — receiver. */
-export const ROYALTY_RECEIVER = "0x269a93ec8486fbc3a82e352430e84fd8af8ebb0d";
+export const ROYALTY_RECEIVER = ROBINWOOD_ROYALTY_RECEIVER;
 
 /** Royalty bps implied by royaltyInfo(1, 1 ether) = 0.081 ether → 810 bps. */
-export const ROYALTY_BPS = 810;
+export const ROYALTY_BPS = ROBINWOOD_ROYALTY_BPS;
 
 export type RoyaltyConfig = { receiver: string; bps: number };
 

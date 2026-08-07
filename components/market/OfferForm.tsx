@@ -125,6 +125,8 @@ export default function OfferForm({
         criteriaTokenIds: traitMode ? qualifyingIds : undefined,
         expiresAt,
         feeBps: collection.feeBps,
+        royaltyBps: collection.royaltyBps,
+        royaltyRecipient: collection.royaltyRecipient,
       });
 
       const traitPairs = clausesToTraitLabels(clauses).filter(
@@ -274,11 +276,12 @@ export default function OfferForm({
                 </div>
                 <div className="col-span-2 rounded-lg border border-line bg-wood-950 px-3 py-2">
                   <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
-                    Marketplace fee / seller net
+                    Fees / seller net
                   </dt>
                   <dd className="mt-1 text-xs font-bold text-foreground">
-                    {(collection.feeBps / 100).toFixed(2)}% fee · seller net verified from
-                    the signed order before acceptance
+                    {(collection.royaltyBps / 100).toFixed(2)}% creator royalty ·{" "}
+                    {(collection.feeBps / 100).toFixed(2)}% marketplace fee · seller net
+                    verified from the signed order before acceptance
                   </dd>
                 </div>
               </dl>
@@ -439,9 +442,10 @@ export default function OfferForm({
         </div>
 
         <p className="text-center text-[0.65rem] text-foreground/50">
+          {(collection.royaltyBps / 100).toFixed(2)}% creator royalty included ·{" "}
           {collection.feeBps > 0
             ? `${(collection.feeBps / 100).toFixed(2)}% marketplace fee`
-            : "No marketplace fee"}
+            : "no marketplace fee"}
         </p>
 
         <button
