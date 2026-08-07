@@ -6,7 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IndexFacetBase} from "./IndexFacetBase.sol";
 import {IIndexPriceSource} from "../../IIndexPriceSource.sol";
 import {Constituent} from "../../lib/IndexTypes.sol";
-import {CoreStorage, EcosystemStorage, DividendStorage, ValueAccrualStorage} from "../storage/IndexStorage.sol";
+import {CoreStorage} from "../storage/IndexStorage.sol";
 
 /**
  * ============================================================================
@@ -125,7 +125,7 @@ contract IndexBootstrapFacet is IndexFacetBase {
      * of the token named, redeemable pro rata by every holder).
      */
     function syncConstituentBalance(address token) external nonReentrant returns (uint256 credited) {
-        return _sync(token);
+        return _reconcileCore(token);
     }
 
     /**
@@ -148,46 +148,33 @@ contract IndexBootstrapFacet is IndexFacetBase {
      * this "credit only an observed balance delta" rule is implemented.
      */
     function reconcile(address token) external nonReentrant returns (uint256 credited) {
-        return _sync(token);
+        return _reconcileCore(token);
     }
 
-    /// @dev THE ONE implementation of "credit only what has already,
-    /// physically, verifiably arrived" — see the header note on
-    /// `syncConstituentBalance` above. Both public entry points call this and
-    /// nothing else, so they can never drift out of parity with each other.
-    function _sync(address token) private returns (uint256 credited) {
-        CoreStorage.Layout storage cs = CoreStorage.layout();
-        Constituent storage c = _get(token);
-        uint256 accounted = c.reserve
-            + cs.reservedClaims[token]
-            + EcosystemStorage.layout().ecosystemFeesWei[token]
-            + ValueAccrualStorage.layout().buybackEarmarkWei[token];
-        if (token == cs.dividendAsset) {
-            DividendStorage.Layout storage d = DividendStorage.layout();
-            accounted += d.totalDividendsReceived - d.totalDividendsWithdrawn;
-        }
-        uint256 bal = IERC20(token).balanceOf(address(this));
-        if (bal <= accounted) return 0;
-        credited = bal - accounted;
-        // §7.3: the observed surplus splits three ways (NAV reserve / dividend
-        // accumulator / buyback earmark) rather than landing wholly in
-        // `c.reserve` — see `IndexFacetBase._creditRoutedValue`'s header.
-        _creditRoutedValue(token, c, credited);
-        emit ConstituentSynced(token, credited);
-        _fireHook(HOOK_AFTER_SYNC_, abi.encode(token, credited));
-        // 2026-08-06 automation pass (design doc §7.10 follow-up):
-        // opportunistically try to deploy this exact freshly-credited
-        // share-token surplus into the index-coin pool, as a byproduct of
-        // this reconcile — never for the payment/dividend token itself,
-        // which is the pool's OTHER leg, not a share-type constituent
-        // `deployToIndexPool`/`autoDeployToIndexPool` ever accept (both
-        // revert `BadParam` on `shareToken == paymentToken`, so this guard
-        // is an optimization, not a correctness requirement — it just skips
-        // an self-call that would always fail for that token). Non-blocking
-        // by construction — see `IndexFacetBase._attemptAutoDeploy`'s header.
-        if (token != cs.dividendAsset) {
-            _attemptAutoDeploy(token, credited);
-        }
+    /**
+     * @notice Opportunistic-reconcile entry point (adversarial-review fix,
+     * 2026-08-06, follow-up to §7.10's automation pass).
+     *
+     * @dev NOT A PUBLIC ACTION, despite the `external` visibility — the
+     * `msg.sender == address(this)` check below means the ONLY possible
+     * caller is the diamond itself, reached exclusively through
+     * `IndexFacetBase._attemptOpportunisticReconcile`'s low-level self-call
+     * from a mint/redeem hot path already holding the shared reentrancy
+     * guard. See that function's header for the full reentrancy-safety
+     * derivation — identical reasoning to `IndexPoolFacet.
+     * autoDeployToIndexPool` one level up. Runs the IDENTICAL
+     * `_reconcileCore` that `syncConstituentBalance`/`reconcile` call, so
+     * there remains exactly one implementation of "credit only an observed
+     * balance delta."
+     *
+     * Deliberately carries NO `nonReentrant` of its own — the shared
+     * reentrancy word is already `ENTERED` by whichever guarded mint/redeem
+     * reached it, and re-checking it here would make every opportunistic
+     * attempt revert.
+     */
+    function autoReconcile(address token) external returns (uint256 credited) {
+        if (msg.sender != address(this)) revert BadParam();
+        return _reconcileCore(token);
     }
 
     /// @notice Drop a deactivated, fully-redeemed constituent. Permissionless

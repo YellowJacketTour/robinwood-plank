@@ -386,6 +386,16 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // permissionless after the eta, gated at the `queue` side by
       // `ROLE_RISK_PARAM_` instead.
       "executeMinAutoDeployWei",
+      // Adversarial-review fix (2026-08-06): `autoReconcile` is the
+      // opportunistic-reconcile counterpart to `autoDeployToIndexPool` —
+      // stricter than permissionless, it reverts for every caller except
+      // `address(this)` (the diamond calling itself mid-mint/redeem via
+      // `IndexFacetBase._attemptOpportunisticReconcile`), so no externally-
+      // owned account or role can ever reach it directly. It shares the
+      // exact same core logic as `syncConstituentBalance`/`reconcile`
+      // immediately above — there is nothing here for a role to be trusted
+      // with either.
+      "autoReconcile",
     ]);
     const abiNames = (vault.interface.fragments as any[])
       .filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))
