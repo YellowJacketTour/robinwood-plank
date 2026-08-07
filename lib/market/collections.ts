@@ -1,5 +1,9 @@
 import { MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
+import {
+  ROBINWOOD_ROYALTY_BPS,
+  ROBINWOOD_ROYALTY_RECEIVER,
+} from "@/lib/market/royalty";
 import type { MarketCollection } from "@/lib/market/types";
 
 // See lib/constants.ts MARKET_DEFAULT_FEE_BPS for the default new
@@ -28,6 +32,8 @@ export const MARKET_COLLECTIONS: MarketCollection[] = [
     // RobinWood's is the env-configured V2 vault; a future collection's
     // vault goes here directly when its release promotes it.
     vaultAddress: MARKET_VAULT_ADDRESS ?? undefined,
+    royaltyBps: ROBINWOOD_ROYALTY_BPS,
+    royaltyRecipient: ROBINWOOD_ROYALTY_RECEIVER,
   },
   // Next collection added here defaults to MARKET_DEFAULT_FEE_BPS unless
   // given its own feeBps override, e.g. `feeBps: MARKET_DEFAULT_FEE_BPS`.

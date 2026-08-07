@@ -123,6 +123,22 @@ function isAddressLike(v: unknown): v is string {
   return typeof v === "string" && /^0x[a-fA-F0-9]{40}$/.test(v);
 }
 
+type CollectionRoyalty = { bps: number; recipient: string };
+
+function collectionRoyalty(collection: MarketCollection): CollectionRoyalty | null {
+  if (collection.royaltyBps <= 0) return null;
+  if (!Number.isInteger(collection.royaltyBps) || collection.royaltyBps > 10_000) {
+    fail("Collection royalty must be a whole number of basis points between 1 and 10000.");
+  }
+  if (!isAddressLike(collection.royaltyRecipient)) {
+    fail("Collection royalty recipient is not a valid address.");
+  }
+  if (sameAddress(collection.royaltyRecipient, MARKET_FEE_RECIPIENT)) {
+    fail("Collection royalty recipient must differ from the marketplace treasury.");
+  }
+  return { bps: collection.royaltyBps, recipient: collection.royaltyRecipient };
+}
+
 /** What the order actually says, after validation. Safe to display. */
 export type DerivedOrder = {
   /** parameters.offerer — never the client's claim. */
@@ -247,6 +263,7 @@ export function validateListingOrder(
   if (collection.tokenStandard !== "ERC721") {
     fail("Only ERC-721 collections are tradable on Marketplank for now.");
   }
+  const royalty = collectionRoyalty(collection);
 
   if (p.offer.length !== 1) {
     fail("Marketplank listings must offer exactly one NFT.");
@@ -267,6 +284,7 @@ export function validateListingOrder(
   // Every consideration item must be native ETH, and they sum to the price.
   let total = BigInt(0);
   let feePaid = BigInt(0);
+  let royaltyPaid = BigInt(0);
   for (let i = 0; i < p.consideration.length; i++) {
     const item = p.consideration[i];
     if (toItemType(item.itemType) !== ITEM_NATIVE) {
@@ -281,10 +299,12 @@ export function validateListingOrder(
     const amount = fixedAmount(item, `consideration[${i}]`);
     total += amount;
     if (sameAddress(item.recipient, MARKET_FEE_RECIPIENT)) feePaid += amount;
+    if (royalty && sameAddress(item.recipient, royalty.recipient)) royaltyPaid += amount;
   }
   if (total <= BigInt(0)) fail("Listing price must be greater than zero.");
 
   assertFeeHonored(total, feePaid, collection);
+  assertRoyaltyHonored(total, royaltyPaid, royalty);
 
   return {
     // Lowercased: order ids and per-maker caps are keyed on this string, so
@@ -326,6 +346,7 @@ export function validateOfferOrder(
   if (collection.tokenStandard !== "ERC721") {
     fail("Only ERC-721 collections are tradable on Marketplank for now.");
   }
+  const royalty = collectionRoyalty(collection);
 
   if (p.offer.length !== 1) fail("Offers must offer exactly one payment item.");
   const offered = p.offer[0];
@@ -343,6 +364,7 @@ export function validateOfferOrder(
   let tokenId: string | undefined;
   let nftItemCount = 0;
   let feePaid = BigInt(0);
+  let royaltyPaid = BigInt(0);
 
   for (let i = 0; i < p.consideration.length; i++) {
     const item = p.consideration[i];
@@ -417,12 +439,17 @@ export function validateOfferOrder(
       }
       // The fulfiller (the seller accepting this bid) pays every consideration
       // item out of the offered funds. An ERC-20 item routed anywhere but the
-      // marketplace treasury is a clawback siphoning the headline amount back
-      // to an attacker-chosen address — REJECT it outright.
-      if (!sameAddress(item.recipient, MARKET_FEE_RECIPIENT)) {
+      // marketplace treasury or the configured creator royalty receiver is a
+      // clawback siphoning the headline amount back to an attacker-chosen
+      // address — REJECT it outright.
+      const amount = fixedAmount(item, `consideration[${i}]`);
+      const isTreasury = sameAddress(item.recipient, MARKET_FEE_RECIPIENT);
+      const isRoyalty = Boolean(royalty && sameAddress(item.recipient, royalty.recipient));
+      if (!isTreasury && !isRoyalty) {
         fail("Offer routes payment away from the seller.");
       }
-      feePaid += fixedAmount(item, `consideration[${i}]`);
+      if (isTreasury) feePaid += amount;
+      if (isRoyalty) royaltyPaid += amount;
       continue;
     }
 
@@ -438,11 +465,12 @@ export function validateOfferOrder(
   }
 
   assertFeeHonored(total, feePaid, collection);
+  assertRoyaltyHonored(total, royaltyPaid, royalty);
 
-  // The seller NETS the offered amount minus everything clawed back as
-  // consideration (post-checks above, that is only the treasury fee). This is
-  // the number to display — showing the gross would overstate the bid.
-  const net = total - feePaid;
+  // The seller NETS the offered amount minus every configured consideration
+  // clawback (marketplace fee plus creator royalty). This is the number to
+  // display — showing the gross would overstate the bid.
+  const net = total - feePaid - royaltyPaid;
   if (net <= BigInt(0)) fail("Offer nets the seller nothing.");
 
   return {
@@ -491,5 +519,32 @@ function assertFeeHonored(total: bigint, feePaid: bigint, collection: MarketColl
   // are paying the standard rate (and it would gut the seller's net on bids).
   if (feePaid > expected + tolerance) {
     fail("Order overpays the marketplace fee for this collection.");
+  }
+}
+
+/**
+ * A royalty-bearing collection must route its configured EIP-2981 amount to
+ * the configured receiver. This is checked against the signed consideration
+ * items, so a relayed order cannot merely claim that it pays the royalty.
+ */
+function assertRoyaltyHonored(
+  total: bigint,
+  royaltyPaid: bigint,
+  royalty: CollectionRoyalty | null
+): void {
+  if (!royalty) {
+    if (royaltyPaid > BigInt(0)) {
+      fail("Order pays a creator royalty this collection does not charge.");
+    }
+    return;
+  }
+  const expected = (total * BigInt(royalty.bps)) / BigInt(10_000);
+  if (expected === BigInt(0)) return;
+  const tolerance = expected / BigInt(100) + BigInt(1); // 1% + 1 wei
+  if (royaltyPaid + tolerance < expected) {
+    fail("Order does not pay the collection's creator royalty.");
+  }
+  if (royaltyPaid > expected + tolerance) {
+    fail("Order overpays the collection's creator royalty.");
   }
 }
