@@ -164,13 +164,28 @@ jobs:
           cp scripts/verify-relayer-log.mjs .next/standalone/ops/drand-relayer/verify-log.mjs
           tar -C .next/standalone -czf passenger-release.tgz .
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload release artifact
+        id: upload-release-artifact
+        # GitHub can reject artifact creation when the repository quota is
+        # exhausted even though every build gate passed. Keep the build
+        # green and let the exact-SHA cache fallback carry this release.
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
           name: passenger-${{ github.sha }}
           path: passenger-release.tgz
           if-no-files-found: error
           retention-days: 14
+
+      - name: Save release cache fallback
+        if: github.event_name != 'pull_request' && steps.upload-release-artifact.outcome == 'failure'
+        uses: actions/cache/save@v4
+        with:
+          path: passenger-release.tgz
+          # This is a release transport fallback, not a mutable build cache.
+          # The commit SHA prevents a deploy from restoring another release.
+          key: passenger-release-${{ github.sha }}
 
   deploy:
     needs: build
@@ -192,9 +207,23 @@ jobs:
       INMOTION_HEALTH_URL: ${{ vars.INMOTION_HEALTH_URL || 'https://plank.tanggang.life' }}
       RELEASE_SHA: ${{ github.sha }}
     steps:
-      - uses: actions/download-artifact@v8
+      - name: Download release artifact
+        id: download-release-artifact
+        continue-on-error: true
+        uses: actions/download-artifact@v8
         with:
           name: passenger-${{ github.sha }}
+
+      - name: Restore release cache fallback
+        if: steps.download-release-artifact.outcome == 'failure'
+        uses: actions/cache/restore@v4
+        with:
+          path: passenger-release.tgz
+          key: passenger-release-${{ github.sha }}
+
+      - name: Assert release is present
+        shell: bash
+        run: test -s passenger-release.tgz
 
       - name: Configure trusted SSH host
         shell: bash
