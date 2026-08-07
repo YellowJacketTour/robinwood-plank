@@ -53,16 +53,15 @@ contract IndexPoolFacet is IndexFacetBase {
 
     event IndexPoolQueued(address indexed pool, uint64 eta);
     event IndexPoolSet(address indexed pool);
-    event DeployedToIndexPool(
-        address indexed shareToken,
-        uint256 shareAmountReferenced,
-        uint256 paymentAmountDeployed,
-        uint256 coinMinted
-    );
     /// @notice Adversarial-review fix (2026-08-06). See `maxPoolShareBps()`'s
     /// header for the full derivation.
     event MaxPoolShareBpsQueued(uint256 value, uint64 eta);
     event MaxPoolShareBpsSet(uint256 value);
+    /// @notice 2026-08-06 automation pass: governance change to the
+    /// automatic-deploy dust floor (`PoolStorage.minAutoDeployWei`). See
+    /// `queueMinAutoDeployWei`'s header.
+    event MinAutoDeployWeiQueued(uint256 value, uint64 eta);
+    event MinAutoDeployWeiSet(uint256 value);
 
     /// @dev Hard, non-governable ceiling on `maxPoolShareBps` — 20%. Governance
     /// can tune the cap anywhere from 0 up to this, timelocked, but can never
@@ -254,89 +253,83 @@ contract IndexPoolFacet is IndexFacetBase {
         whenOpen
         returns (uint256 sharesMinted)
     {
-        if (shareAmount == 0) revert ZeroAmount();
-        address pool = PoolStorage.layout().pool;
-        if (pool == address(0)) revert BadParam();
-        address paymentToken = CoreStorage.layout().dividendAsset;
-        if (shareToken == paymentToken) revert BadParam();
-        _requirePoolQuiescent();
+        return _deployToIndexPoolCore(shareToken, shareAmount);
+    }
 
-        uint256 supplyBefore = _totalSupply();
-        uint256 ethValue;
-        {
-            Constituent storage c = _get(shareToken);
-            _requireNotExiting(shareToken, c);
-            // A depth ceiling, NOT a physical draw-down — see the file
-            // header for why `c.reserve[shareToken]` is never decremented.
-            if (shareAmount > c.reserve) revert InsufficientPoolFunding();
+    /**
+     * @notice Automatic-deployment entry point (2026-08-06 automation pass,
+     * design doc §7.10 follow-up: "growth compounds automatically whenever
+     * used, not only when a keeper happens to call `deployToIndexPool`").
+     *
+     * @dev NOT A PUBLIC ACTION, despite the `external` visibility — the
+     * `msg.sender == address(this)` check below means the ONLY possible
+     * caller is the diamond itself, reached exclusively through
+     * `IndexFacetBase._attemptAutoDeploy`'s low-level self-call from
+     * `IndexBootstrapFacet._sync`. See `_attemptAutoDeploy`'s header for the
+     * full reentrancy-safety derivation: this is what lets that non-blocking
+     * self-call be `try/catch`-style caught (via `.call`'s `bool ok`) while
+     * still being provably unreachable by any outside account or hostile
+     * callback. Runs the IDENTICAL `_deployToIndexPoolCore` the explicit
+     * `deployToIndexPool` above calls — there is exactly one implementation
+     * of the pricing/cap/pairing logic, shared by both entry points.
+     *
+     * Deliberately carries `whenOpen` (a plain state check, safe to repeat)
+     * but NOT `nonReentrant` — the shared reentrancy word is already
+     * `ENTERED` by whichever guarded call reached `_sync` in the first
+     * place, and re-checking it here would make every single automatic
+     * attempt revert.
+     */
+    function autoDeployToIndexPool(address shareToken, uint256 shareAmount)
+        external
+        whenOpen
+        returns (uint256 sharesMinted)
+    {
+        if (msg.sender != address(this)) revert BadParam();
+        return _deployToIndexPoolCore(shareToken, shareAmount);
+    }
 
-            // ── Pricing: byte-for-byte the `mintSingleAsset` formula. ──
-            (uint256 lo, , ) = _priceBand(shareToken);
-            if (lo == 0) revert StalePrice();
-            (, uint256 navHigh) = _nav();
-            if (navHigh == 0) revert NoPriceData();
+    // ── §7.10 automatic-deploy dust floor governance (2026-08-06) ────────
 
-            ethValue = Math.mulDiv(shareAmount, lo, WAD);
-            if (ethValue == 0) revert ZeroAmount();
+    function minAutoDeployWei() external view returns (uint256) {
+        return PoolStorage.layout().minAutoDeployWei;
+    }
 
-            sharesMinted = Math.mulDiv(ethValue, supplyBefore + VIRTUAL_SHARES, navHigh + VIRTUAL_ASSETS);
-            uint256 feeBps = _mintFeeBps(shareToken, _imbalanceFeeBps(shareAmount, c.reserve));
-            sharesMinted -= (sharesMinted * feeBps) / BPS;
-            if (sharesMinted == 0) revert ZeroAmount();
-        }
+    function queuedMinAutoDeployWei() external view returns (uint256 value, uint64 eta, bool pending) {
+        PoolStorage.QueuedUint256 storage q = PoolStorage.layout().queuedMinAutoDeployWei;
+        return (q.value, q.eta, q.pending);
+    }
 
-        // ── Adversarial-review fix: the governed dilution cap, checked
-        // BEFORE either reserve moves, against the supply/pool-share totals
-        // this call WOULD produce. See the header above for the full
-        // derivation of why this bounds rather than eliminates the finding.
-        {
-            PoolStorage.Layout storage ps = PoolStorage.layout();
-            uint256 newPoolShares = ps.poolSharesMinted + sharesMinted;
-            uint256 newSupply = supplyBefore + sharesMinted;
-            if (Math.mulDiv(newPoolShares, BPS, newSupply) > ps.maxPoolShareBps) {
-                revert PoolShareCapExceeded();
-            }
-            ps.poolSharesMinted = newPoolShares;
-        }
+    /**
+     * @notice Queue a new automatic-deploy dust floor — the minimum
+     * `_sync`-credited amount `IndexFacetBase._attemptAutoDeploy` will even
+     * attempt to deploy. `ROLE_RISK_PARAM_`, timelocked, same queue/execute
+     * shape as `queueMaxPoolShareBps` and every other risk-surface change in
+     * this facet set. No hard ceiling is needed here the way
+     * `MAX_POOL_SHARE_BPS_CEIL` bounds the dilution cap — an arbitrarily
+     * large floor only ever makes the automation MORE conservative (it
+     * degrades toward "never auto-deploy", never toward a larger unsafe
+     * action), so there is nothing for a ceiling to protect against.
+     */
+    function queueMinAutoDeployWei(uint256 value) external onlyRole(ROLE_RISK_PARAM_) {
+        uint64 eta = uint64(block.timestamp + CoreStorage.layout().timelockDelay);
+        PoolStorage.layout().queuedMinAutoDeployWei = PoolStorage.QueuedUint256({
+            value: value,
+            eta: eta,
+            pending: true
+        });
+        emit MinAutoDeployWeiQueued(value, eta);
+    }
 
-        uint256 paymentAmount;
-        {
-            // ── The payment-token slice actually drawn down. Sized so that
-            // removing it costs EXACTLY `ethValue` of `navBand` accounting —
-            // i.e. against the payment token's OWN band-low price, the
-            // identical convention `navBand` already applies to every other
-            // constituent (payment token included, when — as here — it is
-            // itself listed). Sizing it at flat 1:1 parity instead would
-            // silently under-draw (and therefore under-credit the pool)
-            // whenever the payment token's own band-low sits below true
-            // parity, which is its usual state under a nonzero `bandBps`.
-            (uint256 loPayment, , ) = _priceBand(paymentToken);
-            if (loPayment == 0) revert StalePrice();
-            paymentAmount = loPayment == WAD ? ethValue : Math.mulDiv(ethValue, WAD, loPayment, Math.Rounding.Up);
-            Constituent storage pc = _get(paymentToken);
-            if (paymentAmount > pc.reserve) revert InsufficientPoolFunding();
-            pc.reserve -= paymentAmount;
-        }
-
-        uint256[] memory weightsBefore = _allWeightsBps();
-
-        // ── Mint the freshly-created coin DIRECTLY TO THE POOL (never to an
-        // external depositor, never split with the platform-allocation
-        // treasury — every unit minted here is destined for the pool) and
-        // push the payment-token slice alongside it, then let the pool
-        // register the balance-delta as protocol-owned liquidity. No LP
-        // token is minted back — `IndexCoinPool.deploy` has no such path. ──
-        _mintShares(pool, sharesMinted);
-        IERC20(paymentToken).safeTransfer(pool, paymentAmount);
-        IIndexCoinPool(pool).deploy(paymentAmount, sharesMinted);
-
-        _requireCapNotWorsened(weightsBefore);
-
-        // Round 9f, ported per the same reasoning `mintSingleAsset` and
-        // `mintProRata` already apply: this path also grows `totalSupply`,
-        // so it also displaces stream backing proportionally.
-        _revestOnMint(sharesMinted, supplyBefore);
-
-        emit DeployedToIndexPool(shareToken, shareAmount, paymentAmount, sharesMinted);
+    /// @notice Apply a queued dust-floor change once its timelock has
+    /// elapsed. Permissionless, like every other `execute*` in this facet
+    /// set.
+    function executeMinAutoDeployWei() external {
+        PoolStorage.Layout storage ps = PoolStorage.layout();
+        PoolStorage.QueuedUint256 memory q = ps.queuedMinAutoDeployWei;
+        if (!q.pending) revert NothingQueued();
+        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        delete ps.queuedMinAutoDeployWei;
+        ps.minAutoDeployWei = q.value;
+        emit MinAutoDeployWeiSet(q.value);
     }
 }

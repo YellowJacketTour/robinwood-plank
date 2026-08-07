@@ -310,6 +310,49 @@ abstract contract IndexFacetBase {
     /// caller-supplied number, and never emitted from anywhere else.
     event ConstituentActivityRecorded(address indexed token, uint256 amount);
 
+    /// @notice §7.10: a real pool deployment landed, via EITHER entry point
+    /// (`IndexPoolFacet.deployToIndexPool` explicit, or
+    /// `IndexPoolFacet.autoDeployToIndexPool` opportunistic) — both share the
+    /// one `_deployToIndexPoolCore` implementation below, which is the sole
+    /// emitter of this event.
+    event DeployedToIndexPool(
+        address indexed shareToken,
+        uint256 shareAmountReferenced,
+        uint256 paymentAmountDeployed,
+        uint256 coinMinted
+    );
+
+    // ── §7.10 automatic pool deployment (2026-08-06 automation pass) ──────
+    //
+    // `IndexPoolFacet.deployToIndexPool`'s pricing/cap/pairing logic is real
+    // but permissionless, so it only ever runs when someone explicitly calls
+    // it. `_attemptAutoDeploy` below makes it also run OPPORTUNISTICALLY as a
+    // byproduct of `IndexBootstrapFacet._sync` crediting a fresh share-token
+    // surplus — same non-blocking, catch-and-emit doctrine already proven by
+    // `HookRegistryFacet._fireHook` (`HookFailed`) and
+    // `IndexFacetBase._routeDevFundBuy` (`DevFundBuyFailed`). The underlying
+    // `DeployedToIndexPool` event (`IndexPoolFacet.sol`) still fires on a
+    // successful deploy regardless of which path reached it, because both
+    // paths run the identical `_deployToIndexPoolCore` — these two events
+    // exist ONLY so the trigger source (explicit call vs. opportunistic
+    // auto-deploy) is separately observable off-chain, mirroring
+    // `DevFundBuyExecuted`/`DevFundBuyFailed` distinguishing a genuine buy
+    // from a caught router failure.
+
+    /// @notice A `_sync`-credited surplus was also, opportunistically and
+    /// successfully, deployed into the index-coin pool in the SAME
+    /// transaction, with no separate call. `sharesMinted` is the real return
+    /// value of the shared core logic — identical to what
+    /// `DeployedToIndexPool` (`IndexPoolFacet.sol`) reports for the same call.
+    event AutoDeployedToIndexPool(address indexed shareToken, uint256 shareAmountAttempted, uint256 sharesMinted);
+    /// @notice The opportunistic auto-deploy attempt reverted (stale price,
+    /// dilution cap exceeded, insufficient payment reserve, pool not
+    /// quiescent, pool not yet configured, or any other real failure mode
+    /// `deployToIndexPool` itself already handles) and was CAUGHT rather than
+    /// propagated — the triggering `_sync` call still succeeds and credits
+    /// reserve exactly as if this attempt had never been made.
+    event AutoDeployToIndexPoolFailed(address indexed shareToken, uint256 shareAmountAttempted);
+
     // ── §7.11 dev-fund PLANK market-buy (design doc §7.11) ────────────────
     //
     // DELIBERATELY NOT DESCRIBED as "no admin path" or "no one can touch it"
@@ -1003,6 +1046,155 @@ abstract contract IndexFacetBase {
         } catch {
             IERC20(token).forceApprove(router, 0);
             emit DevFundBuyFailed(token, skim);
+        }
+    }
+
+    // ══ §7.10 pool deployment — the ONE shared core, two entry points ══════
+    //
+    // `IndexPoolFacet.deployToIndexPool` (explicit, external, `nonReentrant`)
+    // and `IndexPoolFacet.autoDeployToIndexPool` (self-only, reached ONLY via
+    // `_attemptAutoDeploy` below) both call `_deployToIndexPoolCore` and
+    // NOTHING else, so the pricing/cap/pairing logic is implemented exactly
+    // once, exactly like `_sync`'s two entry points already share one
+    // implementation. This function's body is otherwise BYTE-FOR-BYTE what
+    // `deployToIndexPool` used to contain directly — see
+    // `IndexPoolFacet.deployToIndexPool`'s header for the full derivation of
+    // every check and rounding direction below; nothing about the pricing,
+    // the dilution cap, or the exact-wash payment-token draw-down changed in
+    // this refactor.
+
+    /// @dev Deliberately carries NEITHER `nonReentrant` NOR `whenOpen` here —
+    /// both entry points that call this apply their own guards BEFORE
+    /// reaching it (`deployToIndexPool`'s own modifiers; `autoDeployToIndexPool`'s
+    /// `whenOpen` plus the shared reentrancy word already being `ENTERED` by
+    /// whichever guarded call reached `_sync` in the first place). Putting
+    /// `nonReentrant` on this internal function would be actively wrong: the
+    /// automatic path is BY DESIGN a controlled re-entry into pool-deployment
+    /// logic while the outer guard is still engaged, and a second
+    /// `nonReentrant` check here would deadlock that path against itself on
+    /// every single call.
+    function _deployToIndexPoolCore(address shareToken, uint256 shareAmount) internal returns (uint256 sharesMinted) {
+        if (shareAmount == 0) revert ZeroAmount();
+        address pool = PoolStorage.layout().pool;
+        if (pool == address(0)) revert BadParam();
+        address paymentToken = CoreStorage.layout().dividendAsset;
+        if (shareToken == paymentToken) revert BadParam();
+        _requirePoolQuiescent();
+
+        uint256 supplyBefore = _totalSupply();
+        uint256 ethValue;
+        {
+            Constituent storage c = _get(shareToken);
+            _requireNotExiting(shareToken, c);
+            // A depth ceiling, NOT a physical draw-down — see
+            // `IndexPoolFacet.sol`'s header for why `c.reserve[shareToken]`
+            // is never decremented.
+            if (shareAmount > c.reserve) revert InsufficientPoolFunding();
+
+            // ── Pricing: byte-for-byte the `mintSingleAsset` formula. ──
+            (uint256 lo, , ) = _priceBand(shareToken);
+            if (lo == 0) revert StalePrice();
+            (, uint256 navHigh) = _nav();
+            if (navHigh == 0) revert NoPriceData();
+
+            ethValue = Math.mulDiv(shareAmount, lo, WAD);
+            if (ethValue == 0) revert ZeroAmount();
+
+            sharesMinted = Math.mulDiv(ethValue, supplyBefore + VIRTUAL_SHARES, navHigh + VIRTUAL_ASSETS);
+            uint256 feeBps = _mintFeeBps(shareToken, _imbalanceFeeBps(shareAmount, c.reserve));
+            sharesMinted -= (sharesMinted * feeBps) / BPS;
+            if (sharesMinted == 0) revert ZeroAmount();
+        }
+
+        // ── The governed dilution cap, checked BEFORE either reserve moves,
+        // against the supply/pool-share totals this call WOULD produce. See
+        // `IndexPoolFacet.deployToIndexPool`'s header for the full derivation
+        // of why this bounds rather than eliminates the dilution finding.
+        {
+            PoolStorage.Layout storage ps = PoolStorage.layout();
+            uint256 newPoolShares = ps.poolSharesMinted + sharesMinted;
+            uint256 newSupply = supplyBefore + sharesMinted;
+            if (Math.mulDiv(newPoolShares, BPS, newSupply) > ps.maxPoolShareBps) {
+                revert PoolShareCapExceeded();
+            }
+            ps.poolSharesMinted = newPoolShares;
+        }
+
+        uint256 paymentAmount;
+        {
+            // ── The payment-token slice actually drawn down, sized so that
+            // removing it costs EXACTLY `ethValue` of `navBand` accounting —
+            // see `IndexPoolFacet.deployToIndexPool`'s header for the full
+            // band-reconciliation derivation.
+            (uint256 loPayment, , ) = _priceBand(paymentToken);
+            if (loPayment == 0) revert StalePrice();
+            paymentAmount = loPayment == WAD ? ethValue : Math.mulDiv(ethValue, WAD, loPayment, Math.Rounding.Up);
+            Constituent storage pc = _get(paymentToken);
+            if (paymentAmount > pc.reserve) revert InsufficientPoolFunding();
+            pc.reserve -= paymentAmount;
+        }
+
+        uint256[] memory weightsBefore = _allWeightsBps();
+
+        // ── Mint the freshly-created coin DIRECTLY TO THE POOL and push the
+        // payment-token slice alongside it, then let the pool register the
+        // balance-delta as protocol-owned liquidity. No LP token minted
+        // back — `IndexCoinPool.deploy` has no such path. ──
+        _mintShares(pool, sharesMinted);
+        IERC20(paymentToken).safeTransfer(pool, paymentAmount);
+        IIndexCoinPool(pool).deploy(paymentAmount, sharesMinted);
+
+        _requireCapNotWorsened(weightsBefore);
+
+        // Round 9f, ported per the same reasoning `mintSingleAsset` and
+        // `mintProRata` already apply: this path also grows `totalSupply`,
+        // so it also displaces stream backing proportionally.
+        _revestOnMint(sharesMinted, supplyBefore);
+
+        emit DeployedToIndexPool(shareToken, shareAmount, paymentAmount, sharesMinted);
+    }
+
+    /**
+     * @dev Called from exactly one place — `IndexBootstrapFacet._sync`,
+     * immediately after a fresh share-type (non-payment-token) surplus is
+     * credited. Non-blocking BY CONSTRUCTION, not by convention: the only way
+     * to `try/catch` a revert from `_deployToIndexPoolCore` without an actual
+     * `CALL`-boundary is to route through one, exactly the way `_fireHook`
+     * routes through a low-level `.call` to catch a hostile hook's revert —
+     * so this issues a low-level self-call back into the diamond's own
+     * `IndexPoolFacet.autoDeployToIndexPool` selector (dispatched by the
+     * diamond's fallback exactly like any other external call would be) and
+     * reads `ok` rather than ever letting a revert propagate.
+     *
+     * THIS SELF-CALL IS SAFE AGAINST REENTRANCY, NOT MERELY CONVENIENT FOR
+     * try/catch: `autoDeployToIndexPool` requires `msg.sender == address(this)`,
+     * so (a) no outside account can invoke it directly, and (b) a hostile
+     * token/pool callback that tries to reenter it during the `safeTransfer`/
+     * `deploy` calls inside `_deployToIndexPoolCore` arrives with ITS OWN
+     * address as `msg.sender`, not the diamond's, and is rejected the same
+     * way. The shared reentrancy word is already `ENTERED` for the whole
+     * duration (set by whichever guarded call reached `_sync`), so
+     * `autoDeployToIndexPool` deliberately carries no `nonReentrant` of its
+     * own — see that function's header.
+     *
+     * GAS: skipped entirely, before the self-call is even made, whenever
+     * `shareAmount` is below the governed `PoolStorage.minAutoDeployWei`
+     * floor (default zero — every sync is attempted until governance raises
+     * it) OR no pool is configured yet — both are one cheap `SLOAD` each,
+     * avoiding the far larger cost of a full pricing/cap computation that
+     * would only revert anyway.
+     */
+    function _attemptAutoDeploy(address shareToken, uint256 shareAmount) internal {
+        PoolStorage.Layout storage ps = PoolStorage.layout();
+        if (ps.pool == address(0)) return;
+        if (shareAmount < ps.minAutoDeployWei) return;
+        (bool ok, bytes memory data) = address(this).call(
+            abi.encodeWithSignature("autoDeployToIndexPool(address,uint256)", shareToken, shareAmount)
+        );
+        if (ok && data.length >= 32) {
+            emit AutoDeployedToIndexPool(shareToken, shareAmount, abi.decode(data, (uint256)));
+        } else {
+            emit AutoDeployToIndexPoolFailed(shareToken, shareAmount);
         }
     }
 

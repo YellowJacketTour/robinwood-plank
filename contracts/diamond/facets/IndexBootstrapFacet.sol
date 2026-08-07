@@ -175,6 +175,19 @@ contract IndexBootstrapFacet is IndexFacetBase {
         _creditRoutedValue(token, c, credited);
         emit ConstituentSynced(token, credited);
         _fireHook(HOOK_AFTER_SYNC_, abi.encode(token, credited));
+        // 2026-08-06 automation pass (design doc §7.10 follow-up):
+        // opportunistically try to deploy this exact freshly-credited
+        // share-token surplus into the index-coin pool, as a byproduct of
+        // this reconcile — never for the payment/dividend token itself,
+        // which is the pool's OTHER leg, not a share-type constituent
+        // `deployToIndexPool`/`autoDeployToIndexPool` ever accept (both
+        // revert `BadParam` on `shareToken == paymentToken`, so this guard
+        // is an optimization, not a correctness requirement — it just skips
+        // an self-call that would always fail for that token). Non-blocking
+        // by construction — see `IndexFacetBase._attemptAutoDeploy`'s header.
+        if (token != cs.dividendAsset) {
+            _attemptAutoDeploy(token, credited);
+        }
     }
 
     /// @notice Drop a deactivated, fully-redeemed constituent. Permissionless

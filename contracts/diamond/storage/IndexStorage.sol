@@ -578,7 +578,21 @@ library PoolStorage {
         /// queue/execute shape as `queuedPool` above and every other
         /// risk-surface change in this facet set.
         QueuedUint256 queuedMaxPoolShareBps;
-        uint256[13] __gap;
+        /// @notice Automatic-deploy gas-dust floor (2026-08-06 automation
+        /// pass): `IndexFacetBase._attemptAutoDeploy` skips the opportunistic
+        /// self-call into `IndexPoolFacet.autoDeployToIndexPool` entirely
+        /// whenever the freshly-`_sync`-credited amount is below this many
+        /// wei of the constituent token, so a stream of dust-sized syncs never
+        /// pays for a self-call + full pricing/cap computation that the
+        /// pool's own economics would reject anyway. Zero by default — the
+        /// same "opt-in, not a silent behavior change" doctrine every other
+        /// namespace here uses — so until governance raises it, every
+        /// sufficiently-large sync is still attempted.
+        uint256 minAutoDeployWei;
+        /// @notice Timelocked change to `minAutoDeployWei`, same
+        /// queue/execute shape as `queuedMaxPoolShareBps` above.
+        QueuedUint256 queuedMinAutoDeployWei;
+        uint256[10] __gap;
     }
 
     /// @dev Shaped identically to `GovernanceStorage.QueuedParam`, declared
