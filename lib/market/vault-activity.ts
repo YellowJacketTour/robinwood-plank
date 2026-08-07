@@ -104,6 +104,12 @@ function normalizeTopics(raw: unknown): string[] {
     });
 }
 
+/**
+ * Exported as `decodeVaultLog` (see the alias below) so the permanent event
+ * indexer decodes vault logs with THIS function rather than a second copy of
+ * the same ABI work — a divergence here is the exact failure that made the
+ * current pool's renamed liquidity events silently vanish from the feed.
+ */
 function decodeLog(
   log: {
     topics: string[];
@@ -229,6 +235,8 @@ function decodeLog(
   }
   return null;
 }
+
+export { decodeLog as decodeVaultLog };
 
 function sortNewest(events: VaultTradeEvent[]): VaultTradeEvent[] {
   return events.sort(

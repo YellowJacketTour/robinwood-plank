@@ -476,11 +476,10 @@ Managed entry:
 The key is a dedicated gas-only wallet. It has no custody or contract-admin
 authority. Owners must retain an offline backup.
 
-`RELAY_VAULT_ADDRESSES` is the single source of truth for the managed cron's
-`VAULT_ADDRESSES` setting. It must contain every configured production vault,
-currently V3, V2, and V1, in comma-separated form. The provisioning operation
-fails closed if the variable is missing, so a new vault cannot silently be
-left out of the relayer.
+`RELAY_VAULT_ADDRESSES` is the single source of truth for both relayers and
+must contain every configured production vault, currently V3, V2, and V1, in
+comma-separated form. Provisioning and scheduled relay fail closed if the
+variable is missing, so a vault cannot silently be left out.
 
 The GitHub scheduled workflow may overlap temporarily because submission and
 settlement are permissionless and designed to be safe on repeated runs.
@@ -494,7 +493,7 @@ confirmation=DISABLE_GITHUB_RELAY
 The verifier requires:
 
 - at least 90% of expected one-minute successful runs;
-- both V1 and V2 in every structured status;
+- every configured vault in every structured status;
 - no actionable or error state left behind;
 - no fatal run in the 24-hour window; and
 - a recent latest status.
@@ -527,11 +526,17 @@ the app could see (§11). Those scripts are deleted; this cron replaces them.
 Without it the sale surfaces drift stale and cold rebuilds land on user
 requests.
 
-Incremental, every 15 minutes — sales catalog and vault activity:
+Incremental, every 2 minutes — sales catalog and vault activity:
 
 ```cron
-*/15 * * * * /usr/bin/flock -n /home/CPANEL_USER/plank.tanggang.life/shared/market-refresh.lock /ABSOLUTE/NODE/BIN --env-file=/home/CPANEL_USER/plank.tanggang.life/shared/.env.production /home/CPANEL_USER/plank.tanggang.life/current/scripts/refresh-market-data.mjs >> /home/CPANEL_USER/plank.tanggang.life/logs/market-refresh.log 2>&1
+*/2 * * * * /usr/bin/flock -n /home/CPANEL_USER/plank.tanggang.life/shared/market-refresh.lock /ABSOLUTE/NODE/BIN --env-file=/home/CPANEL_USER/plank.tanggang.life/shared/.env.production /home/CPANEL_USER/plank.tanggang.life/current/scripts/refresh-market-data.mjs >> /home/CPANEL_USER/plank.tanggang.life/logs/market-refresh.log 2>&1
 ```
+
+`flock -n` is non-blocking: if a run is still in flight when the next tick
+fires, the new attempt exits immediately instead of queuing, so a shorter
+interval can never pile up overlapping runs — it just self-limits back down
+to "as often as a pass actually takes" on any tick where the previous one
+ran long.
 
 Full rebuild, once daily off-peak — adds rarity, traits and the collection index:
 

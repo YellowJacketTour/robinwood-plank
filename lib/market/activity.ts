@@ -1,6 +1,11 @@
 import { Interface, formatEther, getAddress } from "ethers";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
-import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS, SEAPORT_ADDRESS } from "@/lib/constants";
+import {
+  MARKET_OFFER_CURRENCY,
+  MARKET_VAULT_ADDRESS,
+  MARKET_VAULT_ADDRESSES,
+  SEAPORT_ADDRESS,
+} from "@/lib/constants";
 import { resolveTokenImage } from "@/lib/market/token-image";
 import { wasOrderServedByUs } from "@/lib/market/served-orders";
 import { ethBlockNumberDisplay, ethGetLogsDisplay, rpcCall } from "@/lib/market/fetch-rpc";
@@ -15,6 +20,8 @@ import {
   durableKv as kv,
   hasDurableKv,
 } from "@/lib/market/durable-kv";
+import { readSalesCatalog } from "@/lib/market/sales-catalog";
+import { VAULT_TOPIC_SET } from "@/lib/market/vault-activity";
 
 // Canonical Seaport 1.6 OrderFulfilled event, copied from
 // @opensea/seaport-js's own compiled artifact (src/artifacts/seaport/...),
@@ -40,7 +47,12 @@ const ORDER_FULFILLED_IFACE = new Interface([
  * transaction instead.
  */
 
-const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+/** ERC-721 Transfer(address,address,uint256). Exported so the permanent event
+ *  indexer (lib/market/chain-indexer.ts) queries the exact same topic this
+ *  module's own decoder expects, rather than keeping a second copy that could
+ *  drift. */
+export const TRANSFER_TOPIC =
+  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const ZERO = "0x0000000000000000000000000000000000000000";
 
 /** The node rejects wide ranges, so walk backwards in bounded windows.
@@ -120,10 +132,72 @@ export function classifyTransfer(input: {
   nftContractAddress: string;
   /** Null when no vault is deployed for this collection yet. */
   vaultAddress?: string | null;
+  /**
+   * EVERY vault, not just the primary one. Vaults are an N-vault registry
+   * (see AGENTS.md), and passing only the primary was a real, observed bug:
+   * a deposit into or redeem from a LEGACY pool has a `txTo` that matches no
+   * known vault, so it fell through to the generic "any other contract
+   * executed it, therefore a sale" branch and was recorded as an unpriced
+   * sale. Confirmed against the live chain while backfilling the permanent
+   * ledger — 130 of 375 "sales" were actually legacy-vault mechanics.
+   */
+  vaultAddresses?: readonly string[];
+  /**
+   * What the transaction's OWN receipt proves about payment, when it could be
+   * read. Omit it and this function keeps its original behaviour exactly
+   * ("executed by some contract, therefore a sale") — which is what a caller
+   * that could not read the receipt must do, since silently downgrading a real
+   * sale to a transfer on an RPC failure would be a worse lie than the one this
+   * exists to fix.
+   *
+   * Verified against the real chain on 2026-08-04 by pulling the receipts of
+   * every unpriced "sale" in the ledger. 121 of 131 had NO payment leg at all:
+   *   - 83 via Seaport's TransferHelper (`bulkTransfer`, tx.value 0, receipt
+   *     contains nothing but ERC-721 Transfer logs) — a bulk *transfer* tool,
+   *     not a marketplace;
+   *   - 26 via 0xd5c0…5c97 (`0xb58adcb2` =
+   *     safeBatchTransferToSingleWallet, tx.value 0, no payment log);
+   *   - 9 via 0x5ff1…2789, which is the ERC-4337 EntryPoint (`0x1fad948c` =
+   *     handleOps; its receipts carry UserOperationEvent/Deposited and the NFT
+   *     Transfer, no payment) — an account-abstraction bundler, not a venue.
+   * The remaining 10 were genuine fills, 3 of them routed through
+   * RelayApprovalProxyV3 (`permit2TransferAndMulticall`) whose receipt DOES
+   * carry a real Seaport OrderFulfilled — which is why "was there a Seaport
+   * fill in this receipt" is the evidence that matters, not the address the
+   * transaction happened to be sent to.
+   *
+   *   "seaport-fill"  — the receipt contains a Seaport OrderFulfilled that
+   *                     settled THIS token. A sale, whoever routed it.
+   *   "native-value"  — no Seaport fill, but the transaction carried ETH. A
+   *                     sale through some venue we cannot name.
+   *   "none"          — receipt read, no fill and no value moved. NOT a sale.
+   */
+  saleEvidence?: "seaport-fill" | "native-value" | "none";
+  /**
+   * The vault contract that emitted a vault event (Bought/Sold/Deposited/
+   * Redeemed/LP) in THIS transaction's own receipt, when one did.
+   *
+   * Evidence, not configuration — and that is the entire point. The
+   * `vaultAddresses` list above comes from NEXT_PUBLIC_MARKET_VAULT_* env, which
+   * is maintained by hand in the InMotion server's shared/.env.production and
+   * has drifted from reality before: the V3 pool
+   * (0xacE28f72Fc3e15eA1671e689806694A9b0cE047D) fell out of the indexer's copy
+   * of that list around block 28.0M, and from there every deposit and redeem on
+   * the live pool was written to the append-only ledger as a "sale" — a
+   * depositMany priced at the 0.0001 ETH deposit FEE, a redeemTargetMany priced
+   * at nothing. A vault's own event log cannot go stale that way, so when the
+   * receipt proves a vault executed the transfer, that wins regardless of what
+   * any env list happens to say today.
+   */
+  vaultEventContract?: string | null;
 }): { kind: ActivityKind; venue: ActivityEvent["venue"] } {
   const nftContract = input.nftContractAddress.toLowerCase();
   const seaport = input.seaportAddress.toLowerCase();
-  const vault = input.vaultAddress?.toLowerCase() ?? null;
+  const vaults = new Set(
+    [input.vaultAddress, ...(input.vaultAddresses ?? [])]
+      .filter((v): v is string => Boolean(v))
+      .map((v) => v.toLowerCase())
+  );
   const txTo = input.txTo?.toLowerCase() ?? null;
 
   // A plain wallet-to-wallet transfer calls the NFT contract directly — `to`
@@ -145,21 +219,42 @@ export function classifyTransfer(input: {
   // exactly the reported bug (VaultTradeHistory already shows these with
   // their real numbers; this feed just needs to stop double-counting them
   // as broken sales).
-  if (vault != null && txTo === vault) {
+  if (txTo != null && vaults.has(txTo)) {
     return { kind: "transfer", venue: { kind: "vault", contract: input.txTo! } };
+  }
+  // Same conclusion, reached from the receipt instead of the env list — see
+  // vaultEventContract above. Deliberately ahead of every sale branch: a
+  // transfer a vault itself emitted a Deposited/Redeemed/Bought/Sold for is a
+  // pool mechanic no matter which address the transaction was sent to.
+  if (input.vaultEventContract) {
+    return { kind: "transfer", venue: { kind: "vault", contract: input.vaultEventContract } };
+  }
+  // Seaport itself executed the call: a fill, unconditionally. Deliberately
+  // ahead of the evidence checks below — a receipt that failed to read must
+  // never be able to demote a transaction Seaport plainly executed.
+  if (txTo === seaport) {
+    return { kind: "sale", venue: { kind: "seaport", contract: input.txTo! } };
+  }
+  // Some OTHER contract executed it. Now the receipt decides, when we have it.
+  if (input.saleEvidence === "none") {
+    // A batch-transfer tool, an AA bundler, an airdrop script — moved a token,
+    // moved no money. Recording it as a "sale" with no price was the bug.
+    return { kind: "transfer", venue: null };
+  }
+  if (input.saleEvidence === "seaport-fill") {
+    // Routed by a relayer/aggregator, settled by Seaport. The VENUE is Seaport,
+    // not the router — that is where the order actually cleared.
+    return { kind: "sale", venue: { kind: "seaport", contract: input.seaportAddress } };
   }
   // NOTE: "seaport" here is provisional, never "marketplank" — attribution
   // to us requires a positive orderHash match, applied as a later async
   // upgrade step in fetchActivity (see upgradeMarketplankAttribution). This
   // function stays pure and synchronous on purpose so it's fully testable
   // without an RPC.
-  return {
-    kind: "sale",
-    venue:
-      txTo === seaport
-        ? { kind: "seaport", contract: input.txTo! }
-        : { kind: "other", contract: input.txTo! },
-  };
+  // Either the transaction carried ETH ("native-value"), or no receipt was
+  // available at all — in which case this keeps the original, unchanged
+  // behaviour rather than guessing in the other direction.
+  return { kind: "sale", venue: { kind: "other", contract: input.txTo! } };
 }
 
 type RawLog = {
@@ -186,6 +281,119 @@ const priceCache = new Map<string, bigint>();
 // matching order (nothing added to attributionCache) doesn't get its
 // receipt re-fetched on every subsequent request.
 const attributionResolvedTxs = new Set<string>();
+// "txHash:tokenId" for every token a Seaport OrderFulfilled in that
+// transaction actually settled — the sale evidence classifyTransfer consumes.
+const seaportFillKeys = new Set<string>();
+// txHash -> the vault contract that emitted a vault event in that transaction.
+// Permanent for the same reason as the caches above: a receipt never changes.
+const vaultEventTxs = new Map<string, string>();
+
+/**
+ * Readers for the two caches above, so the permanent event indexer
+ * (lib/market/chain-indexer.ts) reuses this module's already-written Seaport
+ * OrderFulfilled decoding instead of re-implementing the ABI work. Call
+ * resolveMarketplankAttribution(txHash) first — these are plain lookups.
+ */
+export function readCachedSalePriceWei(txHash: string, tokenId: string): bigint | null {
+  return priceCache.get(`${txHash}:${tokenId}`) ?? null;
+}
+
+/** True only on a POSITIVE orderHash match against an order this relay served. */
+export function isMarketplankAttributed(txHash: string, tokenId: string): boolean {
+  return attributionCache.get(`${txHash}:${tokenId}`) === true;
+}
+
+/**
+ * True when this transaction's receipt was successfully READ (regardless of
+ * what was in it). Callers use it to distinguish "the receipt proves there was
+ * no payment" from "the receipt could not be fetched" — the difference between
+ * reclassifying a fake sale and inventing a fake transfer.
+ */
+export function hasResolvedReceipt(txHash: string): boolean {
+  return attributionResolvedTxs.has(txHash);
+}
+
+/**
+ * True when a Seaport OrderFulfilled in this transaction actually settled this
+ * token — the positive, forgery-proof evidence that a transfer was a sale, no
+ * matter which router the transaction was sent to.
+ */
+export function hasSeaportFillFor(txHash: string, tokenId: string): boolean {
+  return seaportFillKeys.has(`${txHash}:${tokenId}`);
+}
+
+/**
+ * The vault contract that emitted a vault event in this transaction, if the
+ * receipt was read and one did. Feeds classifyTransfer's vaultEventContract.
+ */
+export function vaultEventContractFor(txHash: string): string | null {
+  return vaultEventTxs.get(txHash) ?? null;
+}
+
+/** An OrderFulfilled item, in the only shape this module needs. */
+type SettlementItem = {
+  itemType: number | bigint;
+  token: string;
+  identifier: bigint | string;
+  amount: bigint | string;
+};
+
+/**
+ * What one OrderFulfilled event settled: which of OUR tokens it moved, and how
+ * much the buyer paid for them.
+ *
+ * Pure, and exported, because the shape of a Seaport order is exactly the part
+ * that a test can pin down and a live decode cannot. Two real order shapes
+ * occur on this chain and only one of them was handled before:
+ *
+ *   LISTING SIDE  offer = [NFT], consideration = [payment legs]
+ *     Someone bought a listing. Price = the consideration legs.
+ *
+ *   BID SIDE      offer = [WETH], consideration = [NFT, fee legs]
+ *     Someone ACCEPTED an offer. The NFT is in the consideration and the money
+ *     is in the offer — the exact inversion the old decoder had no branch for,
+ *     which is why `fulfillAvailableAdvancedOrders` collection-bid fills
+ *     (verified live: tx 0x56ea0b8f…, token 968, 0.005 WETH) landed in the
+ *     ledger as sales with a null price.
+ *
+ * Payment counts NATIVE legs (itemType 0) as well as the WETH-equivalent
+ * currency: RelayApprovalProxyV3 fill 0xbd7f18fe… paid 0.00999999 ETH natively
+ * through a consideration leg, with tx.value 0, so a native-only-via-tx.value
+ * rule could never have seen it. A leg denominated in any OTHER ERC-20 is
+ * deliberately NOT counted — two of these fills settled in USDG (6 decimals),
+ * and adding 20000000 USDG units to a wei total would render as an absurd ETH
+ * price. Those stay honestly unpriced rather than confidently wrong.
+ */
+export function orderFulfilledSettlement(
+  order: { offer: readonly SettlementItem[]; consideration: readonly SettlementItem[] },
+  opts: { nftContract: string; currency: string }
+): { tokenIds: string[]; paidWei: bigint } {
+  const nft = opts.nftContract.toLowerCase();
+  const currency = (opts.currency || "").toLowerCase();
+
+  const ours = (item: SettlementItem) => String(item.token).toLowerCase() === nft;
+  const payment = (items: readonly SettlementItem[]) => {
+    let total = BigInt(0);
+    for (const item of items) {
+      const type = Number(item.itemType);
+      const token = String(item.token).toLowerCase();
+      // 0 = NATIVE, 1 = ERC20. 2/3 are the NFT itself; 4/5 are criteria items.
+      if (type !== 0 && type !== 1) continue;
+      if (type === 1 && (!currency || token !== currency)) continue;
+      total += BigInt(item.amount);
+    }
+    return total;
+  };
+
+  const offered = order.offer.filter(ours);
+  const considered = order.consideration.filter(ours);
+  // The money is always on the side the NFT is NOT on.
+  const source = offered.length > 0 ? order.consideration : considered.length > 0 ? order.offer : [];
+  const tokenIds = (offered.length > 0 ? offered : considered).map((item) =>
+    BigInt(item.identifier).toString()
+  );
+  return { tokenIds, paidWei: tokenIds.length === 0 ? BigInt(0) : payment(source) };
+}
 
 /**
  * Decode every OrderFulfilled log in a transaction: check each one's
@@ -197,7 +405,7 @@ const attributionResolvedTxs = new Set<string>();
  * Fails closed in the sense that matters: any failure here just leaves the
  * event unattributed/unpriced rather than guessing.
  */
-async function resolveMarketplankAttribution(txHash: string): Promise<void> {
+export async function resolveMarketplankAttribution(txHash: string): Promise<void> {
   if (attributionResolvedTxs.has(txHash)) return;
   try {
     const receipt = await rpcCall<{
@@ -207,6 +415,12 @@ async function resolveMarketplankAttribution(txHash: string): Promise<void> {
     attributionResolvedTxs.add(txHash);
 
     for (const log of receipt.logs || []) {
+      // A vault mechanic proves itself from its own event log, whatever the
+      // env vault list currently says. Recorded before the Seaport filter
+      // because it is about a different contract entirely.
+      if (log.topics[0] && VAULT_TOPIC_SET.has(log.topics[0].toLowerCase())) {
+        vaultEventTxs.set(txHash, log.address.toLowerCase());
+      }
       if (log.address.toLowerCase() !== SEAPORT_ADDRESS.toLowerCase()) continue;
       if (log.topics[0] !== ORDER_FULFILLED_IFACE.getEvent("OrderFulfilled")!.topicHash) continue;
 
@@ -219,24 +433,33 @@ async function resolveMarketplankAttribution(txHash: string): Promise<void> {
       if (!parsed) continue;
 
       const orderHash: string = parsed.args.orderHash;
+
+      // Handles BOTH order shapes — a bought listing and an accepted bid — and
+      // native as well as WETH payment. See orderFulfilledSettlement.
+      const { tokenIds, paidWei } = orderFulfilledSettlement(
+        {
+          offer: parsed.args.offer as unknown as SettlementItem[],
+          consideration: parsed.args.consideration as unknown as SettlementItem[],
+        },
+        { nftContract: NFT_CONTRACT_ADDRESS, currency: MARKET_OFFER_CURRENCY }
+      );
+      if (tokenIds.length === 0) continue;
+
       const isOurs = await wasOrderServedByUs(orderHash);
 
-      // Total the buyer paid in WETH — every consideration leg that's the
-      // WETH token, summed (proceeds + marketplace fee + royalty, if any).
-      let weiPaid = BigInt(0);
-      for (const item of parsed.args.consideration) {
-        if (String(item.token).toLowerCase() !== MARKET_OFFER_CURRENCY.toLowerCase()) continue;
-        weiPaid += item.amount as bigint;
-      }
-
-      // Attribute (and, if priced, price) every token this specific order
-      // actually moved — an order's offer items name the NFT(s) it settled.
-      for (const item of parsed.args.offer) {
-        if (String(item.token).toLowerCase() !== NFT_CONTRACT_ADDRESS.toLowerCase()) continue;
-        const tokenId = (item.identifier as bigint).toString();
+      for (const tokenId of tokenIds) {
         const key = `${txHash}:${tokenId}`;
+        // Positive proof this transfer was a settled sale, independent of both
+        // price and attribution.
+        seaportFillKeys.add(key);
         if (isOurs) attributionCache.set(key, true);
-        if (weiPaid > BigInt(0)) priceCache.set(key, weiPaid);
+        // A matched pair (matchAdvancedOrders) emits TWO OrderFulfilled logs
+        // for the same token: the listing side nets the seller's proceeds, the
+        // bid side carries the full amount the buyer paid. Keep the larger —
+        // "sale price" means what the buyer paid, fees included, which is the
+        // convention every Seaport frontend displays.
+        const known = priceCache.get(key) ?? BigInt(0);
+        if (paidWei > known) priceCache.set(key, paidWei);
       }
     }
   } catch {
@@ -460,8 +683,44 @@ async function buildMarketplacePriceMap(opts?: {
   return out;
 }
 
+/**
+ * Real priced sales, from the royalty-verified catalog (lib/market/
+ * sales-catalog.ts, KV key "...-v2") that /api/market/sales-stats and the
+ * Activity tab's own aggregate sidebar already rely on and keep current.
+ *
+ * This function used to read its own separate, never-migrated "...-v1" key
+ * instead — nothing has written a usable value there in a long time, so
+ * every individual Activity row's price silently came back "Unavailable"
+ * while the aggregate stats built from the real (v2) catalog right next to
+ * it were correct. Confirmed live: sales-stats reported 72 priced sales and
+ * a real highest price, while every row here showed none. Falls through to
+ * the legacy v1 key only if the v2 catalog has nothing yet (e.g. its first
+ * cold build hasn't completed), so a brand-new deployment never regresses
+ * to fully empty.
+ */
 async function loadSalesKv(): Promise<Map<string, bigint>> {
   const map = new Map<string, bigint>();
+  try {
+    const catalog = await readSalesCatalog();
+    if (catalog) {
+      for (const sale of catalog.sales) {
+        try {
+          const wei = BigInt(sale.priceWei);
+          if (wei > BigInt(0)) {
+            const key = `${sale.txHash}:${sale.tokenId}`;
+            map.set(key, wei);
+            priceCache.set(key, wei);
+          }
+        } catch {
+          /* skip */
+        }
+      }
+    }
+  } catch {
+    /* fall through to the legacy key below */
+  }
+  if (map.size > 0) return map;
+
   if (!hasKv()) return map;
   try {
     const prev = await kv.get<Record<string, string>>(SALES_KV_KEY);
@@ -543,7 +802,14 @@ async function fetchActivityFromBlockscout(
     });
   }
 
-  const vault = MARKET_VAULT_ADDRESS?.toLowerCase() ?? null;
+  // EVERY vault, not just the primary — same N-vault-registry correction as
+  // classifyTransfer above. A legacy-pool deposit/redeem seen only through the
+  // Blockscout feed was landing in the generic "sale" branch here too.
+  const vaults = new Set(
+    [MARKET_VAULT_ADDRESS, ...MARKET_VAULT_ADDRESSES]
+      .filter((v): v is string => Boolean(v))
+      .map((v) => v.toLowerCase())
+  );
   const events: ActivityEvent[] = [];
   const seen = new Set<string>(); // txHash:tokenId
 
@@ -586,11 +852,15 @@ async function fetchActivityFromBlockscout(
       kind = "mint";
       venue = null;
     } else if (
-      vault &&
-      (from === vault || to === vault || method.includes("deposit") || method.includes("redeem"))
+      vaults.has(from) ||
+      vaults.has(to) ||
+      (vaults.size > 0 && (method.includes("deposit") || method.includes("redeem")))
     ) {
       kind = "transfer";
-      venue = { kind: "vault", contract: MARKET_VAULT_ADDRESS! };
+      venue = {
+        kind: "vault",
+        contract: vaults.has(from) ? fromRaw : vaults.has(to) ? toRaw : MARKET_VAULT_ADDRESS!,
+      };
     } else if (priced || isMarketplaceMethod(method)) {
       kind = "sale";
       // Seaport methods → seaport venue; anything else → other (still priced).
@@ -599,13 +869,22 @@ async function fetchActivityFromBlockscout(
           ? { kind: "seaport", contract: SEAPORT_ADDRESS }
           : { kind: "other", contract: method || "marketplace" };
     } else if (from !== ZERO && to !== ZERO) {
-      if (method && method !== "transferfrom" && method !== "safetransferfrom") {
-        kind = "sale";
-        venue = { kind: "other", contract: method };
-      } else {
-        kind = "transfer";
-        venue = null;
-      }
+      // Real gap found live 2026-08-04: this used to assume ANY method other
+      // than the two literal strings "transferfrom"/"safetransferfrom" was a
+      // sale — so a genuinely unrelated, unverified contract call (confirmed
+      // on one real tx: method 0xb58adcb2, which 4byte.directory resolves to
+      // safeBatchTransferToSingleWallet(address,address,uint256[]) — a plain
+      // batch NFT transfer tool, not a marketplace, no ETH or WETH moved at
+      // all) got labeled "sale" and rendered the alarming "Unavailable"
+      // instead of the honest "—" a genuine unpriced transfer shows. We
+      // already have a real positive-evidence path above (priced ||
+      // isMarketplaceMethod) for actual sales; nothing here has any positive
+      // signal this is a sale, only that Blockscout couldn't name the
+      // method — which is just as true of an unverified airdrop, batch-send,
+      // or migration tool as of an unrecognized marketplace. Default to the
+      // honest, safe answer instead of guessing "sale".
+      kind = "transfer";
+      venue = null;
     }
 
     const inst = t.total?.token_instance;
@@ -822,6 +1101,8 @@ export async function fetchActivity(
       seaportAddress: SEAPORT_ADDRESS,
       nftContractAddress: NFT_CONTRACT_ADDRESS,
       vaultAddress: MARKET_VAULT_ADDRESS,
+      vaultAddresses: MARKET_VAULT_ADDRESSES,
+      vaultEventContract: vaultEventContractFor(log.transactionHash),
     });
 
     // Upgrade "seaport" (unattributed) to "marketplank" ONLY on a positive

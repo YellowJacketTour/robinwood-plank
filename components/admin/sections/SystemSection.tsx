@@ -3,13 +3,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { SkeletonRows, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 import { ExplorerAddress } from "../ExplorerAddress";
-import { BUTTON_SECONDARY, CARD, LABEL } from "../ui";
+import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, LABEL, NOTE_ERR, NOTE_OK } from "../ui";
+import { adminMessage, adminPayloadHash } from "@/lib/admin-auth";
+import { signMessage } from "@/lib/wallet";
+
+const BACKFILL_ACTION = "backfill-events";
+const REPAIR_ACTION = "repair-activity";
+const REPAIR_INCIDENT_FROM_BLOCK = 27_935_949;
 
 /**
  * System section — the expanded operational picture: durable storage, chain
  * RPC, the drand relayer cron (tail of its structured status log), WoodAmp
  * store counts, and the admin action log. All read-only, from
- * /api/admin/status.
+ * /api/admin/status, plus one mutation: manually fast-forwarding the
+ * permanent chain-event ledger's backfill (see
+ * app/api/admin/backfill-events/route.ts) instead of waiting on however many
+ * 2-minute cron ticks a cold ~9.5M-block walk takes.
  */
 
 type Status = {
@@ -43,11 +52,25 @@ function Dot({ ok }: { ok: boolean | null }) {
   );
 }
 
-// Receives (and ignores) the shell's `address` prop — every section shares
-// the same signature so the shell can render them uniformly.
-export default function SystemSection() {
+type BackfillState =
+  | { kind: "idle" }
+  | { kind: "signing" }
+  | { kind: "running" }
+  | { kind: "ok"; message: string }
+  | { kind: "error"; message: string };
+
+type RepairState =
+  | { kind: "idle" }
+  | { kind: "signing" }
+  | { kind: "running"; fromBlock: number }
+  | { kind: "ok"; message: string }
+  | { kind: "error"; message: string };
+
+export default function SystemSection({ address }: { address: string | null }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [failed, setFailed] = useState(false);
+  const [backfill, setBackfill] = useState<BackfillState>({ kind: "idle" });
+  const [repair, setRepair] = useState<RepairState>({ kind: "idle" });
 
   const load = useCallback(async () => {
     try {
@@ -66,6 +89,105 @@ export default function SystemSection() {
     void load();
   }, [load]);
 
+  const runBackfill = useCallback(async () => {
+    if (!address) return;
+    try {
+      setBackfill({ kind: "signing" });
+      const timestamp = Date.now();
+      const signature = await signMessage(
+        address,
+        adminMessage(BACKFILL_ACTION, timestamp, adminPayloadHash("{}"))
+      );
+      setBackfill({ kind: "running" });
+      const res = await fetch("/api/admin/backfill-events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auth: { address, timestamp, signature } }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        message?: string;
+        passes?: number;
+        rowsInserted?: number;
+        caughtUp?: boolean;
+        head?: number | null;
+        confirmedHead?: number | null;
+        note?: string;
+      };
+      if (!res.ok || !data.ok) {
+        setBackfill({ kind: "error", message: data.message || "The backfill pass failed." });
+        return;
+      }
+      setBackfill({
+        kind: "ok",
+        message: `${data.passes} pass(es), +${data.rowsInserted} rows, confirmed=${data.confirmedHead}/${data.head}. ${data.note}`,
+      });
+    } catch (err) {
+      setBackfill({
+        kind: "error",
+        message: err instanceof Error ? err.message : "The backfill pass failed.",
+      });
+    }
+  }, [address]);
+
+  const runRepair = useCallback(async () => {
+    if (!address) return;
+    try {
+      let fromBlock = REPAIR_INCIDENT_FROM_BLOCK;
+      let totalRepaired = 0;
+      let totalInserted = 0;
+      let passes = 0;
+      for (;;) {
+        setRepair({ kind: "signing" });
+        const timestamp = Date.now();
+        const payload = JSON.stringify({ fromBlock });
+        const signature = await signMessage(
+          address,
+          adminMessage(REPAIR_ACTION, timestamp, adminPayloadHash(payload))
+        );
+        setRepair({ kind: "running", fromBlock });
+        const res = await fetch("/api/admin/repair-activity", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ auth: { address, timestamp, signature }, fromBlock }),
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          message?: string;
+          fromBlock?: number;
+          toBlock?: number;
+          rowsRepaired?: number;
+          rowsInserted?: number;
+          caughtUp?: boolean;
+          nextFromBlock?: number | null;
+          note?: string;
+        };
+        if (!res.ok || !data.ok) {
+          setRepair({ kind: "error", message: data.message || "The repair pass failed." });
+          return;
+        }
+        passes += 1;
+        totalRepaired += data.rowsRepaired ?? 0;
+        totalInserted += data.rowsInserted ?? 0;
+        if (data.caughtUp || !data.nextFromBlock) {
+          setRepair({
+            kind: "ok",
+            message: `${passes} pass(es) through block ${data.toBlock}: ${totalRepaired} row(s) repaired, +${totalInserted} inserted.`,
+          });
+          return;
+        }
+        fromBlock = data.nextFromBlock;
+        // One more sign-and-call round for the next chunk — the range is
+        // wide enough that a single request can't safely cover all of it.
+      }
+    } catch (err) {
+      setRepair({
+        kind: "error",
+        message: err instanceof Error ? err.message : "The repair pass failed.",
+      });
+    }
+  }, [address]);
+
   const relayer = status?.relayer;
 
   return (
@@ -79,6 +201,72 @@ export default function SystemSection() {
           <button type="button" className={BUTTON_SECONDARY} onClick={() => void load()}>
             Re-check
           </button>
+        </div>
+
+        <div className="mt-4 rounded-md bg-panel-strong p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className={LABEL}>Chain event ledger</p>
+              <p className="mt-1 text-sm text-cream-muted">
+                The permanent Activity/sales ledger backfills on its own every cron
+                tick — this fast-forwards it by running several passes right now
+                instead of waiting. Safe to click repeatedly; each pass is
+                idempotent.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={BUTTON_PRIMARY}
+              disabled={!address || backfill.kind === "signing" || backfill.kind === "running"}
+              onClick={() => void runBackfill()}
+            >
+              {backfill.kind === "signing"
+                ? "Sign to confirm…"
+                : backfill.kind === "running"
+                  ? "Backfilling…"
+                  : "Backfill now"}
+            </button>
+          </div>
+          {backfill.kind === "ok" ? (
+            <p className={`mt-2 ${NOTE_OK}`}>{backfill.message}</p>
+          ) : backfill.kind === "error" ? (
+            <p className={`mt-2 ${NOTE_ERR}`}>{backfill.message}</p>
+          ) : null}
+        </div>
+
+        <div className="mt-4 rounded-md bg-panel-strong p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className={LABEL}>Repair mislabelled activity</p>
+              <p className="mt-1 text-sm text-cream-muted">
+                Re-derives kind/venue/price for ledger rows from block{" "}
+                {REPAIR_INCIDENT_FROM_BLOCK.toLocaleString()} onward, using the
+                current classifier instead of the one that wrote them — fixes
+                vault deposits/redeems that were stored as open-market
+                &quot;sales&quot;. Safe to click repeatedly; only rows that
+                actually differ get touched, and a real price is never erased,
+                only filled in if missing. Pages through the range
+                automatically, one signature per chunk.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={BUTTON_PRIMARY}
+              disabled={!address || repair.kind === "signing" || repair.kind === "running"}
+              onClick={() => void runRepair()}
+            >
+              {repair.kind === "signing"
+                ? "Sign to confirm…"
+                : repair.kind === "running"
+                  ? `Repairing from ${repair.fromBlock.toLocaleString()}…`
+                  : "Repair activity"}
+            </button>
+          </div>
+          {repair.kind === "ok" ? (
+            <p className={`mt-2 ${NOTE_OK}`}>{repair.message}</p>
+          ) : repair.kind === "error" ? (
+            <p className={`mt-2 ${NOTE_ERR}`}>{repair.message}</p>
+          ) : null}
         </div>
 
         {failed ? (
