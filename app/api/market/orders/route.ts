@@ -32,6 +32,7 @@ function deleteMessage(id: string): string {
 }
 import {
   OrderValidationError,
+  hasConfiguredRoyaltyConsideration,
   validateListingOrder,
   validateOfferOrder,
 } from "@/lib/market/order-validation";
@@ -69,6 +70,22 @@ type PostBody = {
   criteria?: unknown;
 };
 
+function annotateRoyaltyEnforcement<T extends {
+  collectionSlug: string;
+  rawOrder: unknown;
+  royaltyEnforced?: boolean;
+}>(items: T[]): T[] {
+  return items.map((item) => {
+    const collection = getCollection(item.collectionSlug);
+    return {
+      ...item,
+      royaltyEnforced:
+        item.royaltyEnforced === true ||
+        Boolean(collection && hasConfiguredRoyaltyConsideration(item.rawOrder, collection)),
+    };
+  });
+}
+
 export async function GET(req: Request) {
   const limited = rateLimit(req, { key: "market-orders-get", limit: 120, windowMs: 60_000 });
   if (limited) return limited;
@@ -102,7 +119,12 @@ export async function GET(req: Request) {
 
   // Listings only. Offers stay ours alone — a foreign offer is not something a
   // holder can accept from here, so surfacing one would be a dead end.
-  if (kind === "offer") return publicJson({ kind, items: live });
+  const annotatedLive = annotateRoyaltyEnforcement(live as Array<{
+    collectionSlug: string;
+    rawOrder: unknown;
+    royaltyEnforced?: boolean;
+  }>);
+  if (kind === "offer") return publicJson({ kind, items: annotatedLive });
 
   const { readOpenSeaListings } = await import("@/lib/market/opensea");
   const { mergeBook } = await import("@/lib/market/book");
@@ -136,7 +158,7 @@ export async function GET(req: Request) {
   }
 
   const merged = mergeBook(
-    live as unknown as import("@/lib/market/types").Listing[],
+    annotatedLive as unknown as import("@/lib/market/types").Listing[],
     foreign,
     collectionSlug ?? "robinwood",
     imageByTokenId
@@ -445,6 +467,7 @@ export async function POST(req: Request) {
         priceWei: derived.priceWei,
         expiresAt: derived.expiresAt,
         kind: "fixed",
+        royaltyEnforced: true,
         imageUrl: await resolveTokenImage(collection.contractAddress, derived.tokenId),
       };
       await putListing(listing, body.rawOrder);
@@ -468,6 +491,7 @@ export async function POST(req: Request) {
       maker: derived.maker,
       priceWei: derived.priceWei,
       expiresAt: derived.expiresAt,
+      royaltyEnforced: true,
       imageUrl: derived.tokenId
         ? await resolveTokenImage(collection.contractAddress, derived.tokenId)
         : undefined,
