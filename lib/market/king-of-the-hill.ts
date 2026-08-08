@@ -12,6 +12,7 @@ import { hasPostgresConfig, withPostgresTransaction } from "@/lib/postgres";
 import {
   applyCandidateSale,
   finalizeIfDue,
+  reconcileExistingSale,
   seedExistingSale,
   type KothSale,
   type KothState,
@@ -103,11 +104,14 @@ async function seedLeadingSale(
   state: KothState,
   nowMs: number
 ): Promise<KothState> {
-  if (state.leadingSale != null || state.winnerFinalizedAtMs != null || nowMs > state.deadlineMs) {
+  if (state.winnerFinalizedAtMs != null || nowMs > state.deadlineMs) {
     return state;
   }
   const historical = await readHighestLedgerSale(client);
-  return historical ? seedExistingSale(state, historical) : state;
+  if (!historical) return state;
+  return state.leadingSale == null
+    ? seedExistingSale(state, historical)
+    : reconcileExistingSale(state, historical);
 }
 
 async function writeState(client: PoolClient, state: KothState): Promise<void> {
