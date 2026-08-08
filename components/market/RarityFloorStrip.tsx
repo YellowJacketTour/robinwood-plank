@@ -7,6 +7,7 @@ import type { RarityLookup } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/rarity";
 import { collectionFloorWei, formatPremiumBps, tierFloors } from "@/lib/market/floors";
 import type { Listing } from "@/lib/market/types";
+import EthUsdValue from "@/components/market/EthUsdValue";
 
 type Props = {
   listings: Listing[];
@@ -60,6 +61,7 @@ export default function RarityFloorStrip({
           <p className="font-display text-sm tabular-nums text-gold-300">
             {collFloor == null ? "—" : `${formatTokenAmount(collFloor, 18, 3)} Ξ`}
           </p>
+          <EthUsdValue wei={collFloor} className="block text-[0.55rem] tabular-nums text-foreground/50" />
           <p className="text-[0.55rem] text-foreground/40">{listings.length} listed</p>
         </button>
 
@@ -97,6 +99,7 @@ export default function RarityFloorStrip({
               <p className="font-display text-sm tabular-nums text-foreground">
                 {row.floorWei == null ? "—" : `${formatTokenAmount(row.floorWei, 18, 3)} Ξ`}
               </p>
+              <EthUsdValue wei={row.floorWei} className="block text-[0.55rem] tabular-nums text-foreground/50" />
               <p
                 className={`text-[0.55rem] tabular-nums ${
                   row.premiumBps == null

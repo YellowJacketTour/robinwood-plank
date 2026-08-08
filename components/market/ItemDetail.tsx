@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { ExternalLink, X } from "lucide-react";
-import { formatTokenAmount, shortAddress } from "@/lib/trade";
+import { formatTokenAmount, parseTokenAmount, shortAddress } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
 import { formatRank } from "@/lib/rarity";
@@ -17,6 +17,7 @@ import { sendNft, validateRecipient } from "@/lib/market/transfer";
 import { withImageWidth } from "@/lib/ipfs";
 import { quoteSendFee, type SendFeeQuote } from "@/lib/market/send-fee";
 import { fetchTraitIndex, type TraitIndexResponse } from "@/lib/market/traits";
+import EthUsdValue from "@/components/market/EthUsdValue";
 
 type TokenDetail = {
   tokenId: string;
@@ -306,6 +307,7 @@ export default function ItemDetail({
                   <p className="mt-1 font-display text-2xl text-gold-300">
                     {formatTokenAmount(listing.priceWei, 18, 4)} Ξ
                   </p>
+                  <EthUsdValue wei={listing.priceWei} className="mt-0.5 block text-xs tabular-nums text-foreground/55" />
                 </div>
               )}
 
@@ -481,12 +483,20 @@ export default function ItemDetail({
                           >
                             {h.kind}
                           </a>
-                          <span className="shrink-0 font-bold text-gold-300">
-                            {h.priceEth
-                              ? `${Number(h.priceEth).toFixed(4)} Ξ`
-                              : h.kind === "sale"
-                                ? "Unavailable"
-                                : "—"}
+                          <span className="shrink-0 text-right font-bold text-gold-300">
+                            {h.priceEth ? (
+                              <>
+                                <span className="block">{Number(h.priceEth).toFixed(4)} Ξ</span>
+                                <EthUsdValue
+                                  wei={parseTokenAmount(h.priceEth, 18)}
+                                  className="block text-[0.6rem] font-normal text-foreground/50"
+                                />
+                              </>
+                            ) : h.kind === "sale" ? (
+                              "Unavailable"
+                            ) : (
+                              "—"
+                            )}
                           </span>
                         </div>
                         <div className="mt-1 flex items-center justify-between gap-2 text-[0.6rem] text-foreground/45">

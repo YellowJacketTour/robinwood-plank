@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { formatTokenAmount } from "@/lib/trade";
 import type { Offer } from "@/lib/market/types";
+import EthUsdValue from "@/components/market/EthUsdValue";
 
 export type IncomingBidRow = Offer & { rawOrder?: unknown };
 
@@ -134,6 +135,7 @@ export default function IncomingBids({
                   · {labelFor(offer)}
                 </span>
               </p>
+              <EthUsdValue wei={offer.priceWei} className="block text-[0.62rem] tabular-nums text-foreground/50" />
               <p className="text-[0.6rem] text-foreground/45">
                 {kind === "token"
                   ? "Item bid on a plank you own"

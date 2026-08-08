@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
 import { formatTokenAmount } from "@/lib/trade";
 import { getErc20Balance } from "@/lib/wallet";
+import EthUsdValue from "@/components/market/EthUsdValue";
 
 type Props = {
   account: string;
@@ -55,10 +56,13 @@ export default function WethBalance({ account }: Props) {
     </button>
   ) : (
     <span
-      className="inline-flex min-h-9 items-center rounded-full border border-line bg-panel-strong px-3 text-xs text-gold-300"
+      className="inline-flex min-h-9 flex-wrap items-center gap-x-1 rounded-full border border-line bg-panel-strong px-3 text-xs text-gold-300"
       title={MARKET_OFFER_CURRENCY}
     >
-      WETH balance {balance === null ? "…" : formatTokenAmount(balance, 18, 5)}
+      <span>WETH balance {balance === null ? "…" : formatTokenAmount(balance, 18, 5)}</span>
+      {balance !== null && (
+        <EthUsdValue wei={balance} className="text-[0.62rem] text-foreground/50" />
+      )}
     </span>
   );
 }

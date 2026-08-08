@@ -19,6 +19,7 @@ import type { Listing, MarketCollection } from "@/lib/market/types";
 import { invalidateSwr, swrJson } from "@/lib/market/swr-fetch";
 import { withImageWidth } from "@/lib/ipfs";
 import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
+import EthUsdValue from "@/components/market/EthUsdValue";
 
 type Venue = { kind: "marketplank" | "seaport" | "vault" | "other"; contract: string } | null;
 
@@ -493,7 +494,10 @@ export default function ActivityFeed({
 
                     <strong className="whitespace-nowrap text-right text-xs text-gold-300 xl:text-left">
                       {event.priceEth
-                        ? `${Number(event.priceEth).toFixed(4)} Ξ`
+                        ? <>
+                            <span className="block">{Number(event.priceEth).toFixed(4)} Ξ</span>
+                            <EthUsdValue wei={event.priceWei} className="block text-[0.6rem] font-normal text-foreground/50" />
+                          </>
                         : event.kind === "sale"
                           ? "Unavailable"
                           : "—"}
