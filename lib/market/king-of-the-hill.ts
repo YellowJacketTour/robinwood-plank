@@ -12,6 +12,7 @@ import { hasPostgresConfig, withPostgresTransaction } from "@/lib/postgres";
 import {
   applyCandidateSale,
   finalizeIfDue,
+  seedExistingSale,
   type KothSale,
   type KothState,
 } from "@/lib/market/king-of-the-hill-rules";
@@ -70,6 +71,45 @@ async function readRowForUpdate(client: PoolClient): Promise<KothRow | null> {
   return result.rows[0] ?? null;
 }
 
+/** The highest confirmed collection sale already present when the round starts. */
+async function readHighestLedgerSale(client: PoolClient): Promise<KothSale | null> {
+  const result = await client.query<{
+    tx_hash: string;
+    token_id: string | null;
+    to_address: string | null;
+    price_wei: string;
+  }>(
+    `SELECT tx_hash, token_id, to_address, price_wei::text AS price_wei
+       FROM plank_chain_events
+      WHERE source = 'nft'
+        AND kind = 'sale'
+        AND price_wei IS NOT NULL
+        AND confirmed = TRUE
+      ORDER BY price_wei DESC, block_number DESC, log_index DESC
+      LIMIT 1`
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    txHash: row.tx_hash,
+    tokenId: row.token_id,
+    wallet: row.to_address,
+    priceWei: row.price_wei,
+  };
+}
+
+async function seedLeadingSale(
+  client: PoolClient,
+  state: KothState,
+  nowMs: number
+): Promise<KothState> {
+  if (state.leadingSale != null || state.winnerFinalizedAtMs != null || nowMs > state.deadlineMs) {
+    return state;
+  }
+  const historical = await readHighestLedgerSale(client);
+  return historical ? seedExistingSale(state, historical) : state;
+}
+
 async function writeState(client: PoolClient, state: KothState): Promise<void> {
   await client.query(
     `UPDATE king_of_the_hill
@@ -114,7 +154,7 @@ export async function getKingOfTheHill(nowMs: number = Date.now()): Promise<Koth
   return withPostgresTransaction(async (client) => {
     const row = await readRowForUpdate(client);
     if (!row) return null;
-    const state = rowToState(row);
+    const state = await seedLeadingSale(client, rowToState(row), nowMs);
     const finalized = finalizeIfDue(state, nowMs);
     if (finalized !== state) await writeState(client, finalized);
     return finalized;
@@ -143,7 +183,7 @@ export async function offerKingOfTheHillCandidate(
   await withPostgresTransaction(async (client) => {
     const row = await readRowForUpdate(client);
     if (!row) return;
-    let state = rowToState(row);
+    let state = await seedLeadingSale(client, rowToState(row), nowMs);
     // Finalize first: a sale that arrives after the deadline must never
     // resurrect an already-over round, and finalizing here (rather than only
     // on read) means the ledger's own write path is itself sufficient to

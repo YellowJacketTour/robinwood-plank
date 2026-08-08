@@ -32,6 +32,16 @@ export type KothState = {
 };
 
 /**
+ * Seed a newly-created round from the highest sale already in the ledger.
+ * Historical state establishes the starting record but is not a new bid, so
+ * it must not extend the deadline or replace an existing leader/winner.
+ */
+export function seedExistingSale(state: KothState, sale: KothSale): KothState {
+  if (state.leadingSale != null || state.winnerFinalizedAtMs != null) return state;
+  return { ...state, leadingSale: sale };
+}
+
+/**
  * Apply one confirmed sale as a KOTH candidate.
  *
  * Guards, in order:
