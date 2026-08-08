@@ -5,6 +5,7 @@ import { withImageWidth } from "@/lib/ipfs";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { BUY_GAS_RESERVE_ETH } from "@/lib/constants";
 import type { Listing, MarketCollection } from "@/lib/market/types";
+import EthUsdValue from "@/components/market/EthUsdValue";
 
 type Props = {
   listing: Listing;
@@ -91,8 +92,9 @@ export default function BuyConfirm({
         <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
           <div className="flex justify-between">
             <dt className="text-foreground/60">Price</dt>
-            <dd className="tabular-nums text-foreground">
-              {formatTokenAmount(verifiedPriceWei, 18, 6)} Ξ
+            <dd className="text-right tabular-nums text-foreground">
+              <span className="block">{formatTokenAmount(verifiedPriceWei, 18, 6)} Ξ</span>
+              <EthUsdValue wei={verifiedPriceWei} className="block text-[0.65rem] text-foreground/50" />
             </dd>
           </div>
           <div className="flex justify-between">
@@ -105,8 +107,9 @@ export default function BuyConfirm({
           </div>
           <div className="flex justify-between border-t border-line pt-1">
             <dt className="font-bold text-foreground">You pay</dt>
-            <dd className="font-display tabular-nums text-gold-300">
-              {formatTokenAmount(verifiedPriceWei, 18, 6)} Ξ
+            <dd className="text-right font-display tabular-nums text-gold-300">
+              <span className="block">{formatTokenAmount(verifiedPriceWei, 18, 6)} Ξ</span>
+              <EthUsdValue wei={verifiedPriceWei} className="block font-sans text-xs text-foreground/55" />
             </dd>
           </div>
         </dl>

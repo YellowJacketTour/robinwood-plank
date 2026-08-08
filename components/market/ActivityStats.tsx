@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { formatTokenAmount } from "@/lib/trade";
 import { swrJson } from "@/lib/market/swr-fetch";
 import { startVisibleInterval } from "@/lib/useVisibleInterval";
+import EthUsdValue from "@/components/market/EthUsdValue";
 
 type SaleLike = {
   tokenId: string;
@@ -37,7 +38,7 @@ const RANGE_MS: Record<Exclude<Range, "ALL">, number> = {
   "7D": 7 * 24 * 60 * 60 * 1000,
 };
 
-function stat(label: string, value: string, pending = false) {
+function stat(label: string, value: string, pending = false, wei?: bigint | null) {
   return (
     <div className="rounded-lg border border-line bg-wood-950 px-3 py-2.5">
       <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
@@ -49,6 +50,12 @@ function stat(label: string, value: string, pending = false) {
         }`}
       >
         {value}
+        {wei != null && (
+          <EthUsdValue
+            wei={wei}
+            className="block font-sans text-[0.62rem] text-foreground/50"
+          />
+        )}
       </dd>
     </div>
   );
@@ -253,7 +260,8 @@ export default function ActivityStats({
             : priced.length > 0
               ? `${formatTokenAmount(volume24hWei.toString(), 18, 4)} Ξ`
               : "—",
-          waitingForData
+          waitingForData,
+          priced.length > 0 ? volume24hWei : null
         )}
         {stat(
           "Total volume",
@@ -262,7 +270,8 @@ export default function ActivityStats({
             : priced.length > 0
               ? `${formatTokenAmount(totalVolumeWei.toString(), 18, 3)} Ξ`
               : "—",
-          waitingForData
+          waitingForData,
+          priced.length > 0 ? totalVolumeWei : null
         )}
         {stat(
           "Priced sales",
@@ -276,7 +285,8 @@ export default function ActivityStats({
             : averageWei !== null
               ? `${formatTokenAmount(averageWei.toString(), 18, 4)} Ξ`
               : "—",
-          waitingForData
+          waitingForData,
+          averageWei
         )}
       </dl>
 

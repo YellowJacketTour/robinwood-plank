@@ -13,6 +13,7 @@ import {
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { formatTokenAmount } from "@/lib/trade";
 import type { Listing, Offer } from "@/lib/market/types";
+import EthUsdValue from "@/components/market/EthUsdValue";
 import { SkeletonBlock, SkeletonStatus } from "@/components/Skeleton";
 
 type Props = {
@@ -253,6 +254,10 @@ export default function MyPositions({ account, listings, offers, onChanged }: Pr
                         ? ` · ${row.criteriaTokenIds.length} qualify`
                         : ""}
                     </p>
+                    <EthUsdValue
+                      wei={row.priceWei}
+                      className="mt-0.5 block text-[0.62rem] text-foreground/45"
+                    />
                   </div>
                 </div>
                 <button
