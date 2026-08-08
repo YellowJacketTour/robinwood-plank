@@ -42,6 +42,19 @@ export function seedExistingSale(state: KothState, sale: KothSale): KothState {
 }
 
 /**
+ * Reconcile a historical ledger sale that was priced after the round state
+ * was first observed. Historical reconciliation may repair the leader, but it
+ * is not a new bid and therefore must never move the deadline.
+ */
+export function reconcileExistingSale(state: KothState, sale: KothSale): KothState {
+  if (state.winnerFinalizedAtMs != null) return state;
+  if (state.leadingSale != null && BigInt(sale.priceWei) <= BigInt(state.leadingSale.priceWei)) {
+    return state;
+  }
+  return { ...state, leadingSale: sale };
+}
+
+/**
  * Apply one confirmed sale as a KOTH candidate.
  *
  * Guards, in order:

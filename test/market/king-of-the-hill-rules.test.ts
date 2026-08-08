@@ -5,6 +5,7 @@ import {
   finalizeIfDue,
   GRACE_WINDOW_MS,
   EXTENSION_MS,
+  reconcileExistingSale,
   seedExistingSale,
   type KothSale,
   type KothState,
@@ -38,6 +39,26 @@ test("seeding never replaces an existing leader or finalized winner", () => {
     winnerSale: leader,
   };
   assert.equal(seedExistingSale(finalized, sale("9000", "0xother")), finalized);
+});
+
+test("historical reconciliation can repair a higher priced leader without extending the deadline", () => {
+  const state = { ...initial(), leadingSale: sale("5000", "0xold") };
+  const reconciled = reconcileExistingSale(state, sale("9000", "0xrepaired"));
+  assert.equal(reconciled.leadingSale?.txHash, "0xrepaired");
+  assert.equal(reconciled.deadlineMs, DEADLINE);
+});
+
+test("historical reconciliation never downgrades or changes a finalized round", () => {
+  const leader = sale("9000", "0xleader");
+  const state = { ...initial(), leadingSale: leader };
+  assert.equal(reconcileExistingSale(state, sale("5000", "0xlower")), state);
+
+  const finalized = {
+    ...state,
+    winnerFinalizedAtMs: DEADLINE + 1,
+    winnerSale: leader,
+  };
+  assert.equal(reconcileExistingSale(finalized, sale("10000", "0xafter")), finalized);
 });
 
 test("a new highest sale WITHIN the 2-hour grace window extends the deadline by exactly 4 hours", () => {
