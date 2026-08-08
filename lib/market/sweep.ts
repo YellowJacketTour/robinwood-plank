@@ -77,11 +77,13 @@ export function planSweep(
     if (allow) {
       if (!listing.tokenId || !allow.has(BigInt(listing.tokenId).toString())) continue;
     }
+    if (listing.royaltyEnforced === false) {
+      droppedInvalid++;
+      continue;
+    }
     let derived: DerivedOrder;
     try {
-      derived = validateListingOrder(listing.rawOrder, collection, {
-        requireRoyalty: listing.royaltyEnforced !== false,
-      });
+      derived = validateListingOrder(listing.rawOrder, collection);
     } catch {
       droppedInvalid++;
       continue;
@@ -142,9 +144,12 @@ export function assertSweepTotal(
     // Throws OrderValidationError on any tampering — no catch, no drop here:
     // at confirm time a bad order means the DISPLAYED total is wrong, and the
     // only safe response is to abort, not silently re-price.
-    const derived = validateListingOrder(item.listing.rawOrder, collection, {
-      requireRoyalty: item.listing.royaltyEnforced !== false,
-    });
+    if (item.listing.royaltyEnforced === false) {
+      throw new Error(
+        "A selected listing predates creator-royalty enforcement and must be relisted before it can be bought."
+      );
+    }
+    const derived = validateListingOrder(item.listing.rawOrder, collection);
     if (derived.tokenId !== item.listing.tokenId) {
       throw new Error("A plank in this sweep doesn't match its signature.");
     }

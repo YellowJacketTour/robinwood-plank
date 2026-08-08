@@ -156,9 +156,7 @@ test("rejects a royalty-bearing listing that omits EIP-2981 consideration", () =
   );
 });
 
-test("allows a legacy no-royalty listing only when explicitly marked pre-rollout", () => {
-  const d = validateListingOrder(listing(), royaltyCollection, { requireRoyalty: false });
-  assert.equal(d.priceWei, "1000000000000000000");
+test("rejects a legacy no-royalty listing even when marked pre-rollout", () => {
   assert.throws(
     () => validateListingOrder(listing(), royaltyCollection),
     /creator royalty/i
@@ -314,7 +312,7 @@ test("accepts a royalty-bearing WETH bid and derives seller net proceeds", () =>
   assert.equal(d.priceWei, "919000000000000000");
 });
 
-test("allows a legacy no-royalty WETH bid only when explicitly marked pre-rollout", () => {
+test("rejects a legacy no-royalty WETH bid even when marked pre-rollout", () => {
   const bid = {
     parameters: {
       offerer: ATTACKER,
@@ -342,8 +340,6 @@ test("allows a legacy no-royalty WETH bid only when explicitly marked pre-rollou
     },
     signature: "0xdeadbeef",
   };
-  const d = validateOfferOrder(bid, royaltyCollection, WETH, { requireRoyalty: false });
-  assert.equal(d.priceWei, "1000000000000000000");
   assert.throws(
     () => validateOfferOrder(bid, royaltyCollection, WETH),
     /creator royalty/i
