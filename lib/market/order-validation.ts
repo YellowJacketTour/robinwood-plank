@@ -278,8 +278,7 @@ function endTimeToIso(p: RawParameters): string {
  */
 export function validateListingOrder(
   rawOrder: unknown,
-  collection: MarketCollection,
-  opts?: { requireRoyalty?: boolean }
+  collection: MarketCollection
 ): DerivedOrder {
   const order = assertShape(rawOrder);
   const p = order.parameters;
@@ -292,7 +291,7 @@ export function validateListingOrder(
   if (collection.tokenStandard !== "ERC721") {
     fail("Only ERC-721 collections are tradable on Marketplank for now.");
   }
-  const royalty = opts?.requireRoyalty === false ? null : collectionRoyalty(collection);
+  const royalty = collectionRoyalty(collection);
 
   if (p.offer.length !== 1) {
     fail("Marketplank listings must offer exactly one NFT.");
@@ -365,8 +364,6 @@ export function validateOfferOrder(
      * plank" while being unfillable for most sellers).
      */
     criteriaTokenIds?: readonly string[];
-    /** Set false only for signed orders created before royalty rollout. */
-    requireRoyalty?: boolean;
   }
 ): DerivedOrder {
   const order = assertShape(rawOrder);
@@ -377,7 +374,7 @@ export function validateOfferOrder(
   if (collection.tokenStandard !== "ERC721") {
     fail("Only ERC-721 collections are tradable on Marketplank for now.");
   }
-  const royalty = opts?.requireRoyalty === false ? null : collectionRoyalty(collection);
+  const royalty = collectionRoyalty(collection);
 
   if (p.offer.length !== 1) fail("Offers must offer exactly one payment item.");
   const offered = p.offer[0];
