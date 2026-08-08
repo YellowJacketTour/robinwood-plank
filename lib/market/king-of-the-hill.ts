@@ -72,7 +72,15 @@ async function readRowForUpdate(client: PoolClient): Promise<KothRow | null> {
   return result.rows[0] ?? null;
 }
 
-/** The highest confirmed collection sale already present when the round starts. */
+/**
+ * The highest collection sale already present in the permanent ledger.
+ *
+ * Keep this population identical to salesStatsFromLedger(): KOTH's displayed
+ * NFT and price must agree with the site's authoritative Highest Sale metric.
+ * The ledger writer already supplies the sale evidence and the existing
+ * candidate path uses these same rows; adding a second confirmation filter
+ * here caused repaired historical sales to disappear from KOTH only.
+ */
 async function readHighestLedgerSale(client: PoolClient): Promise<KothSale | null> {
   const result = await client.query<{
     tx_hash: string;
@@ -85,7 +93,6 @@ async function readHighestLedgerSale(client: PoolClient): Promise<KothSale | nul
       WHERE source = 'nft'
         AND kind = 'sale'
         AND price_wei IS NOT NULL
-        AND confirmed = TRUE
       ORDER BY price_wei DESC, block_number DESC, log_index DESC
       LIMIT 1`
   );

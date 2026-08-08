@@ -7,7 +7,12 @@ import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
 import { formatRank } from "@/lib/rarity";
-import type { Listing, MarketCollection } from "@/lib/market/types";
+import {
+  isMarketplankRelistRequired,
+  MARKETPLANK_RELIST_MESSAGE,
+  type Listing,
+  type MarketCollection,
+} from "@/lib/market/types";
 import { sendNft, validateRecipient } from "@/lib/market/transfer";
 import { withImageWidth } from "@/lib/ipfs";
 import { quoteSendFee, type SendFeeQuote } from "@/lib/market/send-fee";
@@ -199,6 +204,7 @@ export default function ItemDetail({
   }, [detail, traitIndex]);
 
   const isOwner = Boolean(account && detail?.owner && account.toLowerCase() === detail.owner.toLowerCase());
+  const relistRequired = Boolean(listing && isMarketplankRelistRequired(listing));
 
   return (
     <div
@@ -216,7 +222,9 @@ export default function ItemDetail({
         <div className="flex shrink-0 items-start gap-3 border-b border-line px-4 py-3 sm:px-5">
           <div className="min-w-0 flex-1">
             <p className="text-[0.6rem] font-black uppercase tracking-[0.14em] text-gold-300">
-              Marketplank · {listing ? "Listed" : "Unlisted"}
+              {listing?.venue === "opensea"
+                ? "OpenSea · Display only"
+                : `Marketplank · ${listing ? "Listed" : "Unlisted"}`}
               {detail?.rarity && (
                 <span className="ml-2" style={{ color: tierColor(detail.rarity.tier) }}>
                   · {detail.rarity.tier} {formatRank(detail.rarity.rank)}
@@ -297,6 +305,18 @@ export default function ItemDetail({
                   <p className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Price</p>
                   <p className="mt-1 font-display text-2xl text-gold-300">
                     {formatTokenAmount(listing.priceWei, 18, 4)} Ξ
+                  </p>
+                </div>
+              )}
+
+              {relistRequired && (
+                <div
+                  role="status"
+                  className="space-y-1 rounded-lg border border-red-400/55 bg-red-950/35 px-3 py-3 text-red-100"
+                >
+                  <p className="text-sm font-black uppercase tracking-[0.08em]">Relist required</p>
+                  <p className="text-sm font-bold leading-snug text-red-100/85">
+                    {MARKETPLANK_RELIST_MESSAGE}
                   </p>
                 </div>
               )}
@@ -505,7 +525,17 @@ export default function ItemDetail({
             </a>
           ) : (
             listing &&
-            onBuy && (
+            onBuy &&
+            (relistRequired ? (
+              <button
+                type="button"
+                disabled
+                title={MARKETPLANK_RELIST_MESSAGE}
+                className="inline-flex min-h-12 flex-1 cursor-not-allowed items-center justify-center rounded-lg border border-red-400/60 bg-red-950/40 px-4 py-3 text-sm font-black text-red-100"
+              >
+                Relist required
+              </button>
+            ) : (
               <button
                 type="button"
                 onClick={() => onBuy(listing)}
@@ -513,15 +543,20 @@ export default function ItemDetail({
               >
                 Buy
               </button>
-            )
+            ))
           )}
           {onOffer && (
             <button
               type="button"
               onClick={() => onOffer(tokenId)}
+              title={
+                listing?.venue === "opensea"
+                  ? "Creates a separate Marketplank offer; it does not modify the OpenSea listing."
+                  : undefined
+              }
               className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg border border-line-strong px-4 py-3 text-sm font-bold text-gold-300 transition hover:border-gold-400"
             >
-              Offer
+              {listing?.venue === "opensea" ? "Make Marketplank offer" : "Offer"}
             </button>
           )}
           <a

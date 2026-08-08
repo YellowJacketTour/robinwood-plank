@@ -1,6 +1,11 @@
 import Image from "next/image";
 import { ExternalLink } from "lucide-react";
-import type { Listing, MarketCollection } from "@/lib/market/types";
+import {
+  isMarketplankRelistRequired,
+  MARKETPLANK_RELIST_MESSAGE,
+  type Listing,
+  type MarketCollection,
+} from "@/lib/market/types";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
@@ -44,6 +49,9 @@ export default function ListingCard({
   rarity,
 }: Props) {
   const isOffer = variant === "offer";
+  // This state is for listings for sale. Incoming offers have their own
+  // acceptance validation and should not inherit a sale-card warning.
+  const relistRequired = !isOffer && isMarketplankRelistRequired(listing);
   // Collection-wide bids have no token to open a detail view for.
   const selectable = Boolean(onSelect && listing.tokenId);
   const trustLabels = collection.trustBadges.map(
@@ -160,16 +168,24 @@ export default function ListingCard({
           ) : (
             <button
               type="button"
-              disabled={!canFill}
+              disabled={!canFill || relistRequired}
               onClick={() => onBuy?.(listing)}
-              title={canFill ? undefined : "You don't own a plank this bid can take."}
-              className={`min-h-11 min-w-16 rounded-md px-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-[4.25rem] sm:px-3 sm:text-sm ${
-                isOffer
-                  ? "bg-emerald-500 text-wood-950 hover:bg-emerald-400"
-                  : "bg-gold-500 text-wood-950 hover:bg-gold-400"
+              title={
+                relistRequired
+                  ? MARKETPLANK_RELIST_MESSAGE
+                  : canFill
+                    ? undefined
+                    : "You don't own a plank this bid can take."
+              }
+              className={`min-h-11 rounded-md px-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-100 sm:px-3 sm:text-sm ${
+                relistRequired
+                  ? "min-w-28 border border-red-400/60 bg-red-950/40 text-red-100"
+                  : isOffer
+                    ? "min-w-16 bg-emerald-500 text-wood-950 hover:bg-emerald-400 sm:min-w-[4.25rem]"
+                    : "min-w-16 bg-gold-500 text-wood-950 hover:bg-gold-400 sm:min-w-[4.25rem]"
               }`}
             >
-              {buyLabel ?? "Buy"}
+              {relistRequired ? "Relist required" : buyLabel ?? "Buy"}
             </button>
           )}
         </div>
@@ -190,14 +206,22 @@ export default function ListingCard({
             {listing.venue === "opensea" ? "OpenSea" : "Marketplank"}
           </span>
         )}
+        {relistRequired && (
+          <div
+            role="status"
+            className="space-y-0.5 rounded-md border border-red-400/55 bg-red-950/35 px-2.5 py-2 text-red-100"
+          >
+            <p className="text-[0.72rem] font-black uppercase tracking-[0.08em]">Relist required</p>
+            <p className="text-[0.68rem] font-bold leading-snug text-red-100/85">
+              Seller must relist with creator royalties before this can be bought here.
+            </p>
+          </div>
+        )}
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-[0.6rem] text-foreground/45" title={listing.maker}>
             {isOffer ? "Bidder " : "Maker "}
             {shortAddress(listing.maker)}
           </p>
-          {collection.trustBadges.includes("verified") && (
-            <span className="shrink-0 text-[0.6rem] font-bold text-emerald-300">Verified ✓</span>
-          )}
         </div>
         {(onOffer || selectable) && (
           <div className="flex gap-1.5">
@@ -205,9 +229,14 @@ export default function ListingCard({
               <button
                 type="button"
                 onClick={() => onOffer(listing)}
+                title={
+                  listing.venue === "opensea"
+                    ? "Creates a separate Marketplank offer; it does not modify the OpenSea listing."
+                    : undefined
+                }
                 className="min-h-11 flex-1 rounded-md border border-line-strong text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
               >
-                Offer
+                {listing.venue === "opensea" ? "Make offer" : "Offer"}
               </button>
             )}
             {selectable && (
