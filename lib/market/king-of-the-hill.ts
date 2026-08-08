@@ -78,8 +78,8 @@ async function readRowForUpdate(client: PoolClient): Promise<KothRow | null> {
  * Keep this population identical to salesStatsFromLedger(): KOTH's displayed
  * NFT and price must agree with the site's authoritative Highest Sale metric.
  * The ledger writer already supplies the sale evidence and the existing
- * candidate path uses these same rows; adding a second confirmation filter
- * here caused repaired historical sales to disappear from KOTH only.
+ * candidate path uses these same rows; adding source/confirmation filters
+ * here caused historical sales to disappear from KOTH only.
  */
 async function readHighestLedgerSale(client: PoolClient): Promise<KothSale | null> {
   const result = await client.query<{
@@ -90,8 +90,7 @@ async function readHighestLedgerSale(client: PoolClient): Promise<KothSale | nul
   }>(
     `SELECT tx_hash, token_id, to_address, price_wei::text AS price_wei
        FROM plank_chain_events
-      WHERE source = 'nft'
-        AND kind = 'sale'
+      WHERE kind = 'sale'
         AND price_wei IS NOT NULL
       ORDER BY price_wei DESC, block_number DESC, log_index DESC
       LIMIT 1`
