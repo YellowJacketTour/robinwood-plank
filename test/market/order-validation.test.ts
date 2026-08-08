@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  hasConfiguredRoyaltyConsideration,
   OrderValidationError,
   validateListingOrder,
   validateOfferOrder,
@@ -155,6 +156,29 @@ test("rejects a royalty-bearing listing that omits EIP-2981 consideration", () =
   );
 });
 
+test("allows a legacy no-royalty listing only when explicitly marked pre-rollout", () => {
+  const d = validateListingOrder(listing(), royaltyCollection, { requireRoyalty: false });
+  assert.equal(d.priceWei, "1000000000000000000");
+  assert.throws(
+    () => validateListingOrder(listing(), royaltyCollection),
+    /creator royalty/i
+  );
+});
+
+test("recovers the royalty rollout marker from an existing signed listing", () => {
+  assert.equal(hasConfiguredRoyaltyConsideration(listing(), royaltyCollection), false);
+  const withRoyalty = listing();
+  withRoyalty.parameters.consideration.push({
+    itemType: 0,
+    token: NATIVE,
+    identifierOrCriteria: "0",
+    startAmount: "81000000000000000",
+    endAmount: "81000000000000000",
+    recipient: ROYALTY_RECEIVER,
+  });
+  assert.equal(hasConfiguredRoyaltyConsideration(withRoyalty, royaltyCollection), true);
+});
+
 test("accepts a royalty-bearing listing and derives the buyer-paid total", () => {
   const withRoyalty = listing();
   withRoyalty.parameters.consideration[0].startAmount = "919000000000000000";
@@ -288,6 +312,42 @@ test("accepts a royalty-bearing WETH bid and derives seller net proceeds", () =>
   };
   const d = validateOfferOrder(bid, royaltyCollection, WETH);
   assert.equal(d.priceWei, "919000000000000000");
+});
+
+test("allows a legacy no-royalty WETH bid only when explicitly marked pre-rollout", () => {
+  const bid = {
+    parameters: {
+      offerer: ATTACKER,
+      offer: [
+        {
+          itemType: 1,
+          token: WETH,
+          identifierOrCriteria: "0",
+          startAmount: "1000000000000000000",
+          endAmount: "1000000000000000000",
+        },
+      ],
+      consideration: [
+        {
+          itemType: 2,
+          token: NFT,
+          identifierOrCriteria: "1106",
+          startAmount: "1",
+          endAmount: "1",
+          recipient: ATTACKER,
+        },
+      ],
+      startTime: "0",
+      endTime: String(futureEnd),
+    },
+    signature: "0xdeadbeef",
+  };
+  const d = validateOfferOrder(bid, royaltyCollection, WETH, { requireRoyalty: false });
+  assert.equal(d.priceWei, "1000000000000000000");
+  assert.throws(
+    () => validateOfferOrder(bid, royaltyCollection, WETH),
+    /creator royalty/i
+  );
 });
 
 // ── Second audit pass (2026-07-27, round 2) ─────────────────────────────────
