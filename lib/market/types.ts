@@ -45,6 +45,11 @@ export type Listing = {
   expiresAt: string;
   kind: "fixed" | "dutch-auction";
   /**
+   * Internal compatibility marker. New orders are royalty-enforced; old
+   * signed orders may predate the royalty rollout and cannot be rewritten.
+   */
+  royaltyEnforced?: boolean;
+  /**
    * The token's own artwork, resolved once at listing time. Showing the
    * collection logo for every item makes a grid look broken or fake — the art
    * is the product. Falls back to the collection image only if resolution
@@ -88,6 +93,8 @@ export type Offer = {
   maker: string;
   priceWei: string;
   expiresAt: string;
+  /** Internal compatibility marker for the royalty rollout. */
+  royaltyEnforced?: boolean;
   /** Resolved token art; absent for collection-wide offers. */
   imageUrl?: string;
 };

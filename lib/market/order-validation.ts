@@ -139,6 +139,34 @@ function collectionRoyalty(collection: MarketCollection): CollectionRoyalty | nu
   return { bps: collection.royaltyBps, recipient: collection.royaltyRecipient };
 }
 
+/**
+ * Existing signed orders do not carry application metadata. Use their signed
+ * consideration to recover the rollout marker when an old stored row is read.
+ * This is only a compatibility hint; new writes are still validated strictly
+ * by the API before this helper is ever used.
+ */
+export function hasConfiguredRoyaltyConsideration(
+  rawOrder: unknown,
+  collection: MarketCollection
+): boolean {
+  const royalty = collectionRoyalty(collection);
+  if (!royalty) return false;
+  try {
+    const order = assertShape(rawOrder);
+    return order.parameters.consideration.some(
+      (item) => {
+        const itemType = toItemType(item.itemType);
+        return (
+          (itemType === ITEM_NATIVE || itemType === ITEM_ERC20) &&
+          sameAddress(item.recipient, royalty.recipient)
+        );
+      }
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** What the order actually says, after validation. Safe to display. */
 export type DerivedOrder = {
   /** parameters.offerer — never the client's claim. */
@@ -250,7 +278,8 @@ function endTimeToIso(p: RawParameters): string {
  */
 export function validateListingOrder(
   rawOrder: unknown,
-  collection: MarketCollection
+  collection: MarketCollection,
+  opts?: { requireRoyalty?: boolean }
 ): DerivedOrder {
   const order = assertShape(rawOrder);
   const p = order.parameters;
@@ -263,7 +292,7 @@ export function validateListingOrder(
   if (collection.tokenStandard !== "ERC721") {
     fail("Only ERC-721 collections are tradable on Marketplank for now.");
   }
-  const royalty = collectionRoyalty(collection);
+  const royalty = opts?.requireRoyalty === false ? null : collectionRoyalty(collection);
 
   if (p.offer.length !== 1) {
     fail("Marketplank listings must offer exactly one NFT.");
@@ -336,6 +365,8 @@ export function validateOfferOrder(
      * plank" while being unfillable for most sellers).
      */
     criteriaTokenIds?: readonly string[];
+    /** Set false only for signed orders created before royalty rollout. */
+    requireRoyalty?: boolean;
   }
 ): DerivedOrder {
   const order = assertShape(rawOrder);
@@ -346,7 +377,7 @@ export function validateOfferOrder(
   if (collection.tokenStandard !== "ERC721") {
     fail("Only ERC-721 collections are tradable on Marketplank for now.");
   }
-  const royalty = collectionRoyalty(collection);
+  const royalty = opts?.requireRoyalty === false ? null : collectionRoyalty(collection);
 
   if (p.offer.length !== 1) fail("Offers must offer exactly one payment item.");
   const offered = p.offer[0];
