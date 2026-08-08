@@ -87,7 +87,7 @@ export function isMarketplankRelistRequired(
 }
 
 export const MARKETPLANK_RELIST_MESSAGE =
-  "This listing predates creator-royalty enforcement. The seller must relist it before it can be bought on Marketplank.";
+  "This listing needs to be unlisted and relisted before it can be purchased on Marketplank.";
 
 export type Offer = {
   id: string;

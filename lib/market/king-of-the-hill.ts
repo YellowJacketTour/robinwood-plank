@@ -9,6 +9,7 @@
  */
 
 import { hasPostgresConfig, withPostgresTransaction } from "@/lib/postgres";
+import { salesStatsFromLedger } from "@/lib/market/chain-events";
 import {
   applyCandidateSale,
   finalizeIfDue,
@@ -82,26 +83,26 @@ async function readRowForUpdate(client: PoolClient): Promise<KothRow | null> {
  * here caused historical sales to disappear from KOTH only.
  */
 async function readHighestLedgerSale(client: PoolClient): Promise<KothSale | null> {
+  const stats = await salesStatsFromLedger(client);
+  if (!stats.highestTxHash || !stats.highestTokenId || !stats.highestWei) return null;
+
   const result = await client.query<{
-    tx_hash: string;
-    token_id: string | null;
     to_address: string | null;
-    price_wei: string;
   }>(
-    `SELECT tx_hash, token_id, to_address, price_wei::text AS price_wei
+    `SELECT to_address
        FROM plank_chain_events
-      WHERE kind = 'sale'
-        AND price_wei IS NOT NULL
-      ORDER BY price_wei DESC, block_number DESC, log_index DESC
-      LIMIT 1`
+      WHERE tx_hash = $1
+        AND kind = 'sale'
+      ORDER BY log_index DESC
+      LIMIT 1`,
+    [stats.highestTxHash]
   );
   const row = result.rows[0];
-  if (!row) return null;
   return {
-    txHash: row.tx_hash,
-    tokenId: row.token_id,
-    wallet: row.to_address,
-    priceWei: row.price_wei,
+    txHash: stats.highestTxHash,
+    tokenId: stats.highestTokenId,
+    wallet: row?.to_address ?? null,
+    priceWei: stats.highestWei,
   };
 }
 

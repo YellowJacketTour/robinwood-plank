@@ -213,7 +213,7 @@ export default function ListingCard({
           >
             <p className="text-[0.72rem] font-black uppercase tracking-[0.08em]">Relist required</p>
             <p className="text-[0.68rem] font-bold leading-snug text-red-100/85">
-              Seller must relist with creator royalties before this can be bought here.
+              {MARKETPLANK_RELIST_MESSAGE}
             </p>
           </div>
         )}
