@@ -27,6 +27,8 @@ test("leaves compliant Marketplank orders available", () => {
 });
 
 test("keeps the buyer-facing explanation explicit", () => {
-  assert.match(MARKETPLANK_RELIST_MESSAGE, /relist/);
-  assert.match(MARKETPLANK_RELIST_MESSAGE, /Marketplank/);
+  assert.equal(
+    MARKETPLANK_RELIST_MESSAGE,
+    "This listing needs to be unlisted and relisted before it can be purchased on Marketplank."
+  );
 });
