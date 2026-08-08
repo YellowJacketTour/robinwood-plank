@@ -79,7 +79,9 @@ export function planSweep(
     }
     let derived: DerivedOrder;
     try {
-      derived = validateListingOrder(listing.rawOrder, collection);
+      derived = validateListingOrder(listing.rawOrder, collection, {
+        requireRoyalty: listing.royaltyEnforced !== false,
+      });
     } catch {
       droppedInvalid++;
       continue;
@@ -140,7 +142,9 @@ export function assertSweepTotal(
     // Throws OrderValidationError on any tampering — no catch, no drop here:
     // at confirm time a bad order means the DISPLAYED total is wrong, and the
     // only safe response is to abort, not silently re-price.
-    const derived = validateListingOrder(item.listing.rawOrder, collection);
+    const derived = validateListingOrder(item.listing.rawOrder, collection, {
+      requireRoyalty: item.listing.royaltyEnforced !== false,
+    });
     if (derived.tokenId !== item.listing.tokenId) {
       throw new Error("A plank in this sweep doesn't match its signature.");
     }

@@ -552,7 +552,9 @@ export default function MarketView() {
         // even a compromised API or store cannot show one price and have the
         // wallet sign another.
         const { validateListingOrder } = await loadOrderValidation();
-        const derived = validateListingOrder(full.rawOrder, COLLECTION);
+        const derived = validateListingOrder(full.rawOrder, COLLECTION, {
+          requireRoyalty: full.royaltyEnforced !== false,
+        });
         if (derived.tokenId !== full.tokenId) {
           throw new Error("This listing's details don't match its signature.");
         }
@@ -654,7 +656,9 @@ export default function MarketView() {
         if (!COLLECTION) throw new Error("Unknown collection.");
 
         const { validateOfferOrder } = await loadOrderValidation();
-        const derived = validateOfferOrder(full.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY);
+        const derived = validateOfferOrder(full.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY, {
+          requireRoyalty: full.royaltyEnforced !== false,
+        });
         const { assertAcceptableOffer } = await loadSeaport();
         assertAcceptableOffer(full, derived);
         // derived.priceWei is the seller's NET proceeds after marketplace fee
@@ -690,6 +694,7 @@ export default function MarketView() {
         const { validateOfferOrder } = await loadOrderValidation();
         const derived = validateOfferOrder(offer.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY, {
           criteriaTokenIds: offer.criteriaTokenIds,
+          requireRoyalty: offer.royaltyEnforced !== false,
         });
         const owned = ownedTokenIds ?? new Set<string>();
         const snapshot = new Set(offer.criteriaTokenIds.map((id) => BigInt(id).toString()));
@@ -728,6 +733,7 @@ export default function MarketView() {
       const { validateOfferOrder } = await loadOrderValidation();
       const derived = validateOfferOrder(offer.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY, {
         criteriaTokenIds: offer.criteriaTokenIds ?? [],
+        requireRoyalty: offer.royaltyEnforced !== false,
       });
       const { assertAcceptableTraitOffer, fulfillOrder } = await loadSeaport();
       const criteria = assertAcceptableTraitOffer(
