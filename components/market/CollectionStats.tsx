@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { formatTokenAmount } from "@/lib/trade";
 import type { Listing, MarketCollection } from "@/lib/market/types";
 import { swrJson } from "@/lib/market/swr-fetch";
+import EthUsdValue from "@/components/market/EthUsdValue";
 
 type Props = {
   collection: MarketCollection;
@@ -72,10 +73,11 @@ export default function CollectionStats({
   // already count. It is deliberately not labelled "Marketplank volume":
   // claiming another venue's trades as our own would be a lie, and excluding
   // them would understate the collection.
-  const stats: { label: string; value: string }[] = [
+  const stats: { label: string; value: string; wei?: string | bigint | null }[] = [
     {
       label: "Floor price",
       value: floorWei === null ? "—" : `${formatTokenAmount(floorWei, 18, 4)} Ξ`,
+      wei: floorWei,
     },
     { label: "Items", value: totalSupply ? totalSupply.toLocaleString() : "—" },
     {
@@ -87,14 +89,17 @@ export default function CollectionStats({
     {
       label: "Best offer",
       value: bestOfferWei === null ? "—" : `${formatTokenAmount(bestOfferWei, 18, 4)} WETH`,
+      wei: bestOfferWei,
     },
     {
       label: "Volume",
       value: volumeWei == null ? "…" : `${formatTokenAmount(volumeWei, 18, 3)} Ξ`,
+      wei: volumeWei,
     },
     {
       label: "Highest sale",
       value: recordWei == null ? "…" : `${formatTokenAmount(recordWei, 18, 4)} Ξ`,
+      wei: recordWei,
     },
   ];
 
@@ -110,6 +115,7 @@ export default function CollectionStats({
           </dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
             {s.value}
+            {s.wei && <EthUsdValue wei={s.wei} className="block font-sans text-[0.62rem] text-foreground/50" />}
           </dd>
         </div>
       ))}

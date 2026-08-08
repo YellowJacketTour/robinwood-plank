@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
+import EthUsdValue from "@/components/market/EthUsdValue";
 
 type Remaining = {
   days: number;
@@ -141,6 +142,7 @@ export default function EventCountdown() {
             <p className="truncate text-[0.72rem] font-bold text-gold-300">
               {finalized ? "Winner" : "King of the Hill"}: Plank #{record.tokenId} ·{" "}
               {formatTokenAmount(record.priceWei, 18, 4)} ETH
+              <EthUsdValue wei={record.priceWei} className="ml-1 text-[0.62rem] text-foreground/50" />
             </p>
             <p className="truncate text-[0.62rem] text-foreground/55">
               {record.buyer ? `${record.buyer} · ` : ""}

@@ -10,6 +10,7 @@ import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { withImageWidth } from "@/lib/ipfs";
+import EthUsdValue from "@/components/market/EthUsdValue";
 
 type Props = {
   listing: Listing;
@@ -145,6 +146,7 @@ export default function ListingCard({
                 {formatTokenAmount(listing.priceWei, 18, 4)} Ξ
               </span>
             </p>
+            <EthUsdValue wei={listing.priceWei} className="block text-[0.62rem] tabular-nums text-foreground/50" />
           </div>
           {listing.venue === "opensea" ? (
             /**

@@ -48,6 +48,7 @@ import { ensureRobinhoodChain } from "@/lib/wallet";
 import { useWallet } from "@/lib/wallet-context";
 import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { formatTokenAmount } from "@/lib/trade";
+import EthUsdValue from "@/components/market/EthUsdValue";
 import {
   isMarketplankRelistRequired,
   MARKETPLANK_RELIST_MESSAGE,
@@ -992,8 +993,14 @@ export default function MarketView() {
             <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
               <div className="flex justify-between">
                 <dt className="font-bold text-foreground">You receive (net)</dt>
-                <dd className="font-display tabular-nums text-gold-300">
-                  {formatTokenAmount(acceptTraitTarget.verifiedNetWei, 18, 6)} WETH
+                <dd className="text-right font-display tabular-nums text-gold-300">
+                  <span className="block">
+                    {formatTokenAmount(acceptTraitTarget.verifiedNetWei, 18, 6)} WETH
+                  </span>
+                  <EthUsdValue
+                    wei={acceptTraitTarget.verifiedNetWei}
+                    className="block font-sans text-[0.65rem] text-foreground/55"
+                  />
                 </dd>
               </div>
             </dl>
@@ -1053,8 +1060,14 @@ export default function MarketView() {
             <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
               <div className="flex justify-between border-t border-line pt-1 first:border-t-0 first:pt-0">
                 <dt className="font-bold text-foreground">You receive (net)</dt>
-                <dd className="font-display tabular-nums text-gold-300">
-                  {formatTokenAmount(acceptTarget.verifiedNetWei, 18, 6)} WETH
+                <dd className="text-right font-display tabular-nums text-gold-300">
+                  <span className="block">
+                    {formatTokenAmount(acceptTarget.verifiedNetWei, 18, 6)} WETH
+                  </span>
+                  <EthUsdValue
+                    wei={acceptTarget.verifiedNetWei}
+                    className="block font-sans text-[0.65rem] text-foreground/55"
+                  />
                 </dd>
               </div>
             </dl>
@@ -1375,6 +1388,10 @@ export default function MarketView() {
                                 {o.criteriaTokenIds?.length ?? 0} planks qualify · seller nets{" "}
                                 {formatTokenAmount(o.priceWei, 18, 6)} WETH
                               </p>
+                              <EthUsdValue
+                                wei={o.priceWei}
+                                className="mt-0.5 block text-[0.62rem] text-foreground/50"
+                              />
                             </div>
                             <button
                               type="button"
