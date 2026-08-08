@@ -167,27 +167,32 @@ export default function ListingCard({
               <ExternalLink size={12} strokeWidth={2.5} aria-hidden />
               <span className="sr-only">on OpenSea, opens in a new tab</span>
             </a>
+          ) : relistRequired ? (
+            <span
+              role="status"
+              title={MARKETPLANK_RELIST_MESSAGE}
+              className="flex min-h-11 max-w-[8.5rem] items-center justify-center rounded-md border border-red-400/60 bg-red-950/40 px-2 text-center text-[0.62rem] font-bold leading-tight text-red-100"
+            >
+              <span>
+                <span className="block uppercase tracking-wide">Relist required</span>
+                <span className="mt-0.5 block text-[0.55rem] font-semibold text-red-100/75">
+                  Unlist + relist to buy
+                </span>
+              </span>
+            </span>
           ) : (
             <button
               type="button"
-              disabled={!canFill || relistRequired}
+              disabled={!canFill}
               onClick={() => onBuy?.(listing)}
-              title={
-                relistRequired
-                  ? MARKETPLANK_RELIST_MESSAGE
-                  : canFill
-                    ? undefined
-                    : "You don't own a plank this bid can take."
-              }
+              title={canFill ? undefined : "You don't own a plank this bid can take."}
               className={`min-h-11 rounded-md px-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-100 sm:px-3 sm:text-sm ${
-                relistRequired
-                  ? "min-w-28 border border-red-400/60 bg-red-950/40 text-red-100"
-                  : isOffer
-                    ? "min-w-16 bg-emerald-500 text-wood-950 hover:bg-emerald-400 sm:min-w-[4.25rem]"
-                    : "min-w-16 bg-gold-500 text-wood-950 hover:bg-gold-400 sm:min-w-[4.25rem]"
+                isOffer
+                  ? "min-w-16 bg-emerald-500 text-wood-950 hover:bg-emerald-400 sm:min-w-[4.25rem]"
+                  : "min-w-16 bg-gold-500 text-wood-950 hover:bg-gold-400 sm:min-w-[4.25rem]"
               }`}
             >
-              {relistRequired ? "Relist required" : buyLabel ?? "Buy"}
+              {buyLabel ?? "Buy"}
             </button>
           )}
         </div>
@@ -207,17 +212,6 @@ export default function ListingCard({
           >
             {listing.venue === "opensea" ? "OpenSea" : "Marketplank"}
           </span>
-        )}
-        {relistRequired && (
-          <div
-            role="status"
-            className="space-y-0.5 rounded-md border border-red-400/55 bg-red-950/35 px-2.5 py-2 text-red-100"
-          >
-            <p className="text-[0.72rem] font-black uppercase tracking-[0.08em]">Relist required</p>
-            <p className="text-[0.68rem] font-bold leading-snug text-red-100/85">
-              {MARKETPLANK_RELIST_MESSAGE}
-            </p>
-          </div>
         )}
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-[0.6rem] text-foreground/45" title={listing.maker}>
