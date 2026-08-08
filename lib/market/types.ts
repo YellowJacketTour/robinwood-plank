@@ -75,6 +75,20 @@ export type Listing = {
   externalUrl?: string;
 };
 
+/**
+ * A legacy order can be displayed for context, but cannot be fulfilled by
+ * Marketplank because its signed consideration predates creator royalties.
+ * OpenSea rows are display-only and must never inherit this state.
+ */
+export function isMarketplankRelistRequired(
+  listing: Pick<Listing, "venue" | "royaltyEnforced">
+): boolean {
+  return listing.venue !== "opensea" && listing.royaltyEnforced === false;
+}
+
+export const MARKETPLANK_RELIST_MESSAGE =
+  "This listing predates creator-royalty enforcement. The seller must relist it before it can be bought on Marketplank.";
+
 export type Offer = {
   id: string;
   collectionSlug: string;

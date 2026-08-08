@@ -48,7 +48,13 @@ import { ensureRobinhoodChain } from "@/lib/wallet";
 import { useWallet } from "@/lib/wallet-context";
 import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { formatTokenAmount } from "@/lib/trade";
-import type { Listing, MarketTab, Offer } from "@/lib/market/types";
+import {
+  isMarketplankRelistRequired,
+  MARKETPLANK_RELIST_MESSAGE,
+  type Listing,
+  type MarketTab,
+  type Offer,
+} from "@/lib/market/types";
 import dynamic from "next/dynamic";
 
 const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModalSwitch"), {
@@ -540,10 +546,8 @@ export default function MarketView() {
   const handleBuy = useCallback(
     async (listing: Listing) => {
       setError(null);
-      if (listing.royaltyEnforced === false) {
-        setError(
-          "This listing predates creator-royalty enforcement. The seller must relist it before it can be bought on Marketplank."
-        );
+      if (isMarketplankRelistRequired(listing)) {
+        setError(MARKETPLANK_RELIST_MESSAGE);
         return;
       }
       const who = await requireAccount();
@@ -552,10 +556,8 @@ export default function MarketView() {
         const full = listings.find((l) => l.id === listing.id);
         if (!full) throw new Error("Listing no longer available.");
         if (!COLLECTION) throw new Error("Unknown collection.");
-        if (full.royaltyEnforced === false) {
-          throw new Error(
-            "This listing predates creator-royalty enforcement. The seller must relist it before it can be bought on Marketplank."
-          );
+        if (isMarketplankRelistRequired(full)) {
+          throw new Error(MARKETPLANK_RELIST_MESSAGE);
         }
 
         // Re-derive the price from the signed order in the buyer's own
