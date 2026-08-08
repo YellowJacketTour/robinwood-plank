@@ -45,8 +45,8 @@ export type Listing = {
   expiresAt: string;
   kind: "fixed" | "dutch-auction";
   /**
-   * Internal compatibility marker. New orders are royalty-enforced; old
-   * signed orders may predate the royalty rollout and cannot be rewritten.
+   * Internal availability marker. False means the signed order predates
+   * mandatory creator royalties and must be relisted before fulfillment.
    */
   royaltyEnforced?: boolean;
   /**
@@ -93,7 +93,7 @@ export type Offer = {
   maker: string;
   priceWei: string;
   expiresAt: string;
-  /** Internal compatibility marker for the royalty rollout. */
+  /** False means the signed offer must be relisted before fulfillment. */
   royaltyEnforced?: boolean;
   /** Resolved token art; absent for collection-wide offers. */
   imageUrl?: string;

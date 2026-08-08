@@ -540,21 +540,30 @@ export default function MarketView() {
   const handleBuy = useCallback(
     async (listing: Listing) => {
       setError(null);
+      if (listing.royaltyEnforced === false) {
+        setError(
+          "This listing predates creator-royalty enforcement. The seller must relist it before it can be bought on Marketplank."
+        );
+        return;
+      }
       const who = await requireAccount();
       if (!who) return;
       try {
         const full = listings.find((l) => l.id === listing.id);
         if (!full) throw new Error("Listing no longer available.");
         if (!COLLECTION) throw new Error("Unknown collection.");
+        if (full.royaltyEnforced === false) {
+          throw new Error(
+            "This listing predates creator-royalty enforcement. The seller must relist it before it can be bought on Marketplank."
+          );
+        }
 
         // Re-derive the price from the signed order in the buyer's own
         // browser. The API already does this, but repeating it here means
         // even a compromised API or store cannot show one price and have the
         // wallet sign another.
         const { validateListingOrder } = await loadOrderValidation();
-        const derived = validateListingOrder(full.rawOrder, COLLECTION, {
-          requireRoyalty: full.royaltyEnforced !== false,
-        });
+        const derived = validateListingOrder(full.rawOrder, COLLECTION);
         if (derived.tokenId !== full.tokenId) {
           throw new Error("This listing's details don't match its signature.");
         }
@@ -648,17 +657,26 @@ export default function MarketView() {
   const handleAcceptOffer = useCallback(
     async (offer: Listing) => {
       setError(null);
+      if (offer.royaltyEnforced === false) {
+        setError(
+          "This offer predates creator-royalty enforcement. The maker must relist it before it can be accepted on Marketplank."
+        );
+        return;
+      }
       const who = await requireAccount();
       if (!who) return;
       try {
         const full = offers.find((o) => o.id === offer.id);
         if (!full) throw new Error("Offer no longer available.");
         if (!COLLECTION) throw new Error("Unknown collection.");
+        if (full.royaltyEnforced === false) {
+          throw new Error(
+            "This offer predates creator-royalty enforcement. The maker must relist it before it can be accepted on Marketplank."
+          );
+        }
 
         const { validateOfferOrder } = await loadOrderValidation();
-        const derived = validateOfferOrder(full.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY, {
-          requireRoyalty: full.royaltyEnforced !== false,
-        });
+        const derived = validateOfferOrder(full.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY);
         const { assertAcceptableOffer } = await loadSeaport();
         assertAcceptableOffer(full, derived);
         // derived.priceWei is the seller's NET proceeds after marketplace fee
@@ -686,6 +704,12 @@ export default function MarketView() {
   const handleAcceptTraitOffer = useCallback(
     async (offer: WithOrder<Offer>) => {
       setError(null);
+      if (offer.royaltyEnforced === false) {
+        setError(
+          "This offer predates creator-royalty enforcement. The maker must relist it before it can be accepted on Marketplank."
+        );
+        return;
+      }
       const who = await requireAccount();
       if (!who) return;
       try {
@@ -694,7 +718,6 @@ export default function MarketView() {
         const { validateOfferOrder } = await loadOrderValidation();
         const derived = validateOfferOrder(offer.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY, {
           criteriaTokenIds: offer.criteriaTokenIds,
-          requireRoyalty: offer.royaltyEnforced !== false,
         });
         const owned = ownedTokenIds ?? new Set<string>();
         const snapshot = new Set(offer.criteriaTokenIds.map((id) => BigInt(id).toString()));
@@ -728,12 +751,16 @@ export default function MarketView() {
     try {
       setAccepting(true);
       const { offer, chosenTokenId } = acceptTraitTarget;
+      if (offer.royaltyEnforced === false) {
+        throw new Error(
+          "This offer predates creator-royalty enforcement. The maker must relist it before it can be accepted on Marketplank."
+        );
+      }
       // Re-derive EVERYTHING from the signed order at send time; the proof
       // handed to the wallet comes from the same verified snapshot.
       const { validateOfferOrder } = await loadOrderValidation();
       const derived = validateOfferOrder(offer.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY, {
         criteriaTokenIds: offer.criteriaTokenIds ?? [],
-        requireRoyalty: offer.royaltyEnforced !== false,
       });
       const { assertAcceptableTraitOffer, fulfillOrder } = await loadSeaport();
       const criteria = assertAcceptableTraitOffer(
