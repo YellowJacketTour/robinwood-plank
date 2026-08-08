@@ -116,11 +116,10 @@ export default function EventCountdown() {
 
   useEffect(() => {
     if (target == null) return;
-    // The banner shows day/hour/minute precision (finalized mockup) — a
-    // minute cadence is enough and avoids a whole-banner re-render every second.
+    // Show second precision so the countdown stays useful near the deadline.
     const update = () => setRemaining(getRemaining(target));
     update();
-    const timer = window.setInterval(update, 30_000);
+    const timer = window.setInterval(update, 1_000);
     return () => window.clearInterval(timer);
   }, [target]);
 
@@ -157,7 +156,7 @@ export default function EventCountdown() {
           {finalized ? "Event closed" : "Event closes in"}
         </p>
         <p className="font-mono text-sm font-bold text-foreground">
-          {pad(remaining?.days)}d {pad(remaining?.hours)}h {pad(remaining?.minutes)}m
+          {pad(remaining?.days)}d {pad(remaining?.hours)}h {pad(remaining?.minutes)}m {pad(remaining?.seconds)}s
         </p>
       </div>
     </div>
