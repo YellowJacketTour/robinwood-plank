@@ -5,6 +5,7 @@ import {
   finalizeIfDue,
   GRACE_WINDOW_MS,
   EXTENSION_MS,
+  seedExistingSale,
   type KothSale,
   type KothState,
 } from "../../lib/market/king-of-the-hill-rules";
@@ -18,6 +19,26 @@ function sale(priceWei: string, txHash = "0xsale"): KothSale {
 function initial(deadlineMs = DEADLINE): KothState {
   return { deadlineMs, leadingSale: null, winnerFinalizedAtMs: null, winnerSale: null };
 }
+
+test("seeding an existing sale establishes the starting leader without extending the deadline", () => {
+  const state = initial();
+  const seeded = seedExistingSale(state, sale("5000", "0xexisting"));
+  assert.equal(seeded.leadingSale?.txHash, "0xexisting");
+  assert.equal(seeded.deadlineMs, DEADLINE);
+});
+
+test("seeding never replaces an existing leader or finalized winner", () => {
+  const leader = sale("5000", "0xleader");
+  const state = { ...initial(), leadingSale: leader };
+  assert.equal(seedExistingSale(state, sale("9000", "0xother")), state);
+
+  const finalized = {
+    ...initial(),
+    winnerFinalizedAtMs: DEADLINE + 1,
+    winnerSale: leader,
+  };
+  assert.equal(seedExistingSale(finalized, sale("9000", "0xother")), finalized);
+});
 
 test("a new highest sale WITHIN the 2-hour grace window extends the deadline by exactly 4 hours", () => {
   const now = DEADLINE - 30 * 60 * 1000; // 30 minutes before deadline, inside the 2h window
