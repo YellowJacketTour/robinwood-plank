@@ -7,6 +7,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {CollectionVaultLP} from "./CollectionVaultLP.sol";
 
 /// @dev Minimal interface for PR1's `WeightModule` signal calls
 /// (`contracts/energy/IWeightModule.sol`), inlined for the same reason.
@@ -158,6 +159,31 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     uint256 public shareReserve;
     bool public poolOpen;
     uint256 private constant MIN_INITIAL_LIQUIDITY = 1e3;
+
+    /// @notice DESIGN-COLLECTION-VAULT-NATIVE-LP-AND-ZAP-MINT-2026-08-08.md §3.1:
+    /// real, permissionless community liquidity ADDITIVE to the constant-
+    /// product pool above. `paymentReserve`/`shareReserve` remain the ONE
+    /// source of truth `buyShares`/`sellShares` price against — this layer
+    /// only changes WHO can deposit/withdraw into those same two numbers.
+    /// Deployed once, lazily, at `openPool()`.
+    CollectionVaultLP public lpToken;
+
+    /// @notice Same dead address this repo already uses for
+    /// `IndexFacetBase.SEED_LOCK_ADDR` / the buyback lock — nobody holds its
+    /// key. The ENTIRE genesis LP mint (100% of the pool at the moment
+    /// `openPool()` is called, i.e. the treasury's seeded floor) is minted
+    /// directly here and nowhere else, so there is no window in which
+    /// `treasury` ever custodies a withdrawable LP position.
+    address public constant LP_LOCK_ADDR = 0x000000000000000000000000000000000000dEaD;
+
+    event GenesisFloorLocked(uint256 lpAmount, uint256 paymentReserve, uint256 shareReserve);
+    event LiquidityAdded(address indexed provider, uint256 paymentIn, uint256 sharesIn, uint256 lpOut);
+    event LiquidityRemoved(address indexed provider, uint256 lpIn, uint256 paymentOut, uint256 sharesOut);
+
+    error PoolNotYetOpenForLp();
+    error ZeroLiquidityInput();
+    error InsufficientLpOutput();
+    error InsufficientLpRemoveOutput();
 
     /// @notice ETH... no: paymentToken fees awaiting a withdrawFees() pull,
     /// exactly MarketplankVaultV3's accruedFees/withdrawFees pattern.
@@ -450,6 +476,106 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         }
         poolOpen = true;
         emit PoolOpened(paymentReserve, shareReserve);
+
+        // ── Native-LP genesis floor (DESIGN-COLLECTION-VAULT-NATIVE-LP-AND-
+        // ZAP-MINT-2026-08-08.md §3.1, requirement 2): deploy this vault's LP
+        // receipt and mint the ENTIRE genesis LP supply straight to
+        // LP_LOCK_ADDR. This is simultaneously (a) the "permanently-locked
+        // protocol floor" and (b) first-depositor/inflation-attack
+        // protection on the LP token itself — every `addLiquidity` call after
+        // this point prices against a nonzero, treasury-sized `lpToken`
+        // supply that no depositor (community or attacker) ever controlled
+        // the creation of.
+        lpToken = new CollectionVaultLP(
+            string.concat("LP ", name()),
+            string.concat("LP-", symbol()),
+            address(this)
+        );
+        uint256 genesisLp = _sqrt(paymentReserve * shareReserve);
+        lpToken.mint(LP_LOCK_ADDR, genesisLp);
+        emit GenesisFloorLocked(genesisLp, paymentReserve, shareReserve);
+    }
+
+    /// @notice Permissionless, balanced two-sided liquidity add, ADDITIVE to
+    /// the constant-product pool `buyShares`/`sellShares` already price
+    /// against (DESIGN-COLLECTION-VAULT-NATIVE-LP-AND-ZAP-MINT-2026-08-08.md
+    /// §3.1, requirement 3). Caller supplies `paymentIn`; the matching `S`
+    /// amount is DERIVED from the pool's own current ratio (never a
+    /// caller-nominal figure), so the deposit is always balanced by
+    /// construction — no separate slippage-prone two-parameter quote needed.
+    /// LP minted is proportional to the REAL, observed-delta-pulled
+    /// `paymentIn` relative to the pool's `paymentReserve` at the moment of
+    /// the call, exactly mirroring the genesis floor's own pricing.
+    function addLiquidity(uint256 paymentIn, uint256 minLpOut)
+        external
+        nonReentrant
+        returns (uint256 lpOut, uint256 sharesIn)
+    {
+        if (!poolOpen) revert PoolNotYetOpenForLp();
+        if (paymentIn == 0) revert ZeroLiquidityInput();
+
+        uint256 totalLp = lpToken.totalSupply();
+        sharesIn = (paymentIn * shareReserve) / paymentReserve;
+        lpOut = (paymentIn * totalLp) / paymentReserve;
+        if (sharesIn == 0 || lpOut == 0 || lpOut < minLpOut) revert InsufficientLpOutput();
+
+        uint256 before = paymentToken.balanceOf(address(this));
+        paymentToken.safeTransferFrom(msg.sender, address(this), paymentIn);
+        uint256 credited = paymentToken.balanceOf(address(this)) - before;
+        if (credited != paymentIn) revert IncorrectFee();
+
+        _spendAllowance(msg.sender, address(this), sharesIn);
+        _transfer(msg.sender, address(this), sharesIn);
+
+        paymentReserve += paymentIn;
+        shareReserve += sharesIn;
+        lpToken.mint(msg.sender, lpOut);
+        emit LiquidityAdded(msg.sender, paymentIn, sharesIn, lpOut);
+    }
+
+    /// @notice Permissionless removal, the exact counterpart to
+    /// `addLiquidity` (requirement 3): burns `lpIn` of the CALLER's OWN LP
+    /// balance (never anyone else's — `lpToken.burn` is only ever invoked
+    /// here, with `msg.sender` as the account, so this contract holds no
+    /// arbitrary admin-burn power) and returns their exact proportional
+    /// share of CURRENT reserves, including every fee-driven `k` increase
+    /// (Stream B's local half via `buyShares`/`sellShares`, and Stream A's
+    /// `XTOKEN_COMPOUND_BPS` carve-out via `_compoundXToken`) accrued since
+    /// their deposit — the identical "fee-into-k" mechanism Uniswap v2 LPs
+    /// already rely on, now real for this vault's own pool.
+    function removeLiquidity(uint256 lpIn, uint256 minPaymentOut, uint256 minSharesOut)
+        external
+        nonReentrant
+        returns (uint256 paymentOut, uint256 sharesOut)
+    {
+        if (lpIn == 0) revert ZeroLiquidityInput();
+        uint256 totalLp = lpToken.totalSupply();
+        paymentOut = (lpIn * paymentReserve) / totalLp;
+        sharesOut = (lpIn * shareReserve) / totalLp;
+        if (paymentOut < minPaymentOut || sharesOut < minSharesOut) revert InsufficientLpRemoveOutput();
+
+        lpToken.burn(msg.sender, lpIn);
+        paymentReserve -= paymentOut;
+        shareReserve -= sharesOut;
+
+        paymentToken.safeTransfer(msg.sender, paymentOut);
+        _transfer(address(this), msg.sender, sharesOut);
+        emit LiquidityRemoved(msg.sender, lpIn, paymentOut, sharesOut);
+    }
+
+    /// @dev Babylonian method, verbatim standard Uniswap-v2-style integer
+    /// sqrt, used only for the one-time genesis LP mint.
+    function _sqrt(uint256 y) private pure returns (uint256 z) {
+        if (y > 3) {
+            z = y;
+            uint256 x = y / 2 + 1;
+            while (x < z) {
+                z = x;
+                x = (y / x + x) / 2;
+            }
+        } else if (y != 0) {
+            z = 1;
+        }
     }
 
     /// @notice PR6 (ONESHOT §5.2 LP-renounce strategy (b) / SPEC §5): a
