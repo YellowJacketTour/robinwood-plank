@@ -37,29 +37,25 @@ import { deployIndexVault, defaultParams, paramsTuple, WAD, TIMELOCK, maxIn } fr
  *   - The real `WeightModule`, admitted permissionlessly via `checkAdmit`.
  *   - The real index Diamond (`IndexEnergyFacet`, `IndexCoreFacet`, etc.),
  *     with the vault's own share `S` as its one constituent.
- *   - Real `InventoryBuyAdapter` (Pipe I), `IdxBurnAdapter` (Pipe X),
- *     `PlankBurnAdapter` (Pipe P), `PlankLpRenounceAdapter` (Pipe R),
- *     `DividendAdapter` (Pipe D) — PR1-7's own shipped contracts, not
- *     `MockEnergyAdapter` stand-ins.
+ *   - Real `InventoryBuyAdapter` (Pipe I), `CollectionLpAdapter` (Pipe L),
+ *     `IdxBurnAdapter` (Pipe X), `PlankBurnAdapter` (Pipe P),
+ *     `PlankLpRenounceAdapter` (Pipe R), `DividendAdapter` (Pipe D) — all six
+ *     pipes now real shipped contracts, not `MockEnergyAdapter` stand-ins.
  *
- * ONE HONEST GAP, DISCLOSED RATHER THAN PAPERED OVER: Pipe L (`clpAdapter`,
- * "Collection LP renounce") has NO shipped adapter contract anywhere in this
- * repo as of this commit. `docs/DESIGN-COLLECTION-VAULT-NATIVE-LP-AND-ZAP-
- * MINT-2026-08-08.md` (git history `c879311`, "obsolete PR6 donation-only
- * files removed") confirms an earlier `CollectionLpRenounceAdapter.sol`
- * attempt was deliberately removed as obsolete and re-designed as the native
- * `CollectionVaultLP` mechanism instead — a DIFFERENT, already-shipped
- * mechanism (`CollectionVault.addLiquidity`/`removeLiquidity`, PR6's actual
- * final shape) that does not plug into `EnergyBus` as a pipe at all. Building
- * a brand-new real Pipe-L adapter is out of scope for an integration-proofing
- * PR (PR8/PR9 are explicitly "integration-proof stages over already-shipped
- * contracts, not new contract logic" per this PR's own brief) — so Pipe L
- * here uses `MockEnergyAdapter` in SPEND_ALL mode, exactly the way
- * `InventoryBuyAdapterNest.test.ts` (NEST-1, PR5) already does for every pipe
- * not under that suite's test. This is the SAME "5 real + 1 documented mock"
- * shape as every other suite in this repo that assembles a full Bus today;
- * "all 6 real adapters" cannot be literally true until a real Pipe L adapter
- * ships in a future PR — flagged here rather than silently worked around.
+ * GAP CLOSED. Pipe L (`clpAdapter`, "Collection LP renounce") previously had
+ * NO shipped adapter — an earlier `CollectionLpRenounceAdapter.sol` attempt,
+ * built against a donation-only model, was deleted when the architecture
+ * pivoted to real native LP (`CollectionVault.addLiquidity`/
+ * `removeLiquidity`, `CollectionVaultLP`, `LP_LOCK_ADDR`). `CollectionLpAdapter.sol`
+ * is now built against that CORRECT model: it acquires the matching `S` for
+ * a balanced deposit via the vault's own `buyShares`, calls `addLiquidity`
+ * for a REAL LP receipt, and forwards that receipt straight to the same
+ * `LP_LOCK_ADDR` the genesis floor already uses — never a withdrawable
+ * position for anyone, including this adapter itself. This suite now
+ * exercises all 6 pipes as real adapters, closing the "5 real + 1 documented
+ * mock" gap this file previously disclosed. See `CollectionLpAdapter.sol`'s
+ * own header and `test/contracts/energy/CollectionLpAdapter.test.ts` for the
+ * full non-withdrawability/skim proofs.
  *
  * LOCAL HARDHAT ONLY.
  * ============================================================================
@@ -278,12 +274,11 @@ describe("CollectionVaultFactory sink -> real EnergyBus, e2e deposit -> route (P
     const [, amountsBefore] = await index.previewRedeemProRata(WAD);
     const perShareBefore: bigint = amountsBefore[0];
 
-    // ── 5. Deploy 5 REAL adapters + 1 documented MockEnergyAdapter (Pipe L,
-    //    see this file's header) in the EXACT fixed count/order the
+    // ── 5. Deploy all 6 REAL adapters in the EXACT fixed count/order the
     //    predicted-Bus-address math above assumed, then the real Bus itself
     //    at the predicted address. ────────────────────────────────────────
-    const MockAdapter = await ethers.getContractFactory("MockEnergyAdapter");
-    const clpMock: any = await MockAdapter.connect(busDeployer).deploy(wethAddr); // Pipe L — no real adapter shipped, see header
+    const ClpAdapterF = await ethers.getContractFactory("CollectionLpAdapter");
+    const clp: any = await ClpAdapterF.connect(busDeployer).deploy(wethAddr, predictedBus, weightModuleAddr); // Pipe L — real, native-LP model
 
     const IdxBurn = await ethers.getContractFactory("IdxBurnAdapter");
     const idxBurn: any = await IdxBurn.connect(busDeployer).deploy(wethAddr, indexAddr, predictedBus);
@@ -318,7 +313,7 @@ describe("CollectionVaultFactory sink -> real EnergyBus, e2e deposit -> route (P
         wethAddr,
         [
           await inv.getAddress(),
-          await clpMock.getAddress(),
+          await clp.getAddress(),
           await idxBurn.getAddress(),
           await plankBurn.getAddress(),
           await plankLp.getAddress(),
