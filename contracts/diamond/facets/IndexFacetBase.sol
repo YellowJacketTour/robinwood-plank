@@ -33,7 +33,8 @@ import {
     PlatformTreasuryStorage,
     ReentrancyStorage,
     HooksStorage,
-    ReserveVestStorage
+    ReserveVestStorage,
+    EnergyBusStorage
 } from "../storage/IndexStorage.sol";
 
 /**
@@ -424,6 +425,15 @@ abstract contract IndexFacetBase {
     event RoleQueued(bytes32 indexed role, address indexed next, uint64 eta);
     event RoleApplied(bytes32 indexed role, address indexed previous, address indexed next);
 
+    // ── PR5 (ONESHOT §5.3, SPEC §4.2) — the Energy Bus credit surface ───────
+    event EnergyBusQueued(address indexed bus, uint64 eta);
+    event EnergyBusSet(address indexed bus);
+    /// @notice A real, observed balance-delta credit landed via
+    /// `IndexEnergyFacet.creditInventory` — `credited` is always what
+    /// `_reconcileCore` itself measured, never a caller-supplied figure (see
+    /// that function's own header).
+    event EnergyCredited(address indexed token, uint256 credited);
+
     // Hooks (design doc section 8)
     /// @notice A hook registration was queued. Mirrors `ParamQueued`/
     /// `ConstituentQueued`/`StreamQueued` — every risk-surface change queues
@@ -486,6 +496,9 @@ abstract contract IndexFacetBase {
     error NoRoleQueued();
     error RoleTimelockNotElapsed();
 
+    // ── PR5 (ONESHOT §5.3, SPEC §4.2) — the Energy Bus credit surface ───────
+    error NotEnergyBus();
+
     error ReentrantCall();
 
     // Hooks (design doc section 8)
@@ -531,6 +544,17 @@ abstract contract IndexFacetBase {
 
     modifier whenOpen() {
         if (!CoreStorage.layout().indexOpen) revert IndexNotOpen();
+        _;
+    }
+
+    /// @dev PR5 (ONESHOT §5.3, SPEC §4.2): gates `IndexEnergyFacet.
+    /// creditInventory` to the one `EnergyBus` address `IndexEnergyFacet.
+    /// executeEnergyBus` has set. `address(0)` (the pre-wiring default) can
+    /// never satisfy this — there is no `msg.sender == address(0)` external
+    /// caller — so the credit surface is inert until governance
+    /// deliberately wires a real Bus.
+    modifier onlyEnergyBus() {
+        if (msg.sender != EnergyBusStorage.layout().energyBus) revert NotEnergyBus();
         _;
     }
 

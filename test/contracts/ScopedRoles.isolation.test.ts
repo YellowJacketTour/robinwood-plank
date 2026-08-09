@@ -245,6 +245,12 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // auto-deploy dust floor. Same queue/execute timelock shape and role
       // as `queueMaxPoolShareBps` above.
       { name: "queueMinAutoDeployWei", args: [1_000n], role: ROLE_RISK, holder: risk },
+      // IndexEnergyFacet (PR5, ONESHOT §5.3). Same queue/execute timelock
+      // shape and role as every other risk-surface setter in this table
+      // (`queueIndexPool`, `queueHook`, `queueMinAutoDeployWei`) — wiring the
+      // Energy Bus is a risk-surface change (it names the sole caller ever
+      // admitted to `creditInventory`), not a constituent-admission one.
+      { name: "queueEnergyBus", args: [alice.address], role: ROLE_RISK, holder: risk },
     ];
 
     // The enumeration must be COMPLETE. Every non-view function on the ABI is
@@ -396,6 +402,24 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // immediately above — there is nothing here for a role to be trusted
       // with either.
       "autoReconcile",
+      // IndexEnergyFacet (PR5, ONESHOT §5.3). `executeEnergyBus` is the
+      // timelock-gated apply, same shape as every other `execute*` above —
+      // permissionless after the eta, gated at the `queue` side by
+      // `ROLE_RISK_PARAM_` instead (see `queueEnergyBus` in the table
+      // above).
+      "executeEnergyBus",
+      // `creditInventory` is stricter than permissionless, not weaker: it is
+      // gated `onlyEnergyBus`, a DIFFERENT, single-address gate (checked
+      // against `EnergyBusStorage.layout().energyBus`, itself only settable
+      // via the `queueEnergyBus`/`executeEnergyBus` timelock pair above) —
+      // not one of this table's five `ROLE_*` role keys, so it has no
+      // `surface` entry to share with them. No role in this table — not
+      // even `ROLE_ADMIN` — can call it directly; only the one wired
+      // EnergyBus contract can, and every credit it can ever apply is
+      // capped at an OBSERVED balance delta (`IndexFacetBase.
+      // _reconcileCore`), never a self-reported or role-chosen amount. There
+      // is nothing here for a role to be trusted with either.
+      "creditInventory",
     ]);
     const abiNames = (vault.interface.fragments as any[])
       .filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))

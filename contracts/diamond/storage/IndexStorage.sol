@@ -840,3 +840,49 @@ library ReentrancyStorage {
         }
     }
 }
+
+/**
+ * @notice PR5 (ONESHOT §5.3) — the single, timelocked `EnergyBus` address
+ * `IndexEnergyFacet.creditInventory` is gated on.
+ *
+ * @dev Same queue/execute-pair shape as every other risk-surface setter in
+ * this Diamond (`PlatformTreasuryStorage.QueuedAddress`,
+ * `IndexGovernanceFacet.queueParam`/`executeParam`) — a fresh namespace only
+ * because `energyBus` is an address outside the existing bounded-`bytes32`
+ * `queuedParams` key space (unlike `ecosystemSink`, it is not merely an
+ * address-shaped uint256 packed into an existing risk param; it gates a new
+ * `onlyEnergyBus` modifier, so it gets its own explicit slot rather than
+ * being smuggled through `IndexParams`).
+ */
+library EnergyBusStorage {
+    bytes32 internal constant SLOT =
+        keccak256(abi.encode(uint256(keccak256("marketplank.index.storage.energybus.v1")) - 1))
+            & ~bytes32(uint256(0xff));
+
+    /// @dev Same shape as `PlatformTreasuryStorage.QueuedAddress`, re-declared
+    /// locally for the same "no cross-namespace compile-time dependency"
+    /// reason that library already documents.
+    struct QueuedAddress {
+        address value;
+        uint64 eta;
+        bool pending;
+    }
+
+    struct Layout {
+        /// @notice The one address ever permitted to call `creditInventory`.
+        /// Zero at genesis (no bus wired), so `creditInventory` reverts
+        /// `NotEnergyBus` for everyone until governance queues and executes
+        /// a real one — the same fail-closed default every other unset
+        /// address-typed risk surface in this Diamond starts from.
+        address energyBus;
+        QueuedAddress queuedEnergyBus;
+        uint256[12] __gap;
+    }
+
+    function layout() internal pure returns (Layout storage l) {
+        bytes32 s = SLOT;
+        assembly {
+            l.slot := s
+        }
+    }
+}
