@@ -6,6 +6,9 @@
 **Date:** 2026-08-08  
 **Hard rule:** No external floor/NAV oracle on mint, redeem, weight settlement, or fee credit. UI may display floors; **contracts do not settle on them.**
 
+> **Retired planning history, superseded in full by
+> `docs/AXIOM-1-AS-BUILT.md`.** Read that document instead.
+
 ---
 
 ## 0. What you asked for (exact product)

@@ -9,6 +9,14 @@
 
 ---
 
+> **This document is retired planning history, superseded in full by
+> `docs/AXIOM-1-AS-BUILT.md`.** Read that document instead — it is now
+> the single authority on the delivered system. Nothing below this
+> line should be used to describe, build against, or report on the
+> shipped protocol.
+
+---
+
 ## 0. Mission (one paragraph)
 
 Ship a **live multi-collection NFTX-D2-class vault-of-vaults**: each collection is a base vault (vToken + **xToken inventory compounding**); the **index holds a basket of xTokens + WETH** weighted by **on-chain demand/supply performance** (not floor oracles); an **Energy Bus** routes every WETH fee into **buy art · POL LP (fee autocompound) · burn/lock IDX · burn PLANK · PLANK POL · yield DRIP (default reinvest, not cash-out)**; **every protocol-controlled path compounds by default**; **pro-rata exit always works**; **no settlement oracle**; full adversarial tests green; deploy scripts + Bullish runbook filled.

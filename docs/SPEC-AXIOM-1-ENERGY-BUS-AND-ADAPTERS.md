@@ -6,6 +6,9 @@
 **Baseline code:** `feat/global-index-vault` Diamond + `CollectionVault` / `CollectionVaultFactory`  
 **Date:** 2026-08-08  
 
+> **Retired planning history, superseded in full by
+> `docs/AXIOM-1-AS-BUILT.md`.** Read that document instead.
+
 **PERFECT-1 extensions (must implement):**  
 - Inventory stake **xToken** (ERC-4626-style) on L1; Bus Pipe I prefers buying **xToken** into L2.  
 - WeightModule multi-signal: αF+βP+γD+δV = 0.45/0.25/0.15/0.15 (see ONESHOT §4.3).  

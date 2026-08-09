@@ -6,6 +6,9 @@
 
 **Hard rules preserved:** no settlement oracle · fee ≠ free iToken mint · pro-rata exit always · PLANK not a redeemable basket leg · trustless Bus (no spendable admin sink).
 
+> **Retired planning history, superseded in full by
+> `docs/AXIOM-1-AS-BUILT.md`.** Read that document instead.
+
 ---
 
 ## 0. Principle
