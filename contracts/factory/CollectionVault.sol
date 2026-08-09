@@ -8,6 +8,22 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
+/// @dev Minimal interface for PR4's `InventoryStake.compound`, inlined here
+/// the same way `DividendAdapter.sol` inlines `IIndexReconcile` — avoids a
+/// cross-directory import for a single call.
+interface IInventoryStakeCompound {
+    function compound(uint256 assets) external returns (uint256 credited);
+}
+
+/// @dev Minimal interface for PR1's `WeightModule` signal calls
+/// (`contracts/energy/IWeightModule.sol`), inlined for the same reason.
+interface IWeightModuleSignals {
+    function noteFee(address vault, uint256 amountWei) external;
+    function noteMintPressure(address vault, int256 netDeltaWei) external;
+    function noteDepth(address vault, uint256 reserveWethWei) external;
+    function noteVolume(address vault, uint256 feeDerivedVolumeWei) external;
+}
+
 /**
  * ============================================================================
  *  CollectionVault — factory-deployed, one per collection, implementing
@@ -86,6 +102,17 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     /// sink. Not creator-settable, not governance-settable per-vault.
     uint256 public constant SWAP_SINK_SPLIT_BPS = 5_000;
 
+    /// @notice PR4 (ONESHOT §4.4 / §5.2): 25% of every Stream A (mint/redeem)
+    /// fee is carved out BEFORE the existing Stream A sink/treasury split and
+    /// routed into `InventoryStake` as a compounding credit. The existing
+    /// Stream A split math (`mintRedeemSinkBps`, `FLOOR_SINK_SPLIT_BPS`) is
+    /// UNCHANGED — it now simply operates on the post-carve-out residual
+    /// instead of the gross fee. Stream B (swap fees) is untouched by this
+    /// carve-out; it keeps its own existing 50/50 split exactly as shipped.
+    /// PROTOCOL-WIDE constant, not creator-settable, matching
+    /// `SWAP_SINK_SPLIT_BPS`'s own shape.
+    uint256 public constant XTOKEN_COMPOUND_BPS = 2_500;
+
     uint256 private constant BPS_DENOMINATOR = 10_000;
     uint256 private constant SHARE_UNIT = 1e18;
 
@@ -121,6 +148,24 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     Queued public queuedTreasury;
     Queued public queuedMintRedeemSinkBps;
 
+    /// @notice PR4: this vault's `InventoryStake` (asset = this vault's own
+    /// share, i.e. `IERC20(address(this))`). NOT immutable (it does not
+    /// exist yet at this vault's own construction time — `InventoryStake`'s
+    /// constructor needs THIS vault's address first), but set-once-only via
+    /// `setInventoryStake`, guarded by `treasury` and an `AlreadySet` revert
+    /// — the identical "settable exactly once, then permanently frozen"
+    /// shape `IndexPoolFacet.PoolAlreadySet` already uses elsewhere in this
+    /// codebase. After it is set it behaves exactly like every other
+    /// immutable value here: no further mutation path exists.
+    address public inventoryStake;
+
+    /// @notice PR4: this vault's `WeightModule` (PR1), notified of mint,
+    /// redeem, swap, and depth signals so the L2 index's InventoryBuyAdapter
+    /// (a later PR) has real activity to weight against. Same set-once shape
+    /// as `inventoryStake` above, for the same reason (WeightModule is a
+    /// protocol-wide singleton deployed independently of any one vault).
+    address public weightModule;
+
     uint256[] private heldTokenIds;
     mapping(uint256 => uint256) private heldTokenIndex;
 
@@ -144,6 +189,10 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     event MintRedeemSinkBpsQueued(uint256 value, uint64 eta);
     event MintRedeemSinkBpsApplied(uint256 previous, uint256 value);
     event SweptToSink(uint256 amount);
+    event InventoryStakeSet(address indexed stake);
+    event WeightModuleSet(address indexed module);
+    event XTokenCompounded(uint256 wethIn, uint256 sharesOut);
+    event XTokenCompoundSkipped(uint256 wethIn);
 
     error FeeTooHigh();
     error IncorrectFee();
@@ -161,6 +210,7 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     error NothingQueued();
     error TimelockNotElapsed();
     error ZeroAddress();
+    error AlreadySet();
 
     constructor(
         IERC721 collection_,
@@ -201,6 +251,7 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         _addHeldToken(tokenId);
         _mint(msg.sender, SHARE_UNIT);
         (uint256 sinkCut, uint256 treasuryCut) = _routeStreamA(mintFeeWei);
+        _noteMintRedeemSignals(sinkCut, int256(mintFeeWei));
         emit Deposited(msg.sender, tokenId, sinkCut, treasuryCut);
     }
 
@@ -211,6 +262,7 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         _removeHeldToken(tokenId);
         collection.safeTransferFrom(address(this), msg.sender, tokenId);
         (uint256 sinkCut, uint256 treasuryCut) = _routeStreamA(redeemFeeWei);
+        _noteMintRedeemSignals(sinkCut, -int256(redeemFeeWei));
         emit Redeemed(msg.sender, tokenId, sinkCut, treasuryCut);
     }
 
@@ -225,17 +277,76 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         if (credited != fee) revert IncorrectFee();
     }
 
-    /// @dev Splits `fee` between sink (pushed immediately, plain transfer)
-    /// and local treasury (accrued, pulled later via withdrawFees()).
+    /// @dev PR4 pre-split carve-out (ONESHOT §4.4): `XTOKEN_COMPOUND_BPS` of
+    /// `fee` is diverted into `InventoryStake` FIRST; the UNCHANGED Stream A
+    /// split (sink vs. treasury, same `mintRedeemSinkBps` math as always)
+    /// then runs on the residual only. Conservation: `compoundCut + sinkCut +
+    /// treasuryCut == fee` exactly (see `_compoundXToken`'s own fallback —
+    /// nothing is ever stranded, only redirected to `accruedFees` if the
+    /// stake or pool isn't ready yet).
     function _routeStreamA(uint256 fee) private returns (uint256 sinkCut, uint256 treasuryCut) {
         if (fee == 0) return (0, 0);
-        sinkCut = (fee * mintRedeemSinkBps) / BPS_DENOMINATOR;
-        treasuryCut = fee - sinkCut;
+        uint256 compoundCut = (fee * XTOKEN_COMPOUND_BPS) / BPS_DENOMINATOR;
+        uint256 residual = fee - compoundCut;
+        _compoundXToken(compoundCut);
+
+        sinkCut = (residual * mintRedeemSinkBps) / BPS_DENOMINATOR;
+        treasuryCut = residual - sinkCut;
         if (sinkCut > 0) {
             paymentToken.safeTransfer(upstreamSink, sinkCut);
             emit SweptToSink(sinkCut);
         }
         accruedFees += treasuryCut;
+    }
+
+    /// @dev Converts `wethIn` of already-collected fee revenue into this
+    /// vault's own shares at the CURRENT AMM price (no additional swap fee —
+    /// this is not a market trade, it is the vault deploying its own fee
+    /// revenue), then hands those shares to `InventoryStake` via the gated
+    /// `compound()` entrypoint. Every branch is balance-conserving: the WETH
+    /// either (a) becomes part of `paymentReserve` backing shares now held
+    /// by stakers, or (b) — if the stake isn't wired yet, or the pool isn't
+    /// open, or the tiny-amount/rounding edge yields zero shares out — falls
+    /// back to ordinary `accruedFees`, exactly where it would have gone
+    /// anyway pre-PR4. Nothing is ever stranded at this contract with no
+    /// accounting path to it.
+    function _compoundXToken(uint256 wethIn) private {
+        if (wethIn == 0) return;
+        if (inventoryStake == address(0) || !poolOpen || shareReserve == 0 || paymentReserve == 0) {
+            accruedFees += wethIn;
+            emit XTokenCompoundSkipped(wethIn);
+            return;
+        }
+        uint256 sharesOut = (wethIn * shareReserve) / (paymentReserve + wethIn);
+        if (sharesOut == 0) {
+            accruedFees += wethIn;
+            emit XTokenCompoundSkipped(wethIn);
+            return;
+        }
+        paymentReserve += wethIn;
+        shareReserve -= sharesOut;
+        _approve(address(this), inventoryStake, sharesOut);
+        IInventoryStakeCompound(inventoryStake).compound(sharesOut);
+        emit XTokenCompounded(wethIn, sharesOut);
+    }
+
+    /// @dev Best-effort WeightModule signal push, deposit/redeem side. Wrapped
+    /// in `try/catch` — exactly `DividendAdapter`'s own "never brick the hot
+    /// path over a downstream, non-load-bearing signal" doctrine — so a
+    /// misconfigured or not-yet-wired `weightModule` can NEVER revert a
+    /// user's mint or redeem.
+    function _noteMintRedeemSignals(uint256 matureFeeWei, int256 pressureWei) private {
+        if (weightModule == address(0)) return;
+        try IWeightModuleSignals(weightModule).noteFee(address(this), matureFeeWei) {} catch {}
+        try IWeightModuleSignals(weightModule).noteMintPressure(address(this), pressureWei) {} catch {}
+    }
+
+    /// @dev Best-effort WeightModule signal push, swap side. Same try/catch
+    /// doctrine as `_noteMintRedeemSignals`.
+    function _noteSwapSignals(uint256 feeDerivedVolumeWei) private {
+        if (weightModule == address(0)) return;
+        try IWeightModuleSignals(weightModule).noteDepth(address(this), paymentReserve) {} catch {}
+        try IWeightModuleSignals(weightModule).noteVolume(address(this), feeDerivedVolumeWei) {} catch {}
     }
 
     // ── Constant-product pool, Stream B ────────────────────────────────────
@@ -264,6 +375,7 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
             paymentToken.safeTransfer(upstreamSink, sinkCut);
             emit SweptToSink(sinkCut);
         }
+        _noteSwapSignals(credited);
         emit Bought(msg.sender, credited, sharesOut, sinkCut);
     }
 
@@ -289,6 +401,7 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
             paymentToken.safeTransfer(upstreamSink, sinkCut);
             emit SweptToSink(sinkCut);
         }
+        _noteSwapSignals(grossOut);
         emit Sold(msg.sender, sharesIn, amountOut, sinkCut);
     }
 
@@ -301,6 +414,30 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     function _swapFeeSinkCut(uint256 amount) private view returns (uint256) {
         uint256 fee = (amount * swapFeeBps) / BPS_DENOMINATOR;
         return (fee * SWAP_SINK_SPLIT_BPS) / BPS_DENOMINATOR;
+    }
+
+    // ── PR4 wiring: InventoryStake / WeightModule, set-once-only ───────────
+
+    /// @notice Wire this vault's `InventoryStake` (asset = this vault's own
+    /// share). Callable once, ever, by `treasury` — deploy `InventoryStake`
+    /// AFTER this vault (its constructor needs this vault's address as both
+    /// `asset()` and `compounder`), then call this to complete the link.
+    function setInventoryStake(address stake_) external {
+        if (msg.sender != treasury) revert NotTreasury();
+        if (stake_ == address(0)) revert ZeroAddress();
+        if (inventoryStake != address(0)) revert AlreadySet();
+        inventoryStake = stake_;
+        emit InventoryStakeSet(stake_);
+    }
+
+    /// @notice Wire this vault's `WeightModule` (PR1, protocol-wide
+    /// singleton). Callable once, ever, by `treasury`.
+    function setWeightModule(address module_) external {
+        if (msg.sender != treasury) revert NotTreasury();
+        if (module_ == address(0)) revert ZeroAddress();
+        if (weightModule != address(0)) revert AlreadySet();
+        weightModule = module_;
+        emit WeightModuleSet(module_);
     }
 
     // ── Bootstrap ──────────────────────────────────────────────────────────

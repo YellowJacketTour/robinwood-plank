@@ -52,8 +52,17 @@ describe("CollectionVault fee routing (design doc §7.2)", () => {
     await expect(vault.connect(alice).deposit(1))
       .to.emit(vault, "Deposited");
 
-    const expectedSink = (MINT_FEE * 810n) / 10_000n;
-    const expectedTreasury = MINT_FEE - expectedSink;
+    // PR4 (ONESHOT §4.4): XTOKEN_COMPOUND_BPS=2500 is carved out of the fee
+    // BEFORE the Stream A split. No InventoryStake is wired in this fixture
+    // (pool isn't open either), so `_compoundXToken` falls back to
+    // `accruedFees` exactly like pre-PR4 treasury accrual — see
+    // "XTOKEN_COMPOUND_BPS" describing-tests further down this file for the
+    // case where InventoryStake IS wired and genuinely compounds.
+    const XTOKEN_COMPOUND_BPS = 2500n;
+    const compoundCut = (MINT_FEE * XTOKEN_COMPOUND_BPS) / 10_000n;
+    const residual = MINT_FEE - compoundCut;
+    const expectedSink = (residual * 810n) / 10_000n;
+    const expectedTreasury = MINT_FEE - expectedSink; // compoundCut fallback + residual's treasury cut
 
     expect(await payment.balanceOf(sinkStandIn.address)).to.equal(sinkBefore + expectedSink);
     expect(await vault.accruedFees()).to.equal(expectedTreasury);
@@ -196,9 +205,15 @@ describe("CollectionVault fee routing (design doc §7.2)", () => {
 
     const [before] = await getReserve(fx, paymentAddr);
 
-    await vault.connect(fx.alice).deposit(1); // pushes 810 bps of MINT_FEE to fx.vaultAddr
+    await vault.connect(fx.alice).deposit(1); // pushes 810 bps of the post-XTOKEN-carve-out residual to fx.vaultAddr
 
-    const expectedSinkCut = (MINT_FEE * 810n) / 10_000n;
+    // PR4 carve-out: no InventoryStake wired here either, so it's the same
+    // fallback-to-accruedFees path as the "Stream A: default 8.1%" test
+    // above — only the SINK cut (never routed to accruedFees) is affected by
+    // computing off the residual instead of the gross fee.
+    const compoundCut = (MINT_FEE * 2500n) / 10_000n;
+    const residual = MINT_FEE - compoundCut;
+    const expectedSinkCut = (residual * 810n) / 10_000n;
     // The Diamond has NOT reconciled yet — its own accounted reserve is
     // unchanged even though the real ERC-20 balance already grew, which is
     // exactly the "opportunistic" half: nothing forces the credit before

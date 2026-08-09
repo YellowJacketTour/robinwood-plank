@@ -50,6 +50,12 @@ contract CollectionVaultFactory {
 
     mapping(bytes32 => address) public vaultForCollection;
     address[] public allVaults;
+    /// @notice PR4 (ONESHOT §5.2 "Factory: isVault(address)"). Set exactly
+    /// once, at deploy time, for every vault this factory ever creates — the
+    /// same permissionless CREATE2 admission gate `deployVault` already is.
+    /// Consumed by `WeightModule.onlyFactoryVault` (PR1) to gate signal
+    /// ingestion to genuine factory-deployed vaults only.
+    mapping(address => bool) private _isVault;
 
     event VaultDeployed(address indexed collection, address indexed vault, bytes32 salt);
 
@@ -106,12 +112,18 @@ contract CollectionVaultFactory {
 
         vaultForCollection[salt] = deployed;
         allVaults.push(deployed);
+        _isVault[deployed] = true;
         emit VaultDeployed(collection, deployed, salt);
         return deployed;
     }
 
     function vaultCount() external view returns (uint256) {
         return allVaults.length;
+    }
+
+    /// @notice True iff `vault` was CREATE2-deployed by this exact factory.
+    function isVault(address vault) external view returns (bool) {
+        return _isVault[vault];
     }
 
     function _creationCode(address collection, address treasury_, uint256 mintRedeemSinkBps_)
