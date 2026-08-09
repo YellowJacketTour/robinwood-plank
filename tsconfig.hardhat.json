@@ -19,7 +19,9 @@
     "scripts/configure-index-vault-governance.ts",
     "scripts/config/index-vault-deploy-config.ts",
     "scripts/deploy/axiom1-local.ts",
-    "scripts/verify/axiom1-postdeploy.ts"
+    "scripts/deploy/axiom1-testnet.ts",
+    "scripts/verify/axiom1-postdeploy.ts",
+    "scripts/gas/axiom1-gas-snapshot.ts"
   ],
   "exclude": ["node_modules"]
 }
