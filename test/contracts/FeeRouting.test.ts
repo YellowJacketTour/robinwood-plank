@@ -52,12 +52,14 @@ describe("CollectionVault fee routing (design doc §7.2)", () => {
     await expect(vault.connect(alice).deposit(1))
       .to.emit(vault, "Deposited");
 
-    // PR4 (ONESHOT §4.4): XTOKEN_COMPOUND_BPS=2500 is carved out of the fee
-    // BEFORE the Stream A split. No InventoryStake is wired in this fixture
-    // (pool isn't open either), so `_compoundXToken` falls back to
-    // `accruedFees` exactly like pre-PR4 treasury accrual — see
-    // "XTOKEN_COMPOUND_BPS" describing-tests further down this file for the
-    // case where InventoryStake IS wired and genuinely compounds.
+    // PR4 (ONESHOT §4.4, corrected per DESIGN-CAKE-EAT-IT-SHARE-ATOM-2026-08-08.md
+    // §2/§4): XTOKEN_COMPOUND_BPS=2500 is carved out of the fee BEFORE the
+    // Stream A split, and would donate directly into the vault's own
+    // `paymentReserve` if the pool were open. The pool isn't open in this
+    // fixture, so `_compoundXToken` falls back to `accruedFees` exactly like
+    // pre-PR4 treasury accrual — see the fee-routing suite in
+    // `InventoryBuyAdapter*.test.ts` for the case where the pool IS open and
+    // the compound cut genuinely raises `convertToAssets`.
     const XTOKEN_COMPOUND_BPS = 2500n;
     const compoundCut = (MINT_FEE * XTOKEN_COMPOUND_BPS) / 10_000n;
     const residual = MINT_FEE - compoundCut;

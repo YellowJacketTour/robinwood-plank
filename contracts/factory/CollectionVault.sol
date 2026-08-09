@@ -8,13 +8,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-/// @dev Minimal interface for PR4's `InventoryStake.compound`, inlined here
-/// the same way `DividendAdapter.sol` inlines `IIndexReconcile` — avoids a
-/// cross-directory import for a single call.
-interface IInventoryStakeCompound {
-    function compound(uint256 assets) external returns (uint256 credited);
-}
-
 /// @dev Minimal interface for PR1's `WeightModule` signal calls
 /// (`contracts/energy/IWeightModule.sol`), inlined for the same reason.
 interface IWeightModuleSignals {
@@ -102,10 +95,13 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     /// sink. Not creator-settable, not governance-settable per-vault.
     uint256 public constant SWAP_SINK_SPLIT_BPS = 5_000;
 
-    /// @notice PR4 (ONESHOT §4.4 / §5.2): 25% of every Stream A (mint/redeem)
-    /// fee is carved out BEFORE the existing Stream A sink/treasury split and
-    /// routed into `InventoryStake` as a compounding credit. The existing
-    /// Stream A split math (`mintRedeemSinkBps`, `FLOOR_SINK_SPLIT_BPS`) is
+    /// @notice CORRECTED per DESIGN-CAKE-EAT-IT-SHARE-ATOM-2026-08-08.md §2/§4
+    /// (supersedes the PR4 dual vToken+xToken design): 25% of every Stream A
+    /// (mint/redeem) fee is carved out BEFORE the existing Stream A
+    /// sink/treasury split and donated DIRECTLY into this vault's own
+    /// `paymentReserve` — raising `convertToAssets` for every `S` holder
+    /// automatically, with no separate stake contract or second token. The
+    /// existing Stream A split math (`mintRedeemSinkBps`, `FLOOR_SINK_SPLIT_BPS`) is
     /// UNCHANGED — it now simply operates on the post-carve-out residual
     /// instead of the gross fee. Stream B (swap fees) is untouched by this
     /// carve-out; it keeps its own existing 50/50 split exactly as shipped.
@@ -148,22 +144,11 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     Queued public queuedTreasury;
     Queued public queuedMintRedeemSinkBps;
 
-    /// @notice PR4: this vault's `InventoryStake` (asset = this vault's own
-    /// share, i.e. `IERC20(address(this))`). NOT immutable (it does not
-    /// exist yet at this vault's own construction time — `InventoryStake`'s
-    /// constructor needs THIS vault's address first), but set-once-only via
-    /// `setInventoryStake`, guarded by `treasury` and an `AlreadySet` revert
-    /// — the identical "settable exactly once, then permanently frozen"
-    /// shape `IndexPoolFacet.PoolAlreadySet` already uses elsewhere in this
-    /// codebase. After it is set it behaves exactly like every other
-    /// immutable value here: no further mutation path exists.
-    address public inventoryStake;
-
-    /// @notice PR4: this vault's `WeightModule` (PR1), notified of mint,
-    /// redeem, swap, and depth signals so the L2 index's InventoryBuyAdapter
-    /// (a later PR) has real activity to weight against. Same set-once shape
-    /// as `inventoryStake` above, for the same reason (WeightModule is a
-    /// protocol-wide singleton deployed independently of any one vault).
+    /// @notice PR1: this vault's `WeightModule`, notified of mint, redeem,
+    /// swap, and depth signals so the L2 index's InventoryBuyAdapter has real
+    /// activity to weight against. Set-once-only, guarded by `treasury` and
+    /// an `AlreadySet` revert (WeightModule is a protocol-wide singleton
+    /// deployed independently of any one vault).
     address public weightModule;
 
     uint256[] private heldTokenIds;
@@ -189,10 +174,10 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     event MintRedeemSinkBpsQueued(uint256 value, uint64 eta);
     event MintRedeemSinkBpsApplied(uint256 previous, uint256 value);
     event SweptToSink(uint256 amount);
-    event InventoryStakeSet(address indexed stake);
     event WeightModuleSet(address indexed module);
-    event XTokenCompounded(uint256 wethIn, uint256 sharesOut);
+    event XTokenCompounded(uint256 wethIn, uint256 paymentReserveAfter);
     event XTokenCompoundSkipped(uint256 wethIn);
+    event ReservesDonated(address indexed donor, uint256 wethIn);
 
     error FeeTooHigh();
     error IncorrectFee();
@@ -211,6 +196,7 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     error TimelockNotElapsed();
     error ZeroAddress();
     error AlreadySet();
+    error NothingToDonate();
 
     constructor(
         IERC721 collection_,
@@ -277,13 +263,15 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         if (credited != fee) revert IncorrectFee();
     }
 
-    /// @dev PR4 pre-split carve-out (ONESHOT §4.4): `XTOKEN_COMPOUND_BPS` of
-    /// `fee` is diverted into `InventoryStake` FIRST; the UNCHANGED Stream A
+    /// @dev Pre-split carve-out (ONESHOT §4.4, corrected per
+    /// DESIGN-CAKE-EAT-IT-SHARE-ATOM-2026-08-08.md §2/§4): `XTOKEN_COMPOUND_BPS`
+    /// of `fee` is donated into this vault's own `paymentReserve` FIRST; the
+    /// UNCHANGED Stream A
     /// split (sink vs. treasury, same `mintRedeemSinkBps` math as always)
     /// then runs on the residual only. Conservation: `compoundCut + sinkCut +
     /// treasuryCut == fee` exactly (see `_compoundXToken`'s own fallback —
     /// nothing is ever stranded, only redirected to `accruedFees` if the
-    /// stake or pool isn't ready yet).
+    /// pool isn't open yet).
     function _routeStreamA(uint256 fee) private returns (uint256 sinkCut, uint256 treasuryCut) {
         if (fee == 0) return (0, 0);
         uint256 compoundCut = (fee * XTOKEN_COMPOUND_BPS) / BPS_DENOMINATOR;
@@ -299,35 +287,43 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         accruedFees += treasuryCut;
     }
 
-    /// @dev Converts `wethIn` of already-collected fee revenue into this
-    /// vault's own shares at the CURRENT AMM price (no additional swap fee —
-    /// this is not a market trade, it is the vault deploying its own fee
-    /// revenue), then hands those shares to `InventoryStake` via the gated
-    /// `compound()` entrypoint. Every branch is balance-conserving: the WETH
-    /// either (a) becomes part of `paymentReserve` backing shares now held
-    /// by stakers, or (b) — if the stake isn't wired yet, or the pool isn't
-    /// open, or the tiny-amount/rounding edge yields zero shares out — falls
-    /// back to ordinary `accruedFees`, exactly where it would have gone
-    /// anyway pre-PR4. Nothing is ever stranded at this contract with no
-    /// accounting path to it.
+    /// @dev CORRECTED MODEL (DESIGN-CAKE-EAT-IT-SHARE-ATOM-2026-08-08.md §2/§4/
+    /// §10 — supersedes the PR4 dual vToken+xToken design): `wethIn` of
+    /// already-collected fee revenue is credited DIRECTLY into this vault's
+    /// own `paymentReserve`, with NO shares bought and NO shares removed from
+    /// `shareReserve`. This is exactly `donateReserves`'s own single-sided,
+    /// receipt-free mechanism (see that function's header for the full
+    /// rationale), reused here for the fee path instead of a third-party
+    /// donor: `k = paymentReserve * shareReserve` rises, so the AMM price of
+    /// every existing S holder's share (`paymentReserve / shareReserve`,
+    /// exposed via `convertToAssets` below) rises too — automatically, for
+    /// every holder, with zero staking step and zero second token. Contrast
+    /// with the deleted PR4 `InventoryStake` path, which bought shares OUT of
+    /// `shareReserve` and diverted them to a separate xToken wrapper: that
+    /// design routed compounding only to opted-in stakers; this one routes it
+    /// to `S` itself. Falls back to ordinary `accruedFees` only if the pool
+    /// isn't open yet (nothing is ever stranded).
     function _compoundXToken(uint256 wethIn) private {
         if (wethIn == 0) return;
-        if (inventoryStake == address(0) || !poolOpen || shareReserve == 0 || paymentReserve == 0) {
-            accruedFees += wethIn;
-            emit XTokenCompoundSkipped(wethIn);
-            return;
-        }
-        uint256 sharesOut = (wethIn * shareReserve) / (paymentReserve + wethIn);
-        if (sharesOut == 0) {
+        if (!poolOpen || shareReserve == 0 || paymentReserve == 0) {
             accruedFees += wethIn;
             emit XTokenCompoundSkipped(wethIn);
             return;
         }
         paymentReserve += wethIn;
-        shareReserve -= sharesOut;
-        _approve(address(this), inventoryStake, sharesOut);
-        IInventoryStakeCompound(inventoryStake).compound(sharesOut);
-        emit XTokenCompounded(wethIn, sharesOut);
+        emit XTokenCompounded(wethIn, paymentReserve);
+    }
+
+    /// @notice DESIGN-CAKE-EAT-IT-SHARE-ATOM-2026-08-08.md §2.3: the
+    /// `convertToAssets`-equivalent for this vault's own share `S`, priced off
+    /// this vault's own constant-product reserves (no oracle, no second
+    /// token). Returns how much `paymentToken` `shares` of `S` are currently
+    /// worth via the AMM — genuinely rises as `_compoundXToken` donates fee
+    /// revenue into `paymentReserve`, for every `S` holder automatically.
+    /// Returns 0 before the pool is open (no reserve to price against yet).
+    function convertToAssets(uint256 shares) public view returns (uint256) {
+        if (shareReserve == 0) return 0;
+        return (shares * paymentReserve) / shareReserve;
     }
 
     /// @dev Best-effort WeightModule signal push, deposit/redeem side. Wrapped
@@ -416,19 +412,7 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         return (fee * SWAP_SINK_SPLIT_BPS) / BPS_DENOMINATOR;
     }
 
-    // ── PR4 wiring: InventoryStake / WeightModule, set-once-only ───────────
-
-    /// @notice Wire this vault's `InventoryStake` (asset = this vault's own
-    /// share). Callable once, ever, by `treasury` — deploy `InventoryStake`
-    /// AFTER this vault (its constructor needs this vault's address as both
-    /// `asset()` and `compounder`), then call this to complete the link.
-    function setInventoryStake(address stake_) external {
-        if (msg.sender != treasury) revert NotTreasury();
-        if (stake_ == address(0)) revert ZeroAddress();
-        if (inventoryStake != address(0)) revert AlreadySet();
-        inventoryStake = stake_;
-        emit InventoryStakeSet(stake_);
-    }
+    // ── WeightModule wiring, set-once-only ──────────────────────────────────
 
     /// @notice Wire this vault's `WeightModule` (PR1, protocol-wide
     /// singleton). Callable once, ever, by `treasury`.
@@ -466,6 +450,35 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         }
         poolOpen = true;
         emit PoolOpened(paymentReserve, shareReserve);
+    }
+
+    /// @notice PR6 (ONESHOT §5.2 LP-renounce strategy (b) / SPEC §5): a
+    /// PERMISSIONLESS, single-sided, permanent donation of `paymentToken`
+    /// straight into `paymentReserve`. Unlike `seedLiquidity` (treasury-only,
+    /// pre-open, mints nothing but is only usable BEFORE `openPool`), this is
+    /// callable by anyone, anytime the pool is open, repeatedly.
+    ///
+    /// WHY SINGLE-SIDED (WETH-only), NOT A BALANCED TWO-ASSET ADD. This
+    /// vault's pool is an internal constant-product AMM with NO LP token —
+    /// `shareReserve`/`paymentReserve` are plain state, and this vault's own
+    /// ERC-20 supply (`shareReserve` accounting) already represents 100% of
+    /// the claims that will ever exist against this pool. A donor adding
+    /// `wethIn` here receives NOTHING back — no LP token, no vault share, no
+    /// receipt of any kind — so `k = paymentReserve * shareReserve` rises
+    /// while every EXISTING share's redeemable claim on `paymentReserve`
+    /// grows with it, permanently and non-reversibly. This is the strongest
+    /// possible form of "no admin withdraw of renounced LP" (ONESHOT §6.6):
+    /// there is no position, ticket, or shares minted to donate, so there is
+    /// nothing whose withdrawal a future admin/governance call could ever
+    /// gate — not even a hypothetical one, since no code path in this
+    /// contract ever reduces `paymentReserve` except the ordinary, universal
+    /// `sellShares` AMM exit already open to every shareholder equally.
+    function donateReserves(uint256 wethIn) external nonReentrant {
+        if (!poolOpen) revert PoolNotOpen();
+        if (wethIn == 0) revert NothingToDonate();
+        paymentToken.safeTransferFrom(msg.sender, address(this), wethIn);
+        paymentReserve += wethIn;
+        emit ReservesDonated(msg.sender, wethIn);
     }
 
     function withdrawFees() external nonReentrant {

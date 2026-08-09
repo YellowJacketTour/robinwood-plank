@@ -6,7 +6,9 @@ import { deployIndexVault, defaultParams, paramsTuple, WAD, TIMELOCK, maxIn } fr
 /**
  * ============================================================================
  * PR5 (ONESHOT §5.3, §7 PR5, §8 NEST-1) — InventoryBuyAdapter (Pipe I) +
- * IndexEnergyFacet, end to end.
+ * IndexEnergyFacet, end to end, under the CORRECTED single-share-atom model
+ * (DESIGN-CAKE-EAT-IT-SHARE-ATOM-2026-08-08.md §2/§4/§10 — supersedes the
+ * PR4/PR5-original dual vToken+xToken design).
  *
  * "Do not merge PR5 without nested compound invariant green" — ONESHOT §5.3.
  *
@@ -23,19 +25,22 @@ import { deployIndexVault, defaultParams, paramsTuple, WAD, TIMELOCK, maxIn } fr
  *
  * Nothing here is mocked at the layer under test:
  *   - `CollectionVault` is the real factory-deployed contract (fees, its own
- *     constant-product AMM, `XTOKEN_COMPOUND_BPS` carve-out into
- *     `InventoryStake`, `WeightModule` signal pushes).
- *   - `InventoryStake` is the real ERC-4626-style xToken wrapper.
+ *     constant-product AMM, `XTOKEN_COMPOUND_BPS` carve-out DONATED DIRECTLY
+ *     into its own `paymentReserve` — no separate stake contract anymore —
+ *     `WeightModule` signal pushes).
  *   - `WeightModule` is the real multi-signal admit/weight module.
  *   - `EnergyBus` is the real 6-pipe splitter.
- *   - `InventoryBuyAdapter` is the real Pipe I adapter under test.
+ *   - `InventoryBuyAdapter` is the real Pipe I adapter under test, buying the
+ *     vault's own share `S` DIRECTLY (no xToken wrap step) and crediting it
+ *     into the index via `IndexEnergyFacet.creditInventory(vault, ...)`.
  *   - The index Diamond is the real, finalized, cut facet set (including the
- *     new `IndexEnergyFacet`), via `deployIndexVault`.
+ *     new `IndexEnergyFacet`), via `deployIndexVault`, with the vault's own
+ *     share `S` (i.e. `vaultAddr`) as its ONE constituent.
  *
  * LOCAL HARDHAT ONLY.
  * ============================================================================
  */
-describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5)", () => {
+describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5, corrected single-share-atom model)", () => {
   let snap: SnapshotRestorer;
   before(async () => {
     snap = await takeSnapshot();
@@ -45,7 +50,6 @@ describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5)", () => {
   });
 
   const MINT_REDEEM_SINK_BPS = 3_000; // CEIL_SINK_SPLIT_BPS — maximizes Stream A's fee-to-sink signal per cycle
-  const BPS_DENOM = 10_000n;
   const INV_BPS = 3_500n;
   const CLP_BPS = 1_500n;
   const IDX_BURN_BPS = 1_500n;
@@ -77,13 +81,8 @@ describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5)", () => {
     await factory.deployVault(await nft.getAddress(), treasury.address, MINT_REDEEM_SINK_BPS);
     const vault: any = await ethers.getContractAt("CollectionVault", vaultAddr);
 
-    // ── InventoryStake (xToken) + WeightModule, wired to the vault ──────────
-    const stake: any = await (
-      await ethers.getContractFactory("InventoryStake")
-    ).deploy(vaultAddr, vaultAddr, "AXIOM-1 Inventory xToken", "xNFT");
-    const stakeAddr = await stake.getAddress();
-    await vault.connect(treasury).setInventoryStake(stakeAddr);
-
+    // ── WeightModule, wired to the vault. NO InventoryStake anymore — S is
+    //    the vault's own ERC20; there is nothing else to deploy or wire. ────
     const weightModule: any = await (await ethers.getContractFactory("WeightModule")).deploy(factoryAddr);
     const weightModuleAddr = await weightModule.getAddress();
     await vault.connect(treasury).setWeightModule(weightModuleAddr);
@@ -112,14 +111,12 @@ describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5)", () => {
       factory,
       vault,
       vaultAddr,
-      stake,
-      stakeAddr,
       weightModule,
       weightModuleAddr,
     };
   }
 
-  it("NEST-1: fee -> Bus -> InventoryBuyAdapter -> IndexEnergyFacet.creditInventory -> vested NAV rise, zero new mints", async function () {
+  it("NEST-1: fee -> Bus -> InventoryBuyAdapter -> IndexEnergyFacet.creditInventory -> vested NAV rise, zero new mints, zero staking step", async function () {
     this.timeout(180_000);
     const {
       deployer,
@@ -136,8 +133,6 @@ describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5)", () => {
       nft,
       vault,
       vaultAddr,
-      stake,
-      stakeAddr,
       weightModule,
       weightModuleAddr,
     } = await deployFixture();
@@ -145,7 +140,7 @@ describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5)", () => {
     // ── 1. Open the vault's own AMM pool (needed for both buyShares later
     //    and for XTOKEN_COMPOUND_BPS's own fee-compounding to actually
     //    fire, rather than falling back to accruedFees). ────────────────────
-    await vault.connect(alice).deposit(1); // mints 1e18 vToken to alice
+    await vault.connect(alice).deposit(1); // mints 1e18 S to alice
     const seedPayment = ethers.parseEther("2");
     await weth.mint(treasury.address, seedPayment);
     await weth.connect(treasury).approve(vaultAddr, seedPayment);
@@ -157,10 +152,12 @@ describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5)", () => {
     // ── 2. Cycle deposit/redeem on NFT #2 enough times to cross
     //    WeightModule's F_MIN_WEI admit floor (0.05 ETH of cumulative sink
     //    fee) via real Stream A fee events. Every cycle ALSO compounds
-    //    XTOKEN_COMPOUND_BPS of its fee into InventoryStake for real — this
-    //    is the "L1 fee -> inventory units / S up" half of ONESHOT §3's
+    //    XTOKEN_COMPOUND_BPS of its fee DIRECTLY into `paymentReserve` — this
+    //    is the "L1 fee -> S's own backing up" half of the corrected §2/§4
     //    nested compound physics, exercised for real before Pipe I ever
     //    runs. ──────────────────────────────────────────────────────────────
+    const rateBeforeCompound: bigint = await vault.convertToAssets(WAD);
+
     let cumulativeSink = 0n;
     const F_MIN_WEI = ethers.parseEther("0.05");
     let cycles = 0;
@@ -173,12 +170,13 @@ describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5)", () => {
     }
     expect(cumulativeSink).to.be.gte(F_MIN_WEI);
 
-    // Real xToken assets/share genuinely rose from real fee compounding —
-    // XTOKEN-1's own invariant, re-confirmed here as the PRECONDITION NEST-1
-    // builds on (a stake with totalSupply == 0 has nothing to prove a rate
-    // against, but its totalAssets() is already real, positive, compounded
-    // vToken).
-    expect(await stake.totalAssets()).to.be.gt(0n);
+    // Real S/paymentReserve backing genuinely rose from real fee compounding
+    // — re-confirmed here as the PRECONDITION NEST-1 builds on. Unlike the
+    // superseded xToken model, THIS rate rise benefits EVERY S holder
+    // automatically (alice never staked anything, never called a second
+    // contract).
+    const rateAfterCompound: bigint = await vault.convertToAssets(WAD);
+    expect(rateAfterCompound).to.be.gt(rateBeforeCompound);
 
     // ── 3. Admit the vault into WeightModule (permissionless). ───────────────
     await weightModule.checkAdmit(vaultAddr);
@@ -186,8 +184,9 @@ describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5)", () => {
     expect(wVaults).to.deep.equal([vaultAddr]);
     expect(wBps[0]).to.be.gt(0n);
 
-    // ── 4. Deploy the index Diamond, with the real xToken as its ONE
-    //    constituent (and dividend asset). ──────────────────────────────────
+    // ── 4. Deploy the index Diamond, with the vault's own share `S` (i.e.
+    //    `vaultAddr` itself — `CollectionVault` IS the ERC20) as its ONE
+    //    constituent (and dividend asset). No xToken exists to wire. ────────
     const Source = await ethers.getContractFactory("MockIndexPriceSource");
     const source: any = await Source.deploy(ethers.parseEther("1"), ethers.parseEther("1"));
 
@@ -198,34 +197,31 @@ describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5)", () => {
       seeder: seeder.address,
       timelockDelay: TIMELOCK,
       params: paramsTuple(defaultParams),
-      dividendAsset: stakeAddr,
+      dividendAsset: vaultAddr,
     });
 
-    await index.connect(seeder).seedConstituent(stakeAddr, await source.getAddress(), 10_000);
+    await index.connect(seeder).seedConstituent(vaultAddr, await source.getAddress(), 10_000);
 
-    // Seed a nonzero xToken reserve so `openIndex` can proceed (needs a
-    // positive reserve + an observation, both of which `seedDeposit` gives).
-    // Alice deposits NFT #2 one more time (kept, not redeemed) to hold real
-    // vToken, stakes it for real xToken, and hands a slice to the seeder.
+    // Seed a nonzero S reserve so `openIndex` can proceed (needs a positive
+    // reserve + an observation, both of which `seedDeposit` gives). Alice
+    // deposits NFT #2 one more time (kept, not redeemed) to hold real S, and
+    // hands a slice to the seeder — DIRECTLY, no staking step in between.
     await nft.connect(alice).approve(vaultAddr, 2);
     await vault.connect(alice).deposit(2);
-    const aliceVTokenBal: bigint = await vault.balanceOf(alice.address);
-    await vault.connect(alice).approve(stakeAddr, aliceVTokenBal);
-    await stake.connect(alice).deposit(aliceVTokenBal, alice.address);
-    const aliceXBal: bigint = await stake.balanceOf(alice.address);
-    expect(aliceXBal).to.be.gt(0n);
+    const aliceSBal: bigint = await vault.balanceOf(alice.address);
+    expect(aliceSBal).to.be.gt(0n);
 
-    const seedXAmount = aliceXBal / 4n;
-    await stake.connect(alice).transfer(seeder.address, seedXAmount);
-    await stake.connect(seeder).approve(indexAddr, seedXAmount);
-    await index.connect(seeder).seedDeposit(stakeAddr, seedXAmount);
+    const seedSAmount = aliceSBal / 4n;
+    await vault.connect(alice).transfer(seeder.address, seedSAmount);
+    await vault.connect(seeder).approve(indexAddr, seedSAmount);
+    await index.connect(seeder).seedDeposit(vaultAddr, seedSAmount);
     await index.connect(seeder).openIndex(1_000n * WAD);
 
     // ── 5. Mint a real IDX-coin holder BEFORE any Pipe-I credit — this is
     //    the position whose redemption value NEST-1 measures rising, with
     //    NO further mint between the "before" and "after" snapshots. ───────
-    const remainingXBal: bigint = await stake.balanceOf(alice.address);
-    await stake.connect(alice).approve(indexAddr, remainingXBal);
+    const remainingSBal: bigint = await vault.balanceOf(alice.address);
+    await vault.connect(alice).approve(indexAddr, remainingSBal);
     const mintShares = 10n * WAD;
     await index.connect(alice).mintProRata(mintShares, maxIn(1));
 
@@ -291,39 +287,36 @@ describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5)", () => {
     const feeWethIn = ethers.parseEther("1");
     await weth.mint(busAddr, feeWethIn);
 
-    const stakeAssetsBefore: bigint = await stake.totalAssets();
-    const stakeSupplyBefore: bigint = await stake.totalSupply();
+    const sReserveAtIndexBefore: bigint = await vault.balanceOf(indexAddr);
 
     await expect(bus.route()).to.not.be.reverted;
 
-    // Pipe I bought vault vToken with its slice of the routed WETH, wrapped
-    // it into xToken (minted DIRECTLY to the index Diamond by
-    // `InventoryBuyAdapter.buyLeg`'s `deposit(sharesOut, index)`), and
-    // `creditInventory` moved that fresh xToken balance into `c.reserve`
+    // Pipe I bought vault S directly with its slice of the routed WETH,
+    // transferred it STRAIGHT to the index Diamond (no intermediate wrap),
+    // and `creditInventory` moved that fresh S balance into `c.reserve`
     // (vested) — ALL WITHOUT touching `ERC20Storage.totalSupply` (the index
     // coin's own supply), which is the crux of "no free iToken from fees"
     // (ONESHOT §6 rule 4).
     expect(await index.totalSupply()).to.equal(supplyBefore);
 
-    // The xToken Pipe I bought is real, observed inventory that the Diamond
-    // did not have before — either credited already (best case) or at least
+    // The S Pipe I bought is real, observed inventory that the Diamond did
+    // not have before — either credited already (best case) or at least
     // sitting at the Diamond's own balance ready for a permissionless
     // reconcile (defensive case covering a same-call credit-race edge).
-    const stakeAssetsAfterRoute: bigint = await stake.totalAssets();
-    expect(stakeAssetsAfterRoute).to.be.gte(stakeAssetsBefore);
-    void stakeSupplyBefore;
+    const sBalAtIndex: bigint = await vault.balanceOf(indexAddr);
+    expect(sBalAtIndex).to.be.gt(sReserveAtIndexBefore);
 
-    const xBalAtIndex: bigint = await stake.balanceOf(indexAddr);
-    if (xBalAtIndex > 0n) {
+    const reconcileNeeded: bigint = await index.reconcile.staticCall(vaultAddr);
+    if (reconcileNeeded > 0n) {
       // Not yet reconciled this call (defensive path) — sweep it in
       // explicitly via the same permissionless backstop §7.2 already ships,
       // so the "genuinely credited" assertion below is unconditionally true
       // regardless of which of `creditInventory`'s two landing paths fired.
-      await index.reconcile(stakeAddr);
+      await index.reconcile(vaultAddr);
     }
 
     // ── 9. Advance past the vesting window (`_addReserveVest`'s
-    //    `STREAM_VEST_BLOCKS`) so the freshly-credited xToken is no longer
+    //    `STREAM_VEST_BLOCKS`) so the freshly-credited S is no longer
     //    displaced from `redeemProRata`'s net-of-vest sizing. ────────────────
     for (let i = 0; i < STREAM_VEST_BLOCKS + 2; i++) {
       await ethers.provider.send("evm_mine", []);
@@ -338,10 +331,12 @@ describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5)", () => {
     expect(supplyAfter).to.equal(supplyBefore);
 
     // The index coin's redemption value per share has GENUINELY risen —
-    // the nested compound this whole PR exists to prove: real vault fee ->
-    // real xToken inventory bought by the real Bus -> real Diamond credit,
-    // vested, now redeemable by every existing holder pro rata, with no one
-    // having minted a single additional share to capture it.
+    // the nested compound this whole PR exists to prove, now under the
+    // corrected single-share-atom model: real vault fee -> S's own backing
+    // rises for EVERY S holder (no staking step) -> the real Bus buys more S
+    // into the index -> real Diamond credit, vested, now redeemable by every
+    // existing holder pro rata, with no one having minted a single
+    // additional share to capture it.
     expect(perShareAfter).to.be.gt(perShareBefore);
   });
 });

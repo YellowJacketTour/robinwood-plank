@@ -1,29 +1,32 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { time, mine, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
-import { deployOpenIndex, WAD, TIMELOCK } from "../helpers/index-vault";
+import { deployOpenIndex, TIMELOCK } from "../helpers/index-vault";
 
 /**
  * ============================================================================
- * PR5 (ONESHOT §7 / §5.3 / §8) — InventoryBuyAdapter (Pipe I) + IndexEnergyFacet.
+ * PR5 (ONESHOT §7 / §5.3 / §8) — InventoryBuyAdapter (Pipe I) + IndexEnergyFacet,
+ * under the CORRECTED single-share-atom model
+ * (DESIGN-CAKE-EAT-IT-SHARE-ATOM-2026-08-08.md §2/§4/§10 — supersedes the
+ * PR4/PR5-original dual vToken+xToken design).
  *
  * Covers TEST-MATRIX-AXIOM-1-ADVERSARIAL.md A-I and, most importantly,
- * ONESHOT §8's NEST-1: "After route Pipe I, L2 xToken reserve up, iToken
+ * ONESHOT §8's NEST-1: "After route Pipe I, L2 share reserve up, iToken
  * supply fixed, claim nested up after vest."
  *
  * NEST-1 is exercised against the REAL chain end to end:
- *   real CollectionVault + InventoryStake (PR4) -> real WeightModule (PR1)
- *   admits it -> real EnergyBus.route() (PR2) actually invokes the real
- *   InventoryBuyAdapter as Pipe I -> it buys real vToken off the vault's own
- *   AMM, deposits it into InventoryStake (minting xToken straight to the
- *   real index Diamond) -> real IndexEnergyFacet.creditInventory reconciles
- *   it into the Diamond's redeemable reserve via the SAME §7.2/§7.3/§7.6
- *   mechanism already proven elsewhere in this codebase.
+ *   real CollectionVault (PR4, corrected) -> real WeightModule (PR1) admits
+ *   it -> real EnergyBus.route() (PR2) actually invokes the real
+ *   InventoryBuyAdapter as Pipe I -> it buys real S (the vault's own share)
+ *   off the vault's own AMM, transfers it STRAIGHT to the real index Diamond
+ *   (no intermediate stake/wrap) -> real IndexEnergyFacet.creditInventory
+ *   reconciles it into the Diamond's redeemable reserve via the SAME
+ *   §7.2/§7.3/§7.6 mechanism already proven elsewhere in this codebase.
  *
  * LOCAL HARDHAT ONLY.
  * ============================================================================
  */
-describe("InventoryBuyAdapter + IndexEnergyFacet (PR5)", () => {
+describe("InventoryBuyAdapter + IndexEnergyFacet (PR5, corrected single-share-atom model)", () => {
   let snap: SnapshotRestorer;
   before(async () => {
     snap = await takeSnapshot();
@@ -34,12 +37,10 @@ describe("InventoryBuyAdapter + IndexEnergyFacet (PR5)", () => {
 
   const VAULT_TIMELOCK = 48 * 3600;
   const MINT_FEE = ethers.parseEther("0.05"); // MAX_MINT_FEE_WEI
-  const REDEEM_FEE = ethers.parseEther("0.01");
   const SINK_BPS = 3_000n; // CEIL_SINK_SPLIT_BPS, for fast F_MIN_WEI admission
   const F_MIN_WEI = ethers.parseEther("0.05");
 
-  /** Seed the vault's internal AMM pool, mirroring InventoryStake.test.ts's
-   * own helper exactly. */
+  /** Seed the vault's internal AMM pool. */
   async function openPool(vault: any, vaultAddr: string, treasury: any, payment: any, seedSharesHolder: any) {
     const seedPayment = ethers.parseEther("100");
     await payment.mint(treasury.address, seedPayment);
@@ -51,14 +52,15 @@ describe("InventoryBuyAdapter + IndexEnergyFacet (PR5)", () => {
     await vault.connect(treasury).openPool();
   }
 
-  it("NEST-1: real Bus -> InventoryBuyAdapter -> IndexEnergyFacet raises the Diamond's xToken reserve and NAV, with iToken supply unchanged, after vest", async () => {
+  it("NEST-1: real Bus -> InventoryBuyAdapter -> IndexEnergyFacet raises the Diamond's S reserve and NAV, with iToken supply unchanged, after vest — zero staking step", async () => {
     const fx = await deployOpenIndex();
     const weth = fx.addrs[0]; // == dividendAsset, the payment token every pipe here uses
     const wethC = await ethers.getContractAt("MockIndexToken", weth);
 
     const [, , , , , , , , , cvTreasury] = await ethers.getSigners();
 
-    // ── 1. Real CollectionVault + InventoryStake + WeightModule (PR1/PR4) ──
+    // ── 1. Real CollectionVault + WeightModule (PR1/PR4, corrected — no
+    //    InventoryStake to deploy or wire; S is the vault's own ERC20). ─────
     const nft: any = await (await ethers.getContractFactory("MockRobinWoodNft")).deploy();
     const factory: any = await (
       await ethers.getContractFactory("CollectionVaultFactory")
@@ -71,11 +73,6 @@ describe("InventoryBuyAdapter + IndexEnergyFacet (PR5)", () => {
     );
     await factory.deployVault(await nft.getAddress(), cvTreasury.address, SINK_BPS);
     const cVault: any = await ethers.getContractAt("CollectionVault", vaultAddr);
-
-    const Stake = await ethers.getContractFactory("InventoryStake");
-    const stake: any = await Stake.deploy(vaultAddr, vaultAddr, "Inventory xToken", "xSHARE");
-    const stakeAddr = await stake.getAddress();
-    await cVault.connect(cvTreasury).setInventoryStake(stakeAddr);
 
     const WeightModuleF = await ethers.getContractFactory("WeightModule");
     const weightModule: any = await WeightModuleF.deploy(await factory.getAddress());
@@ -93,38 +90,33 @@ describe("InventoryBuyAdapter + IndexEnergyFacet (PR5)", () => {
     await cVault.connect(fx.alice).deposit(1); // seed share for the pool
     await openPool(cVault, vaultAddr, cvTreasury, wethC, fx.alice);
 
-    // A real staker establishes InventoryStake's exchange rate BEFORE the
-    // Bus ever buys into it (mirrors InventoryStake.test.ts's own XTOKEN-1
-    // fixture exactly) — otherwise the FIRST-EVER stake deposit lands
-    // against whatever `_compoundXToken` had already donated pre-supply,
-    // which (correctly, per the virtual-shares math) mints a vanishingly
-    // small xToken amount for a small first deposit. With a real staker
-    // already holding xToken at a sane rate, the Bus's later deposit mints
-    // proportionally, at a magnitude large enough to move NAV visibly.
-    await cVault.connect(fx.alice).deposit(2);
-    const stakerShares = ethers.parseEther("1");
-    await cVault.connect(fx.alice).approve(stakeAddr, stakerShares);
-    await stake.connect(fx.alice).deposit(stakerShares, fx.alice.address);
-
     // Enough real mint-fee events to clear F_MIN_WEI (0.05 ether) of matured,
-    // sink-routed fee signal — real economic activity, not a mock.
-    for (let i = 3; i <= 30; i++) {
+    // sink-routed fee signal — real economic activity, not a mock. Every
+    // deposit ALSO donates XTOKEN_COMPOUND_BPS of its fee directly into the
+    // vault's own `paymentReserve`, raising `convertToAssets` for every S
+    // holder automatically (no staking step).
+    const rateBefore: bigint = await cVault.convertToAssets(ethers.parseEther("1"));
+    for (let i = 2; i <= 30; i++) {
       await cVault.connect(fx.alice).deposit(i);
       const s = await weightModule.scores(vaultAddr);
       if (s.feeWethCumulative >= F_MIN_WEI) break;
     }
     const scoreAfterFees = await weightModule.scores(vaultAddr);
     expect(scoreAfterFees.feeWethCumulative).to.be.gte(F_MIN_WEI);
+    const rateAfter: bigint = await cVault.convertToAssets(ethers.parseEther("1"));
+    expect(rateAfter).to.be.gt(rateBefore);
 
     await weightModule.checkAdmit(vaultAddr);
     expect(await weightModule.isAdmitted(vaultAddr)).to.equal(true);
 
-    // ── 3. List xToken as an L2 constituent (real listing, real price source) ──
+    // ── 3. List the vault's own share S as an L2 constituent (real listing,
+    //    real price source) — `vaultAddr` itself, since `CollectionVault` IS
+    //    the ERC20. ────────────────────────────────────────────────────────
     const Source = await ethers.getContractFactory("MockIndexPriceSource");
-    const xSource: any = await Source.deploy(WAD, WAD); // 1:1
-    await fx.vault.connect(fx.admission).queueListing(stakeAddr, await xSource.getAddress(), 1_000n, false);
+    const sSource: any = await Source.deploy(ethers.parseEther("1"), ethers.parseEther("1")); // 1:1
+    await fx.vault.connect(fx.admission).queueListing(vaultAddr, await sSource.getAddress(), 1_000n, false);
     await time.increase(TIMELOCK + 1);
-    await fx.vault.executeListing(stakeAddr);
+    await fx.vault.executeListing(vaultAddr);
     await fx.vault.checkpointAll();
 
     // ── 4. Deploy real InventoryBuyAdapter + 5 mock pipes + a real EnergyBus ──
@@ -181,8 +173,8 @@ describe("InventoryBuyAdapter + IndexEnergyFacet (PR5)", () => {
     await fx.vault.executeEnergyBus();
     expect(await fx.vault.energyBus()).to.equal(invAdapterAddr);
 
-    // ── 6. Snapshot: xToken reserve at the Diamond, NAV, iToken supply ─────
-    const xTokenAtDiamondBefore: bigint = await stake.balanceOf(fx.vaultAddr);
+    // ── 6. Snapshot: S reserve at the Diamond, NAV, iToken supply ──────────
+    const sAtDiamondBefore: bigint = await cVault.balanceOf(fx.vaultAddr);
     const [navLowBefore, navHighBefore] = await fx.vault.nav();
     const supplyBefore: bigint = await fx.vault.totalSupply();
 
@@ -191,9 +183,9 @@ describe("InventoryBuyAdapter + IndexEnergyFacet (PR5)", () => {
     await wethC.mint(await bus.getAddress(), total);
     await expect(bus.route()).to.not.be.reverted;
 
-    // ── 8. The real xToken balance at the Diamond genuinely rose ───────────
-    const xTokenAtDiamondAfter: bigint = await stake.balanceOf(fx.vaultAddr);
-    expect(xTokenAtDiamondAfter).to.be.gt(xTokenAtDiamondBefore);
+    // ── 8. The real S balance at the Diamond genuinely rose ────────────────
+    const sAtDiamondAfter: bigint = await cVault.balanceOf(fx.vaultAddr);
+    expect(sAtDiamondAfter).to.be.gt(sAtDiamondBefore);
 
     // The adapter itself never retains WETH.
     expect(await wethC.balanceOf(await invAdapter.getAddress())).to.equal(0n);
@@ -208,7 +200,7 @@ describe("InventoryBuyAdapter + IndexEnergyFacet (PR5)", () => {
     // ── 11. NAV (redemption value per iToken) genuinely rose ───────────────
     const [navLowAfter, navHighAfter] = await fx.vault.nav();
     console.log(
-      `NEST-1 evidence: xToken@Diamond ${xTokenAtDiamondBefore} -> ${xTokenAtDiamondAfter}; ` +
+      `NEST-1 evidence: S@Diamond ${sAtDiamondBefore} -> ${sAtDiamondAfter}; ` +
         `navLow ${navLowBefore} -> ${navLowAfter}; navHigh ${navHighBefore} -> ${navHighAfter}; ` +
         `iToken totalSupply unchanged at ${supplyAfter}`
     );
