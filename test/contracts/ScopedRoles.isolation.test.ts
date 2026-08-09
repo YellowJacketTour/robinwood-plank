@@ -262,6 +262,15 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       "redeemProRata",
       "mintSingleAsset",
       "redeemSingleAsset",
+      // IndexZapFacet (DESIGN-COLLECTION-VAULT-NATIVE-LP-AND-ZAP-MINT-
+      // 2026-08-08.md §3.2). Permissionless for the identical reason
+      // `mintProRata`/`mintSingleAsset` are: it is a mint path, priced
+      // entirely from the caller's own `desiredSharesOut`/`maxPaymentIn`
+      // arguments and each constituent's own AMM, gated by nothing but the
+      // shared `whenOpen`/`nonReentrant` guards and its own slippage/impact
+      // reverts — there is no role surface here for any key to be trusted
+      // with.
+      "zapMint",
       "checkpoint",
       "checkpointAll",
       "executeParam",
