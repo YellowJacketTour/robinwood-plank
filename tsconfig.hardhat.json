@@ -17,7 +17,9 @@
     "scripts/deploy-index-vault.ts",
     "scripts/seed-index-vault-genesis.ts",
     "scripts/configure-index-vault-governance.ts",
-    "scripts/config/index-vault-deploy-config.ts"
+    "scripts/config/index-vault-deploy-config.ts",
+    "scripts/deploy/axiom1-local.ts",
+    "scripts/verify/axiom1-postdeploy.ts"
   ],
   "exclude": ["node_modules"]
 }
