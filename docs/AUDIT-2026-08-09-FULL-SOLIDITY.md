@@ -8,7 +8,34 @@
 
 ---
 
-## Verdict
+## Remediation status (updated 2026-08-09, post-fix)
+
+**All findings below are now remediated on `feat/cvi-sota-axiom-1`; suite at 913 passing / 0 failing.** The original audit verdict ("do not deploy as-is") applied to the audited commit `1525597`. Remediation is tracked here and in `docs/DESIGN-HONEST-INDEX-2026-08-09.md`.
+
+| Finding | Status | Where |
+|---|---|---|
+| C-1 route() brick | Fixed + PoC inverted | `806b6ac` |
+| C-2 inert impact guard | Deleted, replaced by realizable pricing + 2% leg cap | `806b6ac` |
+| C-3 JIT-LP donation capture | Fixed (vest + dwell) | `806b6ac` |
+| C-4 weight-farming | Fixed (unrecoverable-contribution signal) | `806b6ac` |
+| C-5 junk-for-treasure | Fixed (immutable predicate vaults) | `806b6ac` |
+| C-6 hostile self-priced listing | Fixed (realizable pricing + provenance) | `806b6ac` |
+| H-1/H-2/H-3 vest bypass / zap credit / dividend vest | Fixed | `806b6ac` |
+| H-4/H-6/H-8 weight signals & caps | Fixed | `806b6ac` |
+| H-5 per-call route cap | Fixed (per-block cumulative budget) | `0610c09` |
+| H-7 drand round lead | Fixed (ROUND_LEAD, availability check) | `806b6ac` |
+| M-1 timelock expiry + veto | Fixed (14d GRACE_PERIOD, cross-role veto) | `40eadd9`, `6f256e2` |
+| M-2 stream-slot pinning | Fixed (exit-formula dust bound) | `40eadd9` |
+| M-3/M-4/M-5 governance bounds | Fixed | `806b6ac` |
+| F-4 IndexCoinPool reentrancy | Fixed | `806b6ac` |
+| Three hollow tests | Replaced with behavioural tests | `806b6ac` |
+| V2 live-funds item | Accepted / won't-fix (owner) | `9ae2a2e` |
+
+The remaining pre-deployment items are not findings but constraints: the `CollectionVaultFactory` 98.2% EIP-170 ceiling (design §6a), and standard pre-mainnet diligence (an independent external audit of the remediated code, given the meta-index has no prior audit coverage anywhere — see the strategic finding).
+
+---
+
+## Verdict (original, at audited commit `1525597`)
 
 **Do not deploy as-is.** Six CRITICAL findings, four of them proven with executed proof-of-concept tests that are committed alongside this report.
 
