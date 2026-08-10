@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { selectorsOf, facetSetHash } from "./helpers/diamond";
+import { ethers } from "./helpers/hardhat.js";
+import { selectorsOf, facetSetHash } from "./helpers/diamond.js";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { INDEX_FACETS } = require("./helpers/index-vault") as typeof import("./helpers/index-vault");
 

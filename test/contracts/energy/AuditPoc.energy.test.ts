@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "../helpers/hardhat.js";
+import { takeSnapshot, type SnapshotRestorer } from "../helpers/network-helpers.js";
 
 /**
  * AUDIT PROOF-OF-CONCEPT — added by a pre-deployment security audit pass.

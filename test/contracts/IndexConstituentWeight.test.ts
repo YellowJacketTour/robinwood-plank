@@ -1,9 +1,9 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { mine, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "./helpers/hardhat.js";
+import { mine, takeSnapshot, type SnapshotRestorer } from "./helpers/network-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
-import { deployOpenIndex, WAD, maxIn } from "./helpers/index-vault";
+import { deployOpenIndex, WAD, maxIn } from "./helpers/index-vault.js";
 
 /**
  * ============================================================================
@@ -58,7 +58,7 @@ describe("Index constituent weight — §7.5 continuous sybil-resistant weight",
 
   it("IndexCoreFacet (mintProRata's home) never imports or reads WeightStorage / _constituentWeight", () => {
     const src = fs.readFileSync(
-      path.join(__dirname, "../../contracts/diamond/facets/IndexCoreFacet.sol"),
+      path.join(import.meta.dirname, "../../contracts/diamond/facets/IndexCoreFacet.sol"),
       "utf8"
     );
     expect(src.includes("WeightStorage")).to.equal(false);
@@ -68,7 +68,7 @@ describe("Index constituent weight — §7.5 continuous sybil-resistant weight",
 
   it("IndexValuation (mintProRata's pricing library) never imports or reads WeightStorage", () => {
     const src = fs.readFileSync(
-      path.join(__dirname, "../../contracts/lib/IndexValuation.sol"),
+      path.join(import.meta.dirname, "../../contracts/lib/IndexValuation.sol"),
       "utf8"
     );
     expect(src.includes("WeightStorage")).to.equal(false);

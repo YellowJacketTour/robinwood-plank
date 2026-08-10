@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "../helpers/hardhat.js";
+import { takeSnapshot, type SnapshotRestorer } from "../helpers/network-helpers.js";
 
 /**
  * PHASE 2 — predicate vaults (closes audit C-5).

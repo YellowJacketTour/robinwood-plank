@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "./helpers/hardhat.js";
+import { takeSnapshot, type SnapshotRestorer } from "./helpers/network-helpers.js";
 
 /**
  * Proves design doc §2 / §7.2's factory-level guarantees:

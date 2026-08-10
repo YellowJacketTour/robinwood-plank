@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "../helpers/hardhat.js";
+import { takeSnapshot, type SnapshotRestorer } from "../helpers/network-helpers.js";
 
 /**
  * AUDIT C-3 — INVERTED (swap-leg variant). Originally this file only PRINTED

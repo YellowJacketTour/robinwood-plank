@@ -1,7 +1,7 @@
 import { expect } from "chai";
-import { ethers, artifacts } from "hardhat";
+import { ethers, artifacts } from "./helpers/hardhat.js";
 import { scanOpcodes, deployedSize, EIP170_LIMIT, selectorsOf ,
-  fullInit} from "./helpers/diamond";
+  fullInit} from "./helpers/diamond.js";
 
 /**
  * ============================================================================

@@ -8,6 +8,8 @@ import { adminMessage, adminPayloadHash } from "@/lib/admin-auth";
 import { signMessage } from "@/lib/wallet";
 
 const BACKFILL_ACTION = "backfill-events";
+const REPAIR_ACTION = "repair-activity";
+const REPAIR_INCIDENT_FROM_BLOCK = 27_935_949;
 
 /**
  * System section — the expanded operational picture: durable storage, chain
@@ -57,10 +59,18 @@ type BackfillState =
   | { kind: "ok"; message: string }
   | { kind: "error"; message: string };
 
+type RepairState =
+  | { kind: "idle" }
+  | { kind: "signing" }
+  | { kind: "running"; fromBlock: number }
+  | { kind: "ok"; message: string }
+  | { kind: "error"; message: string };
+
 export default function SystemSection({ address }: { address: string | null }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [failed, setFailed] = useState(false);
   const [backfill, setBackfill] = useState<BackfillState>({ kind: "idle" });
+  const [repair, setRepair] = useState<RepairState>({ kind: "idle" });
 
   const load = useCallback(async () => {
     try {
@@ -120,6 +130,64 @@ export default function SystemSection({ address }: { address: string | null }) {
     }
   }, [address]);
 
+  const runRepair = useCallback(async () => {
+    if (!address) return;
+    try {
+      let fromBlock = REPAIR_INCIDENT_FROM_BLOCK;
+      let totalRepaired = 0;
+      let totalInserted = 0;
+      let passes = 0;
+      for (;;) {
+        setRepair({ kind: "signing" });
+        const timestamp = Date.now();
+        const payload = JSON.stringify({ fromBlock });
+        const signature = await signMessage(
+          address,
+          adminMessage(REPAIR_ACTION, timestamp, adminPayloadHash(payload))
+        );
+        setRepair({ kind: "running", fromBlock });
+        const res = await fetch("/api/admin/repair-activity", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ auth: { address, timestamp, signature }, fromBlock }),
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          message?: string;
+          fromBlock?: number;
+          toBlock?: number;
+          rowsRepaired?: number;
+          rowsInserted?: number;
+          caughtUp?: boolean;
+          nextFromBlock?: number | null;
+          note?: string;
+        };
+        if (!res.ok || !data.ok) {
+          setRepair({ kind: "error", message: data.message || "The repair pass failed." });
+          return;
+        }
+        passes += 1;
+        totalRepaired += data.rowsRepaired ?? 0;
+        totalInserted += data.rowsInserted ?? 0;
+        if (data.caughtUp || !data.nextFromBlock) {
+          setRepair({
+            kind: "ok",
+            message: `${passes} pass(es) through block ${data.toBlock}: ${totalRepaired} row(s) repaired, +${totalInserted} inserted.`,
+          });
+          return;
+        }
+        fromBlock = data.nextFromBlock;
+        // One more sign-and-call round for the next chunk — the range is
+        // wide enough that a single request can't safely cover all of it.
+      }
+    } catch (err) {
+      setRepair({
+        kind: "error",
+        message: err instanceof Error ? err.message : "The repair pass failed.",
+      });
+    }
+  }, [address]);
+
   const relayer = status?.relayer;
 
   return (
@@ -163,6 +231,41 @@ export default function SystemSection({ address }: { address: string | null }) {
             <p className={`mt-2 ${NOTE_OK}`}>{backfill.message}</p>
           ) : backfill.kind === "error" ? (
             <p className={`mt-2 ${NOTE_ERR}`}>{backfill.message}</p>
+          ) : null}
+        </div>
+
+        <div className="mt-4 rounded-md bg-panel-strong p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className={LABEL}>Repair mislabelled activity</p>
+              <p className="mt-1 text-sm text-cream-muted">
+                Re-derives kind/venue/price for ledger rows from block{" "}
+                {REPAIR_INCIDENT_FROM_BLOCK.toLocaleString()} onward, using the
+                current classifier instead of the one that wrote them — fixes
+                vault deposits/redeems that were stored as open-market
+                &quot;sales&quot;. Safe to click repeatedly; only rows that
+                actually differ get touched, and a real price is never erased,
+                only filled in if missing. Pages through the range
+                automatically, one signature per chunk.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={BUTTON_PRIMARY}
+              disabled={!address || repair.kind === "signing" || repair.kind === "running"}
+              onClick={() => void runRepair()}
+            >
+              {repair.kind === "signing"
+                ? "Sign to confirm…"
+                : repair.kind === "running"
+                  ? `Repairing from ${repair.fromBlock.toLocaleString()}…`
+                  : "Repair activity"}
+            </button>
+          </div>
+          {repair.kind === "ok" ? (
+            <p className={`mt-2 ${NOTE_OK}`}>{repair.message}</p>
+          ) : repair.kind === "error" ? (
+            <p className={`mt-2 ${NOTE_ERR}`}>{repair.message}</p>
           ) : null}
         </div>
 

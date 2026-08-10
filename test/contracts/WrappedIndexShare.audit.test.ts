@@ -1,7 +1,7 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
-import { deployOpenIndex, maxIn } from "./helpers/index-vault";
+import { ethers } from "./helpers/hardhat.js";
+import { takeSnapshot, type SnapshotRestorer } from "./helpers/network-helpers.js";
+import { deployOpenIndex, maxIn } from "./helpers/index-vault.js";
 
 /**
  * ============================================================================

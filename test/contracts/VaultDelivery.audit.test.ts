@@ -1,7 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { mine } from "@nomicfoundation/hardhat-network-helpers";
-import { deployBeaconMock, relayPendingRound, expireRounds } from "./helpers/beacon";
+import { ethers, networkHelpers } from "./helpers/hardhat.js";
+import { deployBeaconMock, relayPendingRound, expireRounds } from "./helpers/beacon.js";
 
 /**
  * F-2 — a requester that cannot receive an ERC-721 must not be able to brick
@@ -74,7 +73,7 @@ describe("MarketplankVault — undeliverable requester cannot brick the vault (F
       nft
         .connect(alice)
         ["safeTransferFrom(address,address,uint256)"](alice.address, badAddr, 99)
-    ).to.be.reverted;
+    ).to.be.revert(ethers);
 
     // Fund it with exactly one share and let it request.
     await vault.connect(alice).transfer(badAddr, SHARE_UNIT);
@@ -91,7 +90,7 @@ describe("MarketplankVault — undeliverable requester cannot brick the vault (F
     // THE FIX: delivery is unconditional. Anyone can push it through, the NFT
     // lands with the requester (which chose to request it), and the vault-wide
     // slot is released in the same transaction.
-    await expect(vault.connect(bob).claimRandomRedeemFor(badAddr)).to.not.be.reverted;
+    await expect(vault.connect(bob).claimRandomRedeemFor(badAddr)).to.not.be.revert(ethers);
     expect(await nft.ownerOf(drawn)).to.equal(badAddr);
     expect(await vault.pendingRequester()).to.equal(ethers.ZeroAddress);
     expect(await vault.pendingRedeemCount()).to.equal(0n);
@@ -123,7 +122,7 @@ describe("MarketplankVault — undeliverable requester cannot brick the vault (F
     // the terminal brick: claim reverts on the transfer, forfeit reverts
     // RequestPending, and no third party can do anything about either.
     await expireRounds();
-    await mine(1);
+    await networkHelpers.mine(1);
 
     // At least one terminal path must exist. Settling is the one the fix
     // keeps; if it ever stops working, forfeit must take over. Asserting the
@@ -144,7 +143,7 @@ describe("MarketplankVault — undeliverable requester cannot brick the vault (F
 
     // The slot is genuinely reusable, not merely reported clear.
     await depositOne(nft, vault, bob, 501);
-    await expect(vault.connect(bob).requestRandomRedeem()).to.not.be.reverted;
+    await expect(vault.connect(bob).requestRandomRedeem()).to.not.be.revert(ethers);
   });
 
   it("an EOA requester is entirely unaffected — normal delivery still works", async () => {

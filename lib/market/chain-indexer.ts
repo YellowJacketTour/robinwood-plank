@@ -55,6 +55,7 @@ import {
   isMarketplankAttributed,
   readCachedSalePriceWei,
   resolveMarketplankAttribution,
+  vaultEventContractFor,
   type ActivityEvent,
 } from "@/lib/market/activity";
 import { VAULT_TOPIC_SET, decodeVaultLog } from "@/lib/market/vault-activity";
@@ -69,6 +70,7 @@ import {
   type ChainEventRow,
   type ChainEventSource,
 } from "@/lib/market/chain-events";
+import { kothCandidateFromSaleRow, offerKingOfTheHillCandidate } from "@/lib/market/king-of-the-hill";
 
 /**
  * Read a non-negative integer override from the environment.
@@ -198,6 +200,40 @@ export function planScan(input: {
 
   const targetCursor = windows[windows.length - 1].toBlock;
   return { windows, targetCursor, caughtUp: targetCursor >= safeHead };
+}
+
+/**
+ * The per-token price a NATIVE-ETH fill is allowed to claim from `tx.value`.
+ *
+ * ONE TOKEN ONLY, and that restriction is the entire point. `tx.value` is a
+ * single lump for the WHOLE transaction, so attributing it to every token the
+ * transaction moved records the total N times over instead of a price.
+ *
+ * Observed in production on 2026-08-05: transaction
+ * 0x5174cfb4d8fa0e63d1d9cb1e5e5b5bb2b4f52b1b… moved 7 planks and carried
+ * 0.0007 ETH, and the ledger stored "0.0007 ETH" as the sale price of all
+ * seven — three different rarities, one identical price, which is what made
+ * the feed look like a rarity-blind market. The lump was not a price at all
+ * there (it was 7 × the vault's flat 0.0001 ETH fee), which is precisely why an
+ * unsplittable lump must never be rendered as a per-item price.
+ *
+ * Dividing by the token count is deliberately NOT the fix: a genuine
+ * multi-token native fill is already priced per token by Seaport's
+ * OrderFulfilled legs (see readCachedSalePriceWei — verified live on
+ * 0xc98841c58b…, three tokens, 0.032 each rather than the 0.096 the buyer
+ * sent), so anything that reaches this fallback with several tokens has no
+ * per-token price anyone can know. Honestly unpriced beats confidently wrong —
+ * the same rule orderFulfilledSettlement applies to foreign-ERC-20 legs.
+ */
+export function nativeFillPriceWei(input: {
+  kind: string;
+  txValue: bigint | null;
+  tokensInTx: number;
+}): bigint | null {
+  if (input.kind !== "sale") return null;
+  if (input.txValue == null || input.txValue <= BigInt(0)) return null;
+  if (input.tokensInTx !== 1) return null;
+  return input.txValue;
 }
 
 /* ---------------- *
@@ -354,6 +390,15 @@ async function buildNftRows(logs: RawLog[]): Promise<ChainEventRow[]> {
     );
   }
 
+  // How many of OUR tokens each transaction moved. A transaction's `value` is
+  // ONE lump for the whole transaction, so it can only ever be read as a
+  // per-token price when the transaction moved exactly one token — see the
+  // priceWei rule below.
+  const tokensPerTx = new Map<string, number>();
+  for (const log of transfers) {
+    tokensPerTx.set(log.transactionHash, (tokensPerTx.get(log.transactionHash) ?? 0) + 1);
+  }
+
   const rows: ChainEventRow[] = [];
   for (const log of transfers) {
     let from: string;
@@ -391,6 +436,11 @@ async function buildNftRows(logs: RawLog[]): Promise<ChainEventRow[]> {
       // deposit/redeem into the ledger as an unpriced "sale" — and the ledger
       // is append-only, so a misclassification here is permanent.
       vaultAddresses: MARKET_VAULT_ADDRESSES,
+      // Receipt-proven vault mechanic, for the vault that the env list above
+      // does not know about. This is not belt-and-braces: it is the only
+      // defence against the env list drifting, and it has drifted in
+      // production — see classifyTransfer's vaultEventContract doc comment.
+      vaultEventContract: vaultEventContractFor(log.transactionHash),
       saleEvidence,
     });
 
@@ -400,7 +450,11 @@ async function buildNftRows(logs: RawLog[]): Promise<ChainEventRow[]> {
 
     // Same price rule as the live feed: a native fill moves value via tx.value,
     // a WETH fill moves it as a Seaport consideration leg (decoded above).
-    const nativeWei = kind === "sale" && tx != null && tx.value > BigInt(0) ? tx.value : null;
+    const nativeWei = nativeFillPriceWei({
+      kind,
+      txValue: tx?.value ?? null,
+      tokensInTx: tokensPerTx.get(log.transactionHash) ?? 1,
+    });
     const settledWei =
       kind === "sale" ? readCachedSalePriceWei(log.transactionHash, tokenId) : null;
     // The decoded settlement wins over tx.value when both exist: tx.value is
@@ -448,6 +502,30 @@ async function buildVaultRows(logs: RawLog[], vault: string): Promise<ChainEvent
     if (decoded) rows.push(vaultEventToRow(decoded, vault));
   }
   return rows;
+}
+
+/**
+ * Offer every confirmed sale row in a just-written batch to King of the Hill.
+ *
+ * Called from both ledger write sites (indexSource and reindexNftRange) so a
+ * record sale is detected whether it arrives via live sync OR a historical
+ * re-index — the same "one code path, two regimes" property the ledger
+ * itself relies on. Only source="nft", kind="sale" rows are candidates: a
+ * vault trade or a plain transfer is not a "sale" the tweet's rule is about.
+ * Errors here are logged, not thrown — a King of the Hill hiccup must never
+ * fail the ledger write it rode in on.
+ */
+async function offerSaleRowsToKingOfTheHill(rows: ChainEventRow[]): Promise<void> {
+  const sales = rows.filter((row) => row.source === "nft" && row.kind === "sale");
+  for (const row of sales) {
+    const candidate = kothCandidateFromSaleRow(row);
+    if (!candidate) continue;
+    try {
+      await offerKingOfTheHillCandidate(candidate);
+    } catch (error) {
+      console.error("[king-of-the-hill] failed to offer candidate sale:", error);
+    }
+  }
 }
 
 /**
@@ -517,6 +595,7 @@ export async function indexSource(input: {
   // (tx_hash, log_index) constraint absorbs every duplicate — at-least-once
   // delivery into an idempotent sink. The reverse order would lose events.
   result.rowsInserted = await appendChainEvents(rows);
+  await offerSaleRowsToKingOfTheHill(rows);
   if (reached > startCursor) {
     await writeChainCursor(input.source, input.contract, reached, input.head);
     result.toBlock = reached;
@@ -561,6 +640,7 @@ export async function reindexNftRange(input: {
     logsScanned += found.length;
     const rows = await buildNftRows(found);
     rowsInserted += await appendChainEvents(rows);
+    await offerSaleRowsToKingOfTheHill(rows);
     rowsRepaired += await repairChainEvents(rows);
   }
 

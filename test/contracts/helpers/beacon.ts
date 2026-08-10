@@ -1,5 +1,4 @@
-import { ethers } from "hardhat";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers, networkHelpers } from "./hardhat.js";
 
 /**
  * Shared fixture helpers for the vault suites after the drand rework.
@@ -14,7 +13,7 @@ import { time } from "@nomicfoundation/hardhat-network-helpers";
 
 /** Mock beacon on a 1-second period so one mined block ≈ one round. */
 export async function deployBeaconMock(period = 1): Promise<any> {
-  const genesis = await time.latest();
+  const genesis = await networkHelpers.time.latest();
   const Mock = await ethers.getContractFactory("DrandBeaconMock");
   return await Mock.deploy(period, genesis);
 }
@@ -48,5 +47,5 @@ export async function seedFor(beacon: any, round: bigint): Promise<string> {
 /** Push time far enough forward that a target round counts as expired. */
 export async function expireRounds(periodSeconds = 1): Promise<void> {
   // ROUND_EXPIRY in the vault is 28_800 rounds; overshoot generously.
-  await time.increase(periodSeconds * 30_000);
+  await networkHelpers.time.increase(periodSeconds * 30_000);
 }

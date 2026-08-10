@@ -1,11 +1,11 @@
 import { expect } from "chai";
-import { ethers, network } from "hardhat";
+import { ethers, network } from "./helpers/hardhat.js";
 import {
   takeSnapshot,
   time,
   type SnapshotRestorer,
-} from "@nomicfoundation/hardhat-network-helpers";
-import { TIMELOCK, WAD, deployOpenIndex, maxIn } from "./helpers/index-vault";
+} from "./helpers/network-helpers.js";
+import { TIMELOCK, WAD, deployOpenIndex, maxIn } from "./helpers/index-vault.js";
 
 /**
  * GAME-THEORY / MECHANISM-DESIGN PoC SUITE (read-only audit artefact).

@@ -1,9 +1,9 @@
 import { expect } from "chai";
-import { ethers, artifacts } from "hardhat";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers, artifacts } from "./helpers/hardhat.js";
+import { loadFixture } from "./helpers/network-helpers.js";
 
-import { deployedSize, EIP170_LIMIT, scanOpcodes } from "./helpers/diamond";
-import { INDEX_FACETS, deployOpenIndex, maxIn, zeroOut } from "./helpers/index-vault";
+import { deployedSize, EIP170_LIMIT, scanOpcodes } from "./helpers/diamond.js";
+import { INDEX_FACETS, deployOpenIndex, maxIn, zeroOut } from "./helpers/index-vault.js";
 
 /**
  * ══════════════════════════════════════════════════════════════════════════

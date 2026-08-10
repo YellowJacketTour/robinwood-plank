@@ -10,6 +10,37 @@ function numberArg(name, fallback) {
   return value;
 }
 
+function vaultAddressesArg() {
+  const prefix = "--vault-addresses=";
+  const raw = process.argv.find((value) => value.startsWith(prefix));
+  if (!raw) return null;
+  const values = raw
+    .slice(prefix.length)
+    .split(/[\s,]+/)
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  if (
+    values.length === 0 ||
+    values.some((value) => !/^0x[a-f0-9]{40}$/.test(value))
+  ) {
+    throw new Error("--vault-addresses must contain valid addresses.");
+  }
+  return new Set(values);
+}
+
+function hasConfiguredVaults(status, expectedVaults) {
+  if (!Array.isArray(status.vaults) || status.vaults.length === 0) {
+    return false;
+  }
+  const actualVaults = new Set(
+    status.vaults.map((vault) => String(vault.vault || "").toLowerCase())
+  );
+  return (
+    actualVaults.size === expectedVaults.size &&
+    [...expectedVaults].every((vault) => actualVaults.has(vault))
+  );
+}
+
 function parsePayload(line, marker) {
   const index = line.indexOf(marker);
   if (index < 0) return null;
@@ -27,6 +58,7 @@ async function main() {
   if (!logPath) throw new Error("Pass the relayer log path.");
   const requireHours = numberArg("require-hours", 0);
   const maxAgeMinutes = numberArg("max-age-minutes", 10);
+  const expectedVaults = vaultAddressesArg();
   const now = Date.now();
   const content = await readFile(logPath, "utf8");
   const statuses = [];
@@ -49,9 +81,28 @@ async function main() {
     .sort((left, right) => left.timestampMs - right.timestampMs);
   if (valid.length === 0) throw new Error("No timestamped relayer status entries.");
 
-  for (const status of valid) {
-    if (!Array.isArray(status.vaults) || status.vaults.length !== 2) {
-      throw new Error("A relayer status entry did not contain both vaults.");
+  const configuredStart = expectedVaults
+    ? valid.findIndex((status) => hasConfiguredVaults(status, expectedVaults))
+    : 0;
+  if (configuredStart < 0) {
+    throw new Error("No relayer status entry contained the configured vault set.");
+  }
+  const scoped = valid.slice(configuredStart);
+  const latest = scoped.at(-1);
+  const windowStart = now - requireHours * 3_600_000;
+  const inWindow =
+    requireHours > 0
+      ? scoped.filter((status) => status.timestampMs >= windowStart)
+      : [latest];
+
+  for (const status of inWindow) {
+    if (!Array.isArray(status.vaults) || status.vaults.length === 0) {
+      throw new Error("A relayer status entry did not contain any vaults.");
+    }
+    if (expectedVaults && !hasConfiguredVaults(status, expectedVaults)) {
+      throw new Error(
+        "A relayer status entry did not contain the configured vault set."
+      );
     }
     if (
       status.vaults.some(
@@ -64,18 +115,12 @@ async function main() {
     }
   }
 
-  const latest = valid.at(-1);
   if (now - latest.timestampMs > maxAgeMinutes * 60_000) {
     throw new Error("The latest successful relayer status is stale.");
   }
 
-  const windowStart = now - requireHours * 3_600_000;
-  const inWindow =
-    requireHours > 0
-      ? valid.filter((status) => status.timestampMs >= windowStart)
-      : valid;
   if (requireHours > 0) {
-    const earliest = valid[0];
+    const earliest = scoped[0];
     if (earliest.timestampMs > windowStart) {
       throw new Error(`Relayer history is shorter than ${requireHours} hours.`);
     }
@@ -99,7 +144,7 @@ async function main() {
       status: "ok",
       requireHours,
       successfulRunsInWindow: inWindow.length,
-      firstSuccess: valid[0].timestamp,
+      firstSuccess: scoped[0].timestamp,
       latestSuccess: latest.timestamp,
       fatalCount: fatals.length,
     })}`

@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { deployBeaconMock, relayPendingRound } from "./helpers/beacon";
+import { ethers } from "./helpers/hardhat.js";
+import { deployBeaconMock, relayPendingRound } from "./helpers/beacon.js";
 
 /**
  * Audit regression tests — each of these encodes a specific vulnerability

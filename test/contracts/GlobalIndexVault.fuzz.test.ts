@@ -1,10 +1,10 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers } from "./helpers/hardhat.js";
 import {
   takeSnapshot,
   time,
   type SnapshotRestorer,
-} from "@nomicfoundation/hardhat-network-helpers";
+} from "./helpers/network-helpers.js";
 import {
   CONCENTRATION_CAP_BPS,
   MIN_CHECKPOINT,
@@ -13,7 +13,7 @@ import {
   maxIn,
   zeroOut,
   type IndexFixture,
-} from "./helpers/index-vault";
+} from "./helpers/index-vault.js";
 
 /**
  * Randomized property test for GlobalIndexVault, the counterpart of

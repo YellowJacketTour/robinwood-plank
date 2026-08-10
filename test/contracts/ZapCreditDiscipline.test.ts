@@ -1,8 +1,8 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "./helpers/hardhat.js";
+import { time, takeSnapshot, type SnapshotRestorer } from "./helpers/network-helpers.js";
 
-import { deployIndexVault, TIMELOCK, paramsTuple, defaultParams } from "./helpers/index-vault";
+import { deployIndexVault, TIMELOCK, paramsTuple, defaultParams } from "./helpers/index-vault.js";
 
 /**
  * ══════════════════════════════════════════════════════════════════════════

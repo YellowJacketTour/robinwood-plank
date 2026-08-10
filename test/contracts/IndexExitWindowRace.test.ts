@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "./helpers/hardhat.js";
+import { time, takeSnapshot, type SnapshotRestorer } from "./helpers/network-helpers.js";
 import {
   deployOpenIndex,
   warmCheckpoints,
@@ -9,7 +9,7 @@ import {
   MIN_CHECKPOINT,
   maxIn,
   type IndexFixture,
-} from "./helpers/index-vault";
+} from "./helpers/index-vault.js";
 
 /**
  * ROUND 10, FIX 4 — THE STALE-BAND EXIT-WINDOW RACE.

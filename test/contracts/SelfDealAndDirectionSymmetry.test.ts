@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers } from "./helpers/hardhat.js";
 import {
   impersonateAccount,
   setBalance,
@@ -7,10 +7,10 @@ import {
   takeSnapshot,
   time,
   type SnapshotRestorer,
-} from "@nomicfoundation/hardhat-network-helpers";
+} from "./helpers/network-helpers.js";
 import { TIMELOCK, WAD, defaultParams, paramsTuple,
   indexVaultFactory,
-} from "./helpers/index-vault";
+} from "./helpers/index-vault.js";
 
 /**
  * Audit-style suite for two properties that are easy to CLAIM and easy to get

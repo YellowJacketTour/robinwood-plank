@@ -1,7 +1,7 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
-import { deployOpenIndex, warmCheckpoints, WAD, TIMELOCK, maxIn } from "./helpers/index-vault";
+import { ethers } from "./helpers/hardhat.js";
+import { time, takeSnapshot, type SnapshotRestorer } from "./helpers/network-helpers.js";
+import { deployOpenIndex, warmCheckpoints, WAD, TIMELOCK, maxIn } from "./helpers/index-vault.js";
 
 /**
  * ROUND 10, FIX 2 — THE DIVIDEND ACCUMULATOR CANNOT BE POISONED.

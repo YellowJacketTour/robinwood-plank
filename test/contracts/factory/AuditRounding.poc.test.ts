@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "../helpers/hardhat.js";
+import { takeSnapshot, type SnapshotRestorer } from "../helpers/network-helpers.js";
 
 /** AUDIT: rounding-direction fuzz across 1 wei -> 1e28 for the CPMM and LP round-trips. */
 describe("AUDIT: rounding direction fuzz (CollectionVault)", () => {

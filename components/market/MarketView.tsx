@@ -48,7 +48,14 @@ import { ensureRobinhoodChain } from "@/lib/wallet";
 import { useWallet } from "@/lib/wallet-context";
 import { MARKET_OFFER_CURRENCY, MARKET_VAULT_ADDRESS } from "@/lib/constants";
 import { formatTokenAmount } from "@/lib/trade";
-import type { Listing, MarketTab, Offer } from "@/lib/market/types";
+import EthUsdValue from "@/components/market/EthUsdValue";
+import {
+  isMarketplankRelistRequired,
+  MARKETPLANK_RELIST_MESSAGE,
+  type Listing,
+  type MarketTab,
+  type Offer,
+} from "@/lib/market/types";
 import dynamic from "next/dynamic";
 
 const ConnectWalletModal = dynamic(() => import("@/components/ConnectWalletModalSwitch"), {
@@ -540,12 +547,19 @@ export default function MarketView() {
   const handleBuy = useCallback(
     async (listing: Listing) => {
       setError(null);
+      if (isMarketplankRelistRequired(listing)) {
+        setError(MARKETPLANK_RELIST_MESSAGE);
+        return;
+      }
       const who = await requireAccount();
       if (!who) return;
       try {
         const full = listings.find((l) => l.id === listing.id);
         if (!full) throw new Error("Listing no longer available.");
         if (!COLLECTION) throw new Error("Unknown collection.");
+        if (isMarketplankRelistRequired(full)) {
+          throw new Error(MARKETPLANK_RELIST_MESSAGE);
+        }
 
         // Re-derive the price from the signed order in the buyer's own
         // browser. The API already does this, but repeating it here means
@@ -646,19 +660,30 @@ export default function MarketView() {
   const handleAcceptOffer = useCallback(
     async (offer: Listing) => {
       setError(null);
+      if (offer.royaltyEnforced === false) {
+        setError(
+          "This offer predates creator-royalty enforcement. The maker must relist it before it can be accepted on Marketplank."
+        );
+        return;
+      }
       const who = await requireAccount();
       if (!who) return;
       try {
         const full = offers.find((o) => o.id === offer.id);
         if (!full) throw new Error("Offer no longer available.");
         if (!COLLECTION) throw new Error("Unknown collection.");
+        if (full.royaltyEnforced === false) {
+          throw new Error(
+            "This offer predates creator-royalty enforcement. The maker must relist it before it can be accepted on Marketplank."
+          );
+        }
 
         const { validateOfferOrder } = await loadOrderValidation();
         const derived = validateOfferOrder(full.rawOrder, COLLECTION, MARKET_OFFER_CURRENCY);
         const { assertAcceptableOffer } = await loadSeaport();
         assertAcceptableOffer(full, derived);
-        // derived.priceWei is the seller's NET proceeds (order-validation
-        // OFFER semantics) — the number the seller must see before signing.
+        // derived.priceWei is the seller's NET proceeds after marketplace fee
+        // and creator royalty (order-validation OFFER semantics).
         setAcceptTarget({
           offer: full,
           verifiedNetWei: derived.priceWei,
@@ -682,6 +707,12 @@ export default function MarketView() {
   const handleAcceptTraitOffer = useCallback(
     async (offer: WithOrder<Offer>) => {
       setError(null);
+      if (offer.royaltyEnforced === false) {
+        setError(
+          "This offer predates creator-royalty enforcement. The maker must relist it before it can be accepted on Marketplank."
+        );
+        return;
+      }
       const who = await requireAccount();
       if (!who) return;
       try {
@@ -723,6 +754,11 @@ export default function MarketView() {
     try {
       setAccepting(true);
       const { offer, chosenTokenId } = acceptTraitTarget;
+      if (offer.royaltyEnforced === false) {
+        throw new Error(
+          "This offer predates creator-royalty enforcement. The maker must relist it before it can be accepted on Marketplank."
+        );
+      }
       // Re-derive EVERYTHING from the signed order at send time; the proof
       // handed to the wallet comes from the same verified snapshot.
       const { validateOfferOrder } = await loadOrderValidation();
@@ -957,8 +993,14 @@ export default function MarketView() {
             <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
               <div className="flex justify-between">
                 <dt className="font-bold text-foreground">You receive (net)</dt>
-                <dd className="font-display tabular-nums text-gold-300">
-                  {formatTokenAmount(acceptTraitTarget.verifiedNetWei, 18, 6)} WETH
+                <dd className="text-right font-display tabular-nums text-gold-300">
+                  <span className="block">
+                    {formatTokenAmount(acceptTraitTarget.verifiedNetWei, 18, 6)} WETH
+                  </span>
+                  <EthUsdValue
+                    wei={acceptTraitTarget.verifiedNetWei}
+                    className="block font-sans text-[0.65rem] text-foreground/55"
+                  />
                 </dd>
               </div>
             </dl>
@@ -1018,8 +1060,14 @@ export default function MarketView() {
             <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
               <div className="flex justify-between border-t border-line pt-1 first:border-t-0 first:pt-0">
                 <dt className="font-bold text-foreground">You receive (net)</dt>
-                <dd className="font-display tabular-nums text-gold-300">
-                  {formatTokenAmount(acceptTarget.verifiedNetWei, 18, 6)} WETH
+                <dd className="text-right font-display tabular-nums text-gold-300">
+                  <span className="block">
+                    {formatTokenAmount(acceptTarget.verifiedNetWei, 18, 6)} WETH
+                  </span>
+                  <EthUsdValue
+                    wei={acceptTarget.verifiedNetWei}
+                    className="block font-sans text-[0.65rem] text-foreground/55"
+                  />
                 </dd>
               </div>
             </dl>
@@ -1340,6 +1388,10 @@ export default function MarketView() {
                                 {o.criteriaTokenIds?.length ?? 0} planks qualify · seller nets{" "}
                                 {formatTokenAmount(o.priceWei, 18, 6)} WETH
                               </p>
+                              <EthUsdValue
+                                wei={o.priceWei}
+                                className="mt-0.5 block text-[0.62rem] text-foreground/50"
+                              />
                             </div>
                             <button
                               type="button"

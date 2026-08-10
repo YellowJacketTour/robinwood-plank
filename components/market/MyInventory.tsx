@@ -384,6 +384,15 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
                     </dt>
                     <dd className="mt-1 text-xs font-bold text-foreground">{totalPreview ?? "—"} ETH</dd>
                   </div>
+                  <div className="col-span-2 rounded-lg border border-line bg-wood-950 px-3 py-2">
+                    <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
+                      Creator royalty
+                    </dt>
+                    <dd className="mt-1 text-xs font-bold text-foreground">
+                      {(selectedItems[0]?.collection.royaltyBps ?? 0) / 100}% included in each
+                      signed order and paid by the buyer
+                    </dd>
+                  </div>
                 </dl>
                 <p className="mt-3 text-xs leading-5 text-foreground/55">
                   Each Plank creates one independently cancellable order. Price, expiry,
@@ -517,6 +526,7 @@ export default function MyInventory({ account, collections, alreadyListed, onLis
           <p className="text-center text-[0.6rem] text-foreground/40">
             Each plank is its own signed listing — your wallet will ask for{" "}
             {selectedItems.length} signature{selectedItems.length > 1 ? "s" : ""}, one per item.
+            {" "}The creator royalty is added to the buyer&apos;s payment.
           </p>
 
           <button

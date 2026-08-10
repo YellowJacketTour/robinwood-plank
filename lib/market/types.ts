@@ -26,8 +26,12 @@ export type MarketCollection = {
    * 0 = no fee. Toggle any approved collection's fee on/off or adjust the
    * rate by editing lib/market/collections.ts and redeploying — see
    * MARKET_DEFAULT_FEE_BPS for the default applied to non-PLANK collections.
-   */
+  */
   feeBps: number;
+  /** EIP-2981 creator royalty rate for new signed orders, in basis points. */
+  royaltyBps: number;
+  /** EIP-2981 creator royalty receiver for new signed orders. */
+  royaltyRecipient: string;
 };
 
 export type Listing = {
@@ -40,6 +44,11 @@ export type Listing = {
   /** ISO 8601 */
   expiresAt: string;
   kind: "fixed" | "dutch-auction";
+  /**
+   * Internal availability marker. False means the signed order predates
+   * mandatory creator royalties and must be relisted before fulfillment.
+   */
+  royaltyEnforced?: boolean;
   /**
    * The token's own artwork, resolved once at listing time. Showing the
    * collection logo for every item makes a grid look broken or fake — the art
@@ -66,6 +75,20 @@ export type Listing = {
   externalUrl?: string;
 };
 
+/**
+ * A legacy order can be displayed for context, but cannot be fulfilled by
+ * Marketplank because its signed consideration predates creator royalties.
+ * OpenSea rows are display-only and must never inherit this state.
+ */
+export function isMarketplankRelistRequired(
+  listing: Pick<Listing, "venue" | "royaltyEnforced">
+): boolean {
+  return listing.venue !== "opensea" && listing.royaltyEnforced === false;
+}
+
+export const MARKETPLANK_RELIST_MESSAGE =
+  "This listing needs to be unlisted and relisted before it can be purchased on Marketplank.";
+
 export type Offer = {
   id: string;
   collectionSlug: string;
@@ -84,6 +107,8 @@ export type Offer = {
   maker: string;
   priceWei: string;
   expiresAt: string;
+  /** False means the signed offer must be relisted before fulfillment. */
+  royaltyEnforced?: boolean;
   /** Resolved token art; absent for collection-wide offers. */
   imageUrl?: string;
 };

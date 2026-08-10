@@ -1,7 +1,7 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
-import { deployBeaconMock } from "./helpers/beacon";
+import { ethers } from "./helpers/hardhat.js";
+import { time, takeSnapshot, type SnapshotRestorer } from "./helpers/network-helpers.js";
+import { deployBeaconMock } from "./helpers/beacon.js";
 
 /**
  * ==========================================================================

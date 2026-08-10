@@ -25,6 +25,8 @@ const freeCollection: MarketCollection = {
   image: "/x.png",
   trustBadges: [],
   feeBps: 0,
+  royaltyBps: 0,
+  royaltyRecipient: "0x0000000000000000000000000000000000000000",
 };
 
 const futureEnd = Math.floor(Date.now() / 1000) + 86_400;

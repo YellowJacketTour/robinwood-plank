@@ -1,4 +1,4 @@
-import { ethers, artifacts } from "hardhat";
+import { ethers, artifacts } from "../helpers/hardhat.js";
 
 /**
  * Shared helpers for the Index diamond suites.

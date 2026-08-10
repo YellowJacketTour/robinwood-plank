@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { mine, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "../helpers/hardhat.js";
+import { mine, takeSnapshot, type SnapshotRestorer } from "../helpers/network-helpers.js";
 
 /**
  * AUDIT C-3 — INVERTED. This file used to PROVE the bug; it now proves the fix,

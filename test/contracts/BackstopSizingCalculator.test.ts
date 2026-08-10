@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers, artifacts } from "hardhat";
+import { ethers, artifacts } from "./helpers/hardhat.js";
 
 /**
  * Audit-style suite for BackstopSizingCalculator.

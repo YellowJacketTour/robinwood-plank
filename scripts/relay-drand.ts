@@ -298,6 +298,9 @@ function parseVaultAddresses(): string[] {
     .split(/[\s,]+/)
     .map((value) => value.trim())
     .filter(Boolean);
+  if (values.length === 0) {
+    throw new Error("VAULT_ADDRESSES must contain at least one address");
+  }
   if (values.some((value) => !/^0x[a-fA-F0-9]{40}$/.test(value))) {
     throw new Error("VAULT_ADDRESSES contains an invalid address");
   }

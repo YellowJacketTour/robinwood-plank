@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "./helpers/hardhat.js";
+import { time, takeSnapshot, type SnapshotRestorer } from "./helpers/network-helpers.js";
 import {
   deployOpenIndex,
   warmCheckpoints,
@@ -9,7 +9,7 @@ import {
   maxIn,
   armVaultRegistry,
   type IndexFixture,
-} from "./helpers/index-vault";
+} from "./helpers/index-vault.js";
 
 /**
  * ROUND 10, FIX 1 — THE EXIT DOOR IS NO LONGER BLOCKABLE BY ANY PARTY.

@@ -1,10 +1,10 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers } from "./helpers/hardhat.js";
 import {
   takeSnapshot,
   time,
   type SnapshotRestorer,
-} from "@nomicfoundation/hardhat-network-helpers";
+} from "./helpers/network-helpers.js";
 import {
   BPS,
   MIN_CHECKPOINT,
@@ -13,7 +13,7 @@ import {
   defaultParams,
   paramsTuple,
   indexVaultFactory,
-} from "./helpers/index-vault";
+} from "./helpers/index-vault.js";
 
 /**
  * ECOSYSTEM FEE SPLIT — the segregated revenue ledger that finally connects

@@ -1,10 +1,10 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers } from "./helpers/hardhat.js";
 import {
   takeSnapshot,
   time,
   type SnapshotRestorer,
-} from "@nomicfoundation/hardhat-network-helpers";
+} from "./helpers/network-helpers.js";
 import {
   BPS,
   LARGE_OP_WEI,
@@ -16,7 +16,7 @@ import {
   maxIn,
   warmCheckpoints,
   zeroOut,
-} from "./helpers/index-vault";
+} from "./helpers/index-vault.js";
 
 /**
  * Third hardening pass on GlobalIndexVault: TIMING and EDGE CASES the first

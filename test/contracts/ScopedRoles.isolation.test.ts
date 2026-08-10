@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time, takeSnapshot, SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "./helpers/hardhat.js";
+import { time, takeSnapshot, SnapshotRestorer } from "./helpers/network-helpers.js";
 
 import {
   WAD,
@@ -10,7 +10,7 @@ import {
   maxIn,
   zeroOut,
   armVaultRegistry,
-} from "./helpers/index-vault";
+} from "./helpers/index-vault.js";
 
 /**
  * ==========================================================================

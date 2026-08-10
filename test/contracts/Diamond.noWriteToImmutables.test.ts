@@ -1,8 +1,8 @@
 import { expect } from "chai";
-import { ethers, artifacts } from "hardhat";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers, artifacts } from "./helpers/hardhat.js";
+import { loadFixture } from "./helpers/network-helpers.js";
 import { deployIndexDiamond, combinedHandle, selectorsOf ,
-  fullInit} from "./helpers/diamond";
+  fullInit} from "./helpers/diamond.js";
 
 /**
  * ============================================================================

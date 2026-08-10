@@ -1,10 +1,10 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers } from "./helpers/hardhat.js";
 import {
   takeSnapshot,
   time,
   type SnapshotRestorer,
-} from "@nomicfoundation/hardhat-network-helpers";
+} from "./helpers/network-helpers.js";
 import {
   BPS,
   CONCENTRATION_CAP_BPS,
@@ -21,7 +21,7 @@ import {
   type IndexFixture,
   indexVaultFactory,
   armVaultRegistry,
-} from "./helpers/index-vault";
+} from "./helpers/index-vault.js";
 
 /**
  * Audit-style suite for GlobalIndexVault, written to the bar

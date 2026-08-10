@@ -1,13 +1,13 @@
 import { expect } from "chai";
-import { ethers, artifacts } from "hardhat";
-import { loadFixture, time, takeSnapshot, SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers, artifacts } from "./helpers/hardhat.js";
+import { loadFixture, time, takeSnapshot, SnapshotRestorer } from "./helpers/network-helpers.js";
 
 import {
   deployOpenIndex,
   warmCheckpoints,
   maxIn,
   armVaultRegistry,
-} from "./helpers/index-vault";
+} from "./helpers/index-vault.js";
 
 /**
  * ══════════════════════════════════════════════════════════════════════════

@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "./helpers/hardhat.js";
+import { takeSnapshot, type SnapshotRestorer } from "./helpers/network-helpers.js";
 import {
   indexVaultFactory,
   paramsTuple,
@@ -9,7 +9,7 @@ import {
   TIMELOCK,
   maxIn,
   zeroOut,
-} from "./helpers/index-vault";
+} from "./helpers/index-vault.js";
 
 /**
  * RED TEAM PoC — THE EXIT DOOR IS ONLY AS STRONG AS THE WEAKEST CONSTITUENT.

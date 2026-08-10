@@ -1,6 +1,6 @@
-import { ethers, artifacts } from "hardhat";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
-import { deployIndexDiamond, combinedHandle } from "./diamond";
+import { ethers, artifacts } from "../helpers/hardhat.js";
+import { time } from "../helpers/network-helpers.js";
+import { deployIndexDiamond, combinedHandle } from "./diamond.js";
 
 /**
  * Shared fixture for the GlobalIndexVault suites. Mirrors the shape

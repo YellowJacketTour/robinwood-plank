@@ -4,6 +4,7 @@ import {
   CHAIN_INDEX_GENESIS_BLOCK,
   CONFIRMATION_DEPTH_BLOCKS,
   confirmedHead,
+  nativeFillPriceWei,
   planScan,
 } from "../../lib/market/chain-indexer";
 import {
@@ -203,4 +204,38 @@ test("cursor keys are stable and case-insensitive per contract", () => {
     cursorKey("vault", "0xace28f72fc3e15ea1671e689806694a9b0ce047d")
   );
   assert.notEqual(cursorKey("nft", "0xabc"), cursorKey("vault", "0xabc"));
+});
+
+/* ---------------- native-fill price attribution ---------------- */
+
+test("a single-token native fill keeps tx.value as its price", () => {
+  assert.equal(
+    nativeFillPriceWei({ kind: "sale", txValue: BigInt("33000000000000000"), tokensInTx: 1 }),
+    BigInt("33000000000000000")
+  );
+});
+
+test("a transaction's lump tx.value is never stamped onto each of several tokens", () => {
+  // Real production case: 0x5174cfb4d8… moved 7 planks carrying 0.0007 ETH
+  // total, and every one of the seven was stored as a 0.0007 ETH "sale".
+  assert.equal(
+    nativeFillPriceWei({ kind: "sale", txValue: BigInt("700000000000000"), tokensInTx: 7 }),
+    null
+  );
+});
+
+test("only sales get a native price at all", () => {
+  assert.equal(
+    nativeFillPriceWei({ kind: "transfer", txValue: BigInt("100000000000000"), tokensInTx: 1 }),
+    null
+  );
+  assert.equal(
+    nativeFillPriceWei({ kind: "mint", txValue: BigInt("100000000000000"), tokensInTx: 1 }),
+    null
+  );
+});
+
+test("no value moved means no price, never a misleading zero", () => {
+  assert.equal(nativeFillPriceWei({ kind: "sale", txValue: BigInt(0), tokensInTx: 1 }), null);
+  assert.equal(nativeFillPriceWei({ kind: "sale", txValue: null, tokensInTx: 1 }), null);
 });

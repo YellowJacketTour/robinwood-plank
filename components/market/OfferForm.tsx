@@ -14,6 +14,7 @@ import {
 } from "@/lib/market/trait-criteria";
 import { parseTokenAmount } from "@/lib/trade";
 import type { Listing, MarketCollection } from "@/lib/market/types";
+import EthUsdValue from "@/components/market/EthUsdValue";
 import TraitCriteriaPicker from "@/components/market/TraitCriteriaPicker";
 
 type Props = {
@@ -98,6 +99,7 @@ export default function OfferForm({
     () => resolveCriteriaTokenIds(index?.traits, clauses, index?.rankings),
     [index, clauses]
   );
+  const offerWei = useMemo(() => parseTokenAmount(priceEth, 18), [priceEth]);
 
   const submit = async () => {
     setError(null);
@@ -125,6 +127,8 @@ export default function OfferForm({
         criteriaTokenIds: traitMode ? qualifyingIds : undefined,
         expiresAt,
         feeBps: collection.feeBps,
+        royaltyBps: collection.royaltyBps,
+        royaltyRecipient: collection.royaltyRecipient,
       });
 
       const traitPairs = clausesToTraitLabels(clauses).filter(
@@ -264,7 +268,13 @@ export default function OfferForm({
                   <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
                     Offer
                   </dt>
-                  <dd className="mt-1 text-xs font-bold text-foreground">{priceEth} WETH</dd>
+                  <dd className="mt-1 text-xs font-bold text-foreground">
+                    <span className="block">{priceEth} WETH</span>
+                    <EthUsdValue
+                      wei={offerWei}
+                      className="mt-0.5 block text-[0.65rem] text-foreground/50"
+                    />
+                  </dd>
                 </div>
                 <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
                   <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
@@ -274,11 +284,12 @@ export default function OfferForm({
                 </div>
                 <div className="col-span-2 rounded-lg border border-line bg-wood-950 px-3 py-2">
                   <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">
-                    Marketplace fee / seller net
+                    Fees / seller net
                   </dt>
                   <dd className="mt-1 text-xs font-bold text-foreground">
-                    {(collection.feeBps / 100).toFixed(2)}% fee · seller net verified from
-                    the signed order before acceptance
+                    {(collection.royaltyBps / 100).toFixed(2)}% creator royalty ·{" "}
+                    {(collection.feeBps / 100).toFixed(2)}% marketplace fee · seller net
+                    verified from the signed order before acceptance
                   </dd>
                 </div>
               </dl>
@@ -422,6 +433,10 @@ export default function OfferForm({
           />
           <span className="text-xs font-bold text-gold-300">WETH</span>
         </div>
+        <EthUsdValue
+          wei={offerWei}
+          className="block text-right text-[0.65rem] text-foreground/50"
+        />
 
         <div className="flex gap-1.5">
           {DURATIONS.map((d) => (
@@ -439,9 +454,10 @@ export default function OfferForm({
         </div>
 
         <p className="text-center text-[0.65rem] text-foreground/50">
+          {(collection.royaltyBps / 100).toFixed(2)}% creator royalty included ·{" "}
           {collection.feeBps > 0
             ? `${(collection.feeBps / 100).toFixed(2)}% marketplace fee`
-            : "No marketplace fee"}
+            : "no marketplace fee"}
         </p>
 
         <button

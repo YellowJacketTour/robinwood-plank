@@ -1,7 +1,7 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time, mine, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
-import { deployBeaconMock } from "./helpers/beacon";
+import { ethers } from "./helpers/hardhat.js";
+import { time, mine, takeSnapshot, type SnapshotRestorer } from "./helpers/network-helpers.js";
+import { deployBeaconMock } from "./helpers/beacon.js";
 import {
   deployOpenIndex,
   warmCheckpoints,
@@ -9,7 +9,7 @@ import {
   WAD,
   TIMELOCK,
   maxIn,
-} from "./helpers/index-vault";
+} from "./helpers/index-vault.js";
 
 /**
  * ROUND 10, FIX 3 — THE DOCUMENTED PRODUCTION SINK NO LONGER STRANDS VALUE.

@@ -1,8 +1,8 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { loadFixture, mine } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "./helpers/hardhat.js";
+import { loadFixture, mine } from "./helpers/network-helpers.js";
 
-import { deployOpenIndex, maxIn, zeroOut, WAD, BPS, defaultParams } from "./helpers/index-vault";
+import { deployOpenIndex, maxIn, zeroOut, WAD, BPS, defaultParams } from "./helpers/index-vault.js";
 
 /**
  * ══════════════════════════════════════════════════════════════════════════

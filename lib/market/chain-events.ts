@@ -16,6 +16,7 @@
 
 import { formatEther } from "ethers";
 import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
+import type { PoolClient } from "pg";
 import type { ActivityEvent, ActivityKind } from "@/lib/market/activity";
 import type { VaultTradeEvent } from "@/lib/market/vault-activity";
 import { resolveIpfsUrl } from "@/lib/ipfs";
@@ -616,7 +617,9 @@ export type LedgerSalesStats = {
  * silently excludes a genuine sale just because royalty enforcement was
  * bypassed by whatever venue it went through.
  */
-export async function salesStatsFromLedger(): Promise<LedgerSalesStats> {
+export async function salesStatsFromLedger(
+  client?: Pick<PoolClient, "query">
+): Promise<LedgerSalesStats> {
   const empty: LedgerSalesStats = {
     saleCount: 0,
     highestWei: null,
@@ -628,7 +631,12 @@ export async function salesStatsFromLedger(): Promise<LedgerSalesStats> {
   };
   if (!hasChainEventStore()) return empty;
 
-  const totals = await postgresQuery<{ sale_count: string; total_wei: string | null }>(
+  const query = client
+    ? <T extends Record<string, unknown>>(text: string, values: readonly unknown[] = []) =>
+        client.query<T>(text, [...values])
+    : postgresQuery;
+
+  const totals = await query<{ sale_count: string; total_wei: string | null }>(
     `SELECT COUNT(*)::text AS sale_count, SUM(price_wei)::text AS total_wei
      FROM plank_chain_events
      WHERE kind = 'sale' AND price_wei IS NOT NULL`
@@ -637,7 +645,7 @@ export async function salesStatsFromLedger(): Promise<LedgerSalesStats> {
   if (saleCount === 0) return empty;
   const totalVolumeWei = totals.rows[0]?.total_wei ?? null;
 
-  const highest = await postgresQuery<{
+  const highest = await query<{
     price_wei: string;
     token_id: string | null;
     tx_hash: string;

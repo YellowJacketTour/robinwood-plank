@@ -1,6 +1,6 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time, mine, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers } from "../helpers/hardhat.js";
+import { time, mine, takeSnapshot, type SnapshotRestorer } from "../helpers/network-helpers.js";
 
 /**
  * PHASE 4 NOTE (audit C-3). `removeLiquidity` now enforces

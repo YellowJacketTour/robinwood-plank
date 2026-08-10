@@ -185,63 +185,6 @@ vaporware:
   intents, not direct AMM swaps** — better execution, and it closes a
   real gap found in this round's adversarial sweep (§5 below).
 
-  **STATUS, CORRECTED AFTER ACTUALLY BUILDING AGAINST IT.** A later round
-  was scoped to build the on-chain half of this pattern — an
-  `IIntentSettlement` commit/settle interface — and route
-  `mintSingleAsset`/`redeemSingleAsset`'s "internal swap" leg through it.
-  It was not built, on purpose, because reading the shipped contract shows
-  that leg does not have the exposure this section describes. The finding
-  is now proven rather than assumed, in
-  `test/contracts/IndexVaultIntentSurface.test.ts` (13 tests). Precisely:
-
-  - **There is no vault-initiated executable trade anywhere in
-    `GlobalIndexVault`.** The contract has exactly two token-out call
-    sites, and both send to `msg.sender` inside a share-burning
-    redemption. It never trades on its own behalf, never holds an order,
-    never touches an external venue, and has no entrypoint taking
-    forwardable `bytes` calldata. `targetWeightsBps()` is a view that
-    nothing force-trades against. Publishing a target vector is safe;
-    publishing an executable rebalance order is what gets front-run, and
-    this contract publishes only the former. The intent/solver
-    recommendation therefore applies to a *future off-chain rebalancing
-    operator*, if one is ever built — it is not a gap in what is shipped.
-  - **The "internal swap" is not a swap against liquidity.** The
-    non-pro-rata leg is priced off the checkpointed ORACLE BAND (other
-    legs at band LOW, the target at band HIGH), not off a reserve ratio.
-    There is no pool to move: an attacker cannot worsen the victim's price
-    by trading first, because the victim's price does not come from the
-    reserves the attacker can touch. The whole movable range is the
-    imbalance-fee term, bounded by `maxImbalanceFeeBps`.
-  - **Commitment and fill are already the same atomic step**, bounded by
-    the caller's own `minSharesOut`/`minAmountOut`. There is no interval
-    between "the vault is committed" and "the vault is filled" for anyone
-    to occupy. That decoupling-with-a-price-bound is exactly what an
-    intent/settlement split would be *buying*; here it is free by
-    construction.
-  - **Both sandwich orientations are driven and measured, and both lose
-    money** — mint-side and redeem-side, monotonically worse with size, no
-    break-even point. The fee is retained in reserves, so NAV per share is
-    non-decreasing across the attacker's whole sequence.
-
-  **Why adding the interface anyway would have been a REGRESSION, not
-  future-proofing.** A commit/settle split introduces a second, later,
-  separately-callable step between a user and their assets — a settlement
-  leg that can expire, fail, or be griefed is a way for value to sit
-  un-withdrawable, even temporarily. That is the one thing this codebase's
-  hard constraint forbids outright. The suite's §5 proves the exit door
-  stays open under every adversarial ordering *including with the oracle
-  fully stale*: `redeemProRata` consults no price anywhere in its path and
-  therefore cannot be jammed by one — precisely the case an
-  intent-settlement leg would have made worse.
-
-  One honest note recorded while proving this: the stayer invariant across
-  a single-asset op is **NAV per share**, not per-leg backing. A
-  single-asset deposit deliberately lifts the leg it lands in and dilutes
-  every other leg's per-share slice — that is the mechanism working, not a
-  leak. Asserting per-leg backing there (as the pro-rata suite correctly
-  does for `redeemProRata`) would be asserting the mechanism does not do
-  the one thing it exists to do.
-
 **Build with a fallback:**
 - **ERC-7702** (live since Pectra, May 2025; MetaMask/Rabby/Trust
   integrated through 2025-2026) — genuinely enables one-signature basket
@@ -360,17 +303,6 @@ observable AMM swaps — a sealed-bid auction doesn't reveal the trade
 front-running surface the plain-AMM approach would have left open. Ordinary
 sandwich-MEV mitigation (slippage bounds) does nothing against this
 distinct threat; the execution-layer choice is the actual defense.
-
-**Scope correction, proven (see §4's STATUS block):** this threat is real
-only for a rebalancing *operator* that submits trades to external venues.
-The shipped `GlobalIndexVault` has no such path — no vault-initiated
-trade, no external venue, no order that outlives its own transaction.
-The vault's own single-asset "internal swap" is oracle-band priced and
-atomic with its caller's slippage bound, so both sandwich orientations
-against it are provably loss-making
-(`test/contracts/IndexVaultIntentSurface.test.ts`). The solver-auction
-requirement is inherited by any future off-chain rebalancer; it is not an
-outstanding gap in the contract.
 
 ---
 
