@@ -143,6 +143,8 @@ This is already known and documented across the repo, and the V3 deploy script a
 
 This is the only finding in the audit that touches funds already at risk today.
 
+**Disposition (owner decision, 2026-08-09): leave V2 as-is; no on-chain action.** The frontend legacy-address blocklist remains the mitigation. V2 is a superseded contract with no upgrade path; the value-at-risk does not warrant an adversarial on-chain rescue, and the honest-index redesign does not depend on it. This item is closed as "won't fix / accepted," not outstanding.
+
 ---
 
 ## Meta-finding: three load-bearing tests prove nothing
