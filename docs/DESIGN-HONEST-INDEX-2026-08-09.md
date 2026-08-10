@@ -177,22 +177,23 @@ Every phase ends with real adversarial tests that can actually fail, and each au
 
 ---
 
-## 6a. Deployment constraint: the factory is at 98.2% of EIP-170
+## 6a. Deployment constraint: EIP-170 headroom (relieved, still finite)
 
-Measured after implementation, across all 134 compiled contracts:
+`CollectionVaultFactory` calls `type(CollectionVault).creationCode`, so its deployed bytecode **literally carries the entire vault creation code as a data blob**. Factory size ≈ vault creation code + ~2.6 KB of factory logic. The two are *one* size problem: every byte the vault sheds comes straight off the factory.
 
-| Contract | Bytes | % of 24,576 |
-|---|---:|---:|
-| **CollectionVaultFactory** | **24,122** | **98.2%** |
-| CollectionVault | 19,735 | 80.3% |
-| IndexGovernanceFacet | 15,569 | 63.4% |
-| WrappedIndexShare | 15,474 | 63.0% |
+At first measurement the factory sat at **24,122 bytes — 98.2%** of the 24,576 limit, with 454 bytes spare. Enabling `viaIR` for those two files (commit `43531bf`) relieved it:
 
-Nothing is over the limit, but `CollectionVaultFactory` has **454 bytes of headroom**. It embeds `CollectionVault`'s full creation bytecode, so *every* byte added to the vault costs the factory roughly a byte. Combined with `diamondCut` being renounced at birth, this is a hard, permanent ceiling:
+| Contract | Before | After | % of limit |
+|---|---:|---:|---:|
+| **CollectionVaultFactory** | 24,122 | **22,723** | 98.2% → **92.5%** |
+| CollectionVault | 19,735 | **17,468** | 80.3% → **71.1%** |
+| *headroom* | *454* | ***1,853*** | *4.1× more* |
 
-> **`CollectionVault` is effectively feature-frozen at deployment.** Any further addition requires first factoring vault logic into an external library or switching the factory to a minimal-proxy/clone pattern.
+**The saving came from codegen, not from trading away runtime gas** — measured, because the assumption ran the other way. With `viaIR` on, factory size by optimizer runs was `runs=1 → 22,592`, `runs=50 → 22,593`, `runs=200 → 22,723`: a 131-byte spread across a 200× change. So `runs` stays at the default 200 and the hot user paths (`deposit`, `redeem`, `buyShares`, `sellShares`) keep full optimization. Users pay nothing for the headroom.
 
-This belongs in the pre-deployment checklist, not in a future incident report.
+The override is scoped to those two files; all 133 other contracts are byte-identical, so no facet and no already-deployed bytecode is affected and no existing source verification breaks.
+
+**The ceiling is relieved, not removed.** `diamondCut` is still renounced at birth, so this remains a pre-deployment constraint — there is no later fix. Budget the 1,853 bytes deliberately. If substantially more is ever needed, the real lever is a **minimal-proxy / clone factory**, so the factory stops carrying the vault's creation code at all and drops to a few hundred bytes.
 
 ---
 

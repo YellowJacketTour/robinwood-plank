@@ -31,7 +31,7 @@
 | Three hollow tests | Replaced with behavioural tests | `806b6ac` |
 | V2 live-funds item | Accepted / won't-fix (owner) | `9ae2a2e` |
 
-The remaining pre-deployment items are not findings but constraints: the `CollectionVaultFactory` 98.2% EIP-170 ceiling (design §6a), and standard pre-mainnet diligence (an independent external audit of the remediated code, given the meta-index has no prior audit coverage anywhere — see the strategic finding).
+The remaining pre-deployment items are not findings but constraints: the `CollectionVaultFactory` EIP-170 headroom, relieved to 92.5% / 1,853 bytes in `43531bf` (design §6a), and standard pre-mainnet diligence (an independent external audit of the remediated code, given the meta-index has no prior audit coverage anywhere — see the strategic finding).
 
 ---
 
