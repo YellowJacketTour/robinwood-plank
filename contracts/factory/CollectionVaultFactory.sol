@@ -61,6 +61,13 @@ contract CollectionVaultFactory {
 
     error VaultAlreadyExists();
     error ZeroAddress();
+    /// @dev Replaces `require(deployed != address(0), "create2 failed")`. A
+    /// revert STRING is stored verbatim in the deployed bytecode; a custom
+    /// error is four selector bytes. Trivial on most contracts, worth taking
+    /// on this one — it sits closest to EIP-170 of anything in the repo
+    /// because it embeds all of `CollectionVault`'s creation code (see
+    /// `_creationCode`), and there is no upgrade path to reclaim space later.
+    error Create2Failed();
 
     constructor(address upstreamSink_, IERC20 paymentToken_, uint256 timelockDelay_) {
         if (upstreamSink_ == address(0) || address(paymentToken_) == address(0)) revert ZeroAddress();
@@ -185,7 +192,7 @@ contract CollectionVaultFactory {
         assembly {
             deployed := create2(0, add(bytecode, 0x20), mload(bytecode), salt)
         }
-        require(deployed != address(0), "create2 failed");
+        if (deployed == address(0)) revert Create2Failed();
 
         vaultForCollection[salt] = deployed;
         allVaults.push(deployed);

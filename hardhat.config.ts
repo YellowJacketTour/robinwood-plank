@@ -89,8 +89,9 @@ const config: HardhatUserConfig = {
      * Scoped to these two files only, so no facet's bytecode and no already
      * deployed contract's bytecode is touched.
      */
-    overrides: Object.fromEntries(
-      ["contracts/diamond/Diamond.sol", "contracts/diamond/IndexDeployer.sol"].map((f) => [
+    overrides: Object.fromEntries([
+      // viaIR is needed for these two to compile at all (deep stacks).
+      ...["contracts/diamond/Diamond.sol", "contracts/diamond/IndexDeployer.sol"].map((f) => [
         f,
         {
           version: "0.8.24",
@@ -112,8 +113,57 @@ const config: HardhatUserConfig = {
             },
           },
         },
-      ])
-    ),
+      ]),
+      // SIZE RELIEF FOR THE EIP-170 CEILING — via `viaIR`, NOT by starving
+      // the optimizer.
+      //
+      // CollectionVaultFactory's deployed bytecode literally carries all of
+      // CollectionVault's CREATION code as a data blob (it calls
+      // `type(CollectionVault).creationCode`), so the two are one size
+      // problem: the factory was at 98.2% of EIP-170 with 454 bytes spare,
+      // and every byte the vault sheds comes straight off the factory. An
+      // over-limit contract cannot be deployed at all, and `diamondCut` is
+      // renounced at birth, so there is no later fix.
+      //
+      // MEASURED, not assumed. Factory deployed size by optimizer runs, all
+      // with viaIR on:
+      //     runs=1   -> 22,592 bytes
+      //     runs=50  -> 22,593 bytes
+      //     runs=200 -> 22,723 bytes
+      // The spread across a 200x change in `runs` is 131 bytes. Essentially
+      // the ENTIRE saving comes from `viaIR`'s tighter codegen, not from
+      // trading away runtime gas — so there is no reason to pay for size
+      // with the gas of `deposit`/`redeem`/`buyShares`/`sellShares`, which
+      // are hot user paths on every vault forever. `runs` therefore stays at
+      // the repo default 200 and the contracts keep normal optimisation.
+      //
+      // Scoped to these two files only — no facet and no already-deployed
+      // MarketplankVault bytecode is touched, so no existing contract's
+      // source verification breaks.
+      ...["contracts/factory/CollectionVault.sol", "contracts/factory/CollectionVaultFactory.sol"].map((f) => [
+        f,
+        {
+          version: "0.8.24",
+          settings: {
+            optimizer: { enabled: true, runs: 200 },
+            viaIR: true,
+            evmVersion: "paris",
+            outputSelection: {
+              "*": {
+                "*": [
+                  "abi",
+                  "evm.bytecode",
+                  "evm.deployedBytecode",
+                  "evm.methodIdentifiers",
+                  "metadata",
+                  "storageLayout",
+                ],
+              },
+            },
+          },
+        },
+      ]),
+    ]),
   },
   paths: {
     sources: "./contracts",
