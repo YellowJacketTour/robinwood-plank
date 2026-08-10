@@ -20,6 +20,7 @@ import {
   zeroOut,
   type IndexFixture,
   indexVaultFactory,
+  armVaultRegistry,
 } from "./helpers/index-vault";
 
 /**
@@ -410,6 +411,8 @@ describe("GlobalIndexVault", () => {
     const fx = await fixture();
     const { vault, admission } = fx;
     const d = await deployConstituent("cD", 100n * WAD, 100n * WAD);
+    // AUDIT C-6: post-open admission requires factory provenance.
+    await armVaultRegistry(fx, [...fx.addrs, d.addr]);
 
     await vault.connect(admission).queueListing(d.addr, await d.source.getAddress(), 3_333, false);
     await expect(vault.executeListing(d.addr)).to.be.revertedWithCustomError(
@@ -449,12 +452,14 @@ describe("GlobalIndexVault", () => {
     await vault.executeStream(streamTokAddr);
     expect(await vault.isStream(streamTokAddr)).to.equal(true);
 
-    // Now try to list the SAME token as a priced constituent. queueListing
-    // itself does no validation (same as every other queue), so the
-    // collision must be caught where `_list` actually runs — inside
-    // `executeListing`.
+    // Now try to list the SAME token as a priced constituent. The stream/
+    // constituent collision is caught where `_list` actually runs — inside
+    // `executeListing` — so the registry is armed for this token to prove the
+    // collision check fires on its own merits rather than being masked by the
+    // C-6 provenance gate in front of it.
     const Source = await ethers.getContractFactory("MockIndexPriceSource");
     const source: any = await Source.deploy(100n * WAD, 100n * WAD);
+    await armVaultRegistry(fx, [...fx.addrs, streamTokAddr]);
     await vault.connect(admission).queueListing(streamTokAddr, await source.getAddress(), 1_000, false);
     await time.increase(TIMELOCK + 1);
     await expect(vault.executeListing(streamTokAddr)).to.be.revertedWithCustomError(
@@ -471,6 +476,8 @@ describe("GlobalIndexVault", () => {
     const fx = await fixture();
     const { vault, admission } = fx;
     const d = await deployConstituent("cD", 100n * WAD, 100n * WAD);
+    // AUDIT C-6: post-open admission requires factory provenance.
+    await armVaultRegistry(fx, [...fx.addrs, d.addr]);
     await vault.connect(admission).queueListing(d.addr, await d.source.getAddress(), 3_333, false);
     await time.increase(TIMELOCK + 1);
     await vault.executeListing(d.addr);
@@ -1029,6 +1036,8 @@ describe("GlobalIndexVault — hardening pass", () => {
 
     // Removal of leg 1 and admission of D queued together and executed in the
     // same block — the adversarial overlap.
+    // AUDIT C-6: post-open admission requires factory provenance.
+    await armVaultRegistry(fx, [...fx.addrs, d.addr]);
     await vault.connect(admission).queueListing(addrs[1], addrs[1], 0, true);
     await vault.connect(admission).queueListing(d.addr, await d.source.getAddress(), 3_333, false);
     await time.increase(TIMELOCK + 1);
@@ -1223,6 +1232,8 @@ describe("GlobalIndexVault — hardening pass", () => {
     const claimed = await deployConstituent("cCLAIMED", 100n * WAD, 100n * WAD);
     const unclaimed = await deployConstituent("cUNCLAIMED", 100n * WAD, 100n * WAD);
     await claimed.token.mint(collectionOwner.address, 10_000n * WAD);
+    // AUDIT C-6: post-open admission requires factory provenance.
+    await armVaultRegistry(fx, [...fx.addrs, claimed.addr, unclaimed.addr]);
     for (const c of [claimed, unclaimed]) {
       await vault.connect(admission).queueListing(c.addr, await c.source.getAddress(), 2_000, false);
     }

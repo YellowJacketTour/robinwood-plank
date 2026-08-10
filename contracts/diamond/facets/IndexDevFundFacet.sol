@@ -34,6 +34,26 @@ import {CoreStorage, DevFundStorage} from "../storage/IndexStorage.sol";
  *     enforced at EXECUTION (`_applyDevFundBps`), the same "a timelock
  *     bounds WHEN, never HOW BIG" doctrine `CEIL_BUYBACK_SPLIT_BPS` already
  *     proves for §7.7's earmark.
+ *  WHICH ROLE GOVERNS THIS (2026-08-09 audit fix M-5 — CHANGED):
+ *  `queueDevFundRouter` / `queueDevFundTreasury` / `queueDevFundBps` sat
+ *  behind ROLE_RISK_PARAM. That was wrong, and wrong by this codebase's OWN
+ *  stated rule — `IndexParams.roleForParamKey`'s header draws the line
+ *  explicitly: the risk role owns the fee SCHEDULE (what anyone is charged),
+ *  and the value-flow role (ROLE_PLATFORM_ALLOCATION) owns "where an
+ *  already-charged fee is BOOKED and in what asset it is paid out". That is
+ *  exactly and only what these three keys decide. `devFundBps` is a carve-out
+ *  of an already-charged mint payment; `treasury` is the address it is booked
+ *  to; `router` is the venue that value is swapped through before it lands
+ *  there — a hostile router is a value destination wearing a plumbing hat.
+ *
+ *  The concrete consequence: a compromised RISK key can no longer point a
+ *  spendable, team-directed treasury at itself. That is the single largest
+ *  blast-radius reduction available here, because the risk key's remaining
+ *  reach is entirely over BOUNDED numbers, while this one reached an
+ *  ARBITRARY ADDRESS that receives real value. Two of the three keys that can
+ *  aim value at an address now live behind one role, and that role holds
+ *  nothing else.
+ *
  *   - `router`, `treasury` and `devFundBps` are ALL governed and timelocked
  *     through the identical queue/execute pair every other risk-surface
  *     change in this facet set uses (`IndexGovernanceFacet.queueParam`'s
@@ -93,7 +113,7 @@ contract IndexDevFundFacet is IndexFacetBase {
      * index-coin pool, the dev-fund router may be re-pointed later (e.g. the
      * live PLANK venue migrating), always through this same timelocked path.
      */
-    function queueDevFundRouter(address router) external onlyRole(ROLE_RISK_PARAM_) {
+    function queueDevFundRouter(address router) external onlyRole(ROLE_PLATFORM_ALLOCATION_) {
         uint64 eta = uint64(block.timestamp + CoreStorage.layout().timelockDelay);
         DevFundStorage.layout().queuedRouter =
             DevFundStorage.QueuedAddress({value: router, eta: eta, pending: true});
@@ -122,7 +142,7 @@ contract IndexDevFundFacet is IndexFacetBase {
      * every other privileged address change in this codebase, which is the
      * property this facet DOES mechanically provide.
      */
-    function queueDevFundTreasury(address treasury) external onlyRole(ROLE_RISK_PARAM_) {
+    function queueDevFundTreasury(address treasury) external onlyRole(ROLE_PLATFORM_ALLOCATION_) {
         uint64 eta = uint64(block.timestamp + CoreStorage.layout().timelockDelay);
         DevFundStorage.layout().queuedTreasury =
             DevFundStorage.QueuedAddress({value: treasury, eta: eta, pending: true});
@@ -148,7 +168,7 @@ contract IndexDevFundFacet is IndexFacetBase {
      * already documents, so a governance vote for an absurd value is visible
      * for the FULL delay before it can ever be rejected at the floor.
      */
-    function queueDevFundBps(uint256 bps) external onlyRole(ROLE_RISK_PARAM_) {
+    function queueDevFundBps(uint256 bps) external onlyRole(ROLE_PLATFORM_ALLOCATION_) {
         uint64 eta = uint64(block.timestamp + CoreStorage.layout().timelockDelay);
         DevFundStorage.layout().queuedDevFundBps =
             DevFundStorage.QueuedUint256({value: bps, eta: eta, pending: true});

@@ -107,12 +107,22 @@ describe("DrandBeacon — round numbering matches drand's real convention (F-1)"
   });
 });
 
-describe("MarketplankVault — the request's real lead over drand's wall clock (F-1)", () => {
+describe("MarketplankVaultV3 — the request's real lead over drand's wall clock (F-1 / H-7)", () => {
   const fx = JSON.parse(fs.readFileSync(FIXTURE, "utf8"));
   const GENESIS: number = fx.genesis;
   const PERIOD: number = fx.period;
 
-  it("a request targets a round at least ROUND_LEAD+1 full periods in the future by drand's own clock", async () => {
+  // 2026-08-09 AUDIT FIX H-7. This block previously deployed the LEGACY
+  // `MarketplankVault` and asserted `margin <= 2 * PERIOD` — an assertion
+  // that was true, and that codified a six-second clock-skew tolerance as
+  // the intended invariant. It is not the intended invariant; it is the
+  // vulnerability. `ROUND_LEAD` is now 100, the vault under test is the one
+  // that actually ships (V3), and both the lower bound and the (now much
+  // larger) upper bound are asserted so that lowering ROUND_LEAD again turns
+  // this red rather than quietly relaxing the guarantee.
+  const ROUND_LEAD = 101; // MarketplankVaultV3.ROUND_LEAD + 1 (nextRoundAfter)
+
+  it(`a request targets a round at least ${ROUND_LEAD} full periods in the future by drand's own clock`, async () => {
     const [, treasury, alice] = await ethers.getSigners();
     const Nft = await ethers.getContractFactory("MockRobinWoodNft");
     const nft: any = await Nft.deploy();
@@ -126,11 +136,12 @@ describe("MarketplankVault — the request's real lead over drand's wall clock (
       BigInt(PERIOD),
       ethers.toUtf8Bytes(fx.domain)
     );
-    const Vault = await ethers.getContractFactory("MarketplankVault");
+    const Vault = await ethers.getContractFactory("MarketplankVaultV3");
     const vault: any = await Vault.deploy(
       await nft.getAddress(),
       "V",
       "V",
+      0,
       0,
       0,
       0,
@@ -156,29 +167,38 @@ describe("MarketplankVault — the request's real lead over drand's wall clock (
     // contract. This is the whole point: the old test asked the contract.
     const nowRound = roundAt(t, GENESIS, PERIOD);
 
-    // ROUND_LEAD = 1, so target = currentRound + 2: one round to get past
-    // "already published", one more for the documented safety margin.
+    // ROUND_LEAD = 100, so target = currentRound + 101: one round to get past
+    // "already published", one hundred more of genuine safety margin.
     expect(targetNum - nowRound).to.be.greaterThanOrEqual(
-      2,
+      ROUND_LEAD,
       "the target round does not carry the full documented lead over drand's real clock"
     );
 
-    // The same margin in seconds. A request lands at an arbitrary offset d in
+    // The same margin in seconds, and THIS is the number the audit was
+    // actually about. A request lands at an arbitrary offset d in
     // [0, period) past its current round's publication, so the wall-clock gap
-    // to round (current + 2) is 2*period - d: at most 2 periods, and STRICTLY
-    // MORE THAN ONE period in the worst case. That worst case is the number
-    // that matters — it is the amount of chain-clock lag the design tolerates
-    // before the target round could already be public at request time.
+    // to round (current + ROUND_LEAD) is ROUND_LEAD*period - d: strictly more
+    // than (ROUND_LEAD - 1) periods in the worst case. That worst case is the
+    // amount of BACKWARD chain-clock skew the design tolerates before the
+    // target round could already be public at request time.
     //
-    // Under the off-by-one the target was (current + 1), so the same worst case
-    // was period - d, i.e. it could be arbitrarily close to ZERO. That is the
-    // gap this assertion closes.
+    // At the old ROUND_LEAD = 1 the worst case was 2*period - d, i.e. as
+    // little as ~3 seconds — comfortably inside every sequencer's and every
+    // client's tolerated skew, which is what made the "future round" target
+    // a round an attacker could already read. At 100 it is five minutes.
     const margin = timeOfRound(targetNum, GENESIS, PERIOD) - t;
     expect(margin).to.be.greaterThan(
-      PERIOD,
-      "worst-case wall-clock margin before the target round publishes is not more than one full period"
+      (ROUND_LEAD - 1) * PERIOD,
+      "worst-case backward-skew tolerance before the target round publishes is too small"
     );
-    expect(margin).to.be.lessThanOrEqual(2 * PERIOD);
+    expect(margin).to.be.lessThanOrEqual(ROUND_LEAD * PERIOD);
+
+    // Stated as the property rather than as arithmetic: at least five minutes
+    // of tolerated backward clock skew. Drop ROUND_LEAD and this goes red.
+    expect(margin).to.be.greaterThanOrEqual(
+      300,
+      "less than five minutes of backward clock-skew tolerance — H-7 is reopened"
+    );
 
     // And it is unambiguously unpublished right now by drand's own schedule.
     expect(timeOfRound(targetNum, GENESIS, PERIOD)).to.be.greaterThan(t);

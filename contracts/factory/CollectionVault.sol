@@ -7,6 +7,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {CollectionVaultLP} from "./CollectionVaultLP.sol";
 
 /// @dev Minimal interface for PR1's `WeightModule` signal calls
@@ -92,6 +93,55 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     /// target on the hot path — see header.
     address public immutable upstreamSink;
 
+    // ── PHASE 2: the predicate (DESIGN-HONEST-INDEX-2026-08-09 §2) ─────────
+    //
+    // `1 NFT -> 1e18 S` is a CLAIM ABOUT FUNGIBILITY. Audit C-5 measured what
+    // happens when the claim is false and nothing enforces it: 0.02 ETH of
+    // flat fees converts a 1 ETH NFT into a 3 ETH one, in one transaction,
+    // with no AMM and no flash loan, because `deposit` accepts ANY tokenId and
+    // `redeem` hands out ANY held tokenId for the same 1e18 S.
+    //
+    // WE DO NOT PRICE THE OPTION — WE REMOVE IT. The alternative (an NFTX-v3
+    // style dwell-decaying redeem premium) is the single most bug-prone
+    // surface in NFTX's history: Spearbit's v3 core audit found THREE
+    // Critical/High issues in that one mechanism (C-2/C-6 depositor-slot theft
+    // via a same-tokenId round trip, H-3 `removeLiquidity` applying no premium
+    // bound at all) and signed off only conditionally — "whether it be set too
+    // lax the stealing within it is still possible". Charging zero premium
+    // structurally immunises us against that entire family. Adopting one
+    // imports it. So instead we make the fungibility claim TRUE: a vault is
+    // `(collection, predicate)`, and junk-for-treasure extraction requires
+    // intra-vault variance which the predicate collapses.
+    //
+    // IMMUTABILITY IS THE WHOLE SECURITY ARGUMENT. There is deliberately NO
+    // setter for this value, and there never may be one. A mutable predicate
+    // lets a vault owner attract deposits against a tight, high-value band and
+    // then widen it to admit floor junk — which is a rug wearing a parameter's
+    // clothing, and strictly worse than the C-5 it would claim to fix, because
+    // it is unilateral rather than merely open. `immutable` puts that
+    // guarantee in the bytecode, not in a policy.
+    //
+    // `eligibilityRoot == bytes32(0)` MEANS OPEN — ANY tokenId of the
+    // collection is eligible, exactly the pre-Phase-2 behaviour. This is kept
+    // deliberately and named plainly rather than hidden: an open vault is
+    // EXACTLY the vault that gets sniped, and C-5 is its live, priced risk. We
+    // permit it because that failure is honest and locally contained, which is
+    // the design's §2 claim in full: a vault with a sloppy predicate gets
+    // sniped, so its `S` depreciates, so its LPs leave, so its depth falls, so
+    // its weight falls, so it stops receiving energy. Nothing about that
+    // reaches any OTHER vault or the index, whose exposure to any one vault is
+    // capped by realizable exit capacity regardless (§1.2/§3.3). Fungibility
+    // becomes a market-priced property instead of a hidden liability — which
+    // is the only reason it is safe to leave the door open at all.
+    //
+    // LEAF ENCODING: `keccak256(bytes.concat(keccak256(abi.encode(tokenId))))`
+    // — the standard OpenZeppelin double-hashed leaf. The second hash is not
+    // decoration: it makes a leaf preimage 64 bytes long and therefore
+    // impossible to confuse with an internal node, which is the classic
+    // second-preimage forgery against a naive single-hashed merkle tree.
+    // Verification is `MerkleProof.verify` (sorted-pair), already a dependency.
+    bytes32 public immutable eligibilityRoot;
+
     /// @notice PROTOCOL-WIDE constant: 50% of every swap fee routes to the
     /// sink. Not creator-settable, not governance-settable per-vault.
     uint256 public constant SWAP_SINK_SPLIT_BPS = 5_000;
@@ -176,6 +226,136 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     /// `treasury` ever custodies a withdrawable LP position.
     address public constant LP_LOCK_ADDR = 0x000000000000000000000000000000000000dEaD;
 
+    // ── PHASE 4: donation vesting + LP dwell (audit C-3) ──────────────────
+    //
+    // THE BUG. `_compoundXToken` credited `paymentReserve += wethIn`
+    // INSTANTLY and UNVESTED, while `addLiquidity`/`removeLiquidity` charged
+    // no fee and imposed no lock. The round trip was provably lossless, so an
+    // attacker added liquidity immediately before a donation and removed
+    // immediately after: `AuditJitLp.poc.test.ts` measured EXACTLY 5.0 of a
+    // 10.0 donation, share delta 0, one block, zero risk. The index side of
+    // this same codebase already vests routed value over 300 blocks
+    // (`IndexFacetBase._addReserveVest`); the lesson had been learned in one
+    // place and not the other.
+    //
+    // WHY BOTH HALVES, NOT ONE. Spearbit's NFTX v3 core audit rates this exact
+    // attack Critical (C-8) and High (H-1), and NFTX shipped the bug class
+    // THREE times across two versions (C4-2021-05 H-4 -> C4-2021-12
+    // M-07/M-13 -> Spearbit H-1). The fix that finally held required a
+    // flash-loan-resistant fee AND a timelock — not one or the other. The
+    // reason is structural, and it is worth stating because it dictates the
+    // shape below:
+    //   * A vest alone bounds the capture but does not zero it. A vest makes
+    //     the donation arrive as a ramp; an attacker who is willing to dwell
+    //     merely collects the slice that ramped in during their dwell. Free
+    //     entry and exit means that slice is pure profit at any dwell > 0.
+    //   * A dwell lock alone kills the ATOMIC attack but not the multi-block
+    //     one: with an unvested step credit, an attacker who happens to be
+    //     inside the lock window when a donation lands still takes their full
+    //     pro-rata cut of the whole step for free.
+    // Together they compose into a bound rather than a speed bump: the dwell
+    // forces the attacker to hold for `LP_MIN_DWELL_BLOCKS`, the vest caps
+    // what can possibly have arrived in that time at
+    // `dwell / DONATION_VEST_BLOCKS` of the donation, and the exit fee — which
+    // is still near its maximum at the minimum dwell, by construction, because
+    // both decay over the SAME window — charges more than that slice is worth.
+    //
+    // WHY A DRIP AND NOT AN OVERLAY. The index vests by keeping a SEPARATE
+    // `unvested` ledger and subtracting it at read time (`_reserveNetOfVest`).
+    // That is correct for `c.reserve`, which is a passive balance. It is the
+    // WRONG shape for an AMM reserve, and audit H-1 is the proof: the index's
+    // own overlay was bypassed outright because `redeemSingleAsset` simply
+    // forgot to apply `_reserveNetOfVest`, and 18.18 tokens of unvested value
+    // walked out the neighbouring door. An overlay is only as strong as the
+    // completeness of its call-site audit, and `paymentReserve` is read at
+    // NINE sites here (both swap legs, both quote legs, both liquidity legs,
+    // `convertToAssets`, `noteDepth`, `openPool`) — every one of which would
+    // have to remember, forever, including in code not yet written, on a
+    // contract with no upgrade path.
+    //
+    // So instead the donation is held OUTSIDE the AMM in `pendingDonation` and
+    // MOVED INTO `paymentReserve` block by block. `paymentReserve` stays the
+    // single source of truth for pricing, payout and LP claim alike, so every
+    // reader is correct by construction and no future call site can bypass
+    // anything. The state-changing entry points call `_drip()` first; the view
+    // functions add `_drippable()` instead, which is the same number by
+    // construction (after `_drip()`, `_drippable()` is zero), so a quote and
+    // the trade it quotes cannot disagree.
+    //
+    // HONEST CONSEQUENCES, STATED RATHER THAN GLOSSED:
+    //  1. `k = paymentReserve * shareReserve` now rises as a RAMP rather than
+    //     a STEP. Nothing about constant-product breaks — `k` was never
+    //     invariant here anyway, since every swap fee and every donation
+    //     already grew it — but the price of `S` improves gradually instead of
+    //     instantly. That gradualness IS the mechanism.
+    //  2. Between donation and full drip, the vault's `paymentToken` balance
+    //     exceeds `paymentReserve`. That is a solvency SURPLUS, never a
+    //     deficit: every payout is computed from `paymentReserve`, so the
+    //     contract can always honour it. The surplus is exactly
+    //     `pendingDonation + accruedFees`, both of which are tracked.
+    //  3. A donation is therefore capturable by whoever holds `S`/LP DURING
+    //     the drip window rather than by whoever holds it in the donation's
+    //     own block. Rewarding presence-over-time instead of presence-at-an-
+    //     instant is the entire point: it is the property a flash loan cannot
+    //     buy.
+    //  4. `pendingDonation` is never refundable to the donor and never
+    //     withdrawable by anyone — it can only ever move into
+    //     `paymentReserve`. No new admin surface is created.
+    /// @notice Mirrors `IndexFacetBase.STREAM_VEST_BLOCKS` at the same value,
+    /// deliberately: a fee donation into a vault pool and a routed credit into
+    /// a constituent reserve are the same economic event and should not have
+    /// two different, independently-wrong windows.
+    uint256 public constant DONATION_VEST_BLOCKS = 300;
+
+    /// @notice Minimum blocks LP must be held before `removeLiquidity`. This
+    /// is the TIMELOCK half. It makes the atomic add->donate->remove sandwich
+    /// not merely unprofitable but IMPOSSIBLE — a hard revert, which is the
+    /// only guarantee that does not depend on getting an economic parameter
+    /// right. 8 blocks is ~96s on mainnet: long enough that the attacker holds
+    /// real inventory risk across blocks they do not control, short enough
+    /// that it is not a meaningful tax on a genuine liquidity provider.
+    uint256 internal constant LP_MIN_DWELL_BLOCKS = 8;
+
+    /// @notice Exit fee at zero dwell, decaying LINEARLY to zero over
+    /// `DONATION_VEST_BLOCKS`. This is the FLASH-LOAN-RESISTANT-FEE half.
+    /// Deliberately decayed over the SAME window as the donation vest so the
+    /// two are algebraically coupled: an LP who has been present long enough
+    /// for a donation to have fully arrived pays exactly nothing to leave,
+    /// while an LP who arrived at the last possible moment pays essentially
+    /// the full fee on their WHOLE position to collect a
+    /// `dwell/300` sliver of one donation. 100 bps == the vault's own
+    /// already-vetted `MAX_SWAP_FEE_BPS`; not a new risk parameter.
+    uint256 internal constant LP_EXIT_FEE_MAX_BPS = 100;
+
+    /// @notice Payment-token value donated to this pool but not yet recognised
+    /// into `paymentReserve`. Held by this contract; can only move INTO
+    /// `paymentReserve`.
+    uint256 public pendingDonation;
+    /// @dev Block the current drip window was last committed at.
+    uint64 private dripLast;
+    /// @dev Block the current drip window completes at. Re-armed by every new
+    /// donation, exactly as `IndexFacetBase._addVest` re-arms its own — a
+    /// fresh donation restarts the clock on the whole pending balance. This is
+    /// the conservative direction (it slows recognition, never accelerates it)
+    /// and it keeps the accounting to three slots instead of a queue.
+    uint64 private dripEnd;
+
+    /// @notice Block at which each account last RECEIVED LP. Written on mint
+    /// and on every transfer-in via `onLpReceived`, so the dwell clock cannot
+    /// be laundered by moving LP to a fresh address before removing — the
+    /// obvious defeat of a naive per-caller lock, given `CollectionVaultLP` is
+    /// a freely transferable ERC-20.
+    mapping(address => uint256) public lpEntryBlock;
+
+    event DonationVested(uint256 amount, uint256 pendingTotal, uint64 endBlock);
+    event DonationDripped(uint256 amount, uint256 paymentReserveAfter);
+    event LpExitFeeCharged(address indexed provider, uint256 feeBps, uint256 paymentFee, uint256 shareFee);
+
+    error LpDwellNotMet();
+    error NotLpToken();
+    error NotEligible();
+    error ProofRequired();
+
     event GenesisFloorLocked(uint256 lpAmount, uint256 paymentReserve, uint256 shareReserve);
     event LiquidityAdded(address indexed provider, uint256 paymentIn, uint256 sharesIn, uint256 lpOut);
     event LiquidityRemoved(address indexed provider, uint256 lpIn, uint256 paymentOut, uint256 sharesOut);
@@ -224,40 +404,104 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     error AlreadySet();
     error NothingToDonate();
 
-    constructor(
-        IERC721 collection_,
-        IERC20 paymentToken_,
-        string memory name_,
-        string memory symbol_,
-        uint256 mintFeeWei_,
-        uint256 redeemFeeWei_,
-        uint256 swapFeeBps_,
-        address upstreamSink_,
-        address treasury_,
-        uint256 mintRedeemSinkBps_,
-        uint256 timelockDelay_
-    ) ERC20(name_, symbol_) {
-        if (mintFeeWei_ > MAX_MINT_FEE_WEI || redeemFeeWei_ > MAX_REDEEM_FEE_WEI || swapFeeBps_ > MAX_SWAP_FEE_BPS) {
+    /**
+     * @notice Every construction-time parameter, as ONE struct.
+     *
+     * WHY A STRUCT RATHER THAN LOOSE ARGUMENTS: adding `eligibilityRoot` as a
+     * twelfth loose constructor parameter pushed solc 0.8.24's LEGACY ABI
+     * DECODER over its stack limit ("Variable headStart is 1 slot too deep")
+     * — the identical wall `hardhat.config.ts` documents for `Diamond` and
+     * `IndexDeployer`. Their escape was a per-file `viaIR` override; this
+     * one's is cheaper and does not fork the compiler settings for a whole
+     * file: a single struct argument is decoded into MEMORY, so exactly one
+     * pointer lives on the stack instead of twelve values. Bytecode for every
+     * other contract in the repo is untouched, which a compiler-setting
+     * override cannot claim.
+     *
+     * It also makes the factory's `abi.encode` call site self-documenting —
+     * eleven positional values, two of which are addresses and four of which
+     * are `uint256`, is exactly the shape in which a silent argument
+     * transposition ships to an immutable contract.
+     */
+    struct VaultConfig {
+        IERC721 collection;
+        IERC20 paymentToken;
+        string name;
+        string symbol;
+        uint256 mintFeeWei;
+        uint256 redeemFeeWei;
+        uint256 swapFeeBps;
+        address upstreamSink;
+        address treasury;
+        uint256 mintRedeemSinkBps;
+        uint256 timelockDelay;
+        bytes32 eligibilityRoot;
+    }
+
+    constructor(VaultConfig memory cfg) ERC20(cfg.name, cfg.symbol) {
+        if (
+            cfg.mintFeeWei > MAX_MINT_FEE_WEI || cfg.redeemFeeWei > MAX_REDEEM_FEE_WEI
+                || cfg.swapFeeBps > MAX_SWAP_FEE_BPS
+        ) {
             revert FeeTooHigh();
         }
-        if (treasury_ == address(0) || upstreamSink_ == address(0)) revert ZeroAddress();
-        if (mintRedeemSinkBps_ < FLOOR_SINK_SPLIT_BPS || mintRedeemSinkBps_ > CEIL_SINK_SPLIT_BPS) {
+        if (cfg.treasury == address(0) || cfg.upstreamSink == address(0)) revert ZeroAddress();
+        if (cfg.mintRedeemSinkBps < FLOOR_SINK_SPLIT_BPS || cfg.mintRedeemSinkBps > CEIL_SINK_SPLIT_BPS) {
             revert SplitOutOfRange();
         }
-        collection = collection_;
-        paymentToken = paymentToken_;
-        mintFeeWei = mintFeeWei_;
-        redeemFeeWei = redeemFeeWei_;
-        swapFeeBps = swapFeeBps_;
-        upstreamSink = upstreamSink_;
-        treasury = treasury_;
-        mintRedeemSinkBps = mintRedeemSinkBps_;
-        timelockDelay = timelockDelay_;
+        collection = cfg.collection;
+        paymentToken = cfg.paymentToken;
+        mintFeeWei = cfg.mintFeeWei;
+        redeemFeeWei = cfg.redeemFeeWei;
+        swapFeeBps = cfg.swapFeeBps;
+        upstreamSink = cfg.upstreamSink;
+        treasury = cfg.treasury;
+        mintRedeemSinkBps = cfg.mintRedeemSinkBps;
+        timelockDelay = cfg.timelockDelay;
+        // No validation, and no setter anywhere in this file: any 32 bytes is
+        // a legal commitment, and `bytes32(0)` is the explicit "open vault"
+        // sentinel documented at the declaration. See that comment for why the
+        // absence of a setter is the entire security property.
+        eligibilityRoot = cfg.eligibilityRoot;
     }
 
     // ── Deposit / redeem, Stream A ─────────────────────────────────────────
 
+    /// @notice Deposit an eligible `tokenId` and mint exactly 1e18 `S`.
+    /// @dev Convenience entry point for OPEN vaults (`eligibilityRoot == 0`).
+    /// On a predicate vault this reverts with `ProofRequired` — deliberately a
+    /// distinct error from `NotEligible`, so an integrator that forgot to
+    /// supply a proof gets a different diagnosis from one whose token is
+    /// genuinely out of band.
     function deposit(uint256 tokenId) external nonReentrant {
+        if (eligibilityRoot != bytes32(0)) revert ProofRequired();
+        _deposit(tokenId);
+    }
+
+    /// @notice Deposit `tokenId` against this vault's immutable predicate.
+    /// @param proof merkle proof that `tokenId` is in `eligibilityRoot`'s set.
+    /// Ignored (and may be empty) when the vault is open.
+    function depositWithProof(uint256 tokenId, bytes32[] calldata proof) external nonReentrant {
+        bytes32 root = eligibilityRoot;
+        if (root != bytes32(0)) {
+            // Double-hashed leaf: see `eligibilityRoot`'s declaration for why
+            // the inner hash is load-bearing rather than cosmetic.
+            bytes32 leaf = keccak256(bytes.concat(keccak256(abi.encode(tokenId))));
+            if (!MerkleProof.verify(proof, root, leaf)) revert NotEligible();
+        }
+        _deposit(tokenId);
+    }
+
+    /// @notice Whether `tokenId` may be deposited, given `proof`. Pure
+    /// predicate check with no side effects, so a frontend can refuse a
+    /// doomed transaction instead of burning the user's gas on a revert.
+    function isEligible(uint256 tokenId, bytes32[] calldata proof) external view returns (bool) {
+        bytes32 root = eligibilityRoot;
+        if (root == bytes32(0)) return true;
+        return MerkleProof.verify(proof, root, keccak256(bytes.concat(keccak256(abi.encode(tokenId)))));
+    }
+
+    function _deposit(uint256 tokenId) private {
         _pullFee(mintFeeWei);
         collection.safeTransferFrom(msg.sender, address(this), tokenId);
         _addHeldToken(tokenId);
@@ -267,6 +511,12 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         emit Deposited(msg.sender, tokenId, sinkCut, treasuryCut);
     }
 
+    /// @notice Redeem exactly 1e18 `S` for any held `tokenId` of the caller's
+    /// choosing. Caller choice is SAFE here, without a premium, without
+    /// randomness and without depositor bookkeeping, precisely because
+    /// `eligibilityRoot` collapsed the intra-vault variance that made choice
+    /// worth anything — see that declaration. On an OPEN vault this is the
+    /// C-5 free option, priced and accepted, and locally contained.
     function redeem(uint256 tokenId) external nonReentrant {
         if (heldTokenIndex[tokenId] == 0) revert TokenNotHeld();
         _pullFee(redeemFeeWei);
@@ -329,6 +579,15 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     /// design routed compounding only to opted-in stakers; this one routes it
     /// to `S` itself. Falls back to ordinary `accruedFees` only if the pool
     /// isn't open yet (nothing is ever stranded).
+    ///
+    /// PHASE 4 / AUDIT C-3: the credit is no longer INSTANT. It is handed to
+    /// `_addDonationVest`, which parks it in `pendingDonation` and drips it
+    /// into `paymentReserve` over `DONATION_VEST_BLOCKS`. Everything the
+    /// paragraph above says about `k` rising and every holder benefiting
+    /// remains exactly true — it now happens as a ramp rather than a step, so
+    /// that the value accrues to whoever is PRESENT OVER THE WINDOW rather
+    /// than to whoever is present in one block, which is the only version of
+    /// the property a flash loan cannot buy.
     function _compoundXToken(uint256 wethIn) private {
         if (wethIn == 0) return;
         if (!poolOpen || shareReserve == 0 || paymentReserve == 0) {
@@ -336,9 +595,71 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
             emit XTokenCompoundSkipped(wethIn);
             return;
         }
-        paymentReserve += wethIn;
+        _addDonationVest(wethIn);
         emit XTokenCompounded(wethIn, paymentReserve);
     }
+
+    // ── Donation vesting: the drip (audit C-3, half 1) ─────────────────────
+
+    /// @dev How much of `pendingDonation` has become recognisable since the
+    /// window was last committed. Pure function of storage and `block.number`,
+    /// structurally the complement of `IndexFacetBase._reserveUnvestedOf`
+    /// (that one reports what is still LOCKED; this one reports what is now
+    /// RELEASED, because here the released part must actually be moved).
+    function _drippable() private view returns (uint256) {
+        uint256 p = pendingDonation;
+        if (p == 0) return 0;
+        uint64 end_ = dripEnd;
+        if (block.number >= end_) return p;
+        uint64 last_ = dripLast;
+        // `last_ < end_` always holds: `_addDonationVest` writes them together
+        // as (n, n + DONATION_VEST_BLOCKS) with DONATION_VEST_BLOCKS > 0.
+        // Same-block re-entry therefore drips exactly zero, which is the
+        // atomic-sandwich case.
+        return (p * (block.number - last_)) / (end_ - last_);
+    }
+
+    /// @dev Commit the elapsed portion into the live AMM reserve. Called at
+    /// the head of EVERY state-changing entry point that reads or writes
+    /// `paymentReserve`, so `paymentReserve` is always fully up to date by the
+    /// time any pricing math touches it.
+    function _drip() private {
+        uint256 d = _drippable();
+        if (d == 0) return;
+        pendingDonation -= d;
+        dripLast = uint64(block.number);
+        paymentReserve += d;
+        emit DonationDripped(d, paymentReserve);
+    }
+
+    /// @dev Park `amount` and re-arm the window over the whole pending
+    /// balance. Commits the elapsed portion first so no already-earned value
+    /// is retroactively re-locked by a later donation.
+    function _addDonationVest(uint256 amount) private {
+        if (amount == 0) return;
+        _drip();
+        pendingDonation += amount;
+        dripLast = uint64(block.number);
+        dripEnd = uint64(block.number + DONATION_VEST_BLOCKS);
+        emit DonationVested(amount, pendingDonation, dripEnd);
+    }
+
+    /// @dev `paymentReserve` as every VIEW must see it: including the portion
+    /// that a state-changing call in this same block would commit first. Views
+    /// and trades therefore agree exactly, so a quote can never be off by the
+    /// drip.
+    function _pr() private view returns (uint256) {
+        return paymentReserve + _drippable();
+    }
+
+    /// @notice `paymentReserve` as the next state-changing call in this block
+    /// will see it — i.e. including the already-elapsed drip. THIS, not the
+    /// raw `paymentReserve` storage slot, is the number an integrator should
+    /// price against; the raw slot lags by up to one call.
+    function effectivePaymentReserve() external view returns (uint256) {
+        return _pr();
+    }
+
 
     /// @notice DESIGN-CAKE-EAT-IT-SHARE-ATOM-2026-08-08.md §2.3: the
     /// `convertToAssets`-equivalent for this vault's own share `S`, priced off
@@ -349,7 +670,69 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     /// Returns 0 before the pool is open (no reserve to price against yet).
     function convertToAssets(uint256 shares) public view returns (uint256) {
         if (shareReserve == 0) return 0;
-        return (shares * paymentReserve) / shareReserve;
+        return (shares * _pr()) / shareReserve;
+    }
+
+    // ── Realizable value (DESIGN-HONEST-INDEX-2026-08-09 §1.2/§1.3) ────────
+    //
+    // THE honest-accounting primitive, and the reason this protocol does not
+    // repeat NFTX v1 "D2".
+    //
+    // `convertToAssets` above reports the SPOT mark, `shares * paymentReserve
+    // / shareReserve`. That is what a stake is worth only in the limit of an
+    // infinitesimal exit. It systematically overstates what a real position
+    // can actually realize, and the overstatement grows with position size:
+    // selling `s` shares into a pool holding `y` realizes only `y/(y+s)` of
+    // the spot mark, so a position the size of the pool's own share reserve
+    // is worth exactly HALF its mark.
+    //
+    // Marking constituents at spot while promising redemption against them is
+    // precisely the illusion that killed D2. Every SETTLEMENT price in this
+    // system therefore quotes these functions, never `convertToAssets` — which
+    // survives for display and for callers who genuinely want the spot mark.
+    //
+    // Both return 0 rather than reverting when the pool cannot trade, so a
+    // caller can treat "no realizable value" as a number instead of an
+    // exception. Both mirror `sellShares`/`buyShares` wei-for-wei, including
+    // both fee legs; they assume `paymentToken` is not fee-on-transfer, which
+    // is already an invariant of this vault (`_pullFee` reverts on mismatch).
+
+    /// @notice The payment token `sellShares(sharesIn, 0)` would pay RIGHT
+    /// NOW — impact-inclusive and fee-inclusive — without executing it.
+    /// @dev Quoting the index's ENTIRE holding gives the conservative
+    /// "liquidate everything" figure; quoting a redeemer's pro-rata slice
+    /// gives what that specific exit can honestly realize.
+    function quoteSellShares(uint256 sharesIn) public view returns (uint256 amountOut) {
+        if (!poolOpen || shareReserve == 0 || paymentReserve == 0 || sharesIn == 0) return 0;
+        uint256 inNet = (sharesIn * (BPS_DENOMINATOR - swapFeeBps)) / BPS_DENOMINATOR;
+        uint256 grossOut = (inNet * _pr()) / (shareReserve + inNet);
+        if (grossOut == 0) return 0;
+        return grossOut - _swapFeeSinkCut(grossOut);
+    }
+
+    /// @notice The shares `buyShares(amountIn, 0)` would deliver right now.
+    /// @dev Pricing a protocol buy through this makes an explicit impact
+    /// guard unnecessary: the quote ALREADY contains the impact, so there is
+    /// no separate threshold left to compute wrongly (see audit C-2, where a
+    /// guard that compared against the constant-product output rather than
+    /// the marginal price could never fire at any trade size).
+    function quoteBuyShares(uint256 amountIn) public view returns (uint256 sharesOut) {
+        if (!poolOpen || shareReserve == 0 || paymentReserve == 0 || amountIn == 0) return 0;
+        uint256 netIn = amountIn - _swapFeeSinkCut(amountIn);
+        uint256 inNet = (netIn * (BPS_DENOMINATOR - swapFeeBps)) / BPS_DENOMINATOR;
+        return (inNet * shareReserve) / (_pr() + inNet);
+    }
+
+    /// @notice Realizable value of `sharesIn` as a fraction of its spot mark,
+    /// in bps — the honest "how much of the displayed number is real?" ratio.
+    /// 10000 means fully realizable; 5000 means the mark is double the truth.
+    /// @dev Exit-capacity caps and the solvency tier of the fee waterfall are
+    /// both expressed against this, so illiquidity is a measured quantity
+    /// rather than an assumption.
+    function realizableBps(uint256 sharesIn) external view returns (uint256) {
+        uint256 mark = convertToAssets(sharesIn);
+        if (mark == 0) return 0;
+        return (quoteSellShares(sharesIn) * BPS_DENOMINATOR) / mark;
     }
 
     /// @dev Best-effort WeightModule signal push, deposit/redeem side. Wrapped
@@ -365,6 +748,25 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
 
     /// @dev Best-effort WeightModule signal push, swap side. Same try/catch
     /// doctrine as `_noteMintRedeemSignals`.
+    ///
+    /// PHASE 3 / AUDIT H-4 + H-6: `feeDerivedVolumeWei` is now the SINK CUT —
+    /// the portion of the fee that irreversibly leaves this vault to
+    /// `upstreamSink` — and NOT the gross notional (`credited`/`grossOut`)
+    /// this used to pass, nor even the gross fee. Two independent reasons,
+    /// both from the design's §3:
+    ///   * §3.2 — the `IWeightModule` interface always DOCUMENTED "fee", and
+    ///     the implementation measured notional. The doc was simply false, and
+    ///     gross notional is free to manufacture: a self-trade round trip
+    ///     generates unbounded notional at the cost of the spread alone.
+    ///   * §3.1, the `R <= C` bound — weight may only be bought with value the
+    ///     buyer cannot take back. The treasury cut returns to a
+    ///     vault-chosen address and the compounded cut stays in this vault's
+    ///     own pool; both are recoverable by the vault's operator, which is
+    ///     exactly how audit H-4 bought 12.5% of all fee flow for ~0.004 WETH.
+    ///     Only the sink cut is unrecoverable, so only the sink cut may count.
+    ///     Faking the signal then costs precisely what it earns.
+    /// `_noteMintRedeemSignals` was already passing `sinkCut` for `noteFee`;
+    /// this makes the swap side consistent with it.
     function _noteSwapSignals(uint256 feeDerivedVolumeWei) private {
         if (weightModule == address(0)) return;
         try IWeightModuleSignals(weightModule).noteDepth(address(this), paymentReserve) {} catch {}
@@ -375,6 +777,7 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
 
     function buyShares(uint256 amountIn, uint256 minSharesOut) external nonReentrant returns (uint256 sharesOut) {
         if (!poolOpen) revert PoolNotOpen();
+        _drip();
         if (shareReserve == 0 || paymentReserve == 0) revert EmptyVault();
         if (amountIn == 0) revert InsufficientOutput();
 
@@ -397,12 +800,13 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
             paymentToken.safeTransfer(upstreamSink, sinkCut);
             emit SweptToSink(sinkCut);
         }
-        _noteSwapSignals(credited);
+        _noteSwapSignals(sinkCut);
         emit Bought(msg.sender, credited, sharesOut, sinkCut);
     }
 
     function sellShares(uint256 sharesIn, uint256 minAmountOut) external nonReentrant returns (uint256 amountOut) {
         if (!poolOpen) revert PoolNotOpen();
+        _drip();
         if (shareReserve == 0 || paymentReserve == 0) revert EmptyVault();
         if (sharesIn == 0) revert InsufficientOutput();
 
@@ -423,7 +827,7 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
             paymentToken.safeTransfer(upstreamSink, sinkCut);
             emit SweptToSink(sinkCut);
         }
-        _noteSwapSignals(grossOut);
+        _noteSwapSignals(sinkCut);
         emit Sold(msg.sender, sharesIn, amountOut, sinkCut);
     }
 
@@ -486,11 +890,10 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         // this point prices against a nonzero, treasury-sized `lpToken`
         // supply that no depositor (community or attacker) ever controlled
         // the creation of.
-        lpToken = new CollectionVaultLP(
-            string.concat("LP ", name()),
-            string.concat("LP-", symbol()),
-            address(this)
-        );
+        // Fixed metadata, `vault` immutable as the real identity — see
+        // `CollectionVaultLP`'s constructor for the EIP-170 arithmetic that
+        // forced this and why it costs nothing.
+        lpToken = new CollectionVaultLP(address(this));
         uint256 genesisLp = _sqrt(paymentReserve * shareReserve);
         lpToken.mint(LP_LOCK_ADDR, genesisLp);
         emit GenesisFloorLocked(genesisLp, paymentReserve, shareReserve);
@@ -513,6 +916,10 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     {
         if (!poolOpen) revert PoolNotYetOpenForLp();
         if (paymentIn == 0) revert ZeroLiquidityInput();
+        // Recognise elapsed donation BEFORE pricing the deposit, so a joiner
+        // pays the honest, already-ramped-in price for the pool they are
+        // buying into rather than the pre-drip one.
+        _drip();
 
         uint256 totalLp = lpToken.totalSupply();
         sharesIn = (paymentIn * shareReserve) / paymentReserve;
@@ -549,18 +956,80 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         returns (uint256 paymentOut, uint256 sharesOut)
     {
         if (lpIn == 0) revert ZeroLiquidityInput();
-        uint256 totalLp = lpToken.totalSupply();
-        paymentOut = (lpIn * paymentReserve) / totalLp;
-        sharesOut = (lpIn * shareReserve) / totalLp;
-        if (paymentOut < minPaymentOut || sharesOut < minSharesOut) revert InsufficientLpRemoveOutput();
 
+        // ── AUDIT C-3, half 2: dwell requirement + decaying exit fee ───────
+        uint256 feeBps = _exitFeeBps(msg.sender); // reverts inside the dwell
+        _drip();
+        {
+            uint256 totalLp = lpToken.totalSupply();
+            paymentOut = (lpIn * paymentReserve) / totalLp;
+            sharesOut = (lpIn * shareReserve) / totalLp;
+        }
+        uint256 paymentFee = (paymentOut * feeBps) / BPS_DENOMINATOR;
+        uint256 shareFee = (sharesOut * feeBps) / BPS_DENOMINATOR;
+
+        // CEI: burn and update reserves before any outbound movement. The
+        // reserve decrements use the GROSS payment figure and the NET share
+        // figure, because the two fee legs are retained differently:
+        //   * the share fee simply never leaves `shareReserve` — shares are
+        //     not vestable value, they are the pool's other side, so leaving
+        //     them in place is the whole retention;
+        //   * the payment fee leaves `paymentReserve` and immediately re-enters
+        //     via `_addDonationVest`, so it is subject to the SAME drip as
+        //     every other donation. Crediting it instantly would have
+        //     re-created C-3 in miniature: a second JIT LP could sandwich the
+        //     exit fee of the first.
         lpToken.burn(msg.sender, lpIn);
         paymentReserve -= paymentOut;
-        shareReserve -= sharesOut;
+        shareReserve -= (sharesOut - shareFee);
+
+        paymentOut -= paymentFee;
+        sharesOut -= shareFee;
+        // Slippage bounds are checked against what the caller ACTUALLY
+        // receives, not the pre-fee figure — a bound that ignores the fee is a
+        // bound that does not bind.
+        if (paymentOut < minPaymentOut || sharesOut < minSharesOut) revert InsufficientLpRemoveOutput();
+
+        if (paymentFee > 0 || shareFee > 0) {
+            _addDonationVest(paymentFee);
+            emit LpExitFeeCharged(msg.sender, feeBps, paymentFee, shareFee);
+        }
 
         paymentToken.safeTransfer(msg.sender, paymentOut);
         _transfer(address(this), msg.sender, sharesOut);
         emit LiquidityRemoved(msg.sender, lpIn, paymentOut, sharesOut);
+    }
+
+    /// @notice The exit fee `provider` would pay to remove liquidity right
+    /// now, in bps, reverting with `LpDwellNotMet` if they are still inside
+    /// the minimum dwell. Public so an LP can see the cost of leaving before
+    /// they send the transaction.
+    /// @dev `lpEntryBlock` is written on MINT and on every TRANSFER-IN (see
+    /// `onLpReceived`), so neither routing the position through a fresh
+    /// address nor buying LP on a secondary market resets the clock in an
+    /// attacker's favour. Decayed over `DONATION_VEST_BLOCKS` deliberately —
+    /// see `LP_EXIT_FEE_MAX_BPS`.
+    function _exitFeeBps(address provider) private view returns (uint256) {
+        uint256 held = block.number - lpEntryBlock[provider];
+        if (held < LP_MIN_DWELL_BLOCKS) revert LpDwellNotMet();
+        if (held >= DONATION_VEST_BLOCKS) return 0;
+        return (LP_EXIT_FEE_MAX_BPS * (DONATION_VEST_BLOCKS - held)) / DONATION_VEST_BLOCKS;
+    }
+
+    /// @notice Callback from this vault's own `CollectionVaultLP` on every
+    /// mint and transfer-in. Restarts `to`'s dwell clock.
+    /// @dev Guarded to the LP token address only, so nobody can reset anyone
+    /// else's clock. Restarting (rather than, say, taking a weighted average)
+    /// is the conservative direction: it can only ever make an exit MORE
+    /// expensive, never less, so there is no configuration of transfers that
+    /// launders a fresh position into a cheap exit. The cost is that a
+    /// long-standing LP who tops up restarts their own clock — accepted
+    /// deliberately, because the alternative (per-lot accounting) is an
+    /// unbounded loop on a hot path, and because the fee it exposes them to is
+    /// bounded by 1% and decays to nothing.
+    function onLpReceived(address to) external {
+        if (msg.sender != address(lpToken)) revert NotLpToken();
+        lpEntryBlock[to] = block.number;
     }
 
     /// @dev Babylonian method, verbatim standard Uniswap-v2-style integer
@@ -599,11 +1068,19 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     /// gate — not even a hypothetical one, since no code path in this
     /// contract ever reduces `paymentReserve` except the ordinary, universal
     /// `sellShares` AMM exit already open to every shareholder equally.
+    ///
+    /// PHASE 4 / AUDIT C-3: the credit is VESTED via `_addDonationVest`, not
+    /// applied instantly. A third-party donation is exactly as snipeable as a
+    /// fee-derived one — `AuditJitLp.poc.test.ts` used this very function as
+    /// its donation source — so it gets exactly the same treatment. Nothing
+    /// above changes: the donor still receives nothing back, `k` still rises
+    /// permanently and irreversibly, and no code path can ever return the
+    /// donation to them. It simply arrives over `DONATION_VEST_BLOCKS`.
     function donateReserves(uint256 wethIn) external nonReentrant {
         if (!poolOpen) revert PoolNotOpen();
         if (wethIn == 0) revert NothingToDonate();
         paymentToken.safeTransferFrom(msg.sender, address(this), wethIn);
-        paymentReserve += wethIn;
+        _addDonationVest(wethIn);
         emit ReservesDonated(msg.sender, wethIn);
     }
 

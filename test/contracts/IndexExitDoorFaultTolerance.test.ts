@@ -7,6 +7,7 @@ import {
   WAD,
   TIMELOCK,
   maxIn,
+  armVaultRegistry,
   type IndexFixture,
 } from "./helpers/index-vault";
 
@@ -61,6 +62,8 @@ describe("Index exit door — fault-tolerant redemption (round 10)", () => {
     const Source = await ethers.getContractFactory("MockIndexPriceSource");
     const src: any = await Source.deploy(100n * WAD, 100n * WAD);
 
+    // AUDIT C-6: post-open admission requires factory provenance.
+    await armVaultRegistry(fx, [...fx.addrs, badAddr]);
     await fx.vault
       .connect(fx.admission)
       .queueListing(badAddr, await src.getAddress(), 2_000n, false);

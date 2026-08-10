@@ -2,7 +2,12 @@ import { expect } from "chai";
 import { ethers, artifacts } from "hardhat";
 import { loadFixture, time, takeSnapshot, SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
 
-import { deployOpenIndex, warmCheckpoints, maxIn } from "./helpers/index-vault";
+import {
+  deployOpenIndex,
+  warmCheckpoints,
+  maxIn,
+  armVaultRegistry,
+} from "./helpers/index-vault";
 
 /**
  * ══════════════════════════════════════════════════════════════════════════
@@ -207,6 +212,8 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
     const source = await Source.deploy(100n * 10n ** 18n, 100n * 10n ** 18n);
     const tokenAddr = await token.getAddress();
 
+    // AUDIT C-6: post-open admission requires factory provenance.
+    await armVaultRegistry(fx, [...fx.addrs, tokenAddr]);
     await vault.connect(admission).queueListing(tokenAddr, await source.getAddress(), 1_000, false);
     await time.increase(48 * 3_600 + 1);
 

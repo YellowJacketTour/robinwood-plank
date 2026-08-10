@@ -162,7 +162,25 @@ contract EnergyBus is IEnergyBus, ReentrancyGuard {
         uint256 afterBal = weth.balanceOf(address(this));
         // Observed delta: how much of `amount` actually left the Bus and
         // never came back (i.e. was genuinely spent by the adapter).
-        uint256 leftBus = beforeBal - afterBal <= amount ? beforeBal - afterBal : amount;
+        //
+        // AUDIT C-1: this subtraction MUST be underflow-guarded before the
+        // clamp, not inside a ternary condition. `a - b <= amount ? a - b : amount`
+        // evaluates `a - b` first, so a well-funded adapter returning MORE
+        // than it was sent (e.g. one that refunds its entire balance after
+        // someone donated WETH straight to it) panics here — outside the
+        // try/catch above, which wraps only `adapter.execute()`. The whole
+        // of `route()` then reverts, and because it reverts the donation is
+        // never consumed, so it reverts FOREVER on an immutable contract.
+        // The adapters are additionally capped to never return more than
+        // they received; this guard is the defence-in-depth half, because
+        // adapters are external code and this contract cannot be upgraded.
+        uint256 leftBus;
+        if (afterBal < beforeBal) {
+            unchecked {
+                leftBus = beforeBal - afterBal;
+            }
+            if (leftBus > amount) leftBus = amount;
+        }
         uint256 unspent = amount - leftBus;
 
         if (unspent > 0) {

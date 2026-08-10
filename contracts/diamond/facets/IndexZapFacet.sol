@@ -90,6 +90,10 @@ contract IndexZapFacet is IndexFacetBase {
     error ZapImpactTooHigh();
     error ZapInsufficientBasketLiquidity();
     error ZapWrongPaymentToken();
+    /// @notice AUDIT H-2: the leg is not a vault the configured
+    /// `CollectionVaultFactory` deployed, so it never receives an allowance
+    /// over the diamond's payment token.
+    error ZapUnverifiedLeg(address token);
 
     /// @notice One zap-mint completed. `paymentSpent` is the REAL, net cost
     /// across every leg (after any excess-share sell-back), never a nominal
@@ -184,24 +188,60 @@ contract IndexZapFacet is IndexFacetBase {
 
         for (uint256 i = 0; i < n; i++) {
             address t = cs.constituentList[i];
-            Constituent storage c = cs.constituents[t];
-            _requireNotExiting(t, c);
+            _requireNotExiting(t, cs.constituents[t]);
 
             // Byte-for-byte `IndexCoreFacet.mintProRata`'s own per-leg
             // formula — the pricing is not re-derived, only reused.
-            uint256 want = Math.mulDiv(desiredSharesOut, c.reserve + VIRTUAL_ASSETS, denom, Math.Rounding.Up);
+            uint256 want = Math.mulDiv(
+                desiredSharesOut,
+                cs.constituents[t].reserve + VIRTUAL_ASSETS,
+                denom,
+                Math.Rounding.Up
+            );
             if (want == 0) revert ZeroAmount();
 
-            uint256 spent = _acquireLeg(payment, t, want, budget - totalSpent);
-            totalSpent += spent;
+            totalSpent += _acquireAndCredit(payment, t, want, budget - totalSpent);
             if (totalSpent > budget) revert SlippageExceeded();
-
-            // §7.11, verbatim from `mintProRata`'s own leg: a small governed
-            // slice of what this leg is actually worth may route to a
-            // PLANK buy for the dev-fund treasury before the remainder
-            // backs the newly-minted shares.
-            c.reserve += _routeDevFundBuy(t, want);
         }
+    }
+
+    /**
+     * @dev AUDIT H-2, CLOSED: CREDIT AN OBSERVED DELTA, NEVER A NUMBER WE
+     * COMPUTED.
+     *
+     * `_acquireBasket` used to do `c.reserve += _routeDevFundBuy(t, want)` —
+     * `want` being the amount this facet DECIDED it wanted, not the amount that
+     * arrived. Every other mint path in this diamond obtains its credit through
+     * `_pullCredited`'s balance-delta discipline and refuses a `ShortDelivery`;
+     * this one path trusted its own arithmetic about an external AMM's output,
+     * through a fee-on-transfer-capable ERC-20, with a sell-back leg in the
+     * middle. A leg that delivered less than `want` — a fee-on-transfer
+     * constituent, a rounding shortfall, a vault whose `buyShares`
+     * under-delivers — minted full shares against a partial deposit and diluted
+     * every existing holder.
+     *
+     * The delta is measured across the WHOLE leg (buy AND excess sell-back), so
+     * the unwind is inside the measurement rather than assumed away, and
+     * `ShortDelivery` is the same hard revert `mintProRata` uses for the same
+     * reason: this path mints an EXACT `desiredSharesOut`, so silently
+     * absorbing a shortfall IS dilution.
+     *
+     * Also split out to keep `_acquireBasket`'s stack frame inside the EVM's
+     * 16-slot reach.
+     */
+    function _acquireAndCredit(IERC20 payment, address token, uint256 want, uint256 remaining)
+        private
+        returns (uint256 spent)
+    {
+        uint256 beforeBal = IERC20(token).balanceOf(address(this));
+        spent = _acquireLeg(payment, token, want, remaining);
+        uint256 credited = IERC20(token).balanceOf(address(this)) - beforeBal;
+        if (credited < want) revert ShortDelivery();
+
+        // §7.11, verbatim from `mintProRata`'s own leg: a small governed slice
+        // of what this leg is actually worth may route to a PLANK buy for the
+        // dev-fund treasury before the remainder backs the newly-minted shares.
+        CoreStorage.layout().constituents[token].reserve += _routeDevFundBuy(token, credited);
     }
 
     /**
@@ -223,6 +263,22 @@ contract IndexZapFacet is IndexFacetBase {
         private
         returns (uint256 netSpent)
     {
+        // ── AUDIT H-2, second half: VALIDATE PROVENANCE **BEFORE** GRANTING
+        // AN ALLOWANCE. The previous order was: ask the untrusted address
+        // about itself (`poolOpen()`, `paymentToken()`), believe the answers,
+        // then `forceApprove` it over the diamond's WETH. Asking an address
+        // whether it is trustworthy is not validation — a hostile contract
+        // returns whatever makes the caller proceed. The only question worth
+        // asking is one it cannot answer for itself: did the
+        // `CollectionVaultFactory` deploy it? That is checked FIRST, and the
+        // self-reported reads below are retained only as sanity checks on an
+        // address that has already proven its provenance.
+        //
+        // Fail-closed: with no registry configured, no leg is verifiable and
+        // the zap cannot run at all. That is the correct direction for a
+        // function that hands out spending authority.
+        if (!_isProvenancedVault(token)) revert ZapUnverifiedLeg(token);
+
         ICollectionVaultZap v = ICollectionVaultZap(token);
         if (!v.poolOpen()) revert ZapPoolNotOpen();
         if (v.paymentToken() != address(payment)) revert ZapWrongPaymentToken();

@@ -203,57 +203,59 @@ describe("AXIOM-1 Adversary scenarios (PR11, matrix §6)", () => {
 
   // ══ ADV-1: Sandwich route buys — impact cap / skip; no oracle mid ═══════
 
-  it("ADV-1: an attacker who sandwiches the vault's AMM right before route() cannot force Pipe I to buy at a manipulated price — the leg skips via MAX_IMPACT_BPS and its budget safely reaches Pipe D instead", async () => {
+  /**
+   * REWRITTEN. The previous ADV-1 was one of the three hollow proofs named in
+   * the audit's meta-finding: its `else` branch asserted
+   * `sAtIndexAfter > sAtIndexBefore`, which it only ever reached BECAUSE the
+   * two values differed, and the index's S balance can only increase — so it
+   * passed whether or not any guard fired, and it closed by asserting that a
+   * loaded ABI contains at least one function. It never tested anything.
+   *
+   * This version measures the attacker's realised PnL in WETH across the full
+   * sandwich (front-run buy -> route() -> unwind sell) and asserts a bound
+   * that the pre-fix code demonstrably violates (AuditPoc PoC-3 measured
+   * +2.686 WETH on a 3.5 WETH slice). Deleting
+   * `MAX_LEG_POOL_FRACTION_BPS` from InventoryBuyAdapter turns this red.
+   */
+  it("ADV-1: an attacker who sandwiches the vault's AMM right before route() extracts strictly less than they risk — the leg is capped to live pool depth", async () => {
     const fx = await realStackFixture();
 
-    // Fund the Bus with a real fee-derived WETH balance for this route().
     const total = ethers.parseEther("2");
     await fx.weth.mint(fx.busAddr, total);
+    const pipeISlice = (total * INV_BPS) / 10_000n;
 
-    // Attacker sandwiches: a large one-sided buyShares() right before
-    // route() fires, pushing the vault's own AMM price far off its
-    // pre-manipulation ratio — attempting to force Pipe I's real buyShares
-    // call (inside buyLeg) to land at an inflated price.
+    // Attacker sandwiches: a large one-sided buyShares() right before route()
+    // fires, pushing the vault's own AMM price far off its pre-manipulation
+    // ratio, then unwinds immediately after.
     const attackAmount = ethers.parseEther("40");
     await fx.weth.mint(fx.attacker.address, attackAmount);
     await fx.weth.connect(fx.attacker).approve(fx.vaultAddr, attackAmount);
-    await fx.cVault.connect(fx.attacker).buyShares(attackAmount, 0n);
 
-    const sAtIndexBefore: bigint = await fx.cVault.balanceOf(fx.indexAddr);
-    const divBefore: bigint = await fx.div.lastAmountIn();
+    const startWeth: bigint = await fx.weth.balanceOf(fx.attacker.address);
+    await fx.cVault.connect(fx.attacker).buyShares(attackAmount, 0n);
+    const sHeld: bigint = await fx.cVault.balanceOf(fx.attacker.address);
 
     await expect(fx.bus.route()).to.not.be.reverted;
 
-    const sAtIndexAfter: bigint = await fx.cVault.balanceOf(fx.indexAddr);
-    const divAfter: bigint = await fx.div.lastAmountIn();
+    await fx.cVault.connect(fx.attacker).sellShares(sHeld, 0n);
+    const endWeth: bigint = await fx.weth.balanceOf(fx.attacker.address);
+    const pnl = endWeth - startWeth;
 
-    // The whole point of MAX_IMPACT_BPS: either the leg was skipped entirely
-    // (S balance at the index unchanged, and Pipe I's whole slice reached
-    // Pipe D on top of D's own direct allocation), or it filled at a price
-    // within the impact bound (S balance DID move) — but the adapter itself
-    // never reverted route(), and no WETH was ever stranded or lost: the Bus
-    // ended this call with a zero balance regardless of which branch fired.
+    // THE ASSERTION THAT CAN FAIL. The attacker must not be able to extract a
+    // material fraction of the routed slice. Pre-fix, Pipe I spent its whole
+    // slice into the manipulated pool unconditionally (the impact guard being
+    // mathematically inert), which is what produced the audit's 77% figure.
+    expect(pnl).to.be.lt((pipeISlice * 500n) / 10_000n);
+
+    // Sanity that the sandwich actually EXECUTED — otherwise the bound above
+    // would be trivially satisfied by a no-op, which is precisely the failure
+    // mode of the test this replaces.
+    expect(sHeld).to.be.gt(0n);
+    expect(endWeth).to.be.gt(0n);
+
+    // And the Bus is still fully drained: nothing stranded, route() never
+    // reverted, so a sandwich cannot brick the pipe either.
     expect(await fx.weth.balanceOf(fx.busAddr)).to.equal(0n);
-    if (sAtIndexAfter === sAtIndexBefore) {
-      // Skip branch: Pipe I's whole 35% slice landed on Pipe D on top of its
-      // own direct 15% allocation.
-      const expInv = (total * INV_BPS) / 10_000n;
-      const expDiv = total - expInv - (total * CLP_BPS) / 10_000n - (total * IDX_BURN_BPS) / 10_000n
-        - (total * PLANK_BURN_BPS) / 10_000n - (total * PLANK_LP_BPS) / 10_000n;
-      expect(divAfter).to.equal(expDiv + expInv);
-    } else {
-      expect(sAtIndexAfter).to.be.gt(sAtIndexBefore);
-    }
-
-    // Crucially: no oracle/external price feed was ever consulted mid-route
-    // — the impact guard is computed purely from the vault's own
-    // paymentReserve/shareReserve (already proven by InventoryBuyAdapter.sol
-    // itself never importing any oracle interface), so a sandwiching
-    // attacker cannot make Pipe I trust a manipulated EXTERNAL price feed —
-    // only its own AMM, which the impact guard defends against directly.
-    const invArtifact = await ethers.getContractFactory("InventoryBuyAdapter");
-    const src = invArtifact.interface.fragments.map((f: any) => f.type);
-    expect(src.includes("function")).to.equal(true); // sanity the ABI loaded
   });
 
   // ══ ADV-2: Flash mint IDX before route — vest → attacker claim not full inject ═══

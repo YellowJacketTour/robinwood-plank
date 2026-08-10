@@ -13,6 +13,8 @@ import {IndexOracle} from "../../lib/IndexOracle.sol";
 import {IndexEligibility} from "../../lib/IndexEligibility.sol";
 import {IndexParams, IndexParamSet as Params} from "../../lib/IndexParams.sol";
 import {IndexPoolValuation} from "../../lib/IndexPoolValuation.sol";
+import {IndexRealizable} from "../../lib/IndexRealizable.sol";
+import {IndexProvenanceStorage} from "../storage/IndexProvenanceStorage.sol";
 import {IIndexCoinPool} from "../../IIndexCoinPool.sol";
 import {IExternalSwapRouter} from "../../IExternalSwapRouter.sol";
 
@@ -295,6 +297,10 @@ abstract contract IndexFacetBase {
     event MintedSingle(address indexed to, address indexed token, uint256 amountIn, uint256 shares);
     event RedeemedSingle(address indexed from, address indexed token, uint256 shares, uint256 amountOut);
     event MetricUpdated(address indexed token, uint256 metric);
+
+    /// @notice The provenance registry (audit C-6) was pointed at a new
+    /// `CollectionVaultFactory`, or disarmed with `address(0)`.
+    event VaultFactoryUpdated(address indexed factory);
     event EligibleCountUpdated(uint256 eligibleCount, uint256 effectiveCapBps);
     event EcosystemFeesHarvested(address indexed token, address indexed sink, uint256 amount);
     event DividendsReceived(address indexed from, uint256 amount, uint256 eligibleSupply);
@@ -479,6 +485,17 @@ abstract contract IndexFacetBase {
     error AllocationCapExceeded();
     error EcosystemSinkUnset();
     error ApprovalNotConsumed();
+
+    // ── Audit C-6: constituent admission provenance ───────────────────────
+    /// @notice No `CollectionVaultFactory` is configured, so no post-open
+    /// constituent can be admitted at all. Deliberately fail-closed: an
+    /// unconfigured trust root admits nothing rather than everything.
+    error VaultRegistryUnset();
+    /// @notice The token is not a vault the configured factory deployed.
+    error UnverifiedConstituent(address token);
+    /// @notice The price source is the token, the lister, or otherwise not an
+    /// independent contract.
+    error PriceSourceNotIndependent(address token, address source);
 
     // §7.10 — the dedicated index-coin pool
     error PoolAlreadySet();
@@ -966,11 +983,25 @@ abstract contract IndexFacetBase {
      *  4. `point` is always one of the three compile-time constants declared
      *     above, passed in by the caller of `_fireHook` — never anything
      *     built from user input.
-     *  5. NEVER called from `IndexCoreFacet` — `Hooks.exitDoorFree.test.ts`
-     *     and `Diamond.facets.test.ts`'s source-level scan both assert
-     *     `IndexCoreFacet` never imports `HooksStorage` at all, so there is
-     *     no code path from `redeemProRata`, `claimPending` or
-     *     `claimPendingMany` into this function.
+     *  5. NEVER REACHED FROM `IndexCoreFacet` — INCLUDING INDIRECTLY, which is
+     *     the part that was previously false.
+     *
+     *     `Hooks.exitDoorFree.test.ts` and `Diamond.facets.test.ts` assert at
+     *     SOURCE LEVEL that `IndexCoreFacet` never imports `HooksStorage` and
+     *     never writes `_fireHook`. Audit F-3 showed that this is necessary and
+     *     NOT sufficient: `redeemProRata` reached this function anyway, via
+     *     `_attemptOpportunisticReconcile`'s cross-facet self-call into
+     *     `autoReconcile` -> `_reconcileCore` -> `_fireHook`. A source grep of
+     *     one file cannot see a call dispatched through the diamond's
+     *     fallback, so the published claim was certified false for as long as
+     *     the grep was the only proof.
+     *
+     *     That call site is now removed from `redeemProRata` (see the comment
+     *     at the end of that function), and the load-bearing proof is
+     *     BEHAVIOURAL: `ExitDoorSacred.test.ts` registers a real recording
+     *     hook, creates a real unreconciled surplus, and asserts the hook's
+     *     own counter does not move across a redemption — with a control in
+     *     the same fixture proving that counter does move on a mint.
      *  6. NEVER ON A VALUE PATH — the return data is discarded entirely.
      *     Nothing a hook returns, or whether it succeeds, is used in any
      *     arithmetic anywhere.
@@ -1131,7 +1162,13 @@ abstract contract IndexFacetBase {
             (, uint256 navHigh) = _nav();
             if (navHigh == 0) revert NoPriceData();
 
-            ethValue = Math.mulDiv(shareAmount, lo, WAD);
+            // §1.3: the band-LOW mark, then capped at what selling exactly
+            // this much of `shareToken` would REALLY realize on its own curve.
+            // Minting index coin against a mark the constituent's pool cannot
+            // honour is the D2 illusion in its purest form — this is the one
+            // place the protocol mints supply against its own inventory, so it
+            // is the one place an over-mark is unrecoverable.
+            ethValue = IndexRealizable.capBySell(shareToken, shareAmount, Math.mulDiv(shareAmount, lo, WAD));
             if (ethValue == 0) revert ZeroAmount();
 
             sharesMinted = Math.mulDiv(ethValue, supplyBefore + VIRTUAL_SHARES, navHigh + VIRTUAL_ASSETS);
@@ -1333,6 +1370,68 @@ abstract contract IndexFacetBase {
 
     // ══ Listing ═══════════════════════════════════════════════════════════
 
+    /// @dev True when the configured `CollectionVaultFactory` says it deployed
+    /// `token` itself. The ONE provenance question this diamond asks, and the
+    /// only one it can ask that an attacker cannot answer for themselves. An
+    /// unset registry answers false for everything (fail closed).
+    function _isProvenancedVault(address token) internal view returns (bool) {
+        address factory = IndexProvenanceStorage.layout().vaultFactory;
+        if (factory == address(0) || factory.code.length == 0) return false;
+        (bool ok, bytes memory data) = factory.staticcall{gas: 30_000}(
+            abi.encodeWithSignature("isVault(address)", token)
+        );
+        return ok && data.length >= 32 && abi.decode(data, (bool));
+    }
+
+    /**
+     * @dev AUDIT C-6, CLOSED AT THE ROOT.
+     *
+     * `queueListing` used to accept an arbitrary `token` AND an arbitrary
+     * `IIndexPriceSource` with zero validation at queue time or execute time.
+     * The admission key listed a token it minted, priced by an oracle it
+     * wrote, warmed eight checkpoints (a constant price makes the persistence
+     * check hold PERFECTLY), minted to the concentration cap, and walked out
+     * through the deliberately unblockable `redeemProRata`. The committed PoC
+     * extracted 681.66 ETH from a ~3,500 ETH basket.
+     *
+     * TWO INDEPENDENT GATES, EITHER OF WHICH KILLS THE PoC:
+     *
+     *  1. PROVENANCE. The token must be a vault the configured
+     *     `CollectionVaultFactory` deployed. An attacker cannot write to that
+     *     registry without deploying a genuine vault through it, and a genuine
+     *     vault has a genuine curve with genuine depth — which is exactly what
+     *     the realizable pricing in `IndexRealizable` then measures. Note this
+     *     is the ONLY gate that can close C-6: no arithmetic distinguishes a
+     *     real contract from a manufactured one, because a manufactured one
+     *     can report any number a real one can.
+     *
+     *  2. SOURCE INDEPENDENCE (defence in depth, per the audit's own Tier-2
+     *     recommendation #10). The price source may not BE the token, may not
+     *     be the lister, and must be a contract. This does not attempt to
+     *     prove independence — that is not decidable on-chain, and claiming it
+     *     would be exactly the kind of false assurance this codebase's audit
+     *     found three of. It removes the two trivially-self-dealing shapes and
+     *     nothing more, and gate 1 is what actually carries the weight.
+     *
+     * WHY THIS IS NOT APPLIED TO GENESIS SEEDING, STATED HONESTLY.
+     * `IndexBootstrapFacet.seedConstituent` is `msg.sender == seeder` and
+     * pre-open only. The seeder chooses the ENTIRE opening basket, sets the
+     * price sources for all of it, and would also be the party configuring
+     * this very registry — gating them against it is theatre. The residual
+     * trust is therefore: **whoever seeds the basket at birth is trusted
+     * completely, and nobody afterwards is.** That is a real and disclosed
+     * trust assumption, not a closed one, and it is bounded by being
+     * observable before anyone deposits.
+     */
+    function _requireAdmissible(address token, IIndexPriceSource source) internal view {
+        address src = address(source);
+        if (src == token || src == msg.sender || src.code.length == 0) {
+            revert PriceSourceNotIndependent(token, src);
+        }
+        if (IndexProvenanceStorage.layout().vaultFactory == address(0)) revert VaultRegistryUnset();
+        if (!_isProvenancedVault(token)) revert UnverifiedConstituent(token);
+    }
+
     function _list(
         address token,
         IIndexPriceSource source,
@@ -1352,6 +1451,11 @@ abstract contract IndexFacetBase {
         // constituent of the same basket.
         if (StreamStorage.layout().tracked[token]) revert TokenIsRegisteredStream();
         if (cs.constituentList.length >= MAX_CONSTITUENTS) revert TooManyConstituents();
+        // AUDIT C-6. Enforced for every admission AFTER the index opens — i.e.
+        // for every admission a role key can reach. See
+        // `_requireAdmissible`'s header for why genesis seeding is
+        // deliberately, and disclosedly, exempt.
+        if (cs.indexOpen) _requireAdmissible(token, source);
 
         c.source = source;
         c.rawTargetWeightBps = rawTargetWeightBps;

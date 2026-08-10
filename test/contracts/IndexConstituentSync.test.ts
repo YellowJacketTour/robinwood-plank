@@ -2,7 +2,14 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { time, mine, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
 import { deployBeaconMock } from "./helpers/beacon";
-import { deployOpenIndex, warmCheckpoints, WAD, TIMELOCK, maxIn } from "./helpers/index-vault";
+import {
+  deployOpenIndex,
+  warmCheckpoints,
+  armVaultRegistry,
+  WAD,
+  TIMELOCK,
+  maxIn,
+} from "./helpers/index-vault";
 
 /**
  * ROUND 10, FIX 3 — THE DOCUMENTED PRODUCTION SINK NO LONGER STRANDS VALUE.
@@ -177,6 +184,8 @@ describe("Index constituent sync — swept value becomes redeemable (round 10)",
     const src: any = await (
       await ethers.getContractFactory("MockIndexPriceSource")
     ).deploy(100n * WAD, 100n * WAD);
+    // AUDIT C-6: post-open admission requires factory provenance.
+    await armVaultRegistry(fx, [...fx.addrs, badAddr]);
     await fx.vault
       .connect(fx.admission)
       .queueListing(badAddr, await src.getAddress(), 2_000n, false);

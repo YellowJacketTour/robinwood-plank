@@ -70,6 +70,16 @@ import {CoreStorage, PlatformTreasuryStorage} from "../storage/IndexStorage.sol"
  *     timelock bounds WHEN, never HOW BIG" doctrine `CEIL_DEV_FUND_BPS` and
  *     `CEIL_BUYBACK_SPLIT_BPS` already prove for the other two governed
  *     splits in this facet set.
+ *  WHICH ROLE GOVERNS THIS (2026-08-09 audit fix M-5 — CHANGED):
+ *  `queueSocialFiTreasury` / `queueSocialFiTreasuryBps` sat behind
+ *  ROLE_RISK_PARAM and now sit behind ROLE_PLATFORM_ALLOCATION, for the same
+ *  reason and by the same rule as `IndexDevFundFacet`'s pair — see that
+ *  file's header. In one line: the risk role owns what anyone is CHARGED;
+ *  this facet only decides where an ALREADY-CHARGED fee is BOOKED, which is
+ *  the value-flow role's half of `IndexParams.roleForParamKey`'s own stated
+ *  split. A compromised risk key can no longer redirect a spendable treasury
+ *  to an address of its choosing.
+ *
  *   - `treasury` and `carveOutBps` are BOTH governed and timelocked through
  *     the identical queue/execute pair every other risk-surface change in
  *     this facet set uses (`IndexDevFundFacet.queueDevFundTreasury`'s shape,
@@ -125,7 +135,7 @@ contract IndexSocialFiTreasuryFacet is IndexFacetBase {
      * in this codebase, which is the property this facet DOES mechanically
      * provide.
      */
-    function queueSocialFiTreasury(address treasury) external onlyRole(ROLE_RISK_PARAM_) {
+    function queueSocialFiTreasury(address treasury) external onlyRole(ROLE_PLATFORM_ALLOCATION_) {
         uint64 eta = uint64(block.timestamp + CoreStorage.layout().timelockDelay);
         PlatformTreasuryStorage.layout().queuedTreasury =
             PlatformTreasuryStorage.QueuedAddress({value: treasury, eta: eta, pending: true});
@@ -153,7 +163,7 @@ contract IndexSocialFiTreasuryFacet is IndexFacetBase {
      * so a governance vote for an absurd value is visible for the FULL delay
      * before it can ever be rejected at the floor.
      */
-    function queueSocialFiTreasuryBps(uint256 bps) external onlyRole(ROLE_RISK_PARAM_) {
+    function queueSocialFiTreasuryBps(uint256 bps) external onlyRole(ROLE_PLATFORM_ALLOCATION_) {
         uint64 eta = uint64(block.timestamp + CoreStorage.layout().timelockDelay);
         PlatformTreasuryStorage.layout().queuedCarveOutBps =
             PlatformTreasuryStorage.QueuedUint256({value: bps, eta: eta, pending: true});

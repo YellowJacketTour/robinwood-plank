@@ -21,7 +21,7 @@ describe("WeightModule — multi-signal + admit/cap/decay (PR1)", () => {
 
   const K_BLOCKS = 50_400n;
   const F_MIN_WEI = ethers.parseEther("0.05");
-  const W_MAX_BPS = 2_500n;
+  // W_MAX_BPS removed — replaced by the exit-capacity cap (design §3.3).
   const DECAY_BLOCKS = 100_800n;
 
   async function deployFixture() {
@@ -92,7 +92,13 @@ describe("WeightModule — multi-signal + admit/cap/decay (PR1)", () => {
     expect(sB).to.be.gt(0n);
   });
 
-  it("W-4: w_max clamp — no vault exceeds W_MAX_BPS even with a dominant fee", async () => {
+  // W-4 REPLACED. The fiat `W_MAX_BPS = 2500` cap is gone — DESIGN-HONEST-
+  // INDEX §3.3 replaces it with an exit-capacity cap, and audit H-8 showed
+  // the fiat cap was actively harmful: three admitted vaults summed to 7500
+  // and silently leaked 25% of the largest pipe into dividends. The
+  // concentration behaviour that replaces it is proven in
+  // `WeightModule.reform.test.ts` (R-EC1 / R-H8).
+  it("W-4: with no capacity signal anywhere, weights still sum to EXACTLY 10000 (no fiat cap, no leak)", async () => {
     const { vaultA, vaultB, vaultC, weightModule } = await deployFixture();
 
     await weightModule.connect(vaultA).noteFee(vaultA.address, ethers.parseEther("1000"));
@@ -106,13 +112,10 @@ describe("WeightModule — multi-signal + admit/cap/decay (PR1)", () => {
 
     const [vaults, wBps] = await weightModule.weights();
     expect(vaults.length).to.equal(3);
-    let sum = 0n;
-    for (const w of wBps) {
-      expect(w).to.be.lte(W_MAX_BPS);
-      sum += w;
-    }
-    expect(sum).to.be.lte(10_000n);
-    expect(sum).to.be.gt(0n);
+    const sum = wBps.reduce((a: bigint, b: bigint) => a + b, 0n);
+    // Pre-fix this was 7500 — the dominant vault clamped to 2500 and the
+    // redistribution never refilled the gap.
+    expect(sum).to.equal(10_000n);
   });
 
   it("W-5: admit threshold — fails below F_MIN matured, succeeds above", async () => {
@@ -135,7 +138,11 @@ describe("WeightModule — multi-signal + admit/cap/decay (PR1)", () => {
     await mine(K_BLOCKS);
     const sBefore = await weightModule.score(vaultA.address);
 
-    await mine(DECAY_BLOCKS + 1_000n);
+    // Decay is now a true half-life past the grace window (design §3.2), and
+    // maturity `m` is still rising over the same blocks, so the test must
+    // advance far enough for decay to dominate — three half-lives puts the
+    // ceiling at 1/8 of the un-decayed maximum.
+    await mine(DECAY_BLOCKS * 3n);
     const sAfter = await weightModule.score(vaultA.address);
 
     expect(sAfter).to.be.lt(sBefore);
@@ -182,21 +189,37 @@ describe("WeightModule — multi-signal + admit/cap/decay (PR1)", () => {
     await weightModule.connect(vaultA).noteDepth(vaultA.address, 0n);
 
     await weightModule.connect(vaultB).noteFee(vaultB.address, ethers.parseEther("1"));
+    // Depth is now a WINDOWED MINIMUM (design §3.2 / audit C-4, H-6), so B
+    // must actually HOLD the liquidity across the window to be credited for
+    // it. One sample no longer latches.
+    for (let i = 0; i < 7; i++) {
+      await weightModule.connect(vaultB).noteDepth(vaultB.address, ethers.parseEther("100"));
+      await mine(1_200n);
+    }
     await weightModule.connect(vaultB).noteDepth(vaultB.address, ethers.parseEther("100"));
 
     await mine(K_BLOCKS);
+    // Keep B's window populated across the maturity mine as well.
+    for (let i = 0; i < 7; i++) {
+      await weightModule.connect(vaultB).noteDepth(vaultB.address, ethers.parseEther("100"));
+      await mine(1_200n);
+    }
+    await weightModule.connect(vaultB).noteDepth(vaultB.address, ethers.parseEther("100"));
 
     const sA = await weightModule.score(vaultA.address);
     const sB = await weightModule.score(vaultB.address);
     expect(sB).to.be.gt(sA);
 
     // And vault A alone: depth=0 must not move its score above the pure-F
-    // baseline it would have with no depth signal reported at all.
+    // baseline, computed at A's ACTUAL maturity (m = delta/(delta+K)).
     const ALPHA_F_WAD = 450_000_000_000_000_000n;
     const WAD = 1_000_000_000_000_000_000n;
     const fee = ethers.parseEther("1");
     const composite = (ALPHA_F_WAD * fee) / WAD;
-    const expected = composite / 2n; // m = 0.5 at delta = K
+    const firstBlock: bigint = (await weightModule.scores(vaultA.address)).firstFeeBlock;
+    const now = BigInt(await ethers.provider.getBlockNumber());
+    const delta = now - firstBlock;
+    const expected = (composite * delta) / (delta + K_BLOCKS);
     expect(sA).to.be.closeTo(expected, expected / 100n + 1n);
   });
 

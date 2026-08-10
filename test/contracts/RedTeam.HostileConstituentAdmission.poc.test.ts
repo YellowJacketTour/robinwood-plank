@@ -5,37 +5,48 @@ import { time, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hard
 import {
   WAD,
   TIMELOCK,
-  MIN_CHECKPOINT,
   deployOpenIndex,
   deployConstituent,
+  armVaultRegistry,
 } from "./helpers/index-vault";
 
 /**
- * RED TEAM PoC — ROLE_CONSTITUENT_ADMISSION IS A FULL-CUSTODY KEY, ONE
- * TIMELOCK AWAY.
+ * RED TEAM — AUDIT C-6, **INVERTED**: the attack that extracted 681.66 ETH is
+ * now impossible, and this file is the proof.
  *
- * `IndexGovernanceFacet.queueListing` accepts an ARBITRARY `token` and an
- * ARBITRARY `IIndexPriceSource source`, with no validation at queue time and
- * none at execute time beyond `token != 0 / source != 0 / rawWeight <= BPS /
- * !listed / !stream / count < 32` (`IndexFacetBase._list`). Nothing checks that
- * the price source is independent of the token, or of the caller.
+ * ── THE ORIGINAL FINDING ──────────────────────────────────────────────────
+ * `queueListing` accepted an ARBITRARY `token` and an ARBITRARY
+ * `IIndexPriceSource`, with no validation at queue time and none at execute
+ * time. So `ROLE_CONSTITUENT_ADMISSION` could list a token it minted itself,
+ * priced by an oracle it wrote itself, warm eight checkpoints (a CONSTANT price
+ * makes the persistence check hold perfectly, since every observation equals
+ * the TWAP), mint index shares against the whole real basket with
+ * `mintSingleAsset` up to the concentration cap, and walk out through
+ * `redeemProRata` — the deliberately unblockable, price-free exit door.
  *
- * So the admission key can list a token it minted itself, priced by an oracle
- * it wrote itself, and then mint index shares against the whole real basket
- * with `mintSingleAsset` — bounded only by the concentration cap — and walk out
- * through `redeemProRata`, the deliberately unblockable, price-free exit door.
+ * The PoC extracted 681.66 ETH of real reserves from a ~3,500 ETH basket, and
+ * contradicted `IndexGovernanceFacet`'s own header: literally true that no
+ * privileged function moves a reserve, materially false because the key
+ * MANUFACTURES the share-burning redeemer.
  *
- * This contradicts `IndexGovernanceFacet`'s own header:
- *   "EVERY function here affects FUTURE parameter values only. None can move a
- *    constituent balance ... there is no code path anywhere in the finalized
- *    facet set that transfers a reserve to anyone except a share-burning
- *    redeemer."
- * Literally true. Materially false: the listing key MANUFACTURES the
- * share-burning redeemer.
+ * ── WHY IT IS DEAD ────────────────────────────────────────────────────────
+ * `IndexFacetBase._requireAdmissible`, enforced at BOTH `queueListing` and
+ * `_list`. A post-open constituent must be a vault the configured
+ * `CollectionVaultFactory` deployed, and its price source must not be the token
+ * or the lister. The attacker cannot enter that registry without deploying a
+ * genuine vault through the genuine factory — and a genuine vault has a genuine
+ * curve, which §1.3's realizable pricing then measures. Modelled here by simply
+ * NOT registering the token the attacker minted, which is exactly what the real
+ * factory would do.
+ *
+ * The tests below walk the original attack forward step by step and assert it
+ * dies at the FIRST step, then confirm each remaining gate independently, so a
+ * regression in any one of them shows up here rather than being masked by the
+ * others.
  *
  * LOCAL HARDHAT ONLY.
  */
-describe("RED TEAM — a hostile constituent admission drains the basket", () => {
+describe("RED TEAM (inverted) — a hostile constituent admission is now rejected", () => {
   let snap: SnapshotRestorer;
   before(async () => {
     snap = await takeSnapshot();
@@ -44,74 +55,89 @@ describe("RED TEAM — a hostile constituent admission drains the basket", () =>
     await snap.restore();
   });
 
-  it("PoC: the admission key lists a self-priced worthless token and redeems real reserves", async () => {
+  it("the admission key cannot even QUEUE a self-minted, self-priced token — the registry has never heard of it", async () => {
     const fx = await deployOpenIndex();
-    const { vault, vaultAddr, admission, alice, tokens, addrs } = fx;
+    const { vault, vaultAddr, admission, alice } = fx;
 
-    // A real user is already in the basket.
     await vault.connect(alice).mintProRata(500n * WAD, [
       ethers.MaxUint256,
       ethers.MaxUint256,
       ethers.MaxUint256,
     ]);
 
-    // ── The attack. The admission key is the ONLY key used. ────────────────
-    // A worthless token, and a price source the attacker wrote, claiming 1 ETH
-    // per unit. `MockIndexPriceSource` is exactly the interface the vault
-    // accepts — there is no distinction on-chain between this and a real one.
     const fake = await deployConstituent("FAKE", 100n * WAD, 100n * WAD);
     await fake.token.mint(admission.address, 1_000_000n * WAD);
     await fake.token.connect(admission).approve(vaultAddr, ethers.MaxUint256);
 
-    await vault
-      .connect(admission)
-      .queueListing(fake.addr, await fake.source.getAddress(), 3_000, false);
+    // A real registry is configured, and it covers the REAL basket — the
+    // attacker's token is simply not one the factory deployed.
+    await armVaultRegistry(fx);
+
+    await expect(
+      vault.connect(admission).queueListing(fake.addr, await fake.source.getAddress(), 3_000, false)
+    )
+      .to.be.revertedWithCustomError(vault, "UnverifiedConstituent")
+      .withArgs(fake.addr);
+
+    // ...and the whole attack chain is therefore unreachable: nothing was
+    // queued, so nothing can be executed either.
     await time.increase(TIMELOCK + 1);
-    await vault.executeListing(fake.addr);
-
-    // Warm the ring buffer so `_requirePersistenceIfLarge` is satisfied. The
-    // attacker's source returns a CONSTANT price, so persistence holds
-    // PERFECTLY — every retained observation equals the TWAP exactly.
-    for (let i = 0; i < 8; i++) {
-      await time.increase(MIN_CHECKPOINT + 1);
-      await vault.checkpointAll();
-    }
-    expect(await vault.persistenceHolds(fake.addr)).to.equal(true);
-
-    const realBefore = await Promise.all(
-      tokens.map((t: any) => t.balanceOf(admission.address))
+    await expect(vault.executeListing(fake.addr)).to.be.revertedWithCustomError(
+      vault,
+      "NothingQueued"
     );
-    const reservesBefore = await Promise.all(addrs.map((a: string) => vault.reserveOf(a)));
+  });
 
-    // Mint against the fake leg, right up to whatever the concentration cap
-    // allows, then leave through the free pro-rata exit door.
-    await vault.connect(admission).mintSingleAsset(fake.addr, 800n * WAD, 0n);
-    const got: bigint = await vault.balanceOf(admission.address);
-    expect(got).to.be.greaterThan(0n);
+  it("with NO registry configured, admission is closed entirely — the fail-closed default", async () => {
+    const fx = await deployOpenIndex();
+    const { vault, admission } = fx;
 
-    await vault.connect(admission).redeemProRata(got, [0n, 0n, 0n, 0n]);
+    const fake = await deployConstituent("FAKE2", 100n * WAD, 100n * WAD);
 
-    const realAfter = await Promise.all(
-      tokens.map((t: any) => t.balanceOf(admission.address))
-    );
+    // Nothing was armed. An unconfigured trust root admits NOTHING, rather
+    // than admitting everything — which is what makes a deployment that
+    // forgets to wire the factory safe rather than catastrophic. (Since
+    // `diamondCut` is renounced at birth, "safe" is the only acceptable
+    // direction for that mistake.)
+    await expect(
+      vault.connect(admission).queueListing(fake.addr, await fake.source.getAddress(), 3_000, false)
+    ).to.be.revertedWithCustomError(vault, "VaultRegistryUnset");
+  });
 
-    // ── The damage, priced. ───────────────────────────────────────────────
-    // Constituent prices in the fixture are 1.0 / 0.5 / 2.0 ETH.
-    const px = [WAD, WAD / 2n, 2n * WAD];
-    let stolenEth = 0n;
-    for (let i = 0; i < 3; i++) {
-      const gained = realAfter[i] - realBefore[i];
-      expect(gained, `leg ${i} paid nothing`).to.be.greaterThan(0n);
-      stolenEth += (gained * px[i]) / WAD;
-      // ...and it came straight out of the reserve real holders own.
-      expect(await vault.reserveOf(addrs[i])).to.be.lessThan(reservesBefore[i]);
-    }
+  it("source independence is enforced separately: a token cannot price itself, and the lister cannot be the oracle", async () => {
+    const fx = await deployOpenIndex();
+    const { vault, admission } = fx;
+    await armVaultRegistry(fx);
 
-    console.log(
-      "\n  admission key alone extracted ~" +
-        ethers.formatEther(stolenEth) +
-        " ETH of REAL constituent reserves, for a worthless token it minted itself"
-    );
-    expect(stolenEth).to.be.greaterThan(100n * WAD);
+    const fake = await deployConstituent("FAKE3", 100n * WAD, 100n * WAD);
+
+    // The token as its own price source.
+    await expect(vault.connect(admission).queueListing(fake.addr, fake.addr, 1_000, false))
+      .to.be.revertedWithCustomError(vault, "PriceSourceNotIndependent")
+      .withArgs(fake.addr, fake.addr);
+
+    // The lister's own EOA as the price source. Note this is caught by the
+    // has-no-code clause too — an EOA cannot be a price source — which is why
+    // both clauses live in one check rather than being separately bypassable.
+    await expect(
+      vault.connect(admission).queueListing(fake.addr, admission.address, 1_000, false)
+    ).to.be.revertedWithCustomError(vault, "PriceSourceNotIndependent");
+  });
+
+  it("REGRESSION FLOOR: a legitimately factory-deployed constituent is still admissible — the gate is not simply 'reject everything'", async () => {
+    const fx = await deployOpenIndex();
+    const { vault, admission } = fx;
+
+    const good = await deployConstituent("GOOD", 100n * WAD, 100n * WAD);
+    // The registry vouches for it, exactly as the real factory would for a
+    // vault it deployed.
+    await armVaultRegistry(fx, [...fx.addrs, good.addr]);
+
+    await vault.connect(admission).queueListing(good.addr, await good.source.getAddress(), 1_000, false);
+    await time.increase(TIMELOCK + 1);
+    await expect(vault.executeListing(good.addr)).to.not.be.reverted;
+
+    const listed: string[] = await vault.listConstituents();
+    expect(listed.map((a) => a.toLowerCase())).to.include(good.addr.toLowerCase());
   });
 });

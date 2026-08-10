@@ -219,21 +219,38 @@ contract IndexCoreFacet is IndexFacetBase {
             _payOrDefer(cs.constituentList[i], msg.sender, amountsOut[i]);
         }
 
-        // Adversarial-review fix (2026-08-06): opportunistically reconcile
-        // EVERY constituent this redeem just touched (design doc §7.2). Runs
-        // strictly AFTER every payout above has already left this contract —
-        // reconciling against `c.reserve` before the matching outgoing
-        // transfer would misattribute the amount about to be paid out as a
-        // freshly-observed surplus and re-credit it, a real double-count.
-        // Each call is independently non-blocking, so a failure on one
-        // constituent can never stop the others or this redemption. NOTE:
-        // `_deployToIndexPoolCore` itself gates every attempt on
-        // `_requirePoolQuiescent()`, so at most the first constituent in
-        // this loop whose deploy actually reaches the pool this block
-        // succeeds — see the identical note in `IndexCoreFacet.mintProRata`.
-        for (uint256 i = 0; i < n; i++) {
-            _attemptOpportunisticReconcile(cs.constituentList[i]);
-        }
+        // ── AUDIT F-3, CLOSED: NO OPPORTUNISTIC RECONCILE ON THE EXIT DOOR ──
+        //
+        // An earlier pass (2026-08-06) ran `_attemptOpportunisticReconcile`
+        // over every constituent here, mirroring `mintProRata`. That was a
+        // real, published-claim-breaking mistake and it is deliberately gone.
+        //
+        // WHAT IT ACTUALLY DID: `_attemptOpportunisticReconcile` self-calls
+        // `autoReconcile` -> `_reconcileCore` -> `_fireHook(HOOK_AFTER_SYNC_)`.
+        // So an operator-registered external hook WAS invoked in the middle of
+        // a redemption, and `_reconcileCore` could also self-call
+        // `autoDeployToIndexPool` and MINT SUPPLY during an exit. This file's
+        // own header claims "it consults NO hook, at any point, on any path",
+        // and design §1.1 makes the exit door sacred: never gated, priced,
+        // paused, or governance-reachable. A governance-registered hook firing
+        // inside `redeemProRata` is all four of those at once, however
+        // de-fanged `_fireHook` is.
+        //
+        // The published proof was `Hooks.exitDoorFree.test.ts:53-59`, which
+        // GREPPED THE SOURCE TEXT of this file for `_fireHook`. A cross-facet
+        // self-call through the diamond's fallback is structurally invisible to
+        // a source grep, so the test passed for four days while the property it
+        // named was false. It is replaced by a behavioural test that registers
+        // a real recording hook and asserts its call counter does not move —
+        // see `ExitDoorSacred.test.ts`.
+        //
+        // NOTHING IS LOST. Reconciliation is not skipped, only moved off this
+        // one path: `mintProRata`, `mintSingleAsset`, `redeemSingleAsset`, the
+        // zap, and the explicit `syncConstituentBalance`/`reconcile` entry
+        // points all still reconcile, so a surplus is picked up by the very
+        // next interaction that is not a free-door exit. The exit door pays
+        // strictly out of already-accounted reserves, which is exactly the
+        // property that makes it unrunnable.
 
         emit RedeemedProRata(msg.sender, sharesIn);
     }

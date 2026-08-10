@@ -14,6 +14,7 @@ import {
   paramsTuple,
   defaultParams,
   indexVaultFactory,
+  armVaultRegistry,
 } from "./helpers/index-vault";
 
 /**
@@ -411,6 +412,8 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
       const p4: any = await Price.deploy(100n * WAD, 100n * WAD);
       const a4 = await t4.getAddress();
       await makeEligible(t4);
+      // AUDIT C-6: post-open admission requires factory provenance.
+      await armVaultRegistry(fx as any, [...addrs, a4]);
       await vault.connect(admission).queueListing(a4, await p4.getAddress(), 1_000, false);
       await time.increase(TIMELOCK + 1);
       await vault.executeListing(a4);

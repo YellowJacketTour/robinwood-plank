@@ -291,6 +291,31 @@ export async function deployOpenIndex(
   };
 }
 
+/**
+ * Point an opened index at a provenance registry and register `tokens` in it.
+ *
+ * AUDIT C-6. Post-open constituent admission (`queueListing`/`executeListing`)
+ * and every `zapMint` leg now require the token to be a vault the configured
+ * `CollectionVaultFactory` deployed — `IndexFacetBase._requireAdmissible`. The
+ * default is `address(0)`, which admits NOTHING, so any suite that lists a
+ * constituent after `openIndex` must arm the registry first.
+ *
+ * `MockVaultFactory` stands in for the real factory's `isVault` registry, and
+ * the fact that a test must EXPLICITLY register a token is the point: an
+ * attacker cannot register their own token in the real factory without
+ * deploying a genuine vault through it, and `RedTeam.HostileConstituentAdmission`
+ * models exactly that by declining to register the token it minted.
+ */
+export async function armVaultRegistry(fx: IndexFixture, tokens?: string[]) {
+  const F = await ethers.getContractFactory("MockVaultFactory");
+  const factory: any = await F.deploy();
+  for (const t of tokens ?? fx.addrs) await factory.setVault(t, true);
+  await fx.vault.connect(fx.admission).queueVaultFactory(await factory.getAddress());
+  await time.increase(TIMELOCK + 1);
+  await fx.vault.executeVaultFactory();
+  return factory;
+}
+
 /** Advance time and lay down `n` fresh observations on every constituent. */
 export async function warmCheckpoints(fx: IndexFixture, n: number) {
   for (let i = 0; i < n; i++) {

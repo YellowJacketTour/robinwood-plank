@@ -12,6 +12,14 @@ interface IWeightModuleWeights {
     function weights() external view returns (address[] memory vaults, uint256[] memory wBps);
 }
 
+/// @dev See `InventoryBuyAdapter.IWeightModuleDepth` for the full argument:
+/// the windowed-MINIMUM depth is the only depth figure a same-block attacker
+/// cannot inflate, so it — not the live reserve — is what the leg cap is
+/// measured against.
+interface IWeightModuleDepth {
+    function windowMinDepth(address vault) external view returns (uint256);
+}
+
 /// @dev Minimal reads/writes of `CollectionVault`, extended past
 /// `InventoryBuyAdapter`'s own `ICollectionVaultBuy` with the native-LP
 /// surface this adapter actually needs: `addLiquidity` (balanced two-sided
@@ -21,6 +29,7 @@ interface IWeightModuleWeights {
 /// `CollectionVault.sol:169`).
 interface ICollectionVaultLpOps {
     function buyShares(uint256 amountIn, uint256 minSharesOut) external returns (uint256 sharesOut);
+    function quoteBuyShares(uint256 amountIn) external view returns (uint256 sharesOut);
     function sellShares(uint256 sharesIn, uint256 minAmountOut) external returns (uint256 amountOut);
     function addLiquidity(uint256 paymentIn, uint256 minLpOut) external returns (uint256 lpOut, uint256 sharesIn);
     function paymentReserve() external view returns (uint256);
@@ -97,9 +106,21 @@ contract CollectionLpAdapter is IEnergyAdapter {
     using SafeERC20 for IERC20;
 
     uint256 private constant BPS_DENOM = 10_000;
-    /// @dev Verbatim from `EnergyBus.MAX_IMPACT_BPS` / `InventoryBuyAdapter`'s
-    /// own constant — the SAME 3% ceiling, reused rather than re-derived.
-    uint256 public constant MAX_IMPACT_BPS = 300;
+
+    /// @notice AUDIT C-2 / DESIGN-HONEST-INDEX §1.3. The old `MAX_IMPACT_BPS`
+    /// guard is DELETED, not corrected — it compared the fill against the
+    /// constant-product output formula, so it measured only the swap fee,
+    /// peaked near 149 bps and fell toward zero as trades grew, and could
+    /// never reach its own 300 bps threshold at any size. This adapter now
+    /// prices its acquisition leg exactly the way `InventoryBuyAdapter` does:
+    /// a REAL `minSharesOut` from a pre-trade `quoteBuyShares`, plus a
+    /// depth-adaptive cap on how much of a pool one leg may take in a block.
+    /// See `InventoryBuyAdapter`'s constants for the full honest statement of
+    /// what each mechanism does and does not defend against — in particular
+    /// that the quote BOUNDS but does not DEFEAT a sandwich, and the size cap
+    /// is the load-bearing half.
+    uint256 public constant QUOTE_TOLERANCE_BPS = 50;
+    uint256 public constant MAX_LEG_POOL_FRACTION_BPS = 200;
 
     /// @notice Nominal per-leg split: this fraction of `budget` is spent
     /// acquiring `S` (`buyBudget`); the remainder is the CEILING on
@@ -183,10 +204,10 @@ contract CollectionLpAdapter is IEnergyAdapter {
     error ZeroAddress();
     error NotBus();
     error NotSelf();
-    error ImpactTooHigh();
     error NoShares();
     error NoLp();
     error PoolNotOpen();
+    error NoRealizableQuote();
 
     constructor(address weth_, address bus_, address weightModule_) {
         if (weth_ == address(0) || bus_ == address(0) || weightModule_ == address(0)) revert ZeroAddress();
@@ -241,7 +262,11 @@ contract CollectionLpAdapter is IEnergyAdapter {
         used = totalUsed;
         skipped = (used == 0);
 
+        // AUDIT C-1: never return more than we received — see the identical
+        // guard in InventoryBuyAdapter. A raw-balance refund lets a donation
+        // underflow the Bus's delta arithmetic and brick `route()` forever.
         uint256 leftover = weth.balanceOf(address(this));
+        if (leftover > amountIn) leftover = amountIn;
         if (leftover > 0) {
             weth.safeTransfer(msg.sender, leftover);
         }
@@ -260,6 +285,16 @@ contract CollectionLpAdapter is IEnergyAdapter {
         if (!v.poolOpen()) revert PoolNotOpen();
 
         uint256 wethBefore = weth.balanceOf(address(this));
+
+        // Depth-adaptive sizing, applied to the WHOLE leg before the pair
+        // split so both halves shrink together and `payCap` stays consistent
+        // with what the buy half can actually acquire. Unspent budget is
+        // refunded to the Bus by `execute()`, so a thin pool simply gets
+        // deepened over more routes instead of being taken in one block.
+        uint256 maxLeg = (_depthReference(vault, v.paymentReserve()) * MAX_LEG_POOL_FRACTION_BPS) / BPS_DENOM;
+        if (maxLeg == 0) revert NoRealizableQuote();
+        if (budget > maxLeg) budget = maxLeg;
+
         uint256 buyBudget = (budget * LEG_PAIR_SPLIT_BPS) / BPS_DENOM;
         uint256 payCap = budget - buyBudget;
         if (buyBudget == 0 || payCap == 0) revert NoLp();
@@ -289,23 +324,25 @@ contract CollectionLpAdapter is IEnergyAdapter {
         spent = wethBefore > wethAfter ? wethBefore - wethAfter : 0;
     }
 
-    /// @dev Acquisition half of a leg: buy `S` at the vault's own AMM price,
-    /// impact-guarded exactly like `InventoryBuyAdapter.buyLeg`. Split out
-    /// only to keep `buyLeg`'s own stack shallow enough for the repo's
-    /// pinned (non-viaIR) compiler settings.
+    /// @dev Acquisition half of a leg: buy `S` at the vault's own REALIZABLE
+    /// price — quote first, then transact with that quote (minus a tight
+    /// same-call drift tolerance) as a real `minSharesOut`. Exactly
+    /// `InventoryBuyAdapter.buyLeg`'s discipline, and for exactly the reasons
+    /// documented there. Split out only to keep `buyLeg`'s own stack shallow
+    /// enough for the repo's pinned (non-viaIR) compiler settings.
     function _buyLegShares(ICollectionVaultLpOps v, address vault, uint256 buyBudget)
         private
         returns (uint256 sharesOut)
     {
-        uint256 spotShares = (buyBudget * v.shareReserve()) / (v.paymentReserve() + buyBudget);
+        uint256 quoted = v.quoteBuyShares(buyBudget);
+        if (quoted == 0) revert NoRealizableQuote();
+        uint256 minSharesOut = (quoted * (BPS_DENOM - QUOTE_TOLERANCE_BPS)) / BPS_DENOM;
+        if (minSharesOut == 0) revert NoRealizableQuote();
+
         weth.forceApprove(vault, buyBudget);
-        sharesOut = v.buyShares(buyBudget, 0);
+        sharesOut = v.buyShares(buyBudget, minSharesOut);
         weth.forceApprove(vault, 0);
         if (sharesOut == 0) revert NoShares();
-        if (spotShares > 0) {
-            uint256 shortfall = spotShares > sharesOut ? spotShares - sharesOut : 0;
-            if ((shortfall * BPS_DENOM) / spotShares > MAX_IMPACT_BPS) revert ImpactTooHigh();
-        }
     }
 
     /// @dev Balanced-deposit half of a leg: supply `paymentIn` + the matching
@@ -339,5 +376,18 @@ contract CollectionLpAdapter is IEnergyAdapter {
 
         // Lock the real LP receipt forever — §6.6's non-negotiable.
         IERC20(v.lpToken()).safeTransfer(LP_LOCK_ADDR, lpOut);
+    }
+
+    /// @dev Identical to `InventoryBuyAdapter._depthReference`, including the
+    /// honestly-stated fallback: a vault with no observed depth history sizes
+    /// against its live reserve, and is separately protected by having ~0
+    /// weight and ~0 exit capacity until that history exists.
+    function _depthReference(address vault, uint256 liveReserve) internal view returns (uint256) {
+        (bool ok, bytes memory ret) =
+            weightModule.staticcall(abi.encodeWithSelector(IWeightModuleDepth.windowMinDepth.selector, vault));
+        if (!ok || ret.length < 32) return liveReserve;
+        uint256 windowMin = abi.decode(ret, (uint256));
+        if (windowMin == 0) return liveReserve;
+        return windowMin < liveReserve ? windowMin : liveReserve;
     }
 }

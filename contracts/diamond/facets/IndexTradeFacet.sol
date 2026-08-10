@@ -7,6 +7,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {IndexFacetBase} from "./IndexFacetBase.sol";
 import {Constituent} from "../../lib/IndexTypes.sol";
+import {IndexRealizable} from "../../lib/IndexRealizable.sol";
 
 /**
  * ============================================================================
@@ -58,7 +59,31 @@ contract IndexTradeFacet is IndexFacetBase {
         if (navHigh == 0) revert NoPriceData();
 
         uint256 credited = _pullCredited(IERC20(token), msg.sender, amountIn);
-        uint256 ethValue = Math.mulDiv(credited, lo, WAD);
+        // ── DESIGN §1.3: SETTLE ON THE REALIZABLE INTEGRAL, NOT ON A MARK ──
+        // The band-LOW mark is computed first and then capped at what the
+        // deposited amount would ACTUALLY fetch if the index turned around and
+        // sold it back into the constituent's own pool right now
+        // (`CollectionVault.quoteSellShares` — fee- and impact-inclusive,
+        // because it IS `sellShares`' body run as a view).
+        //
+        // WHY THIS IS THE WHOLE POINT. A deposit credits index shares — a claim
+        // on the WHOLE basket. Crediting it at a mark the depositor's own pool
+        // cannot honour transfers the difference from every existing holder to
+        // the depositor, which is precisely how audit C-6 extracted 681.66 ETH.
+        // Priced on the integral instead, a token with a thin or fake pool has
+        // ~zero realizable depth and therefore credits ~nothing: the attack
+        // pays for itself. It also defangs C-4 (inflating weight over a thin
+        // pool no longer extracts, because purchases credit only what is
+        // genuinely absorbable) and makes C-2's impact guard redundant rather
+        // than merely fixed — the price already contains the impact.
+        //
+        // A CAP, NEVER A SUBSTITUTION. `min` is the only honest direction: a
+        // constituent that exposes no curve prices exactly as it did before,
+        // and one that LIES about its curve can only ever short-change its own
+        // depositor. Nothing a constituent says about itself can raise what it
+        // is credited.
+        uint256 ethValue = IndexRealizable.capBySell(token, credited, Math.mulDiv(credited, lo, WAD));
+        if (ethValue == 0) revert ZeroAmount();
         _requirePersistenceIfLarge(token, ethValue, false);
 
         // Pro-rata-equivalent shares, floored, against the OVER-stated basket.

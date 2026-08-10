@@ -51,13 +51,13 @@ describe("IndexSocialFiTreasuryFacet (design doc §7.12)", () => {
   }
 
   async function setBps(fx: any, bps: bigint) {
-    await fx.vault.connect(fx.risk).queueSocialFiTreasuryBps(bps);
+    await fx.vault.connect(fx.allocation).queueSocialFiTreasuryBps(bps);
     await time.increase(TIMELOCK + 1);
     await fx.vault.executeSocialFiTreasuryBps();
     await fx.vault.checkpointAll(); // refresh past the timelock jump
   }
   async function setTreasury(fx: any, addr: string) {
-    await fx.vault.connect(fx.risk).queueSocialFiTreasury(addr);
+    await fx.vault.connect(fx.allocation).queueSocialFiTreasury(addr);
     await time.increase(TIMELOCK + 1);
     await fx.vault.executeSocialFiTreasury();
     await fx.vault.checkpointAll(); // refresh past the timelock jump
@@ -75,13 +75,13 @@ describe("IndexSocialFiTreasuryFacet (design doc §7.12)", () => {
 
   it("cannot exceed the 5% ceiling — enforced at execution, not just discouraged", async () => {
     const fx = await deployOpenIndex();
-    await fx.vault.connect(fx.risk).queueSocialFiTreasuryBps(CEIL + 1n);
+    await fx.vault.connect(fx.allocation).queueSocialFiTreasuryBps(CEIL + 1n);
     await time.increase(TIMELOCK + 1);
     await expect(fx.vault.executeSocialFiTreasuryBps()).to.be.revertedWithCustomError(fx.vault, "BadParam");
     expect(await fx.vault.socialFiTreasuryBps()).to.equal(0n);
 
     // Exactly at the ceiling succeeds.
-    await fx.vault.connect(fx.risk).queueSocialFiTreasuryBps(CEIL);
+    await fx.vault.connect(fx.allocation).queueSocialFiTreasuryBps(CEIL);
     await time.increase(TIMELOCK + 1);
     await expect(fx.vault.executeSocialFiTreasuryBps())
       .to.emit(fx.vault, "SocialFiTreasuryBpsSet")
@@ -91,12 +91,20 @@ describe("IndexSocialFiTreasuryFacet (design doc §7.12)", () => {
 
   // ══ 2. Governed + timelocked: percentage and treasury address ═════════
 
-  it("socialFiTreasuryBps has no direct setter — only queue/execute, gated to ROLE_RISK_PARAM, timelocked", async () => {
+  it("socialFiTreasuryBps has no direct setter — only queue/execute, gated to ROLE_PLATFORM_ALLOCATION (audit M-5), timelocked", async () => {
     const fx = await deployOpenIndex();
     await expect(
       fx.vault.connect(fx.alice).queueSocialFiTreasuryBps(50n)
     ).to.be.revertedWithCustomError(fx.vault, "NotRoleHolder");
-    await fx.vault.connect(fx.risk).queueSocialFiTreasuryBps(50n);
+    // AUDIT FIX M-5. The RISK key must be rejected here. It used to be the
+    // holder of this capability, which let a compromised risk key aim a real,
+    // spendable treasury at any address. Revert the facet's modifier and this
+    // line goes red.
+    await expect(fx.vault.connect(fx.risk).queueSocialFiTreasuryBps(50n)).to.be.revertedWithCustomError(
+      fx.vault,
+      "NotRoleHolder"
+    );
+    await fx.vault.connect(fx.allocation).queueSocialFiTreasuryBps(50n);
     await expect(fx.vault.executeSocialFiTreasuryBps()).to.be.revertedWithCustomError(
       fx.vault,
       "TimelockNotElapsed"
@@ -107,12 +115,20 @@ describe("IndexSocialFiTreasuryFacet (design doc §7.12)", () => {
     expect(await fx.vault.socialFiTreasuryBps()).to.equal(50n);
   });
 
-  it("socialFiTreasury has no direct setter — only queue/execute, gated to ROLE_RISK_PARAM, timelocked", async () => {
+  it("socialFiTreasury has no direct setter — only queue/execute, gated to ROLE_PLATFORM_ALLOCATION (audit M-5), timelocked", async () => {
     const fx = await deployOpenIndex();
     await expect(
       fx.vault.connect(fx.alice).queueSocialFiTreasury(fx.bob.address)
     ).to.be.revertedWithCustomError(fx.vault, "NotRoleHolder");
-    await fx.vault.connect(fx.risk).queueSocialFiTreasury(fx.bob.address);
+    // AUDIT FIX M-5. The RISK key must be rejected here. It used to be the
+    // holder of this capability, which let a compromised risk key aim a real,
+    // spendable treasury at any address. Revert the facet's modifier and this
+    // line goes red.
+    await expect(fx.vault.connect(fx.risk).queueSocialFiTreasury(fx.bob.address)).to.be.revertedWithCustomError(
+      fx.vault,
+      "NotRoleHolder"
+    );
+    await fx.vault.connect(fx.allocation).queueSocialFiTreasury(fx.bob.address);
     await expect(fx.vault.executeSocialFiTreasury()).to.be.revertedWithCustomError(
       fx.vault,
       "TimelockNotElapsed"

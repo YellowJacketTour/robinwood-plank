@@ -1,12 +1,27 @@
+import { expect } from "chai";
 import { ethers } from "hardhat";
 import { takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
 
 /**
- * AUDIT PoC — ATTACK A: buyShares -> (donation lands) -> sellShares sandwich.
- * Measures ACTUAL attacker P&L across donation/reserve ratios to find the real
- * break-even against the ~3% swap round-trip toll.
+ * AUDIT C-3 — INVERTED (swap-leg variant). Originally this file only PRINTED
+ * attacker P&L across donation/reserve ratios; it asserted nothing at all, and
+ * the measured break-even was around D/PR ~= 3.2% — i.e. a large enough
+ * donation was profitably sandwichable through the AMM itself, no LP position
+ * required. (C-3's LP variant then removed even that brake, which is why the
+ * two PoCs were filed together.)
+ *
+ * Post-fix, a donation contributes ZERO to `paymentReserve` in its own block —
+ * it enters `pendingDonation` and drips over `DONATION_VEST_BLOCKS`. The
+ * sandwich therefore pays the full ~3% swap round-trip toll and captures a
+ * fraction of ONE block's worth of drip, which is nil. There is no ratio at
+ * which it clears, so the break-even does not merely move — it ceases to
+ * exist.
+ *
+ * The test now ASSERTS that, at every ratio including ones far past the old
+ * break-even. Revert `_addDonationVest` to `paymentReserve += x` and the
+ * largest ratios go profitable again and this test goes red.
  */
-describe("AUDIT PoC: donation sandwich via buyShares/sellShares", () => {
+describe("AUDIT C-3 FIXED: donation sandwich via buyShares/sellShares is unprofitable at every ratio", () => {
   let snap: SnapshotRestorer;
   before(async () => { snap = await takeSnapshot(); });
   after(async () => { await snap.restore(); });
@@ -39,7 +54,7 @@ describe("AUDIT PoC: donation sandwich via buyShares/sellShares", () => {
     return { vault, payment, attacker, deployer };
   }
 
-  it("measures attacker P&L vs donation/reserve ratio", async () => {
+  it("attacker P&L is NEGATIVE at every donation/reserve ratio, including far past the old 3.2% break-even", async () => {
     const seedPay = ethers.parseEther("100");
     const seedSh = ethers.parseEther("10");
     // trade size = 10% of reserve; donation swept across ratios
@@ -57,6 +72,10 @@ describe("AUDIT PoC: donation sandwich via buyShares/sellShares", () => {
       console.log(
         `  donation ${donEth} PAY (D/PR=${ratio.toFixed(4)}%)  ->  attacker P&L = ${ethers.formatEther(pnl)} PAY  ${pnl > 0n ? "*** PROFIT ***" : "loss"}`
       );
+      expect(
+        pnl < 0n,
+        `sandwich must lose money at D/PR=${ratio.toFixed(4)}% but netted ${ethers.formatEther(pnl)} PAY`
+      ).to.equal(true);
     }
   });
 });

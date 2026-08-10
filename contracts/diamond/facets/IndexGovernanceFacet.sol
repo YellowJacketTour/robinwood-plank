@@ -14,6 +14,7 @@ import {
     EcosystemStorage,
     ValueAccrualStorage
 } from "../storage/IndexStorage.sol";
+import {IndexProvenanceStorage} from "../storage/IndexProvenanceStorage.sol";
 
 interface IEcosystemFeeSinkView {
     function reinvestAsset() external view returns (address);
@@ -288,6 +289,54 @@ contract IndexGovernanceFacet is IndexFacetBase {
         emit MetricUpdated(token, q.value);
     }
 
+    // ══ The provenance registry (audit C-6) ═══════════════════════════════
+
+    /// @notice The `CollectionVaultFactory` whose `isVault` gates post-open
+    /// constituent admission and every zap leg. `address(0)` = nothing is
+    /// admissible.
+    function vaultFactory() external view returns (address) {
+        return IndexProvenanceStorage.layout().vaultFactory;
+    }
+
+    /**
+     * @notice Point the diamond at the vault registry that decides which
+     * tokens are real. Timelocked like every other economically significant
+     * address here.
+     *
+     * @dev WHAT THIS KEY CAN AND CANNOT DO. It can only ever change WHICH set
+     * of tokens is admissible; it cannot admit one directly, cannot move a
+     * reserve, and cannot reach `redeemProRata`. Setting it to a hostile
+     * registry is equivalent to holding `ROLE_CONSTITUENT_ADMISSION` and no
+     * more — the same key already gates listing, so this adds no authority to
+     * an existing holder, it only takes authority away from them by requiring
+     * a second, independently-deployed contract to agree.
+     *
+     * `address(0)` is accepted and is the SAFE direction: it disarms all
+     * post-open admission. There is deliberately no way for this key to make
+     * admission MORE permissive than "a factory-deployed vault".
+     *
+     * ⚠️ DEPLOYMENT REQUIREMENT, because `diamondCut` is renounced at birth
+     * and there is no upgrade path: `IndexDeployer` MUST queue+execute this
+     * (or the genesis seeder must, before opening) or the index can never
+     * admit a constituent after launch and `zapMint` reverts on every leg.
+     */
+    function queueVaultFactory(address factory) external onlyRole(ROLE_CONSTITUENT_ADMISSION_) {
+        uint64 eta = uint64(block.timestamp + CoreStorage.layout().timelockDelay);
+        IndexProvenanceStorage.layout().queued =
+            IndexProvenanceStorage.QueuedAddress({value: factory, eta: eta, pending: true});
+        emit ParamQueued("vaultFactory", uint256(uint160(factory)), eta);
+    }
+
+    function executeVaultFactory() external {
+        IndexProvenanceStorage.Layout storage l = IndexProvenanceStorage.layout();
+        IndexProvenanceStorage.QueuedAddress memory q = l.queued;
+        if (!q.pending) revert NothingQueued();
+        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        delete l.queued;
+        l.vaultFactory = q.value;
+        emit VaultFactoryUpdated(q.value);
+    }
+
     // ══ Listings ══════════════════════════════════════════════════════════
 
     function queueListing(
@@ -296,6 +345,16 @@ contract IndexGovernanceFacet is IndexFacetBase {
         uint256 rawTargetWeightBps,
         bool isRemoval
     ) external onlyRole(ROLE_CONSTITUENT_ADMISSION_) {
+        // AUDIT C-6: validate at QUEUE time as well as at `_list`. Both
+        // matter and they are not redundant: `executeListing` is
+        // permissionless, so `msg.sender` there is whoever happened to push
+        // the button, and the "the price source may not be the lister" clause
+        // is only meaningful against the account that actually chose it —
+        // which is this one. The provenance gate is re-checked at execution
+        // too, so a token cannot be de-registered-and-relisted through the
+        // window, and a queued listing whose token loses provenance during the
+        // timelock fails closed at execution rather than landing.
+        if (!isRemoval && CoreStorage.layout().indexOpen) _requireAdmissible(token, source);
         uint64 eta = uint64(block.timestamp + CoreStorage.layout().timelockDelay);
         GovernanceStorage.layout().queuedListings[token] = GovernanceStorage.QueuedListing({
             source: address(source),

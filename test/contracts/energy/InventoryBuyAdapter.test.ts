@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { time, mine, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
-import { deployOpenIndex, TIMELOCK } from "../helpers/index-vault";
+import { deployOpenIndex, TIMELOCK, armVaultRegistry } from "../helpers/index-vault";
 
 /**
  * ============================================================================
@@ -114,6 +114,8 @@ describe("InventoryBuyAdapter + IndexEnergyFacet (PR5, corrected single-share-at
     //    the ERC20. ────────────────────────────────────────────────────────
     const Source = await ethers.getContractFactory("MockIndexPriceSource");
     const sSource: any = await Source.deploy(ethers.parseEther("1"), ethers.parseEther("1")); // 1:1
+    // AUDIT C-6: post-open admission requires factory provenance.
+    await armVaultRegistry(fx, [...fx.addrs, vaultAddr]);
     await fx.vault.connect(fx.admission).queueListing(vaultAddr, await sSource.getAddress(), 1_000n, false);
     await time.increase(TIMELOCK + 1);
     await fx.vault.executeListing(vaultAddr);

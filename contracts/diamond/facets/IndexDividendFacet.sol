@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 import {IndexFacetBase} from "./IndexFacetBase.sol";
 import {CoreStorage, DividendStorage, EcosystemStorage} from "../storage/IndexStorage.sol";
+import {DividendVestStorage} from "../storage/IndexDividendVestStorage.sol";
 
 interface IEcosystemFeeSink {
     function reinvestAsset() external view returns (address);
@@ -45,6 +46,52 @@ interface IEcosystemFeeSink {
  *  The push divides by `totalSupply - balanceOf(SEED_LOCK)` and cancels the
  *  seed's own accrual through the same correction term, in O(1).
  * ============================================================================
+ */
+/**
+ *  ══ 2026-08-09 AUDIT FIX H-2/H-3 — THE DIVIDEND LEG NOW VESTS ══════════
+ *
+ *  See `DividendVestStorage`'s header for the attack and the arithmetic. The
+ *  half of the fix that lives HERE is the maturity drip: `dripDividends()`
+ *  moves matured value out of the vest and into the accumulator, and
+ *  `claimDividend()` drips first so a holder never has to know the mechanism
+ *  exists. The half that lives in `IndexFacetBase` is two lines, and this
+ *  facet is INERT without them — spelled out exactly so they cannot be
+ *  reconciled wrong:
+ *
+ *   (1) `_creditRoutedValue`, replacing the unvested credit:
+ *
+ *          -   if (dividendShare > 0) _creditDividends(dividendShare);
+ *          +   if (dividendShare > 0) {
+ *          +       DividendVestStorage.add(dividendShare, STREAM_VEST_BLOCKS);
+ *          +   }
+ *
+ *   (2) `_reconcileCore`, inside the `token == cs.dividendAsset` branch —
+ *       MANDATORY, not cosmetic. Held-but-unpushed value is in this
+ *       contract's ERC-20 balance and NOT in `DividendStorage`'s
+ *       received/withdrawn ledger, so without this line the next `_sync`
+ *       observes it as fresh surplus and routes it again, and again, minting
+ *       dividend entitlement out of nothing:
+ *
+ *          if (token == cs.dividendAsset) {
+ *              DividendStorage.Layout storage d = DividendStorage.layout();
+ *              accounted += d.totalDividendsReceived - d.totalDividendsWithdrawn;
+ *          +   accounted += DividendVestStorage.pending();
+ *          }
+ *
+ *  NOT VESTED, DELIBERATELY: `receiveDividendsWrapped` and
+ *  `harvestEcosystemFees`. Both push value that is ALREADY the holders',
+ *  arriving on a path whose timing an attacker cannot drive from inside their
+ *  own mint — both require the value to have been transferred in first, so
+ *  there is no atomic mint->trigger->redeem sequence through either. Vesting
+ *  them would delay honest distributions to close a door that is not open.
+ *  The snipe is specifically against the MINT-TRIGGERED credit, and that is
+ *  specifically what now vests.
+ *
+ *  ALSO REQUIRED, and NOT in this file: `dividendBps` must be capped so the
+ *  100%-snipeable configuration is not legally reachable at all — defence in
+ *  depth behind the vest, per §7 principle 2. See the report accompanying
+ *  this change for the exact `IndexGovernanceFacet._applyValueAccrualSplit`
+ *  edit.
  */
 contract IndexDividendFacet is IndexFacetBase {
     using SafeERC20 for IERC20;
@@ -176,6 +223,47 @@ contract IndexDividendFacet is IndexFacetBase {
         _creditDividends(IERC20(asset).balanceOf(address(this)) - before);
     }
 
+    // ══ The dividend-leg vest (audit H-2/H-3) ═════════════════════════════
+
+    /// @notice Routed dividend value held here and not yet in the
+    /// accumulator. It is nobody's yet, and it is not lost — see
+    /// `releasableDividendVest`.
+    function pendingDividendVest() external view returns (uint256) {
+        return DividendVestStorage.pending();
+    }
+
+    /// @notice How much of `pendingDividendVest` has matured and would be
+    /// pushed into the accumulator by a `dripDividends()` call right now.
+    /// This is EXACTLY ZERO in the block the value was routed, which is the
+    /// property that kills the atomic mint->credit->redeem->claim snipe.
+    function releasableDividendVest() external view returns (uint256) {
+        return DividendVestStorage.releasable();
+    }
+
+    /**
+     * @notice Push whatever dividend value has matured into the accumulator.
+     *
+     * PERMISSIONLESS and un-aimable: there is no recipient argument and no
+     * amount argument. It credits pro rata to every eligible holder through
+     * the one accumulator write, exactly as `receiveDividendsWrapped` does.
+     * The worst a caller can do is pay gas to distribute money on schedule.
+     *
+     * Returns 0 rather than reverting when nothing has matured, so it is safe
+     * to call unconditionally — including from `claimDividend` below, which
+     * is why a holder never needs to know this function exists.
+     */
+    function dripDividends() external nonReentrant returns (uint256 amount) {
+        return _dripDividends();
+    }
+
+    /// @dev The ONE call site of `DividendVestStorage.take`. `_creditDividends`
+    /// reverts on zero, hence the guard.
+    function _dripDividends() private returns (uint256 amount) {
+        amount = DividendVestStorage.take();
+        if (amount == 0) return 0;
+        _creditDividends(amount);
+    }
+
     // ══ Dividends out ═════════════════════════════════════════════════════
 
     /**
@@ -188,6 +276,12 @@ contract IndexDividendFacet is IndexFacetBase {
      * zero even with the guard removed.
      */
     function claimDividend() external nonReentrant returns (uint256 amount) {
+        // Mature first, so a holder claiming on their own schedule sweeps up
+        // everything that has genuinely vested by now. This CANNOT hand the
+        // caller anything unearned: the drip credits pro rata to every
+        // eligible holder, and the matured quantity is a function of elapsed
+        // blocks alone — never of who called, or how often.
+        _dripDividends();
         amount = _withdrawableDividendOf(msg.sender);
         if (amount == 0) return 0;
         DividendStorage.Layout storage d = DividendStorage.layout();

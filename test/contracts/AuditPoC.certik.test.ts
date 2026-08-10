@@ -10,6 +10,7 @@ import {
   paramsTuple,
   maxIn,
   warmCheckpoints,
+  armVaultRegistry,
 } from "./helpers/index-vault";
 
 /**
@@ -181,6 +182,8 @@ describe("AUDIT PoC — GlobalIndexVault", () => {
 
     // Admitted through the FULL timelocked, role-gated path. Nothing is
     // bypassed here; this is the intended admission procedure.
+    // AUDIT C-6: post-open admission requires factory provenance.
+    await armVaultRegistry(fx, [...fx.addrs, hostileAddr]);
     await fx.vault
       .connect(fx.admission)
       .queueListing(hostileAddr, await src.getAddress(), 2_000n, false);

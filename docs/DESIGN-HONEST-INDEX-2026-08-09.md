@@ -177,6 +177,25 @@ Every phase ends with real adversarial tests that can actually fail, and each au
 
 ---
 
+## 6a. Deployment constraint: the factory is at 98.2% of EIP-170
+
+Measured after implementation, across all 134 compiled contracts:
+
+| Contract | Bytes | % of 24,576 |
+|---|---:|---:|
+| **CollectionVaultFactory** | **24,122** | **98.2%** |
+| CollectionVault | 19,735 | 80.3% |
+| IndexGovernanceFacet | 15,569 | 63.4% |
+| WrappedIndexShare | 15,474 | 63.0% |
+
+Nothing is over the limit, but `CollectionVaultFactory` has **454 bytes of headroom**. It embeds `CollectionVault`'s full creation bytecode, so *every* byte added to the vault costs the factory roughly a byte. Combined with `diamondCut` being renounced at birth, this is a hard, permanent ceiling:
+
+> **`CollectionVault` is effectively feature-frozen at deployment.** Any further addition requires first factoring vault logic into an external library or switching the factory to a minimal-proxy/clone pattern.
+
+This belongs in the pre-deployment checklist, not in a future incident report.
+
+---
+
 ## 7. Standing principles
 
 1. **Never display a number we cannot pay.** Displayed = redeemable, always.

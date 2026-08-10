@@ -246,7 +246,11 @@ contract PlankLpRenounceAdapter is IEnergyAdapter {
         // adapter is NOT holding zero of after the attempt above, matching
         // `IEnergyAdapter`'s own contract and the Bus's own "trust only
         // observed deltas" doctrine.
+        // AUDIT C-1: never return more than we received — see the identical
+        // guard in InventoryBuyAdapter. A raw-balance refund lets a donation
+        // underflow the Bus's delta arithmetic and brick `route()` forever.
         uint256 leftover = weth.balanceOf(address(this));
+        if (leftover > amountIn) leftover = amountIn;
         if (leftover > 0) {
             weth.safeTransfer(msg.sender, leftover);
             if (used >= leftover) {

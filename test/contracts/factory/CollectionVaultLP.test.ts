@@ -1,6 +1,18 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { time, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+import { time, mine, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
+
+/**
+ * PHASE 4 NOTE (audit C-3). `removeLiquidity` now enforces
+ * `LP_MIN_DWELL_BLOCKS` and charges an exit fee that decays linearly to ZERO
+ * over `DONATION_VEST_BLOCKS`. The proportional-claim properties this file
+ * exists to prove are unchanged for a genuine, non-JIT liquidity provider —
+ * so the tests below mine past the decay window (`mine(DECAY)`) and keep their
+ * EXACT-equality assertions rather than loosening them to tolerances. A
+ * loosened assertion would have quietly stopped proving proportionality; the
+ * fee's own behaviour is proven separately, in DonationVesting.test.ts.
+ */
+const DONATION_VEST_BLOCKS = 300;
 
 /**
  * ============================================================================
@@ -149,7 +161,12 @@ describe("CollectionVault native community LP (DESIGN-COLLECTION-VAULT-NATIVE-LP
     await vault.connect(bob).addLiquidity(paymentInBob, 0);
     const bobLpBefore = await lp.balanceOf(bob.address);
 
-    const paymentReserveBefore = await vault.paymentReserve();
+    // Past the exit-fee decay window, so the floor's claim is exactly
+    // proportional (feeBps == 0) and this test keeps proving what it always
+    // proved.
+    await mine(DONATION_VEST_BLOCKS);
+
+    const paymentReserveBefore = await vault.effectivePaymentReserve();
     const shareReserveBefore = await vault.shareReserve();
     const totalLpBefore = await lp.totalSupply();
     const expectedPaymentOut = (total * paymentReserveBefore) / totalLpBefore;
@@ -184,7 +201,11 @@ describe("CollectionVault native community LP (DESIGN-COLLECTION-VAULT-NATIVE-LP
     await mintShares(nft, vault, vaultAddr, bob, 100, 1);
     const bobShareBalBefore = await vault.balanceOf(bob.address);
 
-    const paymentReserveBefore = await vault.paymentReserve();
+    // Settle the Stream-A fee donations those deposits vested, so
+    // `effectivePaymentReserve` is stable block-to-block and the exact
+    // equalities below stay exact (audit C-3 made fee credit a ramp).
+    await mine(DONATION_VEST_BLOCKS);
+    const paymentReserveBefore = await vault.effectivePaymentReserve();
     const shareReserveBefore = await vault.shareReserve();
     const totalLpBefore = await lp.totalSupply();
 
@@ -215,9 +236,10 @@ describe("CollectionVault native community LP (DESIGN-COLLECTION-VAULT-NATIVE-LP
 
     // Bob removes ALL his LP — must get back EXACTLY his proportional slice
     // of the now fee-grown reserves.
+    await mine(DONATION_VEST_BLOCKS); // past the exit-fee decay window
     const bobLp = await lp.balanceOf(bob.address);
     const totalLpNow = await lp.totalSupply();
-    const paymentReserveNow = await vault.paymentReserve();
+    const paymentReserveNow = await vault.effectivePaymentReserve();
     const shareReserveNow = await vault.shareReserve();
     const expectedPaymentOut = (bobLp * paymentReserveNow) / totalLpNow;
     const expectedSharesOut = (bobLp * shareReserveNow) / totalLpNow;
@@ -253,6 +275,7 @@ describe("CollectionVault native community LP (DESIGN-COLLECTION-VAULT-NATIVE-LP
     // community-owned, not just the locked floor.
     await mintShares(nft, vault, vaultAddr, bob, 100, 1);
     await vault.connect(bob).addLiquidity(ethers.parseEther("200"), 0);
+    await mine(DONATION_VEST_BLOCKS); // settle vested fee donations — see note at top
 
     const [, , , , , , , , busSigner] = await ethers.getSigners();
     const MockWM = await ethers.getContractFactory("MockWeightModuleWeights");
@@ -274,7 +297,7 @@ describe("CollectionVault native community LP (DESIGN-COLLECTION-VAULT-NATIVE-LP
     );
     const invAdapterAddr = await invAdapter.getAddress();
 
-    const paymentReserveBefore = await vault.paymentReserve();
+    const paymentReserveBefore = await vault.effectivePaymentReserve();
     const shareReserveBefore = await vault.shareReserve();
 
     const budget = ethers.parseEther("10");
@@ -330,11 +353,21 @@ describe("CollectionVault native community LP (DESIGN-COLLECTION-VAULT-NATIVE-LP
     await payment.mint(attacker.address, donation);
     await payment.connect(attacker).approve(vaultAddr, donation);
     await vault.connect(attacker).donateReserves(donation);
+    // Phase 4: donations now VEST. Settle it so this test measures the same
+    // situation it always measured — a fully-inflated reserve — rather than
+    // accidentally becoming a test of the vest.
+    await mine(DONATION_VEST_BLOCKS);
 
     // A fair, real community depositor (bob) now adds a reasonable amount.
     await mintShares(nft, vault, vaultAddr, bob, 300, 1);
+    // Bob's own deposit vested a fresh Stream-A carve-out and re-armed the
+    // drip window; settle that too so the reserve is stable block-to-block.
+    await mine(DONATION_VEST_BLOCKS);
     const bobPaymentIn = ethers.parseEther("50");
-    const paymentReserveBefore = await vault.paymentReserve();
+    // `effectivePaymentReserve`, not the raw slot: `addLiquidity` commits the
+    // elapsed drip before pricing, so the raw slot is what the call sees
+    // BEFORE it acts, which is not the number Bob's LP is minted against.
+    const paymentReserveBefore = await vault.effectivePaymentReserve();
     const totalLpBefore = await lp.totalSupply();
     const expectedBobLp = (bobPaymentIn * totalLpBefore) / paymentReserveBefore;
 

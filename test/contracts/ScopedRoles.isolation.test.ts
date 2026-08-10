@@ -9,6 +9,7 @@ import {
   deployConstituent,
   maxIn,
   zeroOut,
+  armVaultRegistry,
 } from "./helpers/index-vault";
 
 /**
@@ -149,12 +150,33 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
      */
     const surface: { name: string; args: any[]; role: string; holder: any }[] = [
       {
+        // `isRemoval: true` deliberately. AUDIT C-6 added a provenance +
+        // source-independence gate to the ADD path, so an add of an
+        // arbitrary fixture token now fails admissibility BEFORE it can
+        // demonstrate anything about roles — which is the gate working, not
+        // a regression. This suite's claim is role ISOLATION (does exactly
+        // one key open exactly one door), and `onlyRole` is evaluated before
+        // any argument validation, so the removal form exercises the same
+        // gate on the same selector without entangling two concerns.
+        // Admissibility itself is proven separately, and far more harshly,
+        // in RedTeam.HostileConstituentAdmission.poc.test.ts — which asserts
+        // a self-minted, self-priced token cannot even be QUEUED.
         name: "queueListing",
-        args: [d.addr, await d.source.getAddress(), 1_000, false],
+        args: [d.addr, await d.source.getAddress(), 1_000, true],
         role: ROLE_ADMISSION,
         holder: admission,
       },
       { name: "queueMetric", args: [addrs[0], 123n], role: ROLE_ADMISSION, holder: admission },
+      // AUDIT C-6. The provenance registry that decides which tokens are
+      // admissible at all. Same key as `queueListing` deliberately: it adds no
+      // authority to a holder who can already list, and takes some away by
+      // requiring an independently-deployed registry to agree.
+      {
+        name: "queueVaultFactory",
+        args: [ethers.ZeroAddress],
+        role: ROLE_ADMISSION,
+        holder: admission,
+      },
       { name: "queueParam", args: [b32("bandBps"), 120n], role: ROLE_RISK, holder: risk },
       {
         name: "queueParam",
@@ -225,22 +247,33 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
         holder: risk,
       },
       // IndexDevFundFacet (design doc §7.11) — the dev-fund PLANK market-buy.
-      // DELIBERATELY a different trust model (a real, spendable, team-
-      // directed treasury — see that facet's own header), but the GOVERNANCE
-      // SURFACE over it is timelocked and role-gated exactly like every
-      // other risk-surface change in this table, same role as
-      // `queueIndexPool`/`queueHook` immediately above.
-      { name: "queueDevFundRouter", args: [alice.address], role: ROLE_RISK, holder: risk },
-      { name: "queueDevFundTreasury", args: [alice.address], role: ROLE_RISK, holder: risk },
-      { name: "queueDevFundBps", args: [100n], role: ROLE_RISK, holder: risk },
+      //
+      // 2026-08-09 AUDIT FIX M-5 — THIS TABLE PREVIOUSLY CODIFIED THE WRONG
+      // ANSWER AS CORRECT. All five entries below asserted ROLE_RISK, and so
+      // the suite's completeness check happily proved that the risk key could
+      // point two REAL, SPENDABLE, TEAM-DIRECTED treasuries at any address it
+      // liked. The line these keys actually fall on is drawn by this
+      // codebase's own `IndexParams.roleForParamKey` header: the RISK role
+      // owns the fee SCHEDULE (what anyone is charged); the VALUE-FLOW role
+      // (ROLE_PLATFORM_ALLOCATION) owns where an ALREADY-CHARGED fee is
+      // BOOKED and to whom. Every key below is unambiguously the latter —
+      // `*Bps` carves an already-charged fee, `*Treasury` names its
+      // destination, and `queueDevFundRouter` names the venue value is
+      // swapped through on the way there, which is a value destination in
+      // everything but name.
+      //
+      // The direction of the test matters as much as the mapping: because
+      // this loop demands a revert from EVERY non-designated holder, moving
+      // these rows to ROLE_ALLOC now positively asserts that the RISK key is
+      // REJECTED by all five. Revert the facets and this goes red.
+      { name: "queueDevFundRouter", args: [alice.address], role: ROLE_ALLOC, holder: allocation },
+      { name: "queueDevFundTreasury", args: [alice.address], role: ROLE_ALLOC, holder: allocation },
+      { name: "queueDevFundBps", args: [100n], role: ROLE_ALLOC, holder: allocation },
       // IndexSocialFiTreasuryFacet (design doc §7.12) — the platform socialfi
-      // treasury carve-out. DELIBERATELY the same different trust model as
-      // §7.11 immediately above (a real, spendable, team-directed treasury —
-      // see that facet's own header), but the GOVERNANCE SURFACE over it is
-      // timelocked and role-gated exactly like every other risk-surface
-      // change in this table, same role as `queueDevFundRouter` etc.
-      { name: "queueSocialFiTreasury", args: [alice.address], role: ROLE_RISK, holder: risk },
-      { name: "queueSocialFiTreasuryBps", args: [100n], role: ROLE_RISK, holder: risk },
+      // treasury carve-out. Same trust model and same role rationale as
+      // §7.11 immediately above.
+      { name: "queueSocialFiTreasury", args: [alice.address], role: ROLE_ALLOC, holder: allocation },
+      { name: "queueSocialFiTreasuryBps", args: [100n], role: ROLE_ALLOC, holder: allocation },
       // IndexPoolFacet (design doc §7.10 automation, 2026-08-06) — the
       // auto-deploy dust floor. Same queue/execute timelock shape and role
       // as `queueMaxPoolShareBps` above.
@@ -289,6 +322,11 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // Permissionless BY DESIGN: pushing dividends is donating money. A role
       // gate here would buy nothing and add a key to lose.
       "receiveDividendsWrapped",
+      // AUDIT FIX H-2/H-3 — the dividend-leg vest's maturity drip.
+      // Permissionless BY DESIGN and un-aimable: no recipient argument and no
+      // amount argument, so it can only ever credit already-matured value pro
+      // rata to every eligible holder. Same shape as `harvestEcosystemFees`.
+      "dripDividends",
       // ROUND 10 — the fault-tolerant exit door's retry pair. Both are keyed
       // strictly on `msg.sender`: there is no recipient argument, so neither
       // can be aimed at anybody else's credit, and no role can call either on
@@ -429,6 +467,9 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // _reconcileCore`), never a self-reported or role-chosen amount. There
       // is nothing here for a role to be trusted with either.
       "creditInventory",
+      // AUDIT C-6. The timelock-gated apply half of `queueVaultFactory`,
+      // permissionless after the eta exactly like every other `execute*`.
+      "executeVaultFactory",
     ]);
     const abiNames = (vault.interface.fragments as any[])
       .filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))
@@ -707,6 +748,8 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
     // 2. Redemption works with EVERY role key simultaneously hostile and
     //    every hostile change they can reach sitting queued at once.
     const d = await deployConstituent("cEXIT", 100n * WAD, 100n * WAD);
+    // AUDIT C-6: post-open admission requires factory provenance.
+    await armVaultRegistry(fx, [...addrs, d.addr]);
     await vault.connect(admission).queueListing(d.addr, await d.source.getAddress(), 3_000, false);
     await vault.connect(admission).queueListing(addrs[1], addrs[1], 0, true); // removal
     await vault.connect(admission).queueMetric(addrs[0], 10n ** 30n);

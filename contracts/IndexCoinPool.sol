@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * ============================================================================
@@ -27,9 +28,41 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  *  the pool and is never distributed anywhere — it mechanically deepens both
  *  reserves for the next trade, which is the whole of "compounds directly
  *  back into its own reserve" from design doc §7.10 rule 3.
+ *
+ *  2026-08-09 AUDIT FIX (F-4/F-5/F-6, MEDIUM). Three things were wrong here
+ *  and all three are the same class of mistake — trusting something other
+ *  than this contract's own measured state:
+ *
+ *   1. `swap` carried NO reentrancy guard, and wrote `reservePayment`/
+ *      `reserveCoin` AFTER `safeTransferFrom` had already handed control to
+ *      an arbitrary token contract. Either leg of this pool can, in
+ *      principle, be a token with a transfer callback (ERC-777, ERC-1363, a
+ *      hook-bearing ERC-20); such a token re-enters `swap` while the reserves
+ *      still describe the PRE-trade state, so the re-entrant trade is priced
+ *      against liquidity that has already been committed to the outer trade.
+ *      That is the textbook constant-product drain. Fixed twice over: a
+ *      `nonReentrant` guard, AND strict CEI — every reserve write now lands
+ *      before the payout transfer, so the guard is belt to CEI's braces
+ *      rather than the only defence.
+ *
+ *   2. The input leg credited the NOMINAL `amountIn` to the reserve rather
+ *      than the OBSERVED balance delta. Every sibling value-crediting path in
+ *      this codebase (`IndexFacetBase._reconcileCore`, `creditInventory`,
+ *      `deploy` immediately below) measures a delta and credits only what
+ *      physically arrived; this one function did not, so a fee-on-transfer or
+ *      rebasing payment token would have inflated the reserve above the
+ *      balance actually backing it — the pool would then promise more than it
+ *      holds, which §7 principle 1 forbids outright. Now measured.
+ *
+ *  ORDERING NOTE, because it looks like a CEI violation and is not: the input
+ *  `safeTransferFrom` necessarily precedes the state write, because the state
+ *  write is a function OF that transfer's observed result. This is the
+ *  standard pull-measure-commit-pay shape. The only external call that
+ *  happens after state is committed is the payout, and by then the reserves
+ *  are already correct for a re-entrant reader; the guard rejects one anyway.
  * ============================================================================
  */
-contract IndexCoinPool {
+contract IndexCoinPool is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     IERC20 public immutable paymentToken;
@@ -112,33 +145,49 @@ contract IndexCoinPool {
      * this pool in either direction — this IS the index coin's market
      * (§7.10 rule 4): the venue a holder sells into for ETH outside the
      * dividend-claim mechanism, and the venue §7.7's buyback buys from.
+     *
+     * `amountIn` is a REQUEST, not a credit: the reserve is moved by the
+     * observed balance delta, and the output is priced off that same observed
+     * figure, so a token that delivers less than it was asked for prices the
+     * trade honestly instead of overpaying out of the other reserve.
      */
     function swap(
         bool paymentIn,
         uint256 amountIn,
         uint256 minAmountOut,
         address to
-    ) external returns (uint256 amountOut) {
+    ) external nonReentrant returns (uint256 amountOut) {
         if (amountIn == 0) revert ZeroAmount();
-        if (reservePayment == 0 || reserveCoin == 0) revert InsufficientLiquidity();
+        uint256 rP = reservePayment;
+        uint256 rC = reserveCoin;
+        if (rP == 0 || rC == 0) revert InsufficientLiquidity();
 
-        uint256 amountInWithFee = amountIn * (BPS - FEE_BPS);
+        // ── Pull, and MEASURE what actually arrived ────────────────────────
+        IERC20 tokenIn = paymentIn ? paymentToken : indexCoin;
+        uint256 balBefore = tokenIn.balanceOf(address(this));
+        tokenIn.safeTransferFrom(msg.sender, address(this), amountIn);
+        uint256 received = tokenIn.balanceOf(address(this)) - balBefore;
+        if (received == 0) revert ZeroAmount();
+
+        // ── Price off the measured input against the PRE-trade reserves ────
+        uint256 amountInWithFee = received * (BPS - FEE_BPS);
+        amountOut = paymentIn
+            ? (amountInWithFee * rC) / (rP * BPS + amountInWithFee)
+            : (amountInWithFee * rP) / (rC * BPS + amountInWithFee);
+        if (amountOut < minAmountOut || amountOut == 0) revert InsufficientOutput();
+
+        // ── EFFECTS: every reserve write lands before the payout ───────────
         if (paymentIn) {
-            amountOut = (amountInWithFee * reserveCoin) / (reservePayment * BPS + amountInWithFee);
-            if (amountOut < minAmountOut || amountOut == 0) revert InsufficientOutput();
-            paymentToken.safeTransferFrom(msg.sender, address(this), amountIn);
-            reservePayment += amountIn;
-            reserveCoin -= amountOut;
-            indexCoin.safeTransfer(to, amountOut);
+            reservePayment = rP + received;
+            reserveCoin = rC - amountOut;
         } else {
-            amountOut = (amountInWithFee * reservePayment) / (reserveCoin * BPS + amountInWithFee);
-            if (amountOut < minAmountOut || amountOut == 0) revert InsufficientOutput();
-            indexCoin.safeTransferFrom(msg.sender, address(this), amountIn);
-            reserveCoin += amountIn;
-            reservePayment -= amountOut;
-            paymentToken.safeTransfer(to, amountOut);
+            reserveCoin = rC + received;
+            reservePayment = rP - amountOut;
         }
         lastActionBlock = block.number;
-        emit Swapped(msg.sender, paymentIn, amountIn, amountOut);
+        emit Swapped(msg.sender, paymentIn, received, amountOut);
+
+        // ── INTERACTION: the only external call after state is committed ───
+        (paymentIn ? indexCoin : paymentToken).safeTransfer(to, amountOut);
     }
 }

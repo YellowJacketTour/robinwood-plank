@@ -6,6 +6,8 @@ import {Constituent} from "./IndexTypes.sol";
 import {IndexMath} from "./IndexMath.sol";
 import {IndexOracle} from "./IndexOracle.sol";
 import {IndexParamSet} from "./IndexParams.sol";
+import {IndexRealizable} from "./IndexRealizable.sol";
+import {ReserveVestStorage} from "../diamond/storage/IndexStorage.sol";
 
 /**
  * ============================================================================
@@ -116,14 +118,42 @@ library IndexValuation {
      *      redeemer gives up) and converted into target units at the target's
      *      band HIGH (overvalue what they receive) — conservative on both
      *      sides of the internal swap, so a round trip is never free;
-     *   3. a Curve-`remove_liquidity_one_coin`-style imbalance fee on the
-     *      swapped portion only. The pro-rata portion is always free, which is
-     *      what keeps the balanced path strictly cheaper than the concentrated
-     *      one for every input.
+     *   3. a Curve-`remove_liquidity_one_coin`-style imbalance fee.
      *
-     * @dev Moved verbatim from GlobalIndexVault._previewSingleExit. `denom` is
-     * `totalSupply() + VIRTUAL_SHARES`, computed by the caller, so this library
-     * never needs a reach into the share token.
+     * ── AUDIT H-1, CLOSED HERE (two separate defects, one function) ────────
+     *
+     * (a) THE VEST BYPASS. Every reserve read below used to be the RAW
+     *     `c.reserve`. `IndexCoreFacet.redeemProRata` — the free door — sizes
+     *     against `_reserveNetOfVest`, so §7.6's maturity guard held there and
+     *     ONLY there. The priced door therefore paid out value that the free
+     *     door correctly withheld as not-yet-vested: measured at 18.18 tokens
+     *     of unvested value, out immediately, in the committed PoC. A guard
+     *     enforced at one of two doors is not a guard; it is a signpost
+     *     pointing at the other door. Both doors now net the same way, and
+     *     `_netReserve` below is the single implementation of it.
+     *
+     * (b) THE FREE PRO-RATA COMPONENT. The imbalance fee used to be charged on
+     *     the swapped `extra` only, so the pro-rata component of a PRICED exit
+     *     cost nothing. Measured: the free door paid 100.0 where the priced
+     *     door's pro-rata component paid 118.18. That is backwards — the whole
+     *     point of the two-door design (§1.1/§1.2) is that the in-kind door is
+     *     the free one and the convenience door is priced at what it costs.
+     *     The fee RATE is still a function of the imbalance this exit creates
+     *     (`extra` against the remaining depth) — that is the honest measure of
+     *     the harm — but it is now charged on the WHOLE payout, so no part of a
+     *     priced exit is ever free.
+     *
+     * ── DESIGN §1.3, REALIZABLE PRICING ────────────────────────────────────
+     * Both valuation steps are additionally capped at what the constituents'
+     * OWN curves would actually pay/deliver (`IndexRealizable`): the non-target
+     * legs at what selling them would realize, and the conversion into target
+     * units at what that payment could genuinely buy. Strictly a cap in the
+     * conservative direction, so a constituent that exposes no curve prices
+     * exactly as it did before, and a constituent that lies about its curve can
+     * only ever short-change itself.
+     *
+     * @dev `denom` is `totalSupply() + VIRTUAL_SHARES`, computed by the caller,
+     * so this library never needs a reach into the share token.
      */
     function previewSingleExit(
         address[] storage list,
@@ -133,25 +163,24 @@ library IndexValuation {
         uint256 denom,
         IndexParamSet memory p
     ) internal view returns (uint256 amountOut, uint256 feeAmount) {
-        Constituent storage target = cs[token];
-        (uint256 targetLo, uint256 targetHi, ) = IndexOracle.band(target, p.bandBps, p.staleAfter);
-        if (targetHi == 0 || targetLo == 0) revert StalePrice();
-
-        uint256 proRataTarget = Math.mulDiv(sharesIn, target.reserve, denom);
-
-        uint256 extra = Math.mulDiv(
-            _otherLegsEth(list, cs, token, sharesIn, denom, p.bandBps, p.staleAfter),
-            WAD,
-            targetHi
-        );
-        uint256 remaining = target.reserve > proRataTarget ? target.reserve - proRataTarget : 0;
+        // H-1(a): net of vest, exactly as `redeemProRata` sizes.
+        uint256 netTarget = _netReserve(token, cs[token].reserve);
+        uint256 proRataTarget = Math.mulDiv(sharesIn, netTarget, denom);
+        uint256 remaining = netTarget > proRataTarget ? netTarget - proRataTarget : 0;
         if (remaining == 0) revert ReserveWouldEmpty();
+
+        uint256 extra = _extraInTargetUnits(list, cs, token, sharesIn, denom, p);
+
         // `feeAmount` is the fee this exit charges, in TARGET-token units —
         // the same number that was already being retained implicitly by paying
         // out less. Naming it is what lets the ecosystem split be taken out of
         // the fee rather than out of the reserve.
+        //
+        // H-1(b): rate from the imbalance (`extra` vs. remaining depth),
+        // charged on the WHOLE exit (`proRataTarget + extra`).
+        amountOut = proRataTarget + extra;
         feeAmount =
-            (extra *
+            (amountOut *
                 IndexMath.imbalanceFeeBps(
                     extra,
                     remaining,
@@ -160,8 +189,47 @@ library IndexValuation {
                     p.maxImbalanceFeeBps
                 )) /
             BPS;
-        extra -= feeAmount;
-        amountOut = proRataTarget + extra;
+        amountOut -= feeAmount;
+    }
+
+    /// @dev The internal-swap component: every non-target leg's pro-rata slice
+    /// sold for ETH, then converted into target units. Split out of
+    /// `previewSingleExit` purely to keep that frame inside the EVM's 16-slot
+    /// reach — the arithmetic is unchanged from the inline version.
+    function _extraInTargetUnits(
+        address[] storage list,
+        mapping(address => Constituent) storage cs,
+        address token,
+        uint256 sharesIn,
+        uint256 denom,
+        IndexParamSet memory p
+    ) private view returns (uint256) {
+        (uint256 targetLo, uint256 targetHi, ) = IndexOracle.band(cs[token], p.bandBps, p.staleAfter);
+        if (targetHi == 0 || targetLo == 0) revert StalePrice();
+        uint256 otherEth = _otherLegsEth(list, cs, token, sharesIn, denom, p.bandBps, p.staleAfter);
+        // §1.3: the mark-based conversion, then capped at what that payment
+        // could ACTUALLY buy of the target on the target's own curve.
+        return IndexRealizable.capByBuy(token, otherEth, Math.mulDiv(otherEth, WAD, targetHi));
+    }
+
+    /**
+     * @dev `bal` net of whatever §7.6 still holds unvested for `token` — a
+     * verbatim structural copy of `IndexFacetBase._reserveNetOfVest`/
+     * `_reserveUnvestedOf`, reachable from a library that cannot inherit the
+     * facet base. The two MUST agree, which is why this is a copy of the
+     * arithmetic rather than a second, differently-shaped rule; the
+     * `Vest.consistency` assertions in `ReserveVest.test.ts` pin them
+     * together behaviourally, through the two doors, so a drift between them
+     * shows up as a failing test rather than as a leak.
+     */
+    function _netReserve(address token, uint256 bal) private view returns (uint256) {
+        ReserveVestStorage.Layout storage rs = ReserveVestStorage.layout();
+        uint256 u = rs.vest[token].unvested;
+        if (u == 0) return bal;
+        uint256 end_ = rs.vest[token].end;
+        if (block.number >= end_) return bal;
+        uint256 unvested = Math.mulDiv(u, end_ - block.number, end_ - rs.vest[token].last);
+        return bal > unvested ? bal - unvested : 0;
     }
 
     /**
@@ -241,9 +309,11 @@ library IndexValuation {
     }
 
     /// @dev The pro-rata slice of every NON-target leg, valued at that leg's
-    /// band LOW, summed in ETH wei. Split out of `previewSingleExit` purely to
-    /// keep that function's stack inside the EVM's 16-slot reach — the
-    /// arithmetic is identical to the loop it replaced.
+    /// band LOW **and capped at what selling that slice would actually
+    /// realize** (§1.3), summed in ETH wei. Slices are sized against the
+    /// vest-netted reserve, identically to `redeemProRata` (audit H-1(a)).
+    /// Split out of `previewSingleExit` purely to keep that function's stack
+    /// inside the EVM's 16-slot reach.
     function _otherLegsEth(
         address[] storage list,
         mapping(address => Constituent) storage cs,
@@ -259,7 +329,8 @@ library IndexValuation {
             if (t == token) continue;
             Constituent storage c = cs[t];
             (uint256 lo, , ) = IndexOracle.band(c, bandBps, staleAfter);
-            otherEth += Math.mulDiv(Math.mulDiv(sharesIn, c.reserve, denom), lo, WAD);
+            uint256 slice = Math.mulDiv(sharesIn, _netReserve(t, c.reserve), denom);
+            otherEth += IndexRealizable.capBySell(t, slice, Math.mulDiv(slice, lo, WAD));
         }
     }
 

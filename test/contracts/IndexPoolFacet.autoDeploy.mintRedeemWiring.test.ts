@@ -107,9 +107,21 @@ describe("IndexCoreFacet/IndexTradeFacet — mint/redeem hot-path reconciliation
     expect(poolSharesAfter).to.be.gt(poolSharesBefore);
   });
 
-  // ══ 2. redeemProRata (the all-constituents loop) triggers a real deploy ═
+  // ══ 2. redeemProRata does NOT reconcile, deploy, or mint (audit F-3) ════
+  //
+  // REVERSED DELIBERATELY. The 2026-08-06 wiring pass added the opportunistic
+  // reconcile to the EXIT DOOR as well, and this test asserted it fired there.
+  // Audit F-3 established that it was a genuine defect rather than a feature:
+  // `_attemptOpportunisticReconcile` -> `autoReconcile` -> `_reconcileCore`
+  // reaches `_fireHook(HOOK_AFTER_SYNC_)` AND `_attemptAutoDeploy`, so a
+  // redemption invoked a governance-registered external hook and could MINT
+  // SUPPLY mid-exit. Design §1.1 makes the exit door sacred; §7.2's
+  // "opportunistically reconcile" applies to every path except that one.
+  //
+  // The assertions are inverted rather than deleted so a regression that
+  // re-wires the exit door shows up here immediately.
 
-  it("redeemProRata touching a constituent with a pending fresh surplus automatically deploys into the pool, with NO separate sync/reconcile call", async () => {
+  it("redeemProRata does NOT reconcile or auto-deploy — the exit door reaches no external code (audit F-3)", async () => {
     const fx = await fixtureWithPool();
     const shareToken = fx.addrs[1];
     const donateAmount = 50n * WAD;
@@ -121,19 +133,27 @@ describe("IndexCoreFacet/IndexTradeFacet — mint/redeem hot-path reconciliation
     await fx.tokens[1].mint(fx.vaultAddr, donateAmount);
 
     const poolSharesBefore: bigint = await fx.vault.poolSharesMinted();
+    const reserveBefore: bigint = await fx.vault.reserveOf(shareToken);
     const bal: bigint = await fx.vault.balanceOf(fx.alice.address);
     const tx = await fx.vault.connect(fx.alice).redeemProRata(bal / 10n, zeroOut(3));
-    const receipt = await tx.wait();
 
     await expect(tx).to.emit(fx.vault, "RedeemedProRata");
-    await expect(tx).to.emit(fx.vault, "ConstituentSynced").withArgs(shareToken, donateAmount);
-    await expect(tx).to.emit(fx.vault, "DeployedToIndexPool");
-    const autoLog = findLog(receipt, fx.vault.interface, "AutoDeployedToIndexPool");
-    expect(autoLog).to.not.equal(undefined);
-    expect(autoLog!.args.shareToken).to.equal(shareToken);
+    await expect(tx).to.not.emit(fx.vault, "ConstituentSynced");
+    await expect(tx).to.not.emit(fx.vault, "DeployedToIndexPool");
+    await expect(tx).to.not.emit(fx.vault, "AutoDeployedToIndexPool");
 
-    const poolSharesAfter: bigint = await fx.vault.poolSharesMinted();
-    expect(poolSharesAfter).to.be.gt(poolSharesBefore);
+    // No supply was minted into the pool during someone's exit.
+    expect(await fx.vault.poolSharesMinted()).to.equal(poolSharesBefore);
+    // The donation is untouched — still sitting unaccounted, ready for the
+    // next non-exit interaction to pick it up.
+    expect(await fx.vault.reserveOf(shareToken)).to.be.lessThan(reserveBefore);
+
+    // ...and it genuinely is picked up by the next mint, so nothing is lost.
+    const beforeNext: bigint = await fx.vault.reserveOf(shareToken);
+    await expect(fx.vault.connect(fx.alice).mintProRata(10n * WAD, maxIn(3)))
+      .to.emit(fx.vault, "ConstituentSynced")
+      .withArgs(shareToken, donateAmount);
+    expect(await fx.vault.reserveOf(shareToken)).to.be.greaterThan(beforeNext + donateAmount);
   });
 
   // ══ 3. A failing opportunistic auto-deploy never blocks the mint/redeem ═

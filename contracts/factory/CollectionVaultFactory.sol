@@ -69,19 +69,58 @@ contract CollectionVaultFactory {
         timelockDelay = timelockDelay_;
     }
 
-    function collectionSalt(address collection) public pure returns (bytes32) {
-        return keccak256(abi.encode(collection));
+    /**
+     * @notice Uniqueness key. PHASE 2 (DESIGN-HONEST-INDEX-2026-08-09 §2):
+     * **a vault is `(collection, predicate)`, not `collection`.** The salt
+     * therefore commits to BOTH, so one collection may host several vaults
+     * with disjoint or nested eligibility bands — a "floor" vault and a
+     * "1/1s" vault of the same CryptoPunks-shaped collection are genuinely
+     * different fungibility claims and must not be forced to share a share
+     * token. Collapsing them into one vault is precisely the intra-vault
+     * variance that audit C-5 extracts from.
+     *
+     * Creation stays PERMISSIONLESS: nobody defines the bands centrally, the
+     * factory approves nothing, and the CREATE2 collision revert remains the
+     * entire admission gate — it now merely gates `(collection, root)` pairs
+     * rather than collections.
+     */
+    function vaultSalt(address collection, bytes32 eligibilityRoot) public pure returns (bytes32) {
+        return keccak256(abi.encode(collection, eligibilityRoot));
     }
 
-    /// @notice Predict a collection's vault address before deploying it, for
-    /// the EXACT constructor args a subsequent deployVault call would use.
+    /// @notice The salt of `collection`'s OPEN vault (`eligibilityRoot == 0`).
+    function collectionSalt(address collection) public pure returns (bytes32) {
+        return vaultSalt(collection, bytes32(0));
+    }
+
+    /// @notice Predict a collection's OPEN vault address before deploying it,
+    /// for the EXACT constructor args a subsequent deployVault call would use.
     function predictVault(address collection, address treasury_, uint256 mintRedeemSinkBps_)
         external
         view
         returns (address)
     {
-        bytes32 salt = collectionSalt(collection);
-        bytes memory bytecode = _creationCode(collection, treasury_, mintRedeemSinkBps_);
+        return _predict(collection, treasury_, mintRedeemSinkBps_, bytes32(0));
+    }
+
+    /// @notice Predict a PREDICATE vault's address. Same relationship to
+    /// `deployPredicateVault` as `predictVault` has to `deployVault`.
+    function predictPredicateVault(
+        address collection,
+        address treasury_,
+        uint256 mintRedeemSinkBps_,
+        bytes32 eligibilityRoot
+    ) external view returns (address) {
+        return _predict(collection, treasury_, mintRedeemSinkBps_, eligibilityRoot);
+    }
+
+    function _predict(address collection, address treasury_, uint256 mintRedeemSinkBps_, bytes32 eligibilityRoot)
+        private
+        view
+        returns (address)
+    {
+        bytes32 salt = vaultSalt(collection, eligibilityRoot);
+        bytes memory bytecode = _creationCode(collection, treasury_, mintRedeemSinkBps_, eligibilityRoot);
         return address(
             uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, keccak256(bytecode)))))
         );
@@ -99,11 +138,49 @@ contract CollectionVaultFactory {
         external
         returns (address vault)
     {
+        return _deploy(collection, treasury_, mintRedeemSinkBps_, bytes32(0));
+    }
+
+    /**
+     * @notice Deploy a PREDICATE vault (DESIGN-HONEST-INDEX-2026-08-09 §2):
+     * a vault whose `deposit` admits only tokenIds proven to lie in
+     * `eligibilityRoot`'s merkle set.
+     *
+     * The root is passed straight into the vault's constructor as an
+     * `immutable` and there is NO setter on the far side, so this call is the
+     * only moment in the vault's entire lifetime at which its predicate is
+     * chosen. That is deliberate and is the whole point: a mutable predicate
+     * would let an owner attract deposits against a tight band and then widen
+     * it to admit junk, which is a rug. Choose carefully; there is no second
+     * chance, by construction.
+     *
+     * Passing `bytes32(0)` yields an OPEN vault, identical in every respect to
+     * `deployVault` — and identically exposed to the C-5 rarity-sniping loss.
+     * Kept legal because that failure is honest and locally contained: the
+     * vault's own `S` depreciates and its weight decays, and nothing reaches
+     * the index or any other vault.
+     *
+     * Still permissionless: no allowlist, no fee, no approval. The only gate
+     * is the `(collection, root)` collision revert.
+     */
+    function deployPredicateVault(
+        address collection,
+        address treasury_,
+        uint256 mintRedeemSinkBps_,
+        bytes32 eligibilityRoot
+    ) external returns (address vault) {
+        return _deploy(collection, treasury_, mintRedeemSinkBps_, eligibilityRoot);
+    }
+
+    function _deploy(address collection, address treasury_, uint256 mintRedeemSinkBps_, bytes32 eligibilityRoot)
+        private
+        returns (address vault)
+    {
         if (collection == address(0) || treasury_ == address(0)) revert ZeroAddress();
-        bytes32 salt = collectionSalt(collection);
+        bytes32 salt = vaultSalt(collection, eligibilityRoot);
         if (vaultForCollection[salt] != address(0)) revert VaultAlreadyExists();
 
-        bytes memory bytecode = _creationCode(collection, treasury_, mintRedeemSinkBps_);
+        bytes memory bytecode = _creationCode(collection, treasury_, mintRedeemSinkBps_, eligibilityRoot);
         address deployed;
         assembly {
             deployed := create2(0, add(bytecode, 0x20), mload(bytecode), salt)
@@ -126,7 +203,7 @@ contract CollectionVaultFactory {
         return _isVault[vault];
     }
 
-    function _creationCode(address collection, address treasury_, uint256 mintRedeemSinkBps_)
+    function _creationCode(address collection, address treasury_, uint256 mintRedeemSinkBps_, bytes32 eligibilityRoot)
         private
         view
         returns (bytes memory)
@@ -134,17 +211,20 @@ contract CollectionVaultFactory {
         return abi.encodePacked(
             type(CollectionVault).creationCode,
             abi.encode(
-                IERC721(collection),
-                paymentToken,
-                "Collection Vault Share",
-                "cvSHARE",
-                DEFAULT_MINT_FEE_WEI,
-                DEFAULT_REDEEM_FEE_WEI,
-                DEFAULT_SWAP_FEE_BPS,
-                upstreamSink,
-                treasury_,
-                mintRedeemSinkBps_,
-                timelockDelay
+                CollectionVault.VaultConfig({
+                    collection: IERC721(collection),
+                    paymentToken: paymentToken,
+                    name: "Collection Vault Share",
+                    symbol: "cvSHARE",
+                    mintFeeWei: DEFAULT_MINT_FEE_WEI,
+                    redeemFeeWei: DEFAULT_REDEEM_FEE_WEI,
+                    swapFeeBps: DEFAULT_SWAP_FEE_BPS,
+                    upstreamSink: upstreamSink,
+                    treasury: treasury_,
+                    mintRedeemSinkBps: mintRedeemSinkBps_,
+                    timelockDelay: timelockDelay,
+                    eligibilityRoot: eligibilityRoot
+                })
             )
         );
     }

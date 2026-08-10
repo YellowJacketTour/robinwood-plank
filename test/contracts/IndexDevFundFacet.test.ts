@@ -50,19 +50,19 @@ describe("IndexDevFundFacet (design doc §7.11)", () => {
 
   /** Queue + execute a governed dev-fund param through the full timelock. */
   async function setBps(fx: any, bps: bigint) {
-    await fx.vault.connect(fx.risk).queueDevFundBps(bps);
+    await fx.vault.connect(fx.allocation).queueDevFundBps(bps);
     await time.increase(TIMELOCK + 1);
     await fx.vault.executeDevFundBps();
     await fx.vault.checkpointAll(); // refresh past the timelock jump
   }
   async function setRouter(fx: any, addr: string) {
-    await fx.vault.connect(fx.risk).queueDevFundRouter(addr);
+    await fx.vault.connect(fx.allocation).queueDevFundRouter(addr);
     await time.increase(TIMELOCK + 1);
     await fx.vault.executeDevFundRouter();
     await fx.vault.checkpointAll(); // refresh past the timelock jump
   }
   async function setTreasury(fx: any, addr: string) {
-    await fx.vault.connect(fx.risk).queueDevFundTreasury(addr);
+    await fx.vault.connect(fx.allocation).queueDevFundTreasury(addr);
     await time.increase(TIMELOCK + 1);
     await fx.vault.executeDevFundTreasury();
     await fx.vault.checkpointAll(); // refresh past the timelock jump
@@ -82,13 +82,13 @@ describe("IndexDevFundFacet (design doc §7.11)", () => {
 
   it("cannot exceed the 2% ceiling — enforced at execution, not just discouraged", async () => {
     const fx = await deployOpenIndex();
-    await fx.vault.connect(fx.risk).queueDevFundBps(CEIL + 1n);
+    await fx.vault.connect(fx.allocation).queueDevFundBps(CEIL + 1n);
     await time.increase(TIMELOCK + 1);
     await expect(fx.vault.executeDevFundBps()).to.be.revertedWithCustomError(fx.vault, "BadParam");
     expect(await fx.vault.devFundBps()).to.equal(0n);
 
     // Exactly at the ceiling succeeds.
-    await fx.vault.connect(fx.risk).queueDevFundBps(CEIL);
+    await fx.vault.connect(fx.allocation).queueDevFundBps(CEIL);
     await time.increase(TIMELOCK + 1);
     await expect(fx.vault.executeDevFundBps()).to.emit(fx.vault, "DevFundBpsSet").withArgs(CEIL);
     expect(await fx.vault.devFundBps()).to.equal(CEIL);
@@ -96,13 +96,21 @@ describe("IndexDevFundFacet (design doc §7.11)", () => {
 
   // ══ 2. Governed + timelocked: percentage, router, treasury ════════════
 
-  it("devFundBps has no direct setter — only queue/execute, gated to ROLE_RISK_PARAM, timelocked", async () => {
+  it("devFundBps has no direct setter — only queue/execute, gated to ROLE_PLATFORM_ALLOCATION (audit M-5), timelocked", async () => {
     const fx = await deployOpenIndex();
     await expect(fx.vault.connect(fx.alice).queueDevFundBps(50n)).to.be.revertedWithCustomError(
       fx.vault,
       "NotRoleHolder"
     );
-    await fx.vault.connect(fx.risk).queueDevFundBps(50n);
+    // AUDIT FIX M-5. The RISK key must be rejected here. It used to be the
+    // holder of this capability, which let a compromised risk key aim a real,
+    // spendable treasury at any address. Revert the facet's modifier and this
+    // line goes red.
+    await expect(fx.vault.connect(fx.risk).queueDevFundBps(50n)).to.be.revertedWithCustomError(
+      fx.vault,
+      "NotRoleHolder"
+    );
+    await fx.vault.connect(fx.allocation).queueDevFundBps(50n);
     await expect(fx.vault.executeDevFundBps()).to.be.revertedWithCustomError(fx.vault, "TimelockNotElapsed");
     expect(await fx.vault.devFundBps()).to.equal(0n);
     await time.increase(TIMELOCK + 1);
@@ -110,12 +118,20 @@ describe("IndexDevFundFacet (design doc §7.11)", () => {
     expect(await fx.vault.devFundBps()).to.equal(50n);
   });
 
-  it("devFundTreasury has no direct setter — only queue/execute, gated to ROLE_RISK_PARAM, timelocked", async () => {
+  it("devFundTreasury has no direct setter — only queue/execute, gated to ROLE_PLATFORM_ALLOCATION (audit M-5), timelocked", async () => {
     const fx = await deployOpenIndex();
     await expect(
       fx.vault.connect(fx.alice).queueDevFundTreasury(fx.bob.address)
     ).to.be.revertedWithCustomError(fx.vault, "NotRoleHolder");
-    await fx.vault.connect(fx.risk).queueDevFundTreasury(fx.bob.address);
+    // AUDIT FIX M-5. The RISK key must be rejected here. It used to be the
+    // holder of this capability, which let a compromised risk key aim a real,
+    // spendable treasury at any address. Revert the facet's modifier and this
+    // line goes red.
+    await expect(fx.vault.connect(fx.risk).queueDevFundTreasury(fx.bob.address)).to.be.revertedWithCustomError(
+      fx.vault,
+      "NotRoleHolder"
+    );
+    await fx.vault.connect(fx.allocation).queueDevFundTreasury(fx.bob.address);
     await expect(fx.vault.executeDevFundTreasury()).to.be.revertedWithCustomError(
       fx.vault,
       "TimelockNotElapsed"
@@ -128,13 +144,21 @@ describe("IndexDevFundFacet (design doc §7.11)", () => {
     expect(await fx.vault.devFundTreasury()).to.equal(fx.bob.address);
   });
 
-  it("devFundRouter has no direct setter — only queue/execute, gated to ROLE_RISK_PARAM, timelocked", async () => {
+  it("devFundRouter has no direct setter — only queue/execute, gated to ROLE_PLATFORM_ALLOCATION (audit M-5), timelocked", async () => {
     const fx = await deployOpenIndex();
     const { routerAddr } = await deployRouter();
     await expect(
       fx.vault.connect(fx.alice).queueDevFundRouter(routerAddr)
     ).to.be.revertedWithCustomError(fx.vault, "NotRoleHolder");
-    await fx.vault.connect(fx.risk).queueDevFundRouter(routerAddr);
+    // AUDIT FIX M-5. The RISK key must be rejected here. It used to be the
+    // holder of this capability, which let a compromised risk key aim a real,
+    // spendable treasury at any address. Revert the facet's modifier and this
+    // line goes red.
+    await expect(fx.vault.connect(fx.risk).queueDevFundRouter(routerAddr)).to.be.revertedWithCustomError(
+      fx.vault,
+      "NotRoleHolder"
+    );
+    await fx.vault.connect(fx.allocation).queueDevFundRouter(routerAddr);
     await expect(fx.vault.executeDevFundRouter()).to.be.revertedWithCustomError(
       fx.vault,
       "TimelockNotElapsed"

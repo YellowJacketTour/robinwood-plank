@@ -58,7 +58,6 @@ struct IndexParamSet {
 }
 
 library IndexParams {
-    uint256 private constant BPS = 10_000;
     uint256 private constant OBS_SLOTS = 8;
 
     uint256 private constant MIN_CONCENTRATION_CAP_BPS = 1_000; // 10%
@@ -68,6 +67,72 @@ library IndexParams {
     uint256 private constant CEIL_PRICE_CAP_BPS = 2_000; // 20% per observation
     uint256 private constant MIN_RAMP_DURATION = 7 days;
     uint256 private constant MAX_RAMP_DURATION = 365 days;
+
+    // ── 2026-08-09 audit fixes M-3 / M-4 ────────────────────────────────
+    //
+    // Everything below closes the same shape of hole: a bound that only
+    // rejected ONE degenerate end of a range, leaving the OTHER end — or the
+    // range's interaction with a second parameter — able to switch a whole
+    // safety subsystem off while remaining perfectly legal for the risk key
+    // to queue. A timelock makes such a change visible; it does not make it
+    // survivable. Read every pair below as "and the opposite extreme".
+
+    /// @dev M-3, lower half. `priceCapBps == 1` was legal, which pins the
+    /// truncated oracle to ~0.01% of movement per observation — i.e. it
+    /// FREEZES the reported price at a stale value indefinitely while every
+    /// checkpoint keeps succeeding. A frozen oracle is strictly worse than an
+    /// absent one, because the band/persistence machinery still trusts it.
+    /// 50 bps at the 10-minute default is 3%/hour of tracking speed: enough
+    /// to follow a real repricing within hours, far too slow to be an attack.
+    uint256 private constant MIN_PRICE_CAP_BPS = 50;
+
+    /// @dev M-3, the real fix. The cap was PER-OBSERVATION with no floor on
+    /// how often an observation could be taken, and `minCheckpointInterval`
+    /// could legally be 1 second — so 20% per observation compounds to
+    /// 1.2^13 ≈ 8.9x within 13 blocks of a 2-second chain. The defect is not
+    /// either constant on its own; it is that the pair was never checked
+    /// against each other. This bounds the PRODUCT: the maximum fraction of
+    /// price movement the oracle will absorb per HOUR, whatever cadence
+    /// governance picks.
+    ///
+    ///     (priceCapBps per interval) * (intervals per hour) <= 5000 bps
+    ///
+    /// The shipped default (500 bps / 600 s = 3000 bps/hour) sits inside this
+    /// with headroom; the 20%-per-second configuration exceeds it by five
+    /// orders of magnitude and is now unqueueable. Note this is a bound on
+    /// the SCHEDULE, not on any single move, so it cannot be evaded by
+    /// checkpointing more often — checkpointing more often is exactly what it
+    /// prices in.
+    uint256 private constant MAX_PRICE_CAP_BPS_PER_HOUR = 5_000;
+
+    /// @dev M-3, floor on cadence in its own right. Independent of the rate
+    /// bound above, an oracle that can be re-observed every second is an
+    /// oracle an attacker can walk with per-block granularity. One minute is
+    /// several blocks on every chain this deploys to.
+    uint256 private constant MIN_CHECKPOINT_INTERVAL = 60;
+    uint256 private constant MAX_CHECKPOINT_INTERVAL = 1 days;
+
+    /// @dev M-4. `largeOpValueWei` had NO upper bound — only `!= 0` — so
+    /// `type(uint256).max` was a legal, single-transaction, permanent
+    /// shutdown of the entire persistence/confirmation subsystem: no
+    /// operation is ever "large", so no operation ever requires confirming
+    /// checkpoints, so the oracle-manipulation defence for big mints and
+    /// redemptions simply stops existing. The opposite end matters too: 1 wei
+    /// makes EVERY operation large, which requires `persistenceCheckpoints`
+    /// confirmations for a dust mint and is a denial of service on the
+    /// priced doors during any volatility. Both ends are now bounded.
+    uint256 private constant MIN_LARGE_OP_VALUE_WEI = 0.01 ether;
+    uint256 private constant MAX_LARGE_OP_VALUE_WEI = 10_000 ether;
+
+    /// @dev M-4, the second switch-off. `persistenceToleranceBps = 10000` was
+    /// legal and is exactly equivalent to `largeOpValueWei = max`: a 100%
+    /// tolerance accepts every observation as "persistent", so the
+    /// confirmation check passes unconditionally and confirms nothing. 20% is
+    /// the widest band that still rejects a manipulated observation. The
+    /// floor stops the mirror-image failure — a tolerance so tight that no
+    /// honest observation set ever confirms, which bricks every large op.
+    uint256 private constant MIN_PERSISTENCE_TOLERANCE_BPS = 10;
+    uint256 private constant MAX_PERSISTENCE_TOLERANCE_BPS = 2_000;
 
     /// @dev Re-declared rather than imported so this file has no compile-time
     /// dependency on the vault. The selectors match by name, which is what the
@@ -180,12 +245,30 @@ library IndexParams {
         if (p.baseImbalanceFeeBps > p.maxImbalanceFeeBps) revert BadParam();
         if (p.imbalanceSlopeBps > CEIL_IMBALANCE_FEE_BPS) revert BadParam();
         if (p.bandBps > CEIL_BAND_BPS) revert BadParam();
-        if (p.priceCapBps == 0 || p.priceCapBps > CEIL_PRICE_CAP_BPS) revert BadParam();
-        if (p.minCheckpointInterval == 0 || p.minCheckpointInterval > 1 days) revert BadParam();
+        if (p.priceCapBps < MIN_PRICE_CAP_BPS || p.priceCapBps > CEIL_PRICE_CAP_BPS) revert BadParam();
+        if (
+            p.minCheckpointInterval < MIN_CHECKPOINT_INTERVAL ||
+            p.minCheckpointInterval > MAX_CHECKPOINT_INTERVAL
+        ) revert BadParam();
+        // M-3: the pair, not either constant alone. `priceCapBps` is a cap
+        // PER OBSERVATION, so its real strength is set by how often an
+        // observation may be taken. Bound the implied hourly budget so no
+        // (cap, cadence) combination can compound faster than
+        // MAX_PRICE_CAP_BPS_PER_HOUR. Both operands are already bounded above,
+        // so this multiplication cannot overflow.
+        if (p.priceCapBps * (1 hours) > MAX_PRICE_CAP_BPS_PER_HOUR * p.minCheckpointInterval) {
+            revert BadParam();
+        }
         if (p.staleAfter < p.minCheckpointInterval * 2 || p.staleAfter > 30 days) revert BadParam();
         if (p.persistenceCheckpoints < 2 || p.persistenceCheckpoints > OBS_SLOTS) revert BadParam();
-        if (p.persistenceToleranceBps == 0 || p.persistenceToleranceBps > BPS) revert BadParam();
-        if (p.largeOpValueWei == 0) revert BadParam();
+        if (
+            p.persistenceToleranceBps < MIN_PERSISTENCE_TOLERANCE_BPS ||
+            p.persistenceToleranceBps > MAX_PERSISTENCE_TOLERANCE_BPS
+        ) revert BadParam();
+        if (
+            p.largeOpValueWei < MIN_LARGE_OP_VALUE_WEI ||
+            p.largeOpValueWei > MAX_LARGE_OP_VALUE_WEI
+        ) revert BadParam();
         if (p.rampDuration < MIN_RAMP_DURATION || p.rampDuration > MAX_RAMP_DURATION) {
             revert BadParam();
         }

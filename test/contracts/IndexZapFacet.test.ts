@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { time, takeSnapshot, type SnapshotRestorer } from "@nomicfoundation/hardhat-network-helpers";
 import { deployIndexVault, TIMELOCK, paramsTuple, defaultParams } from "./helpers/index-vault";
 
 /**
@@ -15,6 +16,19 @@ import { deployIndexVault, TIMELOCK, paramsTuple, defaultParams } from "./helper
  * ============================================================================
  */
 describe("IndexZapFacet — single-asset zap-mint", () => {
+  // Every `setup()` now advances the shared clock past a governance timelock
+  // (arming the C-6/H-2 provenance registry). Mocha shares one network across
+  // files, so restore afterwards or the fixed-endTime Seaport orders in later
+  // suites silently expire — the same guard `Hooks.exitDoorFree.test.ts` and
+  // `ScopedRoles.isolation.test.ts` already carry for the same reason.
+  let clockSnapshot: SnapshotRestorer;
+  before(async () => {
+    clockSnapshot = await takeSnapshot();
+  });
+  after(async () => {
+    await clockSnapshot.restore();
+  });
+
   const VAULT_TIMELOCK = 48 * 3600;
   const SINK_BPS = 3_000n; // CEIL_SINK_SPLIT_BPS
 
@@ -124,10 +138,19 @@ describe("IndexZapFacet — single-asset zap-mint", () => {
 
     await vault.connect(seeder).openIndex(ethers.parseEther("1000"));
 
+    // AUDIT H-2: `_acquireLeg` validates every leg's PROVENANCE against the
+    // `CollectionVaultFactory` registry BEFORE granting it an allowance over
+    // the diamond's WETH. This fixture wires the REAL factory — the same one
+    // that deployed both constituent vaults — so the zap tests exercise the
+    // production trust path rather than a mock of it.
+    await vault.connect(admission).queueVaultFactory(await factory.getAddress());
+    await time.increase(TIMELOCK + 1);
+    await vault.executeVaultFactory();
+
     await weth.mint(alice.address, ethers.parseEther("10000"));
     await weth.connect(alice).approve(vaultAddr, ethers.MaxUint256);
 
-    return { vault, vaultAddr, weth, wethAddr, cVault1, addr1, cVault2, addr2, alice, seeder };
+    return { vault, vaultAddr, weth, wethAddr, cVault1, addr1, cVault2, addr2, alice, seeder, admission, factory };
   }
 
   it("mints EXACTLY the requested index-coin amount from a single WETH deposit, and refunds unspent WETH", async () => {

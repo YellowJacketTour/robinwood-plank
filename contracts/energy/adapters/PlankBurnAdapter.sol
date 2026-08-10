@@ -197,7 +197,11 @@ contract PlankBurnAdapter is IEnergyAdapter {
         // is where that risk lives — identical to `_routeDevFundBuy`'s own
         // documented "only a router that fully spends AND delivers is ever
         // treated as a genuine buy" doctrine).
+        // AUDIT C-1: never return more than we received — see the identical
+        // guard in InventoryBuyAdapter. A raw-balance refund lets a donation
+        // underflow the Bus's delta arithmetic and brick `route()` forever.
         uint256 leftover = weth.balanceOf(address(this));
+        if (leftover > amountIn) leftover = amountIn;
         if (leftover > 0) {
             weth.safeTransfer(msg.sender, leftover);
         }
