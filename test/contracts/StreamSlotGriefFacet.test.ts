@@ -119,7 +119,7 @@ describe("AUDIT M-2 — stream-slot pinning on IndexStreamFacet", () => {
     for (const a of pinned) await fx.vault.connect(fx.griefer).pruneStream(a);
     expect(await fx.vault.streamCount()).to.equal(0n);
     await expect(fx.vault.connect(fx.admission).queueStream(await fresh.getAddress())).to.not.be
-      .reverted;
+      .revert(ethers);
   });
 
   /**
@@ -213,6 +213,6 @@ describe("AUDIT M-2 — stream-slot pinning on IndexStreamFacet", () => {
     // withheld: with no supply the residual is not unpayable, it is value
     // waiting for the next minter.
     expect(await fx.vault.totalSupply()).to.be.gt(0n); // the locked seed remains
-    await expect(fx.vault.pruneStream(addr)).to.not.be.reverted;
+    await expect(fx.vault.pruneStream(addr)).to.not.be.revert(ethers);
   });
 });

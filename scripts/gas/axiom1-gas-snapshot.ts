@@ -149,7 +149,7 @@ hard-fail gate.
   console.log("\nWrote docs/GAS-SNAPSHOT-AXIOM-1.md");
 }
 
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((err) => {
     console.error(err);
     process.exitCode = 1;

@@ -163,7 +163,7 @@ describe("PlankBurnAdapter + PlankLpRenounceAdapter (PR7)", () => {
     await fx.router.setMode(1); // Mode.REVERT
     const amount = 3n * WAD;
     await fx.weth.mint(await stub.getAddress(), amount);
-    await expect(stub.pushAndCall(await adapter2.getAddress(), fx.wethAddr, amount)).to.not.be.reverted;
+    await expect(stub.pushAndCall(await adapter2.getAddress(), fx.wethAddr, amount)).to.not.be.revert(ethers);
 
     expect(await fx.weth.balanceOf(await stub.getAddress())).to.equal(amount); // refunded whole
     expect(await fx.weth.balanceOf(await adapter2.getAddress())).to.equal(0n);
@@ -182,7 +182,7 @@ describe("PlankBurnAdapter + PlankLpRenounceAdapter (PR7)", () => {
     await fx.router.setMode(2); // Mode.SHORT_MINT
     const amount = 3n * WAD;
     await fx.weth.mint(await stub.getAddress(), amount);
-    await expect(stub.pushAndCall(await adapter.getAddress(), fx.wethAddr, amount)).to.not.be.reverted;
+    await expect(stub.pushAndCall(await adapter.getAddress(), fx.wethAddr, amount)).to.not.be.revert(ethers);
 
     // SHORT_MINT pulls the full approval via transferFrom before reporting
     // failure, so there is nothing LEFT on the adapter's own balance to
@@ -216,7 +216,7 @@ describe("PlankBurnAdapter + PlankLpRenounceAdapter (PR7)", () => {
     await expect(adapter.executeRouter()).to.be.revertedWithCustomError(adapter, "TimelockNotElapsed");
 
     await time.increase(TIMELOCK + 1);
-    await expect(adapter.executeRouter()).to.not.be.reverted;
+    await expect(adapter.executeRouter()).to.not.be.revert(ethers);
     expect(await adapter.router()).to.equal(await fx.router.getAddress());
   });
 
@@ -309,7 +309,7 @@ describe("PlankBurnAdapter + PlankLpRenounceAdapter (PR7)", () => {
     await fx.router.setMode(1); // Mode.REVERT
     const amount = 6n * WAD;
     await fx.weth.mint(await stub.getAddress(), amount);
-    await expect(stub.pushAndCall(await adapter.getAddress(), fx.wethAddr, amount)).to.not.be.reverted;
+    await expect(stub.pushAndCall(await adapter.getAddress(), fx.wethAddr, amount)).to.not.be.revert(ethers);
 
     expect(await fx.weth.balanceOf(await stub.getAddress())).to.equal(amount); // refunded whole
     expect(await fx.weth.balanceOf(await adapter.getAddress())).to.equal(0n);
@@ -329,7 +329,7 @@ describe("PlankBurnAdapter + PlankLpRenounceAdapter (PR7)", () => {
     await fx.lpPool.setMode(1); // Mode.REVERT
     const amount = 6n * WAD;
     await fx.weth.mint(await stub.getAddress(), amount);
-    await expect(stub.pushAndCall(await adapter.getAddress(), fx.wethAddr, amount)).to.not.be.reverted;
+    await expect(stub.pushAndCall(await adapter.getAddress(), fx.wethAddr, amount)).to.not.be.revert(ethers);
 
     // Atomic unwind: the whole amount is refunded, including the WETH half
     // that would have gone to the LP pool — no partial spend.
@@ -355,7 +355,7 @@ describe("PlankBurnAdapter + PlankLpRenounceAdapter (PR7)", () => {
     await fx.lpPool.setMode(2); // Mode.ZERO_LP
     const amount = 6n * WAD;
     await fx.weth.mint(await stub.getAddress(), amount);
-    await expect(stub.pushAndCall(await adapter.getAddress(), fx.wethAddr, amount)).to.not.be.reverted;
+    await expect(stub.pushAndCall(await adapter.getAddress(), fx.wethAddr, amount)).to.not.be.revert(ethers);
 
     expect(await fx.weth.balanceOf(await stub.getAddress())).to.equal(amount);
     expect(await fx.lp.balanceOf(BURN_ADDRESS)).to.equal(0n);
@@ -383,7 +383,7 @@ describe("PlankBurnAdapter + PlankLpRenounceAdapter (PR7)", () => {
     await expect(adapter.executeConfig()).to.be.revertedWithCustomError(adapter, "TimelockNotElapsed");
 
     await time.increase(TIMELOCK + 1);
-    await expect(adapter.executeConfig()).to.not.be.reverted;
+    await expect(adapter.executeConfig()).to.not.be.revert(ethers);
     expect(await adapter.lpPool()).to.equal(await fx.lpPool.getAddress());
   });
 
@@ -452,7 +452,7 @@ describe("PlankBurnAdapter + PlankLpRenounceAdapter (PR7)", () => {
 
     // Fully unconfigured P/R: route() must not revert, and their slices flow
     // through to Pipe D (the mock) rather than being stranded.
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
     expect(await fx.weth.balanceOf(await realP.getAddress())).to.equal(0n);
     expect(await fx.weth.balanceOf(await realR.getAddress())).to.equal(0n);
 
@@ -470,7 +470,7 @@ describe("PlankBurnAdapter + PlankLpRenounceAdapter (PR7)", () => {
     const lpBefore: bigint = await fx.lp.balanceOf(BURN_ADDRESS);
 
     await fx.weth.mint(await bus.getAddress(), total);
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
 
     expect(await fx.plank.balanceOf(BURN_ADDRESS)).to.be.gt(burnBefore);
     expect(await fx.lp.balanceOf(BURN_ADDRESS)).to.be.gt(lpBefore);

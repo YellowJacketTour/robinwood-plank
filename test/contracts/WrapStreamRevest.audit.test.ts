@@ -258,8 +258,8 @@ describe("WrappedIndexShare — dilution re-vest (round 9f)", () => {
     // no per-holder stamp to wash and none to inherit. Carol has never touched
     // the wrapper and exits immediately.
     const half = (await fx.wrapper.balanceOf(fx.bob.address)) / 2n;
-    await expect(fx.wrapper.connect(fx.bob).transfer(fx.carol.address, half)).to.not.be.reverted;
-    await expect(fx.wrapper.connect(fx.carol).withdraw(half)).to.not.be.reverted;
+    await expect(fx.wrapper.connect(fx.bob).transfer(fx.carol.address, half)).to.not.be.revert(ethers);
+    await expect(fx.wrapper.connect(fx.carol).withdraw(half)).to.not.be.revert(ethers);
     // Carol got the raw leg in full — the fix never blocks an exit.
     expect(await fx.vault.balanceOf(fx.carol.address)).to.be.gt(0n);
   });
@@ -330,10 +330,10 @@ describe("WrappedIndexShare — dilution re-vest (round 9f)", () => {
     // `deposit` now reads streams, but only through the same bounded-gas
     // STATICCALL `withdraw` already used. It must still work.
     await fx.vault.connect(fx.bob).mintProRata(E("1000"), maxIn(3));
-    await expect(fx.wrapper.connect(fx.bob).deposit(E("1000"))).to.not.be.reverted;
+    await expect(fx.wrapper.connect(fx.bob).deposit(E("1000"))).to.not.be.revert(ethers);
     await expect(
       fx.wrapper.connect(fx.bob).withdraw(await fx.wrapper.balanceOf(fx.bob.address))
-    ).to.not.be.reverted;
+    ).to.not.be.revert(ethers);
   });
 
   it("solvency invariant: total claims never exceed real backing across 60 mixed ops", async () => {

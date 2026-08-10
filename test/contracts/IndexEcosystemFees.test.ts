@@ -328,7 +328,7 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
     const reserves: bigint[] = [];
     for (const a of fx.addrs) reserves.push(await fx.vault.reserveOf(a));
 
-    await expect(fx.vault.connect(fx.alice).redeemProRata(shares, [0n, 0n, 0n])).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.alice).redeemProRata(shares, [0n, 0n, 0n])).to.not.be.revert(ethers);
 
     // Strict pro rata against `reserve` alone — the ledger is not in the
     // denominator, not in the numerator, and not in the payout.
@@ -354,12 +354,12 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
     // redemption time.
     await fx.vault.connect(fx.allocation).queueParam(SINK_KEY, fx.addrs[1]);
     await time.increase(TIMELOCK + 1);
-    await expect(fx.vault.executeParam(SINK_KEY)).to.be.reverted;
+    await expect(fx.vault.executeParam(SINK_KEY)).to.be.revert(ethers);
     await warm(fx);
 
     // And meanwhile every user path still works, including the exit.
-    await expect(fx.vault.connect(fx.alice).redeemProRata(E("10"), [0n, 0n, 0n])).to.not.be.reverted;
-    await expect(feeMint(fx, fx.bob, E("10"))).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.alice).redeemProRata(E("10"), [0n, 0n, 0n])).to.not.be.revert(ethers);
+    await expect(feeMint(fx, fx.bob, E("10"))).to.not.be.revert(ethers);
   });
 
   it("EXIT DOOR: retiring the sink leaves the ledger frozen but every user path open", async () => {
@@ -388,11 +388,11 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
     expect(await fx.vault.ecosystemFeesWei(fx.addrs[0])).to.equal(stuck);
 
     // The exit door never noticed any of it.
-    await expect(fx.vault.connect(fx.alice).redeemProRata(E("25"), [0n, 0n, 0n])).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.alice).redeemProRata(E("25"), [0n, 0n, 0n])).to.not.be.revert(ethers);
 
     // Re-appointing the same sink restores the harvest of the frozen balance.
     await appointSink(fx);
-    await expect(fx.vault.connect(fx.carol).harvestEcosystemFees()).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.carol).harvestEcosystemFees()).to.not.be.revert(ethers);
   });
 
   it("a single-asset exit quote and payout are identical with the ledger full or empty", async () => {
@@ -594,7 +594,7 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
     const aliceOwed: bigint = await fx.vault.withdrawableDividendOf(fx.alice.address);
     expect(aliceOwed).to.be.greaterThan(0n);
     const before: bigint = await fx.tokens[0].balanceOf(fx.alice.address);
-    await expect(fx.vault.connect(fx.alice).claimDividend()).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.alice).claimDividend()).to.not.be.revert(ethers);
     expect((await fx.tokens[0].balanceOf(fx.alice.address)) - before).to.equal(aliceOwed);
   });
 
@@ -724,10 +724,10 @@ describe("GlobalIndexVault — segregated ecosystem fee ledger", () => {
     for (const who of actors) {
       const bal: bigint = await fx.vault.balanceOf(who.address);
       if (bal > 0n) {
-        await expect(fx.vault.connect(who).redeemProRata(bal, [0n, 0n, 0n])).to.not.be.reverted;
+        await expect(fx.vault.connect(who).redeemProRata(bal, [0n, 0n, 0n])).to.not.be.revert(ethers);
       }
     }
     expect(await fx.vault.ecosystemFeesWei(fx.addrs[0])).to.be.greaterThan(0n);
-    await expect(fx.vault.connect(fx.carol).harvestEcosystemFees()).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.carol).harvestEcosystemFees()).to.not.be.revert(ethers);
   });
 });

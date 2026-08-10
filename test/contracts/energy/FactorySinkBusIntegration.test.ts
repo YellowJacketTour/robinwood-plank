@@ -350,7 +350,7 @@ describe("CollectionVaultFactory sink -> real EnergyBus, e2e deposit -> route (P
     const sReserveAtIndexBefore: bigint = await vault.balanceOf(indexAddr);
     const idxSupplyBeforeRoute: bigint = await index.totalSupply();
 
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
 
     // Pipe I genuinely bought vault S and it landed at the index Diamond.
     const sBalAtIndex: bigint = await vault.balanceOf(indexAddr);

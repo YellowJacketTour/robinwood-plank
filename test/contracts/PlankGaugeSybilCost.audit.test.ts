@@ -300,7 +300,7 @@ describe("PlankGauge — asset-denominated sybil cost (round 9f)", () => {
     expect(perAddr).to.equal(P);
     const s = await sybil(fx, perAddr);
     // The address can pay the registration OR burn, never both.
-    await expect(fx.gauge.connect(s.signer).burnPlank(fx.gA, perAddr)).to.be.reverted;
+    await expect(fx.gauge.connect(s.signer).burnPlank(fx.gA, perAddr)).to.be.revert(ethers);
 
     // eslint-disable-next-line no-console
     console.log(
@@ -441,7 +441,7 @@ describe("PlankGauge — asset-denominated sybil cost (round 9f)", () => {
     const P = 100n * WAD;
     await setRegistrationBurn(fx, P);
     const s = await sybil(fx, 10n * WAD); // enough to burn, not to register
-    await expect(fx.gauge.connect(s.signer).burnPlank(fx.gA, 5n * WAD)).to.be.reverted;
+    await expect(fx.gauge.connect(s.signer).burnPlank(fx.gA, 5n * WAD)).to.be.revert(ethers);
     expect(await fx.gauge.accountWeight(fx.gA, s.addr)).to.equal(0n);
     expect(await fx.gauge.gaugeWeight(fx.gA)).to.equal(0n);
   });

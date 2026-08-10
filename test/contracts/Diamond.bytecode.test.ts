@@ -43,34 +43,60 @@ describe("Diamond facet bytecode guard", () => {
       { facet: await evil.getAddress(), selectors: await selectorsOf(facetName) },
     ];
     const Deployer = await ethers.getContractFactory("IndexDeployer");
+    const cutAddr = await cut.getAddress();
     return {
-      attempt: Deployer.deploy(
-        await cut.getAddress(),
-        manifest,
-        [],
-        INIT,
-        ethers.ZeroHash // hash is irrelevant: the scan reverts before finalize
-      ),
+      // Explicit gasLimit, deliberately. This deployment is EXPECTED to
+      // revert (that is the whole point of the test), but Hardhat 3's
+      // AutomaticGasHandler estimates gas by simulating the call BEFORE
+      // sending it — and when that simulation itself reverts, the estimator
+      // throws directly rather than handing chai-matchers a normal rejected
+      // transaction to decode. The custom error and its args are identical
+      // either way; only the calling convention that surfaces them differs.
+      // A manual gasLimit skips estimation, so `.to.be.revertedWithCustomError`
+      // sees the real on-chain revert instead of the estimator's own throw.
+      attempt: (() => {
+        const p = Deployer.deploy(
+          cutAddr,
+          manifest,
+          [],
+          INIT,
+          ethers.ZeroHash, // hash is irrelevant: the scan reverts before finalize
+          { gasLimit: 15_000_000 }
+        );
+        // `evil.getAddress()` below is awaited AFTER this promise starts,
+        // which yields the event loop a tick — and since this deployment is
+        // EXPECTED to revert, that tick is enough for Node to see a rejected
+        // promise with no handler yet attached and report it as an unhandled
+        // rejection. Hardhat 3's runner treats that as fatal, crashing the
+        // whole suite before `expect(attempt)` below ever gets a chance to
+        // attach the real assertion. A no-op `.catch` on a SEPARATE
+        // reference marks the promise "handled" for Node's bookkeeping
+        // without consuming it — `p` itself, still unconsumed, is what
+        // `expect()` observes.
+        p.catch(() => {});
+        return p;
+      })(),
       evil: await evil.getAddress(),
+      cut,
     };
   }
 
   describe("the guard fires, on-chain, during the deployment transaction", () => {
     it("a facet containing SELFDESTRUCT cannot be cut in — the whole deployment reverts", async () => {
-      const { attempt, evil } = await tryDeployWith("SelfdestructFacet");
+      const { attempt, evil, cut } = await tryDeployWith("SelfdestructFacet");
       await expect(attempt)
         .to.be.revertedWithCustomError(
-          await ethers.getContractFactory("DiamondCutFacet"),
+          cut,
           "FacetContainsSelfdestruct"
         )
         .withArgs(evil, (n: bigint) => n >= 0n);
     });
 
     it("a facet containing DELEGATECALL cannot be cut in — the whole deployment reverts", async () => {
-      const { attempt, evil } = await tryDeployWith("DelegatecallFacet");
+      const { attempt, evil, cut } = await tryDeployWith("DelegatecallFacet");
       await expect(attempt)
         .to.be.revertedWithCustomError(
-          await ethers.getContractFactory("DiamondCutFacet"),
+          cut,
           "FacetContainsDelegatecall"
         )
         .withArgs(evil, (n: bigint) => n >= 0n);
@@ -81,7 +107,7 @@ describe("Diamond facet bytecode guard", () => {
       // than in a deploy script: a rejected facet leaves NOTHING behind. There
       // is no half-built diamond to clean up and none to accidentally use.
       const { attempt } = await tryDeployWith("SelfdestructFacet");
-      await expect(attempt).to.be.reverted;
+      await expect(attempt).to.be.revert(ethers);
       // A reverted CREATE leaves no code; nothing to assert about an address
       // that was never returned. The absence of a returned address IS the
       // property, and the revert above is its proof.
@@ -107,10 +133,11 @@ describe("Diamond facet bytecode guard", () => {
           [{ facet: await facet.getAddress(), selectors: await selectorsOf("ExternalLibraryFacet") }],
           [],
           INIT,
-          ethers.ZeroHash
+          ethers.ZeroHash,
+          { gasLimit: 15_000_000 }
         )
       ).to.be.revertedWithCustomError(
-        await ethers.getContractFactory("DiamondCutFacet"),
+        cut,
         "FacetContainsDelegatecall"
       );
     });
@@ -124,10 +151,11 @@ describe("Diamond facet bytecode guard", () => {
           [{ facet: "0x00000000000000000000000000000000cafebabe", selectors: ["0x12345678"] }],
           [],
           INIT,
-          ethers.ZeroHash
+          ethers.ZeroHash,
+          { gasLimit: 15_000_000 }
         )
       ).to.be.revertedWithCustomError(
-        await ethers.getContractFactory("DiamondCutFacet"),
+        cut,
         "FacetHasNoCode"
       );
     });
@@ -143,7 +171,7 @@ describe("Diamond facet bytecode guard", () => {
         { facet: await loupeF.getAddress(), selectors: await selectorsOf("DiamondLoupeFacet") },
         { facet: await clean.getAddress(), selectors: await selectorsOf("CleanFacet") },
       ];
-      const { facetSetHash } = require("./helpers/diamond");
+      const { facetSetHash } = await import("./helpers/diamond.js");
       const hash = facetSetHash(manifest.map((m) => ({ name: "", ...m })));
 
       const Deployer = await ethers.getContractFactory("IndexDeployer");
@@ -176,7 +204,7 @@ describe("Diamond facet bytecode guard", () => {
         { facet: await loupeF.getAddress(), selectors: await selectorsOf("DiamondLoupeFacet") },
         { facet: await push.getAddress(), selectors: await selectorsOf("PushDataFacet") },
       ];
-      const { facetSetHash } = require("./helpers/diamond");
+      const { facetSetHash } = await import("./helpers/diamond.js");
       const hash = facetSetHash(manifest.map((m) => ({ name: "", ...m })));
 
       const Deployer = await ethers.getContractFactory("IndexDeployer");

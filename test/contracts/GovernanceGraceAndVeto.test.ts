@@ -68,7 +68,7 @@ describe("AUDIT M-1 — timelock GRACE_PERIOD expiry", () => {
     // (a) inside the window: this MUST work — the anti-vacuity half.
     await vault.connect(risk).queueParam(b32("bandBps"), 120n);
     await time.increase(TIMELOCK + 1);
-    await expect(vault.executeParam(b32("bandBps"))).to.not.be.reverted;
+    await expect(vault.executeParam(b32("bandBps"))).to.not.be.revert(ethers);
 
     // (b) outside the window: dead, and it fails CLOSED.
     await vault.connect(risk).queueParam(b32("bandBps"), 321n);
@@ -83,7 +83,7 @@ describe("AUDIT M-1 — timelock GRACE_PERIOD expiry", () => {
     // Re-queueing on a FRESH, fully public delay is the only way forward.
     await vault.connect(risk).queueParam(b32("bandBps"), 321n);
     await time.increase(TIMELOCK + 1);
-    await expect(vault.executeParam(b32("bandBps"))).to.not.be.reverted;
+    await expect(vault.executeParam(b32("bandBps"))).to.not.be.revert(ethers);
   });
 
   /**
@@ -101,7 +101,7 @@ describe("AUDIT M-1 — timelock GRACE_PERIOD expiry", () => {
 
     // one second BEFORE expiry: still legal.
     await time.setNextBlockTimestamp(Number(eta) + GRACE);
-    await expect(vault.executeParam(b32("bandBps"))).to.not.be.reverted;
+    await expect(vault.executeParam(b32("bandBps"))).to.not.be.revert(ethers);
 
     await vault.connect(risk).queueParam(b32("bandBps"), 151n);
     const [, eta2] = await vault.queuedParams(b32("bandBps"));
@@ -193,7 +193,7 @@ describe("AUDIT M-1 — timelock GRACE_PERIOD expiry", () => {
     const { vault, risk } = fx;
     await vault.connect(risk).queueParam(b32("bandBps"), 175n);
     await time.increase(TIMELOCK + 7 * 24 * 3_600);
-    await expect(vault.executeParam(b32("bandBps"))).to.not.be.reverted;
+    await expect(vault.executeParam(b32("bandBps"))).to.not.be.revert(ethers);
   });
 });
 
@@ -252,7 +252,7 @@ describe("AUDIT M-1 — the veto surface", () => {
    * decision, so it is tested directly for every (vetoer, queue) pair.
    *
    * GOES RED IF the veto is narrowed to ROLE_ADMIN-only or to the queueing
-   * role: the cross-domain `.to.not.be.reverted` calls start reverting.
+   * role: the cross-domain `.to.not.be.revert(ethers)` calls start reverting.
    */
   it("ANY of the five role holders may veto ANY queue, including another role's", async () => {
     const fx = await deployOpenIndex();
@@ -260,28 +260,28 @@ describe("AUDIT M-1 — the veto surface", () => {
 
     // Queued by RISK, vetoed by ALLOCATION (which cannot queue it at all).
     await vault.connect(risk).queueParam(b32("bandBps"), 111n);
-    await expect(vault.connect(allocation).queueParam(b32("bandBps"), 111n)).to.be.reverted;
-    await expect(vault.connect(allocation).vetoParam(b32("bandBps"))).to.not.be.reverted;
+    await expect(vault.connect(allocation).queueParam(b32("bandBps"), 111n)).to.be.revert(ethers);
+    await expect(vault.connect(allocation).vetoParam(b32("bandBps"))).to.not.be.revert(ethers);
 
     // Queued by ALLOCATION, vetoed by ADMISSION.
     await vault.connect(allocation).queuePlatformTreasury(alice.address);
-    await expect(vault.connect(admission).vetoPlatformTreasury()).to.not.be.reverted;
+    await expect(vault.connect(admission).vetoPlatformTreasury()).to.not.be.revert(ethers);
 
     // Queued by ADMISSION, vetoed by RISK.
     await vault.connect(admission).queueMetric(addrs[0], 5n);
     const metricKey = ethers.keccak256(
       ethers.solidityPacked(["string", "address"], ["metric", addrs[0]])
     );
-    await expect(vault.connect(risk).vetoParam(metricKey)).to.not.be.reverted;
+    await expect(vault.connect(risk).vetoParam(metricKey)).to.not.be.revert(ethers);
 
     await vault.connect(admission).queueVaultFactory(ethers.ZeroAddress);
-    await expect(vault.connect(risk).vetoVaultFactory()).to.not.be.reverted;
+    await expect(vault.connect(risk).vetoVaultFactory()).to.not.be.revert(ethers);
 
     // THE CASE `cancelRole` CANNOT SERVE: ROLE_ADMIN is itself the attacker,
     // queueing a rotation of the risk role to an address it controls. Only a
     // veto reachable by somebody else stops it.
     await vault.connect(roleAdmin).queueRole(await vault.ROLE_RISK_PARAM(), roleAdmin.address);
-    await expect(vault.connect(risk).vetoRole(await vault.ROLE_RISK_PARAM())).to.not.be.reverted;
+    await expect(vault.connect(risk).vetoRole(await vault.ROLE_RISK_PARAM())).to.not.be.revert(ethers);
     await time.increase(TIMELOCK + 1);
     await expect(vault.executeRole(await vault.ROLE_RISK_PARAM())).to.be.revertedWithCustomError(
       vault,
@@ -413,7 +413,7 @@ describe("AUDIT M-1 — the veto surface", () => {
     for (let i = 0; i < previewBefore.length; i++) {
       expect(previewAfter[i], `veto moved the exit price on leg ${i}`).to.equal(previewBefore[i]);
     }
-    await expect(vault.connect(alice).redeemProRata(1_000n * WAD, zeroOut(3))).to.not.be.reverted;
+    await expect(vault.connect(alice).redeemProRata(1_000n * WAD, zeroOut(3))).to.not.be.revert(ethers);
     expect(await vault.balanceOf(alice.address)).to.equal(0n);
     expect(await tokens[0].balanceOf(alice.address)).to.be.gt(balBefore);
 
@@ -485,7 +485,7 @@ describe("AUDIT M-1 — the veto surface", () => {
     await vault.connect(risk).vetoParam(b32("bandBps"));
     await vault.connect(risk).queueParam(b32("bandBps"), 141n);
     await time.increase(TIMELOCK + 1);
-    await expect(vault.executeParam(b32("bandBps"))).to.not.be.reverted;
+    await expect(vault.executeParam(b32("bandBps"))).to.not.be.revert(ethers);
     expect((await vault.params()).bandBps).to.equal(141n);
   });
 });

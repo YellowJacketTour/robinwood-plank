@@ -183,7 +183,7 @@ describe("InventoryBuyAdapter + IndexEnergyFacet (PR5, corrected single-share-at
     // ── 7. Fund the Bus with real WETH and route() — permissionless ────────
     const total = ethers.parseEther("2");
     await wethC.mint(await bus.getAddress(), total);
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
 
     // ── 8. The real S balance at the Diamond genuinely rose ────────────────
     const sAtDiamondAfter: bigint = await cVault.balanceOf(fx.vaultAddr);

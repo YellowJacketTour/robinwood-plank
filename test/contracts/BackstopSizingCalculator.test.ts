@@ -97,7 +97,7 @@ describe("BackstopSizingCalculator", () => {
       const { addr } = await deploy();
       const [payer] = await ethers.getSigners();
       await expect(payer.sendTransaction({ to: addr, value: ethers.parseEther("1") })).to.be
-        .reverted;
+        .revert(ethers);
       expect(await ethers.provider.getBalance(addr)).to.equal(0n);
     });
 
@@ -105,7 +105,7 @@ describe("BackstopSizingCalculator", () => {
       const { addr } = await deploy();
       const [payer] = await ethers.getSigners();
       await expect(payer.sendTransaction({ to: addr, value: 1n, data: "0xdeadbeef" })).to.be
-        .reverted;
+        .revert(ethers);
       expect(await ethers.provider.getBalance(addr)).to.equal(0n);
     });
 
@@ -113,7 +113,7 @@ describe("BackstopSizingCalculator", () => {
       const { calc, addr } = await deploy();
       const [payer] = await ethers.getSigners();
       const data = calc.interface.encodeFunctionData("capabilities", []);
-      await expect(payer.sendTransaction({ to: addr, value: 1n, data })).to.be.reverted;
+      await expect(payer.sendTransaction({ to: addr, value: 1n, data })).to.be.revert(ethers);
       expect(await ethers.provider.getBalance(addr)).to.equal(0n);
     });
 

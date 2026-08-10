@@ -55,11 +55,10 @@ import {
 } from "./config/index-vault-deploy-config";
 
 // Imported, not reimplemented — see the file header for why this is load-
-// bearing rather than a convenience.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { deployIndexDiamond } = require("../test/contracts/helpers/diamond") as typeof import("../test/contracts/helpers/diamond");
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { INDEX_FACETS } = require("../test/contracts/helpers/index-vault") as typeof import("../test/contracts/helpers/index-vault");
+// bearing rather than a convenience. Static ESM imports (Hardhat 3 runs this
+// as an ES module, where `require` does not exist).
+import { deployIndexDiamond } from "../test/contracts/helpers/diamond.js";
+import { INDEX_FACETS } from "../test/contracts/helpers/index-vault.js";
 
 export interface DeployIndexVaultResult {
   diamondAddress: string;
@@ -134,8 +133,11 @@ async function main() {
 }
 
 // Only auto-run when invoked directly (`hardhat run`) — importable by the
-// local verification harness without side effects.
-if (require.main === module) {
+// local verification harness without side effects. `require.main === module`
+// was the CJS idiom for this; ESM has no `require`, so this compares against
+// the entrypoint script's own resolved URL instead (the standard ESM
+// replacement — see Node's own docs on detecting the main module).
+if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((err) => {
     console.error(err);
     process.exitCode = 1;

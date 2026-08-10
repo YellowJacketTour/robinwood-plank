@@ -197,7 +197,7 @@ describe("CollectionLpAdapter (real Pipe L, native-LP model)", () => {
     // proving the lock's safety does not rely on 0xdEaD specifically being
     // unreachable but on the ordinary ERC20/burn-your-own-balance rule.
     const [, , , , outsider] = await ethers.getSigners();
-    await expect(vault.connect(outsider).removeLiquidity(1n, 0n, 0n)).to.be.reverted;
+    await expect(vault.connect(outsider).removeLiquidity(1n, 0n, 0n)).to.be.revert(ethers);
 
     // Further trading fees continue to grow the pool's own k without ever
     // touching the locked LP's balance — the lock is a permanent floor on
@@ -250,7 +250,7 @@ describe("CollectionLpAdapter (real Pipe L, native-LP model)", () => {
     const adapter: any = await Adapter.deploy(wethAddr, busSigner.address, await weightModule.getAddress());
 
     const amount = ethers.parseEther("3");
-    await expect(pushAndExecute(adapter, weth, busSigner, amount)).to.not.be.reverted;
+    await expect(pushAndExecute(adapter, weth, busSigner, amount)).to.not.be.revert(ethers);
     const [used, skipped] = await pushAndExecute(adapter, weth, busSigner, amount);
     expect(used).to.equal(0n);
     expect(skipped).to.equal(true);

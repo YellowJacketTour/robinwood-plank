@@ -71,7 +71,7 @@ describe("CollectionVaultFactory — permissionless, one vault per collection", 
   it("is genuinely permissionless — any caller, not just the factory deployer, may deploy", async () => {
     const { factory, attacker, treasury, nft1 } = await deployFixture();
     await expect(factory.connect(attacker).deployVault(await nft1.getAddress(), treasury.address, 810)).to.not.be
-      .reverted;
+      .revert(ethers);
   });
 
   it("create2 address is deterministic and matches predictVault", async () => {
@@ -88,7 +88,7 @@ describe("CollectionVaultFactory — permissionless, one vault per collection", 
     // CONSTRUCTOR does (SplitOutOfRange), so the create2 call reverts and no
     // vault is registered either way. Confirms the floor cannot be
     // constructed around via the factory path.
-    await expect(factory.deployVault(await nft1.getAddress(), treasury.address, 809)).to.be.reverted;
+    await expect(factory.deployVault(await nft1.getAddress(), treasury.address, 809)).to.be.revert(ethers);
     expect(await factory.vaultForCollection(await factory.collectionSalt(await nft1.getAddress()))).to.equal(
       ethers.ZeroAddress
     );

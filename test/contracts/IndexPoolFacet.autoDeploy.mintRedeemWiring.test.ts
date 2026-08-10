@@ -83,7 +83,7 @@ describe("IndexCoreFacet/IndexTradeFacet — mint/redeem hot-path reconciliation
     const poolSharesBefore: bigint = await fx.vault.poolSharesMinted();
     const [reservePaymentBefore, reserveCoinBefore] = await fx.pool.getReserves();
 
-    const tx = await fx.vault.connect(fx.alice).mintSingleAsset(shareToken, 5n * WAD, 0n);
+    const tx = await fx.vault.connect(fx.alice).mintSingleAsset(shareToken, 5n * WAD, 0n, { gasLimit: 3_000_000 });
     const receipt = await tx.wait();
 
     // The ordinary mint happened.

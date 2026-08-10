@@ -172,7 +172,7 @@ describe("Invariant hardening (round 9e)", () => {
       before.push(await fx.tokens[i].balanceOf(fx.alice.address));
     }
 
-    await expect(fx.vault.connect(fx.alice).redeemProRata(shares, zeroOut(N))).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.alice).redeemProRata(shares, zeroOut(N))).to.not.be.revert(ethers);
 
     // Exact strict pro rata on EVERY one of the 32 legs, including the one
     // mid-ramp-out, with no fee term and no ledger term anywhere in it.
@@ -211,7 +211,7 @@ describe("Invariant hardening (round 9e)", () => {
     }
 
     await expect(fx.vault.connect(outsider).redeemProRata(500n * WAD, zeroOut(N))).to.not.be
-      .reverted;
+      .revert(ethers);
     expect(await fx.vault.balanceOf(outsider.address)).to.equal(0n);
   });
 

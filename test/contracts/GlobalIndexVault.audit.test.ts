@@ -165,7 +165,7 @@ describe("GlobalIndexVault", () => {
     const [navLow] = await vault.nav();
     expect(navLow).to.equal(0n, "stale legs must value to zero, not to a frozen price");
     // ...and pro-rata in-kind still works, because it never reads a price.
-    await expect(vault.connect(alice).redeemProRata(200n * WAD, zeroOut(3))).to.not.be.reverted;
+    await expect(vault.connect(alice).redeemProRata(200n * WAD, zeroOut(3))).to.not.be.revert(ethers);
   });
 
   // ══ §1 — the single-asset convenience exit ══════════════════════════════
@@ -382,7 +382,7 @@ describe("GlobalIndexVault", () => {
 
     // The cap is directional, not a freeze: reducing the breach is allowed.
     await expect(vault.connect(alice).redeemSingleAsset(10n * WAD, addrs[2], 0n)).to.not.be
-      .reverted;
+      .revert(ethers);
   });
 
   it("the sqrt weight curve dampens outsized constituents and the cap redistributes", async () => {
@@ -560,7 +560,7 @@ describe("GlobalIndexVault", () => {
     }
     expect(await vault.persistenceHolds(addrs[0])).to.equal(false);
     // Under largeOpValueWei (10 ETH), the same call goes through.
-    await expect(vault.connect(alice).mintSingleAsset(addrs[0], WAD / 2n, 0n)).to.not.be.reverted;
+    await expect(vault.connect(alice).mintSingleAsset(addrs[0], WAD / 2n, 0n)).to.not.be.revert(ethers);
   });
 
   it("a checkpoint cannot be spammed inside the minimum interval", async () => {
@@ -693,7 +693,7 @@ describe("GlobalIndexVault", () => {
     const fx = await fixture();
     await expect(
       fx.alice.sendTransaction({ to: fx.vaultAddr, value: WAD })
-    ).to.be.reverted;
+    ).to.be.revert(ethers);
     const payable = fx.vault.interface.fragments.filter(
       (f: any) => f.type === "function" && f.stateMutability === "payable"
     );
@@ -716,7 +716,7 @@ describe("GlobalIndexVault", () => {
     );
     const [, out] = await vault.previewRedeemProRata(100n * WAD);
     expect(out[1]).to.be.gt(0n, "deactivated leg stopped paying out");
-    await expect(vault.connect(alice).redeemProRata(100n * WAD, zeroOut(3))).to.not.be.reverted;
+    await expect(vault.connect(alice).redeemProRata(100n * WAD, zeroOut(3))).to.not.be.revert(ethers);
   });
 
   // ══ §2.7 — timelock ═════════════════════════════════════════════════════
@@ -1099,7 +1099,7 @@ describe("GlobalIndexVault — hardening pass", () => {
       vault,
       "ReservesOutstanding"
     );
-    await expect(vault.connect(alice).redeemProRata(50n * WAD, zeroOut(3))).to.not.be.reverted;
+    await expect(vault.connect(alice).redeemProRata(50n * WAD, zeroOut(3))).to.not.be.revert(ethers);
   });
 
   // ── Facet 3: the initial-seeding trust model ─────────────────────────

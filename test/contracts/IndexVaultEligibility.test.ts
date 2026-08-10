@@ -324,7 +324,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
       ]);
 
       // None of the four reverted the caller, and the vault is still usable.
-      await expect(vault.connect(alice).refreshEligibleCount()).to.not.be.reverted;
+      await expect(vault.connect(alice).refreshEligibleCount()).to.not.be.revert(ethers);
     });
 
     it("a HOSTILE constituent inside the basket cannot brick a whole-basket recount", async () => {
@@ -374,7 +374,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
 
       // The recount completes and the honest leg is still counted, despite the
       // hostile leg trying to consume the whole budget.
-      await expect(vault.connect(alice).refreshEligibleCount()).to.not.be.reverted;
+      await expect(vault.connect(alice).refreshEligibleCount()).to.not.be.revert(ethers);
       expect(await vault.eligibleConstituentCount()).to.equal(1n);
 
       // And the gas actually spent is bounded, not merely survivable.
@@ -723,7 +723,7 @@ describe("GlobalIndexVault — eligibility (Part A) and the dynamic HHI cap (Par
       // leg 0 leaves it at (1000 + x) / (6000 + x). At x = 1600 that is 34.2%
       // — over the dynamic 3333 and under the flat 4000.
       await expect(vault.connect(alice).mintSingleAsset(addrs[0], 1_600n * WAD, 0n)).to.not.be
-        .reverted;
+        .revert(ethers);
       expect(await vault.weightBps(addrs[0])).to.be.greaterThan(3_333n);
       expect(await vault.weightBps(addrs[0])).to.be.at.most(CONCENTRATION_CAP_BPS);
     });

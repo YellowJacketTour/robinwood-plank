@@ -219,7 +219,7 @@ describe("Phase 2 — predicate vaults (audit C-5)", () => {
         "NotEligible"
       );
       // and without S she cannot redeem the grail either
-      await expect(vault.connect(alice).redeem(GRAIL)).to.be.reverted;
+      await expect(vault.connect(alice).redeem(GRAIL)).to.be.revert(ethers);
       expect(await nft.ownerOf(GRAIL)).to.equal(vaultAddr);
     }
   });

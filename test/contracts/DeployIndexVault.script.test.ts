@@ -2,7 +2,7 @@ import { expect } from "chai";
 import { ethers } from "./helpers/hardhat.js";
 import { selectorsOf, facetSetHash } from "./helpers/diamond.js";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { INDEX_FACETS } = require("./helpers/index-vault") as typeof import("./helpers/index-vault");
+import { INDEX_FACETS } from "./helpers/index-vault.js";
 
 /**
  * ============================================================================
@@ -55,12 +55,13 @@ describe("deploy-index-vault script — faithful to IndexDeployer's proven seque
   });
 
   it("produces a diamond whose finalized state matches what IndexDeployer's own test suite proves", async () => {
-    // Fresh require so the module reads the env vars set in beforeEach rather
-    // than a cached module-level snapshot.
-    delete require.cache[require.resolve("../../scripts/deploy-index-vault")];
-    delete require.cache[require.resolve("../../scripts/config/index-vault-deploy-config")];
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { deployIndexVault } = require("../../scripts/deploy-index-vault") as typeof import("../../scripts/deploy-index-vault");
+    // No cache-busting needed under ESM: `process.env` is read INSIDE
+    // deployIndexVault()'s own call graph (scripts/config/index-vault-deploy-
+    // config.ts's helpers read it at call time, not at module load), so a
+    // plain dynamic import already picks up whatever beforeEach just set —
+    // there is no stale module-level snapshot to invalidate, unlike
+    // CommonJS's require.cache.
+    const { deployIndexVault } = await import("../../scripts/deploy-index-vault.js");
 
     const result = await deployIndexVault();
 
@@ -128,9 +129,7 @@ describe("deploy-index-vault script — faithful to IndexDeployer's proven seque
   });
 
   it("two independent script runs never collide — each produces its own diamond", async () => {
-    delete require.cache[require.resolve("../../scripts/deploy-index-vault")];
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { deployIndexVault } = require("../../scripts/deploy-index-vault") as typeof import("../../scripts/deploy-index-vault");
+    const { deployIndexVault } = await import("../../scripts/deploy-index-vault.js");
     const a = await deployIndexVault();
     const b = await deployIndexVault();
     expect(a.diamondAddress).to.not.equal(b.diamondAddress);

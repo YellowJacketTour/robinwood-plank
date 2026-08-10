@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers } from "./helpers/hardhat.js";
+import { ethers, artifacts } from "./helpers/hardhat.js";
 import { loadFixture } from "./helpers/network-helpers.js";
 import { deployIndexDiamond, combinedHandle ,
   fullInit} from "./helpers/diamond.js";
@@ -280,7 +280,7 @@ describe("Diamond storage namespaces", () => {
       // extends OZ's ERC20 or ReentrancyGuard and silently lands a balance
       // mapping on the diamond's slot 0.
       const facets = ["DiamondCutFacet", "DiamondLoupeFacet"];
-      const { execSync } = require("child_process");
+      const { execSync } = await import("node:child_process");
       void execSync;
 
       for (const name of facets) {
@@ -310,15 +310,31 @@ describe("Diamond storage namespaces", () => {
  * hardhat.config.ts enables for `contracts/diamond` and `contracts/test`.
  */
 async function storageLayoutOf(contractName: string): Promise<any[]> {
-  const { artifacts } = require("hardhat");
-  const fqn = (await artifacts.getAllFullyQualifiedNames()).find(
-    (n: string) => n.endsWith(`:${contractName}`)
+  // HH3's ArtifactManager returns a Set (not an array — no .filter/.find) from
+  // getAllFullyQualifiedNames(), and has no getBuildInfo(fqn) returning the
+  // parsed object directly: build info is now split into an ID plus a
+  // separate OUTPUT file path, read and parsed by hand.
+  const fqn = [...(await artifacts.getAllFullyQualifiedNames())].find((n: string) =>
+    n.endsWith(`:${contractName}`)
   );
   if (!fqn) throw new Error(`no artifact for ${contractName}`);
-  const buildInfo = await artifacts.getBuildInfo(fqn);
-  if (!buildInfo) throw new Error(`no build info for ${fqn}`);
+  const buildInfoId = await artifacts.getBuildInfoId(fqn);
+  if (!buildInfoId) throw new Error(`no build info id for ${fqn}`);
+  const outputPath = await artifacts.getBuildInfoOutputPath(buildInfoId);
+  if (!outputPath) throw new Error(`no build info output path for ${fqn}`);
+  const { readFile } = await import("node:fs/promises");
+  // The file at getBuildInfoOutputPath is a WRAPPER, not the raw solc output
+  // directly: `{ _format, id, output: { contracts, sources, ... } }`. The
+  // real per-file `contracts` map is one level deeper, at `.output.contracts`.
+  const wrapper = JSON.parse(await readFile(outputPath, "utf8"));
   const [source, name] = fqn.split(":");
-  const out = buildInfo.output.contracts[source][name] as any;
+  // The solc source-file KEYS in this wrapper carry an HH3 build-system root
+  // marker ("project/contracts/...") that the artifact-facing fqn does not,
+  // so an exact match on `source` fails — search by suffix instead, matching
+  // the same discipline already used to resolve `fqn` itself above.
+  const sourceKey = Object.keys(wrapper.output.contracts).find((k) => k.endsWith(source));
+  if (!sourceKey) throw new Error(`no output.contracts entry ending in ${source}`);
+  const out = wrapper.output.contracts[sourceKey][name] as any;
   if (!out.storageLayout) {
     throw new Error(
       `solc did not emit storageLayout for ${fqn} — the outputSelection in ` +

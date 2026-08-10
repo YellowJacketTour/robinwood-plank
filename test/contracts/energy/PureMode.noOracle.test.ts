@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers } from "../helpers/hardhat.js";
+import { ethers, artifacts } from "../helpers/hardhat.js";
 
 /**
  * ============================================================================
@@ -105,9 +105,12 @@ describe("PR11 — Pure-mode / no-oracle-on-energy-path regression (matrix §7 P
 
   /** Every top-level contract name this Hardhat project has compiled. */
   async function artifactAllNames(): Promise<string[]> {
-    const hardhatArtifacts = (await import("hardhat")).artifacts;
-    return hardhatArtifacts.getAllFullyQualifiedNames().then((all: string[]) =>
-      all.map((fq) => fq.split(":").pop()!)
-    );
+    // HH3's getAllFullyQualifiedNames() returns a ReadonlySet, not an array
+    // (no .map) — spread to an array first. `artifacts` also moved off the
+    // bare `hardhat` module default export onto the HRE itself; use the
+    // shared connection's `artifacts` re-export (./hardhat.js) rather than a
+    // second, independent `import("hardhat")`.
+    const all = [...(await artifacts.getAllFullyQualifiedNames())];
+    return all.map((fq) => fq.split(":").pop()!);
   }
 });

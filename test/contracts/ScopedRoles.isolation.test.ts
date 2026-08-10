@@ -521,7 +521,7 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       for (const caller of everyKey) {
         const call = (vault.connect(caller) as any)[entry.name](...entry.args);
         if (caller.address === entry.holder.address) {
-          await expect(call, `${entry.name} rejected its OWN role`).to.not.be.reverted;
+          await expect(call, `${entry.name} rejected its OWN role`).to.not.be.revert(ethers);
         } else {
           await expect(call, `${entry.name} accepted a foreign key`)
             .to.be.revertedWithCustomError(vault, "NotRoleHolder")
@@ -543,7 +543,7 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
           .to.be.revertedWithCustomError(vault, "NotRoleHolder")
           .withArgs(ROLE_RISK);
       }
-      await expect(vault.connect(risk).queueParam(b32(k), 1n), k).to.not.be.reverted;
+      await expect(vault.connect(risk).queueParam(b32(k), 1n), k).to.not.be.revert(ethers);
     }
 
     // ...and the one key that is NOT risk's is the operator-value one.
@@ -802,7 +802,7 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
 
     // Mid-timelock: the whole hostile slate is pending and none of it bites.
     const heldMid = await vault.balanceOf(alice.address);
-    await expect(vault.connect(alice).redeemProRata(100n * WAD, zeroOut(3))).to.not.be.reverted;
+    await expect(vault.connect(alice).redeemProRata(100n * WAD, zeroOut(3))).to.not.be.revert(ethers);
     expect(await vault.balanceOf(alice.address)).to.equal(heldMid - 100n * WAD);
 
     // 3. Now let EVERY queued hostile change actually land, and redeem again.
@@ -834,7 +834,7 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       "redemption stopped paying out"
     );
     const held = await vault.balanceOf(alice.address);
-    await expect(vault.connect(alice).redeemProRata(held, zeroOut(3))).to.not.be.reverted;
+    await expect(vault.connect(alice).redeemProRata(held, zeroOut(3))).to.not.be.revert(ethers);
     expect(await vault.balanceOf(alice.address)).to.equal(0n);
 
     // 5. And redeemProRata reads no role and no flag: it is reachable by an
@@ -891,7 +891,7 @@ describe("Scoped-capability roles — PlankGauge", () => {
       for (const caller of everyKey) {
         const call = (gauge.connect(caller) as any)[entry.name](...entry.args);
         if (caller.address === entry.holder.address) {
-          await expect(call, `${entry.name} rejected its OWN role`).to.not.be.reverted;
+          await expect(call, `${entry.name} rejected its OWN role`).to.not.be.revert(ethers);
         } else {
           await expect(call, `${entry.name} accepted a foreign key`)
             .to.be.revertedWithCustomError(gauge, "NotRoleHolder")

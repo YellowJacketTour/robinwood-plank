@@ -217,7 +217,7 @@ describe("HookRegistryFacet — the de-fanged observer hooks (design doc section
     await vault.connect(admission).queueListing(tokenAddr, await source.getAddress(), 1_000, false);
     await time.increase(48 * 3_600 + 1);
 
-    await expect(vault.executeListing(tokenAddr)).to.not.be.reverted;
+    await expect(vault.executeListing(tokenAddr)).to.not.be.revert(ethers);
 
     // The listing genuinely landed.
     const listed = await vault.listConstituents();

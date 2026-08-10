@@ -46,7 +46,7 @@ describe("Diamond fallback and the ETH prohibition", () => {
       const [sender] = await ethers.getSigners();
       await expect(
         sender.sendTransaction({ to: address, value: ethers.parseEther("1") })
-      ).to.be.reverted;
+      ).to.be.revert(ethers);
       expect(await ethers.provider.getBalance(address)).to.equal(0n);
     });
 
@@ -56,7 +56,7 @@ describe("Diamond fallback and the ETH prohibition", () => {
       const sel = (await selectorsOf("DiamondLoupeFacet"))[0];
       await expect(
         sender.sendTransaction({ to: address, data: sel, value: 1n })
-      ).to.be.reverted;
+      ).to.be.revert(ethers);
       expect(await ethers.provider.getBalance(address)).to.equal(0n);
     });
 
@@ -64,7 +64,7 @@ describe("Diamond fallback and the ETH prohibition", () => {
       const { address } = await loadFixture(fx);
       const [sender] = await ethers.getSigners();
       await expect(sender.sendTransaction({ to: address, data: "0x", value: 1n })).to.be
-        .reverted;
+        .revert(ethers);
     });
 
     it("the Diamond's compiled ABI contains neither a receive nor a payable fallback", async () => {
@@ -107,7 +107,7 @@ describe("Diamond fallback and the ETH prohibition", () => {
     it("empty calldata reverts", async () => {
       const { address } = await loadFixture(fx);
       const [caller] = await ethers.getSigners();
-      await expect(caller.sendTransaction({ to: address, data: "0x" })).to.be.reverted;
+      await expect(caller.sendTransaction({ to: address, data: "0x" })).to.be.revert(ethers);
     });
 
     it("a REMOVED selector behaves identically to one that never existed", async () => {

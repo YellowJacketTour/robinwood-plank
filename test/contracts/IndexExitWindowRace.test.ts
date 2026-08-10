@@ -246,7 +246,7 @@ describe("Index exit window — the stale-band race (round 10)", () => {
       fx.vault
         .connect(fx.risk)
         .queueParam(ethers.encodeBytes32String("exitWindowExtraCheckpoints"), 8n)
-    ).to.be.reverted;
+    ).to.be.revert(ethers);
 
     // And with every role key simultaneously hostile, the free exit is still
     // open to everyone, during the window, in one call.

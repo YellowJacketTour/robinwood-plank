@@ -207,7 +207,7 @@ describe("IndexZapFacet — single-asset zap-mint", () => {
     const aliceIdxBefore: bigint = await vault.balanceOf(alice.address);
     const aliceWethBefore: bigint = await weth.balanceOf(alice.address);
 
-    await expect(vault.connect(alice).zapMint(desiredSharesOut, tinyMaxPaymentIn)).to.be.reverted;
+    await expect(vault.connect(alice).zapMint(desiredSharesOut, tinyMaxPaymentIn)).to.be.revert(ethers);
 
     // Atomicity: not one wei moved, not one share minted.
     expect(await vault.balanceOf(alice.address)).to.equal(aliceIdxBefore);
@@ -234,7 +234,7 @@ describe("IndexZapFacet — single-asset zap-mint", () => {
     const aliceIdxBefore: bigint = await vault.balanceOf(alice.address);
     const aliceWethBefore: bigint = await weth.balanceOf(alice.address);
 
-    await expect(vault.connect(alice).zapMint(desiredSharesOut, hugeMaxPaymentIn)).to.be.reverted;
+    await expect(vault.connect(alice).zapMint(desiredSharesOut, hugeMaxPaymentIn)).to.be.revert(ethers);
 
     expect(await vault.balanceOf(alice.address)).to.equal(aliceIdxBefore);
     expect(await weth.balanceOf(alice.address)).to.equal(aliceWethBefore);

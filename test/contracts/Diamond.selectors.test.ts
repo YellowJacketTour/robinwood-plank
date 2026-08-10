@@ -184,7 +184,12 @@ describe("Diamond selector routing", () => {
         ],
         [],
         INIT,
-        ethers.ZeroHash
+        ethers.ZeroHash,
+        // Explicit gasLimit: this deploy is EXPECTED to revert, and Hardhat
+        // 3's automatic gas estimator throws directly on a reverting
+        // simulation rather than surfacing a normal rejected transaction —
+        // see Diamond.finalize.test.ts for the full explanation.
+        { gasLimit: 15_000_000 }
       )
     ).to.be.revertedWithCustomError(cut, "CannotAddSelectorThatAlreadyExists");
   });

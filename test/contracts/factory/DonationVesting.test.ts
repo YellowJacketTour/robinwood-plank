@@ -184,7 +184,7 @@ describe("Phase 4 — donation vesting + LP dwell (audit C-3)", () => {
     );
     // and permitted once the dwell is genuinely served
     await mine(MIN_DWELL);
-    await expect(vault.connect(attacker).removeLiquidity(lpBal, 0, 0)).to.not.be.reverted;
+    await expect(vault.connect(attacker).removeLiquidity(lpBal, 0, 0)).to.not.be.revert(ethers);
   });
 
   it("moving LP to a FRESH address does not launder the dwell clock", async () => {

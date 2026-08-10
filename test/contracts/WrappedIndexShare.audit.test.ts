@@ -353,7 +353,7 @@ describe("WrappedIndexShare — opt-in composability wrapper (wIDX)", () => {
     expect((await fx.div.balanceOf(fx.alice.address)) - d0).to.equal(expDiv);
 
     // Cannot burn more than you hold.
-    await expect(fx.wrapper.connect(fx.alice).withdraw(supply)).to.be.reverted;
+    await expect(fx.wrapper.connect(fx.alice).withdraw(supply)).to.be.revert(ethers);
     await expect(fx.wrapper.connect(fx.alice).withdraw(0n)).to.be.revertedWithCustomError(
       fx.wrapper,
       "ZeroAmount"
@@ -365,13 +365,13 @@ describe("WrappedIndexShare — opt-in composability wrapper (wIDX)", () => {
   it("harvest() is a clean no-op when there is nothing to claim, however often it is called", async () => {
     const fx = await fixture();
     // Empty wrapper, no position at all.
-    await expect(fx.wrapper.connect(fx.bob).harvest()).to.not.be.reverted;
+    await expect(fx.wrapper.connect(fx.bob).harvest()).to.not.be.revert(ethers);
 
     await mint(fx, fx.alice, E("1000"));
     await mint(fx, fx.carol, E("1000"));
     await fx.wrapper.connect(fx.alice).deposit(E("1000"));
 
-    await expect(fx.wrapper.connect(fx.bob).harvest()).to.not.be.reverted;
+    await expect(fx.wrapper.connect(fx.bob).harvest()).to.not.be.revert(ethers);
     expect(await fx.wrapper.dividendAssetHeld()).to.equal(0n);
 
     await push(fx, fx.carol, E("50"));

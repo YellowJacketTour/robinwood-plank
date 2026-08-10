@@ -199,8 +199,8 @@ describe("GlobalIndexVault — on-chain dividend accrual (no staking)", () => {
     expect(aliceFinal + bobFinal).to.be.lessThanOrEqual(E("20"));
 
     // Both are really payable, simultaneously, from a pot that holds both.
-    await expect(fx.vault.connect(fx.alice).claimDividend()).to.not.be.reverted;
-    await expect(fx.vault.connect(fx.bob).claimDividend()).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.alice).claimDividend()).to.not.be.revert(ethers);
+    await expect(fx.vault.connect(fx.bob).claimDividend()).to.not.be.revert(ethers);
     expect(await fx.vault.withdrawableDividendOf(fx.alice.address)).to.equal(0n);
     expect(await fx.vault.withdrawableDividendOf(fx.bob.address)).to.equal(0n);
   });
@@ -230,7 +230,7 @@ describe("GlobalIndexVault — on-chain dividend accrual (no staking)", () => {
     const mid: bigint = await fx.tokens[0].balanceOf(fx.alice.address);
     // A second claim pays zero and does NOT revert — paying zero is a
     // successful transaction, not an error.
-    await expect(fx.vault.connect(fx.alice).claimDividend()).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.alice).claimDividend()).to.not.be.revert(ethers);
     expect(await fx.tokens[0].balanceOf(fx.alice.address)).to.equal(mid);
 
     // A later push is still earned normally on top of the claimed amount.
@@ -280,12 +280,12 @@ describe("GlobalIndexVault — on-chain dividend accrual (no staking)", () => {
     // after a second push she is entitled to nothing from.
     await expect(
       fx.vault.connect(fx.alice).redeemProRata(await fx.vault.balanceOf(fx.alice.address), [0n, 0n, 0n])
-    ).to.not.be.reverted;
+    ).to.not.be.revert(ethers);
     await push(fx, fx.carol, E("50"));
     await mint(fx, fx.alice, E("10"));
     await expect(
       fx.vault.connect(fx.alice).redeemProRata(await fx.vault.balanceOf(fx.alice.address), [0n, 0n, 0n])
-    ).to.not.be.reverted;
+    ).to.not.be.revert(ethers);
   });
 
   it("REGRESSION: the hook's gas cost on redeemProRata is a disclosed, bounded number", async () => {
@@ -434,16 +434,16 @@ describe("GlobalIndexVault — on-chain dividend accrual (no staking)", () => {
         ethers.encodeBytes32String("dividendAsset"),
         fx.addrs[1]
       )
-    ).to.be.reverted;
+    ).to.be.revert(ethers);
 
     // And transfers keep working under every shape, including to and from
     // addresses that have never interacted with the vault.
     const stranger = ethers.Wallet.createRandom().address;
-    await expect(fx.vault.connect(fx.alice).transfer(stranger, E("1"))).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.alice).transfer(stranger, E("1"))).to.not.be.revert(ethers);
     await expect(fx.vault.connect(fx.alice).transfer(fx.bob.address, E("1"))).to.not.be
-      .reverted;
+      .revert(ethers);
     await expect(fx.vault.connect(fx.bob).transfer(fx.alice.address, E("1"))).to.not.be
-      .reverted;
+      .revert(ethers);
   });
 
   it("GAS: the hook's overhead on a plain share transfer is measured and disclosed", async () => {
@@ -486,7 +486,7 @@ describe("GlobalIndexVault — on-chain dividend accrual (no staking)", () => {
     ).to.equal(false);
     await expect(
       fx.alice.sendTransaction({ to: fx.vaultAddr, value: E("1") })
-    ).to.be.reverted;
+    ).to.be.revert(ethers);
   });
 
   it("dividends are INERT when no dividend asset was set at construction", async () => {
@@ -508,7 +508,7 @@ describe("GlobalIndexVault — on-chain dividend accrual (no staking)", () => {
       "BadParam"
     );
     // Claiming is still a successful no-op rather than a revert.
-    await expect(vault.connect(alice).claimDividend()).to.not.be.reverted;
+    await expect(vault.connect(alice).claimDividend()).to.not.be.revert(ethers);
   });
 
   it("pushing zero is refused, and the credited amount is the ACTUAL delta", async () => {

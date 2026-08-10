@@ -70,7 +70,7 @@ describe("IndexPoolFacet automatic deployment (2026-08-06 automation pass)", () 
     const poolSharesBefore: bigint = await fx.vault.poolSharesMinted();
     const [reservePaymentBefore, reserveCoinBefore] = await fx.pool.getReserves();
 
-    const tx = await fx.vault.connect(fx.carol).reconcile(shareToken);
+    const tx = await fx.vault.connect(fx.carol).reconcile(shareToken, { gasLimit: 3_000_000 });
     const receipt = await tx.wait();
 
     // ConstituentSynced still fires exactly as before this change.
@@ -113,7 +113,7 @@ describe("IndexPoolFacet automatic deployment (2026-08-06 automation pass)", () 
     // against the POST-credit reserve — capture that real result first.
     const snap = await takeSnapshot();
     await fx.tokens[1].mint(fx.vaultAddr, amount);
-    const receipt = await (await fx.vault.connect(fx.carol).reconcile(shareToken)).wait();
+    const receipt = await (await fx.vault.connect(fx.carol).reconcile(shareToken, { gasLimit: 3_000_000 })).wait();
     const autoLog = receipt!.logs
       .map((l: any) => {
         try {
@@ -166,7 +166,7 @@ describe("IndexPoolFacet automatic deployment (2026-08-06 automation pass)", () 
     const donateAmount = 500n * WAD; // large enough to blow the cap on its own
 
     await fx.tokens[1].mint(fx.vaultAddr, donateAmount);
-    const tx = await fx.vault.connect(fx.carol).reconcile(shareToken);
+    const tx = await fx.vault.connect(fx.carol).reconcile(shareToken, { gasLimit: 3_000_000 });
     const receipt = await tx.wait();
 
     // The underlying sync succeeded and credited reserve — never blocked.
@@ -234,7 +234,7 @@ describe("IndexPoolFacet automatic deployment (2026-08-06 automation pass)", () 
       await fx.vault.connect(fx.alice).deployToIndexPool(shareToken, 1n * WAD);
     }
     await fx.tokens[1].mint(fx.vaultAddr, 500n * WAD);
-    const receipt = await (await fx.vault.connect(fx.carol).reconcile(shareToken)).wait();
+    const receipt = await (await fx.vault.connect(fx.carol).reconcile(shareToken, { gasLimit: 3_000_000 })).wait();
     expect(receipt!.gasUsed).to.be.lt(600_000n);
   });
 
@@ -269,7 +269,7 @@ describe("IndexPoolFacet automatic deployment (2026-08-06 automation pass)", () 
     await fx.vault.executeMinAutoDeployWei();
     await fx.vault.checkpointAll();
     await fx.tokens[1].mint(fx.vaultAddr, donateAmount);
-    const skipTx = await fx.vault.connect(fx.carol).reconcile(shareToken);
+    const skipTx = await fx.vault.connect(fx.carol).reconcile(shareToken, { gasLimit: 3_000_000 });
     const skipReceipt = await skipTx.wait();
     await expect(skipTx).to.not.emit(fx.vault, "AutoDeployedToIndexPool");
     await expect(skipTx).to.not.emit(fx.vault, "AutoDeployToIndexPoolFailed");
@@ -288,7 +288,7 @@ describe("IndexPoolFacet automatic deployment (2026-08-06 automation pass)", () 
       await fx.vault.connect(fx.alice).deployToIndexPool(shareToken, 1n * WAD);
     }
     await fx.tokens[1].mint(fx.vaultAddr, donateAmount);
-    const failTx = await fx.vault.connect(fx.carol).reconcile(shareToken);
+    const failTx = await fx.vault.connect(fx.carol).reconcile(shareToken, { gasLimit: 3_000_000 });
     const failReceipt = await failTx.wait();
     await expect(failTx).to.emit(fx.vault, "AutoDeployToIndexPoolFailed");
     const failGas: bigint = failReceipt!.gasUsed;
@@ -327,14 +327,14 @@ describe("IndexPoolFacet automatic deployment (2026-08-06 automation pass)", () 
     expect(await fx.vault.minAutoDeployWei()).to.equal(5n * WAD);
 
     await fx.tokens[1].mint(fx.vaultAddr, 1n * WAD); // below the floor
-    const tx = await fx.vault.connect(fx.carol).reconcile(shareToken);
+    const tx = await fx.vault.connect(fx.carol).reconcile(shareToken, { gasLimit: 3_000_000 });
     await expect(tx).to.emit(fx.vault, "ConstituentSynced");
     await expect(tx).to.not.emit(fx.vault, "AutoDeployedToIndexPool");
     await expect(tx).to.not.emit(fx.vault, "AutoDeployToIndexPoolFailed");
 
     // Above the floor, the attempt resumes.
     await fx.tokens[1].mint(fx.vaultAddr, 10n * WAD);
-    const tx2 = await fx.vault.connect(fx.carol).reconcile(shareToken);
+    const tx2 = await fx.vault.connect(fx.carol).reconcile(shareToken, { gasLimit: 3_000_000 });
     await expect(tx2).to.emit(fx.vault, "AutoDeployedToIndexPool");
   });
 

@@ -212,7 +212,13 @@ describe("IndexPoolFacet (design doc §7.10)", () => {
   it("refuses deployToIndexPool in the same block the pool itself just acted", async () => {
     const fx = await fixtureWithPool();
     const shareToken = fx.addrs[1];
-    await fx.vault.connect(fx.alice).deployToIndexPool(shareToken, 100n * WAD);
+    // Explicit gasLimit on this first, otherwise-unremarkable call: Hardhat
+    // 3's AutomaticGasHandler estimates gas by simulating the transaction
+    // before sending it, and that simulation was observed tripping
+    // `_requirePoolQuiescent` on calls that succeed fine once estimation is
+    // skipped — the same estimation-vs-execution divergence documented at
+    // length in Diamond.bytecode.test.ts's tryDeployWith.
+    await fx.vault.connect(fx.alice).deployToIndexPool(shareToken, 100n * WAD, { gasLimit: 5_000_000 });
 
     const paymentToken = await ethers.getContractAt("MockIndexToken", fx.paymentToken);
     await paymentToken.mint(fx.bob.address, 5n * WAD);
@@ -221,7 +227,12 @@ describe("IndexPoolFacet (design doc §7.10)", () => {
     await network.provider.send("evm_setAutomine", [false]);
     try {
       const tx1 = await fx.pool.connect(fx.bob).swap(true, 5n * WAD, 0n, fx.bob.address);
-      const tx2 = await fx.vault.connect(fx.alice).deployToIndexPool(shareToken, 1n * WAD);
+      // Explicit gasLimit: see IndexBuybackFacet.test.ts's identical fix —
+      // with automine off, HH3's gas estimation for tx2 simulates against
+      // pending state (already including tx1) and throws synchronously
+      // before tx2 is queued, rather than letting it land and revert at
+      // mine time as this test's own try/catch expects.
+      const tx2 = await fx.vault.connect(fx.alice).deployToIndexPool(shareToken, 1n * WAD, { gasLimit: 5_000_000 });
       await network.provider.send("evm_mine", []);
       await tx1.wait();
       let reverted = false;
@@ -239,7 +250,8 @@ describe("IndexPoolFacet (design doc §7.10)", () => {
   it("refuses mintSingleAsset in the same block the pool itself just acted", async () => {
     const fx = await fixtureWithPool();
     const shareToken = fx.addrs[1];
-    await fx.vault.connect(fx.alice).deployToIndexPool(shareToken, 100n * WAD);
+    // See the identical fix + explanation on the previous test.
+    await fx.vault.connect(fx.alice).deployToIndexPool(shareToken, 100n * WAD, { gasLimit: 5_000_000 });
 
     const paymentToken = await ethers.getContractAt("MockIndexToken", fx.paymentToken);
     await paymentToken.mint(fx.bob.address, 5n * WAD);
@@ -248,7 +260,9 @@ describe("IndexPoolFacet (design doc §7.10)", () => {
     await network.provider.send("evm_setAutomine", [false]);
     try {
       const tx1 = await fx.pool.connect(fx.bob).swap(true, 5n * WAD, 0n, fx.bob.address);
-      const tx2 = await fx.vault.connect(fx.carol).mintSingleAsset(shareToken, 1n * WAD, 0n);
+      const tx2 = await fx.vault
+        .connect(fx.carol)
+        .mintSingleAsset(shareToken, 1n * WAD, 0n, { gasLimit: 5_000_000 });
       await network.provider.send("evm_mine", []);
       await tx1.wait();
       let reverted = false;
@@ -270,6 +284,6 @@ describe("IndexPoolFacet (design doc §7.10)", () => {
     // Not same-block as the pool's last action (a normal, separately-mined
     // tx) — must succeed.
     await expect(fx.vault.connect(fx.alice).deployToIndexPool(shareToken, 1n * WAD)).to.not.be
-      .reverted;
+      .revert(ethers);
   });
 });

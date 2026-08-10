@@ -230,7 +230,7 @@ describe("GlobalIndexVault — intent/front-running surface (§4, §5.4)", () =>
     // Exact-equality slippage bound: if any second step existed between the
     // quote and the fill, this bound would be unsatisfiable.
     await expect(vault.connect(alice).redeemSingleAsset(120n * WAD, addrs[0], quoted)).to.not
-      .be.reverted;
+      .be.revert(ethers);
   });
 
   // ══ 3/4. Sandwiches, both orientations, driven and measured ═════════════
@@ -357,7 +357,7 @@ describe("GlobalIndexVault — intent/front-running surface (§4, §5.4)", () =>
     await vault.connect(alice).redeemSingleAsset(gained, addrs[0], 0n);
 
     // The bystander's exit is untouched by any of it.
-    await expect(vault.connect(carol).redeemProRata(300n * WAD, zeroOut(3))).to.not.be.reverted;
+    await expect(vault.connect(carol).redeemProRata(300n * WAD, zeroOut(3))).to.not.be.revert(ethers);
     expect(await vault.balanceOf(carol.address)).to.equal(0n);
   });
 
@@ -369,14 +369,14 @@ describe("GlobalIndexVault — intent/front-running surface (§4, §5.4)", () =>
     // Let every observation rot far past staleAfter and never checkpoint again.
     // A priced path must now refuse to quote...
     await time.increase(STALE_AFTER * 10);
-    await expect(vault.connect(alice).mintSingleAsset(fx.addrs[0], WAD, 0n)).to.be.reverted;
+    await expect(vault.connect(alice).mintSingleAsset(fx.addrs[0], WAD, 0n)).to.be.revert(ethers);
 
     // ...while the exit door does not consult a price anywhere in its path,
     // and therefore cannot be jammed by one. THIS is the property an
     // intent/settlement leg would have destroyed: a settlement step that can
     // expire or fail is a step that can sit between a holder and their assets.
     const before = await reservesOf(fx);
-    await expect(vault.connect(alice).redeemProRata(250n * WAD, zeroOut(3))).to.not.be.reverted;
+    await expect(vault.connect(alice).redeemProRata(250n * WAD, zeroOut(3))).to.not.be.revert(ethers);
     const after = await reservesOf(fx);
     for (let i = 0; i < 3; i++) expect(after[i]).to.be.lt(before[i], `leg ${i} paid nothing`);
     expect(await vault.balanceOf(alice.address)).to.equal(0n);
@@ -396,7 +396,7 @@ describe("GlobalIndexVault — intent/front-running surface (§4, §5.4)", () =>
     }
     await vault.connect(bob).mintSingleAsset(addrs[1], 30n * WAD, 0n);
 
-    await expect(vault.connect(alice).redeemProRata(200n * WAD, zeroOut(3))).to.not.be.reverted;
+    await expect(vault.connect(alice).redeemProRata(200n * WAD, zeroOut(3))).to.not.be.revert(ethers);
     expect(await vault.balanceOf(alice.address)).to.equal(0n);
   });
 });

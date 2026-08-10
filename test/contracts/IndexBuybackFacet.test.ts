@@ -134,7 +134,7 @@ describe("IndexBuybackFacet (design doc §7.7)", () => {
   it("is permissionless — any caller may trigger it, nobody chooses the destination", async () => {
     const fx = await fixtureWithBuyback();
     const earmark: bigint = await fx.vault.buybackEarmarkAvailable();
-    await expect(fx.vault.connect(fx.bob).executeBuyback(earmark / 4n, 0n)).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.bob).executeBuyback(earmark / 4n, 0n)).to.not.be.revert(ethers);
   });
 
   // ══ 2. Bought coin is locked and provably unredeemable ═══════════════════
@@ -212,7 +212,7 @@ describe("IndexBuybackFacet (design doc §7.7)", () => {
     // persistence guard (a separate, already-covered concern).
     const redeemAmt = lockBal < WAD / 100n ? lockBal : WAD / 100n;
     const preview: bigint = await fx.vault.previewRedeemSingleAsset(redeemAmt, shareToken);
-    await expect(fx.vault.connect(deadSigner).redeemSingleAsset(redeemAmt, shareToken, 0n)).to.not.be.reverted;
+    await expect(fx.vault.connect(deadSigner).redeemSingleAsset(redeemAmt, shareToken, 0n)).to.not.be.revert(ethers);
 
     // What actually protects the coin in production is that nobody holds
     // this address's private key — this call only succeeds here because
@@ -307,7 +307,15 @@ describe("IndexBuybackFacet (design doc §7.7)", () => {
       // SAME block — the exact atomic-composition shape §7.7's guard has to
       // close.
       const tx1 = await fx.pool.connect(fx.bob).swap(true, 20n * WAD, 0n, fx.bob.address);
-      const tx2 = await fx.vault.connect(fx.carol).executeBuyback(earmark / 4n, 0n);
+      // Explicit gasLimit on tx2, deliberately. With automine off, Hardhat
+      // 3's automatic gas estimation for tx2 simulates against PENDING state
+      // — which already includes tx1's not-yet-mined effect — and correctly
+      // predicts tx2 will revert. Under HH3 that makes the SEND itself throw
+      // synchronously, before tx2 is ever queued, so it never reaches the
+      // `.wait()` below where this test means to observe the revert. A
+      // manual gasLimit skips estimation, restoring the intended "both land
+      // in the same block, then mine and check which one reverted" shape.
+      const tx2 = await fx.vault.connect(fx.carol).executeBuyback(earmark / 4n, 0n, { gasLimit: 5_000_000 });
       await network.provider.send("evm_mine", []);
       await tx1.wait();
       let reverted = false;
@@ -325,10 +333,10 @@ describe("IndexBuybackFacet (design doc §7.7)", () => {
   it("allows a buyback again once a block has passed with no intervening pool action", async () => {
     const fx = await fixtureWithBuyback();
     const earmark: bigint = await fx.vault.buybackEarmarkAvailable();
-    await expect(fx.vault.connect(fx.carol).executeBuyback(earmark / 4n, 0n)).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.carol).executeBuyback(earmark / 4n, 0n)).to.not.be.revert(ethers);
     // Not same-block as the pool's last action (a normal, separately-mined
     // tx) — must succeed again.
-    await expect(fx.vault.connect(fx.carol).executeBuyback(earmark / 4n, 0n)).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.carol).executeBuyback(earmark / 4n, 0n)).to.not.be.revert(ethers);
   });
 
   it("refuses executeBuyback with no pool configured", async () => {

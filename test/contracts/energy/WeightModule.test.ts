@@ -128,7 +128,7 @@ describe("WeightModule — multi-signal + admit/cap/decay (PR1)", () => {
     );
 
     await weightModule.connect(vaultA).noteFee(vaultA.address, 2n); // now >= F_MIN_WEI
-    await expect(weightModule.checkAdmit(vaultA.address)).to.not.be.reverted;
+    await expect(weightModule.checkAdmit(vaultA.address)).to.not.be.revert(ethers);
     expect(await weightModule.isAdmitted(vaultA.address)).to.equal(true);
   });
 

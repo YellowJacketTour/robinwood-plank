@@ -256,7 +256,7 @@ describe("IndexDevFundFacet (design doc §7.11)", () => {
   it("a zero-configured dev fund (the default) is a no-op — mint behaves exactly as before §7.11", async () => {
     const fx = await deployOpenIndex();
     const shareToken = fx.addrs[1];
-    await expect(fx.vault.connect(fx.alice).mintSingleAsset(shareToken, 10n * WAD, 0n)).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.alice).mintSingleAsset(shareToken, 10n * WAD, 0n)).to.not.be.revert(ethers);
     // No router configured, so nothing to check balances against — the
     // absence of a revert, combined with `devFundBps() == 0` below, IS the
     // no-op proof (see DevFundStorage's own header: zero-default is opt-in).
@@ -422,7 +422,7 @@ describe("IndexDevFundFacet (design doc §7.11)", () => {
     await setBps(fx, bps);
 
     const sharesOut = 200n * WAD;
-    await expect(fx.vault.connect(fx.alice).mintProRata(sharesOut, maxIn(3))).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.alice).mintProRata(sharesOut, maxIn(3))).to.not.be.revert(ethers);
     expect(await fx.vault.balanceOf(fx.alice.address)).to.be.gte(sharesOut);
   });
 

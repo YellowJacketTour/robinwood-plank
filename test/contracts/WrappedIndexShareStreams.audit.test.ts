@@ -425,7 +425,7 @@ describe("WrappedIndexShare — N-asset reward streams (round 9d)", () => {
 
     // THE TEST: the withdrawal must still succeed, and must still deliver
     // everything that is NOT restricted.
-    await expect(fx.wrapper.connect(fx.alice).withdraw(all)).to.not.be.reverted;
+    await expect(fx.wrapper.connect(fx.alice).withdraw(all)).to.not.be.revert(ethers);
 
     expect((await fx.vault.balanceOf(fx.alice.address)) - rawBefore).to.equal(
       owed[fx.vaultAddr.toLowerCase()]
@@ -445,7 +445,7 @@ describe("WrappedIndexShare — N-asset reward streams (round 9d)", () => {
     expect(await fx.wrapper.streamHeld(rAddr)).to.equal(E("500") - expectedRwa);
 
     // Retrying while still restricted fails loudly and changes nothing.
-    await expect(fx.wrapper.connect(fx.alice).claimPending(rAddr)).to.be.reverted;
+    await expect(fx.wrapper.connect(fx.alice).claimPending(rAddr)).to.be.revert(ethers);
     expect(await fx.wrapper.pendingClaim(fx.alice.address, rAddr)).to.equal(expectedRwa);
 
     // The batch form is tolerant instead: it settles what it can and leaves
@@ -495,7 +495,7 @@ describe("WrappedIndexShare — N-asset reward streams (round 9d)", () => {
       await fx.wrapper.pendingClaim(fx.alice.address, rAddr)
     );
     await rwa.setBlocked(fx.alice.address, false);
-    await expect(fx.wrapper.connect(fx.alice).claimPending(rAddr)).to.not.be.reverted;
+    await expect(fx.wrapper.connect(fx.alice).claimPending(rAddr)).to.not.be.revert(ethers);
     expect(await rwa.balanceOf(fx.alice.address)).to.equal(aliceOwed);
   });
 
@@ -533,8 +533,8 @@ describe("WrappedIndexShare — N-asset reward streams (round 9d)", () => {
     // (a) the core mechanism is untouched — deposit and harvest never read a
     //     stream at all.
     await push(fx, fx.carol, E("50"));
-    await expect(fx.wrapper.connect(fx.stranger).harvest()).to.not.be.reverted;
-    await expect(fx.wrapper.connect(fx.bob).deposit(E("1"))).to.not.be.reverted;
+    await expect(fx.wrapper.connect(fx.stranger).harvest()).to.not.be.revert(ethers);
+    await expect(fx.wrapper.connect(fx.bob).deposit(E("1"))).to.not.be.revert(ethers);
 
     // (b) pricing views do not revert; the broken stream reads as empty.
     expect(await fx.wrapper.streamHeld(hAddr)).to.equal(0n);
@@ -548,7 +548,7 @@ describe("WrappedIndexShare — N-asset reward streams (round 9d)", () => {
     const divBefore = await fx.div.balanceOf(fx.alice.address);
     await expect(
       fx.wrapper.connect(fx.alice).withdraw(await fx.wrapper.balanceOf(fx.alice.address))
-    ).to.not.be.reverted;
+    ).to.not.be.revert(ethers);
 
     expect((await fx.vault.balanceOf(fx.alice.address)) - rawBefore).to.equal(
       owed[fx.vaultAddr.toLowerCase()]
@@ -568,7 +568,7 @@ describe("WrappedIndexShare — N-asset reward streams (round 9d)", () => {
     // (d) and Bob, a completely different user, is equally unaffected.
     await expect(
       fx.wrapper.connect(fx.bob).withdraw(await fx.wrapper.balanceOf(fx.bob.address))
-    ).to.not.be.reverted;
+    ).to.not.be.revert(ethers);
     expect(await good.balanceOf(fx.bob.address)).to.be.gt(0n);
 
     // (e) the stuck stream can be delisted and pruned, and everyone else's

@@ -235,7 +235,7 @@ describe("AXIOM-1 Adversary scenarios (PR11, matrix §6)", () => {
     await fx.cVault.connect(fx.attacker).buyShares(attackAmount, 0n);
     const sHeld: bigint = await fx.cVault.balanceOf(fx.attacker.address);
 
-    await expect(fx.bus.route()).to.not.be.reverted;
+    await expect(fx.bus.route()).to.not.be.revert(ethers);
 
     await fx.cVault.connect(fx.attacker).sellShares(sHeld, 0n);
     const endWeth: bigint = await fx.weth.balanceOf(fx.attacker.address);
@@ -277,7 +277,7 @@ describe("AXIOM-1 Adversary scenarios (PR11, matrix §6)", () => {
     // perspective.
     const total = ethers.parseEther("2");
     await fx.weth.mint(fx.busAddr, total);
-    await expect(fx.bus.route()).to.not.be.reverted;
+    await expect(fx.bus.route()).to.not.be.revert(ethers);
 
     const reconcileNeeded: bigint = await fx.index.reconcile.staticCall(fx.vaultAddr);
     if (reconcileNeeded > 0n) {
@@ -328,7 +328,7 @@ describe("AXIOM-1 Adversary scenarios (PR11, matrix §6)", () => {
     // A permissionless reconcile picks up the surplus, but it lands via the
     // SAME governed three-way split every other routed value uses — it
     // never mints a share to anyone, donor included.
-    await expect(fx.vault.reconcile(weth)).to.not.be.reverted;
+    await expect(fx.vault.reconcile(weth)).to.not.be.revert(ethers);
     const supplyAfter: bigint = await fx.vault.totalSupply();
     expect(supplyAfter).to.equal(supplyBefore);
     expect(await fx.vault.balanceOf(fx.bob.address)).to.equal(0n);
@@ -354,7 +354,7 @@ describe("AXIOM-1 Adversary scenarios (PR11, matrix §6)", () => {
     const total = ethers.parseEther("1");
     await fx.weth.mint(fx.busAddr, total);
 
-    await expect(fx.bus.route()).to.not.be.reverted;
+    await expect(fx.bus.route()).to.not.be.revert(ethers);
 
     // route() only ever drained its own immutable `weth` — the foreign
     // token's balance at the Bus is completely untouched, proving the split
@@ -442,7 +442,7 @@ describe("AXIOM-1 Adversary scenarios (PR11, matrix §6)", () => {
     // transaction fully committed (`receipt.status == 1`, asserted above),
     // and `creditInventory` itself remains callable afterwards from the
     // real, correctly-wired `energyBus` signer.
-    await expect(fx.vault.connect(fx.bob).creditInventory(token, 0n)).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.bob).creditInventory(token, 0n)).to.not.be.revert(ethers);
   });
 
   // ══ ADV-6: Admin after finalize tries pipe change — revert ══════════════
@@ -504,8 +504,8 @@ describe("AXIOM-1 Adversary scenarios (PR11, matrix §6)", () => {
     // this exercises a fresh NFT alice still fully controls.)
     await fx.nft.mint(fx.alice.address, 999);
     await fx.nft.connect(fx.alice).approve(fx.vaultAddr, 999);
-    await expect(fx.cVault.connect(fx.alice).deposit(999)).to.not.be.reverted;
-    await expect(fx.cVault.connect(fx.alice).redeem(999)).to.not.be.reverted;
+    await expect(fx.cVault.connect(fx.alice).deposit(999)).to.not.be.revert(ethers);
+    await expect(fx.cVault.connect(fx.alice).redeem(999)).to.not.be.revert(ethers);
 
     // Exit path 2: index mintProRata + redeemProRata still work end to end —
     // pro-rata exit (INV-1) is never gated on the Bus's own liveness. Mint a
@@ -514,11 +514,11 @@ describe("AXIOM-1 Adversary scenarios (PR11, matrix §6)", () => {
     const remainingSBal: bigint = await fx.cVault.balanceOf(fx.alice.address);
     expect(remainingSBal).to.be.gt(0n);
     await fx.cVault.connect(fx.alice).approve(fx.indexAddr, ethers.MaxUint256);
-    await expect(fx.index.connect(fx.alice).mintProRata(5n * WAD, maxIn(1))).to.not.be.reverted;
+    await expect(fx.index.connect(fx.alice).mintProRata(5n * WAD, maxIn(1))).to.not.be.revert(ethers);
 
     const aliceIdxBal: bigint = await fx.index.balanceOf(fx.alice.address);
     expect(aliceIdxBal).to.be.gt(0n);
-    await expect(fx.index.connect(fx.alice).redeemProRata(aliceIdxBal / 2n, [0n])).to.not.be.reverted;
+    await expect(fx.index.connect(fx.alice).redeemProRata(aliceIdxBal / 2n, [0n])).to.not.be.revert(ethers);
   });
 
   // ══ ADV-8: Malicious adapter in pre-finalize — only allowlisted ═════════
@@ -563,7 +563,7 @@ describe("AXIOM-1 Adversary scenarios (PR11, matrix §6)", () => {
     // allowance the Bus grants any adapter is (and stays) zero, before and
     // after route().
     expect(await weth.allowance(busAddr, await hostile.getAddress())).to.equal(0n);
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
     expect(await weth.allowance(busAddr, await hostile.getAddress())).to.equal(0n);
 
     // The hostile adapter received EXACTLY its 35% slice, never more —
@@ -621,7 +621,7 @@ describe("AXIOM-1 Adversary scenarios (PR11, matrix §6)", () => {
     // (it was never given a PLANK address to even look at).
     const total = ethers.parseEther("2");
     await fx.weth.mint(fx.busAddr, total);
-    await expect(fx.bus.route()).to.not.be.reverted;
+    await expect(fx.bus.route()).to.not.be.revert(ethers);
 
     // The only constituent ever listed on this index is the real vault's
     // own S — confirmed by requesting its listing view and observing no

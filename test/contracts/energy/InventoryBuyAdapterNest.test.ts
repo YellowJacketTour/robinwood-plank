@@ -289,7 +289,7 @@ describe("InventoryBuyAdapter + IndexEnergyFacet — NEST-1 (PR5, corrected sing
 
     const sReserveAtIndexBefore: bigint = await vault.balanceOf(indexAddr);
 
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
 
     // Pipe I bought vault S directly with its slice of the routed WETH,
     // transferred it STRAIGHT to the index Diamond (no intermediate wrap),

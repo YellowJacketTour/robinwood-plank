@@ -118,7 +118,7 @@ describe("CollectionVault native community LP (DESIGN-COLLECTION-VAULT-NATIVE-LP
     // move floor reserves — removeLiquidity — reverts on treasury's own
     // zero LP balance (ERC20's own insufficient-balance check inside
     // `lpToken.burn`).
-    await expect(vault.connect(treasury).removeLiquidity(1n, 0, 0)).to.be.reverted;
+    await expect(vault.connect(treasury).removeLiquidity(1n, 0, 0)).to.be.revert(ethers);
   });
 
   it("no admin/governance function in the vault's ABI can move or burn another holder's LP position", async () => {
@@ -315,7 +315,7 @@ describe("CollectionVault native community LP (DESIGN-COLLECTION-VAULT-NATIVE-LP
     const inNet = (netIn * (BPS - swapFeeBps)) / BPS;
     const expectedSharesOut = (inNet * shareReserveBefore) / (paymentReserveBefore + inNet);
 
-    await expect(invAdapter.connect(busSigner).execute(budget)).to.not.be.reverted;
+    await expect(invAdapter.connect(busSigner).execute(budget)).to.not.be.revert(ethers);
 
     const sAtIndex = await vault.balanceOf(indexStandInAddr);
     expect(sAtIndex).to.equal(expectedSharesOut);

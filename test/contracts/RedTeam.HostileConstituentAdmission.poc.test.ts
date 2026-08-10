@@ -135,7 +135,7 @@ describe("RED TEAM (inverted) — a hostile constituent admission is now rejecte
 
     await vault.connect(admission).queueListing(good.addr, await good.source.getAddress(), 1_000, false);
     await time.increase(TIMELOCK + 1);
-    await expect(vault.executeListing(good.addr)).to.not.be.reverted;
+    await expect(vault.executeListing(good.addr)).to.not.be.revert(ethers);
 
     const listed: string[] = await vault.listConstituents();
     expect(listed.map((a) => a.toLowerCase())).to.include(good.addr.toLowerCase());

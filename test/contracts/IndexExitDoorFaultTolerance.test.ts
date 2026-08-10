@@ -145,7 +145,7 @@ describe("Index exit door — fault-tolerant redemption (round 10)", () => {
     // While still blocked, a retry FAILS LOUDLY and leaves the credit intact.
     // (That is the deliberate difference from the tolerant batch form: a
     // deliberate retry must tell the caller whether it worked.)
-    await expect(vault.connect(alice).claimPending(badAddr)).to.be.reverted;
+    await expect(vault.connect(alice).claimPending(badAddr)).to.be.revert(ethers);
     expect(await vault.pendingClaim(alice.address, badAddr)).to.equal(owed);
     expect(await vault.reservedClaims(badAddr)).to.equal(owed);
 
@@ -160,7 +160,7 @@ describe("Index exit door — fault-tolerant redemption (round 10)", () => {
     expect(await vault.pendingClaim(alice.address, badAddr)).to.equal(0n);
     expect(await vault.reservedClaims(badAddr)).to.equal(0n);
     // Double-claiming is not a thing.
-    await expect(vault.connect(alice).claimPending(badAddr)).to.be.reverted;
+    await expect(vault.connect(alice).claimPending(badAddr)).to.be.revert(ethers);
   });
 
   it("claimPendingMany is tolerant: a still-blocked leg re-credits exactly, others pay", async () => {

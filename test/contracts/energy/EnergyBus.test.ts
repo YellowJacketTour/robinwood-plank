@@ -69,7 +69,7 @@ describe("EnergyBus — 6-pipe WETH splitter (PR2)", () => {
     const spent = await bus.route.staticCall();
     expect(spent).to.equal(0n);
 
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
     // Balance untouched.
     expect(await weth.balanceOf(await bus.getAddress())).to.equal(MIN_ROUTE_WEI - 1n);
   });
@@ -143,7 +143,7 @@ describe("EnergyBus — 6-pipe WETH splitter (PR2)", () => {
 
     // The Bus's per-pipe try/catch means one reverting adapter never halts
     // the other 5 pipes or the whole route() call.
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
 
     // The WETH the Bus pushed to the reverting adapter BEFORE calling
     // execute() is a separate, already-committed transfer — a revert inside
@@ -414,7 +414,7 @@ describe("EnergyBus — 6-pipe WETH splitter (PR2)", () => {
     // reentrant call demonstrably never executed a second route(): only one
     // attempt was recorded, and no double-spend of the Bus's balance
     // occurred (routed exactly once, total spend accounted for).
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
 
     expect(await inv.reenterAttempts()).to.equal(1n);
     expect(await inv.callCount()).to.equal(1n);
@@ -466,7 +466,7 @@ describe("EnergyBus — 6-pipe WETH splitter (PR2)", () => {
     const { weth, bus, stranger } = await deployFixture();
     await fund(weth, bus, ethers.parseEther("1"));
 
-    await expect(bus.connect(stranger).route()).to.not.be.reverted;
+    await expect(bus.connect(stranger).route()).to.not.be.revert(ethers);
   });
 
   it("bps sum must equal 10_000 at construction, else revert", async () => {

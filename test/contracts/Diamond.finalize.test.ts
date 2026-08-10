@@ -1,5 +1,5 @@
 import { expect } from "chai";
-import { ethers } from "./helpers/hardhat.js";
+import { ethers, artifacts } from "./helpers/hardhat.js";
 import { loadFixture } from "./helpers/network-helpers.js";
 import { deployIndexDiamond, selectorsOf, facetSetHash ,
   fullInit} from "./helpers/diamond.js";
@@ -118,7 +118,7 @@ describe("Diamond finalization — the renouncement window", () => {
 
       const code = await ethers.provider.getCode(await deployer.getAddress());
       const iface = new ethers.Interface(
-        (await require("hardhat").artifacts.readArtifact("IndexDeployer")).abi
+        (await artifacts.readArtifact("IndexDeployer")).abi
       );
       const fns: string[] = [];
       iface.forEachFunction((f) => fns.push(f.name));
@@ -173,7 +173,7 @@ describe("Diamond finalization — the renouncement window", () => {
       // receipt. If freezing were a second transaction there would be two
       // receipts and a window between them.
       const cutFacetIface = new ethers.Interface(
-        (await require("hardhat").artifacts.readArtifact("DiamondCutFacet")).abi
+        (await artifacts.readArtifact("DiamondCutFacet")).abi
       );
       void cutFacetIface;
       const topics = receipt!.logs.map((l) => l.topics[0]);
@@ -204,10 +204,19 @@ describe("Diamond finalization — the renouncement window", () => {
       ];
       const Deployer = await ethers.getContractFactory("IndexDeployer");
 
+      // gasLimit is explicit throughout this describe block: every deploy
+      // here is EXPECTED to revert, and Hardhat 3's automatic gas estimator
+      // simulates the call first — when that simulation itself reverts, the
+      // estimator throws directly instead of handing chai-matchers a normal
+      // rejected transaction, crashing the run rather than failing the
+      // assertion. A manual gasLimit skips estimation so the real on-chain
+      // revert reaches `.to.be.revertedWithCustomError` as intended.
       await expect(
-        Deployer.deploy(await cut.getAddress(), manifest, [], INIT, ethers.id("wrong"))
+        Deployer.deploy(await cut.getAddress(), manifest, [], INIT, ethers.id("wrong"), {
+          gasLimit: 15_000_000,
+        })
       ).to.be.revertedWithCustomError(
-        await ethers.getContractFactory("DiamondCutFacet"),
+        cut,
         "FacetSetHashMismatch"
       );
     });
@@ -242,10 +251,11 @@ describe("Diamond finalization — the renouncement window", () => {
           actuallyInstalled.map((m) => ({ facet: m.facet, selectors: m.selectors })),
           [],
           INIT,
-          facetSetHash(published) // committed to the honest set only
+          facetSetHash(published), // committed to the honest set only
+          { gasLimit: 15_000_000 }
         )
       ).to.be.revertedWithCustomError(
-        await ethers.getContractFactory("DiamondCutFacet"),
+        cut,
         "FacetSetHashMismatch"
       );
     });
@@ -272,18 +282,23 @@ describe("Diamond finalization — the renouncement window", () => {
         },
       ];
       const Deployer = await ethers.getContractFactory("IndexDeployer");
+      // Hoisted ABOVE `expect()`, not inline in `.revertedWithCustomError`'s
+      // own arguments: an await between expect() capturing the (deliberately
+      // reverting) deploy promise and the matcher attaching its handler lets
+      // Node see it as briefly unhandled, and Hardhat 3's runner treats that
+      // as fatal. See Diamond.bytecode.test.ts's tryDeployWith for the full
+      // explanation.
+      const DiamondFactory = await ethers.getContractFactory("Diamond");
       await expect(
         Deployer.deploy(
           await cut.getAddress(),
           manifest.map((m) => ({ facet: m.facet, selectors: m.selectors })),
           [],
           { ...INIT, timelockDelay: 60 },
-          facetSetHash(manifest)
+          facetSetHash(manifest),
+          { gasLimit: 15_000_000 }
         )
-      ).to.be.revertedWithCustomError(
-        await ethers.getContractFactory("Diamond"),
-        "TimelockDelayBelowFloor"
-      );
+      ).to.be.revertedWithCustomError(DiamondFactory, "TimelockDelayBelowFloor");
     });
 
     it("a zero seeder cannot be deployed", async () => {
@@ -297,18 +312,17 @@ describe("Diamond finalization — the renouncement window", () => {
         },
       ];
       const Deployer = await ethers.getContractFactory("IndexDeployer");
+      const DiamondFactory = await ethers.getContractFactory("Diamond");
       await expect(
         Deployer.deploy(
           await cut.getAddress(),
           manifest.map((m) => ({ facet: m.facet, selectors: m.selectors })),
           [],
           { ...INIT, seeder: ethers.ZeroAddress },
-          facetSetHash(manifest)
+          facetSetHash(manifest),
+          { gasLimit: 15_000_000 }
         )
-      ).to.be.revertedWithCustomError(
-        await ethers.getContractFactory("Diamond"),
-        "BadSeeder"
-      );
+      ).to.be.revertedWithCustomError(DiamondFactory, "BadSeeder");
     });
   });
 

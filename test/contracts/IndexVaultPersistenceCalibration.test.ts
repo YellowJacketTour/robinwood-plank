@@ -413,7 +413,7 @@ describe("GlobalIndexVault — realized-variance persistence calibration (Part E
       for (let i = 0; i < 8; i++) await step(quiet, 10_000n);
       expect(await quiet.vault.realizedVolBps(quiet.addr)).to.equal(0n);
       await expect(quiet.vault.connect(quiet.alice).mintSingleAsset(quiet.addr, 100n * WAD, 0n))
-        .to.not.be.reverted;
+        .to.not.be.revert(ethers);
 
       // Thrashing leg: identical size, identical parameters, refused — both
       // because the requirement rose and because a band that is moving cannot
@@ -447,7 +447,7 @@ describe("GlobalIndexVault — realized-variance persistence calibration (Part E
       const smallUnits = (LARGE_OP * WAD) / lo / 2n; // ~half a "large op" in value
       expect(smallUnits).to.be.greaterThan(0n);
       await expect(fx.vault.connect(fx.alice).mintSingleAsset(fx.addr, smallUnits, 0n)).to.not.be
-        .reverted;
+        .revert(ethers);
     });
 
     it("persistenceHolds (the fixed-N view) and the calibrated form can disagree, and the priced paths use the calibrated one", async () => {

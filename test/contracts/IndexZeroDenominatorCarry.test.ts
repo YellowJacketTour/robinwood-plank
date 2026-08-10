@@ -107,7 +107,7 @@ describe("Zero-denominator carry (round 9e)", () => {
     expect(await fx.vault.totalSupply()).to.equal(await fx.vault.balanceOf(seedLock));
 
     // (a) It does NOT revert on the funder.
-    await expect(fx.vault.connect(fx.carol).receiveDividendsWrapped(E("9"))).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.carol).receiveDividendsWrapped(E("9"))).to.not.be.revert(ethers);
     // (b) It is NOT stranded: it is queryable, in a named public carry.
     expect(await fx.vault.undistributedDividends()).to.equal(E("9"));
     expect(await fx.vault.magnifiedDividendPerShare()).to.equal(0n);
@@ -191,7 +191,7 @@ describe("Zero-denominator carry (round 9e)", () => {
     const rawBefore: bigint = await fx.vault.balanceOf(fx.bob.address);
 
     await expect(atk.connect(fx.bob).attack(fx.wrapperAddr, fx.vaultAddr, E("500"))).to.not.be
-      .reverted;
+      .revert(ethers);
 
     // The bribe did not move. Not to the attacker, not to its caller.
     expect(await t.balanceOf(atkAddr)).to.equal(0n, "the bribe was flash-captured");
@@ -437,7 +437,7 @@ describe("Zero-denominator carry (round 9e)", () => {
 
     // Mid-carry — the clock is armed but has not fired.
     expect(await fx.wrapper.carry(ta)).to.equal(E("30"));
-    await expect(fx.wrapper.connect(fx.alice).withdraw(w)).to.not.be.reverted;
+    await expect(fx.wrapper.connect(fx.alice).withdraw(w)).to.not.be.revert(ethers);
     // The raw leg paid in full. The carried leg simply was not hers yet.
     expect(await fx.vault.balanceOf(fx.alice.address)).to.be.greaterThan(rawBefore);
     expect(await fx.wrapper.balanceOf(fx.alice.address)).to.equal(0n);

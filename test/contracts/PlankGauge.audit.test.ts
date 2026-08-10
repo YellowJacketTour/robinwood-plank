@@ -609,7 +609,7 @@ describe("PlankGauge", () => {
     expect(payable.length).to.equal(0, "a payable function exists");
 
     // 2. No bare receive/fallback either — a plain send bounces.
-    await expect(funder.sendTransaction({ to: gaugeAddr, value: WAD })).to.be.reverted;
+    await expect(funder.sendTransaction({ to: gaugeAddr, value: WAD })).to.be.revert(ethers);
     expect(await ethers.provider.getBalance(gaugeAddr)).to.equal(0n);
 
     // 3. No reward/claim/distribution surface of ANY kind, and no ERC-20 or

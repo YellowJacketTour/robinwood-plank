@@ -77,7 +77,7 @@ describe("AUDIT PoC — EnergyBus / adapters", () => {
 
     // Baseline: route() works.
     await weth.mint(await bus.getAddress(), ethers.parseEther("1"));
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
 
     // ATTACK: attacker donates 1 WETH directly to the adapter address.
     await weth.mint(attacker.address, ethers.parseEther("1"));
@@ -91,9 +91,9 @@ describe("AUDIT PoC — EnergyBus / adapters", () => {
     // The clamp is now `afterBal >= beforeBal ? 0 : beforeBal - afterBal`,
     // and every adapter caps its refund at `min(balance, amountIn)`.
     await weth.mint(await bus.getAddress(), ethers.parseEther("1"));
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
     await weth.mint(await bus.getAddress(), ethers.parseEther("5"));
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
 
     // The Bus drains normally: the donation became protocol value instead of
     // a weapon, and nothing is stranded behind a permanent revert.

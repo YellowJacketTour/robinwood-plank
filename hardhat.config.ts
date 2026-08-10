@@ -121,6 +121,22 @@ const config = defineConfig({
     },
   },
   networks: {
+    // Pinned hardfork, RE-ADDED during the Hardhat 2->3 merge — this exact
+    // fix already existed pre-migration and was lost because the merge only
+    // carried the `solidity` block forward from dev's config, not `networks`.
+    //
+    // WHY THIS IS NEEDED. Hardhat's current default hardfork is past Fusaka,
+    // which enforces EIP-7825's 16,777,216 PER-TRANSACTION gas cap.
+    // `IndexDeployer`'s one-shot atomic deploy-cut-finalize transaction
+    // genuinely needs slightly MORE than that once a 13th facet
+    // (`IndexPoolFacet`) joined the manifest (~16.8-17M gas, confirmed by
+    // direct measurement) — a real limit on a Fusaka chain, irrelevant on the
+    // pre-Cancun chain this repo actually targets (see the `evmVersion:
+    // "paris"` note above). "cancun" is the newest hardfork that supports
+    // `PUSH0` (EIP-3855, Shanghai+, required by this compile target) without
+    // reintroducing Fusaka's cap.
+    hardhat: { type: "edr-simulated", hardfork: "cancun" },
+
     // LOCAL ONLY. `npx hardhat node` serves this on 127.0.0.1:8545 (chainId
     // 31337); scripts/local-v3-setup.ts deploys the V3 dev stack here so the
     // frontend can be exercised without touching mainnet.

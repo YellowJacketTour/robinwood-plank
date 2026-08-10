@@ -60,7 +60,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
 
     // Before the queue it is an ordinary constituent.
     expect(await vault.isExiting(addrs[1])).to.equal(false);
-    await expect(vault.connect(alice).mintSingleAsset(addrs[1], 10n * WAD, 0n)).to.not.be.reverted;
+    await expect(vault.connect(alice).mintSingleAsset(addrs[1], 10n * WAD, 0n)).to.not.be.revert(ethers);
 
     // The freeze lands the instant the removal is QUEUED — not when it
     // executes. Between queue and execution the intent is already public, and
@@ -85,7 +85,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
 
     // The other legs are entirely unaffected — the freeze is per-constituent.
     await vault.checkpointAll();
-    await expect(vault.connect(alice).mintSingleAsset(addrs[0], 5n * WAD, 0n)).to.not.be.reverted;
+    await expect(vault.connect(alice).mintSingleAsset(addrs[0], 5n * WAD, 0n)).to.not.be.revert(ethers);
   });
 
   it("RAMP-OUT: every exit stays open for the whole ramp-out, at every stage", async () => {
@@ -135,7 +135,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
     const fx = await fixture();
     const { vault, admission, alice, addrs } = fx;
     await vault.connect(admission).queueListing(addrs[1], addrs[1], 0, true);
-    await expect(vault.connect(alice).mintProRata(100n * WAD, maxIn(3))).to.not.be.reverted;
+    await expect(vault.connect(alice).mintProRata(100n * WAD, maxIn(3))).to.not.be.revert(ethers);
   });
 
   // ══ B. Size-proportional persistence ═══════════════════════════════════
@@ -185,10 +185,10 @@ describe("GlobalIndexVault — timing and allocation", () => {
     expect(await vault.persistenceHoldsFor(addrs[0], 3n)).to.equal(true);
 
     // A small op (under the threshold) is ungated and goes through.
-    await expect(vault.connect(alice).mintSingleAsset(addrs[0], 5n * WAD, 0n)).to.not.be.reverted;
+    await expect(vault.connect(alice).mintSingleAsset(addrs[0], 5n * WAD, 0n)).to.not.be.revert(ethers);
 
     // An op right at ~1x the threshold needs exactly N, which it has.
-    await expect(vault.connect(alice).mintSingleAsset(addrs[0], 12n * WAD, 0n)).to.not.be.reverted;
+    await expect(vault.connect(alice).mintSingleAsset(addrs[0], 12n * WAD, 0n)).to.not.be.revert(ethers);
 
     // But the BIG one — ~4x the threshold, so N+3 = 6 checkpoints — is
     // refused, even though the band is perfectly flat and the fixed-N check
@@ -203,7 +203,7 @@ describe("GlobalIndexVault — timing and allocation", () => {
     // gate exists to impose — is what unlocks it, and nothing else does.
     await warmCheckpoints(fx, 3);
     expect(await vault.persistenceHoldsFor(addrs[0], 6n)).to.equal(true);
-    await expect(vault.connect(alice).mintSingleAsset(addrs[0], 45n * WAD, 0n)).to.not.be.reverted;
+    await expect(vault.connect(alice).mintSingleAsset(addrs[0], 45n * WAD, 0n)).to.not.be.revert(ethers);
   });
 
   it("PERSISTENCE: the size-scaled gate still rejects a band that has not held", async () => {
@@ -575,6 +575,6 @@ describe("GlobalIndexVault — timing and allocation", () => {
     // The only thing it can do with its shares is what anyone else can: a
     // strict pro-rata redemption, at the same price, through the same code.
     const mine: bigint = await vault.balanceOf(treasury.address);
-    await expect(vault.connect(treasury).redeemProRata(mine, zeroOut(3))).to.not.be.reverted;
+    await expect(vault.connect(treasury).redeemProRata(mine, zeroOut(3))).to.not.be.revert(ethers);
   });
 });

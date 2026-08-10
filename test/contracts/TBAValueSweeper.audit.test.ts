@@ -721,7 +721,7 @@ describe("TBAValueSweeper — stranded-value capture", () => {
 
     await expect(
       hostile.sweepTBAERC721(1, await tbas[0].getAddress(), await sub.getAddress(), 9)
-    ).to.be.reverted;
+    ).to.be.revert(ethers);
 
     // The ERC-20 path on the SAME sweeper still works perfectly.
     const tok = await deployToken();

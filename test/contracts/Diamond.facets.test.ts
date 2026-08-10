@@ -67,13 +67,29 @@ describe("Diamond facet set — sizing and purity", () => {
   // ────────────────────────────────────────────────────────────────────────
 
   it("no facet declares a state variable, so nothing can land on the diamond's own slot 0", async () => {
+    // HH3's ArtifactManager returns a Set (no .filter) from
+    // getAllFullyQualifiedNames(), and splits build info into an ID plus a
+    // separate OUTPUT file path rather than one object returned by
+    // getBuildInfo(fqn) — see Diamond.storage.test.ts's storageLayoutOf for
+    // the same pattern in helper form.
     for (const name of ALL_FACETS) {
-      const [fq] = (await artifacts.getAllFullyQualifiedNames()).filter((f) =>
-        f.endsWith(`:${name}`)
-      );
-      const build: any = await artifacts.getBuildInfo(fq);
+      const fq = [...(await artifacts.getAllFullyQualifiedNames())].find((f) => f.endsWith(`:${name}`));
+      if (!fq) throw new Error(`no artifact for ${name}`);
+      const buildInfoId = await artifacts.getBuildInfoId(fq);
+      if (!buildInfoId) throw new Error(`no build info id for ${fq}`);
+      const outputPath = await artifacts.getBuildInfoOutputPath(buildInfoId);
+      if (!outputPath) throw new Error(`no build info output path for ${fq}`);
+      const { readFile } = await import("node:fs/promises");
+      // Same wrapper shape as Diamond.storage.test.ts's storageLayoutOf: the
+      // real contracts map is nested at `.output.contracts`, not top-level.
+      const wrapper = JSON.parse(await readFile(outputPath, "utf8"));
       const [file, contract] = fq.split(":");
-      const layout = build.output.contracts[file][contract].storageLayout;
+      // The solc source-file KEYS in this wrapper carry an HH3 build-system
+      // root marker ("project/contracts/...") the artifact-facing fqn does
+      // not — search by suffix instead of an exact match.
+      const fileKey = Object.keys(wrapper.output.contracts).find((k) => k.endsWith(file));
+      if (!fileKey) throw new Error(`no output.contracts entry ending in ${file}`);
+      const layout = wrapper.output.contracts[fileKey][contract].storageLayout;
       expect(layout.storage, `${name} declares state: ${JSON.stringify(layout.storage)}`).to.deep.equal(
         []
       );

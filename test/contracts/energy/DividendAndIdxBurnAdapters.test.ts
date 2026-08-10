@@ -52,7 +52,19 @@ describe("DividendAdapter + IdxBurnAdapter (PR3)", () => {
     await weth.mint(busSigner.address, amount);
     await weth.connect(busSigner).transfer(await adapter.getAddress(), amount);
     return adapter.connect(busSigner).execute.staticCall(amount).then(async (res: any) => {
-      const tx = await adapter.connect(busSigner).execute(amount);
+      // Explicit gasLimit on the REAL send, deliberately — `res` above comes
+      // from the staticCall, which `eth_call`s against an effectively
+      // unbounded gas budget and therefore proves nothing about whether the
+      // real transaction below has enough gas for every internal step (the
+      // vault's dividend/buyback accumulator credit, in particular). Under
+      // Hardhat 3, automatic gas estimation for THIS send was observed
+      // under-provisioning that internal step just enough for it to be
+      // silently caught and skipped — the adapter's own `used`/`skipped`
+      // still read correctly (they're driven by the WETH transfer, which
+      // succeeds), while the downstream credit this test actually checks
+      // silently never lands. A generous manual limit removes the
+      // estimation step entirely.
+      const tx = await adapter.connect(busSigner).execute(amount, { gasLimit: 3_000_000 });
       await tx.wait();
       return res;
     });
@@ -93,7 +105,7 @@ describe("DividendAdapter + IdxBurnAdapter (PR3)", () => {
 
     // Real claim path actually pays out.
     const aliceWethBefore: bigint = await wethC.balanceOf(fx.alice.address);
-    await expect(fx.vault.connect(fx.alice).claimDividend()).to.not.be.reverted;
+    await expect(fx.vault.connect(fx.alice).claimDividend()).to.not.be.revert(ethers);
     const aliceWethAfter: bigint = await wethC.balanceOf(fx.alice.address);
     expect(aliceWethAfter).to.be.gt(aliceWethBefore);
   });
@@ -107,7 +119,7 @@ describe("DividendAdapter + IdxBurnAdapter (PR3)", () => {
     const [used, skipped] = await div.connect(fx.bob).execute.staticCall(0n);
     expect(used).to.equal(0n);
     expect(skipped).to.equal(false);
-    await expect(div.connect(fx.bob).execute(0n)).to.not.be.reverted;
+    await expect(div.connect(fx.bob).execute(0n)).to.not.be.revert(ethers);
   });
 
   it("DividendAdapter reverts only for the invariant violation of a non-Bus caller, never for any external condition", async () => {
@@ -263,7 +275,7 @@ describe("DividendAdapter + IdxBurnAdapter (PR3)", () => {
     const lockBefore: bigint = await fx.vault.balanceOf(seedLock);
     const divBefore: bigint = await fx.vault.withdrawableDividendOf(fx.alice.address);
 
-    await expect(bus.route()).to.not.be.reverted;
+    await expect(bus.route()).to.not.be.revert(ethers);
 
     // Pipe X actually reached the reused buy-and-lock mechanism.
     expect(await fx.vault.balanceOf(seedLock)).to.be.gte(lockBefore);

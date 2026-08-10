@@ -171,7 +171,7 @@ async function main() {
   console.log(JSON.stringify(result, null, 2));
 }
 
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((err) => {
     console.error(err);
     process.exitCode = 1;
