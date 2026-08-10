@@ -203,6 +203,202 @@ describe("EnergyBus — 6-pipe WETH splitter (PR2)", () => {
     expect(await weth.balanceOf(await bus.getAddress())).to.equal(0n);
   });
 
+  // =====================================================================
+  // AUDIT H-5 — the per-block CUMULATIVE rate limit.
+  //
+  // BUS-4 above proves a per-call cap. H-5's point is that a per-call cap on
+  // a permissionless, unlimited-frequency function is a STEP SIZE, not a
+  // limit. These tests bound the CUMULATIVE figure, which is the only figure
+  // a sandwich cares about.
+  //
+  // Every test below states, in a comment, exactly how it goes RED if the
+  // budget mechanism is deleted from EnergyBus.route(). If deleting the
+  // mechanism leaves a test green, that test is proving nothing — which is
+  // the meta-finding of this audit.
+  // =====================================================================
+
+  async function withAutomineOff(fn: () => Promise<void>) {
+    await ethers.provider.send("evm_setAutomine", [false]);
+    try {
+      await fn();
+    } finally {
+      await ethers.provider.send("evm_setAutomine", [true]);
+    }
+  }
+
+  it("BUS-9 (H-5, THE ATTACK): looping route() inside ONE transaction cannot exceed the per-block budget", async () => {
+    const { weth, bus } = await deployFixture();
+    const looper: any = await (await ethers.getContractFactory("EnergyRouteLooper")).deploy();
+
+    // Far more than one block's budget sitting in the Bus — exactly the
+    // situation an attacker waits for before opening a sandwich.
+    const total = ethers.parseEther("100");
+    await fund(weth, bus, total);
+
+    const BUDGET = await bus.BLOCK_BUDGET_WEI();
+    expect(BUDGET).to.equal(MAX_ROUTE_WEI);
+
+    // 20 sequential (NOT reentrant) route() calls in a single transaction.
+    // The nonReentrant guard is irrelevant here: each call returns before the
+    // next begins. That is why H-5 survived BUS-5.
+    const spent = await looper.loopRoute.staticCall(await bus.getAddress(), 20);
+
+    // Executed for real, with an INDEPENDENT direct caller batched into the
+    // very same block, to prove the budget is shared by the block rather than
+    // per-caller or per-contract.
+    await withAutomineOff(async () => {
+      await looper.loopRoute(await bus.getAddress(), 20);
+      await bus.route();
+      await ethers.provider.send("evm_mine", []);
+    });
+
+    // GOES RED IF THE MECHANISM IS REMOVED: without the per-block budget,
+    // each of the 20 calls takes MAX_ROUTE_WEI until the Bus is empty, so
+    // `spent` is 100 WETH (10 calls x 10) and the balance below is 0. The
+    // whole accumulated balance is extractable inside one sandwich.
+    expect(spent).to.equal(BUDGET);
+    expect(await weth.balanceOf(await bus.getAddress())).to.equal(total - BUDGET);
+  });
+
+  it("BUS-10 (H-5): many separate transactions in ONE block share the same budget", async () => {
+    const { weth, bus, deployer, stranger } = await deployFixture();
+    const total = ethers.parseEther("100");
+    await fund(weth, bus, total);
+
+    const before = await weth.balanceOf(await bus.getAddress());
+
+    // Batching route() calls into one block from two different senders is the
+    // same attack without a helper contract (a searcher's bundle).
+    await withAutomineOff(async () => {
+      await bus.connect(deployer).route();
+      await bus.connect(stranger).route();
+      await bus.connect(deployer).route();
+      await bus.connect(stranger).route();
+      await ethers.provider.send("evm_mine", []);
+    });
+
+    // GOES RED IF THE MECHANISM IS REMOVED: four calls x 10 WETH = 40 WETH
+    // routed in one block instead of 10.
+    const after = await weth.balanceOf(await bus.getAddress());
+    expect(before - after).to.equal(MAX_ROUTE_WEI);
+  });
+
+  it("BUS-11 (H-5): a partially-consumed budget grants only the remainder, and reports it", async () => {
+    const { weth, bus, deployer } = await deployFixture();
+
+    // Start with less than a full budget so the first route under-consumes.
+    await fund(weth, bus, ethers.parseEther("6"));
+
+    let secondRouteTx: any;
+    await withAutomineOff(async () => {
+      await bus.route(); // takes 6 (balance-limited), leaving 4 of budget
+      await weth.mint(await bus.getAddress(), ethers.parseEther("100"));
+      secondRouteTx = await bus.route(); // requests 10, may only have 4
+      await ethers.provider.send("evm_mine", []);
+    });
+    await secondRouteTx.wait();
+
+    // GOES RED IF THE MECHANISM IS REMOVED: with no budget the second call
+    // takes a full MAX_ROUTE_WEI, so the block total is 16 WETH not 10, the
+    // remaining balance is 90 not 96, and RouteBudgetLimited is never emitted
+    // (the event does not even exist without the mechanism).
+    expect(await weth.balanceOf(await bus.getAddress())).to.equal(ethers.parseEther("96"));
+    await expect(secondRouteTx)
+      .to.emit(bus, "RouteBudgetLimited")
+      .withArgs(deployer.address, ethers.parseEther("10"), ethers.parseEther("4"));
+  });
+
+  it("BUS-12 (H-5, GRIEFING): an exhausted budget is a NO-OP returning 0, never a revert", async () => {
+    const { weth, bus, stranger } = await deployFixture();
+    await fund(weth, bus, ethers.parseEther("100"));
+
+    let secondTx: any;
+    await withAutomineOff(async () => {
+      await bus.route(); // consumes the whole block budget
+      secondTx = await bus.connect(stranger).route(); // budget now 0
+      await ethers.provider.send("evm_mine", []);
+    });
+    const rcpt = await secondTx.wait();
+
+    // This is the anti-griefing property. If exhaustion reverted, anyone
+    // could burn the block's budget to revert any transaction that
+    // opportunistically calls route() inside a user action — turning a rate
+    // limit into a general DoS amplifier. It must fail SOFT.
+    //
+    // GOES RED IF THE NO-OP BRANCH IS REPLACED BY A REVERT: status becomes 0
+    // / the await throws.
+    expect(rcpt.status).to.equal(1);
+    await expect(secondTx).to.emit(bus, "RouteBudgetLimited").withArgs(stranger.address, MAX_ROUTE_WEI, 0n);
+  });
+
+  it("BUS-13 (H-5, ANTI-VACUITY CONTROL): legitimate routing is NOT blocked — the budget refills every block", async () => {
+    const { weth, bus, inv, div } = await deployFixture();
+    const total = ethers.parseEther("35");
+    await fund(weth, bus, total);
+
+    // Three ordinary keeper routes in three ordinary blocks (automine on, so
+    // one block per transaction). A rate limit that blocked these would be a
+    // denial of service dressed up as a fix, not a fix.
+    for (let i = 1n; i <= 3n; i++) {
+      // NOTE (real semantics, not a workaround): `eth_call` executes against
+      // the LATEST block, so simulating route() in the same block a route
+      // already landed in correctly reports that block's remaining budget.
+      // Mine first so the simulation reflects the block the tx would land in.
+      await ethers.provider.send("evm_mine", []);
+      const spent = await bus.route.staticCall();
+      expect(spent).to.equal(MAX_ROUTE_WEI); // full throughput, every block
+      await bus.route();
+      expect(await weth.balanceOf(await bus.getAddress())).to.equal(total - i * MAX_ROUTE_WEI);
+    }
+
+    // Fourth block drains the 5 WETH tail in one go, and the pipes really did
+    // fire — this is not a suite that passes because nothing happened.
+    await bus.route();
+    expect(await weth.balanceOf(await bus.getAddress())).to.equal(0n);
+    expect(await inv.totalReceived()).to.be.gt(0n);
+    expect(await div.totalReceived()).to.be.gt(0n);
+
+    // And a small routine route, far under the budget, is completely
+    // unaffected by the limit.
+    await fund(weth, bus, ethers.parseEther("0.25"));
+    await ethers.provider.send("evm_mine", []);
+    expect(await bus.route.staticCall()).to.equal(ethers.parseEther("0.25"));
+  });
+
+  it("BUS-14 (H-5): blockBudgetRemaining() reports the live budget and refills across blocks", async () => {
+    const { weth, bus } = await deployFixture();
+    const BUDGET = await bus.BLOCK_BUDGET_WEI();
+
+    expect(await bus.blockBudgetRemaining()).to.equal(BUDGET);
+
+    await fund(weth, bus, ethers.parseEther("4"));
+    await bus.route();
+
+    // `eth_call` runs against the LATEST block — the very block the route
+    // landed in — so it correctly reports 4 WETH already drawn there.
+    // GOES RED IF THE MECHANISM IS REMOVED: the function does not exist; and
+    // if the tally were not actually written, this reads BUDGET instead.
+    expect(await bus.blockBudgetRemaining()).to.equal(BUDGET - ethers.parseEther("4"));
+
+    // One block later the tally is stale-by-design and the budget is full
+    // again with no clearing write. GOES RED IF THE REFILL IS REMOVED
+    // (e.g. a cumulative-forever counter): this stays at 6.
+    await ethers.provider.send("evm_mine", []);
+    expect(await bus.blockBudgetRemaining()).to.equal(BUDGET);
+
+    // Measure it mid-block instead, via a static call evaluated at the
+    // pending state after a route lands in the current block.
+    await fund(weth, bus, ethers.parseEther("100"));
+    let observed = 0n;
+    await withAutomineOff(async () => {
+      const tx = await bus.route();
+      await ethers.provider.send("evm_mine", []);
+      const blk = (await tx.wait()).blockNumber;
+      observed = await bus.blockBudgetRemaining({ blockTag: blk });
+    });
+    expect(observed).to.equal(0n);
+  });
+
   it("BUS-5: reentrancy on route is blocked", async () => {
     const { weth, bus, inv } = await deployFixture();
     const total = ethers.parseEther("1");
