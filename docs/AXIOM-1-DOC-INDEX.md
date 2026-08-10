@@ -1,8 +1,10 @@
 # AXIOM-1 document index
 
-**Verified at:** branch `feat/cvi-sota-axiom-1`, HEAD `bff8e5c`.
+**Verified at:** branch `integrate/dev-hh3`, PR [#62](https://github.com/YellowJacketTour/robinwood-plank/pull/62) into `dev` (**mergeable**), Hardhat 3.
 **Status of the system:** 913 tests passing / 0 failing; never deployed to
-any network; never independently audited.
+any network; never independently audited. Contracts are byte-identical to
+the earlier `feat/cvi-sota-axiom-1` (PR #61, not mergeable — toolchain
+conflict) audited state; only the test/build toolchain changed.
 
 ---
 

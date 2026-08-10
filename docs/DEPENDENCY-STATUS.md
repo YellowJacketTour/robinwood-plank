@@ -1,15 +1,42 @@
 # Dependency & Supply-Chain Status
 
-**Branch:** `feat/cvi-sota-axiom-1`
-**Date:** 2026-08-09
+**Branch:** `integrate/dev-hh3` (PR [#62](https://github.com/YellowJacketTour/robinwood-plank/pull/62) into `dev`, mergeable)
+**Date:** 2026-08-09 → updated 2026-08-10 after the Hardhat 2→3 migration
 **Default branch for comparison:** `origin/master` (note: the repo's default branch is `master`, not `main`)
 
-Every number in this document came from a command run against this working tree. Commands are
-quoted so a successor can reproduce them.
+> **§7 item 2 below ("Hardhat 2→3 migration") is no longer a recommendation — it is DONE.**
+> This document originally audited `feat/cvi-sota-axiom-1` on Hardhat 2. That branch has since
+> been merged with `origin/dev` (which carries Hardhat 3) on `integrate/dev-hh3`, with every real
+> toolchain behavioral difference diagnosed and fixed — see PR #62's commit messages. The merge
+> changed the whole dependency graph; §1a below re-audits it post-merge. Everything else in this
+> document (§2-§6, written pre-merge) is preserved as-is for its historical reasoning, which still
+> holds — only the live numbers in §1a supersede §1.
+
+Every number in this document came from a command run against the stated working tree at the
+stated time. Commands are quoted so a successor can reproduce them.
 
 ---
 
-## 1. Headline
+## 1a. Post-Hardhat-3-merge re-audit (2026-08-10, current)
+
+| Scope | Result |
+| --- | --- |
+| `npm audit` on `integrate/dev-hh3`, immediately after merging dev | 12 rows (11 low, 0 moderate, **1 high**, 0 critical) |
+| The 1 high | `js-yaml` 4.0.0-4.3.0, [GHSA-5p4m-2wfm-xmqj](https://github.com/advisories/GHSA-5p4m-2wfm-xmqj) (quadratic-CPU DoS in `!!omap` resolution) — pulled in fresh by Hardhat 3's `hardhat-toolbox-mocha-ethers` dependency tree, not present pre-merge |
+| Fix applied | `npm audit fix` (non-breaking) — bumped `js-yaml` past 4.3.1. **No `overrides` entry needed**, unlike §4's `bn.js`/`diff` pins; npm's own resolver handled it. Lockfile diff: 3 lines. |
+| `npm audit` after the fix | **11 rows (11 low, 0 moderate, 0 high, 0 critical)** |
+| Vulnerable packages in the **production** dependency graph (`npm ls --omit=dev`) | **0** — every one of the 11 remaining packages checked individually against the runtime tree, confirmed absent |
+| Advisories affecting deployed Solidity contract code | **None** — contracts are byte-identical across the entire merge (verified via `git diff --name-only` on every merge/fix commit under `contracts/`); this migration touched only test/build tooling |
+| Contract suite after the fix | 913 passing, 0 failing — re-verified independently against the actual committed tree |
+
+**The remaining 11 lows**, all `@ethersproject/*` + `@nomicfoundation/hardhat-ignition*` +
+`elliptic`, are the same `elliptic`-rooted cluster §5 below already documents — carried through the
+merge essentially unchanged, still dev-only, still unfixable upstream (advisory range `*`, 6.6.1 is
+latest). This re-confirms §5's finding rather than superseding it.
+
+---
+
+## 1. Headline (pre-merge baseline, kept for history — see §1a for current numbers)
 
 | Scope | Result |
 | --- | --- |
@@ -203,22 +230,20 @@ npm run test:contracts
 
 ## 7. Recommended path for whoever takes over
 
-1. **Merge this branch to `master` (highest value, lowest effort).** All 8 high and 4 moderate
-   Dependabot alerts come from `brace-expansion`, `js-yaml` and `undici` versions that this
-   branch's `overrides` block already eliminates. This is the single action that clears the GitHub
-   alert banner. Confirm afterwards that Dependabot re-scans and drops to ~1 low.
+1. **Merge PR #62 (`integrate/dev-hh3`) into `dev` (highest value, lowest effort).** This already
+   *is* the merge with `dev`/`master`'s lineage that clears the `brace-expansion`/`js-yaml`/`undici`
+   Dependabot alerts on `master` — confirm after merging that Dependabot re-scans and drops to the
+   ~1 low `elliptic` finding.
 
-2. **Hardhat 2 → 3 migration — scope it as its own project, not a dependency chore.** `npm audit`
-   points at `hardhat@3.12.0` / `@nomicfoundation/hardhat-toolbox@7.0.0` as the fix for the whole
-   remaining cluster. This is a breaking change to the config format, plugin API, and test runner
-   (Hardhat 3 defaults to `node:test`, not mocha) and would put all 913 contract tests at risk.
-   Do **not** run `npm audit fix --force`. Budget it as a standalone branch with the full suite as
-   the acceptance gate. Note that master's audit already shows
-   `@nomicfoundation/hardhat-toolbox-mocha-ethers`, suggesting a partial migration exists elsewhere
-   in the repo's history worth reviewing first.
+2. ~~Hardhat 2 → 3 migration~~ **DONE.** Completed on `integrate/dev-hh3` (PR #62): real config,
+   ESM, and gas-estimation-behavior differences diagnosed and fixed per-issue rather than papered
+   over — see PR #62's commit messages for the full list. 913 passing / 0 failing, verified against
+   the committed tree, matching the pre-migration Hardhat 2 baseline exactly. The `mocha` vs
+   `node:test` concern this item originally raised did not materialize — `hardhat-toolbox-mocha-
+   ethers` keeps mocha as the runner under Hardhat 3.
 
 3. **`elliptic` needs no action now.** It is dev-only, unfixable upstream, and low severity. Track
-   the advisory; it resolves itself when ethers v5 is out of the tree (which Hardhat 3 does).
+   the advisory; it resolves itself when ethers v5 is out of the tree.
 
 4. **Prune the `overrides` block periodically.** It has grown to ~20 entries, several of them
    version-pinned (`brace-expansion@5.0.7`, `undici@7.28.0`, and now `bn.js@4.11.6`,

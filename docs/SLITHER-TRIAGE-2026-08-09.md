@@ -3,6 +3,7 @@
 **Date:** 2026-08-09
 **Tool:** slither-analyzer 0.11.6, solc 0.8.24 (via `solc-select`), standalone per-file invocation
 **Scope:** the code added *after* the audited commit `1525597` — 8,631 lines across the honest-index redesign
+**Still current:** results below were captured at `bff8e5c` on `feat/cvi-sota-axiom-1`. The branch has since been merged into `integrate/dev-hh3` (PR #62, Hardhat 3), but every Solidity contract is byte-identical across that merge — this triage is unaffected and remains the authoritative static-analysis record.
 
 This document exists so an incoming auditor knows exactly which static-analysis findings were examined and dismissed, **and can challenge the reasoning** rather than repeating the triage. Every dismissal below states its argument; if an argument is wrong, the finding is live.
 

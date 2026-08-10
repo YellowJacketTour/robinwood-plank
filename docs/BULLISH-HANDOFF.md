@@ -5,11 +5,13 @@ protocol over cold — review it, commission an independent audit, and decide
 whether to deploy it with real money.
 
 **Repo:** `robinwood-plank-index-vault`
-**Branch:** `feat/cvi-sota-axiom-1`
-**HEAD at handoff:** `bff8e5c`
-**Suite:** `913 passing, 0 failing` (verified by running `npm run test:contracts` at this commit, 2026-08-09)
+**Branch:** `integrate/dev-hh3` — PR [#62](https://github.com/YellowJacketTour/robinwood-plank/pull/62) into `dev`, **mergeable**
+**HEAD at handoff:** see PR #62's latest commit; toolchain is **Hardhat 3** (migrated from Hardhat 2 in this branch — see PR #62's commit messages for the full list of real behavioral differences found and fixed)
+**Suite:** `913 passing, 0 failing` (verified independently against the committed tree, not just a working copy, both immediately post-merge and again after the dependency fix below)
+**Contracts:** byte-identical to the audited state throughout the entire Hardhat 3 migration — `git diff` across every merge/fix commit shows zero changes under `contracts/`. Every finding and fix described in this document and in the audit report is unaffected by the toolchain migration.
 **Deployment status:** **never deployed to any network — not mainnet, not testnet.**
 **Independent audit status:** **none. Zero external audits have been performed.**
+**Prior branch:** [`feat/cvi-sota-axiom-1`](https://github.com/YellowJacketTour/robinwood-plank/pull/61) (PR #61) is the original audit-remediation branch, still on Hardhat 2 and **not mergeable** into `dev` (toolchain conflict). PR #62 supersedes it for integration purposes; #61 remains as the historical audit record.
 
 This document is the entry point. Read it before any other doc in `docs/`.
 
@@ -59,13 +61,14 @@ history — see `docs/AXIOM-1-DOC-INDEX.md`.
 
 | Fact | Value | How verified |
 |---|---|---|
-| Tests | 913 passing, 0 failing | `npm run test:contracts` executed at `bff8e5c` |
+| Tests | 913 passing, 0 failing | `npm run test:contracts` on `integrate/dev-hh3` (PR #62), Hardhat 3 |
 | Audit findings (internal) | 6 CRITICAL, 8 HIGH, 5 MEDIUM — **all marked remediated** | `docs/AUDIT-2026-08-09-FULL-SOLIDITY.md` remediation table |
 | Independent external audit | **none, ever** | — |
 | Deployed to mainnet | **no** | — |
 | Deployed to any public testnet | **no** | `scripts/deploy/axiom1-testnet.ts` has only been dry-run locally with `AXIOM1_DRY_RUN=1` |
 | Upgradeability | **none.** `diamondCut` is renounced atomically in the deployer constructor | `contracts/diamond/IndexDeployer.sol`, `Diamond.finalize.test.ts` |
-| Largest contract | `CollectionVaultFactory`, 22,723 bytes = **92.5%** of the 24,576-byte EIP-170 limit, 1,853 bytes spare | measured from `.hardhat-artifacts` at `bff8e5c` |
+| Largest contract | `CollectionVaultFactory`, 22,723 bytes = **92.5%** of the 24,576-byte EIP-170 limit, 1,853 bytes spare | measured from `.hardhat-artifacts`; unchanged since the toolchain migration (contracts are byte-identical) |
+| Dependency advisories | 0 high, 0 moderate, 11 low — **all dev-toolchain-only, confirmed absent from the production dependency tree** | `docs/DEPENDENCY-STATUS.md`, `npm audit` + `npm ls --omit=dev` |
 
 **What "all findings remediated" does and does not mean.** It means the
 authoring pipeline believes each finding is closed and wrote tests that

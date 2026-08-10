@@ -24,7 +24,10 @@
 > which has not been given. See `docs/BULLISH-HANDOFF.md` §8 for the mainnet
 > gate.
 
-**Verified at:** branch `feat/cvi-sota-axiom-1`, HEAD `bff8e5c`.
+**Verified at:** branch `feat/cvi-sota-axiom-1`, HEAD `bff8e5c`. Now also current on
+`integrate/dev-hh3` (PR #62 into `dev`, mergeable, Hardhat 3): the Solidity contracts are
+byte-identical across that entire migration (test/build toolchain only), so every constant and
+line number below is unchanged and still accurate.
 Every constant below was read out of the Solidity source at that commit.
 
 ---

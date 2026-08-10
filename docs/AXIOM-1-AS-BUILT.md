@@ -1,7 +1,7 @@
 # AXIOM-1 — As-Built (Compounding Vault Index)
 
 **Status:** delivered. All 12 build stages shipped, independently verified.
-**Repo:** `robinwood-plank-index-vault` · **Branch:** `feat/cvi-sota-axiom-1`
+**Repo:** `robinwood-plank-index-vault` · **Branch:** `integrate/dev-hh3` (PR [#62](https://github.com/YellowJacketTour/robinwood-plank/pull/62) into `dev`, mergeable, Hardhat 3)
 **Verification:** `npm run test:contracts` → **913 passing, 0 failing** (full adversarial matrix included, `docs/TEST-MATRIX-AXIOM-1-ADVERSARIAL.md`)
 **Read first:** `docs/BULLISH-HANDOFF.md` — this file is the plain-language summary; the handoff carries the status of record, the open risks, and the deployment gate.
 **Date:** 2026-08-09

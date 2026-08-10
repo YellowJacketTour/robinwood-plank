@@ -10,7 +10,7 @@
 
 ## Remediation status (updated 2026-08-09, post-fix)
 
-**All findings below are now remediated on `feat/cvi-sota-axiom-1`; suite at 913 passing / 0 failing.** The original audit verdict ("do not deploy as-is") applied to the audited commit `1525597`. Remediation is tracked here and in `docs/DESIGN-HONEST-INDEX-2026-08-09.md`.
+**All findings below are now remediated; suite at 913 passing / 0 failing.** The original audit verdict ("do not deploy as-is") applied to the audited commit `1525597`. Remediation landed on `feat/cvi-sota-axiom-1` and is tracked here and in `docs/DESIGN-HONEST-INDEX-2026-08-09.md`. That branch has since been merged with `dev`'s Hardhat 3 toolchain onto `integrate/dev-hh3` (PR [#62](https://github.com/YellowJacketTour/robinwood-plank/pull/62), mergeable) — the Solidity contracts are byte-identical across that merge, so every finding, fix, and line reference below is unaffected and remains current. `feat/cvi-sota-axiom-1` itself (PR #61) is not mergeable into `dev` due to the toolchain conflict; #62 is the branch to review and merge.
 
 | Finding | Status | Where |
 |---|---|---|
