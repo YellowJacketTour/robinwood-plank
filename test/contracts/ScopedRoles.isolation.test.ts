@@ -304,6 +304,12 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // reverts — there is no role surface here for any key to be trusted
       // with.
       "zapMint",
+      // Same reasoning as `zapMint` immediately above — `zapMintHybrid` is
+      // the identical permissionless mint path, just letting the caller
+      // optionally credit constituent shares they already hold instead of
+      // buying every leg fresh. No new role surface: still priced from the
+      // caller's own arguments and each constituent's own AMM.
+      "zapMintHybrid",
       "checkpoint",
       "checkpointAll",
       "executeParam",

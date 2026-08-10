@@ -57,6 +57,12 @@ const config = defineConfig({
         "contracts/diamond/IndexDeployer.sol",
         "contracts/factory/CollectionVault.sol",
         "contracts/factory/CollectionVaultFactory.sol",
+        // IndexZapFacet: zapMintHybrid's per-leg loop (calldata array param +
+        // pull-or-buy branching) overflows legacy codegen's 16-slot stack
+        // despite splitting `_wantFor`/`_acquireAndCreditHybrid` out already
+        // -- same "decoder/codegen limit, not a size limit" shape as
+        // Diamond.sol/IndexDeployer.sol above; viaIR compiles it directly.
+        "contracts/diamond/facets/IndexZapFacet.sol",
       ].map((f) => [
         f,
         {

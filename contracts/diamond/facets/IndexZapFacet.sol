@@ -94,6 +94,10 @@ contract IndexZapFacet is IndexFacetBase {
     /// `CollectionVaultFactory` deployed, so it never receives an allowance
     /// over the diamond's payment token.
     error ZapUnverifiedLeg(address token);
+    /// @notice `bringAmounts` (zapMintHybrid) must have exactly one entry
+    /// per current constituent, same order as `constituentList` — the same
+    /// discipline `mintProRata`'s own `maxAmountsIn` already requires.
+    error ZapBadBringLength();
 
     /// @notice One zap-mint completed. `paymentSpent` is the REAL, net cost
     /// across every leg (after any excess-share sell-back), never a nominal
@@ -168,6 +172,130 @@ contract IndexZapFacet is IndexFacetBase {
 
         paymentSpent = totalSpent;
         emit ZapMinted(msg.sender, sharesOut, totalSpent, refund);
+    }
+
+    /**
+     * @notice Like `zapMint`, but for each constituent leg the caller may
+     * bring shares they ALREADY hold instead of paying to buy them fresh —
+     * `bringAmounts[i]` is how much of `constituentList[i]`'s own token
+     * (approved to this diamond beforehand) to credit directly for that
+     * leg. Only the SHORTFALL still needed to reach that leg's pro-rata
+     * `want` is bought via AMM, exactly the way `zapMint` buys the whole
+     * leg. Still the full weighted basket, every leg filled, one way or
+     * another — an index share is an equal claim on the ENTIRE basket, so
+     * there is no such thing as a partial-basket mint; what this function
+     * makes flexible is WHICH SOURCE funds each leg, never WHICH LEGS are
+     * included. `bringAmounts[i] == 0` for every leg is exactly `zapMint`.
+     * @param bringAmounts one entry per CURRENT constituent, same order as
+     * `constituentList` — reverts `ZapBadBringLength` on a length mismatch,
+     * the same discipline `mintProRata`'s `maxAmountsIn` already requires.
+     */
+    function zapMintHybrid(uint256 desiredSharesOut, uint256 maxPaymentIn, uint256[] calldata bringAmounts)
+        external
+        nonReentrant
+        whenOpen
+        returns (uint256 sharesOut, uint256 paymentSpent)
+    {
+        if (desiredSharesOut == 0) revert ZeroAmount();
+        if (maxPaymentIn == 0) revert ZeroAmount();
+
+        CoreStorage.Layout storage cs = CoreStorage.layout();
+        if (bringAmounts.length != cs.constituentList.length) revert ZapBadBringLength();
+
+        IERC20 payment = IERC20(cs.dividendAsset);
+        uint256 budget = _pullCredited(payment, msg.sender, maxPaymentIn);
+        uint256 supplyBefore = _totalSupply();
+        uint256[] memory weightsBefore = _allWeightsBps();
+
+        uint256 totalSpent = _acquireBasketHybrid(payment, desiredSharesOut, budget, supplyBefore, bringAmounts);
+
+        sharesOut = _mintWithAllocation(msg.sender, desiredSharesOut);
+        _requireCapNotWorsened(weightsBefore);
+        _revestOnMint(desiredSharesOut, supplyBefore);
+
+        address[] memory list = cs.constituentList;
+        for (uint256 i = 0; i < list.length; i++) {
+            _attemptOpportunisticReconcile(list[i]);
+        }
+
+        uint256 refund = budget - totalSpent;
+        if (refund > 0) payment.safeTransfer(msg.sender, refund);
+
+        paymentSpent = totalSpent;
+        emit ZapMinted(msg.sender, sharesOut, totalSpent, refund);
+    }
+
+    /// @dev Hybrid counterpart of `_acquireBasket` — same formula, same
+    /// per-leg budget accounting, same all-or-nothing revert semantics;
+    /// only `_acquireAndCreditHybrid` differs from `_acquireAndCredit`.
+    function _acquireBasketHybrid(
+        IERC20 payment,
+        uint256 desiredSharesOut,
+        uint256 budget,
+        uint256 supplyBefore,
+        uint256[] calldata bringAmounts
+    ) private returns (uint256 totalSpent) {
+        CoreStorage.Layout storage cs = CoreStorage.layout();
+        uint256 denom = supplyBefore + VIRTUAL_SHARES;
+        uint256 n = cs.constituentList.length;
+
+        for (uint256 i = 0; i < n; i++) {
+            address t = cs.constituentList[i];
+            _requireNotExiting(t, cs.constituents[t]);
+            uint256 want = _wantFor(t, desiredSharesOut, denom);
+
+            // Never pull more than this leg actually needs, regardless of
+            // what the caller passed — an over-generous `bringAmounts[i]`
+            // is simply clamped, never a reason to revert or to strand
+            // excess approval.
+            totalSpent += _acquireAndCreditHybrid(
+                payment, t, want, bringAmounts[i] > want ? want : bringAmounts[i], budget - totalSpent
+            );
+            if (totalSpent > budget) revert SlippageExceeded();
+        }
+    }
+
+    /// @dev Split out of `_acquireBasketHybrid` purely for stack budget —
+    /// same reason `_acquireBasket`/`_acquireAndCredit`/`_acquireLeg` are
+    /// already split in this file. Byte-for-byte the same per-leg formula
+    /// `_acquireBasket` uses inline; not re-derived, only reused.
+    function _wantFor(address t, uint256 desiredSharesOut, uint256 denom) private view returns (uint256 want) {
+        want = Math.mulDiv(
+            desiredSharesOut,
+            CoreStorage.layout().constituents[t].reserve + VIRTUAL_ASSETS,
+            denom,
+            Math.Rounding.Up
+        );
+        if (want == 0) revert ZeroAmount();
+    }
+
+    /// @dev Same "credit an observed delta, never a number we computed"
+    /// discipline as `_acquireAndCredit` (audit H-2) — extended across BOTH
+    /// funding sources for one leg, not just the AMM buy. The balance
+    /// delta is measured across the WHOLE leg (pull, then buy-the-
+    /// shortfall, then any excess sell-back inside `_acquireLeg`), so a
+    /// caller-side short delivery (a fee-on-transfer constituent, an
+    /// approval race) is caught by the SAME `ShortDelivery` revert as an
+    /// AMM-side one — there is exactly one point where this leg's credit is
+    /// ever trusted, regardless of how many sub-steps funded it.
+    function _acquireAndCreditHybrid(IERC20 payment, address token, uint256 want, uint256 bring, uint256 remaining)
+        private
+        returns (uint256 spent)
+    {
+        uint256 beforeBal = IERC20(token).balanceOf(address(this));
+        if (bring > 0) {
+            IERC20(token).safeTransferFrom(msg.sender, address(this), bring);
+        }
+        uint256 fromCaller = IERC20(token).balanceOf(address(this)) - beforeBal;
+        uint256 stillNeeded = fromCaller >= want ? 0 : want - fromCaller;
+        if (stillNeeded > 0) {
+            spent = _acquireLeg(payment, token, stillNeeded, remaining);
+        }
+
+        uint256 credited = IERC20(token).balanceOf(address(this)) - beforeBal;
+        if (credited < want) revert ShortDelivery();
+
+        CoreStorage.layout().constituents[token].reserve += _routeDevFundBuy(token, credited);
     }
 
     /**
