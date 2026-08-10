@@ -12,15 +12,74 @@ import type { HardhatUserConfig } from "hardhat/config";
 const config = defineConfig({
   plugins: [hardhatToolboxMochaEthers],
   solidity: {
-    version: "0.8.24",
-    settings: {
-      optimizer: { enabled: true, runs: 200 },
-      // Pinned to OpenZeppelin 4.x specifically to avoid Cancun-only opcodes
-      // (mcopy) that OZ 5.x's Bytes.sol uses unconditionally — Robinhood
-      // Chain's latest block has no excessBlobGas field, so Cancun support
-      // is unconfirmed. Paris is the conservative, broadly-supported target.
-      evmVersion: "paris",
-    },
+    compilers: [
+      {
+        version: "0.8.24",
+        settings: {
+          optimizer: { enabled: true, runs: 200 },
+          // Pinned to OpenZeppelin 4.x specifically to avoid Cancun-only opcodes
+          // (mcopy) that OZ 5.x's Bytes.sol uses unconditionally.
+          evmVersion: "paris",
+          // `storageLayout` is REQUIRED, not decorative: the diamond's rule
+          // "no facet declares a state variable" cannot be checked by reading
+          // facet source, because the dangerous case is INHERITED storage (a
+          // facet extending ERC20/ReentrancyGuard silently landing a mapping
+          // on the diamond's slot 0). Only the compiler knows the resolved
+          // layout, and Diamond.storage.test.ts reads it from here.
+          // outputSelection picks which artefacts solc EMITS -- not a codegen
+          // setting, so bytecode is bit-identical with and without it.
+      outputSelection: {
+        "*": {
+          "*": ["abi", "evm.bytecode", "evm.deployedBytecode", "evm.methodIdentifiers", "metadata", "storageLayout"],
+        },
+      },
+        },
+      },
+    ],
+    // viaIR ONLY, deliberately -- not a lower optimizer `runs`.
+    //
+    // Diamond.sol / IndexDeployer.sol: legacy codegen's ABI DECODER for the
+    // single-struct initialiser runs out of stack ("headStart is 1 slot too
+    // deep"). A decoder limit, not a size limit; viaIR compiles it directly.
+    //
+    // CollectionVault / CollectionVaultFactory: the factory's bytecode carries
+    // the vault's entire CREATION code as a data blob (type(...).creationCode),
+    // so the two are ONE size problem. Factory was 98.2% of EIP-170 with 454
+    // bytes spare; viaIR took it to 92.5% with 1,853. MEASURED: factory size by
+    // runs, all with viaIR on -- runs=1 -> 22,592, runs=50 -> 22,593,
+    // runs=200 -> 22,723. A 131-byte spread across a 200x change, so the whole
+    // saving is viaIR codegen, NOT a gas trade-off. `runs` stays 200 so the hot
+    // user paths keep full optimisation. diamondCut is renounced at birth, so
+    // an over-limit contract would have no later fix.
+    overrides: Object.fromEntries(
+      [
+        "contracts/diamond/Diamond.sol",
+        "contracts/diamond/IndexDeployer.sol",
+        "contracts/factory/CollectionVault.sol",
+        "contracts/factory/CollectionVaultFactory.sol",
+        // IndexZapFacet: zapMintHybrid's per-leg loop (calldata array param +
+        // pull-or-buy branching) overflows legacy codegen's 16-slot stack
+        // despite splitting `_wantFor`/`_acquireAndCreditHybrid` out already
+        // -- same "decoder/codegen limit, not a size limit" shape as
+        // Diamond.sol/IndexDeployer.sol above; viaIR compiles it directly.
+        "contracts/diamond/facets/IndexZapFacet.sol",
+      ].map((f) => [
+        f,
+        {
+          version: "0.8.24",
+          settings: {
+            optimizer: { enabled: true, runs: 200 },
+            viaIR: true,
+            evmVersion: "paris",
+          outputSelection: {
+            "*": {
+              "*": ["abi", "evm.bytecode", "evm.deployedBytecode", "evm.methodIdentifiers", "metadata", "storageLayout"],
+            },
+          },
+          },
+        },
+      ])
+    ),
   },
   paths: {
     sources: "./contracts",
@@ -68,6 +127,22 @@ const config = defineConfig({
     },
   },
   networks: {
+    // Pinned hardfork, RE-ADDED during the Hardhat 2->3 merge — this exact
+    // fix already existed pre-migration and was lost because the merge only
+    // carried the `solidity` block forward from dev's config, not `networks`.
+    //
+    // WHY THIS IS NEEDED. Hardhat's current default hardfork is past Fusaka,
+    // which enforces EIP-7825's 16,777,216 PER-TRANSACTION gas cap.
+    // `IndexDeployer`'s one-shot atomic deploy-cut-finalize transaction
+    // genuinely needs slightly MORE than that once a 13th facet
+    // (`IndexPoolFacet`) joined the manifest (~16.8-17M gas, confirmed by
+    // direct measurement) — a real limit on a Fusaka chain, irrelevant on the
+    // pre-Cancun chain this repo actually targets (see the `evmVersion:
+    // "paris"` note above). "cancun" is the newest hardfork that supports
+    // `PUSH0` (EIP-3855, Shanghai+, required by this compile target) without
+    // reintroducing Fusaka's cap.
+    hardhat: { type: "edr-simulated", hardfork: "cancun" },
+
     // LOCAL ONLY. `npx hardhat node` serves this on 127.0.0.1:8545 (chainId
     // 31337); scripts/local-v3-setup.ts deploys the V3 dev stack here so the
     // frontend can be exercised without touching mainnet.

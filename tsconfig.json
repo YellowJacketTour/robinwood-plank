@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -19,7 +23,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": [
+        "./*"
+      ]
     }
   },
   "include": [
@@ -40,6 +46,13 @@
     "scripts/deploy-vault-v3.ts",
     "scripts/local-v3-setup.ts",
     "scripts/local-topup.ts",
-    "scripts/deploy-and-seed-v3.ts"
+    "scripts/deploy-and-seed-v3.ts",
+    "scripts/deploy-index-vault.ts",
+    "scripts/seed-index-vault-genesis.ts",
+    "scripts/configure-index-vault-governance.ts",
+    "scripts/config/index-vault-deploy-config.ts",
+    "scripts/deploy/**",
+    "scripts/verify/**",
+    "scripts/gas/**"
   ]
 }

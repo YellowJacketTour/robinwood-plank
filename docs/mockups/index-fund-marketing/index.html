@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Plank Index · Final — vault of vaults</title>
+  <meta name="robots" content="noindex,nofollow" />
+  <meta name="description" content="One compounding share per collection. Global index of those shares + ETH. Fees auto-compound. No settlement oracle. Always fair exit." />
+  <style>
+    :root {
+      --bg: #030504;
+      --panel: #0a0e0c;
+      --panel2: #0f1512;
+      --g: #3dffa8;
+      --a: #e0b84a;
+      --c: #5ec4f0;
+      --u: #c47dff;
+      --r: #ff6b6b;
+      --t: #e8f2ec;
+      --m: #6d8278;
+      --line: rgba(61,255,168,.15);
+      --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--sans); background: var(--bg); color: var(--t);
+      font-size: 14px; line-height: 1.45; min-height: 100vh;
+    }
+    body::before {
+      content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background:
+        radial-gradient(ellipse 70% 40% at 50% -10%, rgba(61,255,168,.06), transparent 50%),
+        linear-gradient(rgba(61,255,168,.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(61,255,168,.025) 1px, transparent 1px);
+      background-size: 100% 100%, 40px 40px, 40px 40px;
+    }
+
+    .top {
+      position: sticky; top: 0; z-index: 40;
+      display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem;
+      padding: .55rem 1.1rem;
+      background: rgba(3,5,4,.92); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--line);
+    }
+    .logo {
+      font-family: var(--mono); font-weight: 800; font-size: 11px; letter-spacing: .14em;
+      background: var(--g); color: #030504; padding: .28rem .5rem; border-radius: 3px;
+    }
+    .top .meta { font-family: var(--mono); font-size: 10px; color: var(--m); letter-spacing: .06em; }
+    .top .meta b { color: var(--g); }
+    .top nav { margin-left: auto; display: flex; flex-wrap: wrap; gap: .75rem; }
+    .top a { color: var(--m); text-decoration: none; font-size: 12px; font-weight: 600; }
+    .top a:hover { color: var(--g); }
+
+    .wrap {
+      position: relative; z-index: 1;
+      max-width: 1080px; margin: 0 auto;
+      padding: 1.5rem 1rem 3.5rem;
+    }
+
+    /* HERO */
+    .hero { text-align: center; padding: .5rem 0 1.5rem; }
+    .hero .badge {
+      display: inline-block; font-family: var(--mono); font-size: 10px; letter-spacing: .16em;
+      text-transform: uppercase; color: var(--g); border: 1px solid var(--line);
+      padding: .3rem .65rem; border-radius: 999px; margin-bottom: .75rem;
+      background: rgba(61,255,168,.06);
+    }
+    .hero h1 {
+      font-size: clamp(1.65rem, 4.5vw, 2.45rem); font-weight: 750;
+      letter-spacing: -.03em; line-height: 1.15; margin-bottom: .55rem;
+    }
+    .hero h1 em { font-style: normal; color: var(--g); }
+    .hero .lede {
+      font-size: clamp(1rem, 2.2vw, 1.15rem); color: var(--m);
+      max-width: 34rem; margin: 0 auto 1.1rem; line-height: 1.45;
+    }
+    .pills { display: flex; flex-wrap: wrap; justify-content: center; gap: .4rem; }
+    .pills span {
+      font-family: var(--mono); font-size: 10px; letter-spacing: .05em;
+      padding: .3rem .55rem; border-radius: 6px; border: 1px solid var(--line); color: var(--t);
+      background: var(--panel);
+    }
+
+    /* LEGEND */
+    .legend {
+      display: flex; flex-wrap: wrap; justify-content: center; gap: .4rem;
+      margin: 1rem 0 1.25rem;
+    }
+    .lg {
+      display: inline-flex; align-items: center; gap: .3rem;
+      font-family: var(--mono); font-size: 9px; letter-spacing: .08em;
+      padding: .2rem .45rem; border-radius: 999px; border: 1px solid;
+    }
+    .lg i { width: 7px; height: 7px; border-radius: 50%; }
+    .lg.comp { color: var(--a); border-color: rgba(224,184,74,.4); }
+    .lg.comp i { background: var(--a); }
+    .lg.cash { color: var(--c); border-color: rgba(94,196,240,.4); }
+    .lg.cash i { background: var(--c); }
+    .lg.depth { color: var(--g); border-color: rgba(61,255,168,.4); }
+    .lg.depth i { background: var(--g); }
+    .lg.scarce { color: var(--u); border-color: rgba(196,125,255,.4); }
+    .lg.scarce i { background: var(--u); }
+
+    section { margin-top: 2rem; }
+    .sh {
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem .8rem;
+      margin-bottom: .85rem; padding-bottom: .4rem; border-bottom: 1px solid var(--line);
+    }
+    .sh .n { font-family: var(--mono); font-size: 11px; color: var(--g); letter-spacing: .12em; }
+    .sh h2 { font-size: clamp(1.1rem, 2.2vw, 1.35rem); font-weight: 700; letter-spacing: -.02em; }
+    .sh p { width: 100%; font-size: 13px; color: var(--m); max-width: 40rem; }
+
+    /* BIG FLOW — final schematic */
+    .flow-card {
+      border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+      overflow: hidden;
+    }
+    .flow-tools {
+      display: flex; flex-wrap: wrap; gap: .35rem; align-items: center;
+      padding: .65rem .8rem; border-bottom: 1px solid var(--line); background: #080c0a;
+    }
+    .flow-tools button {
+      font-family: var(--mono); font-size: 11px; font-weight: 600;
+      padding: .35rem .55rem; border-radius: 5px; cursor: pointer;
+      border: 1px solid var(--line); background: transparent; color: var(--t);
+    }
+    .flow-tools button:hover, .flow-tools button.on {
+      border-color: var(--g); color: var(--g); background: rgba(61,255,168,.08);
+    }
+    .flow-tools button.play {
+      background: var(--g); color: #030504; border-color: var(--g);
+    }
+    .flow-cap {
+      padding: .75rem .9rem; border-bottom: 1px solid var(--line);
+      min-height: 4.2rem;
+    }
+    .flow-cap .step {
+      font-family: var(--mono); font-size: 11px; color: var(--g); letter-spacing: .1em;
+      margin-bottom: .25rem;
+    }
+    .flow-cap h3 { font-size: 15px; margin-bottom: .25rem; }
+    .flow-cap p { font-size: 13px; color: var(--m); line-height: 1.4; max-width: 44rem; }
+    .flow-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .45rem; }
+    .chip {
+      font-family: var(--mono); font-size: 9px; padding: .18rem .4rem; border-radius: 4px; border: 1px solid;
+    }
+    .chip.comp { color: var(--a); border-color: rgba(224,184,74,.35); background: rgba(224,184,74,.06); }
+    .chip.cash { color: var(--c); border-color: rgba(94,196,240,.35); background: rgba(94,196,240,.06); }
+    .chip.depth { color: var(--g); border-color: rgba(61,255,168,.35); background: rgba(61,255,168,.06); }
+    .chip.scarce { color: var(--u); border-color: rgba(196,125,255,.35); background: rgba(196,125,255,.06); }
+    .flow-svg { width: 100%; display: block; background: linear-gradient(180deg, #0a100e, #060908); }
+    .node-on { filter: drop-shadow(0 0 8px rgba(61,255,168,.45)); }
+
+    /* 3 LAYER CARDS */
+    .layers {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: .55rem;
+    }
+    @media (max-width: 800px) { .layers { grid-template-columns: 1fr; } }
+    .layer {
+      border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+      padding: .9rem .8rem; border-top: 3px solid var(--g);
+    }
+    .layer.l1 { border-top-color: var(--a); }
+    .layer.l2 { border-top-color: var(--c); }
+    .layer.l3 { border-top-color: var(--u); }
+    .layer .lv {
+      font-family: var(--mono); font-size: 10px; letter-spacing: .14em; color: var(--m);
+      margin-bottom: .3rem;
+    }
+    .layer h3 { font-size: 15px; margin-bottom: .35rem; }
+    .layer p { font-size: 12.5px; color: var(--m); line-height: 1.4; margin-bottom: .55rem; }
+    .layer ul { list-style: none; }
+    .layer li {
+      font-size: 12px; color: var(--t); padding: .28rem 0;
+      border-top: 1px solid rgba(61,255,168,.06); line-height: 1.3;
+    }
+    .layer li strong { color: var(--g); font-weight: 600; }
+
+    /* PIPES */
+    .bus-note {
+      font-size: 12.5px; color: var(--m); margin-bottom: .65rem; line-height: 1.4;
+      padding: .65rem .75rem; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--panel);
+    }
+    .bus-note strong { color: var(--t); }
+    .pipes {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem;
+    }
+    @media (max-width: 700px) { .pipes { grid-template-columns: 1fr 1fr; } }
+    .pipe {
+      border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+      padding: .75rem .65rem; position: relative; overflow: hidden;
+    }
+    .pipe .ty {
+      font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+      margin-bottom: .15rem;
+    }
+    .pipe .pct {
+      font-family: var(--mono); font-size: 1.35rem; font-weight: 800; line-height: 1;
+      margin-bottom: .2rem;
+    }
+    .pipe h4 { font-size: 13px; margin-bottom: .2rem; }
+    .pipe p { font-size: 11.5px; color: var(--m); line-height: 1.3; }
+    .pipe .bar { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; }
+    .pipe.comp .ty, .pipe.comp .pct { color: var(--a); }
+    .pipe.comp .bar { background: var(--a); }
+    .pipe.depth .ty, .pipe.depth .pct { color: var(--g); }
+    .pipe.depth .bar { background: var(--g); }
+    .pipe.scarce .ty, .pipe.scarce .pct { color: var(--u); }
+    .pipe.scarce .bar { background: var(--u); }
+
+    /* INDEX IN OUT */
+    .io {
+      display: grid; grid-template-columns: 1fr 1fr; gap: .55rem;
+    }
+    @media (max-width: 700px) { .io { grid-template-columns: 1fr; } }
+    .io-card {
+      border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+      padding: 1rem .9rem;
+    }
+    .io-card h3 {
+      font-size: 14px; margin-bottom: .5rem; display: flex; align-items: center; gap: .4rem;
+    }
+    .io-card.in h3 { color: var(--g); }
+    .io-card.out h3 { color: var(--a); }
+    .io-card ol { margin: 0 0 0 1.1rem; color: var(--m); font-size: 13px; }
+    .io-card li { margin-bottom: .35rem; line-height: 1.35; }
+    .io-card li strong { color: var(--t); font-weight: 600; }
+    .io-card .fee {
+      margin-top: .65rem; padding-top: .55rem; border-top: 1px dashed var(--line);
+      font-size: 12px; color: var(--m); line-height: 1.35;
+    }
+    .io-card .fee strong { color: var(--c); }
+
+    /* SHARE ATOM */
+    .atom {
+      display: grid; grid-template-columns: 1.1fr .9fr; gap: .65rem;
+    }
+    @media (max-width: 800px) { .atom { grid-template-columns: 1fr; } }
+    .atom-main {
+      border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+      padding: 1rem;
+    }
+    .atom-main h3 { font-size: 15px; margin-bottom: .4rem; }
+    .atom-main p { font-size: 13px; color: var(--m); margin-bottom: .75rem; line-height: 1.4; }
+    .atom-steps {
+      display: flex; flex-direction: column; gap: .4rem;
+    }
+    .as {
+      display: grid; grid-template-columns: 28px 1fr; gap: .45rem; align-items: start;
+      padding: .5rem; border-radius: 6px; background: var(--panel2); border: 1px solid transparent;
+    }
+    .as:hover { border-color: var(--line); }
+    .as .num {
+      font-family: var(--mono); font-weight: 800; color: var(--g); font-size: 14px;
+    }
+    .as strong { display: block; font-size: 13px; margin-bottom: .1rem; }
+    .as span { font-size: 12px; color: var(--m); line-height: 1.3; }
+    .atom-side {
+      border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+      padding: 1rem; display: flex; flex-direction: column; gap: .5rem;
+    }
+    .atom-side h3 { font-size: 13px; color: var(--a); font-family: var(--mono); letter-spacing: .06em; }
+    .eq {
+      font-family: var(--mono); font-size: 12px; padding: .55rem .6rem;
+      background: #080c0a; border-radius: 6px; border-left: 3px solid var(--a);
+      line-height: 1.45; color: var(--t);
+    }
+    .eq small { display: block; color: var(--m); font-size: 10px; margin-top: .25rem; }
+
+    /* PLANK */
+    .plank-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: .55rem;
+    }
+    @media (max-width: 640px) { .plank-grid { grid-template-columns: 1fr; } }
+    .plank-card {
+      border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+      padding: .9rem; border-top: 3px solid var(--u);
+    }
+    .plank-card h3 { font-size: 14px; color: var(--u); margin-bottom: .35rem; }
+    .plank-card p { font-size: 12.5px; color: var(--m); line-height: 1.4; }
+    .plank-card .pct {
+      font-family: var(--mono); font-size: 1.5rem; font-weight: 800; color: var(--u);
+      margin: .35rem 0 .2rem;
+    }
+
+    /* WHO */
+    .who {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem;
+    }
+    @media (max-width: 800px) { .who { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 480px) { .who { grid-template-columns: 1fr; } }
+    .who-card {
+      border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+      padding: .8rem .7rem;
+    }
+    .who-card .role {
+      font-family: var(--mono); font-size: 9px; letter-spacing: .12em; color: var(--a);
+      margin-bottom: .25rem;
+    }
+    .who-card h3 { font-size: 14px; margin-bottom: .4rem; }
+    .who-card .row { font-size: 12px; margin-bottom: .25rem; line-height: 1.3; }
+    .who-card .row b {
+      display: block; font-size: 9px; font-family: var(--mono); letter-spacing: .08em;
+      color: var(--m); font-weight: 500; text-transform: uppercase;
+    }
+    .who-card .pay b { color: var(--c); }
+    .who-card .get b { color: var(--g); }
+
+    /* SIM */
+    .sim {
+      border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+      padding: 1rem;
+    }
+    .sim-grid {
+      display: grid; grid-template-columns: 1fr 1.05fr; gap: 1rem;
+    }
+    @media (max-width: 800px) { .sim-grid { grid-template-columns: 1fr; } }
+    .kpis {
+      display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; margin-bottom: .65rem;
+    }
+    .kpi {
+      background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+      padding: .55rem .55rem; border-top: 2px solid var(--g);
+    }
+    .kpi.a { border-top-color: var(--a); }
+    .kpi.c { border-top-color: var(--c); }
+    .kpi.u { border-top-color: var(--u); }
+    .kpi .l {
+      font-family: var(--mono); font-size: 9px; letter-spacing: .08em; color: var(--m);
+      text-transform: uppercase;
+    }
+    .kpi .v {
+      font-family: var(--mono); font-size: 1.25rem; font-weight: 800; color: var(--g);
+      margin-top: .1rem; font-variant-numeric: tabular-nums;
+    }
+    .kpi.a .v { color: var(--a); }
+    .kpi.c .v { color: var(--c); }
+    .kpi.u .v { color: var(--u); }
+    .meters { display: flex; flex-direction: column; gap: .4rem; }
+    .meter label {
+      display: flex; justify-content: space-between; font-size: 11px; color: var(--m);
+      margin-bottom: .15rem;
+    }
+    .meter label b { color: var(--t); font-family: var(--mono); font-size: 11px; }
+    .track {
+      height: 10px; background: #050807; border: 1px solid var(--line);
+      border-radius: 4px; overflow: hidden;
+    }
+    .track i { display: block; height: 100%; width: 0; transition: width .45s ease; border-radius: 3px; }
+    .m1 i { background: linear-gradient(90deg, #8a7030, var(--a)); }
+    .m2 i { background: linear-gradient(90deg, var(--g2, #1a9f62), var(--g)); }
+    .m3 i { background: linear-gradient(90deg, #2a5a7a, var(--c)); }
+    .chart {
+      height: 100px; background: #060908; border: 1px solid var(--line);
+      border-radius: 8px; margin-bottom: .55rem;
+    }
+    .chart svg { width: 100%; height: 100%; display: block; }
+    .btns { display: flex; flex-wrap: wrap; gap: .35rem; }
+    .btn {
+      font-family: var(--sans); font-size: 12px; font-weight: 650;
+      padding: .45rem .7rem; border-radius: 6px; cursor: pointer;
+      border: 1px solid var(--g); background: rgba(61,255,168,.12); color: var(--g);
+    }
+    .btn:hover { background: rgba(61,255,168,.22); }
+    .btn.sec { background: transparent; border-color: var(--line); color: var(--t); }
+    .btn.warn { border-color: var(--r); color: #f88; background: rgba(255,80,80,.08); }
+    .st {
+      margin-top: .65rem; padding: .65rem .7rem; border-radius: 6px;
+      background: #080c0a; border-left: 3px solid var(--g);
+      font-size: 13px; color: var(--m); line-height: 1.4; min-height: 3em;
+    }
+    .st strong { color: var(--g); }
+    .st em { color: var(--a); font-style: normal; }
+
+    /* RULES */
+    .rules {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: .45rem;
+    }
+    @media (max-width: 800px) { .rules { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 480px) { .rules { grid-template-columns: 1fr; } }
+    .rule {
+      border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+      padding: .7rem; border-top: 2px solid var(--g);
+    }
+    .rule h4 { font-size: 12.5px; margin-bottom: .25rem; }
+    .rule p { font-size: 11.5px; color: var(--m); line-height: 1.35; }
+
+    footer {
+      margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--line);
+      text-align: center; font-family: var(--mono); font-size: 10px; color: var(--m);
+      letter-spacing: .05em; line-height: 1.7;
+    }
+    footer strong { color: var(--g); }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <span class="logo">PLANK INDEX</span>
+    <span class="meta">FINAL · <b>PERFECT-3</b> · single share · no oracle · always exit</span>
+    <nav>
+      <a href="#flow">Flow</a>
+      <a href="#share">Share</a>
+      <a href="#bus">Bus</a>
+      <a href="#index">Index</a>
+      <a href="#plank">PLANK</a>
+      <a href="#sim">Try</a>
+    </nav>
+  </header>
+
+  <div class="wrap">
+    <div class="hero">
+      <div class="badge">Vault of vaults · final product</div>
+      <h1>One share per collection.<br /><em>It always compounds.</em></h1>
+      <p class="lede">
+        Deposit an NFT → get a liquid vault share. Fees raise its claim automatically.
+        The global index holds those shares + ETH. Every fee feeds more art, deeper books, burns, and reinvested yield.
+        Exit fair, anytime — no price oracle.
+      </p>
+      <div class="pills">
+        <span>Single share (no dual v/x)</span>
+        <span>Nested compound</span>
+        <span>Energy Bus</span>
+        <span>Pro-rata exit</span>
+        <span>PLANK burn + POL</span>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span class="lg comp"><i></i>COMPOUND claim</span>
+      <span class="lg cash"><i></i>CASH fee</span>
+      <span class="lg depth"><i></i>DEPTH liquidity</span>
+      <span class="lg scarce"><i></i>SCARCITY burn</span>
+    </div>
+
+    <!-- FLOW -->
+    <section id="flow">
+      <div class="sh">
+        <span class="n">01</span>
+        <h2>How it works</h2>
+        <p>Play or step. Each beat shows what compounds vs what is cash.</p>
+      </div>
+      <div class="flow-card">
+        <div class="flow-tools">
+          <button type="button" class="play" id="btnPlay">▶ Play</button>
+          <button type="button" id="btnPrev">←</button>
+          <button type="button" id="btnNext">→</button>
+          <button type="button" class="on" data-s="0">1</button>
+          <button type="button" data-s="1">2</button>
+          <button type="button" data-s="2">3</button>
+          <button type="button" data-s="3">4</button>
+          <button type="button" data-s="4">5</button>
+          <button type="button" data-s="5">6</button>
+        </div>
+        <div class="flow-cap">
+          <div class="step" id="capStep">STEP 1 / 6</div>
+          <h3 id="capTitle">Deposit NFT → vault share</h3>
+          <p id="capBody">You lock an NFT in a collection vault and receive one fungible share. At launch, one share unit maps to one inventory unit.</p>
+          <div class="flow-chips" id="capChips"></div>
+        </div>
+        <svg class="flow-svg" id="map" viewBox="0 0 900 280" role="img" aria-label="Product flow">
+          <defs>
+            <marker id="ar" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" fill="#3dffa8" opacity=".7"/>
+            </marker>
+            <filter id="gl"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <g id="edges" fill="none" stroke="rgba(61,255,168,.2)" stroke-width="1.8" marker-end="url(#ar)">
+            <path id="e1" d="M130 70 H220"/>
+            <path id="e2" d="M320 70 H400"/>
+            <path id="e3" d="M480 90 C480 130, 360 150, 360 170"/>
+            <path id="e4" d="M360 210 C360 235, 280 250, 250 255"/>
+            <path id="e5" d="M400 210 C450 240, 520 250, 560 255"/>
+            <path id="e6" d="M420 185 H520"/>
+            <path id="e7" d="M580 185 H680"/>
+            <path id="e8" d="M760 185 H830"/>
+          </g>
+          <g id="parts"></g>
+
+          <g class="nd" data-i="0" transform="translate(90,70)" style="cursor:pointer">
+            <rect class="nr" x="-50" y="-32" width="100" height="64" rx="10" fill="#0a0e0c" stroke="#e0b84a" stroke-width="1.6"/>
+            <text y="-4" text-anchor="middle" fill="#e0b84a" font-size="16">🖼</text>
+            <text y="16" text-anchor="middle" fill="#e8f2ec" font-size="11" font-weight="700" font-family="system-ui">NFT</text>
+          </g>
+          <g class="nd" data-i="1" transform="translate(270,70)" style="cursor:pointer">
+            <rect class="nr" x="-55" y="-32" width="110" height="64" rx="10" fill="#0a0e0c" stroke="#e0b84a" stroke-width="1.6"/>
+            <text y="-6" text-anchor="middle" fill="#e0b84a" font-size="11" font-weight="700" font-family="Consolas">SHARE</text>
+            <text y="12" text-anchor="middle" fill="#6d8278" font-size="9" font-family="system-ui">compounds</text>
+          </g>
+          <g class="nd" data-i="2" transform="translate(450,70)" style="cursor:pointer">
+            <rect class="nr" x="-50" y="-32" width="100" height="64" rx="10" fill="#0a0e0c" stroke="#5ec4f0" stroke-width="1.6"/>
+            <text y="-6" text-anchor="middle" fill="#5ec4f0" font-size="11" font-weight="700" font-family="Consolas">AMM</text>
+            <text y="12" text-anchor="middle" fill="#6d8278" font-size="9" font-family="system-ui">share/WETH</text>
+          </g>
+          <g class="nd" data-i="3" transform="translate(360,185)" style="cursor:pointer">
+            <rect class="nr" x="-70" y="-32" width="140" height="64" rx="10" fill="#0a0e0c" stroke="#5ec4f0" stroke-width="1.6"/>
+            <text y="-6" text-anchor="middle" fill="#5ec4f0" font-size="11" font-weight="700" font-family="Consolas">ENERGY BUS</text>
+            <text y="12" text-anchor="middle" fill="#6d8278" font-size="9" font-family="system-ui">6 automatic pipes</text>
+          </g>
+          <g class="nd" data-i="4" transform="translate(230,255)" style="cursor:pointer">
+            <rect class="nr" x="-55" y="-24" width="110" height="48" rx="10" fill="#0a0e0c" stroke="#e0b84a" stroke-width="1.6"/>
+            <text y="0" text-anchor="middle" fill="#e0b84a" font-size="10" font-weight="700" font-family="Consolas">INDEX holds</text>
+            <text y="14" text-anchor="middle" fill="#6d8278" font-size="8" font-family="system-ui">shares + ETH</text>
+          </g>
+          <g class="nd" data-i="5" transform="translate(560,255)" style="cursor:pointer">
+            <rect class="nr" x="-55" y="-24" width="110" height="48" rx="10" fill="#0a0e0c" stroke="#3dffa8" stroke-width="1.6"/>
+            <text y="0" text-anchor="middle" fill="#3dffa8" font-size="10" font-weight="700" font-family="Consolas">iToken</text>
+            <text y="14" text-anchor="middle" fill="#6d8278" font-size="8" font-family="system-ui">pro-rata exit</text>
+          </g>
+          <g class="nd" data-i="6" transform="translate(720,185)" style="cursor:pointer">
+            <rect class="nr" x="-50" y="-32" width="100" height="64" rx="10" fill="#0a0e0c" stroke="#c47dff" stroke-width="1.6"/>
+            <text y="-6" text-anchor="middle" fill="#c47dff" font-size="11" font-weight="700" font-family="Consolas">PLANK</text>
+            <text y="12" text-anchor="middle" fill="#6d8278" font-size="9" font-family="system-ui">burn + POL</text>
+          </g>
+          <g class="nd" data-i="7" transform="translate(850,185)" style="cursor:pointer">
+            <rect class="nr" x="-40" y="-32" width="80" height="64" rx="10" fill="#0a0e0c" stroke="#3dffa8" stroke-width="1.6"/>
+            <text y="-6" text-anchor="middle" fill="#3dffa8" font-size="11" font-weight="700" font-family="Consolas">YOU</text>
+            <text y="12" text-anchor="middle" fill="#6d8278" font-size="9" font-family="system-ui">claim ↑</text>
+          </g>
+        </svg>
+      </div>
+    </section>
+
+    <!-- LAYERS -->
+    <section id="layers">
+      <div class="sh">
+        <span class="n">02</span>
+        <h2>Three layers</h2>
+        <p>Collection · Index · Energy. Lean stack — no dual tokens.</p>
+      </div>
+      <div class="layers">
+        <div class="layer l1">
+          <div class="lv">L1 · COLLECTION</div>
+          <h3>Vault share (S)</h3>
+          <p>One ERC-20 per collection. Always compounding. Liquid on AMM.</p>
+          <ul>
+            <li><strong>In:</strong> NFT → mint share</li>
+            <li><strong>Out:</strong> burn share → NFT</li>
+            <li><strong>Trade:</strong> share ↔ WETH</li>
+            <li><strong>Fees:</strong> raise claim behind every share</li>
+          </ul>
+        </div>
+        <div class="layer l2">
+          <div class="lv">L2 · INDEX</div>
+          <h3>Vault of vaults</h3>
+          <p>Basket of collection shares + WETH. Your iToken is a slice of all of it.</p>
+          <ul>
+            <li><strong>Mint:</strong> deposit full pro-rata basket</li>
+            <li><strong>Redeem:</strong> burn iToken → every asset</li>
+            <li><strong>Weights:</strong> real fees &amp; demand — not floors</li>
+            <li><strong>Growth:</strong> Bus buys more shares in</li>
+          </ul>
+        </div>
+        <div class="layer l3">
+          <div class="lv">L3 · ENERGY</div>
+          <h3>Automatic pipes</h3>
+          <p>WETH fees that hit the Bus split into fixed routes. No free iToken mint.</p>
+          <ul>
+            <li><strong>Art:</strong> buy shares into index</li>
+            <li><strong>Depth:</strong> locked LP that keeps earning</li>
+            <li><strong>Scarce:</strong> burn/lock IDX &amp; PLANK</li>
+            <li><strong>DRIP:</strong> yield reinvests by default</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- SHARE ATOM -->
+    <section id="share">
+      <div class="sh">
+        <span class="n">03</span>
+        <h2>The share (not v + x)</h2>
+        <p>One token. Liquid. Compounds. No “remember to stake.”</p>
+      </div>
+      <div class="atom">
+        <div class="atom-main">
+          <h3>What you hold</h3>
+          <p>
+            There is no separate vToken and xToken for users. Deposit mints a <strong style="color:var(--a)">vault share</strong>
+            that is already the compounding claim (inventory units grow behind it from fees).
+          </p>
+          <div class="atom-steps">
+            <div class="as">
+              <div class="num">1</div>
+              <div><strong>Deposit NFT</strong><span>Vault locks art · you get shares · pay small WETH fee</span></div>
+            </div>
+            <div class="as">
+              <div class="num">2</div>
+              <div><strong>Hold or trade</strong><span>Claim grows as others use the vault · or sell share on AMM</span></div>
+            </div>
+            <div class="as">
+              <div class="num">3</div>
+              <div><strong>Redeem NFT</strong><span>Burn enough shares for one inventory unit · get NFT back</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="atom-side">
+          <h3>COMPOUND MATH</h3>
+          <div class="eq">
+            fees → more inventory behind same shares
+            <small>Your balance can stay flat while redeemable claim rises</small>
+          </div>
+          <div class="eq">
+            genesis: 1 share unit ≈ 1 NFT
+            <small>After growth UI shows claim ≈ X NFTs — honest rate</small>
+          </div>
+          <div class="eq">
+            index holds these shares
+            <small>Bus buys more → nested compound for iToken holders</small>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BUS -->
+    <section id="bus">
+      <div class="sh">
+        <span class="n">04</span>
+        <h2>Energy Bus</h2>
+        <p>Only WETH that actually arrives is split. Percentages below are of Bus balance — not of every fee dollar.</p>
+      </div>
+      <div class="bus-note">
+        <strong>Before the Bus:</strong> part of each fee compounds the collection share · part may go to the creator
+        (default: auto-buy their own shares) · mint path sends ≥8.1% to Bus · swap path sends ~50% of the fee to Bus
+        (rest deepens the local pool).
+      </div>
+      <div class="pipes">
+        <div class="pipe comp">
+          <div class="ty">Compound</div>
+          <div class="pct">35%</div>
+          <h4>Buy vault shares</h4>
+          <p>Market-buy collection shares into the index by performance weight.</p>
+          <div class="bar"></div>
+        </div>
+        <div class="pipe depth">
+          <div class="ty">Depth</div>
+          <div class="pct">15%</div>
+          <h4>Collection POL</h4>
+          <p>Add liquidity and lock it. Fees reinvest into more depth.</p>
+          <div class="bar"></div>
+        </div>
+        <div class="pipe scarce">
+          <div class="ty">Scarcity</div>
+          <div class="pct">15%</div>
+          <h4>Burn / lock IDX</h4>
+          <p>Buy index token and remove it from free float.</p>
+          <div class="bar"></div>
+        </div>
+        <div class="pipe scarce">
+          <div class="ty">Scarcity</div>
+          <div class="pct">10%</div>
+          <h4>Burn PLANK</h4>
+          <p>Buy PLANK on the market and burn it. Not in the NFT basket.</p>
+          <div class="bar"></div>
+        </div>
+        <div class="pipe depth">
+          <div class="ty">Depth</div>
+          <div class="pct">10%</div>
+          <h4>PLANK POL</h4>
+          <p>Lock PLANK/WETH liquidity. Harvest can fund more burns + Bus.</p>
+          <div class="bar"></div>
+        </div>
+        <div class="pipe comp">
+          <div class="ty">Compound</div>
+          <div class="pct">15%</div>
+          <h4>Yield DRIP</h4>
+          <p>Default: reinvest into more index claim. Cash is opt-out only.</p>
+          <div class="bar"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- INDEX IO -->
+    <section id="index">
+      <div class="sh">
+        <span class="n">05</span>
+        <h2>Index: going in &amp; coming out</h2>
+        <p>No oracle NAV. Full basket in · full slice out.</p>
+      </div>
+      <div class="io">
+        <div class="io-card in">
+          <h3>→ Mint iToken</h3>
+          <ol>
+            <li><strong>Pro-rata path:</strong> deposit a fair slice of every collection share + WETH the index holds.</li>
+            <li><strong>Convenience path:</strong> pay WETH; a solver buys the basket and mints in one atomic flow (you set min out).</li>
+            <li><strong>Result:</strong> you receive iTokens. Fees never print free iTokens to fee payers.</li>
+          </ol>
+          <div class="fee">
+            <strong>Costs:</strong> gas · AMM spreads if using a solver · no floor-oracle mint tax on core.
+          </div>
+        </div>
+        <div class="io-card out">
+          <h3>← Redeem iToken</h3>
+          <ol>
+            <li><strong>Burn iTokens</strong> on the core contract anytime.</li>
+            <li><strong>Receive</strong> a pro-rata slice of every share + WETH in the vault.</li>
+            <li><strong>Optional:</strong> sell shares on collection AMMs or redeem NFTs from vaults.</li>
+          </ol>
+          <div class="fee">
+            <strong>Costs:</strong> gas · later AMM/NFT fees if you unwind · exit never waits on an oracle or admin.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PLANK -->
+    <section id="plank">
+      <div class="sh">
+        <span class="n">06</span>
+        <h2>How PLANK is affected</h2>
+        <p>Automatic — only from real Bus WETH. Never a redeemable NFT-index asset.</p>
+      </div>
+      <div class="plank-grid">
+        <div class="plank-card">
+          <h3>Buy &amp; burn</h3>
+          <div class="pct">10%</div>
+          <p>
+            Of every WETH unit on the Energy Bus, 10% market-buys PLANK and burns it.
+            Triggered whenever vault activity feeds the Bus and <code style="color:var(--g)">route()</code> runs.
+            Scarcity for remaining PLANK holders — funded by NFT market use.
+          </p>
+        </div>
+        <div class="plank-card">
+          <h3>Add LP &amp; lock</h3>
+          <div class="pct">10%</div>
+          <p>
+            Another 10% of Bus WETH builds PLANK/WETH liquidity and locks it (no admin withdraw).
+            Fees on that depth can harvest into more PLANK burns and more Bus energy.
+            Tighter PLANK market over time — still outside the NFT basket.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- WHO -->
+    <section id="who">
+      <div class="sh">
+        <span class="n">07</span>
+        <h2>Who gets what</h2>
+      </div>
+      <div class="who">
+        <div class="who-card">
+          <div class="role">USER</div>
+          <h3>NFT / share holder</h3>
+          <div class="row pay"><b>Pays</b>WETH fees when using vaults</div>
+          <div class="row get"><b>Gets</b>Liquid compounding share · NFT back later</div>
+        </div>
+        <div class="who-card">
+          <div class="role">INDEX</div>
+          <h3>iToken holder</h3>
+          <div class="row pay"><b>Pays</b>Basket capital</div>
+          <div class="row get"><b>Gets</b>Nested art claim ↑ · DRIP · burns · fair exit</div>
+        </div>
+        <div class="who-card">
+          <div class="role">CREATOR</div>
+          <h3>Collection</h3>
+          <div class="row pay"><b>Pays</b>Nothing extra</div>
+          <div class="row get"><b>Gets</b>Fee share · default auto-buy own shares</div>
+        </div>
+        <div class="who-card">
+          <div class="role">LP</div>
+          <h3>Share/WETH LP</h3>
+          <div class="row pay"><b>Pays</b>Capital · IL risk</div>
+          <div class="row get"><b>Gets</b>Swap fees · deeper books from POL</div>
+        </div>
+        <div class="who-card">
+          <div class="role">PLANK</div>
+          <h3>PLANK holder</h3>
+          <div class="row pay"><b>Pays</b>—</div>
+          <div class="row get"><b>Gets</b>Automatic burns + locked depth from Bus</div>
+        </div>
+        <div class="who-card">
+          <div class="role">ATTACKER</div>
+          <h3>Wash / griefer</h3>
+          <div class="row pay"><b>Pays</b>Full fees every loop</div>
+          <div class="row get"><b>Gets</b>Funds holders · EV negative</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SIM -->
+    <section id="sim">
+      <div class="sh">
+        <span class="n">08</span>
+        <h2>Try the machine</h2>
+        <p>Toy model of final economics — not live chain data.</p>
+      </div>
+      <div class="sim">
+        <div class="sim-grid">
+          <div>
+            <div class="kpis">
+              <div class="kpi a"><div class="l">Share claim rate</div><div class="v" id="vRate">1.00</div></div>
+              <div class="kpi"><div class="l">Art in index</div><div class="v" id="vArt">0.0</div></div>
+              <div class="kpi c"><div class="l">Nested NFT / i</div><div class="v" id="vNest">1.00</div></div>
+              <div class="kpi u"><div class="l">PLANK burn units</div><div class="v" id="vPlank">0.0</div></div>
+            </div>
+            <div class="meters">
+              <div class="meter m1">
+                <label>Compound · share rate <b id="bRate">0%</b></label>
+                <div class="track"><i id="iRate"></i></div>
+              </div>
+              <div class="meter m2">
+                <label>Compound · nested claim <b id="bNest">0%</b></label>
+                <div class="track"><i id="iNest"></i></div>
+              </div>
+              <div class="meter m3">
+                <label>Cash fees collected <b id="bFee">0%</b></label>
+                <div class="track"><i id="iFee"></i></div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="chart"><svg id="chart" viewBox="0 0 400 100" preserveAspectRatio="none"></svg></div>
+            <div class="btns">
+              <button class="btn" type="button" id="actVault">Use vault</button>
+              <button class="btn sec" type="button" id="actSwap">Swap shares</button>
+              <button class="btn sec" type="button" id="actRoute">route() Bus</button>
+              <button class="btn warn" type="button" id="actWash">Wash ×10</button>
+              <button class="btn sec" type="button" id="actReset">Reset</button>
+            </div>
+            <div class="st" id="st">
+              Press <strong>Use vault</strong> — share claim rises, Bus gets a fee slice, nested index claim can grow.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RULES -->
+    <section>
+      <div class="sh">
+        <span class="n">09</span>
+        <h2>Hard rules</h2>
+      </div>
+      <div class="rules">
+        <div class="rule">
+          <h4>No dual tokens</h4>
+          <p>One compounding share per collection. No “forget to stake.”</p>
+        </div>
+        <div class="rule">
+          <h4>No settlement oracle</h4>
+          <p>Mint/redeem use balances and pro-rata math only.</p>
+        </div>
+        <div class="rule">
+          <h4>No free iToken mint</h4>
+          <p>Fees fatten claims and depth — they don’t print free index shares.</p>
+        </div>
+        <div class="rule">
+          <h4>Exit always open</h4>
+          <p>Pro-rata redeem cannot be bricked by feeds, admins, or keepers.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <strong>PLANK INDEX · FINAL</strong><br />
+      Design surface · ONESHOT PERFECT-3 · not deploy authorization<br />
+      Vault of vaults · single share atom · Energy Bus · maximal compound
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      var steps = [
+        {
+          title: "Deposit NFT → vault share",
+          body: "You lock an NFT and receive one fungible share. At genesis, one share unit maps to one inventory unit. You also pay a small WETH fee.",
+          chips: [
+            { t: "COMPOUND · +share claim", c: "comp" },
+            { t: "CASH · fee paid", c: "cash" }
+          ],
+          n: [0, 1], e: ["e1"]
+        },
+        {
+          title: "Share compounds automatically",
+          body: "You never stake a second token. Fees raise inventory units behind every share. Your balance can stay flat while claim grows.",
+          chips: [
+            { t: "COMPOUND · rate ↑", c: "comp" }
+          ],
+          n: [1], e: []
+        },
+        {
+          title: "Trade on the AMM",
+          body: "Buy or sell shares for WETH. Swap fees partly deepen the pool and partly flow toward the Energy Bus.",
+          chips: [
+            { t: "CASH · swap fee", c: "cash" },
+            { t: "DEPTH · pool half", c: "depth" }
+          ],
+          n: [1, 2, 3], e: ["e2", "e3"]
+        },
+        {
+          title: "Energy Bus splits WETH",
+          body: "Of WETH that arrived: 35% buys shares into the index, 15% locks collection LP, 15% burns/locks IDX, 10% burns PLANK, 10% PLANK POL, 15% DRIP reinvests.",
+          chips: [
+            { t: "COMPOUND · buy shares", c: "comp" },
+            { t: "DEPTH · POL", c: "depth" },
+            { t: "SCARCITY · burns", c: "scarce" }
+          ],
+          n: [3, 4, 6], e: ["e3", "e4", "e5", "e6", "e7"]
+        },
+        {
+          title: "Index is a vault of vaults",
+          body: "iToken is a claim on many collection shares + WETH. Nested compound: shares in the index keep growing on L1 while Bus buys more of them.",
+          chips: [
+            { t: "COMPOUND · nested claim", c: "comp" }
+          ],
+          n: [4, 5], e: ["e4", "e5"]
+        },
+        {
+          title: "Exit fair — anytime",
+          body: "Burn iToken → receive a pro-rata slice of every share and WETH. No oracle. No admin. Then unwind shares to NFTs if you want.",
+          chips: [
+            { t: "COMPOUND · take shares out", c: "comp" },
+            { t: "CASH · take WETH out", c: "cash" }
+          ],
+          n: [5, 7], e: ["e5", "e8"]
+        }
+      ];
+
+      var step = 0, playing = false, timer = null;
+
+      function setStep(i) {
+        step = (i + steps.length) % steps.length;
+        var s = steps[step];
+        document.getElementById("capStep").textContent = "STEP " + (step + 1) + " / " + steps.length;
+        document.getElementById("capTitle").textContent = s.title;
+        document.getElementById("capBody").textContent = s.body;
+        var chips = document.getElementById("capChips");
+        chips.innerHTML = "";
+        s.chips.forEach(function (ch) {
+          var el = document.createElement("span");
+          el.className = "chip " + ch.c;
+          el.textContent = ch.t;
+          chips.appendChild(el);
+        });
+        document.querySelectorAll(".flow-tools button[data-s]").forEach(function (b) {
+          b.classList.toggle("on", +b.getAttribute("data-s") === step);
+        });
+        document.querySelectorAll(".nd .nr").forEach(function (r) {
+          r.setAttribute("stroke-width", "1.6");
+          r.parentElement.classList.remove("node-on");
+        });
+        document.querySelectorAll(".nd").forEach(function (g) {
+          if (s.n.indexOf(+g.getAttribute("data-i")) >= 0) {
+            g.querySelector(".nr").setAttribute("stroke-width", "2.5");
+            g.classList.add("node-on");
+          }
+        });
+        document.querySelectorAll("#edges path").forEach(function (p) {
+          p.setAttribute("stroke", "rgba(61,255,168,.15)");
+          p.setAttribute("stroke-width", "1.6");
+        });
+        var parts = document.getElementById("parts");
+        parts.innerHTML = "";
+        s.e.forEach(function (id) {
+          var p = document.getElementById(id);
+          if (!p) return;
+          p.setAttribute("stroke", "rgba(61,255,168,.8)");
+          p.setAttribute("stroke-width", "2.4");
+          var d = p.getAttribute("d");
+          for (var k = 0; k < 2; k++) {
+            var c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            c.setAttribute("r", "3.5");
+            c.setAttribute("fill", "#3dffa8");
+            c.setAttribute("filter", "url(#gl)");
+            var a = document.createElementNS("http://www.w3.org/2000/svg", "animateMotion");
+            a.setAttribute("dur", (1.5 + k * 0.35) + "s");
+            a.setAttribute("repeatCount", "indefinite");
+            a.setAttribute("path", d);
+            a.setAttribute("begin", (k * 0.4) + "s");
+            c.appendChild(a);
+            parts.appendChild(c);
+          }
+        });
+      }
+
+      document.getElementById("btnNext").onclick = function () { setStep(step + 1); };
+      document.getElementById("btnPrev").onclick = function () { setStep(step - 1); };
+      document.querySelectorAll(".flow-tools button[data-s]").forEach(function (b) {
+        b.onclick = function () { setStep(+b.getAttribute("data-s")); };
+      });
+      document.querySelectorAll(".nd").forEach(function (g) {
+        g.addEventListener("click", function () {
+          var map = [0, 1, 2, 3, 4, 5, 3, 5];
+          setStep(map[+g.getAttribute("data-i")] || 0);
+        });
+      });
+      document.getElementById("btnPlay").onclick = function () {
+        playing = !playing;
+        this.textContent = playing ? "❚❚ Pause" : "▶ Play";
+        if (playing) timer = setInterval(function () { setStep(step + 1); }, 3000);
+        else if (timer) clearInterval(timer);
+      };
+      setStep(0);
+
+      /* SIM */
+      var W = {
+        rate: 1, art: 0, nest: 1, plank: 0, fee: 0, xPerI: 1,
+        hist: [1]
+      };
+      function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
+      function nest() { return W.rate * W.xPerI; }
+
+      function push() {
+        W.hist.push(nest());
+        if (W.hist.length > 36) W.hist.shift();
+      }
+
+      function draw() {
+        var svg = document.getElementById("chart");
+        var n = W.hist.length, pad = 6, Wd = 400, H = 100;
+        var max = Math.max.apply(null, W.hist.concat([1.05]));
+        var min = Math.min.apply(null, W.hist.concat([0.95]));
+        function x(i) { return pad + (n <= 1 ? 0 : i / (n - 1) * (Wd - pad * 2)); }
+        function y(v) { return H - pad - ((v - min) / (max - min || 1)) * (H - pad * 2); }
+        var pts = [];
+        for (var i = 0; i < n; i++) pts.push(x(i) + "," + y(W.hist[i]));
+        svg.innerHTML = '<polyline fill="none" stroke="#3dffa8" stroke-width="2.5" points="' + pts.join(" ") + '"/>';
+      }
+
+      function render(msg) {
+        document.getElementById("vRate").textContent = W.rate.toFixed(2);
+        document.getElementById("vArt").textContent = W.art.toFixed(1);
+        document.getElementById("vNest").textContent = nest().toFixed(2);
+        document.getElementById("vPlank").textContent = W.plank.toFixed(1);
+        var rP = clamp((W.rate - 1) / 0.4 * 100, 0, 100);
+        var nP = clamp((nest() - 1) / 0.5 * 100, 0, 100);
+        var fP = clamp(W.fee / 2 * 100, 0, 100);
+        document.getElementById("iRate").style.width = rP + "%";
+        document.getElementById("iNest").style.width = nP + "%";
+        document.getElementById("iFee").style.width = fP + "%";
+        document.getElementById("bRate").textContent = Math.round(rP) + "%";
+        document.getElementById("bNest").textContent = Math.round(nP) + "%";
+        document.getElementById("bFee").textContent = Math.round(fP) + "%";
+        draw();
+        if (msg) document.getElementById("st").innerHTML = msg;
+      }
+
+      function fee(F, busFrac) {
+        W.fee += F;
+        W.rate += F * 0.25 * 0.15;
+        var bus = F * busFrac;
+        W.art += bus * 0.35 * 8;
+        W.xPerI += bus * 0.35 * 0.05;
+        W.plank += bus * 0.10 * 5;
+        push();
+      }
+
+      document.getElementById("actVault").onclick = function () {
+        fee(0.05, 0.081);
+        setStep(0);
+        render("<strong>Vault use.</strong> Share rate <em>" + W.rate.toFixed(2) +
+          "</em> · Bus slice compounds index · nested <strong>" + nest().toFixed(2) + "</strong>");
+      };
+      document.getElementById("actSwap").onclick = function () {
+        fee(0.05, 0.40);
+        setStep(2);
+        render("<strong>Swap.</strong> Higher Bus fraction · more art bought · PLANK burn units <em>" +
+          W.plank.toFixed(1) + "</em>");
+      };
+      document.getElementById("actRoute").onclick = function () {
+        fee(0.12, 0.45);
+        setStep(3);
+        render("<strong>route()</strong> ran all six pipes · nested claim <strong>" + nest().toFixed(2) + "</strong>");
+      };
+      document.getElementById("actWash").onclick = function () {
+        for (var i = 0; i < 10; i++) fee(0.05, 0.081);
+        render("<strong>Wash×10.</strong> Attacker paid ~0.5 WETH. Fund nested claim <em>" +
+          nest().toFixed(2) + "</em> · they funded you.");
+      };
+      document.getElementById("actReset").onclick = function () {
+        W = { rate: 1, art: 0, nest: 1, plank: 0, fee: 0, xPerI: 1, hist: [1] };
+        render("Reset. Nested claim back to <strong>1.00</strong>.");
+      };
+      render();
+    })();
+  </script>
+</body>
+</html>

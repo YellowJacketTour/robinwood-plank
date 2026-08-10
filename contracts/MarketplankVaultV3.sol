@@ -178,13 +178,86 @@ contract MarketplankVaultV3 is ERC20, ReentrancyGuard, IERC721Receiver {
     uint256 private constant MAX_TARGET_PREMIUM_WEI = 0.1 ether;
     uint256 private constant MAX_SWAP_FEE_BPS = 100;
 
-    /// @dev A LP floor stronger than UniV2's 1000-wei MINIMUM_LIQUIDITY.
-    uint256 private constant MIN_INITIAL_LIQUIDITY = 1e3;
+    /**
+     * @dev The permanently-locked LP floor minted at `openPool`.
+     *
+     * 2026-08-09 AUDIT FIX. This was `1e3` — copied from UniV2's
+     * MINIMUM_LIQUIDITY and described in the old comment as "stronger", which
+     * was simply false: it is the SAME number, and UniV2's 1000 is calibrated
+     * against 18-decimal LP units in a pool where anyone may be the first
+     * depositor. Here `l0 = sqrt(ethReserve * shareReserve)` with both sides
+     * in wei-scale 1e18 units, so 1e3 is reached by a seed of roughly
+     * 1e-12 ETH against 1e-12 of a share — i.e. it excluded literally nothing
+     * and left the locked share of the pool at a rounding error, which is the
+     * quantity that is supposed to make the first-depositor / donation
+     * inflation attack unprofitable.
+     *
+     * 1e15 is the smallest floor that is economically meaningful at this
+     * pool's actual scale: it demands a seed on the order of one whole share
+     * against ~1e12 wei, or 0.01 ETH against 0.01 of a share, and it locks a
+     * non-trivial slice of a real bootstrap forever. The treasury is the only
+     * caller who can seed, so this bounds a mistake rather than an attacker —
+     * but a bootstrap mistake on a contract with no upgrade path is exactly
+     * the thing worth making unrepresentable.
+     */
+    uint256 private constant MIN_INITIAL_LIQUIDITY = 1e15;
 
     /// @dev Cap batch size so a loop cannot exceed block gas and strand a user.
     uint256 private constant MAX_BATCH = 50;
 
-    uint64 private constant ROUND_LEAD = 1;
+    /**
+     * @dev How many drand rounds PAST the next one a request targets.
+     *
+     * 2026-08-09 AUDIT FIX H-7 — this was `1`, and the reasoning written
+     * around it was wrong in one direction.
+     *
+     * THE OLD ARGUMENT, and why it fails. The in-code justification was that
+     * a sequencer "can only shift WHICH FUTURE round is targeted, never make
+     * an already-published one the target". That holds for FORWARD skew and
+     * fails completely for BACKWARD skew. `targetRound` is computed from
+     * `block.timestamp`; drand's period is 3 seconds; at `ROUND_LEAD = 1` the
+     * target sits only 3-6 seconds ahead of the chain clock. Report a
+     * `block.timestamp` 6 or more seconds in the past — well inside the skew
+     * every L2 sequencer and every L1 client tolerates — and the "future"
+     * round the request targets has ALREADY been published on the drand
+     * network.
+     *
+     * WHY THAT IS TOTAL RATHER THAN MARGINAL. The draw is
+     * `index = keccak256(seed, requester) % frozenLen`. With `seed` known
+     * before the request, `requester` is the only free variable and it is
+     * fully attacker-chosen: grind addresses off-chain until one indexes the
+     * token you want, then request from it. And the forfeit-burn — the
+     * defence that makes declining a draw cost a full share — never fires,
+     * because the attacker never MAKES an unfavourable request. They only
+     * broadcast the winning one. Cost of the attack: zero. It is not
+     * commit-reveal at that point; it is a lookup.
+     *
+     * THE FIX IS TWO THINGS, AND BOTH ARE LOAD-BEARING:
+     *
+     *  1. `ROUND_LEAD = 100` — 300 seconds of drand at a 3-second period.
+     *     Five minutes of clock-skew tolerance instead of six seconds. No
+     *     honest chain is five minutes behind wall-clock; a chain that is has
+     *     a far larger problem than this vault.
+     *
+     *  2. A hard rejection, in `requestRandomRedeem`, of any request whose
+     *     target round the beacon ALREADY holds a verified signature for.
+     *     This is the part that does not depend on picking a large enough
+     *     number: whatever the skew, whatever the lead, if the seed is
+     *     already knowable the request is refused outright. (1) makes the
+     *     check essentially never fire in honest operation; (2) makes the
+     *     guarantee independent of (1) being calibrated correctly.
+     *
+     * Note the check can only be a check against what THIS beacon has
+     * verified. A round published on the drand network but not yet relayed
+     * here is not observable on-chain by anything — which is precisely why
+     * (1) has to carry a margin far wider than any plausible relay lag, and
+     * why the forfeit-burn (see `forfeitExpiredRedeem`) remains necessary as
+     * the third layer.
+     *
+     * ROUND_EXPIRY is unchanged: 28,800 rounds is ~24h at a 3s period, and it
+     * stays far larger than ROUND_LEAD, so a request is never born expired.
+     */
+    uint64 private constant ROUND_LEAD = 100;
     uint64 private constant ROUND_EXPIRY = 28_800;
 
     /// @dev Token IDs currently custodied, available for redemption.
@@ -241,6 +314,12 @@ contract MarketplankVaultV3 is ERC20, ReentrancyGuard, IERC721Receiver {
     error NoRequest();
     error TooSoon();
     error RandomnessNotAvailable();
+    /// @dev AUDIT FIX H-7. The target drand round is ALREADY verified in this
+    /// vault's beacon, so its seed is public and the draw would be a pure
+    /// function of the caller's own (grindable) address. Distinct from
+    /// RandomnessNotAvailable, which is the opposite complaint at settlement
+    /// time; these must never be confused in a post-mortem.
+    error TargetRoundAlreadyPublished();
     error RandomnessExpired();
     error InvalidBeacon();
     error ReservedForPendingRedeem();
@@ -332,6 +411,15 @@ contract MarketplankVaultV3 is ERC20, ReentrancyGuard, IERC721Receiver {
         accruedFees += msg.value;
 
         uint64 targetRound = beacon.nextRoundAfter(block.timestamp) + ROUND_LEAD;
+        // AUDIT FIX H-7, the skew-independent half. If this beacon already
+        // holds a verified signature for the target round, then the seed this
+        // request would draw against is PUBLIC RIGHT NOW, and
+        // `keccak256(seed, requester) % frozenLen` is a pure function of an
+        // address the caller chose. Refuse, unconditionally. Under any honest
+        // clock this is unreachable — ROUND_LEAD puts the target ~5 minutes
+        // ahead — so it costs honest callers nothing and costs a skewed-clock
+        // attacker the entire attack.
+        if (beacon.isRoundAvailable(targetRound)) revert TargetRoundAlreadyPublished();
         pendingRedeemCount += 1;
         pendingRequester = msg.sender;
         redeemRequests[msg.sender] = RedeemRequest({

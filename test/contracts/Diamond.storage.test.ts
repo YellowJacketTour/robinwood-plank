@@ -1,0 +1,346 @@
+import { expect } from "chai";
+import { ethers, artifacts } from "./helpers/hardhat.js";
+import { loadFixture } from "./helpers/network-helpers.js";
+import { deployIndexDiamond, combinedHandle ,
+  fullInit} from "./helpers/diamond.js";
+
+/**
+ * ============================================================================
+ *  Diamond.storage — the namespaces cannot collide, and every facet agrees.
+ *
+ *  This suite exists because the diamond introduces a failure mode the
+ *  pre-diamond design could not have: several separately-compiled contracts
+ *  executing against ONE storage space. If two of them disagree about where a
+ *  value lives, the vault does not revert — it silently returns wrong numbers,
+ *  or silently corrupts the routing table, and every other proof in the suite
+ *  becomes a proof about a corrupted object.
+ *
+ *  Nothing here is inherited from the 519 baseline properties. All of it is new
+ *  obligation created by the refactor (design doc section 7.4).
+ * ============================================================================
+ */
+describe("Diamond storage namespaces", () => {
+  const SEEDER = "0x0000000000000000000000000000000000000B0B";
+  const DIVIDEND = "0x000000000000000000000000000000000000dEaD";
+  const TIMELOCK = 48 * 3600;
+
+  async function fx() {
+    const d = await deployIndexDiamond(
+      ["DiamondLoupeFacet", "CoreProbeFacetA", "CoreProbeFacetB"],
+      fullInit({ timelockDelay: TIMELOCK, seeder: SEEDER, dividendAsset: DIVIDEND })
+    );
+    const handle = await combinedHandle(d.address, [
+      "DiamondLoupeFacet",
+      "CoreProbeFacetA",
+      "CoreProbeFacetB",
+    ]);
+    return { ...d, handle };
+  }
+
+  describe("slot derivation", () => {
+    it("every namespace root is distinct, and none of them is slot 0", async () => {
+      const probe: any = await (
+        await ethers.getContractFactory("StorageSlotProbe")
+      ).deploy();
+      const slots: string[] = await probe.slots();
+      const names: string[] = await probe.names();
+
+      // The last entry is slot 0 itself — not a namespace, but the thing every
+      // namespace must avoid, since a facet that declares a state variable
+      // lands there and slot 0 is where the selector table's first mapping is.
+      const namespaces = slots.slice(0, -1);
+      expect(slots[slots.length - 1]).to.equal(ethers.ZeroHash);
+
+      const seen = new Map<string, string>();
+      for (let i = 0; i < namespaces.length; i++) {
+        const s = namespaces[i].toLowerCase();
+        expect(s, `${names[i]} must not be slot 0`).to.not.equal(ethers.ZeroHash);
+        expect(seen.has(s), `${names[i]} collides with ${seen.get(s)}`).to.equal(false);
+        seen.set(s, names[i]);
+      }
+      expect(seen.size).to.equal(12);
+    });
+
+    it("every ERC-7201 root is 256-slot aligned, so appending a struct member cannot walk into a neighbour", async () => {
+      const probe: any = await (
+        await ethers.getContractFactory("StorageSlotProbe")
+      ).deploy();
+      const slots: string[] = await probe.slots();
+      const names: string[] = await probe.names();
+
+      for (let i = 0; i < slots.length - 1; i++) {
+        // The diamond namespace is the ONE deliberate exception: it is pinned
+        // to the canonical `diamond.standard.diamond.storage` slot so
+        // third-party loupe tooling can read the table directly. That is an
+        // interoperability decision, recorded in IndexStorage.sol, not an
+        // oversight — and it is safe because that namespace's Layout is fixed
+        // by EIP-2535 and does not grow.
+        if (names[i] === "diamond") continue;
+        const low = BigInt(slots[i]) & 0xffn;
+        expect(low, `${names[i]} is not 256-aligned`).to.equal(0n);
+      }
+    });
+
+    it("no two namespace roots are within 256 slots of each other", async () => {
+      const probe: any = await (
+        await ethers.getContractFactory("StorageSlotProbe")
+      ).deploy();
+      const slots: string[] = await probe.slots();
+      const names: string[] = await probe.names();
+
+      const sorted = slots
+        .slice(0, -1)
+        .map((s, i) => ({ v: BigInt(s), n: names[i] }))
+        .sort((a, b) => (a.v < b.v ? -1 : 1));
+
+      for (let i = 1; i < sorted.length; i++) {
+        const gap = sorted[i].v - sorted[i - 1].v;
+        expect(
+          gap >= 256n,
+          `${sorted[i - 1].n} and ${sorted[i].n} are only ${gap} slots apart`
+        ).to.equal(true);
+      }
+    });
+  });
+
+  describe("cross-facet agreement", () => {
+    it("a value written by the diamond's constructor reads identically through two independent facets", async () => {
+      const { handle } = await loadFixture(fx);
+
+      expect(await handle.probeA_timelockDelay()).to.equal(
+        await handle.probeB_timelockDelay()
+      );
+      expect(await handle.probeA_seeder()).to.equal(await handle.probeB_seeder());
+      expect(await handle.probeA_dividendAsset()).to.equal(
+        await handle.probeB_dividendAsset()
+      );
+
+      // …and the values are the ones that were passed in, not zero. A pair of
+      // facets that both read the WRONG slot would also agree with each other.
+      expect(await handle.probeA_timelockDelay()).to.equal(TIMELOCK);
+      expect(await handle.probeA_seeder()).to.equal(ethers.getAddress(SEEDER));
+      expect(await handle.probeA_dividendAsset()).to.equal(ethers.getAddress(DIVIDEND));
+    });
+
+    it("the two facets carry DIFFERENT per-facet immutables, proving the agreement above is about storage and not luck", async () => {
+      const { handle } = await loadFixture(fx);
+
+      // This is the control for the previous test. An `immutable` under
+      // DELEGATECALL resolves to whichever FACET is executing, so these differ
+      // — which is exactly why timelockDelay/seeder/dividendAsset had to stop
+      // being `immutable` (design doc section 3.3 rule 2 / section 12 item 1).
+      // If they had not, they would differ here in the same way.
+      expect(await handle.probeA_marker()).to.equal(0xaaaan);
+      expect(await handle.probeB_marker()).to.equal(0xbbbbn);
+      expect(await handle.probeA_marker()).to.not.equal(await handle.probeB_marker());
+    });
+
+    it("a write through facet A is read back identically through facet B, in three separate namespaces at once", async () => {
+      const { handle } = await loadFixture(fx);
+      const role = ethers.id("role.test");
+      const holder = "0x00000000000000000000000000000000deadbeef";
+
+      await handle.probeA_write(123_456n, role, holder, 2n);
+
+      expect(await handle.probeB_totalSupply()).to.equal(123_456n);
+      expect(await handle.probeB_roleHolder(role)).to.equal(
+        ethers.getAddress(holder)
+      );
+      expect(await handle.probeB_reentrancy()).to.equal(2n);
+    });
+
+    it("writing every other namespace leaves the diamond's own routing table intact", async () => {
+      const { handle, loupe, manifest } = await loadFixture(fx);
+
+      const before = await handle.probeB_facetCount();
+      const addrsBefore = await loupe.facetAddresses();
+
+      await handle.probeA_write(
+        ethers.MaxUint256,
+        ethers.id("role.hostile"),
+        "0x00000000000000000000000000000000deadbeef",
+        ethers.MaxUint256
+      );
+
+      // The classic diamond catastrophe is a namespace whose growth reaches
+      // slot 0 and overwrites `selectorToFacetAndPosition`. If that happened,
+      // the facet count would move or the dispatch would start failing.
+      expect(await handle.probeB_facetCount()).to.equal(before);
+      expect(await loupe.facetAddresses()).to.deep.equal(addrsBefore);
+      expect(addrsBefore.length).to.equal(manifest.length);
+
+      // And dispatch still works after the maximal write.
+      expect(await handle.probeA_timelockDelay()).to.equal(TIMELOCK);
+    });
+
+    it("the shared reentrancy word is ONE word for the whole diamond, not one per facet", async () => {
+      const { handle } = await loadFixture(fx);
+
+      // Primed by the diamond's constructor to NOT_ENTERED = 1.
+      expect(await handle.probeB_reentrancy()).to.equal(1n);
+
+      await handle.probeA_write(0n, ethers.id("x"), ethers.ZeroAddress, 2n);
+
+      // Facet B sees facet A's guard state. Under OpenZeppelin's per-contract
+      // ReentrancyGuard each facet would have had its own word, and a
+      // `nonReentrant` on facet A would NOT have excluded a reentrant call into
+      // facet B — a silent loss of the existing "a reentrant token cannot
+      // double-credit" / "a reentrant claimer…" properties. One shared word is
+      // strictly stronger than the pre-diamond per-contract guard.
+      expect(await handle.probeB_reentrancy()).to.equal(2n);
+    });
+  });
+
+  describe("the FULL, populated layouts do not collide", () => {
+    // The layouts are no longer placeholders: they carry dynamic arrays, nested
+    // mappings and structs-inside-mappings, which derive slots by hashing and
+    // write all over the address space. A one-member namespace cannot plausibly
+    // reach a neighbour; these can, so the proof is run against the real shapes.
+    async function stressFx() {
+      const d = await deployIndexDiamond(
+        ["DiamondLoupeFacet", "NamespaceStressFacet"],
+        fullInit({ timelockDelay: TIMELOCK, seeder: SEEDER, dividendAsset: DIVIDEND })
+      );
+      const handle = await combinedHandle(d.address, [
+        "DiamondLoupeFacet",
+        "NamespaceStressFacet",
+      ]);
+      return { ...d, handle };
+    }
+
+    it("every member of every namespace reads back its OWN value after a write to all twelve", async () => {
+      const { handle } = await loadFixture(stressFx);
+      const TAG = 1_000_000n;
+      await handle.stressWrite(TAG);
+      const v: bigint[] = await handle.stressRead(TAG);
+
+      // Each field was written a value derived from a DISTINCT offset off the
+      // tag, so a collision surfaces as a field carrying another field's value
+      // rather than as a zero — which a mere "is it non-zero?" check would miss.
+      const expected = [
+        1n, 2n, 3n, 10n, 11n, 12n, 13n, 15n, 16n, 20n, 21n, 22n, 23n, 24n, 30n,
+        34n, 36n, 40n, 41n, 50n, 51n, 60n, 61n, 63n, 70n, 71n, 73n, 75n, 80n,
+        84n, 86n, 90n,
+      ].map((o) => TAG + o);
+
+      expect(v.length).to.equal(expected.length);
+      for (let i = 0; i < expected.length; i++) {
+        expect(v[i], `namespace field ${i} collided`).to.equal(expected[i]);
+      }
+    });
+
+    it("the twelve-namespace write leaves the migrated immutables and the open latch untouched", async () => {
+      const { handle } = await loadFixture(stressFx);
+      await handle.stressWrite(7n);
+      const [delay, seeder, dividend, open] = await handle.stressCoreInvariants();
+      expect(delay).to.equal(TIMELOCK);
+      expect(seeder).to.equal(ethers.getAddress(SEEDER));
+      expect(dividend).to.equal(ethers.getAddress(DIVIDEND));
+      expect(open).to.equal(false);
+    });
+
+    it("the twelve-namespace write leaves the selector table intact and the diamond dispatching", async () => {
+      const { handle, loupe, manifest } = await loadFixture(stressFx);
+      const before = await loupe.facetAddresses();
+      await handle.stressWrite(ethers.MaxUint256 / 2n);
+      expect(await loupe.facetAddresses()).to.deep.equal(before);
+      expect(before.length).to.equal(manifest.length);
+      expect(await loupe.isFinalized()).to.equal(true);
+    });
+
+    it("two writes with different tags do not overwrite each other's regions", async () => {
+      // Catches a namespace whose HASHED derivation (mapping/array slots)
+      // aliases another's, which a single-tag write cannot see.
+      const { handle } = await loadFixture(stressFx);
+      await handle.stressWrite(1_000n);
+      await handle.stressWrite(9_000_000n);
+
+      const a: bigint[] = await handle.stressRead(1_000n);
+      // Index 3 and 28 read the array TAIL, which the second write moved on
+      // purpose; every other field is keyed by tag and must be undisturbed.
+      const offsets = [
+        1n, 2n, null, null, 11n, 12n, 13n, 15n, null, null, null, null, null,
+        null, 30n, 34n, null, 40n, 41n, null, null, 60n, null, null, null, 71n,
+        null, null, null, 84n, 86n, 90n,
+      ];
+      for (let i = 0; i < offsets.length; i++) {
+        if (offsets[i] === null) continue;
+        expect(a[i], `field ${i} was clobbered by the second write`).to.equal(
+          1_000n + (offsets[i] as bigint)
+        );
+      }
+    });
+  });
+
+  describe("no facet declares storage of its own", () => {
+    it("every production facet's compiler-emitted storageLayout is empty", async () => {
+      // The rule (design doc section 3.3 rule 1) is checked against the
+      // compiler's own output rather than by reading the source, because the
+      // dangerous case is INHERITED storage — a facet that looks clean but
+      // extends OZ's ERC20 or ReentrancyGuard and silently lands a balance
+      // mapping on the diamond's slot 0.
+      const facets = ["DiamondCutFacet", "DiamondLoupeFacet"];
+      const { execSync } = await import("node:child_process");
+      void execSync;
+
+      for (const name of facets) {
+        const layout = await storageLayoutOf(name);
+        expect(layout, `${name} declares state variables: ${JSON.stringify(layout)}`)
+          .to.deep.equal([]);
+      }
+    });
+
+    it("the check is real: a facet that DOES declare a state variable is detected", async () => {
+      // Negative control. Without this, "every facet's layout is empty" is
+      // equally consistent with a reader that always returns [].
+      const layout = await storageLayoutOf("StateVariableFacet");
+      expect(layout.length).to.be.greaterThan(0);
+      expect(layout.map((s: any) => s.label)).to.include("slot0");
+      // …and it lands exactly where the disaster is: slot 0.
+      expect(layout[0].slot).to.equal("0");
+    });
+  });
+});
+
+/**
+ * Read solc's `storageLayout` for a contract out of the build info.
+ *
+ * Hardhat does not surface this on the artifact, so it comes from the build-info
+ * file. Emitting it requires the `storageLayout` output selection, which
+ * hardhat.config.ts enables for `contracts/diamond` and `contracts/test`.
+ */
+async function storageLayoutOf(contractName: string): Promise<any[]> {
+  // HH3's ArtifactManager returns a Set (not an array — no .filter/.find) from
+  // getAllFullyQualifiedNames(), and has no getBuildInfo(fqn) returning the
+  // parsed object directly: build info is now split into an ID plus a
+  // separate OUTPUT file path, read and parsed by hand.
+  const fqn = [...(await artifacts.getAllFullyQualifiedNames())].find((n: string) =>
+    n.endsWith(`:${contractName}`)
+  );
+  if (!fqn) throw new Error(`no artifact for ${contractName}`);
+  const buildInfoId = await artifacts.getBuildInfoId(fqn);
+  if (!buildInfoId) throw new Error(`no build info id for ${fqn}`);
+  const outputPath = await artifacts.getBuildInfoOutputPath(buildInfoId);
+  if (!outputPath) throw new Error(`no build info output path for ${fqn}`);
+  const { readFile } = await import("node:fs/promises");
+  // The file at getBuildInfoOutputPath is a WRAPPER, not the raw solc output
+  // directly: `{ _format, id, output: { contracts, sources, ... } }`. The
+  // real per-file `contracts` map is one level deeper, at `.output.contracts`.
+  const wrapper = JSON.parse(await readFile(outputPath, "utf8"));
+  const [source, name] = fqn.split(":");
+  // The solc source-file KEYS in this wrapper carry an HH3 build-system root
+  // marker ("project/contracts/...") that the artifact-facing fqn does not,
+  // so an exact match on `source` fails — search by suffix instead, matching
+  // the same discipline already used to resolve `fqn` itself above.
+  const sourceKey = Object.keys(wrapper.output.contracts).find((k) => k.endsWith(source));
+  if (!sourceKey) throw new Error(`no output.contracts entry ending in ${source}`);
+  const out = wrapper.output.contracts[sourceKey][name] as any;
+  if (!out.storageLayout) {
+    throw new Error(
+      `solc did not emit storageLayout for ${fqn} — the outputSelection in ` +
+        `hardhat.config.ts is what makes this check possible; without it this ` +
+        `suite would silently pass by checking nothing.`
+    );
+  }
+  return out.storageLayout.storage ?? [];
+}
