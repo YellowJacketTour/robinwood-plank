@@ -33,6 +33,7 @@ interface IWeightModule {
     event VolumeNoted(address indexed vault, uint256 sinkFeeWei, uint256 ewma);
     event Admitted(address indexed vault);
     event RobinwoodVaultSet(address indexed vault);
+    event ExternalVaultAdmitted(address indexed vault);
 
     error NotFactoryVault();
     error NotAdmitted();
@@ -40,6 +41,7 @@ interface IWeightModule {
     error ZeroAddress();
     error NotRobinwoodSetter();
     error RobinwoodAlreadySet();
+    error RobinwoodVaultMustBeGated();
 
     /// @notice The factory whose `isVault(address)` gates every note* call.
     function factory() external view returns (address);

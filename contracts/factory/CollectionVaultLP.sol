@@ -55,7 +55,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// minimal interface rather than importing `CollectionVault` because the
 /// import would be circular (`CollectionVault` deploys this contract).
 interface ICollectionVaultLpHook {
-    function onLpReceived(address to) external;
+    function onLpReceived(address to, uint256 amount) external;
 }
 
 contract CollectionVaultLP is IERC20 {
@@ -101,7 +101,7 @@ contract CollectionVaultLP is IERC20 {
         totalSupply += amount;
         balanceOf[to] += amount;
         emit Transfer(address(0), to, amount);
-        _onReceived(to);
+        _onReceived(to, amount);
     }
 
     function burn(address from, uint256 amount) external onlyVault {
@@ -140,7 +140,7 @@ contract CollectionVaultLP is IERC20 {
         balanceOf[from] = bal - amount;
         balanceOf[to] += amount;
         emit Transfer(from, to, amount);
-        _onReceived(to);
+        _onReceived(to, amount);
     }
 
     /**
@@ -159,7 +159,7 @@ contract CollectionVaultLP is IERC20 {
      * address that already has total authority over this token — so this adds
      * no trust surface and no untrusted external call.
      */
-    function _onReceived(address to) private {
-        ICollectionVaultLpHook(vault).onLpReceived(to);
+    function _onReceived(address to, uint256 amount) private {
+        ICollectionVaultLpHook(vault).onLpReceived(to, amount);
     }
 }

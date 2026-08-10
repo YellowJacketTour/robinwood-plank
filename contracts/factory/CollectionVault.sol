@@ -507,7 +507,7 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         _addHeldToken(tokenId);
         _mint(msg.sender, SHARE_UNIT);
         (uint256 sinkCut, uint256 treasuryCut) = _routeStreamA(mintFeeWei);
-        _noteMintRedeemSignals(sinkCut, int256(mintFeeWei));
+        _noteMintRedeemSignals(sinkCut, int256(sinkCut));
         emit Deposited(msg.sender, tokenId, sinkCut, treasuryCut);
     }
 
@@ -524,7 +524,7 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         _removeHeldToken(tokenId);
         collection.safeTransferFrom(address(this), msg.sender, tokenId);
         (uint256 sinkCut, uint256 treasuryCut) = _routeStreamA(redeemFeeWei);
-        _noteMintRedeemSignals(sinkCut, -int256(redeemFeeWei));
+        _noteMintRedeemSignals(sinkCut, -int256(sinkCut));
         emit Redeemed(msg.sender, tokenId, sinkCut, treasuryCut);
     }
 
@@ -704,10 +704,9 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     /// gives what that specific exit can honestly realize.
     function quoteSellShares(uint256 sharesIn) public view returns (uint256 amountOut) {
         if (!poolOpen || shareReserve == 0 || paymentReserve == 0 || sharesIn == 0) return 0;
-        uint256 inNet = (sharesIn * (BPS_DENOMINATOR - swapFeeBps)) / BPS_DENOMINATOR;
-        uint256 grossOut = (inNet * _pr()) / (shareReserve + inNet);
+        uint256 grossOut = (sharesIn * _pr()) / (shareReserve + sharesIn);
         if (grossOut == 0) return 0;
-        return grossOut - _swapFeeSinkCut(grossOut);
+        return grossOut - _swapFee(grossOut);
     }
 
     /// @notice The shares `buyShares(amountIn, 0)` would deliver right now.
@@ -718,8 +717,7 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
     /// the marginal price could never fire at any trade size).
     function quoteBuyShares(uint256 amountIn) public view returns (uint256 sharesOut) {
         if (!poolOpen || shareReserve == 0 || paymentReserve == 0 || amountIn == 0) return 0;
-        uint256 netIn = amountIn - _swapFeeSinkCut(amountIn);
-        uint256 inNet = (netIn * (BPS_DENOMINATOR - swapFeeBps)) / BPS_DENOMINATOR;
+        uint256 inNet = amountIn - _swapFee(amountIn);
         return (inNet * shareReserve) / (_pr() + inNet);
     }
 
@@ -785,10 +783,14 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         paymentToken.safeTransferFrom(msg.sender, address(this), amountIn);
         uint256 credited = paymentToken.balanceOf(address(this)) - before;
 
-        uint256 sinkCut = _swapFeeSinkCut(credited);
-        uint256 netIn = credited - sinkCut; // fee-that-stays-local is priced in below, same as V3
+        // Full fee applied ONCE, on `credited`. Only the sink's half ever
+        // leaves; the retained half is never subtracted from `netIn`, so it
+        // stays in the vault and compounds into `paymentReserve` below.
+        uint256 fee = _swapFee(credited);
+        uint256 sinkCut = _swapSinkCut(fee);
+        uint256 inNet = credited - fee; // single-discount, priced into the curve
+        uint256 netIn = credited - sinkCut; // physically retained (>= inNet)
 
-        uint256 inNet = (netIn * (BPS_DENOMINATOR - swapFeeBps)) / BPS_DENOMINATOR;
         sharesOut = (inNet * shareReserve) / (paymentReserve + inNet);
         if (sharesOut == 0 || sharesOut < minSharesOut) revert InsufficientOutput();
 
@@ -810,17 +812,20 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         if (shareReserve == 0 || paymentReserve == 0) revert EmptyVault();
         if (sharesIn == 0) revert InsufficientOutput();
 
-        uint256 inNet = (sharesIn * (BPS_DENOMINATOR - swapFeeBps)) / BPS_DENOMINATOR;
-        uint256 grossOut = (inNet * paymentReserve) / (shareReserve + inNet);
+        uint256 grossOut = (sharesIn * paymentReserve) / (shareReserve + sharesIn);
         if (grossOut == 0) revert InsufficientOutput();
 
-        uint256 sinkCut = _swapFeeSinkCut(grossOut);
-        amountOut = grossOut - sinkCut;
+        // Full fee applied ONCE, on `grossOut`. Only the sink's half ever
+        // leaves; the retained half (fee - sinkCut) is simply never
+        // subtracted from `paymentReserve`, so it compounds into the pool.
+        uint256 fee = _swapFee(grossOut);
+        uint256 sinkCut = _swapSinkCut(fee);
+        amountOut = grossOut - fee; // single-discount
         if (amountOut < minAmountOut) revert InsufficientOutput();
 
         _transfer(msg.sender, address(this), sharesIn);
         shareReserve += sharesIn;
-        paymentReserve -= grossOut;
+        paymentReserve -= (amountOut + sinkCut);
 
         paymentToken.safeTransfer(msg.sender, amountOut);
         if (sinkCut > 0) {
@@ -831,14 +836,26 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         emit Sold(msg.sender, sharesIn, amountOut, sinkCut);
     }
 
-    /// @dev The swap fee itself is `amount * swapFeeBps / BPS`; exactly half
-    /// of THAT fee (SWAP_SINK_SPLIT_BPS = 5000) is the sink's cut. The other
-    /// half stays embedded in the pool's own reserve pricing (standard AMM
-    /// fee-compounding — see buyShares/sellShares using the FULL swapFeeBps
-    /// discount for pricing while only the sink's half is ever transferred
-    /// out).
-    function _swapFeeSinkCut(uint256 amount) private view returns (uint256) {
-        uint256 fee = (amount * swapFeeBps) / BPS_DENOMINATOR;
+    /// @dev The FULL swap fee, applied exactly ONCE per trade: `amount *
+    /// swapFeeBps / BPS`. Game-theory audit fix: buyShares/sellShares and
+    /// their quote mirrors used to apply this fee twice — once folded into
+    /// the constant-product pricing input/output, and again via
+    /// `_swapFeeSinkCut` computed on an amount that had already been
+    /// fee-discounted — compounding to an effective ~1.5x the documented
+    /// rate. Both call sites now compute `fee` here ONCE and derive
+    /// `sinkCut` from that SAME `fee`, never from a second independent
+    /// `amount * swapFeeBps / BPS` on an already-adjusted base.
+    function _swapFee(uint256 amount) private view returns (uint256) {
+        return (amount * swapFeeBps) / BPS_DENOMINATOR;
+    }
+
+    /// @dev Exactly half of `_swapFee(amount)` (SWAP_SINK_SPLIT_BPS = 5000)
+    /// — the portion that physically leaves to `upstreamSink`. The other
+    /// half stays in the vault, embedded in the pool's own reserve (standard
+    /// AMM fee-compounding): callers add back what they did NOT subtract for
+    /// the sink, so the retained half is never separately transferred, just
+    /// never removed.
+    function _swapSinkCut(uint256 fee) private pure returns (uint256) {
         return (fee * SWAP_SINK_SPLIT_BPS) / BPS_DENOMINATOR;
     }
 
@@ -1016,19 +1033,32 @@ contract CollectionVault is ERC20, ReentrancyGuard, IERC721Receiver {
         return (LP_EXIT_FEE_MAX_BPS * (DONATION_VEST_BLOCKS - held)) / DONATION_VEST_BLOCKS;
     }
 
+    /// @notice Minimum LP amount an inbound transfer must carry to restart
+    /// the recipient's dwell clock. Below this, `onLpReceived` is a no-op.
+    /// Closes a griefing vector (game-theory audit finding): without a
+    /// floor, ANY inbound transfer — including an attacker-initiated 1-wei
+    /// send the recipient never asked for and cannot refuse — reset the
+    /// clock, letting anyone force a victim back to the full decayed exit
+    /// fee and `LP_MIN_DWELL_BLOCKS` wait at near-zero cost. A floor forces
+    /// the attacker to permanently give up real LP value per griefing
+    /// attempt instead of dust.
+    uint256 internal constant LP_GRIEF_RESET_FLOOR = 1e12;
+
     /// @notice Callback from this vault's own `CollectionVaultLP` on every
-    /// mint and transfer-in. Restarts `to`'s dwell clock.
+    /// mint and transfer-in of at least `LP_GRIEF_RESET_FLOOR`. Restarts
+    /// `to`'s dwell clock.
     /// @dev Guarded to the LP token address only, so nobody can reset anyone
     /// else's clock. Restarting (rather than, say, taking a weighted average)
     /// is the conservative direction: it can only ever make an exit MORE
     /// expensive, never less, so there is no configuration of transfers that
     /// launders a fresh position into a cheap exit. The cost is that a
-    /// long-standing LP who tops up restarts their own clock — accepted
-    /// deliberately, because the alternative (per-lot accounting) is an
-    /// unbounded loop on a hot path, and because the fee it exposes them to is
-    /// bounded by 1% and decays to nothing.
-    function onLpReceived(address to) external {
+    /// long-standing LP who tops up above the floor restarts their own clock
+    /// — accepted deliberately, because the alternative (per-lot accounting)
+    /// is an unbounded loop on a hot path, and because the fee it exposes
+    /// them to is bounded by 1% and decays to nothing.
+    function onLpReceived(address to, uint256 amount) external {
         if (msg.sender != address(lpToken)) revert NotLpToken();
+        if (amount < LP_GRIEF_RESET_FLOOR) return;
         lpEntryBlock[to] = block.number;
     }
 

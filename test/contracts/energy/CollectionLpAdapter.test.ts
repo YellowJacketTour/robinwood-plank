@@ -130,21 +130,27 @@ describe("CollectionLpAdapter (real Pipe L, native-LP model)", () => {
     expect(lockedAfter).to.be.gt(lockedBefore);
 
     // `paymentReserve` genuinely grew by a real balanced deposit (not a
-    // single-sided donation). `shareReserve` ALSO genuinely moved — proving
-    // this adapter's flow actually touched the `S` side of the pool at all
-    // (a `donateReserves`-style single-sided push would leave `shareReserve`
-    // EXACTLY unchanged, byte-for-byte, since it only ever moves
-    // `paymentReserve`). The adapter buys `S`, deposits a balanced pair, and
-    // sells back its own leftover `S` — each of those three legs pays the
-    // pool's own swap fee, so the NET `shareReserve` delta can legitimately
-    // land slightly negative (fee-in-kind) even though real `S` demonstrably
-    // moved through `buyShares`/`addLiquidity`/`sellShares` in the process;
-    // the real, load-bearing proof of a genuine balanced LP deposit is the
-    // LP-lock growth already asserted above, not the sign of this delta.
+    // single-sided donation). The adapter buys `S`, deposits a balanced
+    // pair, and sells back its own leftover `S` — each of those three legs
+    // pays the pool's own swap fee, so the NET `shareReserve` delta can
+    // legitimately land at, above, or (fee-in-kind) below its starting
+    // value depending on the exact fee math; after the game-theory audit
+    // fix that removed a double fee-application bug in buyShares/sellShares,
+    // this specific budget happens to round to an exact net-zero `S` drift.
+    // That is not evidence of a single-sided donation — the real,
+    // load-bearing proof that `S` genuinely moved through
+    // `buyShares`/`addLiquidity`/`sellShares` is the LP-lock growth already
+    // asserted above (a `donateReserves`-style single-sided push mints no
+    // LP at all), so this check only bounds the drift rather than requiring
+    // it be nonzero.
     const paymentReserveAfter: bigint = await vault.paymentReserve();
     const shareReserveAfter: bigint = await vault.shareReserve();
     expect(paymentReserveAfter).to.be.gt(paymentReserveBefore);
-    expect(shareReserveAfter).to.not.equal(shareReserveBefore);
+    const shareDrift =
+      shareReserveAfter > shareReserveBefore
+        ? shareReserveAfter - shareReserveBefore
+        : shareReserveBefore - shareReserveAfter;
+    expect(shareDrift).to.be.lte(ethers.parseEther("0.001"));
 
     // The adapter never retains WETH or LP. It may retain at most a few wei
     // of `S` dust if a leftover-share sellback's own output rounded to zero

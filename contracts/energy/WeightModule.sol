@@ -22,6 +22,7 @@ interface ICollectionVaultRealizable {
     function paymentReserve() external view returns (uint256);
     function shareReserve() external view returns (uint256);
     function realizableBps(uint256 sharesIn) external view returns (uint256);
+    function eligibilityRoot() external view returns (bytes32);
 }
 
 /**
@@ -140,7 +141,10 @@ contract WeightModule is IWeightModule {
         uint256 depthWeth; // last reported depth (display/telemetry only, NEVER scored)
         uint256 volumeEwma; // V_i EWMA of SINK-FEE wei
         uint64 firstFeeBlock;
+        uint64 firstDepthBlock; // first block a REAL (nonzero) depth sample landed
         uint64 lastFeeBlock;
+        uint64 lastDepthBlock; // last block a REAL (nonzero) depth sample landed
+        uint64 lastVolumeBlock; // last block noteVolume actually moved volumeEwma
         bool admitted;
     }
 
@@ -153,9 +157,20 @@ contract WeightModule is IWeightModule {
 
     address public immutable factory;
     /// @dev The only address that may ever name Robinwood, and only once.
+    /// Reused (not a second privileged key) for `admitExternalVault` below —
+    /// same trust tier, "protocol deployer, sets things once," and the audit
+    /// already flagged over-broad keys, so this deliberately adds no new one.
     address public immutable robinwoodSetter;
 
     address public robinwoodVault;
+
+    /// @notice Vaults NOT deployed by `factory` but admitted anyway — e.g.
+    /// `RobinwoodV3Adapter`, wiring an already-live legacy vault into this
+    /// system without migrating it. Admit-only, no revoke: matches the
+    /// factory's own trust shape (a factory-deployed vault is permanently a
+    /// vault too), so there is no admin lever that can un-admit and brick an
+    /// already-integrated constituent out from under its holders.
+    mapping(address => bool) public externalVaultAllowed;
 
     mapping(address => VaultScore) public scores;
     mapping(address => DepthWindow) internal depthWindows;
@@ -168,8 +183,36 @@ contract WeightModule is IWeightModule {
         robinwoodSetter = msg.sender;
     }
 
+    function _isKnownVault(address vault) internal view returns (bool) {
+        return IVaultFactoryView(factory).isVault(vault) || externalVaultAllowed[vault];
+    }
+
+    /// @notice Admit a non-factory-deployed vault (e.g. a legacy-vault
+    /// adapter). Same one-way, no-revoke trust shape as a factory deploy —
+    /// see `externalVaultAllowed`'s own doc.
+    /// @dev Also directly satisfies `checkAdmit`'s membership (skips its
+    /// `F_MIN_WEI` sink-fee floor). That floor exists to keep a PERMISSIONLESS
+    /// factory deploy from being spammed into `admittedVaults` for free; an
+    /// external vault instead requires this deliberate, privileged,
+    /// `robinwoodSetter`-gated call — already a strictly stronger anti-spam
+    /// gate than a 0.05 WETH fee — so re-requiring the fee floor on top would
+    /// be redundant, and impossible besides for a vault whose fees route to
+    /// its own recoverable treasury rather than an unrecoverable sink.
+    function admitExternalVault(address vault) external {
+        if (msg.sender != robinwoodSetter) revert NotRobinwoodSetter();
+        if (vault == address(0)) revert ZeroAddress();
+        if (externalVaultAllowed[vault]) revert AlreadyAdmitted();
+        externalVaultAllowed[vault] = true;
+        VaultScore storage vs = scores[vault];
+        vs.admitted = true;
+        isAdmittedVault[vault] = true;
+        admittedVaults.push(vault);
+        emit Admitted(vault);
+        emit ExternalVaultAdmitted(vault);
+    }
+
     modifier onlyFactoryVault(address vault) {
-        if (msg.sender != vault || !IVaultFactoryView(factory).isVault(vault)) {
+        if (msg.sender != vault || !_isKnownVault(vault)) {
             revert NotFactoryVault();
         }
         _;
@@ -183,10 +226,27 @@ contract WeightModule is IWeightModule {
     /// exactly once, by the deployer, and never changeable afterwards — a
     /// mutable beneficiary would be a governance lever over the largest pipe,
     /// which is precisely the class of key the audit flagged as over-broad.
+    /// @dev MUST be a predicate (eligibility-gated) vault, `eligibilityRoot
+    /// != 0` — not an open vault. Game-theory audit hardening: an open
+    /// vault treats every tokenId as interchangeable, so anyone can deposit
+    /// a low-value NFT and redeem out a high-value one (the documented C-5
+    /// "junk-for-treasure" trade, closed by predicate vaults precisely
+    /// because their eligible set is curated to near-equal value). The
+    /// Robinwood floor exists to guarantee Robinwood NFTs are always a core,
+    /// undiluted value in this ecosystem — that guarantee is worthless if
+    /// the vault backing it can be quietly hollowed out one redeem() at a
+    /// time. This is a hard revert, not a soft degrade: unlike the hot-path
+    /// reads elsewhere in this file, `setRobinwoodVault` fires exactly once
+    /// and is not on any path that must never brick.
     function setRobinwoodVault(address vault) external {
         if (msg.sender != robinwoodSetter) revert NotRobinwoodSetter();
         if (robinwoodVault != address(0)) revert RobinwoodAlreadySet();
         if (vault == address(0)) revert ZeroAddress();
+        // Defensive staticcall, not a direct interface call: an EOA or a
+        // non-conforming contract must fail with THIS explicit error, not an
+        // opaque ABI-decode panic. Same discipline as `_tryUint` below.
+        (bool ok, bytes memory ret) = vault.staticcall(abi.encodeWithSelector(ICollectionVaultRealizable.eligibilityRoot.selector));
+        if (!ok || ret.length < 32 || abi.decode(ret, (bytes32)) == bytes32(0)) revert RobinwoodVaultMustBeGated();
         robinwoodVault = vault;
         emit RobinwoodVaultSet(vault);
     }
@@ -224,21 +284,31 @@ contract WeightModule is IWeightModule {
     }
 
     /// @inheritdoc IWeightModule
+    /// @dev At most one EWMA update per block, per vault. Without this a
+    /// paid burst of same-block swaps could converge `volumeEwma` toward an
+    /// arbitrary target in a single transaction instead of the EWMA genuinely
+    /// reflecting activity spread over time (game-theory audit finding, V
+    /// signal). `lastVolumeBlock` also feeds `_applyDecay` below, so V can no
+    /// longer sit frozen at a stale peak while F alone keeps the composite
+    /// score undecayed.
     function noteVolume(address vault, uint256 sinkFeeWei) external onlyFactoryVault(vault) {
         VaultScore storage vs = scores[vault];
+        if (vs.lastVolumeBlock == uint64(block.number)) return;
         // NO undamped first sample (audit H-6). Starting from zero and
         // applying ALPHA uniformly means a single large opening print buys
         // only ALPHA of the signal, and sustaining it costs sustained sink
         // fees — which is the whole point.
         vs.volumeEwma = (vs.volumeEwma * (WAD - EWMA_ALPHA_WAD) + sinkFeeWei * EWMA_ALPHA_WAD) / WAD;
+        vs.lastVolumeBlock = uint64(block.number);
         emit VolumeNoted(vault, sinkFeeWei, vs.volumeEwma);
     }
 
     /// @inheritdoc IWeightModule
     function pokeDepth(address vault) external {
-        // Permissionless BUT still factory-scoped: only a real vault can hold
-        // weight, so only a real vault's depth is worth recording.
-        if (!IVaultFactoryView(factory).isVault(vault)) revert NotFactoryVault();
+        // Permissionless BUT still scoped to a known vault (factory-deployed
+        // OR externally admitted): only a real vault can hold weight, so
+        // only a real vault's depth is worth recording.
+        if (!_isKnownVault(vault)) revert NotFactoryVault();
         (bool ok, uint256 reserve) = _tryUint(vault, abi.encodeWithSelector(ICollectionVaultRealizable.paymentReserve.selector));
         _recordDepth(vault, ok ? reserve : 0);
     }
@@ -250,6 +320,18 @@ contract WeightModule is IWeightModule {
     function _recordDepth(address vault, uint256 reserve) internal {
         VaultScore storage vs = scores[vault];
         vs.depthWeth = reserve; // telemetry only — never read by _rawScore
+        // A real (nonzero) depth sample is exactly as unfakeable-without-
+        // capital as a sink fee (`_windowMin`'s whole mechanism), so it may
+        // ALSO start the maturity ramp in `_rawScore` — not just `noteFee`.
+        // Without this, a genuinely deep vault with no sink-fee flow at all
+        // (e.g. `RobinwoodV3Adapter`, wrapping a legacy vault whose fees
+        // route to its own recoverable treasury, never a sink) would be
+        // structurally unable to ever earn nonzero weight, regardless of how
+        // real its depth is — `_rawScore` gates entirely on `firstFeeBlock`.
+        if (reserve > 0) {
+            if (vs.firstDepthBlock == 0) vs.firstDepthBlock = uint64(block.number);
+            vs.lastDepthBlock = uint64(block.number);
+        }
         DepthWindow storage dw = depthWindows[vault];
         uint64 epoch = uint64(block.number / DEPTH_BUCKET_BLOCKS);
         uint256 slot = uint256(epoch) % DEPTH_BUCKETS;
@@ -333,9 +415,19 @@ contract WeightModule is IWeightModule {
 
     function _rawScore(address vault) internal view returns (uint256) {
         VaultScore storage vs = scores[vault];
-        if (vs.firstFeeBlock == 0) return 0;
 
-        uint256 delta = block.number - vs.firstFeeBlock;
+        // The maturity ramp starts at whichever REAL signal arrived first —
+        // a sink fee, or a real depth sample. Both are unfakeable without
+        // capital (`_windowMin`'s whole mechanism, for depth); gating solely
+        // on fee would leave a genuinely deep, fee-less vault (e.g. a legacy
+        // vault wired in read-only, whose fees route to its own recoverable
+        // treasury rather than an unrecoverable sink) structurally unable to
+        // ever earn nonzero weight, no matter how real its depth is.
+        uint256 anchor = vs.firstFeeBlock;
+        if (vs.firstDepthBlock != 0 && (anchor == 0 || vs.firstDepthBlock < anchor)) anchor = vs.firstDepthBlock;
+        if (anchor == 0) return 0;
+
+        uint256 delta = block.number - anchor;
         uint256 m = (delta * WAD) / (delta + K_BLOCKS);
         if (m == 0) return 0;
 
@@ -347,7 +439,31 @@ contract WeightModule is IWeightModule {
 
         uint256 composite = (ALPHA_F_WAD * fHat + BETA_P_WAD * pHat + GAMMA_D_WAD * dHat + DELTA_V_WAD * vHat) / WAD;
         uint256 s = (m * composite) / WAD;
-        return _applyDecay(s, block.number - vs.lastFeeBlock);
+
+        // Decay keys off the stalest CONTRIBUTING signal only, not fee alone
+        // (game-theory audit finding: F+P+V = 85% of composite weight could
+        // be held at a historical peak indefinitely by pinging trivial
+        // mint/redeem fees while volume went silent — generalised further
+        // here so a signal that contributes NOTHING to the composite can
+        // never force decay on the signals that do, and so a fee-less,
+        // depth-only vault decays on depth staleness alone rather than never
+        // decaying at all or being permanently gated to zero).
+        uint256 sinceLast;
+        bool anySignal;
+        if (fHat > 0 || pHat > 0) {
+            sinceLast = block.number - vs.lastFeeBlock;
+            anySignal = true;
+        }
+        if (vHat > 0) {
+            uint256 sinceVolume = block.number - vs.lastVolumeBlock;
+            if (!anySignal || sinceVolume > sinceLast) sinceLast = sinceVolume;
+            anySignal = true;
+        }
+        if (dHat > 0) {
+            uint256 sinceDepth = block.number - vs.lastDepthBlock;
+            if (!anySignal || sinceDepth > sinceLast) sinceLast = sinceDepth;
+        }
+        return _applyDecay(s, sinceLast);
     }
 
     /// @dev True half-life decay. `DECAY_BLOCKS` of silence is free (a quiet

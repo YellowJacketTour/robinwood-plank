@@ -31,10 +31,25 @@ describe("WeightModule — Phase 3 weight reform (C-4 / H-4 / H-6 / H-8)", () =>
   const ALPHA_F_WAD = 450_000_000_000_000_000n;
   const EWMA_ALPHA_WAD = 200_000_000_000_000_000n;
 
+  /** `setRobinwoodVault` now requires the target to be a gated (predicate)
+   * vault — `eligibilityRoot() != 0` — closing the "junk-for-treasure"
+   * cherry-pick vector against Robinwood's own NFTs (game-theory audit
+   * hardening). This fixture's other vault stand-ins are plain EOAs (this
+   * file tests WeightModule in isolation, not real CollectionVaults), so
+   * `robinwood` specifically is a deployed stub contract with real code —
+   * impersonated as a signer so the rest of the fixture's uniform
+   * `wm.connect(signer)` pattern still works unmodified. */
   async function fixture() {
-    const [deployer, vaultA, vaultB, vaultC, robinwood, stranger] = await ethers.getSigners();
+    const [deployer, vaultA, vaultB, vaultC, stranger] = await ethers.getSigners();
     const factory: any = await (await ethers.getContractFactory("MockVaultFactory")).deploy();
     const wm: any = await (await ethers.getContractFactory("WeightModule")).deploy(await factory.getAddress());
+
+    const gatedStub: any = await (await ethers.getContractFactory("MockGatedVaultStub")).deploy();
+    const gatedStubAddr = await gatedStub.getAddress();
+    await ethers.provider.send("hardhat_setBalance", [gatedStubAddr, "0x56BC75E2D63100000"]); // 100 ETH
+    await ethers.provider.send("hardhat_impersonateAccount", [gatedStubAddr]);
+    const robinwood: any = await ethers.getSigner(gatedStubAddr);
+
     for (const v of [vaultA, vaultB, vaultC, robinwood]) await factory.setVault(v.address, true);
     return { deployer, vaultA, vaultB, vaultC, robinwood, stranger, factory, wm };
   }
@@ -338,16 +353,29 @@ describe("WeightModule — Phase 3 weight reform (C-4 / H-4 / H-6 / H-8)", () =>
   });
 
   it("R-RW3: Robinwood can be named exactly once, only by the deployer", async () => {
-    const { deployer, vaultA, vaultB, stranger, wm } = await fixture();
+    const { deployer, vaultA, vaultB, robinwood, stranger, wm } = await fixture();
+    // vaultA/vaultB are plain (ungated) stand-ins here — fine for the two
+    // negative-path assertions below, which both revert before the gating
+    // check is ever reached. The successful designation must target a
+    // genuinely gated vault (`robinwood`, the fixture's stub), since that
+    // requirement is now enforced.
     await expect(wm.connect(stranger).setRobinwoodVault(vaultA.address)).to.be.revertedWithCustomError(
       wm,
       "NotRobinwoodSetter"
     );
-    await wm.connect(deployer).setRobinwoodVault(vaultA.address);
+    await wm.connect(deployer).setRobinwoodVault(robinwood.address);
     await expect(wm.connect(deployer).setRobinwoodVault(vaultB.address)).to.be.revertedWithCustomError(
       wm,
       "RobinwoodAlreadySet"
     );
-    expect(await wm.robinwoodVault()).to.equal(vaultA.address);
+    expect(await wm.robinwoodVault()).to.equal(robinwood.address);
+  });
+
+  it("R-RW4: naming an UNGATED (open) vault as Robinwood reverts — the floor's guarantee is worthless if its own basket can be junk-for-treasure'd", async () => {
+    const { deployer, vaultA, wm } = await fixture();
+    await expect(wm.connect(deployer).setRobinwoodVault(vaultA.address)).to.be.revertedWithCustomError(
+      wm,
+      "RobinwoodVaultMustBeGated"
+    );
   });
 });

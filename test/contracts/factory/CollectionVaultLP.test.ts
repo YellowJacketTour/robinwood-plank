@@ -305,14 +305,19 @@ describe("CollectionVault native community LP (DESIGN-COLLECTION-VAULT-NATIVE-LP
 
     // Manual constant-product expectation, computed the SAME way
     // buyShares itself does — independent of how paymentReserve/shareReserve
-    // got to their current values (floor-only vs. floor+community).
+    // got to their current values (floor-only vs. floor+community). The
+    // full fee is applied ONCE (game-theory audit fix — buyShares used to
+    // apply it twice, once for the sink cut and again for curve pricing,
+    // compounding to ~1.5x the documented rate): `inNet` prices the curve,
+    // `netIn` (budget minus only the sink's physical half) is what actually
+    // lands in the reserve, with the retained half compounding in silently.
     const swapFeeBps = await vault.swapFeeBps();
     const sinkBps = await vault.SWAP_SINK_SPLIT_BPS();
     const BPS = 10_000n;
     const fee = (budget * swapFeeBps) / BPS;
     const sinkCut = (fee * sinkBps) / BPS;
     const netIn = budget - sinkCut;
-    const inNet = (netIn * (BPS - swapFeeBps)) / BPS;
+    const inNet = budget - fee;
     const expectedSharesOut = (inNet * shareReserveBefore) / (paymentReserveBefore + inNet);
 
     await expect(invAdapter.connect(busSigner).execute(budget)).to.not.be.revert(ethers);
