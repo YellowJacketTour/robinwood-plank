@@ -113,7 +113,7 @@ contract IndexPoolFacet is IndexFacetBase {
         PoolStorage.Layout storage ps = PoolStorage.layout();
         PoolStorage.GovernanceQueuedAddress memory q = ps.queuedPool;
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1: eta <= now <= eta + GRACE_PERIOD
         if (ps.pool != address(0)) revert PoolAlreadySet();
         delete ps.queuedPool;
         if (IIndexCoinPool(q.value).paymentToken() != CoreStorage.layout().dividendAsset) revert BadParam();
@@ -166,7 +166,7 @@ contract IndexPoolFacet is IndexFacetBase {
         PoolStorage.Layout storage ps = PoolStorage.layout();
         PoolStorage.QueuedUint256 memory q = ps.queuedMaxPoolShareBps;
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1: eta <= now <= eta + GRACE_PERIOD
         delete ps.queuedMaxPoolShareBps;
         ps.maxPoolShareBps = q.value;
         emit MaxPoolShareBpsSet(q.value);
@@ -327,7 +327,7 @@ contract IndexPoolFacet is IndexFacetBase {
         PoolStorage.Layout storage ps = PoolStorage.layout();
         PoolStorage.QueuedUint256 memory q = ps.queuedMinAutoDeployWei;
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1: eta <= now <= eta + GRACE_PERIOD
         delete ps.queuedMinAutoDeployWei;
         ps.minAutoDeployWei = q.value;
         emit MinAutoDeployWeiSet(q.value);

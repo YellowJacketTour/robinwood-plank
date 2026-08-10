@@ -92,7 +92,7 @@ contract IndexEnergyFacet is IndexFacetBase {
         EnergyBusStorage.Layout storage es = EnergyBusStorage.layout();
         EnergyBusStorage.QueuedAddress memory q = es.queuedEnergyBus;
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1: eta <= now <= eta + GRACE_PERIOD
         delete es.queuedEnergyBus;
         es.energyBus = q.value;
         emit EnergyBusSet(q.value);

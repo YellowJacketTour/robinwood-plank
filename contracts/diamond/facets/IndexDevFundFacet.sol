@@ -124,7 +124,7 @@ contract IndexDevFundFacet is IndexFacetBase {
         DevFundStorage.Layout storage df = DevFundStorage.layout();
         DevFundStorage.QueuedAddress memory q = df.queuedRouter;
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1: eta <= now <= eta + GRACE_PERIOD
         delete df.queuedRouter;
         df.router = q.value;
         emit DevFundRouterSet(q.value);
@@ -153,7 +153,7 @@ contract IndexDevFundFacet is IndexFacetBase {
         DevFundStorage.Layout storage df = DevFundStorage.layout();
         DevFundStorage.QueuedAddress memory q = df.queuedTreasury;
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1: eta <= now <= eta + GRACE_PERIOD
         delete df.queuedTreasury;
         df.treasury = q.value;
         emit DevFundTreasurySet(q.value);
@@ -179,7 +179,7 @@ contract IndexDevFundFacet is IndexFacetBase {
         DevFundStorage.Layout storage df = DevFundStorage.layout();
         DevFundStorage.QueuedUint256 memory q = df.queuedDevFundBps;
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1: eta <= now <= eta + GRACE_PERIOD
         delete df.queuedDevFundBps;
         _applyDevFundBps(q.value);
     }

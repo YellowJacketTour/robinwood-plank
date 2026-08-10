@@ -146,7 +146,7 @@ contract IndexSocialFiTreasuryFacet is IndexFacetBase {
         PlatformTreasuryStorage.Layout storage pt = PlatformTreasuryStorage.layout();
         PlatformTreasuryStorage.QueuedAddress memory q = pt.queuedTreasury;
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1: eta <= now <= eta + GRACE_PERIOD
         delete pt.queuedTreasury;
         pt.treasury = q.value;
         emit SocialFiTreasurySet(q.value);
@@ -174,7 +174,7 @@ contract IndexSocialFiTreasuryFacet is IndexFacetBase {
         PlatformTreasuryStorage.Layout storage pt = PlatformTreasuryStorage.layout();
         PlatformTreasuryStorage.QueuedUint256 memory q = pt.queuedCarveOutBps;
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1: eta <= now <= eta + GRACE_PERIOD
         delete pt.queuedCarveOutBps;
         _applySocialFiTreasuryBps(q.value);
     }

@@ -116,7 +116,7 @@ contract HookRegistryFacet is IndexFacetBase {
         HooksStorage.Layout storage h = HooksStorage.layout();
         HooksStorage.QueuedHook memory q = h.queuedHooks[point];
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1: eta <= now <= eta + GRACE_PERIOD
         delete h.queuedHooks[point];
         h.hooks[point] = q.hook;
         h.hookPermissions[q.hook] = q.permissions;

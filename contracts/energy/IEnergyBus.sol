@@ -56,8 +56,12 @@ interface IEnergyBus {
 
     function finalized() external view returns (bool);
 
-    /// @notice Permissionless. Spends min(balance, MAX_ROUTE_WEI) if that
-    /// amount is >= MIN_ROUTE_WEI; otherwise no-ops and returns 0.
+    /// @notice Permissionless. Spends min(balance, MAX_ROUTE_WEI, this block's
+    /// remaining BLOCK_BUDGET_WEI) if that amount is >= MIN_ROUTE_WEI;
+    /// otherwise no-ops and returns 0. The per-block budget (audit H-5) makes
+    /// the cap cumulative across repeated calls in one block, so looping
+    /// route() within a single transaction cannot exceed it — see
+    /// `blockBudgetRemaining()` and the EnergyBus implementation.
     function route() external returns (uint256 spent);
 
     /// @notice Optional accounting sync hook; the Bus itself is a pure
