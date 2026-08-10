@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {IndexFacetBase} from "./IndexFacetBase.sol";
 import {CoreStorage, StreamStorage} from "../storage/IndexStorage.sol";
@@ -211,7 +212,12 @@ contract IndexStreamFacet is IndexFacetBase {
         StreamStorage.Layout storage ss = StreamStorage.layout();
         StreamStorage.QueuedStream memory q = ss.queuedStreams[token];
         if (!q.pending) revert NoStreamQueued();
+        // AUDIT M-1. Bespoke lower-bound error kept (the ABI has always named
+        // `StreamTimelockNotElapsed` here); the GRACE upper bound is the same
+        // everywhere. A listing queued and forgotten must not be executable a
+        // year later against a token whose contract has since changed hands.
         if (block.timestamp < q.eta) revert StreamTimelockNotElapsed();
+        if (block.timestamp > uint256(q.eta) + TIMELOCK_GRACE_PERIOD) revert QueueExpired();
         _validateStreamCandidate(token);
         delete ss.queuedStreams[token];
         ss.streamList.push(token);
@@ -227,6 +233,27 @@ contract IndexStreamFacet is IndexFacetBase {
         if (!ss.queuedStreams[token].pending) revert NoStreamQueued();
         delete ss.queuedStreams[token];
         emit StreamQueued(token, 0);
+    }
+
+    /**
+     * @notice AUDIT M-1 — cross-role veto of a queued stream listing.
+     * `cancelStream` above is `ROLE_STREAM_LISTER`-only and therefore useless
+     * in the one case that matters: the stream-lister key ITSELF being
+     * compromised and queueing a hostile token. Any holder of any of the five
+     * known roles may withdraw the queue instead.
+     *
+     * @dev Strictly safety-increasing, like every other veto (see
+     * `IndexFacetBase._requireAnyRoleHolder`): the only reachable outcome is
+     * that a token which is not a stream today is still not a stream
+     * tomorrow. It cannot delist a LIVE stream, cannot touch held backing, and
+     * cannot reach `depositStream`, `redeemProRata` or `claimPending`.
+     */
+    function vetoStream(address token) external {
+        _requireAnyRoleHolder();
+        StreamStorage.Layout storage ss = StreamStorage.layout();
+        if (!ss.queuedStreams[token].pending) revert NoStreamQueued();
+        delete ss.queuedStreams[token];
+        emit QueueVetoed(keccak256(abi.encodePacked("stream", token)), msg.sender);
     }
 
     /**
@@ -250,26 +277,89 @@ contract IndexStreamFacet is IndexFacetBase {
     }
 
     /**
-     * @notice Free a stream's slot once it is delisted, fully drained, and
-     * owes nobody. PERMISSIONLESS — it can only ever remove a token that has
-     * nothing left to give.
+     * @notice Free a stream's slot once it is delisted and owes nobody
+     * anything anybody could ever actually receive. PERMISSIONLESS — it can
+     * only ever remove a token that has nothing left to give.
      *
-     * Requires `held == 0`, `reservedClaims == 0`, `carry == 0` AND
-     * `unvestedOf == 0`, so pruning can never orphan a holder's pro-rata
-     * slice, a deferred credit, a carried balance, or a still-vesting
-     * displacement off the iteration list.
+     * Requires `reservedClaims == 0`, `carry == 0`, `unvestedOf == 0`, and a
+     * net balance that is PROVABLY UNPAYABLE (see below), so pruning can never
+     * orphan a holder's pro-rata slice, a deferred credit, a carried balance,
+     * or a still-vesting displacement off the iteration list.
+     *
+     * ═══ AUDIT M-2 — THE 1-WEI SLOT-PINNING GRIEF ════════════════════════
+     *
+     * This function used to require `_probeStreamBalance(token) == 0` exactly.
+     * `_probeStreamBalance` reads the LIVE balance, and a raw ERC-20
+     * `transfer` into the diamond needs no approval, no role, and no function
+     * on this contract at all. So anyone could send 1 wei of a delisted,
+     * fully-drained token and pin its slot FOREVER:
+     *
+     *   - the wei can never leave, because every exit pays
+     *     `mulDiv(sharesIn, held, totalSupply + VIRTUAL_SHARES)`, which FLOORS
+     *     to zero for a held balance smaller than the denominator;
+     *   - the slot is consumed out of `MAX_STREAMS = 32`, permanently;
+     *   - every `redeemProRata` thereafter pays SSTORE-free but nonzero gas to
+     *     iterate a leg that always pays nothing;
+     *   - repeat 32 times, for 32 wei of a worthless token, and `queueStream`
+     *     reverts `StreamCapReached` forever: no legitimate reward stream can
+     *     ever be listed again, on a contract with no upgrade path.
+     *
+     * THE FIX, AND WHY IT GIVES UP NOTHING. Rather than pick an arbitrary
+     * "dust" constant — which is not decimal-independent (1e6 is a
+     * rounding error for an 18-decimal token and one whole dollar for USDC)
+     * and would therefore be a real, if small, licence to strand value — the
+     * threshold is DERIVED from the exit formula itself, in the same spirit as
+     * design §1.2's realizable price:
+     *
+     *   A residual is prunable iff the LARGEST redemption anybody could
+     *   possibly make would pay ZERO of it.
+     *
+     * The largest possible `sharesIn` is the entire supply, so the maximum
+     * payout any actor could ever extract from a residual `net` is
+     * `mulDiv(totalSupply, net, totalSupply + VIRTUAL_SHARES)`. Requiring that
+     * to be zero means pruning strands NOTHING: not "almost nothing", but
+     * literally no wei that any holder, at any share count, in any order,
+     * could have received. Holders lose a claim they provably never had.
+     *
+     * It is also decimal-independent and self-scaling by construction — it
+     * asks about the payout, not about the token — and it degenerates to the
+     * old `== 0` rule whenever the supply is large relative to the residual,
+     * which is the normal case.
+     *
+     * ═══ WHY THIS CANNOT PRUNE A LIVE STREAM ═════════════════════════════
+     *
+     * Three independent locks, any one of which suffices:
+     *  1. `isStream[token]` must already be false — a stream must be DELISTED
+     *     by `ROLE_STREAM_LISTER` first, which this function cannot do.
+     *  2. The residual bound is on the payout, so a stream holding any
+     *     economically meaningful balance fails it by many orders of
+     *     magnitude. There is no size of real backing that satisfies it.
+     *  3. `reservedClaims`, `carry` and `unvestedOf` must all be exactly zero,
+     *     unchanged from before — the relaxation is confined to the ONE term
+     *     the griefer could actually write to from outside.
+     *
+     * `totalSupply == 0` deliberately does NOT get the relaxation: with no
+     * supply, the residual is not unpayable at all — it is value waiting for
+     * the next minter — so only an exact zero prunes in that state.
      */
     function pruneStream(address token) external {
         StreamStorage.Layout storage ss = StreamStorage.layout();
         if (!ss.tracked[token]) revert NotAStream();
         if (ss.isStream[token]) revert StreamStillListed();
         if (
-            _probeStreamBalance(token) != 0 ||
             CoreStorage.layout().reservedClaims[token] != 0 ||
             ss.carry[token] != 0 ||
             _unvestedOf(token) != 0
         ) {
             revert StreamNotEmpty();
+        }
+        uint256 net = _probeStreamBalance(token);
+        if (net != 0) {
+            uint256 supply = _totalSupply();
+            // AUDIT M-2: prunable only if a full-supply redemption would pay 0.
+            if (supply == 0 || Math.mulDiv(supply, net, supply + VIRTUAL_SHARES) != 0) {
+                revert StreamNotEmpty();
+            }
         }
 
         uint256 n = ss.streamList.length;

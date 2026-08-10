@@ -178,7 +178,7 @@ contract IndexGovernanceFacet is IndexFacetBase {
         GovernanceStorage.Layout storage gs = GovernanceStorage.layout();
         GovernanceStorage.QueuedParam memory q = gs.queuedParams[key];
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1: eta <= now <= eta + GRACE_PERIOD
         delete gs.queuedParams[key];
 
         ParamsStorage.Layout storage ps = ParamsStorage.layout();
@@ -283,7 +283,7 @@ contract IndexGovernanceFacet is IndexFacetBase {
         GovernanceStorage.Layout storage gs = GovernanceStorage.layout();
         GovernanceStorage.QueuedParam memory q = gs.queuedParams[key];
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1
         delete gs.queuedParams[key];
         CoreStorage.layout().constituents[token].metric = q.value;
         emit MetricUpdated(token, q.value);
@@ -331,7 +331,7 @@ contract IndexGovernanceFacet is IndexFacetBase {
         IndexProvenanceStorage.Layout storage l = IndexProvenanceStorage.layout();
         IndexProvenanceStorage.QueuedAddress memory q = l.queued;
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1
         delete l.queued;
         l.vaultFactory = q.value;
         emit VaultFactoryUpdated(q.value);
@@ -381,7 +381,7 @@ contract IndexGovernanceFacet is IndexFacetBase {
         GovernanceStorage.Layout storage gs = GovernanceStorage.layout();
         GovernanceStorage.QueuedListing memory q = gs.queuedListings[token];
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1
         delete gs.queuedListings[token];
 
         if (q.isRemoval) {
@@ -421,7 +421,7 @@ contract IndexGovernanceFacet is IndexFacetBase {
         GovernanceStorage.Layout storage gs = GovernanceStorage.layout();
         GovernanceStorage.QueuedParam memory q = gs.queuedPlatformTreasury;
         if (!q.pending) revert NothingQueued();
-        if (block.timestamp < q.eta) revert TimelockNotElapsed();
+        _requireMature(q.eta); // AUDIT M-1
         delete gs.queuedPlatformTreasury;
         AllocationStorage.layout().platformTreasury = address(uint160(q.value));
         emit ParamApplied("platformTreasury", q.value);
@@ -468,7 +468,14 @@ contract IndexGovernanceFacet is IndexFacetBase {
         RolesStorage.Layout storage rs = RolesStorage.layout();
         RolesStorage.QueuedRole memory q = rs.queuedRoles[role];
         if (!q.pending) revert NoRoleQueued();
+        // Role queues keep their own bespoke lower-bound error (the ABI has
+        // always named `RoleTimelockNotElapsed` here and monitors read it),
+        // but AUDIT M-1's upper bound applies identically: a role handover
+        // queued and left unexecuted for a fortnight is as stale as a
+        // parameter, and a successor who never showed up should not be able to
+        // be installed a year later by whoever still holds the calldata.
         if (block.timestamp < q.eta) revert RoleTimelockNotElapsed();
+        if (block.timestamp > uint256(q.eta) + TIMELOCK_GRACE_PERIOD) revert QueueExpired();
         delete rs.queuedRoles[role];
         address prev = rs.roleHolder[role];
         rs.roleHolder[role] = q.holder;
@@ -483,5 +490,140 @@ contract IndexGovernanceFacet is IndexFacetBase {
         if (!rs.queuedRoles[role].pending) revert NoRoleQueued();
         delete rs.queuedRoles[role];
         emit RoleQueued(role, address(0), 0);
+    }
+
+    // ══ AUDIT M-1 — THE VETO SURFACE ══════════════════════════════════════
+    //
+    // Before this block existed, the ONLY cancels in the entire diamond were
+    // `cancelRole` (above) and `IndexStreamFacet.cancelStream` — both gated on
+    // the SAME role that queued the thing. There was NO cancel for a queued
+    // PARAMETER, a queued LISTING, a queued TREASURY, or a queued REGISTRY at
+    // all. Combined with the missing expiry (see `TIMELOCK_GRACE_PERIOD`),
+    // that made a compromised parameter key's queued value UNSTOPPABLE: key
+    // rotation runs on the same delay, so `queueRole` always lands after the
+    // malicious eta, and defenders could only watch.
+    //
+    // WHO MAY VETO, and the full argument for it, is documented at
+    // `IndexFacetBase._requireAnyRoleHolder`. Summary: any holder of any of
+    // the five known roles, immediately, across domains — because a veto only
+    // ever returns the system to the state it is already in, and because a
+    // veto reachable only by the compromised key closes nothing.
+    //
+    // WHAT THE VETO CANNOT DO, and this is not a convention but an
+    // enumerable property of the four functions below: none of them takes an
+    // account, an amount, a recipient, a token transfer, or a price. Each
+    // does exactly one thing — `delete` a pending queue record — so the whole
+    // surface's reachable state change is "a change that had not happened
+    // does not happen". In particular NOTHING here touches `redeemProRata`:
+    // the exit door reads no queue, no role and no flag (design §1.1), so the
+    // veto surface cannot gate, price, pause or delay it even with all five
+    // role keys simultaneously hostile. `ScopedRoles.isolation.test.ts`
+    // asserts that directly.
+    //
+    // ── ON A SHORTER DELAY FOR "DE-ESCALATING" ACTIONS: CONSIDERED, AND
+    //    DELIBERATELY NOT BUILT.
+    //
+    // The idea is attractive — let recovery out-race attack by giving
+    // de-escalating changes (rotating a key away, reducing a bps) a shorter
+    // timelock than escalating ones. It was rejected on two grounds, both
+    // concrete rather than stylistic:
+    //
+    //  1. DIRECTION IS NOT A RELIABLE PROXY FOR SAFETY HERE. "Lower bps is
+    //     safer" is false across this contract's own key space. Driving
+    //     `concentrationCapBps` to 1 is the canonical HOSTILE act in this
+    //     repo's own exit-door test; lowering `staleAfter` or `rampDuration`
+    //     tightens rather than loosens; `minEligibility*` are MINIMUMS whose
+    //     safe direction is the opposite of the rest. A fast lane keyed on
+    //     numeric direction would hand a compromised key a fast lane to
+    //     several genuinely hostile values, which is a strict enlargement of
+    //     the attack surface the fast lane was meant to shrink.
+    //
+    //  2. FOR ROLES IT IS ACTIVELY DANGEROUS. `queueRole` rotates to an
+    //     ARBITRARY address; "rotating a key away" and "a compromised
+    //     ROLE_ADMIN rotating a key to itself" are the SAME transaction shape
+    //     and are not distinguishable on-chain. A short-delay rotation lane
+    //     would therefore be a short-delay SELF-ESCALATION lane, breaking
+    //     rule 2 of `ScopedRoles`' header ("self-escalation is observable and
+    //     slow"), which is the property the full delay exists to buy.
+    //
+    // The veto achieves the same goal without either problem: it is
+    // INSTANT — strictly faster than any shortened delay could be — and it is
+    // safe at any speed precisely because it can only ever subtract.
+
+    /**
+     * @notice Withdraw a queued parameter (or metric) before it can land.
+     *
+     * @dev Accepts ANY key present in `queuedParams`, deliberately NOT gated
+     * on `roleForParamKey`. Two reasons. First, `queueMetric` writes a derived
+     * `keccak256("metric", token)` key that `roleForParamKey` REVERTS on by
+     * design (it is the whitelist that stops the risk role forging a metric),
+     * so routing the veto through it would leave queued metrics the one
+     * un-vetoable parameter in the diamond. Second, the veto needs no key
+     * authorization at all: `pending` is the authorization, since a key with
+     * nothing queued is a no-op and a key with something queued can only be
+     * returned to its current value.
+     */
+    function vetoParam(bytes32 key) external {
+        _requireAnyRoleHolder();
+        GovernanceStorage.Layout storage gs = GovernanceStorage.layout();
+        if (!gs.queuedParams[key].pending) revert NothingQueued();
+        delete gs.queuedParams[key];
+        emit QueueVetoed(key, msg.sender);
+    }
+
+    /// @notice Withdraw a queued constituent add/remove before it can land.
+    /// Vetoing a REMOVAL is as legitimate as vetoing an add: both only ever
+    /// preserve the current constituent set, and neither moves a reserve.
+    function vetoListing(address token) external {
+        _requireAnyRoleHolder();
+        GovernanceStorage.Layout storage gs = GovernanceStorage.layout();
+        if (!gs.queuedListings[token].pending) revert NothingQueued();
+        delete gs.queuedListings[token];
+        emit QueueVetoed(keccak256(abi.encodePacked("listing", token)), msg.sender);
+    }
+
+    /// @notice Withdraw a queued platform-treasury appointment. The treasury
+    /// receives SHARES and redeems them through the identical pro-rata path as
+    /// anyone else, so this cancels a future value ROUTE, never a balance.
+    function vetoPlatformTreasury() external {
+        _requireAnyRoleHolder();
+        GovernanceStorage.Layout storage gs = GovernanceStorage.layout();
+        if (!gs.queuedPlatformTreasury.pending) revert NothingQueued();
+        delete gs.queuedPlatformTreasury;
+        emit QueueVetoed("platformTreasury", msg.sender);
+    }
+
+    /// @notice Withdraw a queued `vaultFactory` re-pointing. Leaving the
+    /// registry where it is is always the conservative outcome — a hostile
+    /// registry is the C-6 admission surface, and `address(0)` merely disarms
+    /// admission, so neither direction of this key needs to land in a hurry.
+    function vetoVaultFactory() external {
+        _requireAnyRoleHolder();
+        IndexProvenanceStorage.Layout storage l = IndexProvenanceStorage.layout();
+        if (!l.queued.pending) revert NothingQueued();
+        delete l.queued;
+        emit QueueVetoed("vaultFactory", msg.sender);
+    }
+
+    /**
+     * @notice Withdraw a queued ROLE handover. Broader than `cancelRole`
+     * above, which is `ROLE_ADMIN`-only, and it exists for the case
+     * `cancelRole` structurally cannot serve: ROLE_ADMIN ITSELF being the
+     * compromised key, queueing a rotation of some other role to an address it
+     * controls. Under `cancelRole` alone the only actor able to stop that is
+     * the attacker. Here, any of the other four role holders can — and,
+     * exactly as with every other veto, all they can achieve is that the
+     * current holder REMAINS the current holder.
+     *
+     * @dev `cancelRole` is kept rather than replaced: its ABI, its event and
+     * its `NoRoleQueued` error are already depended on, and a narrower
+     * duplicate of a broader safety function costs nothing.
+     */
+    function vetoRole(bytes32 role) external {
+        _requireAnyRoleHolder();
+        RolesStorage.Layout storage rs = RolesStorage.layout();
+        if (!rs.queuedRoles[role].pending) revert NoRoleQueued();
+        delete rs.queuedRoles[role];
+        emit QueueVetoed(role, msg.sender);
     }
 }

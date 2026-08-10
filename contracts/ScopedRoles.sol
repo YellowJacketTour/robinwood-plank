@@ -78,6 +78,25 @@ abstract contract ScopedRoles {
     /// treasury, and no value path anywhere in either inheriting contract.
     bytes32 public constant ROLE_ADMIN = "role.admin";
 
+    /**
+     * @notice AUDIT M-1 (2026-08-09) — the grace period, mirroring the
+     * diamond's `IndexFacetBase.TIMELOCK_GRACE_PERIOD` exactly.
+     *
+     * `executeRole` used to check only `block.timestamp >= eta`, with no upper
+     * bound, so a queued handover stayed executable FOREVER: a successor who
+     * never showed up could be installed a year later by whoever still held
+     * the calldata, long after the public scrutiny window closed. Uniswap's
+     * Timelock has enforced `timestamp <= eta + GRACE_PERIOD` since 2020 for
+     * this reason. 14 days — 7x the deployed 48h delay, so a gas spike or a
+     * holiday can never turn a liveness hiccup into a lost rotation, while
+     * still being far shorter than the interval over which the circumstances
+     * a handover was judged against can turn over.
+     *
+     * A `constant`, never a governed value: a settable grace period is the
+     * unbounded behaviour one parameter change away.
+     */
+    uint256 public constant GRACE_PERIOD = 14 days;
+
     /// @notice role key => current holder. The single source of truth for
     /// every privileged check in the inheriting contracts.
     mapping(bytes32 => address) public roleHolder;
@@ -90,6 +109,10 @@ abstract contract ScopedRoles {
     error BadRoleHolder();
     error NoRoleQueued();
     error RoleTimelockNotElapsed();
+    /// @dev AUDIT M-1. Matured, but past `GRACE_PERIOD`. Distinct from
+    /// `RoleTimelockNotElapsed` so the two boundary failures are never
+    /// confused by a caller, a monitor, or a test.
+    error QueueExpired();
 
     event RoleQueued(bytes32 indexed role, address indexed next, uint64 eta);
     event RoleApplied(bytes32 indexed role, address indexed previous, address indexed next);
@@ -142,6 +165,7 @@ abstract contract ScopedRoles {
         QueuedRole memory q = queuedRoles[role];
         if (!q.pending) revert NoRoleQueued();
         if (block.timestamp < q.eta) revert RoleTimelockNotElapsed();
+        if (block.timestamp > uint256(q.eta) + GRACE_PERIOD) revert QueueExpired(); // AUDIT M-1
         delete queuedRoles[role];
         address previous = roleHolder[role];
         roleHolder[role] = q.holder;

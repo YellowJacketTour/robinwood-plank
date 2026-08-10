@@ -199,6 +199,49 @@ abstract contract IndexFacetBase {
     uint256 internal constant MAX_STREAMS = 32;
 
     /**
+     * ═══ AUDIT M-1 (2026-08-09) — THE TIMELOCK GRACE PERIOD ═══════════════
+     *
+     * Before this constant existed, EVERY `execute*` in the diamond checked
+     * only `block.timestamp >= eta` — a lower bound with no upper bound. A
+     * queued value was therefore executable FOREVER. That is not a latency
+     * bug, it is a different mechanism than the one the timelock advertises:
+     * "this change becomes legal after 48 hours" silently means "…and stays
+     * legal for eternity", so an operator can queue something innocuous under
+     * one set of circumstances and fire it eighteen months later under
+     * another, with the public scrutiny window long since closed. Uniswap's
+     * Timelock has enforced `timestamp <= eta + GRACE_PERIOD` ("Transaction is
+     * stale") since 2020 for exactly this reason.
+     *
+     * WHY 14 DAYS, and not shorter or longer:
+     *
+     *  - It must be comfortably LONGER than the timelock delay itself
+     *    (`CoreStorage.timelockDelay`, 48h in every deployment fixture).
+     *    `execute*` is permissionless, so the only thing standing between a
+     *    matured queue and its application is somebody paying gas. A grace
+     *    window that could plausibly be missed — through a gas spike, a
+     *    holiday, a reorg-heavy week, a chain halt — would convert a
+     *    liveness hiccup into "re-run the whole 48h timelock", i.e. the fix
+     *    would itself become a denial of service. 14 days is 7x the delay.
+     *
+     *  - It must be comfortably SHORTER than the interval over which the
+     *    circumstances a change was judged against can turn over. Two weeks
+     *    is the standard governance-review cadence this figure was chosen
+     *    from; past it, the queued value has to be re-proposed and re-observed
+     *    in the conditions that actually obtain.
+     *
+     *  - It is a `constant`, not a governed parameter, for the usual reason
+     *    (design §7.2): a parameter governance can set wrong is worse than a
+     *    formula it cannot touch. A governed grace period would just be the
+     *    old unbounded behaviour one `queueParam` away.
+     *
+     * Applied via `_requireMature` on every timelocked apply path. A queue
+     * outside `[eta, eta + GRACE]` FAILS CLOSED — it reverts and stays queued
+     * (harmlessly: it can never again be executed), and the intent must be
+     * re-queued on a fresh, fully-public delay.
+     */
+    uint256 internal constant TIMELOCK_GRACE_PERIOD = 14 days;
+
+    /**
      * @dev Round-9f re-vest window, ported verbatim from WrappedIndexShare. A
      * CONSTANT, deliberately: nothing settable here, because anything settable
      * would be a lever over when users can redeem. See WrappedIndexShare.sol's
@@ -431,6 +474,13 @@ abstract contract IndexFacetBase {
     event RoleQueued(bytes32 indexed role, address indexed next, uint64 eta);
     event RoleApplied(bytes32 indexed role, address indexed previous, address indexed next);
 
+    /// @dev AUDIT M-1. Fired by every veto path. `slot` names the queue that
+    /// was withdrawn (a param key, or `keccak256("listing", token)`-style
+    /// identifier for the address-keyed queues) and `by` is the vetoing role
+    /// holder, so the on-chain record of WHO stopped WHAT is complete without
+    /// having to correlate a zeroed re-queue event.
+    event QueueVetoed(bytes32 indexed slot, address indexed by);
+
     // ── PR5 (ONESHOT §5.3, SPEC §4.2) — the Energy Bus credit surface ───────
     event EnergyBusQueued(address indexed bus, uint64 eta);
     event EnergyBusSet(address indexed bus);
@@ -508,6 +558,14 @@ abstract contract IndexFacetBase {
     error PoolShareCapExceeded();
 
     error NotRoleHolder(bytes32 role);
+    /// @dev AUDIT M-1. The queue matured but its `GRACE_PERIOD` has elapsed;
+    /// see `TIMELOCK_GRACE_PERIOD`. Deliberately distinct from
+    /// `TimelockNotElapsed` so the two boundary failures are never confused
+    /// by a caller, a monitor, or a test.
+    error QueueExpired();
+    /// @dev AUDIT M-1. The veto surface: the caller holds NONE of the five
+    /// known roles. See `_requireAnyRoleHolder`.
+    error NotAnyRoleHolder();
     error UnknownRole(bytes32 role);
     error BadRoleHolder();
     error NoRoleQueued();
@@ -587,6 +645,96 @@ abstract contract IndexFacetBase {
             role == ROLE_RISK_PARAM_ ||
             role == ROLE_PLATFORM_ALLOCATION_ ||
             role == ROLE_STREAM_LISTER_;
+    }
+
+    /**
+     * @dev AUDIT M-1 — the maturity window, in ONE place.
+     *
+     * Every timelocked apply path in the diamond calls this instead of writing
+     * its own `block.timestamp < eta` line. Factoring it here is not merely
+     * tidiness: the audit's finding was that the upper bound was missing from
+     * `execute*` UNIFORMLY, and the cheapest way to guarantee it never goes
+     * missing again on a facet added later is to leave no second place where
+     * the comparison is spelled out.
+     *
+     * `uint256(eta) + TIMELOCK_GRACE_PERIOD` cannot overflow: `eta` is a
+     * uint64 written as `block.timestamp + timelockDelay`, and the sum is
+     * evaluated in uint256.
+     */
+    function _requireMature(uint64 eta) internal view {
+        if (block.timestamp < eta) revert TimelockNotElapsed();
+        if (block.timestamp > uint256(eta) + TIMELOCK_GRACE_PERIOD) revert QueueExpired();
+    }
+
+    /**
+     * @dev AUDIT M-1 — WHO MAY VETO. This is the load-bearing design decision
+     * of the fix, so the reasoning is recorded here rather than inferred.
+     *
+     * THE THREAT THE VETO EXISTS FOR is a COMPROMISED PARAMETER KEY. That key
+     * queues a hostile value with an eta of `now + delay`. Defenders' only
+     * lever was `queueRole` — which runs on the SAME delay, so the rotation
+     * always lands AFTER the malicious eta. The attack is therefore strictly
+     * unstoppable: defenders can watch it mature and nothing more. Any veto
+     * that is only reachable by the compromised key itself, or by a key that
+     * must first win a timelock race it structurally cannot win, closes
+     * nothing.
+     *
+     * SO THE VETO MUST BE IMMEDIATE, AND IT MUST BE REACHABLE BY SOMEONE WHO
+     * IS NOT THE ATTACKER. Two candidates were considered:
+     *
+     *  (a) `ROLE_ADMIN_` only. Symmetric with `cancelRole`, and the natural
+     *      "defender" key. Rejected as INSUFFICIENT ON ITS OWN: it makes
+     *      ROLE_ADMIN a single point of failure for the entire recovery story,
+     *      and — worse — it is useless in the one compromise scenario that
+     *      matters most, ROLE_ADMIN itself being the compromised key. It also
+     *      quietly violates rule 1 of `ScopedRoles`' header ("no super-role
+     *      over parameters") in the other direction by making ROLE_ADMIN the
+     *      only actor with any say over every parameter domain.
+     *
+     *  (b) ANY holder of ANY of the five known roles may veto ANY queued item,
+     *      including one queued by a different role. CHOSEN.
+     *
+     * WHY (b) IS SAFE, which is the whole crux: A VETO IS MONOTONICALLY
+     * SAFETY-INCREASING. It has exactly one effect — it returns the system to
+     * the state it is already in. It cannot set a value, cannot move a
+     * reserve, cannot mint, cannot admit a constituent, cannot appoint a
+     * treasury, cannot grant a role, and cannot reach `redeemProRata` (see
+     * `ExitDoorSacred`/`ScopedRoles.isolation` — the veto surface takes no
+     * user, no amount and no recipient argument anywhere). The asymmetry is
+     * total: a permissive QUEUE surface hands out authority, a permissive VETO
+     * surface hands out nothing but the ability to decline authority. Roles
+     * are already trusted enough to queue changes in their own domain; a
+     * strictly weaker capability over a neighbouring domain is a far smaller
+     * grant than the one they already hold.
+     *
+     * THE COST, STATED HONESTLY: a compromised or merely hostile role holder
+     * can veto every proposal every other role makes, i.e. GRIEF GOVERNANCE
+     * LIVENESS. That is accepted, deliberately, on three grounds. First, the
+     * damage is bounded to "nothing changes" — the protocol keeps operating on
+     * its current parameters and the exit door stays open, which is precisely
+     * the failure mode this codebase everywhere prefers. Second, it is not
+     * durable: `ROLE_ADMIN` can rotate a griefing holder out, and unlike a
+     * hostile PARAMETER the griefer cannot win by waiting, because a veto
+     * grants no persistent state. Third, and decisively, the alternative is
+     * the pre-fix status quo, where the attacker's bounded-liveness grief is
+     * replaced by an attacker's UNBOUNDED, IRREVERSIBLE parameter capture.
+     * Trading "governance can be stalled" for "governance can be stolen" is
+     * the correct direction and it is not close.
+     *
+     * `address(0)` cannot satisfy this: an unseeded role's holder is zero and
+     * no external call can have `msg.sender == address(0)`, so an un-appointed
+     * role confers no veto to anybody.
+     */
+    function _requireAnyRoleHolder() internal view {
+        RolesStorage.Layout storage rs = RolesStorage.layout();
+        address s = msg.sender;
+        if (
+            s != rs.roleHolder[ROLE_ADMIN_] &&
+            s != rs.roleHolder[ROLE_CONSTITUENT_ADMISSION_] &&
+            s != rs.roleHolder[ROLE_RISK_PARAM_] &&
+            s != rs.roleHolder[ROLE_PLATFORM_ALLOCATION_] &&
+            s != rs.roleHolder[ROLE_STREAM_LISTER_]
+        ) revert NotAnyRoleHolder();
     }
 
     // ── Storage accessors, spelled out once ────────────────────────────────

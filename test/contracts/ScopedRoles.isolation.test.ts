@@ -471,14 +471,48 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       // permissionless after the eta exactly like every other `execute*`.
       "executeVaultFactory",
     ]);
+
+    // ══ AUDIT M-1 — THE VETO SURFACE, A THIRD CLASSIFICATION ══════════════
+    //
+    // These are neither single-role-gated (so they cannot join `surface`,
+    // whose loop demands `NotRoleHolder` from every non-designated key) nor
+    // permissionless (so they must not join `permissionless`, which would
+    // under-state what they require). They are gated on
+    // `_requireAnyRoleHolder`: ANY holder of ANY of the five known roles, and
+    // nobody else.
+    //
+    // WHY THAT IS THE RIGHT GATE, in one line — a veto only ever returns the
+    // system to the state it is already in, so a permissive veto grants no
+    // authority, while the compromised-key scenario it exists for is exactly
+    // the one a same-role cancel cannot serve. The full argument lives at
+    // `IndexFacetBase._requireAnyRoleHolder`.
+    //
+    // Their behaviour is asserted in GovernanceGraceAndVeto.test.ts, including
+    // that no veto can reach the exit door. Listing them here keeps this
+    // file's COMPLETENESS claim intact: a future gated function that lands in
+    // none of the three sets still fails closed below.
+    const vetoSurface = new Set([
+      "vetoParam",
+      "vetoListing",
+      "vetoPlatformTreasury",
+      "vetoVaultFactory",
+      "vetoRole",
+      "vetoStream",
+    ]);
     const abiNames = (vault.interface.fragments as any[])
       .filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))
       .map((f) => f.name);
     for (const n of abiNames) {
       expect(
-        gatedNames.has(n) || permissionless.has(n),
+        gatedNames.has(n) || permissionless.has(n) || vetoSurface.has(n),
         `unclassified privileged function "${n}" — add it to the isolation table`
       ).to.equal(true);
+    }
+    // ...and the veto set is not aspirational: every name in it must really
+    // be on the ABI, so a renamed or deleted veto cannot hide behind this
+    // classification.
+    for (const v of vetoSurface) {
+      expect(abiNames, `veto surface names a function that does not exist: ${v}`).to.include(v);
     }
 
     const everyKey = [roleAdmin, admission, risk, allocation, alice];
@@ -605,10 +639,16 @@ describe("Scoped-capability roles — GlobalIndexVault", () => {
       .filter((f) => f.type === "function" && !["view", "pure"].includes(f.stateMutability))
       .map((f) => f.name);
     // `executeRole` is the only mutator, and it is gated on the eta alone.
+    // AUDIT M-1 added `vetoRole`. It belongs on this list rather than being
+    // an exception to it: like `cancelRole` it only ever `delete`s a PENDING
+    // record, so it is a write path to `queuedRoles`, never to `roleHolder`.
+    // `executeRole` remains the sole mutator of `roleHolder`, gated on the
+    // eta alone — which is exactly what this test claims.
     expect(names.filter((n) => n.toLowerCase().includes("role")).sort()).to.deep.equal([
       "cancelRole",
       "executeRole",
       "queueRole",
+      "vetoRole",
     ]);
     // No renounce/grant/revoke/setRole surface sneaked in alongside it.
     for (const bad of ["grantRole", "revokeRole", "renounceRole", "setRole", "setAdmin"]) {

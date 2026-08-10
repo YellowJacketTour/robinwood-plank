@@ -416,11 +416,23 @@ describe("Invariant hardening (round 9e)", () => {
       expect(names, `a "${forbidden}" surface appeared`).to.not.include(forbidden);
     }
     // The COMPLETE set of role-mutating entrypoints, enumerated.
+    //
+    // AUDIT M-1 (2026-08-09) added `vetoRole`, and it belongs here rather
+    // than being an exception: it is a SUBTRACTIVE surface. Like `cancelRole`
+    // it only `delete`s a PENDING `queuedRoles` record — it can never write
+    // `roleHolder`, can never vacate a role (the thing this test is about),
+    // and can never install one. Its one effect is that the CURRENT holder
+    // stays the current holder, which is the opposite of a renounce path. It
+    // is broader than `cancelRole` (any of the five role holders, not just
+    // ROLE_ADMIN) for the case `cancelRole` structurally cannot serve:
+    // ROLE_ADMIN itself compromised, queueing a rotation to an address it
+    // controls. See IndexFacetBase._requireAnyRoleHolder.
     expect(names.filter((n: string) => n.endsWith("role")).sort()).to.deep.equal([
       "cancelrole",
       "executerole",
       "hasrole", // a pure view; it writes nothing
       "queuerole",
+      "vetorole",
     ]);
 
     // A role can never be vacated: address(0) is rejected at both writers.
