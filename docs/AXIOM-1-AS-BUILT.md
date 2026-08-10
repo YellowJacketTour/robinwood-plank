@@ -2,7 +2,8 @@
 
 **Status:** delivered. All 12 build stages shipped, independently verified.
 **Repo:** `robinwood-plank-index-vault` · **Branch:** `feat/cvi-sota-axiom-1`
-**Verification:** `npm run test:contracts` → **809 passing, 0 failing** (full adversarial matrix included, `docs/TEST-MATRIX-AXIOM-1-ADVERSARIAL.md`)
+**Verification:** `npm run test:contracts` → **913 passing, 0 failing** (full adversarial matrix included, `docs/TEST-MATRIX-AXIOM-1-ADVERSARIAL.md`)
+**Read first:** `docs/BULLISH-HANDOFF.md` — this file is the plain-language summary; the handoff carries the status of record, the open risks, and the deployment gate.
 **Date:** 2026-08-09
 
 This is the single authoritative description of the delivered system. It

@@ -34,8 +34,25 @@ contract EnergyBus is IEnergyBus, ReentrancyGuard {
 
     uint256 public constant BPS_DENOM = 10_000;
 
-    // ---- LOCKED genesis safety constants (ONESHOT §4.2 — do not deviate) ----
-    uint256 public constant MAX_IMPACT_BPS = 300;
+    // ---- LOCKED genesis safety constants ----
+    //
+    // `MAX_IMPACT_BPS = 300` USED TO BE DECLARED HERE AND IS DELIBERATELY GONE.
+    // It named a price-impact guard that audit C-2 proved mathematically inert
+    // (it compared a fill against the constant-product OUTPUT formula, so it
+    // measured only the swap fee, peaked near 149 bps, and fell toward zero as
+    // trades grew — it could never reach its own 300 bps threshold at any
+    // size). The guard was DELETED rather than repaired, because realizable
+    // pricing makes the concept redundant: the quote already contains the
+    // impact. See `InventoryBuyAdapter`'s header and DESIGN-HONEST-INDEX §1.3.
+    //
+    // The constant itself is removed, not merely unused, and that is the point.
+    // This contract is IMMUTABLE with no upgrade path, so a `public constant`
+    // advertising a 300 bps impact limit would sit in the ABI forever telling
+    // every integrator that a protection exists which does not. Overstating a
+    // guard is precisely what C-2 was; leaving its tombstone in the ABI would
+    // repeat the mistake in a quieter form. The live bounds are
+    // `MAX_LEG_POOL_FRACTION_BPS = 200` and `QUOTE_TOLERANCE_BPS = 50` on the
+    // adapters, plus `BLOCK_BUDGET_WEI` below.
     uint256 public constant MAX_ROUTE_WEI = 10 ether;
     uint256 public constant MIN_ROUTE_WEI = 0.001 ether;
 

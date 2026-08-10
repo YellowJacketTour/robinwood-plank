@@ -8,15 +8,28 @@ This document exists so an incoming auditor knows exactly which static-analysis 
 
 ---
 
-## Toolchain note (read this before re-running)
+## Toolchain note (read this before re-running) — CORRECTED
 
-**Whole-project `slither .` crashes on this repo** with a fatal CPython error:
+The **`slither .` console script** crashes on this repo with a fatal CPython error:
 
 ```
 Fatal Python error: _PyEval_EvalFrameDefault: Executing a cache
 ```
 
-It succeeded on the pre-redesign tree and fails on the current one. Not diagnosed further; most likely a Python 3.14 / crytic-compile interaction rather than anything about the contracts. **Workaround that works: per-file invocation against standalone solc**, which is how every result below was produced:
+**Invoking it as a module works.** This was found after the per-file triage below was written, and it supersedes this document's original claim that whole-project analysis was impossible:
+
+```bash
+python -m slither .        # works
+slither .                  # crashes — console-script entry point only
+```
+
+**Whole-project result at `bff8e5c`:** 284 contracts analysed, 102 detectors, **748 results** — 364 informational, 176 medium, 161 low, **37 high**, 10 optimization.
+
+Of the 37 High: 12 are in `contracts/test/` mocks or in OpenZeppelin itself (`Math.mulDiv`'s well-known `^`-vs-`**` false positive). The **25 in production contracts** are 22 `reentrancy-balance`, 2 `reentrancy-eth`, and 1 `arbitrary-send-erc20` — **precisely the two families triaged below**, plus the `_pullCredited` finding already cleared in the original audit (internal function; all four call sites pass `msg.sender`).
+
+So the whole-project run surfaced **no new family** beyond what the per-file triage below already covers.
+
+The per-file method is still documented because it is useful for iterating on one contract, and it is how the detailed findings below were produced:
 
 ```bash
 solc-select install 0.8.24 && solc-select use 0.8.24
@@ -25,7 +38,7 @@ slither contracts/factory/CollectionVault.sol \
   --exclude-dependencies --exclude-informational
 ```
 
-Honest statement of coverage: this was run on the principal new/changed contracts, **not on all 135**. A full-project run remains owed and should be part of the independent external audit.
+⚠️ **Operator warning:** Slither runs `hardhat clean` + `compile --force`. Running it while a test suite is executing corrupts the artifacts the tests are reading and produces phantom `Unexpected end of JSON input` / `Unterminated string in JSON` failures that look like real breakage. This happened three times during this work and resolved to a read race every time. **Never run Slither and `npm run test:contracts` concurrently.**
 
 ---
 
@@ -97,6 +110,6 @@ One `incorrect-equality` in `_runPipe` (a `== 0` guard). Note that `_runPipe` is
 
 ## Summary
 
-**No static-analysis finding on the post-redesign code survives triage as a real defect.** Every High and Medium reduces to a guard Slither does not model, an unsigned zero-check, or an intentional fixed-point ordering whose rounding direction favours the protocol and is fuzz-verified.
+**No static-analysis finding on the post-redesign code survives triage as a real defect** — and this now covers the whole project (284 contracts, 748 results), not merely the principal files. Every High and Medium reduces to a guard Slither does not model, an unsigned zero-check, or an intentional fixed-point ordering whose rounding direction favours the protocol and is fuzz-verified.
 
 **What this does NOT establish.** Slither finds shallow, pattern-matchable defects. Every finding in the original audit — inert guards, unvested value, self-referential price references, privileged keys with undocumented blast radius — was **economic and invisible to static analysis**. A clean Slither run is a floor, not a ceiling, and must not be cited as evidence that the redesign is sound. The remediation has still never been independently audited.

@@ -515,9 +515,19 @@ bound rather than accept it.
   on-chain surface remains open to direct calls. This is a superseded
   contract with no upgrade path and the honest-index design does not depend
   on it, but an incoming operator must know it exists and is live.
-- **Real-drand wire compatibility is unproven.** `fixtures/drand-round.json`
-  and `DrandBeacon.realsig.test.ts` — the crypto is correct against
-  constructed vectors; a real drand round has not been verified end to end.
+- **Real-drand wire compatibility IS proven** (corrected — an earlier draft of
+  this section said otherwise). `test/contracts/fixtures/drand-round.json`
+  holds a real drand **evmnet** round (round 19229507, chain hash
+  `0x04f1e906…8c3`), fetched from `api.drand.sh` and `api2.drand.sh` with an
+  exact match on both, verified on-curve and against that round's signature
+  with `@noble/curves`' independent pairing before being committed. The
+  consuming test — "verifies a REAL drand round" in
+  `DrandBeacon.bls.test.ts` — **passes** (`✔`, not skipped) in the 913-test
+  run. What remains unproven is not the wire format but live *operational*
+  relaying: no relayer has run against a real network, because nothing has
+  been deployed. Note also that audit **H-7** (`ROUND_LEAD` too thin, making
+  the seed grindable) was a defect in round *selection*, not in the
+  cryptography, and is fixed.
 - **Gas figures are local-Hardhat only.** `route()` on 2 seeded vaults
   measured 1,199,429 gas; empty weights 572,350 (against a soft target of
   <200k, i.e. **over** it — documentation only, not a gate). See
@@ -684,7 +694,9 @@ GATE may be waived**, because there is no upgrade path.
       accepted, with the residual sandwich loss stated in ETH terms
 - [ ] Every replacement test for the three hollow tests confirmed to fail
       under mutation (§4.3, §6 item 4)
-- [ ] Real-drand wire compatibility proven against a live round (§5.8)
+- [ ] Live drand *relaying* exercised end to end on the target network — the
+      wire format is already proven against a real evmnet round (§5.8); what
+      is untested is an operational relayer, since nothing has been deployed
 - [ ] Full testnet deployment executed and soaked, with
       `docs/BULLISH-AXIOM1-RUNBOOK.md` filled in from the real run
 - [ ] Role custody plan decided: the deploy script runs as a

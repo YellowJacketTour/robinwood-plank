@@ -195,6 +195,24 @@ describe("AUDIT PoC — EnergyBus / adapters", () => {
       .map((f: any) => f.name);
     expect(names).to.not.include("MAX_IMPACT_BPS");
     expect(names).to.include("MAX_LEG_POOL_FRACTION_BPS");
+
+    // The Bus must not advertise it either. It survived there as a DEAD
+    // `public constant` — declared, referenced by nothing, and therefore
+    // sitting in the ABI telling integrators a 300 bps impact protection
+    // exists when the guard had been deleted. On an IMMUTABLE contract that
+    // claim would be permanent. Removed, and asserted here so it cannot
+    // creep back.
+    //
+    // How this goes red: re-declare `MAX_IMPACT_BPS` on EnergyBus.
+    const bus = await ethers.getContractFactory("EnergyBus");
+    const busNames = bus.interface.fragments
+      .filter((f: any) => f.type === "function")
+      .map((f: any) => f.name);
+    expect(busNames, "EnergyBus re-exposed the deleted impact guard").to.not.include("MAX_IMPACT_BPS");
+    // Anti-vacuity: the constants that ARE live must still be present, so
+    // this test cannot pass merely because the ABI failed to load.
+    expect(busNames).to.include("MAX_ROUTE_WEI");
+    expect(busNames).to.include("BLOCK_BUDGET_WEI");
   });
 
   it("PoC-2b (FIXED): buyShares now receives a REAL minSharesOut derived from quoteBuyShares", async () => {
