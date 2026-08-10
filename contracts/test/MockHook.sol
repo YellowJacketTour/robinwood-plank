@@ -25,7 +25,10 @@ contract MockHook {
     /// @dev REENTER mode target + calldata, and what the reentrant attempt
     /// returned — set by `setReentrantTarget`, read by the finding-2 hostile
     /// reentrant-hook test to prove the attempted call reverted cleanly.
-    address public target;
+    /// Named `reentrantTarget`, not `target`, because ethers v6's own
+    /// `BaseContract` reserves `target` — a same-named public getter here
+    /// breaks the generated factory's TypeScript types.
+    address public reentrantTarget;
     bytes public reentrantCalldata;
     bool public reentrantOk;
     bytes public reentrantReturnData;
@@ -39,7 +42,7 @@ contract MockHook {
     }
 
     function setReentrantTarget(address t, bytes calldata data) external {
-        target = t;
+        reentrantTarget = t;
         reentrantCalldata = data;
     }
 
@@ -60,7 +63,7 @@ contract MockHook {
             // Fired mid-checkpoint (or mid-sync), still inside the diamond's
             // `nonReentrant` window. Attempt to call straight back in — with
             // the guard in place this must revert with `ReentrantCall`.
-            (bool ok, bytes memory ret) = target.call(reentrantCalldata);
+            (bool ok, bytes memory ret) = reentrantTarget.call(reentrantCalldata);
             reentrantOk = ok;
             reentrantReturnData = ret;
         }

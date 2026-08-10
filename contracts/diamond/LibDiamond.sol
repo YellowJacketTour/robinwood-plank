@@ -53,7 +53,6 @@ library LibDiamond {
     error IndexMustBeClosedToFinalize();
     error NothingToFinalize();
 
-    event DiamondCut(IDiamondCut.FacetCut[] _diamondCut, address _init, bytes _calldata);
     event Finalized(bytes32 facetSetHash, uint256 blockNumber, uint256 facetCount);
 
     // ---------------------------------------------------------------- guards
@@ -87,7 +86,7 @@ library LibDiamond {
                 revert IncorrectFacetCutAction(uint8(cut.action));
             }
         }
-        emit DiamondCut(cuts, _init, _calldata);
+        emit IDiamondCut.DiamondCut(cuts, _init, _calldata);
     }
 
     function _addFunctions(address facet, bytes4[] memory selectors) private {

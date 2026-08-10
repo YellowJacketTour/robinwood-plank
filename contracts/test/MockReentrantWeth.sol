@@ -43,7 +43,10 @@ contract MockReentrantWeth {
     mapping(address => mapping(address => uint256)) public allowance;
 
     /// @notice The distributor to re-enter. Zero disables the attack entirely.
-    address public target;
+    /// Named `attackTarget`, not `target` — ethers v6's `BaseContract`
+    /// reserves `target`, and a same-named public getter here breaks the
+    /// generated factory's TypeScript types.
+    address public attackTarget;
     /// @notice Re-enter from `deposit()` — the FIRST call in the window.
     bool public attackOnDeposit;
     /// @notice Re-enter from `transferFrom()` — reached from inside the
@@ -74,7 +77,7 @@ contract MockReentrantWeth {
         uint256 value_,
         bool swallow_
     ) external {
-        target = target_;
+        attackTarget = target_;
         attackOnDeposit = onDeposit;
         attackOnTransferFrom = onTransferFrom;
         reenterValue = value_;
@@ -89,7 +92,7 @@ contract MockReentrantWeth {
     function fundAttack() external payable {}
 
     function _tryReenter() private {
-        address t = target;
+        address t = attackTarget;
         if (t == address(0)) return;
         uint256 v = reenterValue;
         if (address(this).balance < v) return;
