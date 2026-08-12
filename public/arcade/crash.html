@@ -131,6 +131,13 @@
     50% { box-shadow: 0 8px 46px rgba(62,224,140,0.6); }
   }
   .btn-sub { text-align: center; margin-top: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); }
+  .sim-btn {
+    display: block; width: 100%; max-width: 520px; margin: 10px auto 0; padding: 10px;
+    border-radius: 10px; border: 1px dashed var(--line); background: transparent;
+    color: var(--ink-dim); font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .sim-btn:hover { color: var(--ink); border-color: var(--accent); }
+  .sim-btn.hide { display: none; }
 
   /* ── settings sheet ──────────────────────────────────────────────── */
   .sheet-backdrop {
@@ -276,6 +283,7 @@
     </div>
     <button class="primary-btn" id="primaryBtn" disabled>CONNECT WALLET</button>
     <div class="btn-sub" id="btnSub">&nbsp;</div>
+    <button class="sim-btn" id="simBtn">▶ Simulate — no wallet needed</button>
   </div>
 
   <div class="toast-log" id="toastLog"></div>
@@ -1361,22 +1369,77 @@ async function loadAvatarPicker() {
   }
 }
 
+async function connectToChain(rpcUrl, address, pk, label) {
+  await loadAbi();
+  provider = new ethers.JsonRpcProvider(rpcUrl);
+  signer = new ethers.Wallet(pk, provider);
+  if (!ethers.isAddress(address)) throw new Error("Bad contract address");
+  crash = new ethers.Contract(address, abi, signer);
+  $("connDot").classList.add("on");
+  toast("Connected as " + label);
+  closeSheet();
+  startPolling();
+  await loadAvatarPicker();
+}
+
 $("connectBtn").addEventListener("click", async () => {
   try {
-    await loadAbi();
-    provider = new ethers.JsonRpcProvider($("rpc").value.trim());
     const pk = selectedAccount ? selectedAccount.pk : $("pk").value.trim();
-    signer = new ethers.Wallet(pk, provider);
-    const address = $("addr").value.trim();
-    if (!ethers.isAddress(address)) throw new Error("Bad contract address");
-    crash = new ethers.Contract(address, abi, signer);
-    $("connDot").classList.add("on");
-    toast("Connected as " + (selectedAccount ? selectedAccount.name : signer.address.slice(0, 8) + "…"));
-    closeSheet();
-    startPolling();
-    await loadAvatarPicker();
+    const label = selectedAccount ? selectedAccount.name : "custom account";
+    await connectToChain($("rpc").value.trim(), $("addr").value.trim(), pk, label);
   } catch (err) {
     toast("Connect failed: " + err.message);
+  }
+});
+
+// ── Simulate mode: zero wallet-connect friction, zero rule-relaxation.
+// This still deploys to and settles against the real PlankCrash.sol on
+// the real local chain -- every check (whale cap, pari-mutuel payout
+// math, blockhash-derived crash point, two-phase register+claim) is the
+// actual contract enforcing itself, not a client-side approximation.
+// The only things automated are (1) picking a known local test account
+// instead of making you click through the picker, and (2) a background
+// bot bettor (a second real signer, real transactions) that auto-bets a
+// small real amount the moment betting opens each round, so the round's
+// real minParticipants can be met without a second human in a second tab.
+// SIMULATE_ADDR must match whatever scripts/local-crash-setup.ts last
+// printed as CRASH_ADDRESS -- update it after every fresh local deploy.
+const SIMULATE_ADDR = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+const SIM_RPC = "http://127.0.0.1:8545";
+let botBetTimer = null;
+let botBetAttemptedRound = null;
+
+async function startBotBettor() {
+  if (botBetTimer) clearInterval(botBetTimer);
+  const bobAcc = LOCAL_ACCOUNTS[2]; // Bob
+  const botSigner = new ethers.Wallet(bobAcc.pk, provider);
+  const botCrash = new ethers.Contract(SIMULATE_ADDR, abi, botSigner);
+  botBetTimer = setInterval(async () => {
+    try {
+      const roundId = await botCrash.currentRoundId();
+      const round = await botCrash.currentRound();
+      const key = roundId.toString();
+      if (Number(round.phase) !== 0) return; // only bets during BETTING
+      if (botBetAttemptedRound === key) return;
+      const stake = await botCrash.stakeOf(roundId, bobAcc.address);
+      if (stake > 0n) { botBetAttemptedRound = key; return; }
+      botBetAttemptedRound = key;
+      await (await botCrash.placeBet({ value: ethers.parseEther("0.01") })).wait();
+      toast("Bot bettor (Bob) placed a real 0.01 ETH bet");
+    } catch {
+      /* races with the real player's own bet timing -- silent by design */
+    }
+  }, 2500);
+}
+
+$("simBtn").addEventListener("click", async () => {
+  try {
+    await connectToChain(SIM_RPC, SIMULATE_ADDR, LOCAL_ACCOUNTS[0].pk, "Deployer (Simulate mode)");
+    await startBotBettor();
+    $("simBtn").classList.add("hide");
+    toast("Simulate mode: real contract, real chain, a background bot covers the 2nd bettor");
+  } catch (err) {
+    toast("Simulate failed: " + err.message + " -- is the local node running with this address deployed?");
   }
 });
 
