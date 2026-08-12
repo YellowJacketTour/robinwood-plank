@@ -8,6 +8,7 @@ import TradeModeSwitch, {
   type ZeroXStatusResponse,
 } from "@/components/trade/TradeModeSwitch";
 import MoonPayPanel from "@/components/trade/MoonPayPanel";
+import ReferralPanel from "@/components/trade/ReferralPanel";
 import { TRADE_PAUSED } from "@/lib/constants";
 import { getCountdownParts } from "@/lib/trade";
 
@@ -36,12 +37,13 @@ export default function TradeWorkbench({ onModeChange, onZeroXStatusChange }: Pr
         <>
           <CopyCA />
           <TradeModeSwitch onModeChange={onModeChange} onStatusChange={onZeroXStatusChange} />
-          {/* Fiat on/off-ramp sits AFTER the swap widget, not competing with
-              it — /trade's primary task is swapping $PLANK (DESIGN.md, "each
-              product page must lead with its primary task"). Self-hides via
-              its own /api/moonpay/status check when not configured, same
-              contract as TradeModeSwitch's cross-chain tab. */}
+          {/* Both self-hide via their own status check when not configured,
+              same contract as TradeModeSwitch's cross-chain tab. Sit AFTER
+              the swap widget, not competing with it — /trade's primary task
+              is swapping $PLANK (DESIGN.md, "each product page must lead
+              with its primary task"). */}
           <MoonPayPanel />
+          <ReferralPanel />
         </>
       ) : (
         !TRADE_PAUSED && (
