@@ -440,6 +440,82 @@ for (let i = 0; i < 3; i++) {
 artifactGroup.position.set(-16, 10, -14);
 scene.add(artifactGroup);
 
+// ── Wormhole gate: a real ring the astronaut climbs through in deep
+// space, right before the crash boundary most rounds never reach. The
+// ring itself is real emissive geometry (a torus, actually lit); the
+// event-horizon disc inside it is a shader -- the same "wormhole" tunnel
+// technique from spacescanners' WarpStreakShader (postfx.ts), ported
+// from a full-screen post effect into a real in-scene disc so it reads
+// as an object the character approaches, not a screen filter.
+const gateRingMat = new THREE.MeshStandardMaterial({ color: 0x2a3a6a, emissive: 0x6fa8ff, emissiveIntensity: 1.1, roughness: 0.3, metalness: 0.6 });
+const gateGroup = new THREE.Group();
+const gateRing = new THREE.Mesh(new THREE.TorusGeometry(3.2, 0.32, 16, 48), gateRingMat);
+gateGroup.add(gateRing);
+
+const WormholeDiscShader = {
+  uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color(0x8fffe0) } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform float uTime; uniform vec3 uColor;
+    varying vec2 vUv;
+    void main(){
+      vec2 uv = vUv - 0.5;
+      float r = length(uv), a = atan(uv.y, uv.x);
+      if (r > 0.5) discard;
+      float depth = 0.34 / (r + 0.035) + uTime * 1.5;
+      float bands = 0.5 + 0.5 * sin(depth * 6.28318);
+      float ribs = pow(max(0.0, sin(a * 54.0 + uTime * 2.0)), 18.0) * smoothstep(0.08, 0.48, r);
+      float glow = bands * smoothstep(0.02, 0.48, r) * 0.75 + ribs + smoothstep(0.28, 0.0, r) * 0.4;
+      gl_FragColor = vec4(uColor * glow, clamp(glow, 0.0, 1.0));
+    }`,
+};
+const gateDiscMat = new THREE.ShaderMaterial({ ...WormholeDiscShader, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+const gateDisc = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 6.4), gateDiscMat);
+gateGroup.add(gateDisc);
+gateGroup.position.set(6, 22, -30);
+scene.add(gateGroup);
+
+// ── Warp accelerator: a full-screen radial tunnel + flash, added onto
+// the frame the moment the astronaut passes through the gate -- same
+// vortex/wormhole tunnel technique as the reference's WarpStreakShader,
+// ported directly rather than reinvented, with a color tuned to this
+// scene's own palette instead of theirs.
+const WarpStreakShader = {
+  uniforms: {
+    tDiffuse: { value: null }, uTime: { value: 0 }, uWarp: { value: 0 }, uFlash: { value: 0 },
+    uColor: { value: new THREE.Color(0x8fffe0) }, uAspect: { value: 1.0 },
+  },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float uTime, uWarp, uFlash, uAspect; uniform vec3 uColor;
+    varying vec2 vUv;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+    float rays(vec2 uv, float density, float speed){
+      float r = length(uv), a = atan(uv.y, uv.x);
+      float h = hash(vec2(floor(a * density), 3.0));
+      float br = pow(h, 3.0) * smoothstep(0.0, 0.72, r);
+      return br * (0.45 + 0.55 * sin(r * 36.0 - uTime * speed * uWarp + h * 120.0));
+    }
+    float wormhole(vec2 uv){
+      float r = length(uv), a = atan(uv.y, uv.x);
+      float depth = 0.34 / (r + 0.035) + uTime * (1.5 + uWarp * 6.0);
+      float bands = 0.5 + 0.5 * sin(depth * 6.28318);
+      float ribs = pow(max(0.0, sin(a * 54.0 + uTime * 2.0)), 18.0) * smoothstep(0.08, 0.76, r);
+      return bands * smoothstep(0.04, 0.86, r) * 0.72 + ribs + smoothstep(0.42, 0.0, r) * 0.35 + rays(uv, 60.0, 40.0) * 0.4;
+    }
+    void main(){
+      vec3 base = texture2D(tDiffuse, vUv).rgb;
+      if (uWarp < 0.002 && uFlash < 0.002){ gl_FragColor = vec4(base, 1.0); return; }
+      vec2 uv = vUv - 0.5; uv.x *= uAspect;
+      float r = length(uv);
+      vec3 c = uColor * wormhole(uv) * 1.4;
+      c *= uWarp * (1.0 + uWarp * 0.4);
+      c += smoothstep(0.55, 0.0, r) * uWarp * 0.25 * uColor;
+      c += uFlash;
+      gl_FragColor = vec4(base + c, 1.0);
+    }`,
+};
+
 // ── Chalkstronaut: real RobinWood art (token #1334, "Chalkstronaut" trait,
 // "Rare" background -- ungraded, so no rarity-sticker icons in the
 // corners, AND a real *solid color* background (blue) rather than white.
@@ -832,6 +908,9 @@ const mixPass = new ShaderPass(mixMaterial, "baseTexture");
 composer.addPass(mixPass);
 const godRaysPass = new ShaderPass(GodRaysShader);
 composer.addPass(godRaysPass);
+const warpStreakMaterial = new THREE.ShaderMaterial(WarpStreakShader);
+const warpStreakPass = new ShaderPass(warpStreakMaterial, "tDiffuse");
+composer.addPass(warpStreakPass);
 composer.addPass(new OutputPass());
 const gradePass = new ShaderPass(GradeShader);
 composer.addPass(gradePass);
@@ -859,6 +938,7 @@ function resize() {
   composer.setSize(w, h);
   bloomComposer.setSize(w, h);
   lensFlarePass.uniforms.uAspect.value = w / h;
+  warpStreakPass.uniforms.uAspect.value = w / h;
 }
 window.addEventListener("resize", resize);
 
@@ -867,6 +947,10 @@ let flightProgress = 0; // 0..1, drives ascent height
 let crashedAt = null;
 let launchAt = null; // performance.now() at moment LIVE begins -- slingshot snap
 let shakeAmount = 0;
+const GATE_PROGRESS = 0.746; // where the wormhole gate sits, in flightProgress terms
+let warpTriggeredForRound = false; // resets on round change, so it can fire again next round
+let warpMix = 0; // 0..1, ramps up crossing the gate then decays
+let warpFlash = 0;
 
 function skyColorAt(progress) {
   const bands = [
@@ -934,6 +1018,28 @@ function frame() {
   artifactGroup.visible = progress > 0.85;
   artifactGroup.rotation.y = t * 0.15;
   artifactGroup.position.y = 10 + Math.sin(t * 0.25 + 1) * 1;
+
+  // Wormhole gate: fades in on approach, event horizon churns
+  const gateApproach = Math.max(0, Math.min(1, (progress - (GATE_PROGRESS - 0.12)) / 0.12));
+  gateGroup.visible = gateApproach > 0.01;
+  gateRing.rotation.x = t * 0.2;
+  gateDiscMat.uniforms.uTime.value = t;
+  gateRingMat.emissiveIntensity = 0.8 + gateApproach * 0.6;
+
+  // Warp trigger: the instant flightProgress first crosses the gate this
+  // round, ramp a full-screen warp tunnel + flash onto the frame, same
+  // technique as the reference's jump transition. Only ever fires once
+  // per round (progress is monotonic within a round, so "crossed" is
+  // unambiguous), decays back to nothing over a couple seconds.
+  if (phaseState === "live" && !warpTriggeredForRound && progress >= GATE_PROGRESS) {
+    warpTriggeredForRound = true;
+    warpFlash = 1;
+  }
+  warpMix += ((warpTriggeredForRound && warpFlash > 0.01 ? 1 : 0) - warpMix) * Math.min(1, dt * 3);
+  warpFlash = Math.max(0, warpFlash - dt * 1.4);
+  warpStreakPass.uniforms.uWarp.value = warpMix;
+  warpStreakPass.uniforms.uFlash.value = warpFlash * 0.6;
+  warpStreakPass.uniforms.uTime.value = t;
 
   // Chalkstronaut position + tilt
   if (chalkstronautSprite) {
@@ -1281,6 +1387,7 @@ async function refresh() {
       attemptedRevealThisRound = false;
       attemptedRegisterThisRound = false;
       attemptedClaimThisRound = false;
+      warpTriggeredForRound = false;
       hideOutcome();
     }
 
