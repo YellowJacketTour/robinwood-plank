@@ -1026,7 +1026,18 @@ async function refresh() {
       const xStr = bpsToXStr(liveBps);
       lastMult = Number(xStr);
       setMultReadout(xStr, "live");
-      flightProgress = Math.min(1, Math.log(Number(xStr)) / Math.log(12));
+      // Ascent speed must track the REAL underlying math: PlankCrash.sol's
+      // _multiplierAt(elapsedBlocks) = 10000 + e*400 + e^2*20 is quadratic
+      // in elapsed blocks, i.e. the round genuinely accelerates the longer
+      // it survives. A log-of-multiplier progress curve was a real bug --
+      // logarithms COMPRESS large values, so the climb would visually
+      // *decelerate* over time, the opposite of the contract's real
+      // behavior. Linear-in-multiplier instead: since the multiplier
+      // itself already grows quadratically with elapsed blocks, mapping
+      // screen position linearly to the multiplier makes screen position
+      // grow quadratically with time too -- a visibly accelerating climb
+      // that matches the math, not fights it.
+      flightProgress = Math.min(1, (Number(xStr) - 1) / 9);
       $("substatus").textContent = "IN FLIGHT";
       if (!hasStake) updatePrimaryButton("watching");
       else if (hasCashedOut) updatePrimaryButton("cashed", { sub: "Cashed out — waiting for the crash to see the final multiplier" });
