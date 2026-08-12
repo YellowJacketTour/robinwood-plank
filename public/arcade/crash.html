@@ -226,6 +226,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 
 const { ethers } = window;
 const $ = (id) => document.getElementById(id);
@@ -487,13 +488,157 @@ function spawnParticles(color, n, spread) {
   emitParticles(crashParticles, origin, n, spread, 3.2);
 }
 
-// ── post-processing: real bloom, so the thruster/rune/satellite emissive
-// materials actually glow instead of just being bright flat colors.
+// ── post-processing ──────────────────────────────────────────────────
+// The pass stack and every shader below is adapted directly from a sibling
+// real-production Three.js space game (spacescanners/frontend/src/postfx.ts)
+// -- not reinvented, not a generic bloom-only demo. Same techniques, same
+// proven composer ordering (render -> bloom -> god rays -> OutputPass ->
+// display-space grade -> lens flare, so the grade's vignette runs on the
+// final sRGB image and the flare draws on top of it, not underneath).
+
+// Cinematic grade: contrast + saturation lift, vignette, animated film
+// grain, and a damage/impact chromatic-aberration channel-split -- reused
+// here for the crash moment instead of a hull hit. Runs in display space
+// (after OutputPass), which is what makes it read as a photographer's
+// grade rather than a scene-space filter.
+const GradeShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uTime: { value: 0 },
+    uVignette: { value: 0.32 },
+    uGrain: { value: 0.045 },
+    uContrast: { value: 1.06 },
+    uSat: { value: 1.08 },
+    uAberration: { value: 0.0 },
+  },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float uTime, uVignette, uGrain, uContrast, uSat, uAberration;
+    varying vec2 vUv;
+    void main(){
+      vec3 c;
+      if (uAberration > 0.001){
+        vec2 dir = (vUv - 0.5);
+        float ab = uAberration * 0.012 * (0.4 + length(dir));
+        c.r = texture2D(tDiffuse, vUv + dir * ab).r;
+        c.g = texture2D(tDiffuse, vUv).g;
+        c.b = texture2D(tDiffuse, vUv - dir * ab).b;
+      } else {
+        c = texture2D(tDiffuse, vUv).rgb;
+      }
+      c = (c - 0.5) * uContrast + 0.5;
+      float l = dot(c, vec3(0.299, 0.587, 0.114));
+      c = mix(vec3(l), c, uSat);
+      float d = length(vUv - 0.5);
+      float vig = smoothstep(0.85, 0.32, d);
+      c *= mix(1.0, vig, uVignette);
+      float g = fract(sin(dot(vUv * (1.0 + fract(uTime)), vec2(12.9898, 78.233))) * 43758.5453);
+      c += (g - 0.5) * uGrain;
+      gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+    }`,
+};
+
+// God rays: screen-space volumetric light shafts marching from each pixel
+// toward the sun's projected screen position, accumulating only genuinely
+// bright pixels so the scene doesn't smear into haze.
+const GodRaysShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uLight: { value: new THREE.Vector2(0.5, 0.5) },
+    uColor: { value: new THREE.Color(0xffe6c2) },
+    uStrength: { value: 0.0 },
+    uDecay: { value: 0.94 },
+    uTime: { value: 0 },
+  },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform vec2 uLight; uniform vec3 uColor;
+    uniform float uStrength, uDecay, uTime;
+    varying vec2 vUv;
+    const int SAMPLES = 32;
+    float lum(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
+    void main(){
+      vec3 base = texture2D(tDiffuse, vUv).rgb;
+      if (uStrength <= 0.0){ gl_FragColor = vec4(base, 1.0); return; }
+      vec2 dir = (uLight - vUv) / float(SAMPLES);
+      vec2 uv = vUv;
+      float decay = 1.0;
+      float shaft = 0.0;
+      float j = fract(sin(dot(vUv, vec2(12.9898, 78.233)) + uTime) * 43758.5453);
+      uv += dir * j;
+      for (int i = 0; i < SAMPLES; i++){
+        uv += dir;
+        float s = max(0.0, lum(texture2D(tDiffuse, uv).rgb) - 0.62) * 1.5;
+        shaft += s * decay;
+        decay *= uDecay;
+      }
+      shaft /= float(SAMPLES);
+      gl_FragColor = vec4(base + uColor * shaft * uStrength, 1.0);
+    }`,
+};
+
+// Lens flare: procedural ghosts + halo marching from the sun's screen
+// position through screen-centre. No textures -- soft discs in the shader.
+// Drawn after the grade so the vignette doesn't eat it.
+const LensFlareShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uLight: { value: new THREE.Vector2(0.5, 0.5) },
+    uColor: { value: new THREE.Color(0xffe6c2) },
+    uStrength: { value: 0.0 },
+    uAspect: { value: 1.0 },
+  },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform vec2 uLight; uniform vec3 uColor;
+    uniform float uStrength, uAspect;
+    varying vec2 vUv;
+    float disc(vec2 p, vec2 c, float r, float soft){
+      float d = length((p - c) * vec2(uAspect, 1.0));
+      return 1.0 - smoothstep(r * (1.0 - soft), r, d);
+    }
+    void main(){
+      vec3 col = texture2D(tDiffuse, vUv).rgb;
+      if (uStrength > 0.0){
+        vec2 toCenter = vec2(0.5) - uLight;
+        float flare = 0.0;
+        flare += disc(vUv, uLight, 0.13, 1.0) * 0.46;
+        flare += disc(vUv, uLight, 0.038, 0.9) * 0.68;
+        flare += disc(vUv, uLight + toCenter * 0.5,  0.05, 0.9) * 0.35;
+        flare += disc(vUv, uLight + toCenter * 0.85, 0.085, 0.95) * 0.22;
+        flare += disc(vUv, uLight + toCenter * 1.25, 0.06, 0.9) * 0.28;
+        flare += disc(vUv, uLight + toCenter * 1.6,  0.12, 0.97) * 0.16;
+        flare += disc(vUv, uLight + toCenter * 2.0,  0.04, 0.85) * 0.3;
+        col += uColor * flare * uStrength;
+      }
+      gl_FragColor = vec4(col, 1.0);
+    }`,
+};
+
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.28, 0.25, 0.97);
 composer.addPass(bloomPass);
+const godRaysPass = new ShaderPass(GodRaysShader);
+composer.addPass(godRaysPass);
 composer.addPass(new OutputPass());
+const gradePass = new ShaderPass(GradeShader);
+composer.addPass(gradePass);
+const lensFlarePass = new ShaderPass(LensFlareShader);
+composer.addPass(lensFlarePass);
+
+// Project the sun's direction to screen UV each frame and feed god rays +
+// lens flare -- same technique as the reference: a world point far along
+// the light's direction, projected through the camera, with an off-screen/
+// behind-camera guard so the effects fade out cleanly instead of glitching.
+const _lightWorld = new THREE.Vector3();
+function lightScreenUV(worldPos) {
+  _lightWorld.copy(worldPos).project(camera);
+  if (_lightWorld.z > 1) return null;
+  const x = _lightWorld.x * 0.5 + 0.5, y = _lightWorld.y * 0.5 + 0.5;
+  if (x < -0.35 || x > 1.35 || y < -0.35 || y > 1.35) return null;
+  return { x, y };
+}
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -501,6 +646,7 @@ function resize() {
   camera.updateProjectionMatrix();
   renderer.setSize(w, h, false);
   composer.setSize(w, h);
+  lensFlarePass.uniforms.uAspect.value = w / h;
 }
 window.addEventListener("resize", resize);
 
@@ -603,6 +749,23 @@ function frame() {
   const targetCamY = 6 + astronautY * 0.55;
   camera.position.set(Math.sin(t * 0.06) * 3 + camShakeX, targetCamY + camShakeY, 24 - progress * 6);
   camera.lookAt(0, astronautY * 0.6 + 6, 0);
+
+  // god rays + lens flare track the sun; fade smoothly as the scene leaves
+  // atmosphere (the sun reads less as "the light source" once starlight
+  // and satellites take over the composition in deep space)
+  const sunUV = lightScreenUV(sun.position);
+  const sourceStrength = Math.max(0, 1 - progress * 0.6);
+  godRaysPass.uniforms.uLight.value.set(sunUV ? sunUV.x : 0.5, sunUV ? sunUV.y : 0.5);
+  godRaysPass.uniforms.uStrength.value = sunUV ? 0.22 * sourceStrength : 0;
+  godRaysPass.uniforms.uTime.value = t;
+  lensFlarePass.uniforms.uLight.value.set(sunUV ? sunUV.x : 0.5, sunUV ? sunUV.y : 0.5);
+  lensFlarePass.uniforms.uStrength.value = sunUV ? 0.12 * sourceStrength : 0;
+
+  // cinematic grade: crash impact reads as a lens-stress chromatic-
+  // aberration crunch that decays over ~0.6s, same technique as a hull hit
+  const crashElapsed = crashedAt ? (performance.now() - crashedAt) / 600 : 1;
+  gradePass.uniforms.uAberration.value = Math.max(0, 1 - crashElapsed);
+  gradePass.uniforms.uTime.value = t;
 
   composer.render();
   requestAnimationFrame(frame);
