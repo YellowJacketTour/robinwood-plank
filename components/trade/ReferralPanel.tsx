@@ -1,14 +1,57 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Copy, Users } from "lucide-react";
+import { Copy, Share2, Users } from "lucide-react";
 import { useWallet } from "@/lib/wallet-context";
 
 type ReferralStatus = { enabled: boolean; configured: boolean };
 type ReferralInfo = { referredBy: string | null; referredCount: number };
 
+const PENDING_REF_KEY = "plank_pending_referral";
+
 function shortAddr(addr: string): string {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+/**
+ * Reads ?ref= if present and persists it to localStorage immediately, on
+ * every mount, regardless of wallet connection state -- reading only
+ * window.location.search at claim time (the original version of this
+ * component) loses the code the moment a visitor browses to another page
+ * before connecting, since the query param doesn't follow them. Once
+ * captured, the stored value wins over a stale/absent URL param, and it's
+ * cleared after a successful claim so it can't be replayed for a later,
+ * unrelated wallet on the same browser.
+ */
+function capturePendingReferral(): void {
+  if (typeof window === "undefined") return;
+  const fromUrl = new URLSearchParams(window.location.search).get("ref");
+  if (fromUrl) {
+    try {
+      window.localStorage.setItem(PENDING_REF_KEY, fromUrl);
+    } catch {
+      /* storage unavailable -- claim still works this same page load via the URL param */
+    }
+  }
+}
+
+function getPendingReferral(): string | null {
+  if (typeof window === "undefined") return null;
+  const fromUrl = new URLSearchParams(window.location.search).get("ref");
+  if (fromUrl) return fromUrl;
+  try {
+    return window.localStorage.getItem(PENDING_REF_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingReferral(): void {
+  try {
+    window.localStorage.removeItem(PENDING_REF_KEY);
+  } catch {
+    /* non-fatal -- worst case a future claim attempt just gets rejected as already-claimed */
+  }
 }
 
 /**
@@ -29,6 +72,15 @@ export default function ReferralPanel() {
   const [copied, setCopied] = useState(false);
   const claimedRef = useRef(false);
 
+  // Capture ?ref= into localStorage on every mount, unconditionally --
+  // BEFORE the status fetch even resolves, so a visitor who lands on /trade
+  // pre-connect and browses elsewhere first doesn't lose the code (see
+  // capturePendingReferral's own header for why reading only the URL param
+  // at claim time isn't enough).
+  useEffect(() => {
+    capturePendingReferral();
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     fetch("/api/referral/status")
@@ -45,23 +97,26 @@ export default function ReferralPanel() {
   }, []);
 
   // Auto-claim: only once per page load, only once a wallet is actually
-  // connected, only when the URL actually carries ?ref=. Never re-claims on
-  // every render, and the server independently rejects a self-referral or a
+  // connected, only when a referral code is actually on file (URL param or
+  // the persisted one from an earlier page view). Never re-claims on every
+  // render, and the server independently rejects a self-referral or a
   // second, different referrer for a wallet that already has one on file
   // (lib/referral-server.ts's own immutability guarantee) -- this is a
   // convenience trigger, not the source of truth for correctness.
   useEffect(() => {
     if (!status?.enabled || !status?.configured || !account || claimedRef.current) return;
-    const ref = new URLSearchParams(window.location.search).get("ref");
+    const ref = getPendingReferral();
     if (!ref || ref.toLowerCase() === account.toLowerCase()) return;
     claimedRef.current = true;
     fetch("/api/referral/claim", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ referredWallet: account, referrerWallet: ref }),
-    }).catch(() => {
-      /* best-effort -- the invite link still works next visit */
-    });
+    })
+      .then(() => clearPendingReferral())
+      .catch(() => {
+        /* best-effort -- stays in localStorage, retried next time this mounts */
+      });
   }, [status, account]);
 
   useEffect(() => {
@@ -92,6 +147,21 @@ export default function ReferralPanel() {
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
       /* clipboard unavailable -- fail silently, same as CopyCA */
+    }
+  }
+
+  // Native share sheet where the platform supports it (most mobile
+  // browsers) -- one tap straight to Messages/WhatsApp/etc. instead of
+  // copy-then-switch-apps-then-paste. Progressive enhancement only: the
+  // button doesn't render at all where navigator.share doesn't exist
+  // (desktop Chrome/Firefox), Copy above always covers that case.
+  const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
+  async function handleShare() {
+    if (!inviteUrl) return;
+    try {
+      await navigator.share({ url: inviteUrl, title: "Trade $PLANK on RobinWood" });
+    } catch {
+      /* user cancelled the share sheet, or the platform rejected it -- Copy still works */
     }
   }
 
@@ -131,6 +201,16 @@ export default function ReferralPanel() {
             <code className="min-w-0 flex-1 truncate text-[0.7rem] text-cream" title={inviteUrl ?? undefined}>
               {inviteUrl}
             </code>
+            {canShare && (
+              <button
+                type="button"
+                onClick={handleShare}
+                className="flex min-h-9 shrink-0 items-center gap-1 rounded-md bg-panel px-2.5 text-[0.68rem] font-bold text-gold-300 transition-colors hover:bg-gold-500/10"
+              >
+                <Share2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                Share
+              </button>
+            )}
             <button
               type="button"
               onClick={handleCopy}
