@@ -3,9 +3,28 @@
 import { useEffect, useState } from "react";
 import { CreditCard, ExternalLink, Landmark } from "lucide-react";
 import { useWallet } from "@/lib/wallet-context";
+import { getErc20Balance } from "@/lib/wallet";
 
 type MoonPayStatus = { enabled: boolean; configured: boolean; sandbox: boolean };
 type RampDirection = "buy" | "sell";
+
+// Confirmed 2026-08-12 directly on-chain against Robinhood Chain mainnet
+// (symbol() returns "USDG", decimals() returns 6 -- NOT the 18 most ERC-20s
+// use, verified rather than assumed) -- independently cross-checked against
+// Paxos's own USDG mainnet docs and Blockscout before relying on it here.
+// Not present anywhere else in this codebase (this app's SwapWidget trades
+// $PLANK against native ETH, never USDG), so it's scoped to this file.
+const USDG_ADDRESS = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168";
+const USDG_DECIMALS = 6;
+
+function formatUsdg(raw: bigint): string {
+  const divisor = BigInt(10) ** BigInt(USDG_DECIMALS);
+  const whole = raw / divisor;
+  const frac = raw % divisor;
+  if (frac === BigInt(0)) return whole.toString();
+  const fracStr = frac.toString().padStart(USDG_DECIMALS, "0").replace(/0+$/, "");
+  return `${whole}.${fracStr}`;
+}
 
 /**
  * Fiat on-ramp/off-ramp entry point, real signed-URL flow (lib/moonpay-
@@ -19,6 +38,14 @@ type RampDirection = "buy" | "sell";
  * before asking (DESIGN.md, "Wallet gates explain what connection unlocks
  * before asking the user to connect"), and never accepts a destination
  * address other than the caller's own connected wallet.
+ *
+ * Off-ramp automation: once connected, this reads the real USDG balance
+ * (lib/wallet.ts's own getErc20Balance -- the same helper SwapWidget uses
+ * for post-swap delivery checks) and pre-fills the cash-out amount with it,
+ * so the MoonPay widget opens ready to sell the full real balance instead
+ * of asking the visitor to look up and type their own balance. If there's
+ * nothing to sell, the cash-out button is disabled with an honest reason
+ * instead of opening a checkout with nothing in it.
  */
 export default function MoonPayPanel() {
   const { address: account, connect: walletConnect } = useWallet();
@@ -26,6 +53,7 @@ export default function MoonPayPanel() {
   const [direction, setDirection] = useState<RampDirection>("buy");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [usdgBalance, setUsdgBalance] = useState<bigint | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,10 +70,31 @@ export default function MoonPayPanel() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!account) {
+      // Resetting to "unknown" on disconnect/account-switch is
+      // synchronizing with the external wallet, not derived render state --
+      // same justification as the reset pattern in lib/wallet-context.tsx.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setUsdgBalance(null);
+      return;
+    }
+    let cancelled = false;
+    getErc20Balance(USDG_ADDRESS, account).then((bal) => {
+      if (!cancelled) setUsdgBalance(bal);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [account]);
+
   // Same "clean no-op when off" contract as TradeModeSwitch's cross-chain
   // tab: render nothing at all rather than a dead/disabled card, so an
   // unconfigured server never shows a broken-looking button in production.
   if (!status?.enabled || !status?.configured) return null;
+
+  const hasUsdgToSell = usdgBalance !== null && usdgBalance > BigInt(0);
+  const sellBlocked = direction === "sell" && account !== null && usdgBalance !== null && !hasUsdgToSell;
 
   async function handleOpen() {
     setLoading(true);
@@ -59,13 +108,31 @@ export default function MoonPayPanel() {
       // below and shows a real error, not a silent no-op.
       const walletAddress = account ?? (await walletConnect());
 
-      const endpoint = direction === "buy" ? "/api/moonpay/widget-url" : "/api/moonpay/sell-widget-url";
-      const body =
-        direction === "buy" ? { walletAddress } : { refundWalletAddress: walletAddress };
-      const resp = await fetch(endpoint, {
+      if (direction === "sell") {
+        const resp = await fetch("/api/moonpay/sell-widget-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            refundWalletAddress: walletAddress,
+            // Pre-fill with the real, just-read balance -- skips the visitor
+            // having to look up and type their own USDG amount. Only sent
+            // when we actually have a fresh balance for THIS wallet (never
+            // carries over a stale read from a previously-connected one).
+            ...(walletAddress === account && usdgBalance && usdgBalance > BigInt(0)
+              ? { baseCurrencyAmount: formatUsdg(usdgBalance) }
+              : {}),
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.message || data.error || `status ${resp.status}`);
+        window.open(data.url, "_blank", "noopener");
+        return;
+      }
+
+      const resp = await fetch("/api/moonpay/widget-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ walletAddress }),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.message || data.error || `status ${resp.status}`);
@@ -115,12 +182,20 @@ export default function MoonPayPanel() {
       <p className="text-[0.72rem] leading-snug text-cream-muted">
         {direction === "buy"
           ? "Real card, Apple Pay, Google Pay, or bank transfer via MoonPay — delivers USDG directly to your wallet on Robinhood Chain, no bridge. Convert USDG to $PLANK afterward using Swap above (import USDG by address)."
-          : "Send USDG from your wallet through MoonPay's real off-ramp and receive fiat in your bank or card. Swap $PLANK to USDG first if you're holding $PLANK."}
+          : "Send USDG from your wallet through MoonPay's real off-ramp and receive fiat in your bank or card."}
       </p>
 
       {!account ? (
         <p className="rounded-lg border border-line bg-panel-strong px-3 py-2 text-[0.72rem] text-cream-muted">
           One click connects your wallet and opens MoonPay — it always delivers to (or refunds from) that exact address, never anywhere else.
+        </p>
+      ) : direction === "sell" ? (
+        <p className="rounded-lg border border-line bg-panel-strong px-3 py-2 text-[0.72rem] text-cream-muted">
+          {usdgBalance === null
+            ? "Checking your real USDG balance…"
+            : hasUsdgToSell
+              ? `${formatUsdg(usdgBalance)} USDG ready to cash out — pre-filled automatically, editable in the MoonPay checkout.`
+              : "You don't hold any USDG yet. Swap $PLANK to USDG above, or buy USDG with a card on the other tab, then come back here."}
         </p>
       ) : null}
 
@@ -133,11 +208,13 @@ export default function MoonPayPanel() {
       <button
         type="button"
         onClick={handleOpen}
-        disabled={loading}
+        disabled={loading || sellBlocked}
         className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md bg-gold-500 px-3 text-xs font-bold uppercase tracking-wide text-on-gold transition-colors hover:bg-gold-400 disabled:opacity-60"
       >
         {loading ? (
           account ? "Opening…" : "Connecting…"
+        ) : sellBlocked ? (
+          "Nothing to cash out yet"
         ) : (
           <>
             {direction === "buy" ? "Open MoonPay checkout" : "Open MoonPay cash-out"}
