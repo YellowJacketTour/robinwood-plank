@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>PlankCrash — local playtest</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; min-height: 100vh;
+    background: #0b0d12; color: #e8ecf1;
+    font: 15px/1.5 -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #8a93a6; font-size: 13px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 340px; gap: 20px; max-width: 1100px; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: #12151d; border: 1px solid #232838; border-radius: 12px; padding: 18px; }
+  .stage {
+    height: 260px; border-radius: 10px; margin-bottom: 14px;
+    background: radial-gradient(120% 100% at 50% 100%, #1a2440 0%, #0b0d12 70%);
+    display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;
+  }
+  .mult { font-size: 56px; font-weight: 700; font-variant-numeric: tabular-nums; transition: color .15s; }
+  .mult.crashed { color: #ff5c5c; }
+  .mult.live { color: #58e07c; }
+  .mult.idle { color: #5b6478; }
+  .phasebar { display: flex; gap: 6px; margin-bottom: 14px; }
+  .phasebar span {
+    flex: 1; text-align: center; padding: 6px 4px; border-radius: 6px; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .04em; background: #1a1f2c; color: #5b6478;
+  }
+  .phasebar span.active { background: #2a3a63; color: #9db4ff; }
+  label { display: block; font-size: 12px; color: #8a93a6; margin: 10px 0 4px; }
+  input, select, button {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid #2a3040;
+    background: #0e111a; color: #e8ecf1; font-size: 13px;
+  }
+  button {
+    background: #3462ff; border: none; font-weight: 600; cursor: pointer; margin-top: 12px;
+  }
+  button.secondary { background: #1a1f2c; color: #cbd3e6; }
+  button:disabled { opacity: .4; cursor: default; }
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .log {
+    font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: #8a93a6;
+    max-height: 220px; overflow-y: auto; background: #0e111a; border-radius: 8px; padding: 10px; margin-top: 14px;
+  }
+  .log div { padding: 2px 0; border-bottom: 1px solid #1a1f2c; }
+  .kv { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3px 0; }
+  .kv b { color: #cbd3e6; font-weight: 600; }
+  .players { margin-top: 10px; }
+  .players table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .players td { padding: 4px 0; border-bottom: 1px solid #1a1f2c; }
+  .players td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; }
+  .pill.win { background: #123a24; color: #58e07c; }
+  .pill.lose { background: #3a1212; color: #ff5c5c; }
+  .pill.wait { background: #1a1f2c; color: #8a93a6; }
+</style>
+</head>
+<body>
+
+<h1>PlankCrash — local playtest</h1>
+<div class="sub">Talks directly to a local Hardhat node. Not connected to any real chain. Run <code>scripts/local-crash-setup.ts</code> first.</div>
+
+<div class="grid">
+  <div class="panel">
+    <div class="phasebar">
+      <span data-phase="0">Betting</span>
+      <span data-phase="1">Live</span>
+      <span data-phase="2">Crashed</span>
+      <span data-phase="3">Settled</span>
+    </div>
+    <div class="stage">
+      <div id="mult" class="mult idle">—</div>
+    </div>
+    <div class="kv"><span>Round</span><b id="roundId">—</b></div>
+    <div class="kv"><span>Pool</span><b id="pool">—</b></div>
+    <div class="kv"><span>Distributable</span><b id="distributable">—</b></div>
+    <div class="kv"><span>Participants</span><b id="participants">—</b></div>
+    <div class="kv"><span>Betting closes / target block</span><b id="timing">—</b></div>
+
+    <div class="row" style="margin-top:14px">
+      <button id="lockBtn" class="secondary">Lock round</button>
+      <button id="revealBtn" class="secondary">Reveal crash</button>
+    </div>
+
+    <div class="players">
+      <table id="playersTable"><tbody></tbody></table>
+    </div>
+
+    <div class="log" id="log"></div>
+  </div>
+
+  <div class="panel">
+    <label>RPC URL</label>
+    <input id="rpc" value="http://127.0.0.1:8545" />
+
+    <label>PlankCrash contract address</label>
+    <input id="addr" placeholder="0x... (from scripts/local-crash-setup.ts output)" />
+
+    <label>Private key (local test account only)</label>
+    <input id="pk" placeholder="0xac09...ff80 (Hardhat account #0)" />
+    <button id="connectBtn">Connect</button>
+    <div class="kv" style="margin-top:8px"><span>Address</span><b id="myAddr">—</b></div>
+    <div class="kv"><span>Balance</span><b id="myBal">—</b></div>
+    <div class="kv"><span>My stake this round</span><b id="myStake">—</b></div>
+    <div class="kv"><span>Withdrawable (pull payments)</span><b id="myPayments">—</b></div>
+
+    <label>Bet amount (ETH)</label>
+    <input id="betAmount" value="0.02" />
+    <button id="betBtn">Place bet</button>
+    <button id="cashOutBtn" class="secondary">Cash out now</button>
+
+    <div class="row">
+      <button id="registerBtn" class="secondary">Register result</button>
+      <button id="claimBtn" class="secondary">Claim</button>
+    </div>
+    <button id="withdrawBtn" class="secondary">Withdraw payments</button>
+  </div>
+</div>
+
+<script src="vendor/ethers.umd.min.js"></script>
+<script>
+const { ethers } = window;
+const PHASE_NAMES = ["BETTING", "LIVE", "CRASHED", "SETTLED"];
+
+let provider, signer, crash, crashRead, abi;
+let pollTimer = null;
+
+const $ = (id) => document.getElementById(id);
+function log(msg) {
+  const el = document.createElement("div");
+  const t = new Date().toLocaleTimeString();
+  el.textContent = `[${t}] ${msg}`;
+  $("log").prepend(el);
+}
+function bpsToX(bps) {
+  return (Number(bps) / 10000).toFixed(4) + "x";
+}
+
+async function loadAbi() {
+  const res = await fetch("plankcrash-abi.json");
+  abi = await res.json();
+}
+
+$("connectBtn").addEventListener("click", async () => {
+  try {
+    await loadAbi();
+    provider = new ethers.JsonRpcProvider($("rpc").value.trim());
+    signer = new ethers.Wallet($("pk").value.trim(), provider);
+    const address = $("addr").value.trim();
+    if (!ethers.isAddress(address)) throw new Error("Bad contract address");
+    crash = new ethers.Contract(address, abi, signer);
+    crashRead = crash;
+    $("myAddr").textContent = signer.address;
+    log("Connected as " + signer.address);
+    startPolling();
+  } catch (err) {
+    log("Connect failed: " + err.message);
+  }
+});
+
+async function refresh() {
+  if (!crashRead) return;
+  try {
+    const roundId = await crashRead.currentRoundId();
+    const round = await crashRead.currentRound();
+    const [phase, bettingEndsAt, lockBlock, targetBlock, crashMultiplierBps, , pool, distributable] = round;
+    const blockNum = await provider.getBlockNumber();
+
+    $("roundId").textContent = roundId.toString();
+    $("pool").textContent = ethers.formatEther(pool) + " ETH";
+    $("distributable").textContent = ethers.formatEther(distributable) + " ETH";
+    $("participants").textContent = (await crashRead.participantCount(roundId)).toString();
+
+    document.querySelectorAll(".phasebar span").forEach((el) => {
+      el.classList.toggle("active", Number(el.dataset.phase) === Number(phase));
+    });
+
+    const multEl = $("mult");
+    if (Number(phase) === 1) {
+      const live = await crashRead.liveMultiplierBps(roundId);
+      multEl.textContent = bpsToX(live);
+      multEl.className = "mult live";
+      $("timing").textContent = `target block ${targetBlock} (now ${blockNum})`;
+    } else if (Number(phase) === 2 || Number(phase) === 3) {
+      multEl.textContent = crashMultiplierBps > 0n ? bpsToX(crashMultiplierBps) + " CRASHED" : "voided";
+      multEl.className = "mult crashed";
+      $("timing").textContent = "settled";
+    } else {
+      multEl.textContent = "waiting…";
+      multEl.className = "mult idle";
+      const secsLeft = Number(bettingEndsAt) - Math.floor(Date.now() / 1000);
+      $("timing").textContent = secsLeft > 0 ? `betting closes in ${secsLeft}s` : "betting closed, lock it";
+    }
+
+    $("lockBtn").disabled = Number(phase) !== 0;
+    $("revealBtn").disabled = Number(phase) !== 1;
+
+    if (signer) {
+      const bal = await provider.getBalance(signer.address);
+      $("myBal").textContent = ethers.formatEther(bal) + " ETH";
+      const stake = await crashRead.stakeOf(roundId, signer.address);
+      $("myStake").textContent = ethers.formatEther(stake) + " ETH";
+      const payments = await crashRead.payments(signer.address);
+      $("myPayments").textContent = ethers.formatEther(payments) + " ETH";
+    }
+  } catch (err) {
+    // transient during round transitions -- not logged every poll
+  }
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  refresh();
+  pollTimer = setInterval(refresh, 1500);
+}
+
+async function withErrors(fn) {
+  try {
+    const tx = await fn();
+    log("Sent " + tx.hash.slice(0, 10) + "…");
+    await tx.wait();
+    log("Confirmed.");
+    refresh();
+  } catch (err) {
+    const reason = err.shortMessage || err.reason || err.message;
+    log("Reverted: " + reason);
+  }
+}
+
+$("betBtn").addEventListener("click", () => {
+  const amount = $("betAmount").value.trim();
+  withErrors(() => crash.placeBet({ value: ethers.parseEther(amount) }));
+});
+$("cashOutBtn").addEventListener("click", async () => {
+  const roundId = await crashRead.currentRoundId();
+  withErrors(() => crash.cashOut(roundId));
+});
+$("lockBtn").addEventListener("click", () => withErrors(() => crash.lockRound()));
+$("revealBtn").addEventListener("click", async () => {
+  const roundId = await crashRead.currentRoundId();
+  withErrors(() => crash.revealCrash(roundId));
+});
+$("registerBtn").addEventListener("click", async () => {
+  const roundId = await crashRead.currentRoundId();
+  withErrors(() => crash.registerResult(roundId));
+});
+$("claimBtn").addEventListener("click", async () => {
+  const roundId = await crashRead.currentRoundId();
+  withErrors(() => crash.claim(roundId));
+});
+$("withdrawBtn").addEventListener("click", () => withErrors(() => crash.withdrawPayments(signer.address)));
+</script>
+</body>
+</html>
