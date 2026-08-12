@@ -91,6 +91,16 @@
   .stake-row {
     display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px;
   }
+  .avatar-row {
+    display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px;
+    overflow-x: auto; padding: 2px;
+  }
+  .avatar-pick {
+    flex: none; width: 46px; height: 46px; border-radius: 10px; padding: 0; cursor: pointer;
+    border: 2px solid var(--line); background: var(--bg-1); overflow: hidden;
+  }
+  .avatar-pick img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .avatar-pick.selected { border-color: var(--win); box-shadow: 0 0 10px rgba(62,224,140,0.4); }
   .chip {
     font-family: var(--font-mono); font-size: 13px; padding: 7px 14px; border-radius: 999px;
     border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--ink-dim); cursor: pointer;
@@ -209,6 +219,7 @@
   </div>
 
   <div class="deck">
+    <div class="avatar-row" id="avatarRow" style="display:none"></div>
     <div class="stake-row" id="stakeRow">
       <button class="chip active" data-amt="0.01">0.01</button>
       <button class="chip" data-amt="0.02">0.02</button>
@@ -247,8 +258,11 @@
   </div>
 
   <details class="advanced">
-    <summary>Advanced — RPC URL</summary>
+    <summary>Advanced — RPC URL, avatar NFT contract</summary>
     <input id="rpc" value="http://127.0.0.1:8545" autocomplete="off" spellcheck="false" />
+    <label style="margin-top:10px">Avatar NFT contract (optional)</label>
+    <div class="field-hint">Printed as <code>AVATAR_NFT_ADDRESS</code> -- pick which real plank you hold to play as</div>
+    <input id="nftAddr" placeholder="0x..." autocomplete="off" spellcheck="false" />
   </details>
 
   <div class="row">
@@ -527,46 +541,63 @@ const WarpStreakShader = {
 // at load time and billboarded into 3D space as a THREE.Sprite so it
 // always faces camera and reads
 // correctly against the moving sky/lighting behind it.
-const chalkstronautImg = new Image();
 let chalkstronautSprite = null;
-chalkstronautImg.crossOrigin = "anonymous";
-chalkstronautImg.onload = () => {
-  const off = document.createElement("canvas");
-  off.width = chalkstronautImg.width;
-  off.height = chalkstronautImg.height;
-  const octx = off.getContext("2d");
-  octx.drawImage(chalkstronautImg, 0, 0);
-  const data = octx.getImageData(0, 0, off.width, off.height);
-  const px = data.data;
-  const keyR = px[0], keyG = px[1], keyB = px[2];
-  const tolerance = 40;
-  const w = off.width, h = off.height;
-  const cornerClear = w * 0.19; // strips the four small trait-rarity icons printed in the corners of the real artwork -- not part of the character
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4;
-      const dr = px[i] - keyR, dg = px[i + 1] - keyG, db = px[i + 2] - keyB;
-      const isKeyColor = Math.sqrt(dr * dr + dg * dg + db * db) < tolerance;
-      const inCorner = (x < cornerClear || x > w - cornerClear) && (y < cornerClear || y > h - cornerClear);
-      if (isKeyColor || inCorner) px[i + 3] = 0;
+
+// Pulled out into a real function, not just an inline onload, so the
+// avatar picker below can re-run this against a different real
+// RobinWood token's art whenever the player switches avatars, not just
+// once at page load.
+function loadChalkstronautArt(src) {
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = () => {
+    const off = document.createElement("canvas");
+    off.width = img.width;
+    off.height = img.height;
+    const octx = off.getContext("2d");
+    octx.drawImage(img, 0, 0);
+    const data = octx.getImageData(0, 0, off.width, off.height);
+    const px = data.data;
+    const keyR = px[0], keyG = px[1], keyB = px[2];
+    const tolerance = 40;
+    const w = off.width, h = off.height;
+    const cornerClear = w * 0.19; // strips the four small trait-rarity icons printed in the corners of the real artwork -- not part of the character
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        const dr = px[i] - keyR, dg = px[i + 1] - keyG, db = px[i + 2] - keyB;
+        const isKeyColor = Math.sqrt(dr * dr + dg * dg + db * db) < tolerance;
+        const inCorner = (x < cornerClear || x > w - cornerClear) && (y < cornerClear || y > h - cornerClear);
+        if (isKeyColor || inCorner) px[i + 3] = 0;
+      }
     }
-  }
-  octx.putImageData(data, 0, 0);
-  const tex = new THREE.CanvasTexture(off);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
-  chalkstronautSprite = new THREE.Sprite(mat);
-  chalkstronautSprite.scale.set(5.4, 5.4, 1);
-  // Explicit renderOrder, not left to scene-insertion order: the sprite
-  // loads asynchronously and could get added to the scene before OR
-  // after the particle systems depending on network/cache timing, which
-  // made the thruster glow render in front of the character on some
-  // loads and behind it on others. Transparent objects at similar depth
-  // don't reliably self-sort in three.js -- renderOrder does.
-  chalkstronautSprite.renderOrder = 10;
-  scene.add(chalkstronautSprite);
-};
-chalkstronautImg.src = "art/Chalkstronaut4.png";
+    octx.putImageData(data, 0, 0);
+    const tex = new THREE.CanvasTexture(off);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    if (chalkstronautSprite) {
+      // Swapping avatars: reuse the existing sprite object (keeps its
+      // position/renderOrder/scene membership) and just replace the map,
+      // disposing the old texture so we don't leak GPU memory on switch.
+      chalkstronautSprite.material.map.dispose();
+      chalkstronautSprite.material.map = tex;
+      chalkstronautSprite.material.needsUpdate = true;
+      return;
+    }
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+    chalkstronautSprite = new THREE.Sprite(mat);
+    chalkstronautSprite.scale.set(5.4, 5.4, 1);
+    // Explicit renderOrder, not left to scene-insertion order: the sprite
+    // loads asynchronously and could get added to the scene before OR
+    // after the particle systems depending on network/cache timing, which
+    // made the thruster glow render in front of the character on some
+    // loads and behind it on others. Transparent objects at similar depth
+    // don't reliably self-sort in three.js -- renderOrder does.
+    chalkstronautSprite.renderOrder = 10;
+    scene.add(chalkstronautSprite);
+  };
+  img.src = src;
+}
+loadChalkstronautArt("art/Chalkstronaut4.png");
 
 // ── particle systems: chalk-dust thruster + crash burst, real GPU points
 function makeParticleSystem(maxCount, color) {
@@ -1213,6 +1244,59 @@ function closeSheet() {
   $("sheet").classList.remove("show");
 }
 
+// Real RobinWood token IDs -> the actual downloaded art files, matching
+// exactly what scripts/local-crash-setup.ts mints. The mock NFT contract
+// has no tokenURI implementation (it's a minimal local test double), so
+// this is the honest local stand-in for what a real tokenURI->IPFS
+// resolve would do -- the ownership check below is real on-chain data,
+// only the art lookup is a local table instead of a metadata fetch.
+const AVATAR_ART = {
+  1334: { name: "Chalkstronaut", file: "art/Chalkstronaut4.png" },
+  889: { name: "ChalkPirate", file: "art/ChalkPirate4.png" },
+  655: { name: "ChalkStash", file: "art/ChalkStash4.png" },
+  1099: { name: "ChalkBaller", file: "art/ChalkBaller4.png" },
+};
+const ERC721_ENUMERABLE_ABI = [
+  "function balanceOf(address owner) view returns (uint256)",
+  "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
+];
+
+async function loadAvatarPicker() {
+  const row = $("avatarRow");
+  row.innerHTML = "";
+  row.style.display = "none";
+  const nftAddr = $("nftAddr").value.trim();
+  if (!ethers.isAddress(nftAddr) || !signer) return;
+  try {
+    const nft = new ethers.Contract(nftAddr, ERC721_ENUMERABLE_ABI, signer);
+    const balance = await nft.balanceOf(signer.address);
+    const heldIds = [];
+    for (let i = 0n; i < balance; i++) heldIds.push(await nft.tokenOfOwnerByIndex(signer.address, i));
+    const known = heldIds.map((id) => Number(id)).filter((id) => AVATAR_ART[id]);
+    if (known.length === 0) {
+      toast("No known avatars held by this wallet on that NFT contract");
+      return;
+    }
+    for (const id of known) {
+      const art = AVATAR_ART[id];
+      const btn = document.createElement("button");
+      btn.className = "avatar-pick";
+      btn.title = art.name + " (#" + id + ")";
+      btn.innerHTML = `<img src="${art.file}" alt="${art.name}" />`;
+      btn.addEventListener("click", () => {
+        loadChalkstronautArt(art.file);
+        document.querySelectorAll(".avatar-pick").forEach((b) => b.classList.remove("selected"));
+        btn.classList.add("selected");
+        toast("Playing as " + art.name + " (#" + id + ")");
+      });
+      row.appendChild(btn);
+    }
+    row.style.display = "flex";
+  } catch (err) {
+    toast("Avatar lookup failed: " + (err.shortMessage || err.message));
+  }
+}
+
 $("connectBtn").addEventListener("click", async () => {
   try {
     await loadAbi();
@@ -1226,6 +1310,7 @@ $("connectBtn").addEventListener("click", async () => {
     toast("Connected as " + (selectedAccount ? selectedAccount.name : signer.address.slice(0, 8) + "…"));
     closeSheet();
     startPolling();
+    await loadAvatarPicker();
   } catch (err) {
     toast("Connect failed: " + err.message);
   }

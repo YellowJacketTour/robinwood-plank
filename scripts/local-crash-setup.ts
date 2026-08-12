@@ -15,7 +15,7 @@ import hardhat from "hardhat";
 const { ethers } = await hardhat.network.create();
 
 async function main() {
-  const [deployer, treasury] = await ethers.getSigners();
+  const [deployer, treasury, alice, bob, carol] = await ethers.getSigners();
 
   // Fast local timings so a round is actually playable in seconds, not
   // the production cadence these constants would use on a real chain.
@@ -40,6 +40,25 @@ async function main() {
   );
   await crash.waitForDeployment();
   const crashAddr = await crash.getAddress();
+
+  // Real RobinWood collection art, real token IDs from the actual
+  // on-chain collection (verified this session against the real
+  // metadata CID), minted on a local mock so the avatar picker can walk
+  // a wallet's real on-chain holdings (tokenOfOwnerByIndex) the same way
+  // it would against the real collection -- the ownership check is real,
+  // only the contract instance is local. See public/arcade/art/ for the
+  // actual downloaded, chroma-key-verified images.
+  const Nft = await ethers.getContractFactory("MockRobinWoodNftEnumerable");
+  const nft = await Nft.deploy();
+  await nft.waitForDeployment();
+  const nftAddr = await nft.getAddress();
+  const AVATARS = [
+    { id: 1334, holder: deployer, name: "Chalkstronaut", file: "Chalkstronaut4.png" },
+    { id: 889, holder: alice, name: "ChalkPirate", file: "ChalkPirate4.png" },
+    { id: 655, holder: bob, name: "ChalkStash", file: "ChalkStash4.png" },
+    { id: 1099, holder: carol, name: "ChalkBaller", file: "ChalkBaller4.png" },
+  ];
+  for (const a of AVATARS) await (await nft.mint(a.holder.address, a.id)).wait();
 
   const player = process.env.PLAYER_ADDRESS;
   if (player && /^0x[0-9a-fA-F]{40}$/.test(player)) {
@@ -67,6 +86,9 @@ async function main() {
   console.log("\n Test accounts (alice #2, bob #3, carol #4) each hold 10000 ETH by default (hardhat node).");
   console.log("\n--- paste into public/arcade/crash.html's CONFIG, or your wallet ---");
   console.log(" CRASH_ADDRESS =", `"${crashAddr}"`);
+  console.log(" AVATAR_NFT_ADDRESS =", `"${nftAddr}"`);
+  console.log("\n Real RobinWood avatars minted (local mock, real collection art):");
+  for (const a of AVATARS) console.log("  #" + a.id, a.name.padEnd(14), "->", a.holder.address);
   console.log("\n--- wallet import keys (LOCAL ONLY, never used against real value) ---");
   ["deployer", "treasury", "alice", "bob", "carol"].forEach((name, i) => {
     console.log(" " + name.padEnd(9), HH_KEYS[i]);
