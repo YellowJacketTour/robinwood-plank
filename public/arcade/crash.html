@@ -264,7 +264,10 @@ camera.lookAt(0, 8, 0);
 const hemi = new THREE.HemisphereLight(0x88a7ff, 0x2a1c10, 1.1);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffe6c2, 1.4);
-sun.position.set(10, 20, 12);
+// Positioned well off to the side and high, so its screen projection reads
+// as a corner glint composed away from the astronaut, not a halo painted
+// directly over their face -- a real bug the first placement had.
+sun.position.set(34, 30, -14);
 scene.add(sun);
 const thrusterLight = new THREE.PointLight(0xffb37a, 0, 18, 2);
 scene.add(thrusterLight);
@@ -391,11 +394,16 @@ for (let i = 0; i < 3; i++) {
 artifactGroup.position.set(-16, 10, -14);
 scene.add(artifactGroup);
 
-// ── Chalkstronaut: real RobinWood art (token #1381, "Chalkstronaut" trait,
-// "Common" background -- deliberately picked ungraded so there are no
-// rarity-sticker icons in the corners to key out -- verified on-chain via
-// robinwoodTokenUri()/IPFS), chroma-keyed at load time and billboarded
-// into 3D space as a THREE.Sprite so it always faces camera and reads
+// ── Chalkstronaut: real RobinWood art (token #1334, "Chalkstronaut" trait,
+// "Rare" background -- ungraded, so no rarity-sticker icons in the
+// corners, AND a real *solid color* background (blue) rather than white.
+// A white-background variant was tried first and was a real chroma-key
+// bug: the suit's own near-white highlights fell inside the same key
+// tolerance as the background, silently eating parts of the character.
+// A flat, saturated color the character's own palette never touches keys
+// cleanly. Verified on-chain via robinwoodTokenUri()/IPFS, chroma-keyed
+// at load time and billboarded into 3D space as a THREE.Sprite so it
+// always faces camera and reads
 // correctly against the moving sky/lighting behind it.
 const chalkstronautImg = new Image();
 let chalkstronautSprite = null;
@@ -429,7 +437,7 @@ chalkstronautImg.onload = () => {
   chalkstronautSprite.scale.set(5.4, 5.4, 1);
   scene.add(chalkstronautSprite);
 };
-chalkstronautImg.src = "art/Chalkstronaut5.png";
+chalkstronautImg.src = "art/Chalkstronaut4.png";
 
 // ── particle systems: chalk-dust thruster + crash burst, real GPU points
 function makeParticleSystem(maxCount, color) {
@@ -617,7 +625,7 @@ const LensFlareShader = {
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.28, 0.25, 0.97);
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.22, 0.25, 0.995);
 composer.addPass(bloomPass);
 const godRaysPass = new ShaderPass(GodRaysShader);
 composer.addPass(godRaysPass);
