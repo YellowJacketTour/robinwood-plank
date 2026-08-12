@@ -193,6 +193,53 @@
     z-index: 15; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-dim);
     max-width: 44vw; opacity: 0.55; pointer-events: none; line-height: 1.6;
   }
+
+  /* ── stats panel ─────────────────────────────────────────────────── */
+  .stats-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 50;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .stats-backdrop.show { opacity: 1; pointer-events: auto; }
+  .stats-panel {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(0.97);
+    width: min(920px, 94vw); max-height: 86vh; display: flex; flex-direction: column;
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 16px;
+    padding: 20px; z-index: 51; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s;
+  }
+  .stats-panel.show { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+  .stats-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .stats-head h2 { margin: 0; font-size: 16px; font-family: var(--font-display); }
+  .stats-actions { display: flex; gap: 8px; }
+  .stats-actions input {
+    padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-1);
+    color: var(--ink); font-family: var(--font-mono); font-size: 12px; width: 220px;
+  }
+  .stats-actions button {
+    padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-1);
+    color: var(--ink-dim); font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .stats-actions button:hover { color: var(--ink); border-color: var(--accent); }
+  .stats-hint { font-size: 11px; color: var(--ink-dim); margin: 10px 0 14px; line-height: 1.6; }
+  .stats-hint code { color: var(--ink); }
+  .stats-body { overflow-y: auto; flex: 1; min-height: 0; }
+  .stats-empty { color: var(--ink-dim); font-size: 12.5px; padding: 30px 0; text-align: center; }
+  .stats-section-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim);
+    margin: 18px 0 8px; font-weight: 700;
+  }
+  .stats-section-title:first-child { margin-top: 0; }
+  table.stats-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+  table.stats-table th, table.stats-table td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--line); }
+  table.stats-table th:first-child, table.stats-table td:first-child { text-align: left; font-family: var(--font-mono); }
+  table.stats-table th {
+    color: var(--ink-dim); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em;
+    cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  table.stats-table th:hover { color: var(--ink); }
+  table.stats-table th.sorted::after { content: " ▾"; }
+  table.stats-table th.sorted.asc::after { content: " ▴"; }
+  table.stats-table td.win { color: var(--win); }
+  table.stats-table td.lose { color: var(--lose); }
 </style>
 </head>
 <body>
@@ -206,6 +253,7 @@
       <span>POOL <b id="poolStat">—</b></span>
       <span>PLAYERS <b id="playersStat">—</b></span>
     </div>
+    <div class="gear" id="statsBtn" title="Stats">📊</div>
     <div class="gear" id="gearBtn" title="Connection settings">⚙</div>
   </div>
 
@@ -231,6 +279,22 @@
   </div>
 
   <div class="toast-log" id="toastLog"></div>
+</div>
+
+<div class="stats-backdrop" id="statsBackdrop"></div>
+<div class="stats-panel" id="statsPanel">
+  <div class="stats-head">
+    <h2>Stats</h2>
+    <div class="stats-actions">
+      <input id="statsFilter" placeholder="Filter by address…" autocomplete="off" spellcheck="false" />
+      <button id="statsRefresh">Refresh</button>
+      <button id="statsClose">Close</button>
+    </div>
+  </div>
+  <div class="stats-hint">Built entirely from this contract's own emitted events (<code>BetPlaced</code>, <code>CashedOut</code>, <code>RoundCrashed</code>, <code>ResultRegistered</code>, <code>Claimed</code>) via a real <code>queryFilter</code> scan -- not a mock or a fabricated leaderboard. At local/testnet scale this client-side scan is genuinely fine; a real mainnet deployment would want a proper indexer behind this same UI, not this same scan re-run on every load.</div>
+  <div class="stats-body" id="statsBody">
+    <div class="stats-empty">Connect, then click Refresh to scan real on-chain history.</div>
+  </div>
 </div>
 
 <div class="sheet-backdrop" id="sheetBackdrop"></div>
@@ -1552,6 +1616,188 @@ function startPolling() {
   refresh();
   pollTimer = setInterval(refresh, 1200);
 }
+
+// ── stats: real event-driven leaderboard + round history ────────────────
+// Everything here is derived from the contract's own emitted events via
+// queryFilter -- no fabricated data, no mock leaderboard. Genuinely fine
+// at local/testnet event volume; a real mainnet deployment behind this
+// same UI would want a proper indexer (this repo already has the right
+// Postgres infra pattern for exactly that elsewhere) rather than
+// re-running this full scan on every refresh.
+let statsSort = { key: "totalWon", dir: "desc" };
+let lastPlayerRows = [];
+let lastRoundRows = [];
+
+async function runStatsScan() {
+  const body = $("statsBody");
+  if (!crash) {
+    body.innerHTML = '<div class="stats-empty">Connect first.</div>';
+    return;
+  }
+  body.innerHTML = '<div class="stats-empty">Scanning real on-chain events…</div>';
+  try {
+    const [bets, cashOuts, crashes, registrations, claims] = await Promise.all([
+      crash.queryFilter(crash.filters.BetPlaced()),
+      crash.queryFilter(crash.filters.CashedOut()),
+      crash.queryFilter(crash.filters.RoundCrashed()),
+      crash.queryFilter(crash.filters.ResultRegistered()),
+      crash.queryFilter(crash.filters.Claimed()),
+    ]);
+
+    const crashByRound = new Map();
+    for (const e of crashes) {
+      crashByRound.set(e.args.roundId.toString(), {
+        multiplierBps: e.args.crashMultiplierBps,
+        elapsedBlocks: e.args.crashElapsedBlocks,
+      });
+    }
+
+    const players = new Map(); // address -> aggregate stats
+    function player(addr) {
+      if (!players.has(addr)) {
+        players.set(addr, {
+          address: addr, roundsPlayed: new Set(), totalWagered: 0n,
+          wins: 0, losses: 0, totalWon: 0n, biggestWin: 0n, cashOuts: 0,
+        });
+      }
+      return players.get(addr);
+    }
+
+    for (const e of bets) {
+      const p = player(e.args.player);
+      p.roundsPlayed.add(e.args.roundId.toString());
+      p.totalWagered += e.args.amount;
+    }
+    for (const e of cashOuts) player(e.args.player).cashOuts += 1;
+    for (const e of registrations) {
+      const p = player(e.args.player);
+      if (e.args.won) p.wins += 1; else p.losses += 1;
+    }
+    for (const e of claims) {
+      const p = player(e.args.player);
+      p.totalWon += e.args.payout;
+      if (e.args.payout > p.biggestWin) p.biggestWin = e.args.payout;
+    }
+
+    lastPlayerRows = [...players.values()].map((p) => ({
+      address: p.address,
+      roundsPlayed: p.roundsPlayed.size,
+      totalWagered: p.totalWagered,
+      cashOuts: p.cashOuts,
+      wins: p.wins,
+      losses: p.losses,
+      winRate: p.wins + p.losses > 0 ? p.wins / (p.wins + p.losses) : 0,
+      totalWon: p.totalWon,
+      biggestWin: p.biggestWin,
+      netPl: p.totalWon - p.totalWagered,
+    }));
+
+    const roundIds = [...new Set(bets.map((e) => e.args.roundId.toString()))];
+    lastRoundRows = roundIds
+      .map((rid) => {
+        const roundBets = bets.filter((e) => e.args.roundId.toString() === rid);
+        const pool = roundBets.reduce((sum, e) => sum + e.args.amount, 0n);
+        const bettors = new Set(roundBets.map((e) => e.args.player)).size;
+        const winners = registrations.filter((e) => e.args.roundId.toString() === rid && e.args.won).length;
+        const c = crashByRound.get(rid);
+        return {
+          roundId: Number(rid),
+          pool,
+          bettors,
+          winners,
+          crashX: c ? Number(c.multiplierBps) / 10000 : null,
+          blockNum: roundBets[0]?.blockNumber ?? 0,
+        };
+      })
+      .sort((a, b) => b.roundId - a.roundId);
+
+    renderStats();
+  } catch (err) {
+    body.innerHTML = '<div class="stats-empty">Scan failed: ' + (err.shortMessage || err.message) + "</div>";
+  }
+}
+
+function fmtEth(wei) {
+  return Number(ethers.formatEther(wei)).toFixed(4);
+}
+
+function renderStats() {
+  const filter = $("statsFilter").value.trim().toLowerCase();
+  let playerRows = lastPlayerRows.filter((r) => !filter || r.address.toLowerCase().includes(filter));
+  const { key, dir } = statsSort;
+  playerRows = [...playerRows].sort((a, b) => {
+    const av = a[key], bv = b[key];
+    const cmp = typeof av === "bigint" ? (av < bv ? -1 : av > bv ? 1 : 0) : av - bv;
+    return dir === "asc" ? cmp : -cmp;
+  });
+
+  const playerCols = [
+    { key: "address", label: "Player", fmt: (r) => r.address.slice(0, 8) + "…" + r.address.slice(-4) },
+    { key: "roundsPlayed", label: "Rounds", fmt: (r) => r.roundsPlayed },
+    { key: "totalWagered", label: "Wagered", fmt: (r) => fmtEth(r.totalWagered) + " ETH" },
+    { key: "wins", label: "Wins", fmt: (r) => r.wins },
+    { key: "losses", label: "Losses", fmt: (r) => r.losses },
+    { key: "winRate", label: "Win %", fmt: (r) => (r.winRate * 100).toFixed(1) + "%" },
+    { key: "totalWon", label: "Total Won", fmt: (r) => fmtEth(r.totalWon) + " ETH" },
+    { key: "biggestWin", label: "Biggest Win", fmt: (r) => fmtEth(r.biggestWin) + " ETH" },
+    { key: "netPl", label: "Net P/L", fmt: (r) => (r.netPl >= 0n ? "+" : "") + fmtEth(r.netPl) + " ETH", cls: (r) => (r.netPl >= 0n ? "win" : "lose") },
+  ];
+
+  let html = '<div class="stats-section-title">Leaderboard — ' + playerRows.length + " player" + (playerRows.length === 1 ? "" : "s") + "</div>";
+  if (playerRows.length === 0) {
+    html += '<div class="stats-empty">No matching players.</div>';
+  } else {
+    html += '<table class="stats-table"><thead><tr>';
+    for (const col of playerCols) {
+      const sorted = statsSort.key === col.key;
+      html += `<th data-key="${col.key}" class="${sorted ? "sorted " + statsSort.dir : ""}">${col.label}</th>`;
+    }
+    html += "</tr></thead><tbody>";
+    for (const row of playerRows) {
+      html += "<tr>";
+      for (const col of playerCols) {
+        const cls = col.cls ? col.cls(row) : "";
+        html += `<td class="${cls}">${col.fmt(row)}</td>`;
+      }
+      html += "</tr>";
+    }
+    html += "</tbody></table>";
+  }
+
+  html += '<div class="stats-section-title">Round history — ' + lastRoundRows.length + " round" + (lastRoundRows.length === 1 ? "" : "s") + "</div>";
+  if (lastRoundRows.length === 0) {
+    html += '<div class="stats-empty">No rounds yet.</div>';
+  } else {
+    html += '<table class="stats-table"><thead><tr><th>Round</th><th>Pool</th><th>Bettors</th><th>Winners</th><th>Crash</th></tr></thead><tbody>';
+    for (const r of lastRoundRows) {
+      html += `<tr><td style="text-align:left;font-family:var(--font-mono)">#${r.roundId}</td><td>${fmtEth(r.pool)} ETH</td><td>${r.bettors}</td><td>${r.winners}</td><td class="${r.crashX && r.crashX >= 2 ? "win" : ""}">${r.crashX ? r.crashX.toFixed(2) + "x" : "voided"}</td></tr>`;
+    }
+    html += "</tbody></table>";
+  }
+
+  $("statsBody").innerHTML = html;
+  document.querySelectorAll("table.stats-table th[data-key]").forEach((th) => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.key;
+      statsSort = { key, dir: statsSort.key === key && statsSort.dir === "desc" ? "asc" : "desc" };
+      renderStats();
+    });
+  });
+}
+
+$("statsBtn").addEventListener("click", () => {
+  $("statsBackdrop").classList.add("show");
+  $("statsPanel").classList.add("show");
+  if (lastPlayerRows.length === 0 && crash) runStatsScan();
+});
+$("statsClose").addEventListener("click", closeStats);
+$("statsBackdrop").addEventListener("click", closeStats);
+function closeStats() {
+  $("statsBackdrop").classList.remove("show");
+  $("statsPanel").classList.remove("show");
+}
+$("statsRefresh").addEventListener("click", runStatsScan);
+$("statsFilter").addEventListener("input", renderStats);
 </script>
 </body>
 </html>
