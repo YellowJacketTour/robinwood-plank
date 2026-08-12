@@ -99,7 +99,7 @@ care this whole design process has applied to the contracts themselves.
 | Horse model (Plank Derby) | [OpenGameArt.org's "CC0 - 3D Animals / Creatures" collection](https://opengameart.org/content/cc0-3d-animals-creatures) includes a rigged horse; [Hugo A Munoz's "Low Poly Horse Free"](https://itch.io/profile/hugo-a-munoz) on itch.io is a second real option | CC0 (public domain) | Two independent real sources found, not one fragile dependency — cross-check both before committing to either as the final asset |
 | Racer movement animation (gallop/run cycle) | [Quaternius Universal Animation Library](https://quaternius.com/) | CC0, retargetable | Built specifically for retargeting onto arbitrary rigs — the right tool for driving a generic horse skeleton without needing bespoke mocap |
 | Track/environment set pieces | [Kenney's Racing Kit](https://kenney.nl/assets/racing-kit) (110 assets) and [Racing Pack](https://kenney.nl/assets/racing-pack) (420 assets) | CC0 | Coherent, matched art style across the whole pack — reduces the "assets from five different styles clash" risk a scattered asset hunt usually produces |
-| Crash game rocket/space environment | [Kenney's Space Kit](https://kenney.nl/assets/space-kit) (150 assets) | CC0 | Same coherent-style benefit as the racing kit |
+| Crash game rocket/space *environment* (stars, debris, station set pieces) | [Kenney's Space Kit](https://kenney.nl/assets/space-kit) (150 assets) | CC0 | Same coherent-style benefit as the racing kit — the rocket *itself* is not this; see §2.4 |
 | PBR textures / environment lighting (HDRIs) | [Poly Haven](https://polyhaven.com/) | CC0 | The real, standard source professional teams already use for physically-accurate lighting — this is what makes flat CC0 low-poly models read as "AAA-lit" rather than "free asset pack," and it's the single highest-leverage piece for the "triple A" visual bar specifically |
 
 ### 2.2 — Rocket/crash animation reference
@@ -123,6 +123,49 @@ actual source for UI/state-management patterns before designing this
 repo's own crash-game frontend from a blank page, same "don't reinvent what
 already has a working, licensed answer" discipline applied to research
 throughout this whole design process.
+
+### 2.4 — The real RobinWood collection as the actual hero art, not stand-ins
+
+This changes the crash game and the racing game's identity in a real way,
+and it's the right call: `DESIGN.md`'s own hard brand rule already states
+"any decorative or animated representation of planks... must use these
+actual character assets or match that hand-drawn outlined style exactly"
+and explicitly rules out "abstract geometric boards" as a substitute — a
+generic CC0 rocket was always going to be a placeholder against that rule,
+not a final answer.
+
+- **Crash game hero**: the "Chalkstronaut" Plank replaces the generic CC0
+  rocket entirely as the thing ascending and (on a bust) exploding. **Not
+  independently verified against this repo's own files** — the local
+  `public/images/collection/` directory only mirrors five sample images
+  (`plank-bobawood.png`, `plank-insidertrader.png`, `plank-is-this-art.png`,
+  `plank-knightwood.png`, `plank-redacted.png`); the full collection lives
+  on-chain/IPFS per `lib/market/traits.ts` and `app/api/market/traits`, not
+  locally. Taking this as real on the strength of it being the owner's own
+  collection, but the exact tokenId/IPFS URI needs pulling from the real
+  collection metadata before implementation — same "verify before building"
+  standard as every other citation in this design arc, just not one this
+  session can independently check from local files alone.
+- **Plank Derby jockeys**: rotating real RobinWood collection artwork,
+  riding the CC0 horse bodies from §2.1 — not a generic humanoid jockey
+  asset. Tone is deliberately "funny, cheesy cartoon," execution is not:
+  same bar as everything else in Part 3's rendering pipeline.
+
+**One real technical constraint worth naming plainly**: RobinWood's
+collection art is flat 2D character art, not a rigged, posable 3D asset —
+it cannot be naturally "seated" on a horse's back the way a real 3D jockey
+model could bend at the hip and grip with its legs. The honest, and
+genuinely fitting, technical answer is **not** to attempt rigging 2D art
+into 3D — it's a camera-facing billboarded sprite (the real Three.js
+technique: a flat plane holding the NFT image, always rotated to face the
+camera, `THREE.Sprite` or a billboarded `PlaneGeometry`) bobbing and tilting
+with the horse's real animated gait from the `AnimationMixer` in Part 3 §4.
+This is a real, well-understood technique (classic "paper cutout on a 3D
+stage," the same trick a huge number of stylized 3D games use deliberately,
+not a compromise hiding a limitation) — and it's a genuinely better fit for
+"funny cheesy cartoon" tone than a fully-3D jockey would be: the visual joke
+of a flat, 2D-art Plank bouncing along on a fully-3D horse is charming
+specifically *because* of the contrast, not despite it.
 
 ---
 
@@ -154,7 +197,10 @@ some post-processing":
    (`SPEC-plank-derby-racing.md` §4.3) — a racer visibly straining in a
    photo-finish segment is a real, direct visualization of the underlying
    math, not a decorative animation disconnected from the actual simulation
-   result.
+   result. The billboarded jockey sprite (§2.4) rides on top of this same
+   animated transform, inheriting the horse's real bob/tilt each frame
+   rather than being animated independently and risking drifting out of
+   sync with it.
 5. **UI overlay**: the multiplier counter (crash) and live odds ticker
    (racing, `SPEC-plank-derby-racing.md` §7) render as HTML/CSS overlaid on
    the canvas, not as in-3D text meshes — this matches the actual technical
