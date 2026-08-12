@@ -523,6 +523,70 @@ function makeParticleSystem(maxCount, color) {
 }
 const thrusterParticles = makeParticleSystem(400, 0xe4e8f5);
 const crashParticles = makeParticleSystem(500, 0xff8a6c);
+const emberParticles = makeParticleSystem(300, 0xff9a4a);
+emberParticles.points.renderOrder = 6;
+
+// ── Heat shield: atmospheric-friction plasma sheath ──────────────────
+// Real re-entry vehicles build a compressed shock layer of superheated,
+// ionized air ahead of the heat shield -- a turbulent plasma sheath, not
+// a flat glow. Here it's the same physics inverted (ascending through
+// the densest air instead of descending into it), peaking around the
+// stratosphere/mesosphere boundary (progress ~0.35-0.68, the same band
+// already used for the sky-color transition) where dynamic pressure and
+// friction heating are greatest, fading to nothing in thin upper air.
+// A camera-facing billboard with a turbulent noise shader, not a static
+// texture -- the sheath has to visibly roil.
+const HeatShieldShader = {
+  uniforms: {
+    uTime: { value: 0 },
+    uIntensity: { value: 0 },
+  },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    uniform float uTime, uIntensity;
+    varying vec2 vUv;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+    float noise(vec2 p){
+      vec2 i = floor(p), f = fract(p);
+      float a = hash(i), b = hash(i + vec2(1.0,0.0)), c = hash(i + vec2(0.0,1.0)), d = hash(i + vec2(1.0,1.0));
+      vec2 u = f*f*(3.0-2.0*f);
+      return mix(a,b,u.x) + (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y;
+    }
+    void main(){
+      if (uIntensity <= 0.002) discard;
+      vec2 p = vUv - 0.5;
+      float r = length(p * vec2(1.0, 1.4));
+      // turbulent shock layer: several octaves of scrolling noise, biased
+      // toward the leading (bottom) edge like real compressed plasma
+      float turb = noise(p * 5.0 + vec2(0.0, -uTime * 3.5)) * 0.6
+                 + noise(p * 11.0 + vec2(uTime * 2.0, -uTime * 5.0)) * 0.3
+                 + noise(p * 23.0 - vec2(0.0, uTime * 8.0)) * 0.1;
+      float ring = smoothstep(0.42, 0.2, r) * smoothstep(0.05, 0.24, r);
+      float shape = ring * (0.35 + turb * 0.5);
+      vec3 core = vec3(1.0, 0.85, 0.6);    // hot core -- warm, never pure white
+      vec3 mid = vec3(1.0, 0.5, 0.2);      // orange plasma
+      vec3 edge = vec3(0.8, 0.15, 0.45);   // ionized pink-magenta fringe
+      vec3 color = mix(edge, mid, smoothstep(0.0, 0.45, shape));
+      color = mix(color, core, smoothstep(0.6, 0.95, shape));
+      // Deliberately restrained alpha -- this sits in an additive-blended,
+      // separately-bloomed pass, so full-strength alpha here was enough
+      // to blow the whole frame out to a solid white ball (a real bug
+      // found by actually rendering it, not assumed away).
+      float alpha = clamp(shape, 0.0, 1.0) * uIntensity * 0.32;
+      gl_FragColor = vec4(color, alpha);
+    }`,
+};
+const heatShieldMat = new THREE.ShaderMaterial({
+  uniforms: HeatShieldShader.uniforms, vertexShader: HeatShieldShader.vertexShader,
+  fragmentShader: HeatShieldShader.fragmentShader, transparent: true,
+  blending: THREE.AdditiveBlending, depthWrite: false,
+});
+// SpriteMaterial can't run a custom fragment shader, so this is a real
+// camera-facing quad turned to face the camera manually each frame
+// instead of a THREE.Sprite (which only supports SpriteMaterial).
+const heatShieldMesh = new THREE.Mesh(new THREE.PlaneGeometry(6.2, 8.2), heatShieldMat);
+heatShieldMesh.renderOrder = 8; // between particles (5-6) and the astronaut (10)
+scene.add(heatShieldMesh);
 
 // Isotropic burst -- correct for the crash explosion, which really should
 // spray in every direction from the impact point.
@@ -884,10 +948,29 @@ function frame() {
       origin.y -= 1.6;
       emitCone(thrusterParticles, origin, 3, 0.35, 3.2);
     }
+
+    // Heat shield: peaks in the stratosphere/mesosphere band (~0.35-0.68),
+    // the same real "densest surviving atmosphere" window already used
+    // for the sky transition -- thin air above and below means no real
+    // friction heating there, so intensity has to actually fall back to
+    // zero at both ends, not just ramp up and stay.
+    const heatBand = progress > 0.35 && progress < 0.68
+      ? Math.sin(((progress - 0.35) / 0.33) * Math.PI)
+      : 0;
+    heatShieldMat.uniforms.uIntensity.value = heatBand * (phaseState === "live" ? 1 : 0);
+    heatShieldMat.uniforms.uTime.value = t;
+    heatShieldMesh.position.copy(chalkstronautSprite.position);
+    heatShieldMesh.quaternion.copy(camera.quaternion); // billboard: always faces camera
+    if (phaseState === "live" && heatBand > 0.1 && Math.random() < heatBand * 0.7) {
+      const origin = chalkstronautSprite.position.clone();
+      origin.y -= 1.2;
+      emitCone(emberParticles, origin, 2, 0.9, 2.4);
+    }
   }
 
   updateParticles(thrusterParticles, dt);
   updateParticles(crashParticles, dt);
+  updateParticles(emberParticles, dt);
 
   // camera: slow cinematic dolly that follows the astronaut's altitude,
   // plus a shake impulse on crash
