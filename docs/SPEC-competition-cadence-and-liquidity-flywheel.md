@@ -50,23 +50,98 @@ to be fair and to feel like something real is happening.
 
 ### This is a floor, not a permanent limit — see §1.4 for the actual scaling path.
 
-## 1.1 — Degenerate-round protection (new rule, goes beyond the racing spec as written)
+## 1.1 — The daily sourcing/trigger model, precisely (revised — supersedes the
+first draft of this section)
 
-Add an explicit **minimum viable pool** before a competition is allowed to
-settle normally:
+**Sourcing is continuous, not a hard-reset daily window.** Every game type
+has exactly one live "sourcing pool" at all times, accepting stakes
+continuously. Once a day, on a fixed clock, anyone can permissionlessly call
+`triggerGame()`. What happens depends on what's actually in the pool at that
+moment — this is the literal mechanism behind "real collateral sourced, or
+no game launches":
 
 ```
-MIN_PARTICIPANTS   = 5   (tunable, see §1.3's governance mechanism)
-MIN_POOL_SIZE      = a real, disclosed floor in the competition's stake asset
+function triggerGame() external {
+    require(block.timestamp >= nextTriggerAt, "too early");
+    if (pool.participants >= MIN_PARTICIPANTS && pool.total >= MIN_POOL_SIZE) {
+        // Real collateral threshold met: snapshot everything sourced so
+        // far, lock it in as today's game, and open a BRAND NEW empty
+        // pool immediately -- sourcing for tomorrow starts in the same
+        // transaction the current game locks, with zero gap.
+        _lockAndLaunch(pool);
+        pool = newEmptyPool();
+    }
+    // Threshold NOT met: do nothing to the pool. No game launches today
+    // -- exactly as asked for -- but nothing is refunded or disturbed
+    // either. The same pool keeps accumulating stakes it already had,
+    // plus whatever sources in over the next 24h, and gets checked again
+    // at the next trigger. A stake placed on a "quiet" day isn't lost or
+    // returned -- it's simply still there, waiting for the pool it's part
+    // of to actually clear the real-collateral bar.
+    nextTriggerAt = block.timestamp + TRIGGER_INTERVAL; // 1 days
+}
 ```
 
-If a competition locks (betting closes) without meeting both thresholds, it
-**voids automatically**: every stake refunds in full, no rake is taken, no
-payout is computed. This isn't a judgment call made after the fact — it's a
-hard contract-level branch, checked once at the `OPEN → LOCKED` transition,
-with no discretion for anyone (including the deployer) to override it either
-direction. This single rule removes the "thin pool exploit" *by construction*
-rather than by trusting nobody tries it.
+This reconciles every part of the request simultaneously:
+- **"1 contest per game type per day"** — the trigger clock is fixed and
+  daily, full stop.
+- **"Guaranteed only running real games with real collateral sourced, or no
+  game launches"** — the threshold check is a hard gate with no
+  discretionary override in either direction; an under-collateralized day
+  genuinely produces no game.
+- **"Immediately begin sourcing funds for next game next day"** — sourcing
+  never actually stops; a successful trigger just snapshots-and-resets in
+  one atomic step, so there's no "off" period between one game locking and
+  the next day's pool being open.
+- **"No risk of users losing funds"** — nobody's stake is force-refunded
+  just because one day's check came up short. It stays committed toward
+  whichever day's pool eventually does clear the bar.
+
+## 1.1a — "Maybe no refundable entries?" — yes, with one real safety valve
+
+Confirmed: **entries do not unilaterally withdraw once staked into the live
+sourcing pool.** This is the actual answer to "guaranteed liquidity" — the
+failure mode a refundable-entry design has is a last-second bank run right
+before `triggerGame()` fires, where participants who staked early pull out
+the moment they suspect the pool won't clear the bar (or, worse, right after
+it does, trying to un-commit from a game they no longer like the odds of).
+PoolTogether's own production design hits this same tension and resolves it
+the same direction: their docs describe "early withdrawal penalties that
+maintain system integrity by preventing strategic deposits [and exits]
+immediately before prize drawings" — this isn't a novel restriction, it's
+the same real, audited precedent already field-tested at scale.
+
+**The safety valve that keeps this from ever becoming "funds trapped
+forever"**: if a pool goes an extended period without a single successful
+trigger (proposed default: 30 days of continuous under-threshold checks),
+individual participants unlock the ability to withdraw their own original
+stake from that specific stale pool — a real, hard-coded, non-discretionary
+escape hatch, not something that requires anyone's permission or
+intervention. This is what makes "no refundable entries" compatible with
+"no risk of users losing funds": entries are locked *while there's a
+realistic path to a real game*, and unlock automatically the moment that
+stops being true for long enough to matter.
+
+## 1.1b — Timestamp-trigger manipulation, named and closed
+
+A real, historical lesson worth building against directly: a 2024 lottery
+exploit extracted **$12M** by manipulating timestamp validation to claim
+already-expired prizes, and the older EtherLotto contract had the same class
+of bug (timestamp-dependence around its draw trigger). Two concrete
+mitigations, both already implicit in the design above but worth stating as
+hard requirements:
+- `triggerGame()` is a **tolerance window, not a knife-edge instant** — it's
+  permissionlessly callable any time *at or after* `nextTriggerAt`, not
+  required to land at an exact block. There's no "claim an expired prize"
+  window at all, because nothing about the payout depends on exactly when
+  within that window the trigger fires — only the roster/outcome seeds
+  (`SPEC-plank-derby-racing.md` §4.1) do, and those are independent of
+  `triggerGame()`'s own timing.
+- No path anywhere in this design reads `block.timestamp` to compute a
+  payout amount, an odds calculation, or anything financially meaningful —
+  it is used exclusively as a gate (has enough time passed to check again),
+  never as an input to a value calculation. This closes the entire class of
+  bug both real incidents above share.
 
 ## 1.2 — Whale-domination protection
 
@@ -87,42 +162,35 @@ community is small" instruction directly, and can be revisited once pools are
 consistently deep enough that a single wallet hitting 30% is already
 practically rare.
 
-## 1.3 — Cadence enforcement must be contract-level, not a cron job
+## 1.3 — Cadence enforcement is contract-level by construction, not a cron job
 
 The "one per day" rule only means something if it can't quietly stop being
 true. A backend scheduler that just happens to run once a day is not
 enforcement — it's a convention that silently breaks the moment a deploy
 script has a bug, a server restarts wrong, or someone spins up a second
-competition by hand "just this once."
-
-```solidity
-uint256 public lastCompetitionStart;
-uint256 public minCompetitionInterval = 1 days; // starting value
-
-function createCompetition(...) external {
-    require(
-        block.timestamp >= lastCompetitionStart + minCompetitionInterval,
-        "cadence: too soon"
-    );
-    lastCompetitionStart = block.timestamp;
-    // ... create the competition
-}
-```
+competition by hand "just this once." §1.1's `triggerGame()` *is* this
+enforcement, directly — `require(block.timestamp >= nextTriggerAt, ...)`
+is the same interval-gate idea, just merged into the one function that also
+does the real-collateral check, rather than living as a separate
+`createCompetition` gate that could theoretically drift out of sync with it.
+One function, one gate, no second code path that could disagree with it.
 
 Nobody — not the team, not an admin key, not a compromised backend — can
-create a second same-day competition without either waiting out the interval
-or changing `minCompetitionInterval` through the real, visible governance
-path in §1.4. That's what makes this "impenetrable" in the literal sense:
-the rule is enforced by the same contract that runs the competition, not by
-a promise about how the team operates it.
+trigger a second same-day competition, or force one to launch under the
+real-collateral threshold, without changing `TRIGGER_INTERVAL` or
+`MIN_PARTICIPANTS`/`MIN_POOL_SIZE` through the real, visible governance path
+in §1.4. That's what makes this "impenetrable" in the literal sense: the
+rule is enforced by the same contract that runs the competition, not by a
+promise about how the team operates it.
 
 ## 1.4 — Scaling the cadence: a real governance path, not a silent admin lever
 
-`minCompetitionInterval` needs to be adjustable — the whole point is scaling
-as the community grows — but an instantly-effective admin call to change it
-would just relocate the trust problem rather than solve it (an admin key that
-can silently double the competition frequency is exactly the kind of lever
-this whole design is trying to avoid). The pattern:
+`TRIGGER_INTERVAL` (and the collateral thresholds) need to be adjustable —
+the whole point is scaling as the community grows — but an instantly-
+effective admin call to change either would just relocate the trust problem
+rather than solve it (an admin key that can silently double the competition
+frequency, or silently lower the real-collateral bar, is exactly the kind of
+lever this whole design is trying to avoid). The pattern:
 
 ```
 queueCadenceChange(newInterval)  →  [public timelock delay, e.g. 48h]  →  executeCadenceChange()
@@ -145,10 +213,12 @@ mechanic (per `SPEC-plank-derby-racing.md` §7's "hype from real mechanics,
 not manipulation" principle):
 
 ```
-Eligible for 2/day when, over the trailing 10 competitions of that game type:
-  - average unique participants  >= N1
-  - average pool size            >= P1 (in the competition's stake asset)
-  - zero voided (degenerate) rounds in the trailing 10
+Eligible for 2/day when, over the trailing 10 triggered games of that type:
+  - average unique participants     >= N1
+  - average pool size               >= P1 (in the competition's stake asset)
+  - zero under-threshold trigger checks (§1.1) in the trailing 30 days --
+    i.e. every day's trigger actually launched a game, nothing rolled
+    forward for lack of real collateral
 ```
 
 Each threshold tier (2/day → 3/day → multiple concurrent game types) gets its
@@ -262,16 +332,136 @@ be managed.
 
 ---
 
+## Part 3 — Zero exploit surface, closed against real, named incidents
+
+"Low to no collateral" is already true of everything in this doc by
+construction — the pari-mutuel model (`SPEC-plank-derby-racing.md` §4.4)
+means the protocol never holds or risks its own capital; every dollar in
+every pool is a user's own voluntary stake. What's specified here is the
+remaining question: how the contracts holding *that* capital, for the time
+it's genuinely in flight, avoid every real, documented way this exact class
+of contract has actually been broken before. Every mitigation below is
+tied to a real, named incident — not a hypothetical.
+
+### 3.1 — Pull payments only, everywhere. Named incidents: Akutars ($34M),
+King of the Ether, and the "Puppy Raffle" pattern taught as a canonical
+teaching example in modern Solidity security courses specifically because
+it's this common.
+
+All three are the same root cause: a contract loops over recipients and
+pushes payment to each one directly. One recipient with a reverting
+fallback (malicious or just broken) permanently freezes the *entire*
+distribution for *every* other winner too — Akutars lost $34M this way.
+
+**Hard requirement**: every payout in this system — competition winnings,
+bribe-pool shares, dev share, keeper tips, the emergency stale-pool
+withdrawal in §1.1a — is **pull-based**. The contract only ever records
+"this address is owed this amount"; the address claims it in its own
+separate transaction, paying its own gas, on its own schedule. No function
+anywhere loops over a list of winners and sends them money. This isn't a
+style preference — it's the specific, direct fix for a $34M-and-counting
+class of real loss.
+
+### 3.2 — No unbounded loops, anywhere, ever
+
+Same root vulnerability class as above, one level more general: any loop
+whose length depends on the number of participants (refunding a roll-forward
+pool, computing an all-time leaderboard, tallying bribe backers) will work
+fine at 10 users and silently become unusable — not exploitable, just
+*broken*, a real and common failure mode distinct from but related to 3.1 —
+once participation exceeds what a single transaction's gas limit allows. All
+per-user amounts owed are computed and stored individually, read via mapping
+lookup, never summed by iterating a growing list inside a single
+transaction.
+
+### 3.3 — Reentrancy guards on every state-changing external function.
+Named incident: Penpie DeFi, $27M, 2024 — a real, recent, non-hypothetical
+loss, not a 2016-era cautionary tale.
+
+`ReentrancyGuard` + `nonReentrant`, same as this repo's own
+`MarketplankVaultV3.sol` already applies to every state-changing external
+function (verified directly against the real file), applied identically
+here. Checks-effects-interactions ordering throughout — state updates before
+any external call or token transfer, never after.
+
+### 3.4 — No admin custody of user funds, at any point, for any reason
+
+Every dollar in a live sourcing pool sits in the pool contract itself, not
+in a wallet or multisig anyone controls. There is no `withdraw()` function
+callable by a deployer, owner, or any privileged role, on any contract in
+this system — matching the exact bar `MarketplankVaultV3.sol` already sets
+for this repo ("no admin withdrawal of pool ETH," verified). The only two
+places value ever leaves a pool are (a) a user's own pull-claim of something
+they're individually owed, and (b) the disclosed, non-discretionary rake
+split in Part 2 (which itself has no admin lever — see Part 2's own
+"nobody, ever, can withdraw it" property for the burned LP tokens
+specifically).
+
+### 3.5 — Randomness is commit-reveal, never derived from anything
+predictable. Named incident: Roast Football Protocol, insecure RNG seeded
+from block number, timestamp, and caller address/balance — all fully
+predictable to the caller in advance.
+
+Already the design in `SPEC-plank-derby-racing.md` §4.1 — the two-seed
+commit-reveal split, never `block.timestamp`/`blockhash`/caller-derived
+values used as entropy for anything that decides an outcome. Restated here
+because it's directly load-bearing for the "zero exploit surface" claim,
+not a separate concern from it.
+
+### 3.6 — The liquidity-flywheel swap (Part 2) gets its own, stronger price
+protection. Named incidents: multiple real flash-loan oracle-manipulation
+drains (Mango Markets, $112M; an INV-token TWAP manipulation, $15.6M; a
+plvGLP oracle manipulation, ~$6.5M) — the common pattern in all of them is a
+contract trusting a price it read from a thin, manipulable pool in the same
+transaction an attacker controls.
+
+`harvestRake()`'s PLANK-side swap (Part 2, step 2) is the one place in this
+whole design that touches an AMM price at all — everything else is pure
+pari-mutuel math with no external price dependency whatsoever. That makes it
+the single highest-value target for exactly this attack class, and it needs
+real, specific protection beyond a generic slippage bound: a time-weighted
+reference price (TWAP over a real window, not the instantaneous spot price
+of the same pool being traded into) as the sanity check the swap's actual
+execution price is compared against, reverting if they diverge beyond a
+tight tolerance. A flat slippage percentage alone is not sufficient here,
+specifically because the swap and the manipulation would both be touching
+the *same* thin pool this flywheel is trying to deepen — the exact setup
+every cited incident above exploited elsewhere.
+
+### 3.7 — Professional audit is a hard gate, not a nice-to-have, before any
+real value flows through any of this
+
+Every pattern above is a real, well-understood mitigation for a real,
+named, dollar-denominated incident — but "we followed the checklist" is not
+the same claim as "an independent expert reviewed this specific
+implementation and found no way around it." No contract in this document
+should hold real user funds before a professional (non-AI) audit has
+reviewed it specifically against this document's own claims — the same
+bar already implicit in `docs/SPEC-plank-derby-racing.md` §1's rollout
+phases, restated here as a hard requirement rather than an implication.
+
+---
+
 ## Summary — every rule, where it's enforced, what breaks it
 
 | Rule | Enforced by | What happens if violated |
 |---|---|---|
-| One competition per day (per game type) | `createCompetition`'s on-chain interval check (§1.3) | Transaction reverts — there is no path around it except the timelocked governance change |
-| Degenerate rounds don't settle unfairly | `OPEN → LOCKED` transition's participant/pool-size check (§1.1) | Automatic full refund, zero rake taken, no discretionary override |
+| One competition per day (per game type) | `triggerGame()`'s on-chain interval + collateral gate, one function (§1.1, §1.3) | Call reverts if too early; silently rolls forward (no game, no loss) if collateral is short — there is no path around either case except the timelocked governance change |
+| Guaranteed real collateral or no launch | `triggerGame()`'s `MIN_PARTICIPANTS`/`MIN_POOL_SIZE` check (§1.1) | Pool simply doesn't snapshot/launch that day — no discretion, no override, nothing lost |
+| No last-second bank runs on a sourcing pool | No unilateral withdrawal function on a live pool (§1.1a) | Withdrawal calls revert until either a successful trigger includes that stake in a real game, or the 30-day stale-pool safety valve unlocks it |
+| Funds are never permanently trapped | 30-day no-trigger emergency withdrawal (§1.1a) | Individual withdrawal unlocks automatically, no admin action needed |
+| Trigger timing can't be gamed | Tolerance-window trigger, `block.timestamp` never used in a value calculation (§1.1b) | Closes the exact bug class of the real $12M 2024 lottery exploit and EtherLotto |
 | No single wallet dominates a thin pool | Per-bet stake cap check (§1.2) | Bet rejected immediately at placement, not after the fact |
-| Cadence changes are visible before they're live | Queue-then-timelock pattern (§1.4) | A change cannot take effect same-block; the community has the full timelock window to see it coming |
+| Cadence/threshold changes are visible before they're live | Queue-then-timelock pattern (§1.4) | A change cannot take effect same-block; the community has the full timelock window to see it coming |
 | Every round leaves $PLANK's liquidity stronger | Permissionless `harvestRake()` + LP-token burn (§2) | Nothing can be skipped by inaction — anyone can call it, and the tip means someone eventually will |
 | The permanent liquidity really is permanent | LP tokens sent to `BURN_ADDRESS`, never a treasury (§2) | No withdrawal path exists for anyone, including the team |
+| No payout distribution can freeze (Akutars/King-of-Ether/Puppy-Raffle class) | Pull payments only, no push loops anywhere (§3.1) | One bad recipient can never block anyone else's claim |
+| No participant-count-dependent gas blowup | No unbounded loops over participant lists (§3.2) | Every function's gas cost stays flat regardless of how many people have ever played |
+| No reentrancy drain (Penpie class) | `ReentrancyGuard`/`nonReentrant` on every state-changing function (§3.3) | Reentrant call reverts |
+| No admin can ever move user funds | No `withdraw()` on any contract, verified against no privileged role anywhere (§3.4) | There is no function to call — the capability doesn't exist in the bytecode |
+| No predictable-outcome exploit (Roast Football class) | Two-seed commit-reveal, never `block.timestamp`/caller-derived entropy (§3.5) | Outcome is cryptographically unpredictable before reveal, independently verifiable after |
+| No flash-loan price manipulation on the liquidity-flywheel swap (Mango/INV/plvGLP class) | TWAP-referenced execution-price check, not spot-only slippage (§3.6) | Swap reverts if execution price diverges from the time-weighted reference beyond a tight tolerance |
+| Nothing above is trusted on claim alone | Professional (non-AI) audit gate before real funds (§3.7) | No contract in this system holds real user value until independently reviewed against this document's own claims |
 
 This is the same bar `SPEC-plank-derby-racing.md` §9 already set for the
 racing game's fairness math, extended to the operating rules around every
