@@ -105,7 +105,8 @@ export function buildBuyWidgetUrl(walletAddress: string, currencyCode = DEFAULT_
  */
 export function buildSellWidgetUrl(
   refundWalletAddress: string,
-  baseCurrencyCode = DEFAULT_CURRENCY_CODE
+  baseCurrencyCode = DEFAULT_CURRENCY_CODE,
+  baseCurrencyAmount?: string
 ): { url: string; sandbox: boolean } {
   if (!isEthAddress(refundWalletAddress)) {
     throw new TradeApiError(400, "BAD_WALLET_ADDRESS", "refundWalletAddress must be a valid 0x address.");
@@ -117,6 +118,16 @@ export function buildSellWidgetUrl(
     baseCurrencyCode,
     refundWalletAddress,
   });
+  // Optional pre-fill (MoonPayPanel.tsx sends the real, just-read USDG
+  // balance). Validated as a plain positive decimal -- never trust a
+  // client-supplied string straight into a signed URL without checking its
+  // shape first.
+  if (baseCurrencyAmount !== undefined) {
+    if (!/^\d+(\.\d+)?$/.test(baseCurrencyAmount) || Number(baseCurrencyAmount) <= 0) {
+      throw new TradeApiError(400, "BAD_AMOUNT", "baseCurrencyAmount must be a positive decimal number.");
+    }
+    params.set("baseCurrencyAmount", baseCurrencyAmount);
+  }
   const queryString = `?${params.toString()}`;
   const signature = sign(secretKey, queryString);
 

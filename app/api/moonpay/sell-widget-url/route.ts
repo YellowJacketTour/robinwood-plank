@@ -5,7 +5,7 @@ import { TradeApiError } from "@/lib/uniswap-server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type Body = { refundWalletAddress?: unknown; baseCurrencyCode?: unknown };
+type Body = { refundWalletAddress?: unknown; baseCurrencyCode?: unknown; baseCurrencyAmount?: unknown };
 
 export async function POST(req: Request) {
   try {
@@ -20,11 +20,13 @@ export async function POST(req: Request) {
     const refundWalletAddress = typeof body.refundWalletAddress === "string" ? body.refundWalletAddress.trim() : "";
     const baseCurrencyCode =
       typeof body.baseCurrencyCode === "string" && body.baseCurrencyCode.trim() ? body.baseCurrencyCode.trim() : undefined;
+    const baseCurrencyAmount =
+      typeof body.baseCurrencyAmount === "string" && body.baseCurrencyAmount.trim() ? body.baseCurrencyAmount.trim() : undefined;
     if (!refundWalletAddress) {
       throw new TradeApiError(400, "MISSING_WALLET_ADDRESS", "refundWalletAddress is required.");
     }
 
-    const { url, sandbox } = buildSellWidgetUrl(refundWalletAddress, baseCurrencyCode);
+    const { url, sandbox } = buildSellWidgetUrl(refundWalletAddress, baseCurrencyCode, baseCurrencyAmount);
     return publicJson({ url, sandbox });
   } catch (err) {
     return publicError(err, "Unexpected error building MoonPay sell widget URL.");
