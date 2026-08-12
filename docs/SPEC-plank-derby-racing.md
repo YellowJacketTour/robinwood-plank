@@ -20,9 +20,10 @@ knowing before this ships: most jurisdictions' gambling tests look at substance
 pari-mutuel stakes moving based on race results will likely be evaluated as
 wagering by a regulator regardless of what the product calls itself. That's a
 business decision, not an engineering one, and it doesn't block writing the spec
-— but it belongs in the same legal-review queue as the crash game's own open
-question (`docs/LEGAL-REVIEW-BRIEF.md`), not shipped assuming the framing alone
-settles it.
+— but it belongs in the same real-counsel review this whole game suite needs
+before real money is staked (no legal-review doc exists in this repo yet for
+either game — that's a real gap, not a pointer to something already written),
+not shipped assuming the framing alone settles it.
 
 ---
 
@@ -62,17 +63,20 @@ payout.
   target, backers of that target split it if the target wins. Billions of
   real dollars have moved through this exact mechanic in DeFi; it is not a
   novel trust assumption.
-- **Provably fair RNG**: the same commit-reveal / HMAC-seed pattern already
-  proposed for the crash game (`docs/RESEARCH-*` from the earlier crash-game
-  research pass), and the same pattern every serious "provably fair" casino
-  product (Aviator/Spribe, Stake) already uses.
+- **Provably fair RNG**: the same commit-reveal / HMAC-seed pattern discussed
+  for the crash game earlier in this design process (conversational so far,
+  not yet written to its own spec doc — flagging that explicitly rather than
+  citing a file that doesn't exist yet), and the same pattern every serious
+  "provably fair" casino product (Aviator/Spribe, Stake) already uses.
 - **Non-custodial entry**: matches this repo's own proven pattern —
-  `contracts/PlankPositionAutomation.sol`'s header states "ZERO EXPLOIT
-  SURFACE: no owner, no admin role, no access-control modifier exists at
-  all." Plank Derby's racer generation and settlement contracts should hold
-  the same property: nothing about who wins is touchable by whoever deployed
-  it, and no NFT ever leaves a holder's wallet because none is ever
-  referenced by ownership at all.
+  `contracts/MarketplankVaultV3.sol`'s header states its design explicitly
+  excludes "no oracle, no external AMM, no owner-mutable fees, no
+  upgradeability, no admin withdrawal of pool ETH, no pause" (verified
+  directly against the real file in this repo, not assumed). Plank Derby's
+  racer generation and settlement contracts should hold the same property:
+  nothing about who wins is touchable by whoever deployed it, and no NFT
+  ever leaves a holder's wallet because none is ever referenced by ownership
+  at all.
 
 ## 3. Race lifecycle (state machine)
 
@@ -232,10 +236,10 @@ broken, with the specific mitigation this spec already includes.
 | **Roster bias** | House waits to see who's betting before deciding which racers even appear | Roster seed reveals at `OPEN`, before any bet is placed — the field is fixed and public for the entire betting window. |
 | **Operator seed withholding (griefing)** | Operator commits a hash, then simply never reveals the real seed if the "wrong" racer is about to be favored | Same failure mode `clawd-crash` documented and solved with an emergency-refund timeout — if `SEED_REVEALED` hasn't happened within a fixed window after `LOCKED`, the race voids and all stakes (and bribes) refund automatically, no admin action required. |
 | **Stat-computation grinding** | If stats were assigned by the house rather than derived from a hash, someone could grind for a favorable roster | Stats derive entirely from `keccak256(rosterSeed, i)` — nobody, including the deployer, picks a racer's stats; they fall out of the hash. |
-| **Rounding-exploit settlement drain** | Repeatedly claiming payouts with adversarial rounding to extract more than a fair share | Settlement math (§4.4) uses integer division consistently; the CEI (checks-effects-interactions) pattern and a per-race claimed-bitmap prevent double-claiming — this needs the same fuzzed/randomized-invariant testing this repo's `MarketplankVaultV3` already uses (`test/market/king-of-the-hill.ts`-style property tests), not just unit tests on the happy path. |
+| **Rounding-exploit settlement drain** | Repeatedly claiming payouts with adversarial rounding to extract more than a fair share | Settlement math (§4.4) uses integer division consistently; the CEI (checks-effects-interactions) pattern and a per-race claimed-bitmap prevent double-claiming — this needs the same fuzzed/randomized-invariant testing already proven in this repo (`test/contracts/VaultV3.fuzz.test.ts` and `VaultSolvency.fuzz.test.ts`, verified to exist directly against the real test tree), not just unit tests on the happy path. |
 | **Sybil betting to manufacture a "winning" narrative** | One actor splits a large bet across many wallets to look like organic broad support for a racer they know backing | Doesn't break the math (payout is still proportional to total stake, sybil or not) — this is a *hype/perception* risk, not a solvency risk. Worth naming so the growth-mechanics section (§7) doesn't accidentally reward apparent-consensus signals that are trivially fakeable. |
 | **Bribe-pool NFT valuation gaming** | Someone bribes with a worthless/spam NFT to inflate a racer's apparent bribe pot for social-proof effect | Display bribe pots by asset, not a single blended "value" number, unless there's a trusted price oracle for every possible bribed NFT (there won't be) — don't invent a fake valuation to make the UI look more exciting. |
-| **Reentrancy on claim** | Classic reentrancy during payout/bribe-share claim | Standard `nonReentrant` guard + CEI ordering, same as `PlankRouter.sol`/`PlankBuybackBurn.sol` already do in this codebase — nothing novel needed here, just don't skip it. |
+| **Reentrancy on claim** | Classic reentrancy during payout/bribe-share claim | Standard OpenZeppelin `ReentrancyGuard` + `nonReentrant` guard, same as `contracts/MarketplankVaultV3.sol` already uses on every state-changing external function in this codebase (verified directly against the real file) — nothing novel needed here, just don't skip it. |
 | **Front-running the bribe deposit itself** | Depositing a bribe right at the `OPEN → LOCKED` boundary to sway last-second betting | Bribes should close at the same moment betting does (`LOCKED`), not have their own later deadline — otherwise a whale can bribe *after* seeing final betting patterns to manufacture a specific outcome's popularity right before lock, which is a real, if subtle, manipulation vector worth closing explicitly. |
 
 ## 6. Open engineering questions (owner or eng-lead decisions, not resolved here)
@@ -330,8 +334,10 @@ Same staged logic already used for ETH-crash-before-PLANK-crash:
    and the fungible-asset path has run cleanly for a real stretch of races.
 
 Legal review (per this document's framing note, §0) should happen before
-Phase 2, not after — the same discipline already applied to the referral
-payout and crash game work in this repo.
+Phase 2, not after — the same discipline this session has held to
+consistently across every game concept discussed so far (crash, racing),
+even though no formal legal-review doc exists in this repo yet for any of
+them.
 
 ## 9. What "fool proof" actually means here, restated plainly
 
