@@ -443,6 +443,19 @@ chalkstronautImg.src = "art/Chalkstronaut4.png";
 function makeParticleSystem(maxCount, color) {
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(maxCount * 3);
+  // The real bug behind the persistent "shining white light" glow: a
+  // Float32Array zero-initializes, so every never-yet-emitted particle
+  // defaulted to world position (0,0,0) -- right where the astronaut
+  // stands -- and stayed there forever, since updateParticles() only
+  // relocates a particle to off-screen once its life decays past 0, which
+  // never happens for a particle that was never emitted in the first
+  // place. With ~900 particles (both systems combined) stacked at one
+  // point under additive blending, that's hundreds of full-brightness
+  // points summed into one screen pixel cluster -- blooms explosively
+  // regardless of any threshold tuning. Confirmed by removing the
+  // astronaut sprite from the scene entirely and finding the glow
+  // unchanged. Fix: every particle starts off-screen, not at the origin.
+  for (let i = 1; i < pos.length; i += 3) pos[i] = -9999;
   const alpha = new Float32Array(maxCount);
   geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   const mat = new THREE.PointsMaterial({
@@ -457,6 +470,8 @@ function makeParticleSystem(maxCount, color) {
 const thrusterParticles = makeParticleSystem(400, 0xe4e8f5);
 const crashParticles = makeParticleSystem(500, 0xff8a6c);
 
+// Isotropic burst -- correct for the crash explosion, which really should
+// spray in every direction from the impact point.
 function emitParticles(system, origin, n, spread, speed) {
   for (let k = 0; k < n; k++) {
     const i = system.cursor;
@@ -469,6 +484,28 @@ function emitParticles(system, origin, n, spread, speed) {
     system.vel[i * 3] = Math.cos(a) * Math.cos(b) * v;
     system.vel[i * 3 + 1] = Math.sin(b) * v - 0.6;
     system.vel[i * 3 + 2] = Math.sin(a) * Math.cos(b) * v;
+    system.life[i] = 1;
+    system.cursor = (system.cursor + 1) % system.maxCount;
+  }
+}
+
+// Tight downward cone -- correct for a thruster exhaust plume. The old
+// thruster call reused emitParticles' isotropic spray, which is why it
+// read as a messy diagonal streak instead of a coherent flame: particles
+// need to launch mostly straight down with only a small lateral spread,
+// not in a random direction across the whole sphere.
+function emitCone(system, origin, n, coneAngle, speed) {
+  for (let k = 0; k < n; k++) {
+    const i = system.cursor;
+    system.pos[i * 3] = origin.x;
+    system.pos[i * 3 + 1] = origin.y;
+    system.pos[i * 3 + 2] = origin.z;
+    const a = Math.random() * Math.PI * 2;
+    const spread = Math.random() * coneAngle;
+    const v = (0.6 + Math.random() * 0.5) * speed;
+    system.vel[i * 3] = Math.sin(spread) * Math.cos(a) * v;
+    system.vel[i * 3 + 1] = -Math.cos(spread) * v;
+    system.vel[i * 3 + 2] = Math.sin(spread) * Math.sin(a) * v;
     system.life[i] = 1;
     system.cursor = (system.cursor + 1) % system.maxCount;
   }
@@ -623,10 +660,58 @@ const LensFlareShader = {
     }`,
 };
 
+// ── Selective bloom ──────────────────────────────────────────────────
+// Threshold-tuning alone couldn't stop the astronaut sprite from
+// self-blooming: its near-white paint highlights sit close enough to
+// 1.0 luminance that almost any usable threshold still caught them,
+// haloing the character in a "shining light on top of the plank" that
+// wasn't ever the sun -- it was the character's own art. The correct
+// fix (the standard three.js selective-bloom technique, not a
+// threshold hack) is a second, separate render: hide the sprite,
+// render that frame through its own bloom-only composer to get a pure
+// bloom texture, restore the sprite, then additively combine that
+// texture onto the NORMAL frame (sprite visible, not bloomed). Now the
+// thruster/runes/satellites/crash-burst still glow correctly, and the
+// character never blows out no matter how bright its flat art is.
+const bloomComposer = new EffectComposer(renderer);
+bloomComposer.renderToScreen = false;
+bloomComposer.addPass(new RenderPass(scene, camera));
+// The real bug behind "shining white light on top of the plank": this was
+// constructed with a resolution of (1, 1) -- a literal one-pixel internal
+// render target. UnrealBloomPass sizes its mip/blur chain off this value,
+// so a 1x1 buffer upscaled back to screen size produces a content-
+// independent soft square blob, regardless of what's actually in the
+// scene -- confirmed by hiding the astronaut sprite entirely and getting
+// the exact same blob in the exact same place. Needs the real canvas
+// resolution, kept in sync on resize().
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(canvas.clientWidth || 1, canvas.clientHeight || 1), 0.55, 0.35, 0.72);
+bloomComposer.addPass(bloomPass);
+
+const MixShader = {
+  uniforms: { baseTexture: { value: null }, bloomTexture: { value: bloomComposer.renderTarget2.texture } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform sampler2D baseTexture; uniform sampler2D bloomTexture;
+    varying vec2 vUv;
+    void main(){
+      vec4 base = texture2D(baseTexture, vUv);
+      vec4 bloom = texture2D(bloomTexture, vUv);
+      gl_FragColor = vec4(base.rgb + bloom.rgb, 1.0);
+    }`,
+};
+
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.22, 0.25, 0.995);
-composer.addPass(bloomPass);
+// Built as a real ShaderMaterial (not a plain shader-def object) and
+// passed to ShaderPass directly: ShaderPass clones uniforms for a plain
+// object, and cloning a render-target TEXTURE silently breaks it (fires
+// "Textures of render targets cannot be cloned" and leaves bloomTexture
+// null, which is why the very first attempt washed the whole screen out
+// white instead of fixing the glow). Passing an already-constructed
+// material skips that clone path entirely.
+const mixMaterial = new THREE.ShaderMaterial(MixShader);
+const mixPass = new ShaderPass(mixMaterial, "baseTexture");
+composer.addPass(mixPass);
 const godRaysPass = new ShaderPass(GodRaysShader);
 composer.addPass(godRaysPass);
 composer.addPass(new OutputPass());
@@ -654,6 +739,7 @@ function resize() {
   camera.updateProjectionMatrix();
   renderer.setSize(w, h, false);
   composer.setSize(w, h);
+  bloomComposer.setSize(w, h);
   lensFlarePass.uniforms.uAspect.value = w / h;
 }
 window.addEventListener("resize", resize);
@@ -742,7 +828,7 @@ function frame() {
     if (phaseState === "live" && Math.random() < 0.6) {
       const origin = chalkstronautSprite.position.clone();
       origin.y -= 1.6;
-      emitParticles(thrusterParticles, origin, 2, 0.6, 1.6);
+      emitCone(thrusterParticles, origin, 3, 0.35, 3.2);
     }
   }
 
@@ -775,6 +861,13 @@ function frame() {
   gradePass.uniforms.uAberration.value = Math.max(0, 1 - crashElapsed);
   gradePass.uniforms.uTime.value = t;
 
+  // Selective bloom: hide the astronaut for the bloom-only render (its
+  // flat art must never glow), restore it for the real frame, then
+  // additively combine the two via mixPass inside the main composer.
+  if (chalkstronautSprite) chalkstronautSprite.visible = false;
+  bloomComposer.render();
+  if (chalkstronautSprite) chalkstronautSprite.visible = true;
+  mixPass.uniforms.bloomTexture.value = bloomComposer.renderTarget2.texture;
   composer.render();
   requestAnimationFrame(frame);
 }
