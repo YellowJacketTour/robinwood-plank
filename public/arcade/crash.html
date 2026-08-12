@@ -2,150 +2,656 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>PlankCrash — local playtest</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PlankCrash</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 24px; min-height: 100vh;
-    background: #0b0d12; color: #e8ecf1;
-    font: 15px/1.5 -apple-system, Segoe UI, Roboto, sans-serif;
+  :root {
+    --bg-0: #05070c;
+    --bg-1: #0a0e18;
+    --bg-2: #121729;
+    --line: #1e2740;
+    --ink: #eef1fb;
+    --ink-dim: #7c85a3;
+    --accent: #ff5a3c;
+    --accent-glow: #ff8a5c;
+    --win: #3ee08c;
+    --win-glow: #7bffc0;
+    --lose: #ff4d6a;
+    --gold: #ffc857;
+    --font-display: "Rockwell", "Cambria", Georgia, serif;
+    --font-body: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  .sub { color: #8a93a6; font-size: 13px; margin-bottom: 20px; }
-  .grid { display: grid; grid-template-columns: 1fr 340px; gap: 20px; max-width: 1100px; }
-  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
-  .panel { background: #12151d; border: 1px solid #232838; border-radius: 12px; padding: 18px; }
-  .stage {
-    height: 260px; border-radius: 10px; margin-bottom: 14px;
-    background: radial-gradient(120% 100% at 50% 100%, #1a2440 0%, #0b0d12 70%);
-    display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg-0); color: var(--ink);
+    font-family: var(--font-body);
   }
-  .mult { font-size: 56px; font-weight: 700; font-variant-numeric: tabular-nums; transition: color .15s; }
-  .mult.crashed { color: #ff5c5c; }
-  .mult.live { color: #58e07c; }
-  .mult.idle { color: #5b6478; }
-  .phasebar { display: flex; gap: 6px; margin-bottom: 14px; }
-  .phasebar span {
-    flex: 1; text-align: center; padding: 6px 4px; border-radius: 6px; font-size: 11px;
-    text-transform: uppercase; letter-spacing: .04em; background: #1a1f2c; color: #5b6478;
+  #app {
+    position: relative; height: 100vh; width: 100vw;
+    display: flex; flex-direction: column;
   }
-  .phasebar span.active { background: #2a3a63; color: #9db4ff; }
-  label { display: block; font-size: 12px; color: #8a93a6; margin: 10px 0 4px; }
-  input, select, button {
-    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid #2a3040;
-    background: #0e111a; color: #e8ecf1; font-size: 13px;
+
+  /* ── top bar ─────────────────────────────────────────────────────── */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; z-index: 20; position: relative;
   }
-  button {
-    background: #3462ff; border: none; font-weight: 600; cursor: pointer; margin-top: 12px;
+  .brand { display: flex; align-items: baseline; gap: 8px; }
+  .brand .mark {
+    font-family: var(--font-display); font-weight: 700; font-size: 20px; letter-spacing: 0.5px;
+    background: linear-gradient(135deg, var(--accent-glow), var(--gold));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
   }
-  button.secondary { background: #1a1f2c; color: #cbd3e6; }
-  button:disabled { opacity: .4; cursor: default; }
-  button:hover:not(:disabled) { filter: brightness(1.1); }
-  .row { display: flex; gap: 8px; }
-  .row > * { flex: 1; }
-  .log {
-    font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: #8a93a6;
-    max-height: 220px; overflow-y: auto; background: #0e111a; border-radius: 8px; padding: 10px; margin-top: 14px;
+  .brand .round { font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); }
+  .stats { display: flex; gap: 18px; font-family: var(--font-mono); font-size: 12px; color: var(--ink-dim); }
+  .stats b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .gear {
+    width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line);
+    background: rgba(255,255,255,0.03); color: var(--ink-dim); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
   }
-  .log div { padding: 2px 0; border-bottom: 1px solid #1a1f2c; }
-  .kv { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3px 0; }
-  .kv b { color: #cbd3e6; font-weight: 600; }
-  .players { margin-top: 10px; }
-  .players table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .players td { padding: 4px 0; border-bottom: 1px solid #1a1f2c; }
-  .players td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
-  .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; }
-  .pill.win { background: #123a24; color: #58e07c; }
-  .pill.lose { background: #3a1212; color: #ff5c5c; }
-  .pill.wait { background: #1a1f2c; color: #8a93a6; }
+  .gear:hover { color: var(--ink); border-color: var(--accent); }
+
+  /* ── stage (canvas) ──────────────────────────────────────────────── */
+  .stage { position: relative; flex: 1; min-height: 0; }
+  canvas#fx { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  .center-readout {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; pointer-events: none; text-align: center;
+  }
+  .mult {
+    font-family: var(--font-display); font-weight: 700; font-variant-numeric: tabular-nums;
+    font-size: clamp(48px, 12vw, 108px); line-height: 1;
+    color: var(--ink); text-shadow: 0 0 40px rgba(255,90,60,0.25);
+    transition: color .12s, transform .08s;
+  }
+  .mult.live { color: var(--win); text-shadow: 0 0 46px rgba(62,224,140,0.45); }
+  .mult.crashed { color: var(--lose); text-shadow: 0 0 46px rgba(255,77,106,0.5); }
+  .mult .x { font-size: 0.42em; opacity: 0.7; margin-left: 2px; }
+  .substatus {
+    margin-top: 10px; font-family: var(--font-mono); font-size: 12.5px;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim);
+  }
+  .outcome-banner {
+    margin-top: 16px; padding: 8px 20px; border-radius: 999px; font-weight: 700;
+    font-size: 14px; opacity: 0; transform: translateY(6px); transition: opacity .3s, transform .3s;
+  }
+  .outcome-banner.show { opacity: 1; transform: translateY(0); }
+  .outcome-banner.win { background: rgba(62,224,140,0.12); color: var(--win); border: 1px solid rgba(62,224,140,0.3); }
+  .outcome-banner.lose { background: rgba(255,77,106,0.1); color: var(--lose); border: 1px solid rgba(255,77,106,0.28); }
+
+  /* ── bottom control deck ─────────────────────────────────────────── */
+  .deck {
+    position: relative; z-index: 20; padding: 16px 18px calc(18px + env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, transparent, var(--bg-0) 35%);
+  }
+  .stake-row {
+    display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px;
+  }
+  .chip {
+    font-family: var(--font-mono); font-size: 13px; padding: 7px 14px; border-radius: 999px;
+    border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--ink-dim); cursor: pointer;
+  }
+  .chip.active { border-color: var(--accent); color: var(--ink); background: rgba(255,90,60,0.1); }
+  .chip:disabled { opacity: 0.35; cursor: default; }
+
+  .primary-btn {
+    width: 100%; max-width: 520px; margin: 0 auto; display: block;
+    padding: 20px; border-radius: 18px; border: none; cursor: pointer;
+    font-family: var(--font-display); font-weight: 700; font-size: 20px; letter-spacing: 0.3px;
+    color: #10131c; background: linear-gradient(135deg, var(--accent-glow), var(--accent));
+    box-shadow: 0 8px 30px rgba(255,90,60,0.28);
+    transition: transform .08s, box-shadow .2s, background .2s, color .2s;
+  }
+  .primary-btn:active { transform: scale(0.98); }
+  .primary-btn:disabled {
+    cursor: default; color: var(--ink-dim); background: var(--bg-2);
+    box-shadow: none; border: 1px solid var(--line);
+  }
+  .primary-btn.cashout {
+    background: linear-gradient(135deg, var(--win-glow), var(--win));
+    box-shadow: 0 8px 34px rgba(62,224,140,0.35);
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 8px 34px rgba(62,224,140,0.35); }
+    50% { box-shadow: 0 8px 46px rgba(62,224,140,0.6); }
+  }
+  .btn-sub { text-align: center; margin-top: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); }
+
+  /* ── settings sheet ──────────────────────────────────────────────── */
+  .sheet-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 40;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .sheet-backdrop.show { opacity: 1; pointer-events: auto; }
+  .sheet {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(0.96);
+    width: min(420px, 92vw); background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: 16px; padding: 20px; z-index: 41; opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s;
+  }
+  .sheet.show { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
+  .sheet h2 { margin: 0 0 4px; font-size: 15px; font-family: var(--font-display); }
+  .sheet .hint { font-size: 11.5px; color: var(--ink-dim); margin-bottom: 14px; }
+  .sheet label { display: block; font-size: 11px; color: var(--ink-dim); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .sheet input {
+    width: 100%; padding: 10px 11px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg-1); color: var(--ink); font-family: var(--font-mono); font-size: 12.5px;
+  }
+  .sheet .row { display: flex; gap: 8px; margin-top: 14px; }
+  .sheet button {
+    flex: 1; padding: 10px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; font-size: 13px;
+  }
+  .sheet .connect { background: var(--accent); color: #10131c; }
+  .sheet .close { background: var(--bg-1); color: var(--ink-dim); border: 1px solid var(--line); }
+  .conn-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-dim); margin-right: 6px; }
+  .conn-dot.on { background: var(--win); box-shadow: 0 0 8px var(--win); }
+
+  .toast-log {
+    position: fixed; left: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+    z-index: 15; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-dim);
+    max-width: 44vw; opacity: 0.55; pointer-events: none; line-height: 1.6;
+  }
 </style>
 </head>
 <body>
-
-<h1>PlankCrash — local playtest</h1>
-<div class="sub">Talks directly to a local Hardhat node. Not connected to any real chain. Run <code>scripts/local-crash-setup.ts</code> first.</div>
-
-<div class="grid">
-  <div class="panel">
-    <div class="phasebar">
-      <span data-phase="0">Betting</span>
-      <span data-phase="1">Live</span>
-      <span data-phase="2">Crashed</span>
-      <span data-phase="3">Settled</span>
+<div id="app">
+  <div class="topbar">
+    <div class="brand">
+      <span class="mark">PLANKCRASH</span>
+      <span class="round" id="roundLabel">ROUND —</span>
     </div>
-    <div class="stage">
-      <div id="mult" class="mult idle">—</div>
+    <div class="stats">
+      <span>POOL <b id="poolStat">—</b></span>
+      <span>PLAYERS <b id="playersStat">—</b></span>
     </div>
-    <div class="kv"><span>Round</span><b id="roundId">—</b></div>
-    <div class="kv"><span>Pool</span><b id="pool">—</b></div>
-    <div class="kv"><span>Distributable</span><b id="distributable">—</b></div>
-    <div class="kv"><span>Participants</span><b id="participants">—</b></div>
-    <div class="kv"><span>Betting closes / target block</span><b id="timing">—</b></div>
-
-    <div class="row" style="margin-top:14px">
-      <button id="lockBtn" class="secondary">Lock round</button>
-      <button id="revealBtn" class="secondary">Reveal crash</button>
-    </div>
-
-    <div class="players">
-      <table id="playersTable"><tbody></tbody></table>
-    </div>
-
-    <div class="log" id="log"></div>
+    <div class="gear" id="gearBtn" title="Connection settings">⚙</div>
   </div>
 
-  <div class="panel">
-    <label>RPC URL</label>
-    <input id="rpc" value="http://127.0.0.1:8545" />
-
-    <label>PlankCrash contract address</label>
-    <input id="addr" placeholder="0x... (from scripts/local-crash-setup.ts output)" />
-
-    <label>Private key (local test account only)</label>
-    <input id="pk" placeholder="0xac09...ff80 (Hardhat account #0)" />
-    <button id="connectBtn">Connect</button>
-    <div class="kv" style="margin-top:8px"><span>Address</span><b id="myAddr">—</b></div>
-    <div class="kv"><span>Balance</span><b id="myBal">—</b></div>
-    <div class="kv"><span>My stake this round</span><b id="myStake">—</b></div>
-    <div class="kv"><span>Withdrawable (pull payments)</span><b id="myPayments">—</b></div>
-
-    <label>Bet amount (ETH)</label>
-    <input id="betAmount" value="0.02" />
-    <button id="betBtn">Place bet</button>
-    <button id="cashOutBtn" class="secondary">Cash out now</button>
-
-    <div class="row">
-      <button id="registerBtn" class="secondary">Register result</button>
-      <button id="claimBtn" class="secondary">Claim</button>
+  <div class="stage">
+    <canvas id="fx"></canvas>
+    <div class="center-readout">
+      <div class="mult idle" id="multReadout">1<span class="x">.00x</span></div>
+      <div class="substatus" id="substatus">CONNECT A WALLET TO PLAY</div>
+      <div class="outcome-banner" id="outcomeBanner"></div>
     </div>
-    <button id="withdrawBtn" class="secondary">Withdraw payments</button>
+  </div>
+
+  <div class="deck">
+    <div class="stake-row" id="stakeRow">
+      <button class="chip active" data-amt="0.01">0.01</button>
+      <button class="chip" data-amt="0.02">0.02</button>
+      <button class="chip" data-amt="0.05">0.05</button>
+      <button class="chip" data-amt="0.1">0.10</button>
+    </div>
+    <button class="primary-btn" id="primaryBtn" disabled>CONNECT WALLET</button>
+    <div class="btn-sub" id="btnSub">&nbsp;</div>
+  </div>
+
+  <div class="toast-log" id="toastLog"></div>
+</div>
+
+<div class="sheet-backdrop" id="sheetBackdrop"></div>
+<div class="sheet" id="sheet">
+  <h2><span class="conn-dot" id="connDot"></span>Local connection</h2>
+  <div class="hint">Talks directly to a local Hardhat node — not a real chain. Run <code>scripts/local-crash-setup.ts</code> first, then paste the printed address below.</div>
+  <label>RPC URL</label>
+  <input id="rpc" value="http://127.0.0.1:8545" />
+  <label>PlankCrash contract address</label>
+  <input id="addr" placeholder="0x..." />
+  <label>Private key (local test account only)</label>
+  <input id="pk" placeholder="0xac09...ff80" />
+  <div class="row">
+    <button class="close" id="sheetClose">Close</button>
+    <button class="connect" id="connectBtn">Connect</button>
   </div>
 </div>
 
 <script src="vendor/ethers.umd.min.js"></script>
-<script>
-const { ethers } = window;
-const PHASE_NAMES = ["BETTING", "LIVE", "CRASHED", "SETTLED"];
-
-let provider, signer, crash, crashRead, abi;
-let pollTimer = null;
-
-const $ = (id) => document.getElementById(id);
-function log(msg) {
-  const el = document.createElement("div");
-  const t = new Date().toLocaleTimeString();
-  el.textContent = `[${t}] ${msg}`;
-  $("log").prepend(el);
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
 }
-function bpsToX(bps) {
-  return (Number(bps) / 10000).toFixed(4) + "x";
+</script>
+<script type="module">
+import * as THREE from "three";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+
+const { ethers } = window;
+const $ = (id) => document.getElementById(id);
+
+// ── THREE.JS scene: launch pad → atmosphere → deep space ────────────────
+// Real WebGL pipeline: PBR materials, a two-color gradient sky dome (vertex
+// shader), UnrealBloomPass post-processing, GPU point-sprite starfield and
+// thruster/crash particle systems, and the real, verified Chalkstronaut art
+// (public/arcade/art/Chalkstronaut1.png -- RobinWood collection token
+// #1174, IPFS CID bafybeiadhdudbdylicfqq7pdfw5qzdrggqu4bzaxbel5mulhsia6ax4zdy,
+// chroma-keyed onto a CanvasTexture at load time) billboarded into 3D space
+// via THREE.Sprite, so it always faces camera and lights/glows correctly
+// with the scene around it. Four staged altitude bands, keyed to
+// flightProgress (0..1):
+//   pad        [0.00, 0.02)  static, on the slingshot
+//   sky        [0.02, 0.35)  troposphere -- blue, clouds
+//   stratos    [0.35, 0.65)  deep blue/violet, thinning air, first stars
+//   space      [0.65, 1.00]  black, stars, satellites, an alien, a mystery
+//                            plank artifact drifting past
+const canvas = $("fx");
+const clock = new THREE.Clock();
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
+camera.position.set(0, 6, 26);
+camera.lookAt(0, 8, 0);
+
+// ── lighting: hemisphere (sky/ground) + a warm "sun" + a thruster point light
+const hemi = new THREE.HemisphereLight(0x88a7ff, 0x2a1c10, 1.1);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffe6c2, 1.4);
+sun.position.set(10, 20, 12);
+scene.add(sun);
+const thrusterLight = new THREE.PointLight(0xffb37a, 0, 18, 2);
+scene.add(thrusterLight);
+
+// ── gradient sky dome -- real vertex-interpolated shader, not a flat color
+const skyUniforms = {
+  topColor: { value: new THREE.Color(0x0c1836) },
+  bottomColor: { value: new THREE.Color(0x2e4a78) },
+};
+const skyDome = new THREE.Mesh(
+  new THREE.SphereGeometry(180, 32, 20),
+  new THREE.ShaderMaterial({
+    uniforms: skyUniforms,
+    side: THREE.BackSide,
+    depthWrite: false,
+    vertexShader: `
+      varying float vHeight;
+      void main() {
+        vHeight = normalize(position).y;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 topColor;
+      uniform vec3 bottomColor;
+      varying float vHeight;
+      void main() {
+        float f = smoothstep(-0.15, 0.85, vHeight);
+        gl_FragColor = vec4(mix(bottomColor, topColor, f), 1.0);
+      }
+    `,
+  })
+);
+scene.add(skyDome);
+scene.fog = new THREE.FogExp2(0x1e2c4a, 0.012);
+
+// ── starfield: a real GPU point-sprite field, additive-blended so bloom
+// picks it up naturally once we're high enough for it to fade in.
+const STAR_COUNT = 2200;
+const starGeo = new THREE.BufferGeometry();
+const starPos = new Float32Array(STAR_COUNT * 3);
+for (let i = 0; i < STAR_COUNT; i++) {
+  const r = 60 + Math.random() * 110;
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(Math.random() * 1.6 - 0.8);
+  starPos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+  starPos[i * 3 + 1] = Math.abs(r * Math.cos(phi)) * 0.6 + 4;
+  starPos[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+}
+starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+const starMat = new THREE.PointsMaterial({
+  color: 0xeef1fb, size: 0.55, transparent: true, opacity: 0,
+  blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+});
+const stars = new THREE.Points(starGeo, starMat);
+scene.add(stars);
+
+// ── launch pad: pallet of planks + slingshot posts (PBR wood material)
+const padGroup = new THREE.Group();
+const plankMat = new THREE.MeshStandardMaterial({ color: 0x9c6a3e, roughness: 0.85, metalness: 0.02 });
+for (let row = 0; row < 4; row++) {
+  const plank = new THREE.Mesh(new THREE.BoxGeometry(9, 0.5, 2.2), plankMat);
+  plank.position.set(0, row * 0.55, 0);
+  padGroup.add(plank);
+}
+const postMat = new THREE.MeshStandardMaterial({ color: 0x4a3420, roughness: 0.9 });
+for (const side of [-1, 1]) {
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 3.4, 8), postMat);
+  post.position.set(side * 1.5, 3.5, 0);
+  post.rotation.z = side * 0.12;
+  padGroup.add(post);
+}
+padGroup.position.set(0, -6, 0);
+scene.add(padGroup);
+
+// ── satellites: real geometry with metal/roughness PBR values so the sun
+// light actually reads on them, not flat-shaded placeholders.
+const satBodyMat = new THREE.MeshStandardMaterial({ color: 0xc7cede, roughness: 0.35, metalness: 0.7 });
+const satPanelMat = new THREE.MeshStandardMaterial({ color: 0x2c3660, roughness: 0.25, metalness: 0.5, emissive: 0x0b1230, emissiveIntensity: 0.4 });
+const satellites = [];
+for (let i = 0; i < 3; i++) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.6), satBodyMat);
+  g.add(body);
+  for (const side of [-1, 1]) {
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.06, 0.7), satPanelMat);
+    panel.position.set(side * 1.5, 0, 0);
+    g.add(panel);
+  }
+  g.userData = { angle: Math.random() * Math.PI * 2, radius: 22 + i * 8, height: 8 + i * 5, speed: 0.04 + Math.random() * 0.03 };
+  satellites.push(g);
+  scene.add(g);
+}
+
+// ── alien: simple but real-lit low-poly figure with an emissive glow
+const alienMat = new THREE.MeshStandardMaterial({ color: 0x7ee096, roughness: 0.4, metalness: 0.1, emissive: 0x1c4a2c, emissiveIntensity: 0.6 });
+const alienGroup = new THREE.Group();
+const alienHead = new THREE.Mesh(new THREE.SphereGeometry(0.55, 16, 12), alienMat);
+alienHead.scale.set(1, 1.3, 0.9);
+alienGroup.add(alienHead);
+const eyeMat = new THREE.MeshStandardMaterial({ color: 0x0e1a12, roughness: 0.2 });
+for (const side of [-1, 1]) {
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), eyeMat);
+  eye.scale.set(1, 1.4, 0.6);
+  eye.position.set(side * 0.22, 0.05, 0.45);
+  eye.rotation.z = side * 0.3;
+  alienGroup.add(eye);
+}
+alienGroup.position.set(14, 12, -18);
+scene.add(alienGroup);
+
+// ── mystery plank artifact: a rune-etched wooden monolith drifting in deep
+// space -- a lore hook, not a real collected asset.
+const artifactMat = new THREE.MeshStandardMaterial({ color: 0xb98553, roughness: 0.6, metalness: 0.1, emissive: 0x8a5a20, emissiveIntensity: 0.35 });
+const artifactGroup = new THREE.Group();
+const artifactBody = new THREE.Mesh(new THREE.BoxGeometry(1.1, 2.6, 0.5), artifactMat);
+artifactGroup.add(artifactBody);
+const runeMat = new THREE.MeshStandardMaterial({ color: 0xffc878, emissive: 0xffb050, emissiveIntensity: 1.4, roughness: 0.3 });
+for (let i = 0; i < 3; i++) {
+  const rune = new THREE.Mesh(new THREE.CircleGeometry(0.09, 12), runeMat);
+  rune.position.set(0, -0.7 + i * 0.7, 0.26);
+  artifactGroup.add(rune);
+}
+artifactGroup.position.set(-16, 10, -14);
+scene.add(artifactGroup);
+
+// ── Chalkstronaut: real RobinWood art (token #1381, "Chalkstronaut" trait,
+// "Common" background -- deliberately picked ungraded so there are no
+// rarity-sticker icons in the corners to key out -- verified on-chain via
+// robinwoodTokenUri()/IPFS), chroma-keyed at load time and billboarded
+// into 3D space as a THREE.Sprite so it always faces camera and reads
+// correctly against the moving sky/lighting behind it.
+const chalkstronautImg = new Image();
+let chalkstronautSprite = null;
+chalkstronautImg.crossOrigin = "anonymous";
+chalkstronautImg.onload = () => {
+  const off = document.createElement("canvas");
+  off.width = chalkstronautImg.width;
+  off.height = chalkstronautImg.height;
+  const octx = off.getContext("2d");
+  octx.drawImage(chalkstronautImg, 0, 0);
+  const data = octx.getImageData(0, 0, off.width, off.height);
+  const px = data.data;
+  const keyR = px[0], keyG = px[1], keyB = px[2];
+  const tolerance = 40;
+  const w = off.width, h = off.height;
+  const cornerClear = w * 0.19; // strips the four small trait-rarity icons printed in the corners of the real artwork -- not part of the character
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const dr = px[i] - keyR, dg = px[i + 1] - keyG, db = px[i + 2] - keyB;
+      const isKeyColor = Math.sqrt(dr * dr + dg * dg + db * db) < tolerance;
+      const inCorner = (x < cornerClear || x > w - cornerClear) && (y < cornerClear || y > h - cornerClear);
+      if (isKeyColor || inCorner) px[i + 3] = 0;
+    }
+  }
+  octx.putImageData(data, 0, 0);
+  const tex = new THREE.CanvasTexture(off);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
+  chalkstronautSprite = new THREE.Sprite(mat);
+  chalkstronautSprite.scale.set(5.4, 5.4, 1);
+  scene.add(chalkstronautSprite);
+};
+chalkstronautImg.src = "art/Chalkstronaut5.png";
+
+// ── particle systems: chalk-dust thruster + crash burst, real GPU points
+function makeParticleSystem(maxCount, color) {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(maxCount * 3);
+  const alpha = new Float32Array(maxCount);
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({
+    color, size: 0.32, transparent: true, opacity: 1,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+  });
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false;
+  scene.add(points);
+  return { points, geo, pos, alpha, vel: new Float32Array(maxCount * 3), life: new Float32Array(maxCount), cursor: 0, maxCount };
+}
+const thrusterParticles = makeParticleSystem(400, 0xe4e8f5);
+const crashParticles = makeParticleSystem(500, 0xff8a6c);
+
+function emitParticles(system, origin, n, spread, speed) {
+  for (let k = 0; k < n; k++) {
+    const i = system.cursor;
+    system.pos[i * 3] = origin.x;
+    system.pos[i * 3 + 1] = origin.y;
+    system.pos[i * 3 + 2] = origin.z;
+    const a = Math.random() * Math.PI * 2;
+    const b = Math.random() * Math.PI - Math.PI / 2;
+    const v = (Math.random() * spread + 0.4) * speed;
+    system.vel[i * 3] = Math.cos(a) * Math.cos(b) * v;
+    system.vel[i * 3 + 1] = Math.sin(b) * v - 0.6;
+    system.vel[i * 3 + 2] = Math.sin(a) * Math.cos(b) * v;
+    system.life[i] = 1;
+    system.cursor = (system.cursor + 1) % system.maxCount;
+  }
+}
+function updateParticles(system, dt) {
+  for (let i = 0; i < system.maxCount; i++) {
+    if (system.life[i] <= 0) continue;
+    system.pos[i * 3] += system.vel[i * 3] * dt;
+    system.pos[i * 3 + 1] += system.vel[i * 3 + 1] * dt;
+    system.pos[i * 3 + 2] += system.vel[i * 3 + 2] * dt;
+    system.vel[i * 3 + 1] -= 0.4 * dt;
+    system.life[i] -= dt * 0.7;
+    if (system.life[i] <= 0) system.pos[i * 3 + 1] = -9999;
+  }
+  system.geo.attributes.position.needsUpdate = true;
+}
+
+// spawnParticles(color, n, spread) -- spawns at the astronaut's current
+// world position. Signature kept intentionally simple: the chain-logic
+// code below only ever wants "burst some particles where the player is
+// right now," it doesn't track 3D coordinates itself.
+function spawnParticles(color, n, spread) {
+  const origin = chalkstronautSprite ? chalkstronautSprite.position : new THREE.Vector3(0, 0, 0);
+  crashParticles.points.material.color.set(color);
+  emitParticles(crashParticles, origin, n, spread, 3.2);
+}
+
+// ── post-processing: real bloom, so the thruster/rune/satellite emissive
+// materials actually glow instead of just being bright flat colors.
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.28, 0.25, 0.97);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+
+function resize() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h, false);
+  composer.setSize(w, h);
+}
+window.addEventListener("resize", resize);
+
+let phaseState = "idle"; // idle | betting | live | crashed
+let flightProgress = 0; // 0..1, drives ascent height
+let crashedAt = null;
+let launchAt = null; // performance.now() at moment LIVE begins -- slingshot snap
+let shakeAmount = 0;
+
+function skyColorAt(progress) {
+  const bands = [
+    { p: 0.00, top: [12, 24, 46], bottom: [46, 74, 120] },
+    { p: 0.22, top: [30, 96, 176], bottom: [120, 176, 224] },
+    { p: 0.45, top: [18, 30, 92], bottom: [64, 60, 150] },
+    { p: 0.68, top: [6, 8, 22], bottom: [22, 18, 48] },
+    { p: 1.00, top: [2, 3, 8], bottom: [4, 5, 14] },
+  ];
+  let a = bands[0], b = bands[bands.length - 1];
+  for (let i = 0; i < bands.length - 1; i++) {
+    if (progress >= bands[i].p && progress <= bands[i + 1].p) { a = bands[i]; b = bands[i + 1]; break; }
+  }
+  const span = Math.max(b.p - a.p, 0.0001);
+  const f = Math.min(Math.max((progress - a.p) / span, 0), 1);
+  const lerp = (c1, c2) => c1.map((v, i) => Math.round(v + (c2[i] - v) * f));
+  return { top: lerp(a.top, b.top), bottom: lerp(a.bottom, b.bottom) };
+}
+
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+
+  const progress = phaseState === "crashed" ? Math.min(flightProgress, 1) : flightProgress;
+  const groundY = -1.5, topY = 30;
+  const launchElapsed = launchAt ? performance.now() - launchAt : 0;
+  const snap = phaseState === "live" && launchElapsed < 260
+    ? Math.sin((launchElapsed / 260) * Math.PI) * 1.6 * (1 - launchElapsed / 260)
+    : 0;
+  const astronautY = (phaseState === "crashed" ? groundY + (topY - groundY) * Math.min(flightProgress, 1) : groundY + (topY - groundY) * flightProgress) - snap;
+
+  // sky + fog track altitude
+  const sky = skyColorAt(progress);
+  skyUniforms.topColor.value.setRGB(sky.top[0] / 255, sky.top[1] / 255, sky.top[2] / 255);
+  skyUniforms.bottomColor.value.setRGB(sky.bottom[0] / 255, sky.bottom[1] / 255, sky.bottom[2] / 255);
+  scene.fog.color.setRGB(sky.bottom[0] / 255, sky.bottom[1] / 255, sky.bottom[2] / 255);
+  scene.fog.density = 0.02 - progress * 0.018;
+
+  // stars fade in once above the troposphere; hemisphere light dims as we
+  // leave atmosphere (no more scattered daylight to bounce off objects)
+  starMat.opacity = Math.max(0, (progress - 0.3) / 0.4) * 0.9;
+  hemi.intensity = 1.1 - progress * 0.7;
+  sun.intensity = 1.4 - progress * 0.3;
+
+  // launch pad fades out (moves below the horizon) once the climb begins
+  padGroup.visible = progress < 0.1;
+  padGroup.position.y = -6 - Math.max(0, progress - 0.02) * 40;
+
+  // satellites drift once above the stratosphere
+  const satAlpha = Math.max(0, Math.min(1, (progress - 0.45) / 0.2));
+  for (const s of satellites) {
+    s.visible = satAlpha > 0.01;
+    s.userData.angle += s.userData.speed * dt;
+    s.position.set(
+      Math.cos(s.userData.angle) * s.userData.radius,
+      s.userData.height + Math.sin(t * 0.3 + s.userData.angle) * 1.2,
+      Math.sin(s.userData.angle) * s.userData.radius - 20
+    );
+    s.rotation.y = -s.userData.angle;
+  }
+
+  // alien + mystery artifact appear deep in space
+  alienGroup.visible = progress > 0.78;
+  alienGroup.position.y = 12 + Math.sin(t * 0.4) * 0.6;
+  artifactGroup.visible = progress > 0.85;
+  artifactGroup.rotation.y = t * 0.15;
+  artifactGroup.position.y = 10 + Math.sin(t * 0.25 + 1) * 1;
+
+  // Chalkstronaut position + tilt
+  if (chalkstronautSprite) {
+    chalkstronautSprite.position.set(Math.sin(t * 0.4) * (phaseState === "live" ? 0.4 : 0), astronautY, 0);
+    chalkstronautSprite.material.rotation = phaseState === "crashed"
+      ? -Math.min((performance.now() - (crashedAt || performance.now())) / 260, 1) * 1.1
+      : Math.sin(t * 1.1) * 0.06;
+    thrusterLight.position.copy(chalkstronautSprite.position).y -= 1;
+    thrusterLight.intensity = phaseState === "live" ? 2.2 + Math.sin(t * 20) * 0.4 : 0;
+    if (phaseState === "live" && Math.random() < 0.6) {
+      const origin = chalkstronautSprite.position.clone();
+      origin.y -= 1.6;
+      emitParticles(thrusterParticles, origin, 2, 0.6, 1.6);
+    }
+  }
+
+  updateParticles(thrusterParticles, dt);
+  updateParticles(crashParticles, dt);
+
+  // camera: slow cinematic dolly that follows the astronaut's altitude,
+  // plus a shake impulse on crash
+  const camShakeX = shakeAmount > 0.01 ? (Math.random() - 0.5) * shakeAmount : 0;
+  const camShakeY = shakeAmount > 0.01 ? (Math.random() - 0.5) * shakeAmount : 0;
+  shakeAmount *= 0.9;
+  const targetCamY = 6 + astronautY * 0.55;
+  camera.position.set(Math.sin(t * 0.06) * 3 + camShakeX, targetCamY + camShakeY, 24 - progress * 6);
+  camera.lookAt(0, astronautY * 0.6 + 6, 0);
+
+  composer.render();
+  requestAnimationFrame(frame);
+}
+resize();
+requestAnimationFrame(frame);
+
+// ── chain plumbing ──────────────────────────────────────────────────────
+let provider, signer, crash, abi;
+let pollTimer = null;
+let betAmount = "0.01";
+let currentRoundIdCache = null;
+let lastMult = 1;
+let attemptedLockThisRound = false;
+let attemptedRevealThisRound = false;
+let attemptedRegisterThisRound = false;
+let attemptedClaimThisRound = false;
+let outcomeShownForRound = null;
+
+function toast(msg) {
+  const el = document.createElement("div");
+  el.textContent = msg;
+  const log = $("toastLog");
+  log.prepend(el);
+  while (log.children.length > 6) log.removeChild(log.lastChild);
 }
 
 async function loadAbi() {
   const res = await fetch("plankcrash-abi.json");
   abi = await res.json();
+}
+
+document.querySelectorAll(".chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+    chip.classList.add("active");
+    betAmount = chip.dataset.amt;
+  });
+});
+
+$("gearBtn").addEventListener("click", () => {
+  $("sheetBackdrop").classList.add("show");
+  $("sheet").classList.add("show");
+});
+$("sheetClose").addEventListener("click", closeSheet);
+$("sheetBackdrop").addEventListener("click", closeSheet);
+function closeSheet() {
+  $("sheetBackdrop").classList.remove("show");
+  $("sheet").classList.remove("show");
 }
 
 $("connectBtn").addEventListener("click", async () => {
@@ -156,106 +662,239 @@ $("connectBtn").addEventListener("click", async () => {
     const address = $("addr").value.trim();
     if (!ethers.isAddress(address)) throw new Error("Bad contract address");
     crash = new ethers.Contract(address, abi, signer);
-    crashRead = crash;
-    $("myAddr").textContent = signer.address;
-    log("Connected as " + signer.address);
+    $("connDot").classList.add("on");
+    toast("Connected " + signer.address.slice(0, 8) + "…");
+    closeSheet();
     startPolling();
   } catch (err) {
-    log("Connect failed: " + err.message);
+    toast("Connect failed: " + err.message);
   }
 });
 
-async function refresh() {
-  if (!crashRead) return;
+function bpsToXStr(bps) {
+  const v = Number(bps) / 10000;
+  return v.toFixed(2);
+}
+
+function setMultReadout(xStr, cls) {
+  const el = $("multReadout");
+  el.className = "mult " + cls;
+  const [whole, frac] = xStr.split(".");
+  el.innerHTML = whole + '<span class="x">.' + (frac || "00") + "x</span>";
+}
+
+function showOutcome(kind, text) {
+  const b = $("outcomeBanner");
+  b.className = "outcome-banner show " + kind;
+  b.textContent = text;
+}
+function hideOutcome() {
+  const b = $("outcomeBanner");
+  b.className = "outcome-banner";
+}
+
+// ── primary button state machine ────────────────────────────────────────
+const primaryBtn = $("primaryBtn");
+let uiState = "disconnected"; // disconnected | betting-open | waiting | live-hold | cashed | settling
+
+primaryBtn.addEventListener("click", async () => {
+  if (uiState === "betting-open") {
+    primaryBtn.disabled = true;
+    primaryBtn.textContent = "PLACING BET…";
+    try {
+      const tx = await crash.placeBet({ value: ethers.parseEther(betAmount) });
+      await tx.wait();
+      toast("Bet placed: " + betAmount + " ETH");
+    } catch (err) {
+      toast("Bet failed: " + (err.shortMessage || err.message));
+    }
+    refresh();
+  } else if (uiState === "live-hold") {
+    primaryBtn.disabled = true;
+    primaryBtn.textContent = "CASHING OUT…";
+    try {
+      const roundId = await crash.currentRoundId();
+      const tx = await crash.cashOut(roundId);
+      await tx.wait();
+      toast("Cashed out at " + bpsToXStr(await crash.liveMultiplierBps(roundId)) + "x");
+    } catch (err) {
+      toast("Cash out failed: " + (err.shortMessage || err.message));
+    }
+    refresh();
+  }
+});
+
+function updatePrimaryButton(state, opts = {}) {
+  uiState = state;
+  const chips = document.querySelectorAll(".chip");
+  switch (state) {
+    case "disconnected":
+      primaryBtn.className = "primary-btn"; primaryBtn.disabled = true;
+      primaryBtn.textContent = "CONNECT WALLET"; $("btnSub").textContent = "Tap the gear icon, top right";
+      chips.forEach((c) => (c.disabled = true));
+      break;
+    case "betting-open":
+      primaryBtn.className = "primary-btn"; primaryBtn.disabled = false;
+      primaryBtn.textContent = `LAUNCH · ${betAmount} ETH`;
+      $("btnSub").textContent = opts.sub || "Betting is open";
+      chips.forEach((c) => (c.disabled = false));
+      break;
+    case "waiting":
+      primaryBtn.className = "primary-btn"; primaryBtn.disabled = true;
+      primaryBtn.textContent = "WAITING FOR LAUNCH…";
+      $("btnSub").textContent = opts.sub || "Your bet is locked in";
+      chips.forEach((c) => (c.disabled = true));
+      break;
+    case "live-hold":
+      primaryBtn.className = "primary-btn cashout"; primaryBtn.disabled = false;
+      primaryBtn.textContent = "CASH OUT NOW";
+      $("btnSub").textContent = opts.sub || "";
+      chips.forEach((c) => (c.disabled = true));
+      break;
+    case "cashed":
+      primaryBtn.className = "primary-btn"; primaryBtn.disabled = true;
+      primaryBtn.textContent = "LOCKED IN — WATCHING…";
+      $("btnSub").textContent = opts.sub || "";
+      chips.forEach((c) => (c.disabled = true));
+      break;
+    case "watching":
+      primaryBtn.className = "primary-btn"; primaryBtn.disabled = true;
+      primaryBtn.textContent = "ROUND IN PROGRESS";
+      $("btnSub").textContent = opts.sub || "You'll play next round";
+      chips.forEach((c) => (c.disabled = true));
+      break;
+    case "settling":
+      primaryBtn.className = "primary-btn"; primaryBtn.disabled = true;
+      primaryBtn.textContent = "SETTLING…";
+      $("btnSub").textContent = opts.sub || "";
+      chips.forEach((c) => (c.disabled = true));
+      break;
+  }
+}
+
+// ── keeper: auto lock / auto reveal / auto register / auto claim ────────
+async function keeperTick(round, roundId, blockNum, chainNow) {
   try {
-    const roundId = await crashRead.currentRoundId();
-    const round = await crashRead.currentRound();
-    const [phase, bettingEndsAt, lockBlock, targetBlock, crashMultiplierBps, , pool, distributable] = round;
+    // Gate on the CHAIN's own clock (the contract's real check), not the
+    // browser's Date.now() -- on a locally time-warped dev node those two
+    // clocks can drift arbitrarily far apart, and trusting the client's
+    // clock would make the keeper wait forever even though lockRound()
+    // would already succeed on-chain.
+    if (Number(round.phase) === 0 && Number(round.bettingEndsAt) <= chainNow && !attemptedLockThisRound) {
+      attemptedLockThisRound = true;
+      await (await crash.lockRound()).wait().catch(() => {});
+    }
+    if (Number(round.phase) === 1 && blockNum > Number(round.targetBlock) && !attemptedRevealThisRound) {
+      attemptedRevealThisRound = true;
+      await (await crash.revealCrash(roundId)).wait().catch(() => {});
+    }
+    if (Number(round.phase) === 2 && signer) {
+      const stake = await crash.stakeOf(roundId, signer.address);
+      if (stake > 0n) {
+        const isRegistered = await crash.registered(roundId, signer.address);
+        if (!isRegistered && !attemptedRegisterThisRound && blockNum <= Number(round.registrationDeadlineBlock)) {
+          attemptedRegisterThisRound = true;
+          await (await crash.registerResult(roundId)).wait().catch(() => {});
+        }
+        const isClaimed = await crash.claimed(roundId, signer.address);
+        if (!isClaimed && !attemptedClaimThisRound && blockNum > Number(round.registrationDeadlineBlock)) {
+          attemptedClaimThisRound = true;
+          try {
+            await (await crash.claim(roundId)).wait();
+            await (await crash.withdrawPayments(signer.address)).wait();
+          } catch {
+            /* not a winner -- expected outcome, not an error */
+          }
+        }
+      }
+    }
+  } catch {
+    /* keeper races with other tabs/players -- silent by design */
+  }
+}
+
+async function refresh() {
+  if (!crash) return;
+  try {
+    const roundId = await crash.currentRoundId();
+    const round = await crash.currentRound();
     const blockNum = await provider.getBlockNumber();
+    const chainNow = (await provider.getBlock(blockNum)).timestamp;
 
-    $("roundId").textContent = roundId.toString();
-    $("pool").textContent = ethers.formatEther(pool) + " ETH";
-    $("distributable").textContent = ethers.formatEther(distributable) + " ETH";
-    $("participants").textContent = (await crashRead.participantCount(roundId)).toString();
+    if (currentRoundIdCache !== roundId.toString()) {
+      currentRoundIdCache = roundId.toString();
+      attemptedLockThisRound = false;
+      attemptedRevealThisRound = false;
+      attemptedRegisterThisRound = false;
+      attemptedClaimThisRound = false;
+      hideOutcome();
+    }
 
-    document.querySelectorAll(".phasebar span").forEach((el) => {
-      el.classList.toggle("active", Number(el.dataset.phase) === Number(phase));
-    });
+    $("roundLabel").textContent = "ROUND " + roundId.toString();
+    $("poolStat").textContent = Number(ethers.formatEther(round.pool)).toFixed(3) + " ETH";
+    $("playersStat").textContent = (await crash.participantCount(roundId)).toString();
 
-    const multEl = $("mult");
-    if (Number(phase) === 1) {
-      const live = await crashRead.liveMultiplierBps(roundId);
-      multEl.textContent = bpsToX(live);
-      multEl.className = "mult live";
-      $("timing").textContent = `target block ${targetBlock} (now ${blockNum})`;
-    } else if (Number(phase) === 2 || Number(phase) === 3) {
-      multEl.textContent = crashMultiplierBps > 0n ? bpsToX(crashMultiplierBps) + " CRASHED" : "voided";
-      multEl.className = "mult crashed";
-      $("timing").textContent = "settled";
+    const phase = Number(round.phase);
+    const prevPhaseState = phaseState;
+    phaseState = phase === 0 ? "betting" : phase === 1 ? "live" : "crashed";
+    if (phaseState === "live" && prevPhaseState !== "live") launchAt = performance.now();
+
+    const stake = signer ? await crash.stakeOf(roundId, signer.address) : 0n;
+    const hasStake = stake > 0n;
+    const cashOutBlock = signer ? await crash.cashOutBlockOf(roundId, signer.address) : 0n;
+    const hasCashedOut = cashOutBlock > 0n;
+
+    if (phase === 0) {
+      flightProgress = 0; crashedAt = null;
+      setMultReadout("1.00", "idle");
+      const secsLeft = Math.max(0, Number(round.bettingEndsAt) - chainNow);
+      $("substatus").textContent = secsLeft > 0 ? `LAUNCHING IN ${secsLeft}s` : "LOCKING…";
+      updatePrimaryButton(hasStake ? "waiting" : "betting-open");
+    } else if (phase === 1) {
+      const liveBps = await crash.liveMultiplierBps(roundId);
+      const xStr = bpsToXStr(liveBps);
+      lastMult = Number(xStr);
+      setMultReadout(xStr, "live");
+      flightProgress = Math.min(1, Math.log(Number(xStr)) / Math.log(12));
+      $("substatus").textContent = "IN FLIGHT";
+      if (!hasStake) updatePrimaryButton("watching");
+      else if (hasCashedOut) updatePrimaryButton("cashed", { sub: "Cashed out — waiting for the crash to see the final multiplier" });
+      else updatePrimaryButton("live-hold", { sub: `Staked ${ethers.formatEther(stake)} ETH` });
     } else {
-      multEl.textContent = "waiting…";
-      multEl.className = "mult idle";
-      const secsLeft = Number(bettingEndsAt) - Math.floor(Date.now() / 1000);
-      $("timing").textContent = secsLeft > 0 ? `betting closes in ${secsLeft}s` : "betting closed, lock it";
+      if (crashedAt === null) { crashedAt = performance.now(); shakeAmount = 1.4; spawnParticles(0xff4d6a, 60, 3.5); }
+      const xStr = bpsToXStr(round.crashMultiplierBps);
+      setMultReadout(round.crashMultiplierBps > 0n ? xStr : "0.00", "crashed");
+      $("substatus").textContent = round.crashMultiplierBps > 0n ? "CRASHED" : "VOIDED";
+
+      if (!hasStake) {
+        updatePrimaryButton("watching", { sub: "Next round starts automatically" });
+      } else if (!hasCashedOut) {
+        if (outcomeShownForRound !== currentRoundIdCache) {
+          outcomeShownForRound = currentRoundIdCache;
+          showOutcome("lose", "ROUND LOST — didn't cash out in time");
+        }
+        updatePrimaryButton("settling", { sub: "Next round starts automatically" });
+      } else {
+        const isClaimed = await crash.claimed(roundId, signer.address);
+        if (isClaimed && outcomeShownForRound !== currentRoundIdCache) {
+          outcomeShownForRound = currentRoundIdCache;
+          showOutcome("win", `WON at ${bpsToXStr((await crash.cashOutBlockOf(roundId, signer.address)) > 0n ? round.crashMultiplierBps : 0n)}x`);
+        }
+        updatePrimaryButton("settling", { sub: isClaimed ? "Payout claimed — next round starts automatically" : "Settling your payout automatically…" });
+      }
     }
 
-    $("lockBtn").disabled = Number(phase) !== 0;
-    $("revealBtn").disabled = Number(phase) !== 1;
-
-    if (signer) {
-      const bal = await provider.getBalance(signer.address);
-      $("myBal").textContent = ethers.formatEther(bal) + " ETH";
-      const stake = await crashRead.stakeOf(roundId, signer.address);
-      $("myStake").textContent = ethers.formatEther(stake) + " ETH";
-      const payments = await crashRead.payments(signer.address);
-      $("myPayments").textContent = ethers.formatEther(payments) + " ETH";
-    }
+    await keeperTick(round, roundId, blockNum, chainNow);
   } catch (err) {
-    // transient during round transitions -- not logged every poll
+    /* transient during round transitions */
   }
 }
 
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   refresh();
-  pollTimer = setInterval(refresh, 1500);
+  pollTimer = setInterval(refresh, 1200);
 }
-
-async function withErrors(fn) {
-  try {
-    const tx = await fn();
-    log("Sent " + tx.hash.slice(0, 10) + "…");
-    await tx.wait();
-    log("Confirmed.");
-    refresh();
-  } catch (err) {
-    const reason = err.shortMessage || err.reason || err.message;
-    log("Reverted: " + reason);
-  }
-}
-
-$("betBtn").addEventListener("click", () => {
-  const amount = $("betAmount").value.trim();
-  withErrors(() => crash.placeBet({ value: ethers.parseEther(amount) }));
-});
-$("cashOutBtn").addEventListener("click", async () => {
-  const roundId = await crashRead.currentRoundId();
-  withErrors(() => crash.cashOut(roundId));
-});
-$("lockBtn").addEventListener("click", () => withErrors(() => crash.lockRound()));
-$("revealBtn").addEventListener("click", async () => {
-  const roundId = await crashRead.currentRoundId();
-  withErrors(() => crash.revealCrash(roundId));
-});
-$("registerBtn").addEventListener("click", async () => {
-  const roundId = await crashRead.currentRoundId();
-  withErrors(() => crash.registerResult(roundId));
-});
-$("claimBtn").addEventListener("click", async () => {
-  const roundId = await crashRead.currentRoundId();
-  withErrors(() => crash.claim(roundId));
-});
-$("withdrawBtn").addEventListener("click", () => withErrors(() => crash.withdrawPayments(signer.address)));
 </script>
 </body>
 </html>
