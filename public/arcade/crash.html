@@ -130,26 +130,53 @@
   .sheet-backdrop.show { opacity: 1; pointer-events: auto; }
   .sheet {
     position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(0.96);
-    width: min(420px, 92vw); background: var(--bg-2); border: 1px solid var(--line);
-    border-radius: 16px; padding: 20px; z-index: 41; opacity: 0; pointer-events: none;
+    width: min(440px, 92vw); max-height: 86vh; overflow-y: auto;
+    background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: 16px; padding: 22px; z-index: 41; opacity: 0; pointer-events: none;
     transition: opacity .2s, transform .2s;
   }
   .sheet.show { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
-  .sheet h2 { margin: 0 0 4px; font-size: 15px; font-family: var(--font-display); }
-  .sheet .hint { font-size: 11.5px; color: var(--ink-dim); margin-bottom: 14px; }
-  .sheet label { display: block; font-size: 11px; color: var(--ink-dim); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .sheet h2 { margin: 0 0 4px; font-size: 16px; font-family: var(--font-display); }
+  .sheet .hint { font-size: 11.5px; color: var(--ink-dim); margin-bottom: 18px; line-height: 1.5; }
+  .sheet label { display: block; font-size: 11px; color: var(--ink); font-weight: 600; margin: 0 0 3px; text-transform: uppercase; letter-spacing: 0.06em; }
   .sheet input {
     width: 100%; padding: 10px 11px; border-radius: 8px; border: 1px solid var(--line);
     background: var(--bg-1); color: var(--ink); font-family: var(--font-mono); font-size: 12.5px;
   }
-  .sheet .row { display: flex; gap: 8px; margin-top: 14px; }
+  .sheet .row { display: flex; gap: 8px; margin-top: 18px; }
   .sheet button {
-    flex: 1; padding: 10px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; font-size: 13px;
+    flex: 1; padding: 11px; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; font-size: 13px;
   }
   .sheet .connect { background: var(--accent); color: #10131c; }
+  .sheet .connect:disabled { background: var(--bg-1); color: var(--ink-dim); border: 1px solid var(--line); cursor: default; }
   .sheet .close { background: var(--bg-1); color: var(--ink-dim); border: 1px solid var(--line); }
   .conn-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-dim); margin-right: 6px; }
   .conn-dot.on { background: var(--win); box-shadow: 0 0 8px var(--win); }
+
+  .step { display: flex; gap: 12px; margin-bottom: 16px; }
+  .step-num {
+    flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--bg-1);
+    border: 1px solid var(--line); color: var(--ink-dim); font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; font-family: var(--font-mono);
+  }
+  .step-body { flex: 1; min-width: 0; }
+  .field-hint { font-size: 10.5px; color: var(--ink-dim); margin-bottom: 6px; }
+  .field-hint code { color: var(--ink); }
+
+  .account-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .account-card {
+    padding: 9px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg-1); cursor: pointer; text-align: left;
+  }
+  .account-card:hover { border-color: var(--accent); }
+  .account-card.selected { border-color: var(--accent); background: rgba(255,90,60,0.1); }
+  .account-card .name { font-size: 12px; font-weight: 700; color: var(--ink); }
+  .account-card .addr { font-size: 10px; color: var(--ink-dim); font-family: var(--font-mono); margin-top: 2px; }
+  .account-card.custom { grid-column: 1 / -1; }
+
+  .advanced { margin-top: 4px; }
+  .advanced summary { font-size: 11px; color: var(--ink-dim); cursor: pointer; letter-spacing: 0.04em; }
+  .advanced input { margin-top: 8px; }
 
   .toast-log {
     position: fixed; left: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
@@ -197,17 +224,36 @@
 
 <div class="sheet-backdrop" id="sheetBackdrop"></div>
 <div class="sheet" id="sheet">
-  <h2><span class="conn-dot" id="connDot"></span>Local connection</h2>
-  <div class="hint">Talks directly to a local Hardhat node — not a real chain. Run <code>scripts/local-crash-setup.ts</code> first, then paste the printed address below.</div>
-  <label>RPC URL</label>
-  <input id="rpc" value="http://127.0.0.1:8545" />
-  <label>PlankCrash contract address</label>
-  <input id="addr" placeholder="0x..." />
-  <label>Private key (local test account only)</label>
-  <input id="pk" placeholder="0xac09...ff80" />
+  <h2><span class="conn-dot" id="connDot"></span>Connect to play</h2>
+  <div class="hint">Local Hardhat node only — never a real chain. Run <code>scripts/local-crash-setup.ts</code>, then paste what it prints below.</div>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <label>Contract address</label>
+      <div class="field-hint">Printed as <code>CRASH_ADDRESS</code> by the setup script</div>
+      <input id="addr" placeholder="0x..." autocomplete="off" spellcheck="false" />
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <label>Play as</label>
+      <div class="field-hint">One of the setup script's local test accounts — never real funds</div>
+      <div class="account-grid" id="accountGrid"></div>
+      <input id="pk" class="custom-pk" placeholder="0x… custom private key" style="display:none" autocomplete="off" spellcheck="false" />
+    </div>
+  </div>
+
+  <details class="advanced">
+    <summary>Advanced — RPC URL</summary>
+    <input id="rpc" value="http://127.0.0.1:8545" autocomplete="off" spellcheck="false" />
+  </details>
+
   <div class="row">
     <button class="close" id="sheetClose">Close</button>
-    <button class="connect" id="connectBtn">Connect</button>
+    <button class="connect" id="connectBtn" disabled>Select an address first</button>
   </div>
 </div>
 
@@ -915,9 +961,61 @@ document.querySelectorAll(".chip").forEach((chip) => {
   });
 });
 
+// The exact keys printed by scripts/local-crash-setup.ts -- derived from
+// the standard Hardhat mnemonic and verified against this node's real
+// reported addresses (a from-memory copy of these was wrong once this
+// session; never repeat that, always derive/verify, never guess).
+const LOCAL_ACCOUNTS = [
+  { name: "Deployer", address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", pk: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" },
+  { name: "Alice", address: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", pk: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a" },
+  { name: "Bob", address: "0x90F79bf6EB2c4f870365E785982E1f101E93b906", pk: "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6" },
+  { name: "Carol", address: "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65", pk: "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a" },
+];
+let selectedAccount = null;
+
+const accountGrid = $("accountGrid");
+LOCAL_ACCOUNTS.forEach((acc) => {
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = "account-card";
+  card.innerHTML = `<div class="name">${acc.name}</div><div class="addr">${acc.address.slice(0, 6)}…${acc.address.slice(-4)}</div>`;
+  card.addEventListener("click", () => {
+    selectedAccount = acc;
+    $("pk").style.display = "none";
+    $("pk").value = "";
+    document.querySelectorAll(".account-card").forEach((c) => c.classList.remove("selected"));
+    card.classList.add("selected");
+    updateConnectGate();
+  });
+  accountGrid.appendChild(card);
+});
+const customCard = document.createElement("button");
+customCard.type = "button";
+customCard.className = "account-card custom";
+customCard.innerHTML = `<div class="name">Custom private key…</div>`;
+customCard.addEventListener("click", () => {
+  selectedAccount = null;
+  document.querySelectorAll(".account-card").forEach((c) => c.classList.remove("selected"));
+  customCard.classList.add("selected");
+  $("pk").style.display = "block";
+  updateConnectGate();
+});
+accountGrid.appendChild(customCard);
+
+function updateConnectGate() {
+  const addrOk = ethers.isAddress($("addr").value.trim());
+  const pkOk = selectedAccount || /^0x[0-9a-fA-F]{64}$/.test($("pk").value.trim());
+  const btn = $("connectBtn");
+  btn.disabled = !(addrOk && pkOk);
+  btn.textContent = !addrOk ? "Enter a contract address" : !pkOk ? "Select an address first" : "Connect";
+}
+$("addr").addEventListener("input", updateConnectGate);
+$("pk").addEventListener("input", updateConnectGate);
+
 $("gearBtn").addEventListener("click", () => {
   $("sheetBackdrop").classList.add("show");
   $("sheet").classList.add("show");
+  updateConnectGate();
 });
 $("sheetClose").addEventListener("click", closeSheet);
 $("sheetBackdrop").addEventListener("click", closeSheet);
@@ -930,12 +1028,13 @@ $("connectBtn").addEventListener("click", async () => {
   try {
     await loadAbi();
     provider = new ethers.JsonRpcProvider($("rpc").value.trim());
-    signer = new ethers.Wallet($("pk").value.trim(), provider);
+    const pk = selectedAccount ? selectedAccount.pk : $("pk").value.trim();
+    signer = new ethers.Wallet(pk, provider);
     const address = $("addr").value.trim();
     if (!ethers.isAddress(address)) throw new Error("Bad contract address");
     crash = new ethers.Contract(address, abi, signer);
     $("connDot").classList.add("on");
-    toast("Connected " + signer.address.slice(0, 8) + "…");
+    toast("Connected as " + (selectedAccount ? selectedAccount.name : signer.address.slice(0, 8) + "…"));
     closeSheet();
     startPolling();
   } catch (err) {
