@@ -48,16 +48,20 @@ export default function MoonPayPanel() {
   if (!status?.enabled || !status?.configured) return null;
 
   async function handleOpen() {
-    if (!account) {
-      await walletConnect();
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
+      // One click end to end: if there's no wallet yet, connect() first and
+      // use the address it resolves to directly, rather than stopping and
+      // making the visitor click a second time once `account` re-renders.
+      // connect() throws if the visitor closes the modal or rejects the
+      // request (lib/wallet-context.tsx) -- that propagates to the catch
+      // below and shows a real error, not a silent no-op.
+      const walletAddress = account ?? (await walletConnect());
+
       const endpoint = direction === "buy" ? "/api/moonpay/widget-url" : "/api/moonpay/sell-widget-url";
       const body =
-        direction === "buy" ? { walletAddress: account } : { refundWalletAddress: account };
+        direction === "buy" ? { walletAddress } : { refundWalletAddress: walletAddress };
       const resp = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -116,7 +120,7 @@ export default function MoonPayPanel() {
 
       {!account ? (
         <p className="rounded-lg border border-line bg-panel-strong px-3 py-2 text-[0.72rem] text-cream-muted">
-          Connect your wallet to continue — MoonPay delivers to (or refunds from) that exact address, never anywhere else.
+          One click connects your wallet and opens MoonPay — it always delivers to (or refunds from) that exact address, never anywhere else.
         </p>
       ) : null}
 
@@ -133,9 +137,7 @@ export default function MoonPayPanel() {
         className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md bg-gold-500 px-3 text-xs font-bold uppercase tracking-wide text-on-gold transition-colors hover:bg-gold-400 disabled:opacity-60"
       >
         {loading ? (
-          "Opening…"
-        ) : !account ? (
-          "Connect wallet"
+          account ? "Opening…" : "Connecting…"
         ) : (
           <>
             {direction === "buy" ? "Open MoonPay checkout" : "Open MoonPay cash-out"}
