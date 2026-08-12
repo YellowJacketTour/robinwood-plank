@@ -435,6 +435,13 @@ chalkstronautImg.onload = () => {
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true });
   chalkstronautSprite = new THREE.Sprite(mat);
   chalkstronautSprite.scale.set(5.4, 5.4, 1);
+  // Explicit renderOrder, not left to scene-insertion order: the sprite
+  // loads asynchronously and could get added to the scene before OR
+  // after the particle systems depending on network/cache timing, which
+  // made the thruster glow render in front of the character on some
+  // loads and behind it on others. Transparent objects at similar depth
+  // don't reliably self-sort in three.js -- renderOrder does.
+  chalkstronautSprite.renderOrder = 10;
   scene.add(chalkstronautSprite);
 };
 chalkstronautImg.src = "art/Chalkstronaut4.png";
@@ -464,6 +471,7 @@ function makeParticleSystem(maxCount, color) {
   });
   const points = new THREE.Points(geo, mat);
   points.frustumCulled = false;
+  points.renderOrder = 5; // behind the sprite (renderOrder 10) regardless of scene-insertion timing
   scene.add(points);
   return { points, geo, pos, alpha, vel: new Float32Array(maxCount * 3), life: new Float32Array(maxCount), cursor: 0, maxCount };
 }
