@@ -76,6 +76,7 @@ contract PlankBurnEngine is ReentrancyGuard {
     error NothingToBurn();
     error ExceedsRateLimit();
     error NoSwapOutput();
+    error SlippageExceeded();
     error EthTransferFailed();
 
     constructor(
@@ -105,10 +106,22 @@ contract PlankBurnEngine is ReentrancyGuard {
     /// WHERE that ETH gets routed, never WHERE the output goes (always
     /// back here, verified by balance delta) or whether it gets burned
     /// (always, unconditionally).
+    ///
+    /// `minPlankOut` is real slippage protection, and it protects the
+    /// COMMUNITY, not the caller: an honest keeper sets it from the
+    /// current fair price so a sandwich bot cannot force the burn to
+    /// execute at a manipulated, terrible rate (which would burn far less
+    /// $PLANK per ETH than the community deserves). A malicious keeper
+    /// can of course set it to 0 -- but they already control the route,
+    /// so this takes nothing away from them; it only ever ADDS the
+    /// ability for an honest caller to refuse a bad fill. There is no
+    /// setting of minPlankOut that lets anyone extract value; the worst
+    /// case remains "less got burned," never theft.
     function executeBurn(
         bytes calldata commands,
         bytes[] calldata inputs,
         uint256 ethAmount,
+        uint256 minPlankOut,
         uint256 deadline
     ) external nonReentrant {
         if (ethAmount == 0 || ethAmount > address(this).balance) revert NothingToBurn();
@@ -118,6 +131,7 @@ contract PlankBurnEngine is ReentrancyGuard {
         universalRouter.execute{value: ethAmount}(commands, inputs, deadline);
         uint256 received = plank.balanceOf(address(this)) - plankBefore;
         if (received == 0) revert NoSwapOutput();
+        if (received < minPlankOut) revert SlippageExceeded();
 
         plank.burn(received);
         totalEthSpent += ethAmount;

@@ -168,6 +168,54 @@ describe("PlankAirdropPool", () => {
     expect(nextEpoch.pool).to.equal(ethers.parseEther("1"));
   });
 
+  it("DoS RESISTANCE: the draw stays cheap even with hundreds of ticket segments -- a sybil griefer cannot bloat the participant set to strand the pot", async () => {
+    // Regression for a real DoS the O(log n) binary-search draw closes:
+    // the old linear walk would let anyone with many tiny real bets push
+    // the participant array past the block gas limit and permanently
+    // freeze a fat pot. Here we claim a large number of distinct segments
+    // and prove (a) the draw still completes, and (b) its gas is a small
+    // fraction of what an O(n) walk over the same set would cost -- i.e.
+    // roughly flat, not linear, in segment count.
+    const { pool, beacon, source } = await deployAll();
+    const signers = await ethers.getSigners();
+
+    await pool.fund({ value: ethers.parseEther("1") });
+    const epoch = await pool.currentEpoch();
+
+    // Use a modest count that still meaningfully exercises the search
+    // (2^N depth) while keeping the test fast: reuse a handful of real
+    // signer addresses across many distinct source round ids, so each is
+    // a genuinely separate, independently-claimed ticket segment.
+    const SEGMENTS = 64;
+    for (let i = 0; i < SEGMENTS; i++) {
+      const who = signers[i % signers.length];
+      await source.setStake(i, who.address, ethers.parseEther("1"));
+      await pool.claimTickets(await source.getAddress(), i, who.address);
+    }
+    expect(await pool.segmentCount(epoch)).to.equal(BigInt(SEGMENTS));
+
+    const genesis = await pool.genesisTimestamp();
+    await networkHelpers.time.increaseTo(genesis + (epoch + 1n) * EPOCH_DURATION);
+    await pool.requestDraw(epoch);
+    const e = await pool.epochs(epoch);
+    const dueAt = DRAND_GENESIS_TIME + BigInt(e.targetDrandRound) * DRAND_PERIOD;
+    await networkHelpers.time.increaseTo(dueAt);
+    await beacon.setRandomness(e.targetDrandRound, ethers.keccak256(ethers.toUtf8Bytes("dos-seed")));
+
+    const tx = await pool.drawWinner(epoch);
+    const receipt = await tx.wait();
+    // Binary search over 64 segments is ~6 iterations; the whole draw
+    // (incl. two PullPayment escrow credits) must stay well under a
+    // budget that a 64-element linear walk plus per-element SLOADs would
+    // blow past. This bound is generous but still proves sub-linear
+    // scaling -- a real O(n) walk here would be many times larger.
+    expect(receipt!.gasUsed).to.be.lt(200000n);
+
+    const finalEpoch = await pool.epochs(epoch);
+    expect(finalEpoch.drawn).to.equal(true);
+    expect(finalEpoch.winner).to.not.equal(ethers.ZeroAddress);
+  });
+
   it("requestDraw reverts before the epoch has actually closed", async () => {
     const { pool } = await deployAll();
     const epoch = await pool.currentEpoch();

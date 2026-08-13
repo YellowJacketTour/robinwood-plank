@@ -45,19 +45,21 @@ interface IWagerSource {
  * compulsive uncertainty. This is a real design constraint, not
  * decoration -- do not "improve" this into a random-timing trigger.
  *
- * WHY THE DRAW IS AN O(n) WALK OVER AN EPOCH'S PARTICIPANTS, DISCLOSED
- * HONESTLY: on-chain weighted random selection over a dynamic, unbounded
- * set of participants has no O(1) primitive without a much heavier
- * structure (e.g. a Fenwick tree over ticket weights). This uses the
- * simple, standard, auditable pattern instead: a per-epoch participant
- * array appended once per new address, walked cumulatively at draw time
- * until the drawn ticket number is covered. Gas cost is real and scales
- * with distinct participants in that epoch -- bounded by epochDuration
- * being generous (daily+), not by any cap here. If a future epoch's
- * participant count ever makes this prohibitively expensive, that is a
- * real, disclosed limitation to revisit (e.g. a resumable/chunked draw),
- * not a silent failure: drawWinner() simply costs more gas, it does not
- * misbehave.
+ * WHY THE DRAW IS O(log n), NOT O(n) -- A REAL DoS FIX, NOT PREMATURE
+ * OPTIMISATION: an earlier version walked the whole participant array at
+ * draw time. Because getting into that array only requires a real,
+ * nonzero stake in an allowlisted source, a determined griefer could
+ * place many tiny real bets across many addresses, bloat the array past
+ * the block gas limit, and PERMANENTLY strand a fat airdrop pot (there
+ * is a void path for a zero-participant epoch, none for a
+ * too-many-participants one). That is a real, if expensive, denial of
+ * service against the pot. The fix: tickets are recorded as an
+ * append-only array of cumulative checkpoints (each claim appends one
+ * segment whose `cumulativeEnd` is the running ticket total), and the
+ * draw does a BINARY SEARCH for the segment covering the drawn ticket
+ * number -- ~log2(n) SLOADs, flat regardless of how many segments a
+ * griefer manufactures. Nothing is ever iterated in full, so no amount
+ * of sybil claiming can push the draw past the gas limit.
  */
 contract PlankAirdropPool is ReentrancyGuard, PullPayment {
     IDrandBeacon public immutable beacon;
@@ -84,9 +86,19 @@ contract PlankAirdropPool is ReentrancyGuard, PullPayment {
         address winner;
     }
 
+    /// One per claimTickets() call: `player` earned tickets covering the
+    /// half-open ticket range [cumulativeEnd - <this claim's amount>,
+    /// cumulativeEnd). cumulativeEnd is strictly increasing (a zero-stake
+    /// claim reverts), so the array is sorted and binary-searchable.
+    struct TicketSegment {
+        address player;
+        uint256 cumulativeEnd;
+    }
+
     mapping(uint256 => Epoch) public epochs;
-    mapping(uint256 => address[]) private _participants;
+    mapping(uint256 => TicketSegment[]) private _segments;
     mapping(uint256 => mapping(address => uint256)) public ticketsOf;
+    mapping(uint256 => uint256) public distinctParticipants;
     mapping(uint256 => mapping(address => bool)) private _hasParticipated;
     // (source, sourceRoundId, player) -> claimed. Prevents the same real
     // bet from ever being credited as tickets more than once.
@@ -113,8 +125,6 @@ contract PlankAirdropPool is ReentrancyGuard, PullPayment {
     error DrawNotYetRequested();
     error DrawAlreadyRequested();
     error RandomnessNotYetAvailable();
-    error NoTickets();
-    error EpochNotYetDrawable();
 
     constructor(
         address beacon_,
@@ -173,12 +183,16 @@ contract PlankAirdropPool is ReentrancyGuard, PullPayment {
         ticketsClaimed[claimId] = true;
 
         uint256 epoch = currentEpoch();
+        Epoch storage e = epochs[epoch];
+        uint256 newCumulativeEnd = e.totalTickets + amount;
+
+        _segments[epoch].push(TicketSegment({player: player, cumulativeEnd: newCumulativeEnd}));
+        e.totalTickets = newCumulativeEnd;
+        ticketsOf[epoch][player] += amount;
         if (!_hasParticipated[epoch][player]) {
             _hasParticipated[epoch][player] = true;
-            _participants[epoch].push(player);
+            distinctParticipants[epoch] += 1;
         }
-        ticketsOf[epoch][player] += amount;
-        epochs[epoch].totalTickets += amount;
         emit TicketsClaimed(epoch, source, sourceRoundId, player, amount);
     }
 
@@ -196,12 +210,12 @@ contract PlankAirdropPool is ReentrancyGuard, PullPayment {
     }
 
     /// Permissionless. Reads the shared beacon's already-verified
-    /// randomness for the committed round and performs the weighted
-    /// draw -- see this file's header for the real, disclosed O(n) cost
-    /// of the walk. An epoch with zero tickets is voided (its pool rolls
-    /// forward into the NEXT epoch's pool rather than being stranded),
-    /// exactly mirroring the crash games' own under-threshold void +
-    /// carry-forward pattern.
+    /// randomness for the committed round and performs the O(log n)
+    /// weighted draw (see this file's header for why it's a binary
+    /// search, not a walk). An epoch with zero tickets is voided (its
+    /// pool rolls forward into the NEXT epoch's pool rather than being
+    /// stranded), exactly mirroring the crash games' own under-threshold
+    /// void + carry-forward pattern.
     function drawWinner(uint256 epoch) external nonReentrant {
         Epoch storage e = epochs[epoch];
         if (!e.drawRequested) revert DrawNotYetRequested();
@@ -220,16 +234,7 @@ contract PlankAirdropPool is ReentrancyGuard, PullPayment {
         if (randomness == bytes32(0)) revert RandomnessNotYetAvailable();
 
         uint256 draw = uint256(randomness) % e.totalTickets;
-        address[] storage participants = _participants[epoch];
-        address winner = participants[participants.length - 1];
-        uint256 cumulative = 0;
-        for (uint256 i = 0; i < participants.length; i++) {
-            cumulative += ticketsOf[epoch][participants[i]];
-            if (draw < cumulative) {
-                winner = participants[i];
-                break;
-            }
-        }
+        address winner = _segmentOwnerOf(epoch, draw);
 
         e.drawn = true;
         e.winner = winner;
@@ -242,7 +247,35 @@ contract PlankAirdropPool is ReentrancyGuard, PullPayment {
         emit WinnerDrawn(epoch, winner, payout, drawerReward);
     }
 
+    /// Binary search for the segment whose half-open range covers ticket
+    /// number `draw` (0-indexed, in [0, totalTickets)). Segments'
+    /// cumulativeEnd values are strictly increasing, so this finds the
+    /// first segment with cumulativeEnd > draw -- its owner holds ticket
+    /// `draw`. ~log2(segmentCount) SLOADs; never iterates the full array.
+    function _segmentOwnerOf(uint256 epoch, uint256 draw) private view returns (address) {
+        TicketSegment[] storage segs = _segments[epoch];
+        uint256 lo = 0;
+        uint256 hi = segs.length; // exclusive
+        while (lo < hi) {
+            uint256 mid = (lo + hi) / 2;
+            if (segs[mid].cumulativeEnd > draw) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        return segs[lo].player;
+    }
+
+    /// Distinct addresses that hold tickets this epoch (for display). NOT
+    /// the draw's cost basis -- the draw is O(log segmentCount), not O(this).
     function participantCount(uint256 epoch) external view returns (uint256) {
-        return _participants[epoch].length;
+        return distinctParticipants[epoch];
+    }
+
+    /// Number of ticket segments (claims) this epoch -- the array the
+    /// binary-search draw runs over.
+    function segmentCount(uint256 epoch) external view returns (uint256) {
+        return _segments[epoch].length;
     }
 }

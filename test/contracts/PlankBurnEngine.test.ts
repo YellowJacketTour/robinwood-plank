@@ -62,7 +62,9 @@ describe("PlankBurnEngine", () => {
     const expectedKeeperReward = (ethAmount * KEEPER_REWARD_BPS) / 10000n;
 
     const keeperBefore = await ethers.provider.getBalance(keeper.address);
-    const tx = await engine.connect(keeper).executeBurn("0x", [], ethAmount, Math.floor(Date.now() / 1000) + 3600);
+    const tx = await engine
+      .connect(keeper)
+      .executeBurn("0x", [], ethAmount, expectedPlankOut, Math.floor(Date.now() / 1000) + 3600);
     const receipt = await tx.wait();
     const gasCost = receipt!.gasUsed * receipt!.gasPrice;
 
@@ -84,7 +86,7 @@ describe("PlankBurnEngine", () => {
     await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
 
     await expect(
-      engine.executeBurn("0x", [], ethers.parseEther("0.1"), Math.floor(Date.now() / 1000) + 3600)
+      engine.executeBurn("0x", [], ethers.parseEther("0.1"), 0n, Math.floor(Date.now() / 1000) + 3600)
     ).to.be.revertedWithCustomError(engine, "NoSwapOutput");
   });
 
@@ -93,14 +95,26 @@ describe("PlankBurnEngine", () => {
     await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("5") });
 
     await expect(
-      engine.executeBurn("0x", [], MAX_ETH_PER_CALL + 1n, Math.floor(Date.now() / 1000) + 3600)
+      engine.executeBurn("0x", [], MAX_ETH_PER_CALL + 1n, 0n, Math.floor(Date.now() / 1000) + 3600)
     ).to.be.revertedWithCustomError(engine, "ExceedsRateLimit");
   });
 
   it("reverts if the engine doesn't hold enough ETH to cover the requested amount", async () => {
     const { engine } = await deployAll();
     await expect(
-      engine.executeBurn("0x", [], ethers.parseEther("0.01"), Math.floor(Date.now() / 1000) + 3600)
+      engine.executeBurn("0x", [], ethers.parseEther("0.01"), 0n, Math.floor(Date.now() / 1000) + 3600)
     ).to.be.revertedWithCustomError(engine, "NothingToBurn");
+  });
+
+  it("reverts if the real swap output falls below minPlankOut -- honest slippage protection against a manipulated fill", async () => {
+    const { engine, deployer, keeper } = await deployAll();
+    await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
+
+    const ethAmount = ethers.parseEther("0.1");
+    const realOut = ethAmount * PLANK_OUT_PER_WEI;
+    // Demand strictly more than the route will actually produce.
+    await expect(
+      engine.connect(keeper).executeBurn("0x", [], ethAmount, realOut + 1n, Math.floor(Date.now() / 1000) + 3600)
+    ).to.be.revertedWithCustomError(engine, "SlippageExceeded");
   });
 });
