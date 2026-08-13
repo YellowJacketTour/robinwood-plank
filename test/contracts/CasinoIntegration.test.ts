@@ -27,6 +27,9 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
   const MAX_AWAIT_BLOCKS = 50;
   const EPOCH_SECONDS = 86400n;
   const MOCK_PLANK_PER_WEI = 1000n;
+  const BALL_RANGE = 26n;
+  const JACKPOT_BALL = 8n;
+  const CONSOLATION_BPS = 500n;
 
   async function deployCasino() {
     const [deployer, treasury, alice, bob, keeper] = await ethers.getSigners();
@@ -47,8 +50,17 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
     const predictedCrash = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 2 });
 
     const airdropPool: any = await (
-      await ethers.getContractFactory("PlankAirdropPool")
-    ).deploy(await beacon.getAddress(), [predictedCrash], DRAND_GENESIS, EPOCH_SECONDS, 200n);
+      await ethers.getContractFactory("PlankPowerboard")
+    ).deploy({
+      beacon: await beacon.getAddress(),
+      allowedSources: [predictedCrash],
+      genesisTimestamp: DRAND_GENESIS,
+      epochDuration: EPOCH_SECONDS,
+      drawerRewardBps: 200n,
+      ballRange: BALL_RANGE,
+      jackpotBall: JACKPOT_BALL,
+      consolationBps: CONSOLATION_BPS,
+    });
 
     const distributor: any = await (
       await ethers.getContractFactory("PlankRakeDistributor")
@@ -126,7 +138,8 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
 
     // ── The airdrop pool really received its slice, into an epoch ──
     const epoch = await airdropPool.currentEpoch();
-    expect((await airdropPool.epochs(epoch)).pool).to.equal(expectedToAirdrop);
+    // Powerboard holds ONE rolling jackpot rather than a per-epoch pot.
+    expect(await airdropPool.jackpot()).to.equal(expectedToAirdrop);
 
     // ── Real wager-weighted tickets, read from the crash's own state ─
     await airdropPool.claimTickets(await crash.getAddress(), roundId, alice.address);
@@ -157,10 +170,14 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
     const drawn = await airdropPool.epochs(epoch);
     expect(drawn.drawn).to.equal(true);
     expect([alice.address, bob.address]).to.include(drawn.winner);
-    // The winner's payout is escrowed for pull-withdrawal, and it's the
-    // pot minus the drawer's reward -- real ETH that came from real rake.
-    const drawerReward = (expectedToAirdrop * 200n) / 10000n;
-    expect(await airdropPool.payments(drawn.winner)).to.equal(expectedToAirdrop - drawerReward);
+    // Powerboard pays the FULL pot only on a Plank Ball hit; otherwise the
+    // winner takes the consolation slice and the rest rolls over. Either
+    // way it is real ETH that came from real rake, escrowed to the winner.
+    const prize = drawn.jackpotHit ? expectedToAirdrop : (expectedToAirdrop * CONSOLATION_BPS) / 10000n;
+    const drawerReward = (prize * 200n) / 10000n;
+    expect(await airdropPool.payments(drawn.winner)).to.equal(prize - drawerReward);
+    // Nothing is ever destroyed: paid prize + remaining jackpot == funded.
+    expect(prize + (await airdropPool.jackpot())).to.equal(expectedToAirdrop);
     void treasury;
   });
 });

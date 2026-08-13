@@ -73,7 +73,15 @@ async function main() {
   const BURN_KEEPER_REWARD_BPS = 500n; // 5% of ETH spent, to whoever executes a burn
   const MAX_ETH_PER_BURN = ethers.parseEther("1");
   const AIRDROP_EPOCH_SECONDS = 86400n; // daily draw -- fixed schedule, on purpose (see the contract)
-  const AIRDROP_DRAWER_REWARD_BPS = 200n; // 2% of the pot, to whoever calls the draw
+  const AIRDROP_DRAWER_REWARD_BPS = 200n; // 2% of the prize, to whoever calls the draw
+  // POWERBOARD rollover engine: each daily draw picks a Plank Ball in
+  // [1, BALL_RANGE]. Land on JACKPOT_BALL (1-in-26, so roughly monthly)
+  // and the whole rolling pot pays out; miss and the winner still takes
+  // CONSOLATION_BPS of it while the rest compounds into the next day.
+  // JACKPOT_BALL = 8 is memetic (the 8 in the 8.1% NFT royalty / 1.8% rake).
+  const BALL_RANGE = 26n;
+  const JACKPOT_BALL = 8n;
+  const CONSOLATION_BPS = 500n; // 5% paid on a miss, 95% rolls over
   const MOCK_PLANK_PER_WEI = 1000n; // arbitrary local exchange rate for the mock router
 
   // ── Independent pieces first (no dependency cycle) ─────────────────
@@ -112,14 +120,17 @@ async function main() {
   const predictedCrash = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 2 });
 
   const airdropPool = await (
-    await ethers.getContractFactory("PlankAirdropPool")
-  ).deploy(
-    await beacon.getAddress(),
-    [predictedCrash], // the crash game is the allowed wager source
-    DRAND_GENESIS, // airdrop epochs anchor to the same genesis for a clean shared schedule
-    AIRDROP_EPOCH_SECONDS,
-    AIRDROP_DRAWER_REWARD_BPS
-  ); // nonce
+    await ethers.getContractFactory("PlankPowerboard")
+  ).deploy({
+    beacon: await beacon.getAddress(),
+    allowedSources: [predictedCrash], // the crash game is the allowed wager source
+    genesisTimestamp: DRAND_GENESIS, // epochs anchor to the same genesis for a clean shared schedule
+    epochDuration: AIRDROP_EPOCH_SECONDS,
+    drawerRewardBps: AIRDROP_DRAWER_REWARD_BPS,
+    ballRange: BALL_RANGE,
+    jackpotBall: JACKPOT_BALL,
+    consolationBps: CONSOLATION_BPS,
+  }); // nonce
   await airdropPool.waitForDeployment();
 
   const distributor = await (
@@ -171,7 +182,7 @@ async function main() {
   const jackpotPct = (afterKeeper * Number(AIRDROP_BPS)) / 10000;
   const burnPct = (afterKeeper * Number(BURN_BPS)) / 10000;
   console.log(" PlankBurnEngine      :", await burnEngine.getAddress(), `(${burnPct.toFixed(2)}% of pool -> burn)`);
-  console.log(" PlankAirdropPool     :", await airdropPool.getAddress(), `(${jackpotPct.toFixed(2)}% of pool -> jackpot)`);
+  console.log(" PlankPowerboard      :", await airdropPool.getAddress(), `(${jackpotPct.toFixed(2)}% of pool -> rolling jackpot)`);
   console.log(" Dev/ops treasury     :", treasury.address, `(${devPct.toFixed(2)}% of pool)`);
   console.log(" DrandBeacon (mock)   :", await beacon.getAddress());
   console.log(" $PLANK (mock)        :", await plank.getAddress());
@@ -184,16 +195,18 @@ async function main() {
   console.log(
     ` -> ${(((jackpotPct + burnPct) / rakePct) * 100).toFixed(0)}% of every take returns to players (jackpot + burn).`
   );
-  console.log(" Airdrop epoch        :", Number(AIRDROP_EPOCH_SECONDS) / 3600, "hours (FIXED schedule -- see the contract header)");
+  console.log(" Powerboard draw      :", Number(AIRDROP_EPOCH_SECONDS) / 3600, "h cadence, Plank Ball 1-in-" + BALL_RANGE + " for the full pot, " + Number(CONSOLATION_BPS)/100 + "% consolation on a miss (rest rolls over)");
   console.log("\n Test accounts: alice/bob/carol (#2/#3/#4) each hold 10000 ETH.");
   console.log("\n Keeper loop each round (all permissionless):");
   console.log("   1. crash.lockRound()        once betting closes");
   console.log("   2. beacon.setRandomness(round, value) + crash.revealEntropy(roundId)   once the drand round is due");
   console.log("   3. crash.settleRound(roundId)         -> pays keeper + accrues rake");
   console.log("   4. crash.withdrawPayments(distributor) -> splits rake into burn/airdrop/treasury");
-  console.log("   5. airdropPool.claimTickets(crash, roundId, player) for each bettor");
+  console.log("   5. powerboard.claimTickets(crash, roundId, player) for each bettor");
+  console.log("   5b. crash.registerResult(roundId, player) + crash.claim(roundId, player) for each winner (keeper CAN do this on their behalf)");
+  console.log("   5c. crash.sweepBustedRound(roundId) if the whole field busted -> rolls the pot into the next round");
   console.log("   6. burnEngine.executeBurn(route, ethAmount, minPlankOut, deadline)   when ETH has accrued");
-  console.log("   7. once a day: airdropPool.requestDraw(epoch) -> ... -> airdropPool.drawWinner(epoch)");
+  console.log("   7. once a day: powerboard.requestDraw(epoch) -> ... -> powerboard.drawWinner(epoch)");
   console.log("========================================================\n");
 
   void [alice, bob, carol];

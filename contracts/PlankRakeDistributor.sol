@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-interface IPlankAirdropPool {
+/// Powerboard's funding surface -- see PlankPowerboard.sol. Kept as a
+/// minimal interface so the jackpot implementation can evolve without
+/// redeploying the distributor.
+interface IPlankJackpot {
     function fund() external payable;
 }
 
@@ -18,14 +21,14 @@ interface IPlankAirdropPool {
  * players as a whole; nothing here changes that math. What this DOES
  * do, for real: the rake stays INSIDE the community instead of leaving
  * it. A share buys and burns real $PLANK (benefiting the token, which
- * players who hold it are often the same people), and a share funds a
- * wager-weighted ETH airdrop redistributed back among active bettors
- * (PlankAirdropPool.sol) -- positive-SUM for the community, not
- * positive-EV for any single bet. See PlankAirdropPool.sol's own header
+ * players who hold it are often the same people), and a share funds the
+ * Powerboard rolling jackpot, redistributed back among active bettors
+ * (PlankPowerboard.sol) -- positive-SUM for the community, not
+ * positive-EV for any single bet. See PlankPowerboard.sol's own header
  * for the deliberate, research-grounded choice to draw on a fixed
  * schedule rather than a surprise trigger.
  *
- * WHY PUSH, NOT PULL: every recipient here (burnEngine, airdropPool,
+ * WHY PUSH, NOT PULL: every recipient here (burnEngine, jackpot,
  * treasury) is this deploy's own trusted, immutable, non-arbitrary
  * contract/address -- none of the "an untrusted payee could grief a
  * push transfer" reasoning that justifies PullPayment elsewhere in this
@@ -35,10 +38,10 @@ interface IPlankAirdropPool {
  */
 contract PlankRakeDistributor {
     address public immutable burnEngine;
-    IPlankAirdropPool public immutable airdropPool;
+    IPlankJackpot public immutable jackpot;
     address public immutable treasury;
     // Real, fixed at deploy -- what fraction of every ETH received goes
-    // to burnEngine and airdropPool respectively. The remainder (10000 -
+    // to burnEngine and the Powerboard jackpot respectively. The remainder (10000 -
     // burnBps - airdropBps) goes to treasury. No setter, anywhere --
     // changing the split requires a new deployment and a deliberate
     // re-point of every rake-generating contract's treasury, not a
@@ -57,11 +60,11 @@ contract PlankRakeDistributor {
     error SplitExceeds100Percent();
     error EthTransferFailed();
 
-    constructor(address burnEngine_, address airdropPool_, address treasury_, uint256 burnBps_, uint256 airdropBps_) {
-        if (burnEngine_ == address(0) || airdropPool_ == address(0) || treasury_ == address(0)) revert ZeroAddress();
+    constructor(address burnEngine_, address jackpot_, address treasury_, uint256 burnBps_, uint256 airdropBps_) {
+        if (burnEngine_ == address(0) || jackpot_ == address(0) || treasury_ == address(0)) revert ZeroAddress();
         if (burnBps_ + airdropBps_ > 10000) revert SplitExceeds100Percent();
         burnEngine = burnEngine_;
-        airdropPool = IPlankAirdropPool(airdropPool_);
+        jackpot = IPlankJackpot(jackpot_);
         treasury = treasury_;
         burnBps = burnBps_;
         airdropBps = airdropBps_;
@@ -84,7 +87,7 @@ contract PlankRakeDistributor {
             if (!ok) revert EthTransferFailed();
         }
         if (toAirdrop > 0) {
-            airdropPool.fund{value: toAirdrop}();
+            jackpot.fund{value: toAirdrop}();
         }
         if (toTreasury > 0) {
             (bool ok, ) = treasury.call{value: toTreasury}("");

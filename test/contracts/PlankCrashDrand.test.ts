@@ -132,13 +132,13 @@ describe("PlankCrashDrand", () => {
     const settled = await crash.rounds(roundId);
     expect(settled.phase).to.equal(2n); // CRASHED
 
-    await crash.connect(alice).registerResult(roundId);
-    await crash.connect(bob).registerResult(roundId);
+    await crash.connect(alice).registerResult(roundId, alice.address);
+    await crash.connect(bob).registerResult(roundId, bob.address);
     await networkHelpers.mine(REGISTRATION_BLOCKS + 1);
 
     const estimate = await crash.estimatedPayout(roundId, alice.address);
     if (estimate > 0n) {
-      const tx = await crash.connect(alice).claim(roundId);
+      const tx = await crash.connect(alice).claim(roundId, alice.address);
       const receipt = await tx.wait();
       const claimedEvent = receipt.logs
         .map((log: any) => {

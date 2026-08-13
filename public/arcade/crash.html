@@ -2144,13 +2144,13 @@ async function keeperTick(round, roundId, blockNum, chainNow) {
         const isRegistered = await crash.registered(roundId, signer.address);
         if (!isRegistered && !attemptedRegisterThisRound && blockNum <= Number(round.registrationDeadlineBlock)) {
           attemptedRegisterThisRound = true;
-          await (await crash.registerResult(roundId)).wait().catch(() => {});
+          await (await crash.registerResult(roundId, signer.address)).wait().catch(() => {});
         }
         const isClaimed = await crash.claimed(roundId, signer.address);
         if (!isClaimed && !attemptedClaimThisRound && blockNum > Number(round.registrationDeadlineBlock)) {
           attemptedClaimThisRound = true;
           try {
-            await (await crash.claim(roundId)).wait();
+            await (await crash.claim(roundId, signer.address)).wait();
             await (await crash.withdrawPayments(signer.address)).wait();
           } catch {
             /* not a winner -- expected outcome, not an error */

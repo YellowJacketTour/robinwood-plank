@@ -87,6 +87,9 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         uint256 provisionalWinningWeight;
         uint256 registrationDeadlineBlock;
         uint256 rolledOverFromPrevious;
+        // Set once a fully-busted round's distributable has been swept
+        // into pendingRollover -- see sweepBustedRound().
+        bool swept;
     }
 
     uint256 public immutable bettingDurationSeconds;
@@ -143,6 +146,18 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     uint256 private constant TARGET_ROUND_SAFETY_PERIODS = 20;
 
     uint256 public currentRoundId;
+    // ETH from fully-busted rounds (nobody cashed out, so nobody can ever
+    // claim) waiting to seed the next round that starts. Real bug this
+    // fixes: without it that ETH -- ~95.5% of a busted pool -- had NO
+    // claim path, NO sweep, and NO rescue, so it sat in the contract
+    // permanently. Fully-busted rounds are common at low crash
+    // multipliers, so this was a recurring, permanent loss to players.
+    // Rolling it forward keeps the money in the game and visibly seeds a
+    // bigger pot -- the lottery rollover mechanic, applied to the crash
+    // game, and a genuine positive-EV injection for whoever plays next
+    // (it is previously-lost player money returning to players, never
+    // dev revenue).
+    uint256 public pendingRollover;
     mapping(uint256 => Round) public rounds;
     mapping(uint64 => uint256) public drandRoundToRoundId;
     mapping(uint256 => mapping(address => uint256)) public stakeOf;
@@ -163,6 +178,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     event RoundCrashed(uint256 indexed roundId, uint256 crashMultiplierBps, uint256 crashElapsedBlocks, bool cappedByMax);
     event ResultRegistered(uint256 indexed roundId, address indexed player, bool won, uint256 weight);
     event Claimed(uint256 indexed roundId, address indexed player, uint256 payout);
+    event PoolRolledOver(uint256 indexed fromRoundId, uint256 amount);
 
     error BadPhase();
     error TooEarly();
@@ -182,6 +198,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     error RandomnessNotYetAvailable();
     error ZeroBeacon();
     error RoundIntervalTooShort();
+    error RoundHasWinners();
+    error AlreadySwept();
 
     struct Config {
         uint256 bettingDurationSeconds;
@@ -248,8 +266,13 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         r.bettingEndsAt = (currentRoundId == 1 || roundIntervalSeconds == 0)
             ? block.timestamp + bettingDurationSeconds
             : _nextSlot();
-        r.pool = rolledOver;
-        r.rolledOverFromPrevious = rolledOver;
+        // Drain any swept busted-round pot into this round's starting pool.
+        // Consumed exactly once (pendingRollover is zeroed here), so the
+        // same ETH can never seed two rounds.
+        uint256 seeded = rolledOver + pendingRollover;
+        pendingRollover = 0;
+        r.pool = seeded;
+        r.rolledOverFromPrevious = seeded;
         emit RoundStarted(currentRoundId, r.bettingEndsAt);
     }
 
@@ -424,16 +447,47 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         _asyncTransfer(treasury, amount);
     }
 
-    function registerResult(uint256 roundId) external nonReentrant {
+    /// Rescues a FULLY-BUSTED round: one where the crash beat every single
+    /// player, so no winning weight was ever recorded and claim() can
+    /// never pay anyone. Permissionless and callable only after the
+    /// registration window has closed (so it can never front-run a real
+    /// winner still registering) and only when totalWinningWeight is
+    /// genuinely zero. The pot rolls into the next round instead of being
+    /// stranded -- see pendingRollover's own comment for why this is a
+    /// real fix, not a nicety.
+    function sweepBustedRound(uint256 roundId) external nonReentrant {
+        Round storage r = rounds[roundId];
+        if (r.phase != Phase.CRASHED) revert BadPhase();
+        if (block.number <= r.registrationDeadlineBlock) revert TooEarly();
+        if (r.totalWinningWeight != 0) revert RoundHasWinners();
+        if (r.swept) revert AlreadySwept();
+
+        r.swept = true;
+        uint256 amount = r.distributable;
+        r.distributable = 0;
+        pendingRollover += amount;
+        emit PoolRolledOver(roundId, amount);
+    }
+
+    /// Records `player`'s result. Callable BY ANYONE on any player's
+    /// behalf -- deliberately, and load-bearing for "runs forever without
+    /// anyone babysitting it": the outcome is computed entirely from
+    /// state already on chain (their stake, their cash-out block, the
+    /// settled crash point), so a caller cannot influence it, and
+    /// registering someone is purely neutral-or-beneficial to them. Before
+    /// this was on-behalf, a winner who was simply offline during the
+    /// registration window forfeited their winnings outright and a keeper
+    /// bot could do nothing about it.
+    function registerResult(uint256 roundId, address player) external nonReentrant {
         Round storage r = rounds[roundId];
         if (r.phase != Phase.CRASHED) revert BadPhase();
         if (block.number > r.registrationDeadlineBlock) revert TooLate();
-        uint256 stake = stakeOf[roundId][msg.sender];
+        uint256 stake = stakeOf[roundId][player];
         if (stake == 0) revert NoBet();
-        if (registered[roundId][msg.sender]) revert AlreadyRegistered();
-        registered[roundId][msg.sender] = true;
+        if (registered[roundId][player]) revert AlreadyRegistered();
+        registered[roundId][player] = true;
 
-        uint256 cashOutBlock = cashOutBlockOf[roundId][msg.sender];
+        uint256 cashOutBlock = cashOutBlockOf[roundId][player];
         bool won = cashOutBlock != 0 && (cashOutBlock - r.lockBlock) <= r.crashElapsedBlocks;
 
         uint256 weight = 0;
@@ -442,23 +496,29 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
             weight = (stake * multiplierAtCashOutBps) / 10000;
             r.totalWinningWeight += weight;
         }
-        emit ResultRegistered(roundId, msg.sender, won, weight);
-        _weightOf[roundId][msg.sender] = weight;
+        emit ResultRegistered(roundId, player, won, weight);
+        _weightOf[roundId][player] = weight;
     }
 
-    function claim(uint256 roundId) external nonReentrant {
+    /// Claims `player`'s winnings. Also callable by anyone on their
+    /// behalf, for the same automation reason as registerResult -- and
+    /// safe for the same reason the rest of this contract's payouts are:
+    /// the ETH is credited to the PLAYER through the PullPayment escrow,
+    /// never to the caller, so a keeper settling everyone's claims can
+    /// never redirect a single wei to itself.
+    function claim(uint256 roundId, address player) external nonReentrant {
         Round storage r = rounds[roundId];
         if (r.phase != Phase.CRASHED) revert BadPhase();
         if (block.number <= r.registrationDeadlineBlock) revert TooEarly();
-        if (!registered[roundId][msg.sender]) revert NotWinner();
-        if (claimed[roundId][msg.sender]) revert AlreadyClaimed();
-        uint256 weight = _weightOf[roundId][msg.sender];
+        if (!registered[roundId][player]) revert NotWinner();
+        if (claimed[roundId][player]) revert AlreadyClaimed();
+        uint256 weight = _weightOf[roundId][player];
         if (weight == 0) revert NotWinner();
 
-        claimed[roundId][msg.sender] = true;
+        claimed[roundId][player] = true;
         uint256 payout = (r.distributable * weight) / r.totalWinningWeight;
-        _asyncTransfer(msg.sender, payout);
-        emit Claimed(roundId, msg.sender, payout);
+        _asyncTransfer(player, payout);
+        emit Claimed(roundId, player, payout);
     }
 
     // ── Pure math -- byte-for-byte identical to PlankCrashV2's, not ──────
