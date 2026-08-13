@@ -5,6 +5,16 @@
 <title>PlankCrash</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <style>
+  /* Bungee -- a real, OFL-licensed display face (Google Fonts, vendored
+     locally, no CDN dependency at runtime), chosen for the mission-patch/
+     retro-space-poster feel this game's whole art direction is built on.
+     Not a system-font fallback pretending to be a brand choice. */
+  @font-face {
+    font-family: "Bungee";
+    src: url("vendor/bungee.ttf") format("truetype");
+    font-display: swap;
+    font-weight: 400;
+  }
   :root {
     --bg-0: #05070c;
     --bg-1: #0a0e18;
@@ -18,7 +28,7 @@
     --win-glow: #7bffc0;
     --lose: #ff4d6a;
     --gold: #ffc857;
-    --font-display: "Rockwell", "Cambria", Georgia, serif;
+    --font-display: "Bungee", "Rockwell", "Cambria", Georgia, serif;
     --font-body: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   }
@@ -33,6 +43,21 @@
     display: flex; flex-direction: column;
   }
 
+  /* ── boot overlay: covers the first-paint flash while WebGL/font/art
+     assets settle, so the reveal reads as a deliberate curtain-up moment
+     instead of a jump-cut from black to a half-loaded scene. ────────── */
+  #boot {
+    position: fixed; inset: 0; z-index: 100; background: var(--bg-0);
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity .5s ease, visibility .5s;
+  }
+  #boot.hide { opacity: 0; visibility: hidden; pointer-events: none; }
+  #boot .boot-mark {
+    font-family: var(--font-display); font-size: 15px; letter-spacing: 2px;
+    color: var(--ink-dim); animation: bootPulse 1.4s ease-in-out infinite;
+  }
+  @keyframes bootPulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.9; } }
+
   /* ── top bar ─────────────────────────────────────────────────────── */
   .topbar {
     display: flex; align-items: center; justify-content: space-between;
@@ -40,7 +65,7 @@
   }
   .brand { display: flex; align-items: baseline; gap: 8px; }
   .brand .mark {
-    font-family: var(--font-display); font-weight: 700; font-size: 20px; letter-spacing: 0.5px;
+    font-family: var(--font-display); font-weight: 400; font-size: 17px; letter-spacing: 0.5px;
     background: linear-gradient(135deg, var(--accent-glow), var(--gold));
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
@@ -63,8 +88,8 @@
     align-items: center; justify-content: center; pointer-events: none; text-align: center;
   }
   .mult {
-    font-family: var(--font-display); font-weight: 700; font-variant-numeric: tabular-nums;
-    font-size: clamp(48px, 12vw, 108px); line-height: 1;
+    font-family: var(--font-display); font-weight: 400; font-variant-numeric: tabular-nums;
+    font-size: clamp(44px, 10.5vw, 96px); line-height: 1; letter-spacing: -0.01em;
     color: var(--ink); text-shadow: 0 0 40px rgba(255,90,60,0.25);
     transition: color .12s, transform .08s;
   }
@@ -111,7 +136,7 @@
   .primary-btn {
     width: 100%; max-width: 520px; margin: 0 auto; display: block;
     padding: 20px; border-radius: 18px; border: none; cursor: pointer;
-    font-family: var(--font-display); font-weight: 700; font-size: 20px; letter-spacing: 0.3px;
+    font-family: var(--font-display); font-weight: 400; font-size: 17px; letter-spacing: 0.3px;
     color: #10131c; background: linear-gradient(135deg, var(--accent-glow), var(--accent));
     box-shadow: 0 8px 30px rgba(255,90,60,0.28);
     transition: transform .08s, box-shadow .2s, background .2s, color .2s;
@@ -250,6 +275,7 @@
 </style>
 </head>
 <body>
+<div id="boot"><div class="boot-mark">PLANKCRASH</div></div>
 <div id="app">
   <div class="topbar">
     <div class="brand">
@@ -1215,10 +1241,30 @@ function frame() {
   if (chalkstronautSprite) chalkstronautSprite.visible = true;
   mixPass.uniforms.bloomTexture.value = bloomComposer.renderTarget2.texture;
   composer.render();
+  dismissBoot();
   requestAnimationFrame(frame);
 }
 resize();
 requestAnimationFrame(frame);
+
+// Dismiss the boot curtain only once real conditions are met -- the
+// display font has actually loaded (not just requested) and the scene
+// has genuinely rendered at least one frame -- not a fixed timer
+// guessing how long assets take.
+let bootFramesRendered = 0;
+let bootFontReady = false;
+let bootDismissed = false;
+document.fonts.ready.then(() => { bootFontReady = true; maybeDismissBoot(); });
+function dismissBoot() {
+  if (bootDismissed) return;
+  bootFramesRendered++;
+  if (bootFramesRendered === 2) maybeDismissBoot(); // one frame to warm shaders, then check
+}
+function maybeDismissBoot() {
+  if (bootDismissed || bootFramesRendered < 2 || !bootFontReady) return;
+  bootDismissed = true;
+  document.getElementById("boot").classList.add("hide");
+}
 
 // ── chain plumbing ──────────────────────────────────────────────────────
 let provider, signer, crash, abi;
