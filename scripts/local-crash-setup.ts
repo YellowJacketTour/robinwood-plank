@@ -17,6 +17,18 @@ const { ethers } = await hardhat.network.create();
 async function main() {
   const [deployer, treasury, alice, bob, carol] = await ethers.getSigners();
 
+  // Node-level interval mining: makes the local chain auto-mine an empty
+  // block every second regardless of transaction traffic, so
+  // block.timestamp tracks real wall-clock time even if nobody happens
+  // to be betting right now. Set ONCE here, not per-browser-tab -- a
+  // client-side per-tab heartbeat was tried and was a real bug: with more
+  // than one tab connected, multiple independent heartbeats compounded
+  // (Hardhat's block timestamp is monotonic, max(prev+1, real now)) and
+  // raced chain time thousands of rounds ahead of real time within
+  // minutes. This is idempotent to re-run against an already-configured
+  // node.
+  await ethers.provider.send("evm_setIntervalMining", [1000]);
+
   // Fast local timings so a round is actually playable in seconds, not
   // the production cadence these constants would use on a real chain.
   // 3s was tried and empirically doesn't work for a human: there's no
