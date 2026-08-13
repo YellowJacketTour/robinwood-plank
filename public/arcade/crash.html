@@ -598,6 +598,11 @@ scene.add(stars);
 // arms cradle the rocket at rest and swing open at ignition (animated in
 // frame() via padClampOpen), giving the "snap" moment something concrete
 // to release instead of firing in front of an inert pad.
+// Resting height of the whole launch complex. Raised from the old -6 so
+// the pad sits under the astronaut's feet and is actually visible on the
+// launch screen -- see the padGroup.position note below. frame()'s
+// pad-fade math anchors to this so the two never drift apart.
+const PAD_REST_Y = -4.6;
 const padGroup = new THREE.Group();
 
 const deckMat = new THREE.MeshStandardMaterial({ color: 0x6b7480, roughness: 0.55, metalness: 0.6 });
@@ -674,29 +679,25 @@ const beacon = new THREE.Mesh(
 beacon.position.y = 8.3;
 towerGroup.add(beacon);
 
-// Real project art, not a procedural placeholder: the actual $PLANK logo
-// (public/images/plank-logo.webp, the same file the site's own branding
-// uses), mounted on the gantry like a real launch-site sign board.
-// colorSpace must be set explicitly to SRGBColorSpace -- textures loaded
-// this way default to whatever THREE.Color would, and skipping it is the
-// exact bug that made the whole sky read pale/washed-out earlier in this
-// scene's history: an sRGB image's bytes get used as linear values, then
-// gamma-re-encoded again on output.
-const logoTexture = new THREE.TextureLoader().load("../images/plank-logo.webp");
-logoTexture.colorSpace = THREE.SRGBColorSpace;
-const LOGO_ASPECT = 1765 / 1199; // real source image dimensions
-const logoPlaqueWidth = 1.15;
-const logoPlaque = new THREE.Mesh(
-  new THREE.PlaneGeometry(logoPlaqueWidth, logoPlaqueWidth * LOGO_ASPECT),
-  new THREE.MeshBasicMaterial({ map: logoTexture, transparent: true, side: THREE.DoubleSide })
-);
-logoPlaque.position.set(0.55, 5.4, 0);
-towerGroup.add(logoPlaque);
+// NOTE: an in-scene $PLANK logo plaque used to hang on this gantry at
+// (0.55, 5.4). It was removed deliberately -- it rendered as a small
+// redundant "plank" floating beside the tower on the launch screen (the
+// site's own PLANKCRASH wordmark already carries the branding), and with
+// the pad now raised to sit under the astronaut it read as clutter, not
+// signage. The gantry itself stays as the launch complex's service tower.
 
 towerGroup.position.set(-4.6, -2.3, -0.6);
 padGroup.add(towerGroup);
 
-padGroup.position.set(0, -6, 0);
+// The whole launch complex sits directly beneath the astronaut's resting
+// height (groundY = -1.5; the astronaut sprite is 5.4 tall, so its feet
+// rest near y = -4.2). Parking the pad here -- rather than the old y=-6,
+// which pushed the deck below the frame and left only the lone gantry
+// mast visible (reading as a stray slingshot pole) -- means the deck,
+// hazard rim, and engine-glow port are actually on screen under the
+// astronaut, so it visibly stands on and launches from a real pad. The
+// fade-out in frame() anchors to this same PAD_REST_Y.
+padGroup.position.set(0, PAD_REST_Y, 0);
 scene.add(padGroup);
 
 // ── satellites: real geometry with metal/roughness PBR values so the sun
@@ -1419,7 +1420,7 @@ function frame() {
 
   // launch pad fades out (moves below the horizon) once the climb begins
   padGroup.visible = progress < 0.1;
-  padGroup.position.y = -6 - Math.max(0, progress - 0.02) * 40;
+  padGroup.position.y = PAD_REST_Y - Math.max(0, progress - 0.02) * 40;
 
   // clamp arms swing open at ignition and stay open through the crash
   // (the rocket doesn't re-cradle mid-round); beacon blinks continuously
