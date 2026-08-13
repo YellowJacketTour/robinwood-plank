@@ -1290,10 +1290,29 @@ function frame() {
   const astronautY = (phaseState === "crashed" ? groundY + (topY - groundY) * Math.min(flightProgress, 1) : groundY + (topY - groundY) * flightProgress) - ignitionKick;
 
   // sky + fog track altitude
+  // The real cause of the whole scene reading as washed-out and pale: the
+  // skyColorAt() bands are plain 0-255 sRGB bytes, the same numbers a
+  // color picker would give you (e.g. top-band [12,24,46] is meant to be
+  // a dark navy). setRGB() with no colorSpace argument, though, treats
+  // its input as ALREADY LINEAR -- so those small "dark" sRGB byte values
+  // got used directly as linear light, and OutputPass's linear-to-sRGB
+  // encode at the end of the pass chain then re-brightened them again
+  // (gamma encoding lifts dark values a lot -- e.g. linear 0.047 displays
+  // as ~0.24, nearly a third of the way to white), silently double-
+  // interpreting the same 3 numbers first as one color space and then the
+  // other. Every hex-color path in this file (material colors, light
+  // colors, particle colors) was already correct, since THREE.Color's hex
+  // constructor defaults to treating hex input as sRGB -- it was only
+  // these three raw-component calls, the one place colors are built from
+  // plain numbers instead of a hex literal, that skipped that conversion.
+  // Passing THREE.SRGBColorSpace explicitly is the fix: it tells
+  // setRGB() to decode these bytes from sRGB to linear before storing
+  // them, so they land back at the same darkness the numbers were chosen
+  // to represent once OutputPass re-encodes them for display.
   const sky = skyColorAt(progress);
-  skyUniforms.topColor.value.setRGB(sky.top[0] / 255, sky.top[1] / 255, sky.top[2] / 255);
-  skyUniforms.bottomColor.value.setRGB(sky.bottom[0] / 255, sky.bottom[1] / 255, sky.bottom[2] / 255);
-  scene.fog.color.setRGB(sky.bottom[0] / 255, sky.bottom[1] / 255, sky.bottom[2] / 255);
+  skyUniforms.topColor.value.setRGB(sky.top[0] / 255, sky.top[1] / 255, sky.top[2] / 255, THREE.SRGBColorSpace);
+  skyUniforms.bottomColor.value.setRGB(sky.bottom[0] / 255, sky.bottom[1] / 255, sky.bottom[2] / 255, THREE.SRGBColorSpace);
+  scene.fog.color.setRGB(sky.bottom[0] / 255, sky.bottom[1] / 255, sky.bottom[2] / 255, THREE.SRGBColorSpace);
   scene.fog.density = 0.02 - progress * 0.018;
 
   // stars fade in once above the troposphere; hemisphere light dims as we
