@@ -19,8 +19,20 @@ async function main() {
 
   // Fast local timings so a round is actually playable in seconds, not
   // the production cadence these constants would use on a real chain.
-  const BETTING_SECONDS = 3; // dev-test speed -- bump back up for anything resembling real play
-  const REVEAL_DELAY_BLOCKS = 2;
+  // 3s was tried and empirically doesn't work for a human: there's no
+  // realistic time to click LAUNCH before betting closes, so it's always
+  // just the background bot alone (1 participant) -- the round voids
+  // every single time (needs minParticipants=2) and never reaches LIVE
+  // at all. 8s is still fast dev-test cycling but leaves real react time.
+  const BETTING_SECONDS = 8;
+  // Was 2 -- fine when blocks only advanced on real transactions, but the
+  // heartbeat fix (evm_mine every ~1s while connected) means blocks now
+  // advance on a real timer, so 2 blocks meant the LIVE phase lasted well
+  // under a second: the round crashed almost the instant it locked, too
+  // fast to ever see the astronaut actually ascend or the multiplier
+  // actually climb. 25 blocks against a ~1 block/sec heartbeat gives a
+  // real, watchable flight window.
+  const REVEAL_DELAY_BLOCKS = 25;
   const REGISTRATION_WINDOW_BLOCKS = 50;
   const RAKE_BPS = 250n; // 2.5%
   const MIN_PARTICIPANTS = 2n;
