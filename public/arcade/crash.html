@@ -1356,11 +1356,13 @@ function frame() {
     setMultReadout(xStr, "live");
     targetFlightProgress = 1 - 1 / (1 + (Number(xStr) - 1) / 2.5);
     // The contract's real instantaneous rate of climb is the derivative
-    // of _multiplierAt: 400 + 40*elapsedBlocks bps/block. Normalized
-    // against ~40 blocks (roughly a 5x round locally) so it reads as "hit
-    // full intensity" around the point most rounds have already crashed,
-    // rather than needing an extreme multiplier to ever feel fast.
-    targetVelocityNorm = Math.min(1, estElapsedBlocks / 40);
+    // of _multiplierAt: 40 + (2/5)*elapsedBlocks bps/block. Normalized
+    // against ~358 blocks (where the re-derived curve reaches ~5x --
+    // solved from 10000 + 40e + e^2/5 = 50000, not eyeballed) so it reads
+    // as "hit full intensity" around the point most rounds have already
+    // crashed, rather than needing an extreme multiplier to ever feel
+    // fast. This constant must move if the curve constants above ever do.
+    targetVelocityNorm = Math.min(1, estElapsedBlocks / 358);
   } else if (phaseState === "betting" && bettingEndsAtEstimateMs !== null) {
     const secsLeft = Math.max(0, Math.ceil((bettingEndsAtEstimateMs - performance.now()) / 1000));
     $("substatus").textContent = secsLeft > 0 ? `LAUNCHING IN ${secsLeft}s` : "LOCKING…";
@@ -1695,9 +1697,21 @@ async function loadHistoryRibbon() {
   }
 }
 let attemptedLockThisRound = false;
-let attemptedRevealThisRound = false;
+// V2's reveal/settle split (see PlankCrashV2.sol's header) needs two
+// separate one-shot flags where V1 needed one: revealEntropy() makes the
+// true crash point public WITHOUT ending the round, and settleRound()
+// only becomes callable later, once real elapsed blocks actually reach
+// it -- these happen at genuinely different times, sometimes many
+// real seconds apart, and each needs its own "don't spam a doomed-to-
+// revert transaction every poll" guard.
+let attemptedEntropyRevealThisRound = false;
+let attemptedSettleThisRound = false;
 let attemptedRegisterThisRound = false;
 let attemptedClaimThisRound = false;
+// PlankCrashV2's maxElapsedBlocks immutable, fetched once at connect
+// time and cached -- lets the keeper compute client-side exactly when
+// settleRound() will stop reverting, instead of polling it blindly.
+let maxElapsedBlocksCache = null;
 let outcomeShownForRound = null;
 
 function toast(msg) {
@@ -1709,7 +1723,10 @@ function toast(msg) {
 }
 
 async function loadAbi() {
-  const res = await fetch("plankcrash-abi.json");
+  // V2: reveal/settle split, presetCashOut, estimatedPayout, keeper
+  // reward -- see contracts/PlankCrashV2.sol's own header for the full
+  // design. This is the live contract the frontend actually talks to now.
+  const res = await fetch("plankcrashv2-abi.json");
   abi = await res.json();
 }
 
@@ -1852,6 +1869,7 @@ async function connectToChain(rpcUrl, address, pk, label) {
   signer = new ethers.Wallet(pk, provider);
   if (!ethers.isAddress(address)) throw new Error("Bad contract address");
   crash = new ethers.Contract(address, abi, signer);
+  maxElapsedBlocksCache = await crash.maxElapsedBlocks();
   $("connDot").classList.add("on");
   toast("Connected as " + label);
   closeSheet();
@@ -1926,33 +1944,38 @@ function bpsToXStr(bps) {
   return v.toFixed(2);
 }
 
-// Real dev-chain block cadence, must match scripts/local-crash-setup.ts's
+// Real dev-chain block cadence, must match scripts/local-crash-v2-setup.ts's
 // evm_setIntervalMining argument exactly -- this is what lets elapsed
-// real time stand in for elapsed blocks below. Round pacing on this local
-// harness is bottlenecked entirely by REVEAL_DELAY_BLOCKS (fixed block
-// count) against this cadence, so halving it here (paired with the same
-// halving in the deploy script) is a real, direct "make it feel faster"
-// lever: it doesn't touch any game economics, just how many real seconds
-// a block -- and therefore a round -- takes.
-const LOCAL_BLOCK_MS = 500;
+// real time stand in for elapsed blocks below. Set to Robinhood Chain's
+// real measured block time (~100ms, confirmed via research -- see
+// PlankCrashV2.sol's _multiplierAt comment), not an arbitrary "feels
+// right" local value, so local playtesting reflects real mainnet pacing.
+const LOCAL_BLOCK_MS = 100;
 
-// Real mirror of PlankCrash.sol's _multiplierAt(elapsedBlocks), not an
-// approximation: 10000 + 400*e + 20*e^2, bps. The multiplier readout and
+// Real mirror of PlankCrashV2.sol's _multiplierAt(elapsedBlocks), not an
+// approximation: 10000 + 40*e + floor(e^2/5), bps -- re-derived for
+// Robinhood Chain's real ~100ms blocks (V1/V2's earlier constant,
+// 400*e + 20*e^2, was tuned against local dev's simulated ~500ms-1s
+// blocks and would climb roughly 10x too fast against real mainnet block
+// production). Math.floor on the squared term matches Solidity's integer
+// division exactly -- this has to be bit-for-bit the same curve the
+// contract pays out on, not just visually close, since it also drives
+// what price the ascent animation implies. The multiplier readout and
 // ascent used to only update once per ~1.2s poll of liveMultiplierBps --
 // correct in value, but it made both the number and the astronaut's climb
 // visibly step/stutter instead of climbing smoothly, since three.js
 // renders at 60fps and the polled value only changed a few times a
 // second. Since the contract's curve is a pure, known function of elapsed
 // blocks, and the local dev chain mines on a fixed interval
-// (evm_setIntervalMining in scripts/local-crash-setup.ts), elapsed real
-// time since launchAt is a genuinely accurate stand-in for elapsed
+// (evm_setIntervalMining in scripts/local-crash-v2-setup.ts), elapsed
+// real time since launchAt is a genuinely accurate stand-in for elapsed
 // blocks -- so the climb can be extrapolated every single frame instead
 // of waiting on the next poll. The real polled value from refresh() is
 // still what the contract will actually pay out on; this only smooths
 // what's drawn between polls, and gets corrected back to the authoritative
 // value every poll the same way any client-side prediction does.
 function multiplierAtBlocksBps(elapsedBlocks) {
-  return 10000 + elapsedBlocks * 400 + elapsedBlocks * elapsedBlocks * 20;
+  return 10000 + elapsedBlocks * 40 + Math.floor((elapsedBlocks * elapsedBlocks) / 5);
 }
 
 function setMultReadout(xStr, cls) {
@@ -2018,7 +2041,16 @@ primaryBtn.addEventListener("click", async () => {
       await tx.wait();
       toast("Cashed out at " + bpsToXStr(await crash.liveMultiplierBps(roundId)) + "x");
     } catch (err) {
-      toast("Cash out failed: " + (err.shortMessage || err.message));
+      // A real, meaningful outcome under V2's reveal/settle split, not a
+      // generic failure: the round's true crash point was already
+      // revealed and real elapsed blocks caught up to it between the
+      // click and the transaction landing -- the ticker itself will show
+      // this the instant refresh() runs again.
+      if ((err.shortMessage || err.message || "").includes("PastCrashPoint")) {
+        toast("Too late -- the round already crashed before this landed.");
+      } else {
+        toast("Cash out failed: " + (err.shortMessage || err.message));
+      }
     }
     refresh();
   }
@@ -2084,9 +2116,26 @@ async function keeperTick(round, roundId, blockNum, chainNow) {
       attemptedLockThisRound = true;
       await (await crash.lockRound()).wait().catch(() => {});
     }
-    if (Number(round.phase) === 1 && blockNum > Number(round.targetBlock) && !attemptedRevealThisRound) {
-      attemptedRevealThisRound = true;
-      await (await crash.revealCrash(roundId)).wait().catch(() => {});
+    // V2's reveal/settle split: revealEntropy() makes the true crash
+    // point public without ending the round; settleRound() only becomes
+    // valid once real elapsed blocks actually reach it (capped by
+    // maxElapsedBlocks). These are genuinely two different moments in
+    // real time, sometimes far apart -- computed client-side so this
+    // keeper only ever sends a transaction once it's actually valid,
+    // instead of spamming settleRound() every poll until it stops
+    // reverting.
+    if (Number(round.phase) === 1) {
+      if (!round.entropyRevealed && blockNum > Number(round.entropyBlock) && !attemptedEntropyRevealThisRound) {
+        attemptedEntropyRevealThisRound = true;
+        await (await crash.revealEntropy(roundId)).wait().catch(() => {});
+      } else if (round.entropyRevealed && !attemptedSettleThisRound && maxElapsedBlocksCache !== null) {
+        const effective =
+          round.trueCrashElapsedBlocks < maxElapsedBlocksCache ? round.trueCrashElapsedBlocks : maxElapsedBlocksCache;
+        if (BigInt(blockNum) - round.lockBlock >= effective) {
+          attemptedSettleThisRound = true;
+          await (await crash.settleRound(roundId)).wait().catch(() => {});
+        }
+      }
     }
     if (Number(round.phase) === 2 && signer) {
       const stake = await crash.stakeOf(roundId, signer.address);
@@ -2124,7 +2173,8 @@ async function refresh() {
     if (currentRoundIdCache !== roundId.toString()) {
       currentRoundIdCache = roundId.toString();
       attemptedLockThisRound = false;
-      attemptedRevealThisRound = false;
+      attemptedEntropyRevealThisRound = false;
+      attemptedSettleThisRound = false;
       attemptedRegisterThisRound = false;
       attemptedClaimThisRound = false;
       warpTriggeredForRound = false;
@@ -2177,11 +2227,14 @@ async function refresh() {
       // client-side-predicted real-time game uses, so estimation error
       // can never silently accumulate round after round.
       const liveBps = await crash.liveMultiplierBps(roundId);
-      // Invert 10000 + 400e + 20e^2 = bps for e (elapsed blocks), positive
-      // root of the quadratic, then re-derive the launchAt that would
-      // produce that many elapsed blocks under the ~1 block/sec local
-      // dev cadence -- correcting drift instead of letting it compound.
-      const impliedElapsed = Math.max(0, (-400 + Math.sqrt(160000 + 80 * (Number(liveBps) - 10000))) / 40);
+      // Invert 10000 + 40e + e^2/5 = bps for e (elapsed blocks), positive
+      // root of the quadratic (multiply through by 5 first: e^2 + 200e +
+      // (50000-5bps) = 0), then re-derive the launchAt that would produce
+      // that many elapsed blocks under the local dev block cadence --
+      // correcting drift instead of letting it compound. Must be re-solved
+      // any time multiplierAtBlocksBps's constants change (see that
+      // function's own comment) -- this is the exact inverse of it.
+      const impliedElapsed = Math.max(0, (-200 + Math.sqrt(20 * Number(liveBps) - 160000)) / 2);
       const impliedLaunchAt = performance.now() - impliedElapsed * LOCAL_BLOCK_MS;
       // Only ever correct FORWARD (smaller launchAt = larger elapsed
       // estimate). The real multiplier is mathematically non-decreasing
@@ -2199,8 +2252,17 @@ async function refresh() {
       drawMultGraph();
       $("substatus").textContent = "IN FLIGHT";
       if (!hasStake) updatePrimaryButton("watching");
-      else if (hasCashedOut) updatePrimaryButton("cashed", { sub: "Cashed out — waiting for the crash to see the final multiplier" });
-      else updatePrimaryButton("live-hold", { sub: `Staked ${ethers.formatEther(stake)} ETH` });
+      else if (hasCashedOut) {
+        // Real, on-chain, honestly-labeled -- see estimatedPayout()'s own
+        // comment on contracts/PlankCrashV2.sol for why this is a
+        // PROVISIONAL figure while still live (it can only ever shrink,
+        // never grow, as more players also cash out), not a promise.
+        // This is the actual point of building that view: show it, don't
+        // let "Cashed out, waiting…" imply a number nobody can see yet.
+        const est = await crash.estimatedPayout(roundId, signer.address);
+        const estStr = Number(ethers.formatEther(est)).toFixed(4);
+        updatePrimaryButton("cashed", { sub: `Cashed out — ~${estStr} ETH if the round ended right now` });
+      } else updatePrimaryButton("live-hold", { sub: `Staked ${ethers.formatEther(stake)} ETH` });
     } else {
       if (crashedAt === null) { crashedAt = performance.now(); shakeAmount = 1.4; spawnParticles(0xff4d6a, 60, 3.5); }
       const xStr = bpsToXStr(round.crashMultiplierBps);
