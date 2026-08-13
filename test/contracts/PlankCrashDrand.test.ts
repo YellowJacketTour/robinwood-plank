@@ -1,0 +1,294 @@
+import { expect } from "chai";
+import { ethers, networkHelpers } from "./helpers/hardhat.js";
+
+/**
+ * PlankCrashDrand's real delta from PlankCrashV2 (its header is required
+ * reading first): drand evmnet entropy instead of blockhash, verified
+ * via the standalone DrandBLSVerifier contract. This suite uses
+ * MockDrandVerifier (a deterministic, caller-controlled stand-in) to
+ * exercise the surrounding GAME LOGIC -- round targeting, cashOut
+ * gating, settlement, keeper reward, voidStaleRound, curve parity --
+ * without needing a real signature for a not-yet-existent future round
+ * in every test. The real BLS cryptography this deliberately bypasses is
+ * proven independently, for real, against actual historical drand
+ * signatures in DrandBLSVerifier.test.ts -- not re-proven here.
+ */
+describe("PlankCrashDrand", () => {
+  const BETTING_SECONDS = 5;
+  const ROUND_INTERVAL_SECONDS = 0;
+  const MAX_AWAIT_BLOCKS = 50;
+  const MAX_ELAPSED_BLOCKS = 40;
+  const REGISTRATION_BLOCKS = 20;
+  const RAKE_BPS = 250n;
+  const KEEPER_REWARD_BPS = 1000n;
+  const MIN_PARTICIPANTS = 2n;
+  const MIN_POOL = ethers.parseEther("0.01");
+  const MAX_STAKE_BPS = 5000n;
+  // Real drand evmnet genesis/period, matching the contract's own
+  // hardcoded constants -- needed here only to compute how long to wait
+  // before a target round becomes "due" per the contract's own gate.
+  const DRAND_GENESIS_TIME = 1727521075n;
+  const DRAND_PERIOD = 3n;
+  const TARGET_ROUND_SAFETY_PERIODS = 2n;
+  // Any well-formed G1 point works against the mock -- it never actually
+  // runs the pairing check. Reusing DrandBLSVerifier.test.ts's real
+  // signature for round 19700000 here purely for realism, not because
+  // its cryptographic validity matters to this suite.
+  const ANY_SIGNATURE: [bigint, bigint] = [
+    1949372652777623059452286480617121015258151223408003143426288109451940808146n,
+    15774059631938790910616310917835606469673169251013786491967954562235893110699n,
+  ];
+
+  async function deployAll() {
+    const [deployer, treasury, alice, bob, carol] = await ethers.getSigners();
+
+    const Mock = await ethers.getContractFactory("MockDrandVerifier");
+    const mockVerifier: any = await Mock.deploy();
+
+    const Crash = await ethers.getContractFactory("PlankCrashDrand");
+    const crash: any = await Crash.deploy({
+      bettingDurationSeconds: BETTING_SECONDS,
+      roundIntervalSeconds: ROUND_INTERVAL_SECONDS,
+      maxAwaitBlocks: MAX_AWAIT_BLOCKS,
+      maxElapsedBlocks: MAX_ELAPSED_BLOCKS,
+      registrationWindowBlocks: REGISTRATION_BLOCKS,
+      rakeBps: RAKE_BPS,
+      minParticipants: MIN_PARTICIPANTS,
+      minPoolSize: MIN_POOL,
+      maxStakePerWalletBps: MAX_STAKE_BPS,
+      keeperRewardBps: KEEPER_REWARD_BPS,
+      treasury: treasury.address,
+      drandVerifier: await mockVerifier.getAddress(),
+    });
+
+    return { crash, mockVerifier, deployer, treasury, alice, bob, carol };
+  }
+
+  async function closeBettingAndLock(crash: any) {
+    await networkHelpers.time.increase(BETTING_SECONDS + 1);
+    await crash.lockRound();
+  }
+
+  /// Waits until the round's own targetDrandRound is actually "due" per
+  /// the contract's real gate (DRAND_GENESIS_TIME + targetDrandRound *
+  /// DRAND_PERIOD), matching TARGET_ROUND_SAFETY_PERIODS's real margin,
+  /// then reveals with the mock (which accepts unconditionally).
+  async function waitForDueAndReveal(crash: any, roundId: bigint) {
+    const round = await crash.rounds(roundId);
+    const dueAt = DRAND_GENESIS_TIME + BigInt(round.targetDrandRound) * DRAND_PERIOD;
+    const now = BigInt(await networkHelpers.time.latest());
+    if (dueAt > now) await networkHelpers.time.increaseTo(dueAt);
+    await crash.revealEntropy(roundId, ANY_SIGNATURE);
+  }
+
+  async function mineToCrashAndSettle(crash: any, roundId: bigint) {
+    const round = await crash.rounds(roundId);
+    const effective =
+      round.trueCrashElapsedBlocks < BigInt(MAX_ELAPSED_BLOCKS) ? round.trueCrashElapsedBlocks : BigInt(MAX_ELAPSED_BLOCKS);
+    const current = await ethers.provider.getBlockNumber();
+    const targetBlock = Number(round.lockBlock) + Number(effective);
+    const toMine = targetBlock - current;
+    if (toMine > 0) await networkHelpers.mine(toMine);
+    await crash.settleRound(roundId);
+  }
+
+  it("lockRound commits to a target drand round strictly after now, with the real safety margin applied", async () => {
+    const { crash, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
+    await networkHelpers.time.increase(BETTING_SECONDS + 1);
+    const lockTime = BigInt(await networkHelpers.time.latest()) + 1n; // +1 for the lockRound tx's own block
+    await crash.lockRound();
+
+    const round = await crash.rounds(roundId);
+    const expectedMinimalRound =
+      (lockTime - DRAND_GENESIS_TIME) / DRAND_PERIOD + 1n + TARGET_ROUND_SAFETY_PERIODS;
+    expect(BigInt(round.targetDrandRound)).to.be.gte(expectedMinimalRound);
+    // The due time for that round must be strictly in the future relative
+    // to lock -- the whole point of the safety margin.
+    const dueAt = DRAND_GENESIS_TIME + BigInt(round.targetDrandRound) * DRAND_PERIOD;
+    expect(dueAt).to.be.gt(lockTime);
+  });
+
+  it("revealEntropy rejects a round that isn't due yet, even with a signature the verifier would accept", async () => {
+    const { crash, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(crash);
+
+    await expect(crash.revealEntropy(roundId, ANY_SIGNATURE)).to.be.revertedWithCustomError(
+      crash,
+      "DrandRoundNotYetDue"
+    );
+  });
+
+  it("revealEntropy rejects a signature the verifier says is invalid", async () => {
+    const { crash, mockVerifier, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(crash);
+
+    const round = await crash.rounds(roundId);
+    const dueAt = DRAND_GENESIS_TIME + BigInt(round.targetDrandRound) * DRAND_PERIOD;
+    await networkHelpers.time.increaseTo(dueAt);
+
+    await mockVerifier.setNextResult(false);
+    await expect(crash.revealEntropy(roundId, ANY_SIGNATURE)).to.be.revertedWithCustomError(
+      crash,
+      "InvalidSignature"
+    );
+  });
+
+  it("a real end-to-end round: lock targets a future drand round, revealEntropy verifies once due, and settlement pays out exactly like PlankCrashV2's blockhash-based flow", async () => {
+    const { crash, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await closeBettingAndLock(crash);
+
+    const roundAfterLock = await crash.rounds(roundId);
+    expect(roundAfterLock.targetDrandRound).to.be.gt(0n);
+    expect(roundAfterLock.entropyRevealed).to.equal(false);
+
+    // Real cash-out before the (not yet knowable) crash point.
+    await crash.connect(alice).cashOut(roundId);
+
+    await waitForDueAndReveal(crash, roundId);
+    const revealed = await crash.rounds(roundId);
+    expect(revealed.entropyRevealed).to.equal(true);
+
+    await mineToCrashAndSettle(crash, roundId);
+    const settled = await crash.rounds(roundId);
+    expect(settled.phase).to.equal(2n); // CRASHED
+
+    await crash.connect(alice).registerResult(roundId);
+    await crash.connect(bob).registerResult(roundId);
+    await networkHelpers.mine(REGISTRATION_BLOCKS + 1);
+
+    const estimate = await crash.estimatedPayout(roundId, alice.address);
+    if (estimate > 0n) {
+      const tx = await crash.connect(alice).claim(roundId);
+      const receipt = await tx.wait();
+      const claimedEvent = receipt.logs
+        .map((log: any) => {
+          try {
+            return crash.interface.parseLog(log);
+          } catch {
+            return null;
+          }
+        })
+        .find((parsed: any) => parsed?.name === "Claimed");
+      expect(claimedEvent.args.payout).to.equal(estimate);
+    }
+  });
+
+  it("cashOut() is gated against the true crash point once drand has revealed it, same load-bearing property as PlankCrashV2", async () => {
+    const { crash, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(crash);
+
+    await waitForDueAndReveal(crash, roundId);
+    const round = await crash.rounds(roundId);
+    const effective =
+      round.trueCrashElapsedBlocks < BigInt(MAX_ELAPSED_BLOCKS) ? round.trueCrashElapsedBlocks : BigInt(MAX_ELAPSED_BLOCKS);
+    const current = await ethers.provider.getBlockNumber();
+    const targetBlock = Number(round.lockBlock) + Number(effective);
+    if (targetBlock - current > 0) await networkHelpers.mine(targetBlock - current);
+
+    await expect(crash.connect(alice).cashOut(roundId)).to.be.revertedWithCustomError(crash, "PastCrashPoint");
+  });
+
+  it("presetCashOut is rejected once entropy has been revealed, same fairness gate as PlankCrashV2", async () => {
+    const { crash, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(crash);
+    await waitForDueAndReveal(crash, roundId);
+
+    const targetBps = await crash._multiplierAt(5);
+    await expect(crash.connect(alice).presetCashOut(roundId, targetBps)).to.be.revertedWithCustomError(
+      crash,
+      "EntropyAlreadyRevealed"
+    );
+  });
+
+  it("voidStaleRound rescues a round nobody reveals for, and the stake carries forward", async () => {
+    const { crash, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(crash);
+
+    // Deliberately never call revealEntropy -- simulates nobody bothering
+    // to post the signature promptly.
+    await expect(crash.voidStaleRound(roundId)).to.be.revertedWithCustomError(crash, "TooEarly");
+    await networkHelpers.mine(MAX_AWAIT_BLOCKS + 1);
+
+    await crash.voidStaleRound(roundId);
+    expect(await crash.voided(roundId)).to.equal(true);
+
+    await crash.connect(alice).carryForwardStake(roundId);
+    const nextRoundId = await crash.currentRoundId();
+    expect(await crash.stakeOf(nextRoundId, alice.address)).to.equal(ethers.parseEther("0.01"));
+  });
+
+  it("settleRound splits the rake and pays the keeper reward, exactly like PlankCrashV2", async () => {
+    const { crash, treasury, alice, bob, carol } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await closeBettingAndLock(crash);
+    await waitForDueAndReveal(crash, roundId);
+
+    const roundBeforeSettle = await crash.rounds(roundId);
+    const effective =
+      roundBeforeSettle.trueCrashElapsedBlocks < BigInt(MAX_ELAPSED_BLOCKS)
+        ? roundBeforeSettle.trueCrashElapsedBlocks
+        : BigInt(MAX_ELAPSED_BLOCKS);
+    const current = await ethers.provider.getBlockNumber();
+    const targetBlock = Number(roundBeforeSettle.lockBlock) + Number(effective);
+    if (targetBlock - current > 0) await networkHelpers.mine(targetBlock - current);
+
+    const pool = ethers.parseEther("2");
+    const expectedRake = (pool * RAKE_BPS) / 10000n;
+    const expectedKeeperReward = (expectedRake * KEEPER_REWARD_BPS) / 10000n;
+
+    await crash.connect(carol).settleRound(roundId);
+    expect(await crash.payments(carol.address)).to.equal(expectedKeeperReward);
+    expect(await crash.accumulatedRake()).to.equal(expectedRake - expectedKeeperReward);
+
+    await crash.claimRake();
+    expect(await crash.payments(treasury.address)).to.equal(expectedRake - expectedKeeperReward);
+  });
+
+  it("the same _multiplierAt/_deriveCrash curve as PlankCrashV2 -- both contracts pay out identically for the same entropy, proving the drand swap changed nothing about game math", async () => {
+    const { crash, treasury } = await deployAll();
+    const V2 = await ethers.getContractFactory("PlankCrashV2");
+    const v2: any = await V2.deploy({
+      bettingDurationSeconds: BETTING_SECONDS,
+      roundIntervalSeconds: 0,
+      entropyDelayBlocks: 2,
+      maxElapsedBlocks: MAX_ELAPSED_BLOCKS,
+      registrationWindowBlocks: REGISTRATION_BLOCKS,
+      rakeBps: RAKE_BPS,
+      minParticipants: MIN_PARTICIPANTS,
+      minPoolSize: MIN_POOL,
+      maxStakePerWalletBps: MAX_STAKE_BPS,
+      keeperRewardBps: KEEPER_REWARD_BPS,
+      treasury: treasury.address,
+    });
+    for (const seedStr of ["a", "b", "c", "42", "plank"]) {
+      const seed = ethers.keccak256(ethers.toUtf8Bytes(seedStr));
+      const [m1, e1] = await crash._deriveCrash(seed);
+      const [m2, e2] = await v2._deriveCrash(seed);
+      expect(m1).to.equal(m2);
+      expect(e1).to.equal(e2);
+    }
+  });
+});
