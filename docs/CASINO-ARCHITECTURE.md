@@ -17,7 +17,7 @@ Players bet ETH into a shared pari-mutuel pool on a crash game. A small **rake**
 (default 2.5%) is skimmed from each settled round. That rake — instead of
 leaking to a disconnected wallet — flows into a **distributor** that splits it
 three ways: a slice **buys and burns real $PLANK**, a slice **funds a
-wager-weighted ETH raffle** paid back to active bettors, and the remainder goes
+Powerboard rolling jackpot** paid back to active bettors, and the remainder goes
 to the protocol treasury. Randomness for both the crash point and the raffle
 draw comes from **one shared, verify-on-chain drand beacon** that the NFT vault
 already uses. The result is not positive-EV for any individual bet (a rake from
@@ -41,7 +41,7 @@ stays inside it.
              │                          burn │  air │ trea │
              │                               ▼  drop▼ sury ▼
              │                    ┌──────────────┐ ┌──────────────┐  (EOA)
-             │                    │PlankBurnEngine│ │PlankAirdropPool│
+             │                    │PlankBurnEngine│ │PlankPowerboard│
              │                    │ swaps ETH→PLANK│ │ wager-weighted │
              │                    │ and burns it   │ │ ETH raffle     │
              │                    └──────────────┘ └───────┬────────┘
@@ -59,7 +59,7 @@ stays inside it.
 | `PlankCrashDrand.sol` | The crash game. Reads randomness from the shared beacon; pays rake to whatever `treasury` it's configured with. | No owner, no admin. |
 | `PlankRakeDistributor.sol` | Immutable 3-way rake split (burn / airdrop / treasury). Push-forwards on receipt. | No owner, no setter — changing the split needs a redeploy. |
 | `PlankBurnEngine.sol` | Permissionless swap-and-burn. Caller supplies a real Universal-Router route; the contract verifies the real PLANK balance delta and burns it. | No owner. Swap output can only ever be burned, never redirected. |
-| `PlankAirdropPool.sol` | Wager-weighted ETH raffle on a fixed daily schedule. Tickets read from a source's own `stakeOf`. | No owner. Source allowlist is immutable. |
+| `PlankPowerboard.sol` | Rolling jackpot. Wager-weighted tickets read from a source's own `stakeOf`; a daily Plank Ball draw either pays the whole pot or a consolation slice and rolls the rest over. | No owner. Source allowlist is immutable. |
 | `DrandBeacon.sol` | Shared, permissionless, verify-on-chain cache of drand rounds. | Deploy-time-verified drand key; no owner. |
 
 The crash variants `PlankCrashV2 / VRF / Entropy` exist as alternative
@@ -113,6 +113,71 @@ through it end to end.
 
 ---
 
+## 4a. Game theory: what the game looks like at 1, 2, and N players
+
+**At 1 player — the round does not run.** `minParticipants` (2) and
+`minPoolSize` are checked at lock; failing either voids the round and every
+stake carries forward to the next one. No rake is taken, nothing is lost. This
+is correct (you always need a real counterparty) but it is a genuine **cold-start
+problem**: with one player, nothing ever happens. Note a lone player *can*
+bootstrap by betting from two addresses — that isn't an exploit, it just costs
+them the rake to play against themselves, and if both entries bust they lose
+everything to the rollover.
+
+**At 2 players — a war of attrition, and the payout is counterintuitive.**
+This is the case worth understanding, because pari-mutuel does *not* behave
+the way players assume. With equal stakes *S* and both cashing out at
+multipliers *m₁, m₂*, player 1 receives
+
+```
+distributable × m₁ / (m₁ + m₂)
+```
+
+The consequences are real and will surprise people:
+- **If both cash out at the same multiplier, both LOSE the rake** — even if
+  they both rode to 10x. Your multiplier buys a *share of the pot*, not a
+  payout rate.
+- Real profit at 2 players comes almost entirely from **the other player
+  busting** (then you take the whole distributable, ~+91% on your stake).
+- So the strategy is pure nerve: cash early for a small guaranteed loss, or
+  hold for a chance the other player busts first.
+
+**Collusion doesn't pay.** Two colluding players (or one sybil running both
+sides) can only ever get back the distributable, which is strictly less than
+what they put in — they simply pay the rake. Pari-mutuel is not exploitable by
+coordination.
+
+**At larger N it smooths out** — your multiplier's *relative* rank matters
+more than its absolute value, and the "everyone cashed at once" degenerate
+outcome becomes vanishingly unlikely. The honest UI consequence at every N:
+show `estimatedPayout()` (a real share of a real pot), never `stake ×
+multiplier`, which the game never pays.
+
+**And if the whole field busts,** nobody wins — the pot is not stranded, it
+rolls into the next round (`sweepBustedRound`). That's the mechanic that makes
+a busted round *fund* the next one instead of vanishing.
+
+## 4b. Running forever without a babysitter
+
+Every state-advancing function is permissionless, and the ones that cost gas
+carry a reward, so the loop does not depend on any single operator:
+
+| Step | Who can call it | Incentive |
+|---|---|---|
+| `lockRound` | anyone | — (cheap, and gates everything downstream) |
+| relay drand round to the beacon | anyone (`scripts/relay-drand.ts` exists) | — (shared across all consumers) |
+| `revealEntropy` | anyone | — |
+| `settleRound` | anyone | `keeperRewardBps` of the rake |
+| `registerResult` / `claim` | **anyone, on any player's behalf** | — |
+| `sweepBustedRound` | anyone | — |
+| `executeBurn` | anyone | share of ETH spent |
+| `requestDraw` / `drawWinner` | anyone | share of the prize |
+
+Two things to set deliberately before mainnet: **`keeperRewardBps` is currently
+0** (fine while the keeper is dev-run; raise it if third-party keepers should be
+paid to take over), and someone must actually **run a keeper process** — the
+void/rollover fallbacks are a safety net for when nobody does, not a substitute.
+
 ## 5. Security properties worth knowing
 
 - **`presetCashOut` is gated on entropy *availability*, not the on-chain reveal
@@ -144,7 +209,22 @@ Decided, and wired into `scripts/local-casino-setup.ts`:
 | **Dev / ops** | **1.80%** | 40% | Real bills. Memetically anchored to the 8.1% NFT royalty. |
 | **Rolling jackpot** | **1.80%** | 40% | Matched 1:1 with the dev take — straight back to players. |
 | **$PLANK burn** | **0.90%** | 20% | Deflation for holders. |
-| **Total rake** | **4.50%** | 100% | **60% of every take returns to players.** |
+| **Total rake** | **4.50%** | 100% | 60% of the *rake* returns to players. |
+
+**Read that table carefully — "4.5% rake" is NOT a 4.5% house edge.** Of every
+100 ETH wagered:
+
+- **95.50** is paid straight back out as crash winnings (the distributable).
+- **1.80** returns to players as Powerboard jackpot prizes.
+- **0.90** buys and burns $PLANK (accrues to token holders — overlapping with
+  players, but not identical to them, so don't count it as a direct rebate).
+- **1.80** is the only ETH that actually leaves the player economy (dev/ops).
+
+So the **true net house edge is 1.8%**, and **97.3% of wagered ETH comes back to
+players in ETH terms** (98.2% if you count the burn as community value). Never
+say "4.5% rake, 60% to players" without that breakdown — it reads as though
+players only get 60% of their money back, which is wrong by an order of
+magnitude.
 
 Two deliberate choices worth keeping:
 - **The total rake is low on purpose.** Rake is the single biggest driver of how
