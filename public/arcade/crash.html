@@ -443,18 +443,46 @@ const skyDome = new THREE.Mesh(
     depthWrite: false,
     vertexShader: `
       varying float vHeight;
+      varying vec3 vDir;
       void main() {
         vHeight = normalize(position).y;
+        vDir = normalize(position);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
+    // A flat two-stop lerp on a huge, smoothly-lit dome is exactly what
+    // produces visible 8-bit banding rings -- a real artifact, confirmed
+    // on screen, not a subjective complaint. Two real fixes, not one:
+    // (1) a dither -- a tiny per-pixel noise offset before quantization,
+    // the standard technique for killing gradient banding outright; (2)
+    // large-scale procedural noise breaking up the flat fill so the sky
+    // actually reads as a generated volume instead of a solid paint fill.
     fragmentShader: `
       uniform vec3 topColor;
       uniform vec3 bottomColor;
       varying float vHeight;
+      varying vec3 vDir;
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
+      float noise(vec2 p){
+        vec2 i = floor(p), f = fract(p);
+        float a = hash(i), b = hash(i+vec2(1.0,0.0)), c = hash(i+vec2(0.0,1.0)), d = hash(i+vec2(1.0,1.0));
+        vec2 u = f*f*(3.0-2.0*f);
+        return mix(a,b,u.x) + (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y;
+      }
+      float fbm(vec2 p){
+        float v = 0.0, amp = 0.5;
+        for (int i = 0; i < 4; i++) { v += amp * noise(p); p *= 2.02; amp *= 0.5; }
+        return v;
+      }
       void main() {
         float f = smoothstep(-0.15, 0.85, vHeight);
-        gl_FragColor = vec4(mix(bottomColor, topColor, f), 1.0);
+        vec3 col = mix(bottomColor, topColor, f);
+        // large-scale soft atmospheric variation, not flat noise -- reads
+        // as depth/haze drifting through the sky, not visible grain
+        float haze = fbm(vDir.xz * 1.6 + vDir.y * 0.8) * 0.06 - 0.03;
+        col += haze;
+        float dither = (hash(gl_FragCoord.xy) - 0.5) / 64.0;
+        gl_FragColor = vec4(col + dither, 1.0);
       }
     `,
   })
