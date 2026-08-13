@@ -19,7 +19,7 @@ async function main() {
 
   // Fast local timings so a round is actually playable in seconds, not
   // the production cadence these constants would use on a real chain.
-  const BETTING_SECONDS = 90;
+  const BETTING_SECONDS = 3; // dev-test speed -- bump back up for anything resembling real play
   const REVEAL_DELAY_BLOCKS = 2;
   const REGISTRATION_WINDOW_BLOCKS = 50;
   const RAKE_BPS = 250n; // 2.5%

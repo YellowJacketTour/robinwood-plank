@@ -1724,6 +1724,26 @@ function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   refresh();
   pollTimer = setInterval(refresh, 1200);
+  startChainHeartbeat();
+}
+
+// Local-dev-only fix for a real deadlock: Hardhat's automine only
+// advances block.timestamp when a transaction actually gets mined. At a
+// short BETTING_SECONDS window, if every placeBet attempt reverts before
+// submission (nothing left to bet, wrong amount, etc.), no new block
+// lands -- so chain time can freeze a few seconds short of
+// bettingEndsAt forever. Since the keeper's own lockRound() gate checks
+// against that same frozen chain time, it can never even attempt to
+// unstick itself. A real chain never has this problem (blocks keep
+// coming regardless of this app's traffic); a local single-node dev
+// chain does. A cheap empty-block heartbeat keeps chain time tracking
+// real wall-clock regardless of whether any bet succeeds.
+let heartbeatTimer = null;
+function startChainHeartbeat() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(() => {
+    if (provider) provider.send("evm_mine", []).catch(() => {});
+  }, 1000);
 }
 
 // ── stats: real event-driven leaderboard + round history ────────────────
