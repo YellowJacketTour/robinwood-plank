@@ -79,6 +79,21 @@
   }
   .gear:hover { color: var(--ink); border-color: var(--accent); }
 
+  /* ── history ribbon: universal crash-game convention ─────────────── */
+  .history-ribbon {
+    display: flex; gap: 6px; padding: 0 18px 10px; overflow-x: auto;
+    z-index: 15; position: relative;
+  }
+  .history-chip {
+    flex: none; padding: 4px 10px; border-radius: 999px; font-family: var(--font-mono);
+    font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+    background: var(--bg-2); border: 1px solid var(--line); color: var(--ink-dim);
+  }
+  .history-chip.tier-low { color: var(--ink-dim); }
+  .history-chip.tier-mid { color: var(--gold); border-color: rgba(255,200,87,0.3); }
+  .history-chip.tier-high { color: var(--win); border-color: rgba(62,224,140,0.35); }
+  .history-chip.tier-void { color: var(--lose); border-color: rgba(255,77,106,0.3); font-style: italic; }
+
   /* ── stage (canvas) ──────────────────────────────────────────────── */
   .stage { position: relative; flex: 1; min-height: 0; }
   canvas#fx { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
@@ -107,6 +122,15 @@
   .outcome-banner.show { opacity: 1; transform: translateY(0); }
   .outcome-banner.win { background: rgba(62,224,140,0.12); color: var(--win); border: 1px solid rgba(62,224,140,0.3); }
   .outcome-banner.lose { background: rgba(255,77,106,0.1); color: var(--lose); border: 1px solid rgba(255,77,106,0.28); }
+
+  /* Stock-ticker-style rising multiplier curve -- the other universal
+     crash-game primitive. Sits low in the stage, behind the 3D scene's
+     focal point, so it reads as data readout rather than competing with
+     the character for attention. */
+  .mult-graph {
+    position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%);
+    width: min(560px, 86vw); height: 90px; pointer-events: none; opacity: 0.85;
+  }
 
   /* ── bottom control deck ─────────────────────────────────────────── */
   .deck {
@@ -290,12 +314,23 @@
     <div class="gear" id="gearBtn" title="Connection settings">⚙</div>
   </div>
 
+  <!-- Universal crash-game convention (Aviator, JetX, Spaceman, Rocketman
+       all have this): a compact, always-visible strip of recent crash
+       points, color-coded by tier. Built from the same real RoundCrashed
+       events the Stats panel scans -- not a separate fabricated feed. -->
+  <div class="history-ribbon" id="historyRibbon"></div>
+
   <div class="stage">
     <canvas id="fx"></canvas>
     <div class="center-readout">
       <div class="mult idle" id="multReadout">1<span class="x">.00x</span></div>
       <div class="substatus" id="substatus">CONNECT A WALLET TO PLAY</div>
       <div class="outcome-banner" id="outcomeBanner"></div>
+      <!-- The other universal convention: a rising multiplier line graph,
+           color-shifting cool-to-warm as it climbs, like every real crash
+           game's stock-ticker-style curve. Plots this round's own real
+           liveMultiplierBps samples, not synthetic/decorative motion. -->
+      <canvas id="multGraph" class="mult-graph"></canvas>
     </div>
   </div>
 
@@ -1300,6 +1335,95 @@ let pollTimer = null;
 let betAmount = "0.01";
 let currentRoundIdCache = null;
 let lastMult = 1;
+
+// ── live multiplier graph + round-history ribbon (JetX/Rocketman/Aviator
+// convention: a rising stock-ticker-style curve for the live round, and an
+// always-visible strip of recent real crash points) ─────────────────────
+let multGraphSamples = [];
+const multGraphCanvas = $("multGraph");
+const multGraphCtx = multGraphCanvas.getContext("2d");
+
+function sizeMultGraph() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = multGraphCanvas.getBoundingClientRect();
+  multGraphCanvas.width = Math.max(1, Math.round(rect.width * dpr));
+  multGraphCanvas.height = Math.max(1, Math.round(rect.height * dpr));
+  multGraphCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function clearMultGraph() {
+  sizeMultGraph();
+  const rect = multGraphCanvas.getBoundingClientRect();
+  multGraphCtx.clearRect(0, 0, rect.width, rect.height);
+}
+
+// Cool-to-warm color for a given multiplier, matching every real crash
+// game's line-graph convention (blue at 1.0x trending gold/red as it climbs).
+function multGraphColor(x) {
+  const t = Math.max(0, Math.min(1, (x - 1) / 6));
+  const r = Math.round(80 + t * 175);
+  const g = Math.round(160 - t * 60);
+  const b = Math.round(255 - t * 220);
+  return `rgb(${r},${g},${b})`;
+}
+
+function drawMultGraph() {
+  const rect = multGraphCanvas.getBoundingClientRect();
+  const w = rect.width, h = rect.height;
+  if (!w || !h) return;
+  sizeMultGraph();
+  multGraphCtx.clearRect(0, 0, w, h);
+  const samples = multGraphSamples;
+  if (samples.length < 2) return;
+
+  const maxX = Math.max(2, samples[samples.length - 1] * 1.08);
+  const pad = 6;
+  const toXY = (i, v) => [
+    pad + (i / (samples.length - 1)) * (w - pad * 2),
+    h - pad - ((v - 1) / (maxX - 1)) * (h - pad * 2),
+  ];
+
+  multGraphCtx.lineWidth = 3;
+  multGraphCtx.lineJoin = "round";
+  multGraphCtx.lineCap = "round";
+  for (let i = 1; i < samples.length; i++) {
+    const [x0, y0] = toXY(i - 1, samples[i - 1]);
+    const [x1, y1] = toXY(i, samples[i]);
+    multGraphCtx.strokeStyle = multGraphColor(samples[i]);
+    multGraphCtx.beginPath();
+    multGraphCtx.moveTo(x0, y0);
+    multGraphCtx.lineTo(x1, y1);
+    multGraphCtx.stroke();
+  }
+  const [lx, ly] = toXY(samples.length - 1, samples[samples.length - 1]);
+  multGraphCtx.fillStyle = multGraphColor(samples[samples.length - 1]);
+  multGraphCtx.beginPath();
+  multGraphCtx.arc(lx, ly, 4, 0, Math.PI * 2);
+  multGraphCtx.fill();
+}
+
+// Real RoundCrashed events, same source the Stats panel scans -- last ~10
+// rounds, color-coded by tier the way Aviator/JetX round-history chips are.
+async function loadHistoryRibbon() {
+  if (!crash) return;
+  const ribbon = $("historyRibbon");
+  try {
+    const events = await crash.queryFilter(crash.filters.RoundCrashed());
+    const recent = events.slice(-10).reverse();
+    ribbon.innerHTML = recent
+      .map((e) => {
+        const bps = e.args.crashMultiplierBps;
+        if (bps === 0n) return `<span class="history-chip tier-void">VOID</span>`;
+        const x = Number(bps) / 10000;
+        const tier = x >= 5 ? "tier-high" : x >= 2 ? "tier-mid" : "tier-low";
+        return `<span class="history-chip ${tier}">${x.toFixed(2)}x</span>`;
+      })
+      .join("");
+  } catch (err) {
+    // Non-fatal -- the ribbon is a nice-to-have; the game itself doesn't
+    // depend on it, so a scan failure shouldn't interrupt play.
+  }
+}
 let attemptedLockThisRound = false;
 let attemptedRevealThisRound = false;
 let attemptedRegisterThisRound = false;
@@ -1454,6 +1578,7 @@ async function connectToChain(rpcUrl, address, pk, label) {
   closeSheet();
   startPolling();
   await loadAvatarPicker();
+  await loadHistoryRibbon();
 }
 
 $("connectBtn").addEventListener("click", async () => {
@@ -1675,6 +1800,9 @@ async function refresh() {
       attemptedClaimThisRound = false;
       warpTriggeredForRound = false;
       hideOutcome();
+      multGraphSamples = [];
+      clearMultGraph();
+      loadHistoryRibbon();
     }
 
     $("roundLabel").textContent = "ROUND " + roundId.toString();
@@ -1714,6 +1842,9 @@ async function refresh() {
       // grow quadratically with time too -- a visibly accelerating climb
       // that matches the math, not fights it.
       flightProgress = Math.min(1, (Number(xStr) - 1) / 9);
+      multGraphSamples.push(Number(xStr));
+      if (multGraphSamples.length > 400) multGraphSamples.shift();
+      drawMultGraph();
       $("substatus").textContent = "IN FLIGHT";
       if (!hasStake) updatePrimaryButton("watching");
       else if (hasCashedOut) updatePrimaryButton("cashed", { sub: "Cashed out — waiting for the crash to see the final multiplier" });
