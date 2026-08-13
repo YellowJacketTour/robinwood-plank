@@ -20,12 +20,16 @@ const { ethers } = await hardhat.network.create();
 async function main() {
   const [deployer, treasury, alice, bob, carol] = await ethers.getSigners();
 
-  // Real ~100ms Robinhood Chain block cadence (confirmed via research,
-  // see contracts/PlankCrashV2.sol's _multiplierAt comment) -- matched
-  // exactly, not approximated, so the local playtest actually reflects
-  // real mainnet pacing rather than an arbitrary "feels right" number.
-  // public/arcade/crash.html's LOCAL_BLOCK_MS constant must equal this.
-  await ethers.provider.send("evm_setIntervalMining", [100]);
+  // Block cadence (real ~100ms Robinhood Chain pace; public/arcade/crash.html's
+  // LOCAL_BLOCK_MS must match) is now configured on the "node" network in
+  // hardhat.config.ts as `mining: { auto: false, interval: 100 }` PLUS
+  // `allowBlocksWithSameTimestamp: true`. We deliberately DO NOT call
+  // evm_setIntervalMining here anymore: the runtime RPC does NOT honor
+  // allowBlocksWithSameTimestamp, so it advances block.timestamp ~+1s per
+  // 100ms block and races chain-time to ~10x real -- which made the betting
+  // countdown skip numbers and compressed every round ("launch/timer
+  // broken"). The config-based miner honors the flag: fast blocks with a
+  // real-tracking clock (empirically 1.0x). Just `npx hardhat node`.
 
   const BETTING_SECONDS = 8;
   // Real entropy-source delay -- just enough blocks that blockhash(entropyBlock)

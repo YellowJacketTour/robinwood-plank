@@ -31,7 +31,11 @@ const { ethers } = await hardhat.network.create();
 
 async function main() {
   const [deployer, treasury, alice, bob, carol] = await ethers.getSigners();
-  await ethers.provider.send("evm_setIntervalMining", [100]);
+  // Block cadence + timestamp behavior come from the "node" network config
+  // in hardhat.config.ts (mining.interval 100 + allowBlocksWithSameTimestamp).
+  // We intentionally do NOT call evm_setIntervalMining -- the runtime RPC
+  // ignores the same-timestamp flag and races chain-time ~10x, breaking the
+  // countdown/pacing. See local-crash-v2-setup.ts for the full writeup.
 
   // ── drand evmnet's real timing constants (the mock uses the same
   // schedule the real beacon would) ──────────────────────────────────
