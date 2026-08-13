@@ -411,20 +411,27 @@ contract PlankCrashV2 is ReentrancyGuard, PullPayment {
     /// for-byte the same code path as a human who clicked cash out at
     /// that exact block would hit.
     ///
-    /// ONLY valid before entropy is revealed -- load-bearing for fairness,
-    /// not an arbitrary restriction. Once entropy is revealed, the true
-    /// crash point is public; allowing presetCashOut after that would let
-    /// a sophisticated reader of the reveal transaction set target =
-    /// (the now-known crash point) and guarantee a win with a single,
-    /// risk-free transaction -- strictly better than what a live human
-    /// watching the ticker could ever do, since they still have to land a
-    /// real transaction inside the live window. Before reveal, a preset
-    /// target carries exactly the same genuine uncertainty a live
-    /// cash-out attempt does.
+    /// ONLY valid while entropy is genuinely UNAVAILABLE -- load-bearing
+    /// for fairness, not an arbitrary restriction, and gated on real
+    /// availability (block.number > entropyBlock), NOT on whether
+    /// revealEntropy() has been called on-chain yet. This is a real,
+    /// previously-shipped bug, found and fixed here: blockhash(entropyBlock)
+    /// is a public EVM value readable by anyone via a plain RPC call the
+    /// instant entropyBlock is mined -- long before anyone bothers to
+    /// submit a revealEntropy() transaction. Since _deriveCrash/
+    /// _invertMultiplier are `public pure`, an attacker can fetch that
+    /// blockhash off-chain, reproduce the exact true crash point locally,
+    /// and call presetCashOut with it -- a zero-risk, deterministic,
+    /// guaranteed-max-multiplier win, exploitable every single round by
+    /// anyone with an RPC connection, not just "a sophisticated reader of
+    /// the reveal transaction." Gating on entropy AVAILABILITY (not the
+    /// flag) closes this: once entropyBlock is mined, presetCashOut is no
+    /// safer than reading the reveal transaction, so it's rejected on the
+    /// same terms live cash-out already treats reveal as final for.
     function presetCashOut(uint256 roundId, uint256 targetMultiplierBps) external nonReentrant {
         Round storage r = rounds[roundId];
         if (r.phase != Phase.LIVE) revert BadPhase();
-        if (r.entropyRevealed) revert EntropyAlreadyRevealed();
+        if (r.entropyRevealed || block.number > r.entropyBlock) revert EntropyAlreadyRevealed();
         if (stakeOf[roundId][msg.sender] == 0) revert NoBet();
         if (cashOutBlockOf[roundId][msg.sender] != 0) revert AlreadyCashedOut();
 

@@ -17,6 +17,7 @@ describe("PlankCrashEntropy", () => {
   const REGISTRATION_BLOCKS = 20;
   const RAKE_BPS = 250n;
   const KEEPER_REWARD_BPS = 1000n;
+  const LOCKER_REWARD_BPS = 500n;
   const MIN_PARTICIPANTS = 2n;
   const MIN_POOL = ethers.parseEther("0.01");
   const MAX_STAKE_BPS = 5000n;
@@ -44,6 +45,7 @@ describe("PlankCrashEntropy", () => {
       minPoolSize: MIN_POOL,
       maxStakePerWalletBps: MAX_STAKE_BPS,
       keeperRewardBps: KEEPER_REWARD_BPS,
+      lockerRewardBps: LOCKER_REWARD_BPS,
       treasury: treasury.address,
       entropy: await mock.getAddress(),
       entropyProvider: provider,
@@ -131,11 +133,14 @@ describe("PlankCrashEntropy", () => {
     const settled = await crash.rounds(roundId);
     expect(settled.phase).to.equal(2n); // CRASHED
 
-    // The locker (alice) was refunded her overpayment at lock time --
-    // MockEntropy's getFeeV2() is hardcoded to 0 (see the fee test's own
-    // note), so the entire 10 wei she sent back at closeBettingAndLock
-    // comes back as a withdrawable payment.
-    expect(await crash.payments(alice.address)).to.equal(10n);
+    // The locker (alice) was refunded her overpayment at lock time (10
+    // wei, since MockEntropy's getFeeV2() is hardcoded to 0 -- see the
+    // fee test's own note) PLUS her real lockerRewardBps share of the
+    // rake (see the dedicated locker-reward test for the exact math) --
+    // just confirm here that it's strictly more than the bare refund,
+    // proving lockRound() now has a real profit margin, not exact-fee
+    // breakeven.
+    expect(await crash.payments(alice.address)).to.be.gt(10n);
 
     await crash.connect(alice).registerResult(roundId);
     await crash.connect(bob).registerResult(roundId);
@@ -213,6 +218,30 @@ describe("PlankCrashEntropy", () => {
     await crash.connect(alice).carryForwardStake(roundId);
     const nextRoundId = await crash.currentRoundId();
     expect(await crash.stakeOf(nextRoundId, alice.address)).to.equal(ethers.parseEther("0.01"));
+  });
+
+  it("settleRound pays the locker a real reward on top of fee reimbursement, giving lockRound() a real profit margin", async () => {
+    const { crash, mock, provider, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await closeBettingAndLock(crash, alice);
+    await revealWith(mock, provider, crash, roundId, ethers.keccak256(ethers.toUtf8Bytes("locker-reward-seed")));
+    await mineToCrashAndSettle(crash, roundId);
+
+    const pool = ethers.parseEther("2");
+    const rake = (pool * RAKE_BPS) / 10000n;
+    // MockEntropy's getFeeV2() is hardcoded to 0, so feeReimbursement is
+    // 0 and remainingRake == rake in full.
+    const expectedLockerReward = (rake * LOCKER_REWARD_BPS) / 10000n;
+    const expectedKeeperReward = (rake * KEEPER_REWARD_BPS) / 10000n;
+
+    // alice both locked (closeBettingAndLock) and settled (mineToCrashAndSettle
+    // calls settleRound as the default signer, carol here since it's a
+    // free function call not scoped to a connected signer -- verify who
+    // actually called it by checking payments on the right addresses).
+    expect(await crash.payments(alice.address)).to.equal(10n + expectedLockerReward);
+    expect(await crash.accumulatedRake()).to.equal(rake - expectedLockerReward - expectedKeeperReward);
   });
 
   it("only the real Pyth Entropy contract can ever trigger the callback -- a spoofed direct call reverts", async () => {

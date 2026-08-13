@@ -137,7 +137,23 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     // chain's block.timestamp and drand's own genesis-time math so
     // lockRound() never accidentally targets a round that's already (or
     // about to be) producible before the lock transaction even confirms.
-    uint256 private constant TARGET_ROUND_SAFETY_PERIODS = 2;
+    //
+    // Sized at 20 periods (60s), not the original 2 (6s): a real,
+    // disclosed L2-specific risk, found during audit, not steady clock
+    // drift (which is self-cancelling -- revealEntropy()'s gate checks
+    // the same clock the target was picked against). Arbitrum-style
+    // Orbit sequencers can snap block.timestamp forward in a single step
+    // to catch up to wall-clock time after an idle gap with no
+    // transactions -- a documented sequencer behavior, not hypothetical.
+    // On a low-traffic contract, an idle gap after lockRound() could jump
+    // block.timestamp straight past a too-close target round's real due
+    // time, making its real signature (already public via any drand
+    // relay) revealable in the very next block -- collapsing the
+    // intended live-play window for whoever is watching the relay versus
+    // whoever isn't. 60s is generous headroom against ordinary idle-gap
+    // jumps; this remains a real, disclosed assumption about sequencer
+    // timestamp jump size, not a mathematical guarantee.
+    uint256 private constant TARGET_ROUND_SAFETY_PERIODS = 20;
 
     uint256 public currentRoundId;
     mapping(uint256 => Round) public rounds;
@@ -178,6 +194,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     error TargetUnreachable();
     error DrandRoundNotYetDue();
     error InvalidSignature();
+    error ZeroVerifier();
+    error RoundIntervalTooShort();
 
     struct Config {
         uint256 bettingDurationSeconds;
@@ -203,6 +221,24 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     IDrandVerifier public immutable drandVerifier;
 
     constructor(Config memory cfg) {
+        if (cfg.drandVerifier == address(0)) revert ZeroVerifier();
+        if (cfg.drandVerifier.code.length == 0) revert ZeroVerifier();
+        // If roundIntervalSeconds were smaller than the drand safety
+        // window, two consecutive game rounds could compute the IDENTICAL
+        // targetDrandRound -- nothing else would stop round N+1 from
+        // settling off the same signature round N already revealed,
+        // making round N+1's outcome knowable before it even locks. Real
+        // audit finding; guarded here instead of only in a deploy-script
+        // comment so a future/alternate config can't silently reintroduce
+        // it. roundIntervalSeconds == 0 (this repo's local-dev "reopen
+        // immediately" mode) is exempt: real round cadence there is
+        // whatever bettingDurationSeconds naturally imposes, already far
+        // longer than the drand safety window at any realistic setting.
+        if (cfg.roundIntervalSeconds != 0) {
+            if (cfg.roundIntervalSeconds <= (TARGET_ROUND_SAFETY_PERIODS + 1) * DRAND_PERIOD) {
+                revert RoundIntervalTooShort();
+            }
+        }
         bettingDurationSeconds = cfg.bettingDurationSeconds;
         roundIntervalSeconds = cfg.roundIntervalSeconds;
         genesisTimestamp = block.timestamp;
@@ -316,10 +352,26 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         emit CashedOut(roundId, msg.sender, block.number, false);
     }
 
+    /// ONLY valid while the target drand round is genuinely NOT YET DUE --
+    /// gated on real availability (block.timestamp < the round's own due
+    /// time), NOT on whether revealEntropy() has been called on-chain
+    /// yet. Real bug, found and fixed here (the same class of bug found
+    /// and fixed in PlankCrashV2.sol's presetCashOut -- see that file's
+    /// own comment for the full writeup): a drand evmnet round's real
+    /// signature is publicly fetchable via any drand HTTP relay the
+    /// instant its due time passes, regardless of whether anyone has
+    /// submitted a revealEntropy() transaction on THIS contract yet.
+    /// Gating on the on-chain flag alone would let anyone who fetches the
+    /// signature off-chain, verifies it themselves (or just trusts the
+    /// public relay), and computes the true crash point locally, call
+    /// presetCashOut with a guaranteed, risk-free maximum-multiplier
+    /// target before anyone bothers to reveal on-chain.
     function presetCashOut(uint256 roundId, uint256 targetMultiplierBps) external nonReentrant {
         Round storage r = rounds[roundId];
         if (r.phase != Phase.LIVE) revert BadPhase();
-        if (r.entropyRevealed) revert EntropyAlreadyRevealed();
+        if (r.entropyRevealed || block.timestamp >= DRAND_GENESIS_TIME + r.targetDrandRound * DRAND_PERIOD) {
+            revert EntropyAlreadyRevealed();
+        }
         if (stakeOf[roundId][msg.sender] == 0) revert NoBet();
         if (cashOutBlockOf[roundId][msg.sender] != 0) revert AlreadyCashedOut();
 

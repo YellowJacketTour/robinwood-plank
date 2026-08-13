@@ -130,6 +130,15 @@ contract PlankCrashEntropy is ReentrancyGuard, PullPayment, IEntropyConsumer {
     uint256 public immutable minPoolSize;
     uint256 public immutable maxStakePerWalletBps;
     uint256 public immutable keeperRewardBps;
+    // Real audit finding: without this, calling lockRound() was strictly
+    // break-even at best (exact fee reimbursement, no profit margin) for
+    // whoever fronts the real Pyth fee -- no rational keeper bot has any
+    // reason to call it over a more profitable settleRound() elsewhere,
+    // a real single-point-of-liveness-failure with no economic backstop.
+    // Paid to r.locker at settleRound() time, out of the same rake
+    // keeperRewardBps already draws from, on top of (not instead of) fee
+    // reimbursement -- gives lockRound() a real, if small, profit margin.
+    uint256 public immutable lockerRewardBps;
     address public immutable treasury;
     uint256 public accumulatedRake;
 
@@ -188,6 +197,7 @@ contract PlankCrashEntropy is ReentrancyGuard, PullPayment, IEntropyConsumer {
         uint256 minPoolSize;
         uint256 maxStakePerWalletBps;
         uint256 keeperRewardBps;
+        uint256 lockerRewardBps;
         address treasury;
         address entropy;
         address entropyProvider;
@@ -206,6 +216,7 @@ contract PlankCrashEntropy is ReentrancyGuard, PullPayment, IEntropyConsumer {
         minPoolSize = cfg.minPoolSize;
         maxStakePerWalletBps = cfg.maxStakePerWalletBps;
         keeperRewardBps = cfg.keeperRewardBps;
+        lockerRewardBps = cfg.lockerRewardBps;
         treasury = cfg.treasury;
         entropy = IEntropyV2(cfg.entropy);
         entropyProvider = cfg.entropyProvider;
@@ -380,9 +391,12 @@ contract PlankCrashEntropy is ReentrancyGuard, PullPayment, IEntropyConsumer {
         // the fee ever exceeded the rake (not currently covered).
         uint256 feeReimbursement = r.entropyFeePaid < rake ? r.entropyFeePaid : rake;
         uint256 remainingRake = rake - feeReimbursement;
+        // Real profit margin for the locker, on top of fee-neutrality --
+        // see lockerRewardBps's own comment for why this exists.
+        uint256 lockerReward = (remainingRake * lockerRewardBps) / 10000;
         uint256 keeperReward = (remainingRake * keeperRewardBps) / 10000;
-        accumulatedRake += remainingRake - keeperReward;
-        if (feeReimbursement > 0) _asyncTransfer(r.locker, feeReimbursement);
+        accumulatedRake += remainingRake - lockerReward - keeperReward;
+        if (feeReimbursement + lockerReward > 0) _asyncTransfer(r.locker, feeReimbursement + lockerReward);
         if (keeperReward > 0) _asyncTransfer(msg.sender, keeperReward);
 
         emit RoundCrashed(roundId, r.crashMultiplierBps, effective, r.trueCrashElapsedBlocks > maxElapsedBlocks);

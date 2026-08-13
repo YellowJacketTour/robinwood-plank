@@ -203,6 +203,52 @@ describe("PlankCrashDrand", () => {
     await expect(crash.connect(alice).cashOut(roundId)).to.be.revertedWithCustomError(crash, "PastCrashPoint");
   });
 
+  it("SECURITY REGRESSION: presetCashOut reverts once the target drand round is due, even if revealEntropy() has NOT been called on-chain yet -- closes the same class of exploit fixed in PlankCrashV2", async () => {
+    // Real bug, found by audit and fixed here (same class as the one
+    // fixed in PlankCrashV2.sol's presetCashOut -- see that test's own
+    // writeup): a drand evmnet round's real signature is publicly
+    // fetchable via any drand HTTP relay the instant its due time passes
+    // -- regardless of whether anyone has called revealEntropy() on this
+    // contract. Gating on the on-chain flag alone would let anyone who
+    // fetches the real signature off-chain call presetCashOut with a
+    // guaranteed, risk-free target before revealing on-chain. This test
+    // proves the gate now rejects it purely on due-time, without ever
+    // calling revealEntropy -- entropyRevealed stays false throughout.
+    const { crash, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(crash);
+
+    const round = await crash.rounds(roundId);
+    const dueAt = DRAND_GENESIS_TIME + BigInt(round.targetDrandRound) * DRAND_PERIOD;
+    await networkHelpers.time.increaseTo(dueAt);
+
+    expect((await crash.rounds(roundId)).entropyRevealed).to.equal(false); // deliberately never revealed
+
+    const targetBps = await crash._multiplierAt(5);
+    await expect(crash.connect(alice).presetCashOut(roundId, targetBps)).to.be.revertedWithCustomError(
+      crash,
+      "EntropyAlreadyRevealed"
+    );
+  });
+
+  it("presetCashOut still works normally while the target drand round is genuinely not due yet -- the fix doesn't over-restrict the legitimate case", async () => {
+    const { crash, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(crash);
+
+    const round = await crash.rounds(roundId);
+    const dueAt = DRAND_GENESIS_TIME + BigInt(round.targetDrandRound) * DRAND_PERIOD;
+    expect(dueAt).to.be.gt(BigInt(await networkHelpers.time.latest())); // still genuinely not due
+
+    const targetBps = await crash._multiplierAt(5);
+    await crash.connect(alice).presetCashOut(roundId, targetBps);
+    expect(await crash.cashOutBlockOf(roundId, alice.address)).to.be.gt(0n);
+  });
+
   it("presetCashOut is rejected once entropy has been revealed, same fairness gate as PlankCrashV2", async () => {
     const { crash, alice, bob } = await deployAll();
     const roundId = await crash.currentRoundId();

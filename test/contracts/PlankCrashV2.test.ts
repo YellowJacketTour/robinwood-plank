@@ -199,6 +199,62 @@ describe("PlankCrashV2", () => {
     );
   });
 
+  it("SECURITY REGRESSION: presetCashOut reverts once entropyBlock is mined, even if revealEntropy() has NOT been called on-chain yet -- closes a real, previously-shipped exploit", async () => {
+    // Real bug, found by audit and fixed here: blockhash(entropyBlock) is
+    // a public EVM value the instant entropyBlock is mined -- readable by
+    // anyone via a plain RPC call, long before anyone bothers to submit
+    // revealEntropy(). Since _deriveCrash/_invertMultiplier are `public
+    // pure`, an attacker who reproduces the true crash point off-chain
+    // could previously call presetCashOut with it here -- a zero-risk,
+    // deterministic, guaranteed-max-multiplier win. This test proves that
+    // window is now closed: the gate must reject presetCashOut the moment
+    // entropyBlock exists, NOT wait for the on-chain flag.
+    const { crash, alice, bob } = await deployCrash();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(crash);
+
+    const round = await crash.rounds(roundId);
+    const current = await ethers.provider.getBlockNumber();
+    const toMine = Number(round.entropyBlock) - current + 1; // exactly enough to mine entropyBlock, no further
+    if (toMine > 0) await networkHelpers.mine(toMine);
+
+    // entropyBlock is now mined and its hash is real and public -- but
+    // revealEntropy() has deliberately NOT been called. Before the fix,
+    // this exact state is what let an attacker read the real blockhash
+    // off-chain, compute the true crash point via the contract's own
+    // public pure _deriveCrash, and call presetCashOut with it.
+    expect((await crash.rounds(roundId)).entropyRevealed).to.equal(false);
+    const trueEntropy = await ethers.provider.send("eth_getBlockByNumber", [
+      "0x" + Number(round.entropyBlock).toString(16),
+      false,
+    ]);
+    expect(trueEntropy.hash).to.not.be.undefined; // proves the "attacker" really can read it off-chain right now
+    const [trueMultiplierBps] = await crash._deriveCrash(trueEntropy.hash);
+
+    await expect(crash.connect(alice).presetCashOut(roundId, trueMultiplierBps)).to.be.revertedWithCustomError(
+      crash,
+      "EntropyAlreadyRevealed"
+    );
+  });
+
+  it("presetCashOut still works normally while entropyBlock is genuinely in the future -- the fix doesn't over-restrict the legitimate case", async () => {
+    const { crash, alice, bob } = await deployCrash();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(crash);
+
+    const round = await crash.rounds(roundId);
+    const current = await ethers.provider.getBlockNumber();
+    expect(Number(round.entropyBlock)).to.be.gt(current); // still genuinely in the future
+
+    const targetBps = await crash._multiplierAt(5);
+    await crash.connect(alice).presetCashOut(roundId, targetBps);
+    expect(await crash.cashOutBlockOf(roundId, alice.address)).to.be.gt(0n);
+  });
+
   it("presetCashOut reverts for a target beyond what maxElapsedBlocks can ever reach", async () => {
     const { crash, alice, bob } = await deployCrash();
     const roundId = await crash.currentRoundId();

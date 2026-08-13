@@ -8,11 +8,11 @@ import {PullPayment} from "@openzeppelin/contracts/security/PullPayment.sol";
 /// by the round's real distributable pool, split among bettors on the
 /// winning horse in proportion to their real stake. No house edge, no
 /// funded bankroll, no oracle. Winner is drawn from the blockhash of a
-/// block that does not exist yet at bet-lock time (see PlankCrash.sol for
+/// block that does not exist yet at bet-lock time (see PlankCrashV2.sol for
 /// the same reasoning on why that specific randomness source closes the
 /// reveal-ordering front-running exploit that a secret-seed design would
 /// have). Two-phase register+claim so payout order can never matter, same
-/// pattern as PlankCrash.sol.
+/// pattern as PlankCrashV2.sol.
 contract PlankDerby is ReentrancyGuard, PullPayment {
     enum Phase { BETTING, LOCKED, FINISHED, SETTLED }
 
@@ -115,7 +115,7 @@ contract PlankDerby is ReentrancyGuard, PullPayment {
         if (block.timestamp >= r.bettingEndsAt) revert TooLate();
         if (horseOf[currentRaceId][msg.sender] != 0) revert AlreadyBet();
 
-        // Same structural exemption as PlankCrash.sol's placeBet(): the
+        // Same structural exemption as PlankCrashV2.sol's placeBet(): the
         // very first bet of a race is necessarily 100% of the resulting
         // pool, so a percentage cap is only meaningful once a real second
         // participant exists to be disproportionate relative to.
@@ -133,7 +133,7 @@ contract PlankDerby is ReentrancyGuard, PullPayment {
     }
 
     /// Same non-custodial "real collateral or no launch" recovery path as
-    /// PlankCrash.carryForwardStake(): a voided race's pool total does NOT
+    /// PlankCrashV2.carryForwardStake(): a voided race's pool total does NOT
     /// move automatically (individual stakeOf/horseOf entries stay keyed
     /// to the dead race id), so each affected bettor pulls their own stake
     /// into whatever race is currently open, bounded and per-user.
@@ -185,7 +185,7 @@ contract PlankDerby is ReentrancyGuard, PullPayment {
     /// Draws the winning horse from the blockhash of a block that did not
     /// exist at lock time -- unknowable to anyone, including the deployer,
     /// until it is mined. Same entropy source and 256-block window
-    /// constraint as PlankCrash.revealCrash().
+    /// constraint as PlankCrashV2.revealEntropy().
     function finishRace(uint256 raceId) external nonReentrant {
         Race storage r = races[raceId];
         if (r.phase != Phase.LOCKED) revert BadPhase();
@@ -209,7 +209,7 @@ contract PlankDerby is ReentrancyGuard, PullPayment {
         _asyncTransfer(treasury, amount);
     }
 
-    /// Bounded, per-user aggregate step -- see PlankCrash.sol's own
+    /// Bounded, per-user aggregate step -- see PlankCrashV2.sol's own
     /// registerResult() for why this two-phase pattern exists (computing
     /// totalWinningWeight without an unbounded loop over every bettor).
     function registerResult(uint256 raceId) external nonReentrant {

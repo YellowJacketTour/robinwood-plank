@@ -1889,9 +1889,9 @@ $("connectBtn").addEventListener("click", async () => {
 });
 
 // ── Simulate mode: zero wallet-connect friction, zero rule-relaxation.
-// This still deploys to and settles against the real PlankCrash.sol on
+// This still deploys to and settles against the real PlankCrashV2.sol on
 // the real local chain -- every check (whale cap, pari-mutuel payout
-// math, blockhash-derived crash point, two-phase register+claim) is the
+// math, reveal/settle-split crash point, two-phase register+claim) is the
 // actual contract enforcing itself, not a client-side approximation.
 // The only things automated are (1) picking a known local test account
 // instead of making you click through the picker, and (2) a background
