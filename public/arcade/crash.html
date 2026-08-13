@@ -434,7 +434,7 @@ const $ = (id) => document.getElementById(id);
 // via THREE.Sprite, so it always faces camera and lights/glows correctly
 // with the scene around it. Four staged altitude bands, keyed to
 // flightProgress (0..1):
-//   pad        [0.00, 0.02)  static, on the slingshot
+//   pad        [0.00, 0.02)  static, on the launch platform
 //   sky        [0.02, 0.35)  troposphere -- blue, clouds
 //   stratos    [0.35, 0.65)  deep blue/violet, thinning air, first stars
 //   space      [0.65, 1.00]  black, stars, satellites, an alien, a mystery
@@ -546,21 +546,96 @@ const starMat = new THREE.PointsMaterial({
 const stars = new THREE.Points(starGeo, starMat);
 scene.add(stars);
 
-// ── launch pad: pallet of planks + slingshot posts (PBR wood material)
+// ── launch pad: rocket launch platform ────────────────────────────────
+// Replaces the earlier two wooden posts, which had no relationship to the
+// actual launch animation (a compress-then-release "snap") and didn't
+// read as any recognizable structure. Real rocket-pad convention, built
+// from primitives rather than a texture so it holds up at any zoom: a
+// raised steel deck ringed with hazard stripes, load-bearing legs, an
+// engine-glow port the astronaut launches from dead center, and a service
+// gantry off to one side with a blinking beacon -- the single cheapest
+// real-world cue that reads unambiguously as "launch site." Four clamp
+// arms cradle the rocket at rest and swing open at ignition (animated in
+// frame() via padClampOpen), giving the "snap" moment something concrete
+// to release instead of firing in front of an inert pad.
 const padGroup = new THREE.Group();
-const plankMat = new THREE.MeshStandardMaterial({ color: 0x9c6a3e, roughness: 0.85, metalness: 0.02 });
-for (let row = 0; row < 4; row++) {
-  const plank = new THREE.Mesh(new THREE.BoxGeometry(9, 0.5, 2.2), plankMat);
-  plank.position.set(0, row * 0.55, 0);
-  padGroup.add(plank);
+
+const deckMat = new THREE.MeshStandardMaterial({ color: 0x6b7480, roughness: 0.55, metalness: 0.6 });
+const deck = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 3.9, 0.5, 8), deckMat);
+padGroup.add(deck);
+
+// hazard-stripe rim -- alternating red/white wedges around the blast
+// radius, a real launch-pad marking convention
+const stripeMatRed = new THREE.MeshStandardMaterial({ color: 0xd23b3b, roughness: 0.5 });
+const stripeMatWhite = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.5 });
+const STRIPE_COUNT = 16;
+for (let i = 0; i < STRIPE_COUNT; i++) {
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.14, 0.42), i % 2 === 0 ? stripeMatRed : stripeMatWhite);
+  const a = (i / STRIPE_COUNT) * Math.PI * 2;
+  stripe.position.set(Math.cos(a) * 3.85, 0.02, Math.sin(a) * 3.85);
+  stripe.rotation.y = -a;
+  padGroup.add(stripe);
 }
-const postMat = new THREE.MeshStandardMaterial({ color: 0x4a3420, roughness: 0.9 });
-for (const side of [-1, 1]) {
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 3.4, 8), postMat);
-  post.position.set(side * 1.5, 3.5, 0);
-  post.rotation.z = side * 0.12;
-  padGroup.add(post);
+
+// engine-glow ring: the exhaust port the astronaut launches from
+const glowRing = new THREE.Mesh(
+  new THREE.RingGeometry(0.9, 1.3, 32),
+  new THREE.MeshBasicMaterial({ color: 0xff8a3c, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+);
+glowRing.rotation.x = -Math.PI / 2;
+glowRing.position.y = 0.26;
+padGroup.add(glowRing);
+
+// 4 angled load-bearing legs
+const legMat = new THREE.MeshStandardMaterial({ color: 0x333a44, roughness: 0.7, metalness: 0.4 });
+for (let i = 0; i < 4; i++) {
+  const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 4.6, 6), legMat);
+  leg.position.set(Math.cos(a) * 3.1, -2.4, Math.sin(a) * 3.1);
+  leg.rotation.z = Math.cos(a) * 0.22;
+  leg.rotation.x = -Math.sin(a) * 0.22;
+  padGroup.add(leg);
 }
+
+// 4 retracting clamp arms, closed (cradling the rocket) at rest --
+// padClampOpen (declared with the other animation state below) swings
+// them open at ignition, animated per-frame in frame(), not baked here.
+const clampMat = new THREE.MeshStandardMaterial({ color: 0x8a2f2f, roughness: 0.5, metalness: 0.5 });
+const padClamps = [];
+for (let i = 0; i < 4; i++) {
+  const a = (i / 4) * Math.PI * 2;
+  const pivot = new THREE.Group();
+  pivot.position.set(Math.cos(a) * 1.5, 1.1, Math.sin(a) * 1.5);
+  pivot.rotation.y = -a;
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.22, 0.22), clampMat);
+  arm.position.set(0.75, 0, 0);
+  pivot.add(arm);
+  padGroup.add(pivot);
+  padClamps.push(pivot);
+}
+
+// service gantry off to one side: a vertical lattice mast, cross braces,
+// and a blinking beacon on top
+const towerMat = new THREE.MeshStandardMaterial({ color: 0x555f6b, roughness: 0.6, metalness: 0.5 });
+const towerGroup = new THREE.Group();
+const mast = new THREE.Mesh(new THREE.BoxGeometry(0.35, 9, 0.35), towerMat);
+mast.position.y = 3.6;
+towerGroup.add(mast);
+for (let i = 0; i < 3; i++) {
+  const brace = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.16, 0.16), towerMat);
+  brace.position.set(-0.8, 1.4 + i * 2.6, 0);
+  brace.rotation.z = 0.5;
+  towerGroup.add(brace);
+}
+const beacon = new THREE.Mesh(
+  new THREE.SphereGeometry(0.16, 8, 8),
+  new THREE.MeshStandardMaterial({ color: 0xff3040, emissive: 0xff2030, emissiveIntensity: 1.6 })
+);
+beacon.position.y = 8.3;
+towerGroup.add(beacon);
+towerGroup.position.set(-4.6, -2.3, -0.6);
+padGroup.add(towerGroup);
+
 padGroup.position.set(0, -6, 0);
 scene.add(padGroup);
 
@@ -779,9 +854,43 @@ function makeParticleSystem(maxCount, color) {
   for (let i = 1; i < pos.length; i += 3) pos[i] = -9999;
   const alpha = new Float32Array(maxCount);
   geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-  const mat = new THREE.PointsMaterial({
-    color, size: 0.32, transparent: true, opacity: 1,
-    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+  geo.setAttribute("aAlpha", new THREE.BufferAttribute(alpha, 1));
+  // A real, separate bug from the origin-stacking one above: this was a
+  // plain PointsMaterial with a flat opacity: 1, so every live particle
+  // rendered at full brightness right up until the instant it died --
+  // nothing ever faded. A steady-state cone of ~100+ overlapping,
+  // constant-full-brightness, additively-blended points reads not as a
+  // wispy exhaust trail but as one dense, solid, oddly bright pillar --
+  // exactly the "weird bright shine" behind the astronaut. The `alpha`
+  // array above was allocated for per-particle fade-out from the start
+  // but never actually wired into anything that could render it -- dead
+  // plumbing. Fixed with a real per-vertex alpha attribute (aAlpha, driven
+  // by remaining life in updateParticles) and a small custom shader, since
+  // stock PointsMaterial has no per-vertex alpha channel to fade with.
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(color) }, uSize: { value: 260 } },
+    vertexShader: `
+      uniform float uSize;
+      attribute float aAlpha;
+      varying float vAlpha;
+      void main() {
+        vAlpha = aAlpha;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = uSize / -mv.z;
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uColor;
+      varying float vAlpha;
+      void main() {
+        if (vAlpha <= 0.001) discard;
+        float d = length(gl_PointCoord - 0.5);
+        if (d > 0.5) discard;
+        gl_FragColor = vec4(uColor, smoothstep(0.5, 0.0, d) * vAlpha);
+      }
+    `,
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
   });
   const points = new THREE.Points(geo, mat);
   points.frustumCulled = false;
@@ -898,15 +1007,21 @@ function emitCone(system, origin, n, coneAngle, speed) {
 }
 function updateParticles(system, dt) {
   for (let i = 0; i < system.maxCount; i++) {
-    if (system.life[i] <= 0) continue;
+    if (system.life[i] <= 0) { system.alpha[i] = 0; continue; }
     system.pos[i * 3] += system.vel[i * 3] * dt;
     system.pos[i * 3 + 1] += system.vel[i * 3 + 1] * dt;
     system.pos[i * 3 + 2] += system.vel[i * 3 + 2] * dt;
     system.vel[i * 3 + 1] -= 0.4 * dt;
     system.life[i] -= dt * 0.7;
-    if (system.life[i] <= 0) system.pos[i * 3 + 1] = -9999;
+    // Fade out over the tail of its life instead of a hard cut at 0 --
+    // the real fix for the "solid bright pillar" bug: overlapping
+    // particles now taper toward transparent as they age, so a dense
+    // cone reads as a diffusing trail, not a constant-brightness mass.
+    system.alpha[i] = Math.max(0, Math.min(1, system.life[i] * 2));
+    if (system.life[i] <= 0) { system.pos[i * 3 + 1] = -9999; system.alpha[i] = 0; }
   }
   system.geo.attributes.position.needsUpdate = true;
+  system.geo.attributes.aAlpha.needsUpdate = true;
 }
 
 // spawnParticles(color, n, spread) -- spawns at the astronaut's current
@@ -915,7 +1030,7 @@ function updateParticles(system, dt) {
 // right now," it doesn't track 3D coordinates itself.
 function spawnParticles(color, n, spread) {
   const origin = chalkstronautSprite ? chalkstronautSprite.position : new THREE.Vector3(0, 0, 0);
-  crashParticles.points.material.color.set(color);
+  crashParticles.points.material.uniforms.uColor.value.set(color);
   emitParticles(crashParticles, origin, n, spread, 3.2);
 }
 
@@ -1109,18 +1224,6 @@ composer.addPass(gradePass);
 const lensFlarePass = new ShaderPass(LensFlareShader);
 composer.addPass(lensFlarePass);
 
-// Project the sun's direction to screen UV each frame and feed god rays +
-// lens flare -- same technique as the reference: a world point far along
-// the light's direction, projected through the camera, with an off-screen/
-// behind-camera guard so the effects fade out cleanly instead of glitching.
-const _lightWorld = new THREE.Vector3();
-function lightScreenUV(worldPos) {
-  _lightWorld.copy(worldPos).project(camera);
-  if (_lightWorld.z > 1) return null;
-  const x = _lightWorld.x * 0.5 + 0.5, y = _lightWorld.y * 0.5 + 0.5;
-  if (x < -0.35 || x > 1.35 || y < -0.35 || y > 1.35) return null;
-  return { x, y };
-}
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -1135,10 +1238,17 @@ function resize() {
 window.addEventListener("resize", resize);
 
 let phaseState = "idle"; // idle | betting | live | crashed
-let flightProgress = 0; // 0..1, drives ascent height
+let flightProgress = 0; // 0..1, drives ascent height -- smoothed toward targetFlightProgress every frame
+// The raw value read from the contract, updated once per ~1.2s poll. Was
+// used directly to drive astronautY -- a real bug: it made the ascent
+// visibly POP once per poll instead of climbing continuously, since three.js
+// renders ~60fps but the underlying value only changed a few times a
+// second. flightProgress now eases toward this target every frame instead.
+let targetFlightProgress = 0;
 let crashedAt = null;
-let launchAt = null; // performance.now() at moment LIVE begins -- slingshot snap
+let launchAt = null; // performance.now() at moment LIVE begins -- ignition kick
 let shakeAmount = 0;
+let padClampOpen = 0; // 0=closed (cradling the rocket), 1=open (launched), eased in frame()
 const GATE_PROGRESS = 0.746; // where the wormhole gate sits, in flightProgress terms
 let warpTriggeredForRound = false; // resets on round change, so it can fire again next round
 let warpMix = 0; // 0..1, ramps up crossing the gate then decays
@@ -1166,13 +1276,18 @@ function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
+  flightProgress += (targetFlightProgress - flightProgress) * Math.min(1, dt * 4);
+
   const progress = phaseState === "crashed" ? Math.min(flightProgress, 1) : flightProgress;
   const groundY = -1.5, topY = 30;
   const launchElapsed = launchAt ? performance.now() - launchAt : 0;
-  const snap = phaseState === "live" && launchElapsed < 260
+  // Ignition kick: a quick compress-then-release dip right as the clamps
+  // let go, decaying to nothing over ~260ms -- the moment the clamp arms
+  // (padClamps, above) actually have something to release into.
+  const ignitionKick = phaseState === "live" && launchElapsed < 260
     ? Math.sin((launchElapsed / 260) * Math.PI) * 1.6 * (1 - launchElapsed / 260)
     : 0;
-  const astronautY = (phaseState === "crashed" ? groundY + (topY - groundY) * Math.min(flightProgress, 1) : groundY + (topY - groundY) * flightProgress) - snap;
+  const astronautY = (phaseState === "crashed" ? groundY + (topY - groundY) * Math.min(flightProgress, 1) : groundY + (topY - groundY) * flightProgress) - ignitionKick;
 
   // sky + fog track altitude
   const sky = skyColorAt(progress);
@@ -1190,6 +1305,12 @@ function frame() {
   // launch pad fades out (moves below the horizon) once the climb begins
   padGroup.visible = progress < 0.1;
   padGroup.position.y = -6 - Math.max(0, progress - 0.02) * 40;
+
+  // clamp arms swing open at ignition and stay open through the crash
+  // (the rocket doesn't re-cradle mid-round); beacon blinks continuously
+  padClampOpen += ((phaseState === "live" || phaseState === "crashed" ? 1 : 0) - padClampOpen) * Math.min(1, dt * 6);
+  for (const clamp of padClamps) clamp.rotation.x = padClampOpen * 0.9;
+  beacon.material.emissiveIntensity = 1.2 + Math.sin(t * 6) * 0.6;
 
   // satellites drift once above the stratosphere
   const satAlpha = Math.max(0, Math.min(1, (progress - 0.45) / 0.2));
@@ -1279,16 +1400,25 @@ function frame() {
   camera.position.set(Math.sin(t * 0.06) * 3 + camShakeX, targetCamY + camShakeY, 24 - progress * 6);
   camera.lookAt(0, astronautY * 0.6 + 6, 0);
 
-  // god rays + lens flare track the sun; fade smoothly as the scene leaves
-  // atmosphere (the sun reads less as "the light source" once starlight
-  // and satellites take over the composition in deep space)
-  const sunUV = lightScreenUV(sun.position);
+  // god rays + lens flare read as a corner glint, fading as the scene
+  // leaves atmosphere. This USED to project the sun's real world position
+  // through the camera every frame -- correct in isolation, but the
+  // camera also dollies upward with the astronaut's altitude (targetCamY
+  // above), and nothing kept the sun's position moving with it. At some
+  // climb heights the sun's screen projection drifted to sit directly
+  // above the character -- the real cause of the "bright shine over the
+  // top of the avatar" bug, confirmed by the fact it only appeared at
+  // certain altitudes, never at launch or at the very top of a climb.
+  // Fixed by anchoring the glint to a fixed screen-space corner instead of
+  // re-deriving it from a moving camera vs. a stationary light every
+  // frame -- it's a stylized lens artifact, not a physically accurate
+  // light-source marker, so it never needs to track the real sun at all.
   const sourceStrength = Math.max(0, 1 - progress * 0.6);
-  godRaysPass.uniforms.uLight.value.set(sunUV ? sunUV.x : 0.5, sunUV ? sunUV.y : 0.5);
-  godRaysPass.uniforms.uStrength.value = sunUV ? 0.22 * sourceStrength : 0;
+  godRaysPass.uniforms.uLight.value.set(0.84, 0.8);
+  godRaysPass.uniforms.uStrength.value = 0.22 * sourceStrength;
   godRaysPass.uniforms.uTime.value = t;
-  lensFlarePass.uniforms.uLight.value.set(sunUV ? sunUV.x : 0.5, sunUV ? sunUV.y : 0.5);
-  lensFlarePass.uniforms.uStrength.value = sunUV ? 0.12 * sourceStrength : 0;
+  lensFlarePass.uniforms.uLight.value.set(0.84, 0.8);
+  lensFlarePass.uniforms.uStrength.value = 0.12 * sourceStrength;
 
   // cinematic grade: crash impact reads as a lens-stress chromatic-
   // aberration crunch that decays over ~0.6s, same technique as a hull hit
@@ -1812,7 +1942,15 @@ async function refresh() {
     const phase = Number(round.phase);
     const prevPhaseState = phaseState;
     phaseState = phase === 0 ? "betting" : phase === 1 ? "live" : "crashed";
-    if (phaseState === "live" && prevPhaseState !== "live") launchAt = performance.now();
+    if (phaseState === "live" && prevPhaseState !== "live") {
+      launchAt = performance.now();
+      // Ignition burst + rumble right as the clamp arms release -- reuses
+      // the crash burst's isotropic emitter (real rocket ignition really
+      // does billow outward in every direction off the deck, unlike the
+      // tight downward cruise-thrust cone used the rest of the flight).
+      spawnParticles(0xffb37a, 50, 2.4);
+      shakeAmount = 0.5;
+    }
 
     const stake = signer ? await crash.stakeOf(roundId, signer.address) : 0n;
     const hasStake = stake > 0n;
@@ -1820,7 +1958,7 @@ async function refresh() {
     const hasCashedOut = cashOutBlock > 0n;
 
     if (phase === 0) {
-      flightProgress = 0; crashedAt = null;
+      flightProgress = 0; targetFlightProgress = 0; crashedAt = null;
       setMultReadout("1.00", "idle");
       const secsLeft = Math.max(0, Number(round.bettingEndsAt) - chainNow);
       $("substatus").textContent = secsLeft > 0 ? `LAUNCHING IN ${secsLeft}s` : "LOCKING…";
@@ -1836,12 +1974,18 @@ async function refresh() {
       // it survives. A log-of-multiplier progress curve was a real bug --
       // logarithms COMPRESS large values, so the climb would visually
       // *decelerate* over time, the opposite of the contract's real
-      // behavior. Linear-in-multiplier instead: since the multiplier
-      // itself already grows quadratically with elapsed blocks, mapping
-      // screen position linearly to the multiplier makes screen position
-      // grow quadratically with time too -- a visibly accelerating climb
-      // that matches the math, not fights it.
-      flightProgress = Math.min(1, (Number(xStr) - 1) / 9);
+      // behavior. Linear-in-multiplier was the first fix, but a hard /9
+      // denominator (full ascent only at 10x) turned out to be its own
+      // real bug: this contract's real crash distribution is pari-mutuel
+      // and heavily weighted under 5x (confirmed against real RoundCrashed
+      // history in the Stats panel), so the astronaut spent almost every
+      // round pinned in the bottom 10-20% of the screen -- reading as
+      // "stuck at the bottom." An asymptotic curve fixes this without
+      // reintroducing the log-compression bug: it climbs fast through the
+      // common 1x-5x range (e.g. 2x already reaches ~29% of the screen,
+      // 5x ~62%) while still climbing, never hard-capping, for the rare
+      // huge multiplier.
+      targetFlightProgress = 1 - 1 / (1 + (Number(xStr) - 1) / 2.5);
       multGraphSamples.push(Number(xStr));
       if (multGraphSamples.length > 400) multGraphSamples.shift();
       drawMultGraph();
@@ -1852,6 +1996,11 @@ async function refresh() {
     } else {
       if (crashedAt === null) { crashedAt = performance.now(); shakeAmount = 1.4; spawnParticles(0xff4d6a, 60, 3.5); }
       const xStr = bpsToXStr(round.crashMultiplierBps);
+      // Snap the target to the real, final crash multiplier -- not
+      // whatever the last LIVE poll happened to sample -- so the
+      // astronaut's resting height always matches the actual on-chain
+      // outcome exactly, even though polling is coarser than 60fps.
+      if (round.crashMultiplierBps > 0n) targetFlightProgress = 1 - 1 / (1 + (Number(xStr) - 1) / 2.5);
       setMultReadout(round.crashMultiplierBps > 0n ? xStr : "0.00", "crashed");
       $("substatus").textContent = round.crashMultiplierBps > 0n ? "CRASHED" : "VOIDED";
 
