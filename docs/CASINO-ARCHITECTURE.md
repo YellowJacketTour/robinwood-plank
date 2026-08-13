@@ -5,7 +5,7 @@ randomness, and the community-economics loop that ties them together. It is
 written to be honest about what the design does and does not achieve, so the
 remaining business decisions (the bps parameters) can be made with eyes open.
 
-Everything here is real, compiled, and tested (`npx hardhat test`, 182 passing
+Everything here is real, compiled, and tested (`npx hardhat test`, 186 passing
 as of this writing). Nothing in this doc is aspirational unless explicitly
 marked **OPEN**.
 
@@ -14,7 +14,7 @@ marked **OPEN**.
 ## 1. The one-paragraph version
 
 Players bet ETH into a shared pari-mutuel pool on a crash game. A small **rake**
-(default 2.5%) is skimmed from each settled round. That rake — instead of
+(4.5%, of which only 1.8% is a real house edge — see §5a) is skimmed from each settled round. That rake — instead of
 leaking to a disconnected wallet — flows into a **distributor** that splits it
 three ways: a slice **buys and burns real $PLANK**, a slice **funds a
 Powerboard rolling jackpot** paid back to active bettors, and the remainder goes
@@ -57,7 +57,7 @@ stays inside it.
 | Contract | Role | Trust surface |
 |---|---|---|
 | `PlankCrashDrand.sol` | The crash game. Reads randomness from the shared beacon; pays rake to whatever `treasury` it's configured with. | No owner, no admin. |
-| `PlankRakeDistributor.sol` | Immutable 3-way rake split (burn / airdrop / treasury). Push-forwards on receipt. | No owner, no setter — changing the split needs a redeploy. |
+| `PlankRakeDistributor.sol` | Immutable 3-way rake split (burn / jackpot / dev). Push-forwards on receipt. | No owner, no setter — changing the split needs a redeploy. |
 | `PlankBurnEngine.sol` | Permissionless swap-and-burn. Caller supplies a real Universal-Router route; the contract verifies the real PLANK balance delta and burns it. | No owner. Swap output can only ever be burned, never redirected. |
 | `PlankPowerboard.sol` | Rolling jackpot. Wager-weighted tickets read from a source's own `stakeOf`; a daily Plank Ball draw either pays the whole pot or a consolation slice and rolls the rest over. | No owner. Source allowlist is immutable. |
 | `DrandBeacon.sol` | Shared, permissionless, verify-on-chain cache of drand rounds. | Deploy-time-verified drand key; no owner. |
@@ -71,20 +71,23 @@ two could not be confirmed live on Robinhood Chain (checked via `eth_getCode`).
 
 ## 3. The rake, followed end to end
 
-1. Players bet; a round settles. `settleRound()` pays a small keeper reward
-   (default 10% of rake) to whoever settled, and accrues the remaining rake.
+1. Players bet; a round settles. `settleRound()` pays a keeper reward
+   (`keeperRewardBps`, currently 0 — see §4b) to whoever settled, and accrues the remaining rake.
 2. `claimRake()` moves the accrued rake into the crash's PullPayment escrow,
    credited to `treasury` — which on mainnet is the **distributor's** address.
 3. Anyone calls `crash.withdrawPayments(distributor)`. The distributor's
    `receive()` fires and splits the ETH: `burnBps` → burn engine, `airdropBps`
-   → airdrop pool's current epoch, remainder → protocol treasury.
+   → the Powerboard jackpot, remainder → dev/ops treasury.
 4. A keeper calls `burnEngine.executeBurn(route, ethAmount, minPlankOut, deadline)`
    with a route built off-chain (Uniswap Trading API, the same aggregator this
    repo's frontend already uses). Real $PLANK is bought and burned.
-5. A keeper calls `airdropPool.claimTickets(crash, roundId, player)` for each
+5. A keeper calls `powerboard.claimTickets(crash, roundId, player)` for each
    bettor, crediting them tickets equal to their real stake.
-6. Once a day, `airdropPool.requestDraw(epoch)` → relay the drand round →
-   `airdropPool.drawWinner(epoch)` pays the winner the pot minus a drawer reward.
+6. Once a day, `powerboard.requestDraw(epoch)` → relay the drand round →
+   `powerboard.drawWinner(epoch)` draws the Plank Ball: a hit pays the whole
+   rolling jackpot, a miss pays a consolation slice and rolls the rest over.
+7. If the whole field busted, `crash.sweepBustedRound(roundId)` rolls that
+   round's pot into the next round instead of stranding it.
 
 `scripts/local-casino-setup.ts` deploys this whole loop wired together on a
 local node; `test/contracts/CasinoIntegration.test.ts` drives one full round
