@@ -18,7 +18,7 @@ async function main() {
   const [deployer, treasury, alice, bob, carol] = await ethers.getSigners();
 
   // Node-level interval mining: makes the local chain auto-mine an empty
-  // block every second regardless of transaction traffic, so
+  // block every 500ms regardless of transaction traffic, so
   // block.timestamp tracks real wall-clock time even if nobody happens
   // to be betting right now. Set ONCE here, not per-browser-tab -- a
   // client-side per-tab heartbeat was tried and was a real bug: with more
@@ -27,7 +27,16 @@ async function main() {
   // raced chain time thousands of rounds ahead of real time within
   // minutes. This is idempotent to re-run against an already-configured
   // node.
-  await ethers.provider.send("evm_setIntervalMining", [1000]);
+  //
+  // Was 1000ms -- halved because round pacing here is bottlenecked
+  // entirely by REVEAL_DELAY_BLOCKS (a fixed block count, below), so this
+  // is the one real lever for "the game feels too slow" that doesn't
+  // touch any game economics: it only changes how many real seconds a
+  // block takes, not the contract's math. public/arcade/crash.html's
+  // LOCAL_BLOCK_MS constant must be kept equal to this value -- it's what
+  // lets the client extrapolate the live multiplier smoothly between
+  // polls using real elapsed time as a stand-in for elapsed blocks.
+  await ethers.provider.send("evm_setIntervalMining", [500]);
 
   // Fast local timings so a round is actually playable in seconds, not
   // the production cadence these constants would use on a real chain.
@@ -45,7 +54,17 @@ async function main() {
   // actually climb. 25 blocks against a ~1 block/sec heartbeat gives a
   // real, watchable flight window.
   const REVEAL_DELAY_BLOCKS = 25;
-  const REGISTRATION_WINDOW_BLOCKS = 50;
+  // Was 50 -- claim() is contract-gated to only succeed after this many
+  // blocks past reveal (real two-phase register-then-claim design, so
+  // payout order can never matter -- see PlankDerby.test.ts's identical
+  // pattern). That's correct and not something to work around, but 50
+  // blocks was a real, separate "feels slow" bug of its own: at the
+  // (now 500ms) local block cadence that's a genuine ~25 real-second wait
+  // after every single round before a player's own result becomes
+  // claimable and the frontend's result card can even appear. 10 blocks
+  // (~5s locally) keeps the same real on-chain guarantee while making the
+  // conclusion actually show up promptly.
+  const REGISTRATION_WINDOW_BLOCKS = 10;
   const RAKE_BPS = 250n; // 2.5%
   const MIN_PARTICIPANTS = 2n;
   const MIN_POOL = ethers.parseEther("0.01");

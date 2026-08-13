@@ -115,13 +115,42 @@
     margin-top: 10px; font-family: var(--font-mono); font-size: 12.5px;
     letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim);
   }
-  .outcome-banner {
-    margin-top: 16px; padding: 8px 20px; border-radius: 999px; font-weight: 700;
-    font-size: 14px; opacity: 0; transform: translateY(6px); transition: opacity .3s, transform .3s;
+  /* Real conclusion card -- centered over the whole stage so a settled
+     round reads as an actual moment, not a line of text competing with
+     the multiplier readout for attention. Tier classes scale the glow
+     intensity with how big the result was (see celebrate() in the
+     script), the same "bigger win = bigger visual" language every real
+     crash game's cash-out moment uses. */
+  .result-card {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -46%) scale(0.85);
+    z-index: 25; text-align: center; padding: 22px 40px; border-radius: 20px;
+    background: rgba(10,14,24,0.72); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.12);
+    opacity: 0; pointer-events: none;
+    transition: opacity .35s ease, transform .35s cubic-bezier(.2,1.4,.4,1);
   }
-  .outcome-banner.show { opacity: 1; transform: translateY(0); }
-  .outcome-banner.win { background: rgba(62,224,140,0.12); color: var(--win); border: 1px solid rgba(62,224,140,0.3); }
-  .outcome-banner.lose { background: rgba(255,77,106,0.1); color: var(--lose); border: 1px solid rgba(255,77,106,0.28); }
+  .result-card.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  .result-tier {
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-dim); margin-bottom: 4px;
+  }
+  .result-mult {
+    font-family: var(--font-display); font-size: 52px; line-height: 1;
+  }
+  .result-delta { font-family: var(--font-mono); font-size: 15px; margin-top: 8px; font-weight: 600; }
+  .result-card.win .result-mult, .result-card.win .result-delta { color: var(--win); }
+  .result-card.lose .result-mult, .result-card.lose .result-delta { color: var(--lose); }
+  .result-card.win.tier-mid { box-shadow: 0 0 40px rgba(62,224,140,0.25); border-color: rgba(62,224,140,0.35); }
+  .result-card.win.tier-high { box-shadow: 0 0 70px rgba(62,224,140,0.4); border-color: rgba(62,224,140,0.55); }
+  .result-card.win.tier-epic {
+    box-shadow: 0 0 110px rgba(255,200,87,0.55); border-color: rgba(255,200,87,0.7);
+    animation: result-epic-pulse 0.9s ease-in-out infinite;
+  }
+  .result-card.win.tier-epic .result-mult { color: var(--gold); }
+  @keyframes result-epic-pulse {
+    0%, 100% { box-shadow: 0 0 90px rgba(255,200,87,0.45); }
+    50% { box-shadow: 0 0 140px rgba(255,200,87,0.75); }
+  }
 
   /* Stock-ticker-style rising multiplier curve -- the other universal
      crash-game primitive. Sits low in the stage, behind the 3D scene's
@@ -325,12 +354,23 @@
     <div class="center-readout">
       <div class="mult idle" id="multReadout">1<span class="x">.00x</span></div>
       <div class="substatus" id="substatus">CONNECT A WALLET TO PLAY</div>
-      <div class="outcome-banner" id="outcomeBanner"></div>
       <!-- The other universal convention: a rising multiplier line graph,
            color-shifting cool-to-warm as it climbs, like every real crash
            game's stock-ticker-style curve. Plots this round's own real
            liveMultiplierBps samples, not synthetic/decorative motion. -->
       <canvas id="multGraph" class="mult-graph"></canvas>
+    </div>
+    <!-- The real conclusion moment -- replaces a one-line "WON at Xx"
+         banner. Shows what actually happened (your real cash-out
+         multiplier and real on-chain payout, not the round's eventual
+         crash point, which can be a totally different, larger number if
+         you cashed out early) and scales its own visual intensity
+         (border glow, particle burst, screen kick) with how big the
+         result was -- see celebrate() in the script below. -->
+    <div class="result-card" id="resultCard">
+      <div class="result-tier" id="resultTier"></div>
+      <div class="result-mult" id="resultMult"></div>
+      <div class="result-delta" id="resultDelta"></div>
     </div>
   </div>
 
@@ -1269,6 +1309,13 @@ let crashedAt = null;
 let launchAt = null; // performance.now() at moment LIVE begins -- ignition kick
 let shakeAmount = 0;
 let padClampOpen = 0; // 0=closed (cradling the rocket), 1=open (launched), eased in frame()
+// 0..1, how fast the round is currently accelerating -- the contract's
+// real rate of climb (d bps / d elapsedBlocks = 400 + 40*elapsedBlocks)
+// grows linearly with elapsed blocks, i.e. the round genuinely speeds up
+// the longer it survives. Drives FOV punch-in, thruster intensity, and
+// engine rumble so that real acceleration is felt, not just displayed as
+// a bigger number -- eased in frame() so it climbs and releases smoothly.
+let velocityNorm = 0;
 const GATE_PROGRESS = 0.746; // where the wormhole gate sits, in flightProgress terms
 let warpTriggeredForRound = false; // resets on round change, so it can fire again next round
 let warpMix = 0; // 0..1, ramps up crossing the gate then decays
@@ -1300,17 +1347,25 @@ function frame() {
   // multiplierAtBlocksBps() above for why this is safe. Runs every frame,
   // not just every ~1.2s poll, so both the number and the ascent it
   // drives climb continuously instead of stepping.
+  let targetVelocityNorm = 0;
   if (phaseState === "live" && launchAt) {
-    const estElapsedBlocks = Math.max(0, (performance.now() - launchAt) / 1000);
+    const estElapsedBlocks = Math.max(0, (performance.now() - launchAt) / LOCAL_BLOCK_MS);
     const estBps = multiplierAtBlocksBps(estElapsedBlocks);
     const xStr = bpsToXStr(estBps);
     lastMult = Number(xStr);
     setMultReadout(xStr, "live");
     targetFlightProgress = 1 - 1 / (1 + (Number(xStr) - 1) / 2.5);
+    // The contract's real instantaneous rate of climb is the derivative
+    // of _multiplierAt: 400 + 40*elapsedBlocks bps/block. Normalized
+    // against ~40 blocks (roughly a 5x round locally) so it reads as "hit
+    // full intensity" around the point most rounds have already crashed,
+    // rather than needing an extreme multiplier to ever feel fast.
+    targetVelocityNorm = Math.min(1, estElapsedBlocks / 40);
   } else if (phaseState === "betting" && bettingEndsAtEstimateMs !== null) {
     const secsLeft = Math.max(0, Math.ceil((bettingEndsAtEstimateMs - performance.now()) / 1000));
     $("substatus").textContent = secsLeft > 0 ? `LAUNCHING IN ${secsLeft}s` : "LOCKING…";
   }
+  velocityNorm += (targetVelocityNorm - velocityNorm) * Math.min(1, dt * 3);
   // Tighter tracking than before (was dt*4): now that targetFlightProgress
   // itself updates continuously every frame instead of jumping once per
   // poll, flightProgress can afford to follow it more closely without
@@ -1419,11 +1474,17 @@ function frame() {
       ? -Math.min((performance.now() - (crashedAt || performance.now())) / 260, 1) * 1.1
       : Math.sin(t * 1.1) * 0.06;
     thrusterLight.position.copy(chalkstronautSprite.position).y -= 1;
-    thrusterLight.intensity = phaseState === "live" ? 2.2 + Math.sin(t * 20) * 0.4 : 0;
+    // Engine light flickers faster and burns hotter as velocityNorm rises
+    // -- a real rocket's exhaust gets more violent under higher thrust,
+    // not just a bigger number on screen.
+    thrusterLight.intensity = phaseState === "live" ? 2.2 + velocityNorm * 1.6 + Math.sin(t * (20 + velocityNorm * 30)) * 0.4 : 0;
     if (phaseState === "live" && Math.random() < 0.6) {
       const origin = chalkstronautSprite.position.clone();
       origin.y -= 1.6;
-      emitCone(thrusterParticles, origin, 3, 0.35, 3.2);
+      // Both particle count and exhaust speed scale with velocityNorm --
+      // the plume visibly lengthens and thickens as the round accelerates,
+      // instead of a fixed-looking trickle the whole flight.
+      emitCone(thrusterParticles, origin, 3 + Math.round(velocityNorm * 4), 0.35, 3.2 + velocityNorm * 3.5);
     }
 
     // Heat shield: peaks in the stratosphere/mesosphere band (~0.35-0.68),
@@ -1450,13 +1511,27 @@ function frame() {
   updateParticles(emberParticles, dt);
 
   // camera: slow cinematic dolly that follows the astronaut's altitude,
-  // plus a shake impulse on crash
+  // plus a shake impulse on crash. shakeAmount now also carries a
+  // continuous engine-rumble FLOOR proportional to velocityNorm (a real
+  // rocket's cabin vibration gets rougher under higher thrust, not just
+  // silent until impact) -- Math.max against its own decay so momentary
+  // kicks (ignition, crash) can still spike above the floor and settle
+  // back down to it, rather than being overwritten by it.
+  shakeAmount = Math.max(shakeAmount * 0.9, phaseState === "live" ? velocityNorm * 0.22 : 0);
   const camShakeX = shakeAmount > 0.01 ? (Math.random() - 0.5) * shakeAmount : 0;
   const camShakeY = shakeAmount > 0.01 ? (Math.random() - 0.5) * shakeAmount : 0;
-  shakeAmount *= 0.9;
   const targetCamY = 6 + astronautY * 0.55;
   camera.position.set(Math.sin(t * 0.06) * 3 + camShakeX, targetCamY + camShakeY, 24 - progress * 6);
   camera.lookAt(0, astronautY * 0.6 + 6, 0);
+  // FOV punch-in: a subtle widening as velocity climbs is a real
+  // cinematography/game-feel trick (used for speed boosts in racing games)
+  // for communicating acceleration the eye reads instantly, on top of the
+  // numeric multiplier and the particle/rumble cues above.
+  const targetFov = 42 + velocityNorm * 9;
+  if (Math.abs(camera.fov - targetFov) > 0.01) {
+    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 4);
+    camera.updateProjectionMatrix();
+  }
 
   // god rays + lens flare read as a corner glint, fading as the scene
   // leaves atmosphere. This USED to project the sun's real world position
@@ -1643,6 +1718,15 @@ document.querySelectorAll(".chip").forEach((chip) => {
     document.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
     chip.classList.add("active");
     betAmount = chip.dataset.amt;
+    // Real bug: this set betAmount correctly, but nothing re-rendered the
+    // primary button's own "LAUNCH · 0.01 ETH" text -- it only picked up
+    // the new amount on the NEXT poll (previously up to 1.2s, now up to
+    // 400ms), so clicking 0.05 right after 0.01 looked like the click did
+    // nothing for a beat. updatePrimaryButton is idempotent for the
+    // current state, so just re-invoking it with whatever state is
+    // already active gives instant feedback without duplicating its
+    // per-state logic here.
+    if (typeof uiState !== "undefined") updatePrimaryButton(uiState);
   });
 });
 
@@ -1842,6 +1926,16 @@ function bpsToXStr(bps) {
   return v.toFixed(2);
 }
 
+// Real dev-chain block cadence, must match scripts/local-crash-setup.ts's
+// evm_setIntervalMining argument exactly -- this is what lets elapsed
+// real time stand in for elapsed blocks below. Round pacing on this local
+// harness is bottlenecked entirely by REVEAL_DELAY_BLOCKS (fixed block
+// count) against this cadence, so halving it here (paired with the same
+// halving in the deploy script) is a real, direct "make it feel faster"
+// lever: it doesn't touch any game economics, just how many real seconds
+// a block -- and therefore a round -- takes.
+const LOCAL_BLOCK_MS = 500;
+
 // Real mirror of PlankCrash.sol's _multiplierAt(elapsedBlocks), not an
 // approximation: 10000 + 400*e + 20*e^2, bps. The multiplier readout and
 // ascent used to only update once per ~1.2s poll of liveMultiplierBps --
@@ -1849,14 +1943,14 @@ function bpsToXStr(bps) {
 // visibly step/stutter instead of climbing smoothly, since three.js
 // renders at 60fps and the polled value only changed a few times a
 // second. Since the contract's curve is a pure, known function of elapsed
-// blocks, and the local dev chain mines on a fixed 1s interval
+// blocks, and the local dev chain mines on a fixed interval
 // (evm_setIntervalMining in scripts/local-crash-setup.ts), elapsed real
-// seconds since launchAt is a genuinely accurate stand-in for elapsed
+// time since launchAt is a genuinely accurate stand-in for elapsed
 // blocks -- so the climb can be extrapolated every single frame instead
 // of waiting on the next poll. The real polled value from refresh() is
 // still what the contract will actually pay out on; this only smooths
 // what's drawn between polls, and gets corrected back to the authoritative
-// value every ~1.2s the same way any client-side prediction does.
+// value every poll the same way any client-side prediction does.
 function multiplierAtBlocksBps(elapsedBlocks) {
   return 10000 + elapsedBlocks * 400 + elapsedBlocks * elapsedBlocks * 20;
 }
@@ -1868,14 +1962,35 @@ function setMultReadout(xStr, cls) {
   el.innerHTML = whole + '<span class="x">.' + (frac || "00") + "x</span>";
 }
 
-function showOutcome(kind, text) {
-  const b = $("outcomeBanner");
-  b.className = "outcome-banner show " + kind;
-  b.textContent = text;
+let resultCardTimer = null;
+function showResultCard(kind, xNum, deltaText, label) {
+  const card = $("resultCard");
+  const tier = kind !== "win" ? "" : xNum >= 10 ? "tier-epic" : xNum >= 5 ? "tier-high" : xNum >= 2 ? "tier-mid" : "tier-low";
+  card.className = `result-card show ${kind} ${tier}`;
+  $("resultTier").textContent = label;
+  $("resultMult").textContent = xNum.toFixed(2) + "x";
+  $("resultDelta").textContent = deltaText;
+  clearTimeout(resultCardTimer);
+  // Auto-dismiss well inside BETTING_SECONDS (8s locally) so it's gone
+  // before the next round's own launch, not a modal blocking anything --
+  // pointer-events stay off the whole time (see .result-card CSS).
+  resultCardTimer = setTimeout(() => card.classList.remove("show"), 3200);
 }
 function hideOutcome() {
-  const b = $("outcomeBanner");
-  b.className = "outcome-banner";
+  $("resultCard").classList.remove("show");
+}
+
+// Real celebration, scaled to the real result -- not a fixed-size fireworks
+// burst regardless of outcome. intensityNorm (0..1) is a log scale of the
+// player's own cash-out multiplier: log2 because a crash multiplier is
+// itself geometric (2x feels like a step, 4x another full step, not
+// "twice as big a step as 2x"), so a linear scale would make everything
+// past ~3x look maxed out and everything under 2x look like nothing.
+function celebrate(xNum) {
+  const intensityNorm = Math.max(0, Math.min(1, Math.log2(Math.max(1, xNum)) / 4)); // 1.0 reached around 16x
+  const particleColor = xNum >= 10 ? 0xffc857 : 0x3ee08c;
+  spawnParticles(particleColor, Math.round(40 + intensityNorm * 160), 2 + intensityNorm * 4.5);
+  shakeAmount = Math.max(shakeAmount, 0.32 + intensityNorm * 1.1);
 }
 
 // ── primary button state machine ────────────────────────────────────────
@@ -2067,7 +2182,7 @@ async function refresh() {
       // produce that many elapsed blocks under the ~1 block/sec local
       // dev cadence -- correcting drift instead of letting it compound.
       const impliedElapsed = Math.max(0, (-400 + Math.sqrt(160000 + 80 * (Number(liveBps) - 10000))) / 40);
-      const impliedLaunchAt = performance.now() - impliedElapsed * 1000;
+      const impliedLaunchAt = performance.now() - impliedElapsed * LOCAL_BLOCK_MS;
       // Only ever correct FORWARD (smaller launchAt = larger elapsed
       // estimate). The real multiplier is mathematically non-decreasing
       // while LIVE -- a straight snap-to-implied here was a real, visible
@@ -2102,14 +2217,48 @@ async function refresh() {
       } else if (!hasCashedOut) {
         if (outcomeShownForRound !== currentRoundIdCache) {
           outcomeShownForRound = currentRoundIdCache;
-          showOutcome("lose", "ROUND LOST — didn't cash out in time");
+          showResultCard("lose", Number(xStr), `-${ethers.formatEther(stake)} ETH`, "DIDN'T CASH OUT IN TIME");
         }
         updatePrimaryButton("settling", { sub: "Next round starts automatically" });
       } else {
         const isClaimed = await crash.claimed(roundId, signer.address);
+        // Your actual locked-in multiplier is a pure function of your own
+        // cashOutBlock relative to lockBlock -- the same formula the
+        // contract itself pays out on, mirrored client-side. Real bug
+        // fixed here: this used to display round.crashMultiplierBps (the
+        // round's EVENTUAL crash point, only known at reveal) as if it
+        // were the player's own result -- wrong whenever you cashed out
+        // before the crash, which is the entire point of cashing out
+        // early.
+        const cashOutMultX = Number(bpsToXStr(multiplierAtBlocksBps(Number(cashOutBlock - round.lockBlock))));
         if (isClaimed && outcomeShownForRound !== currentRoundIdCache) {
           outcomeShownForRound = currentRoundIdCache;
-          showOutcome("win", `WON at ${bpsToXStr((await crash.cashOutBlockOf(roundId, signer.address)) > 0n ? round.crashMultiplierBps : 0n)}x`);
+          // Real payout, not stake*multiplier (this is a pari-mutuel split
+          // among winners, not a fixed-odds payout, so that estimate could
+          // be meaningfully off) -- one cheap one-shot event query right
+          // at the settle moment, not per poll.
+          const claims = await crash.queryFilter(crash.filters.Claimed(roundId, signer.address));
+          const payout = claims[0]?.args.payout ?? 0n;
+          showResultCard("win", cashOutMultX, `+${ethers.formatEther(payout)} ETH`, "CASHED OUT");
+          celebrate(cashOutMultX);
+        } else if (
+          !isClaimed &&
+          attemptedClaimThisRound &&
+          blockNum > Number(round.registrationDeadlineBlock) &&
+          outcomeShownForRound !== currentRoundIdCache
+        ) {
+          // Real gap this closes: cashing out does NOT guarantee a win in
+          // this contract -- the crash point is only derived from
+          // blockhash entropy at reveal, so it's entirely possible for
+          // the (retroactively-determined) crash to have "happened"
+          // before your own cash-out block. claim() correctly reverts as
+          // NotWinner for that outcome (keeperTick already treats that as
+          // expected, not an error), but nothing ever told the PLAYER --
+          // they'd sit on "Settling your payout automatically…" forever
+          // with no conclusion at all. attemptedClaimThisRound being true
+          // means claim() was already tried and lost this exact case.
+          outcomeShownForRound = currentRoundIdCache;
+          showResultCard("lose", cashOutMultX, `-${ethers.formatEther(stake)} ETH`, "CRASHED BEFORE YOUR CASH-OUT");
         }
         updatePrimaryButton("settling", { sub: isClaimed ? "Payout claimed — next round starts automatically" : "Settling your payout automatically…" });
       }
