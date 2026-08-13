@@ -3,7 +3,7 @@ pragma solidity 0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {PullPayment} from "@openzeppelin/contracts/security/PullPayment.sol";
-import {IDrandVerifier} from "./IDrandVerifier.sol";
+import {IDrandBeacon} from "./IDrandBeacon.sol";
 
 /**
  * Plank Crash Drand -- same pari-mutuel game as PlankCrashV2.sol (its
@@ -13,42 +13,36 @@ import {IDrandVerifier} from "./IDrandVerifier.sol";
  * from blockhash(futureBlock).
  *
  * WHY THIS EXISTS, NOT VRF OR PYTH: neither Chainlink VRF nor Pyth
- * Entropy could be confirmed deployed on Robinhood Chain -- and this
- * wasn't left as a docs-level "couldn't confirm", it was checked for
- * real: eth_getCode against both services' real Arbitrum One addresses
- * (VRF coordinator 0x3C0Ca6...B6f7a3e, Pyth Entropy 0x7698e9...20adac)
- * on Robinhood Chain's real mainnet RPC (chainId 4663, confirmed via
- * eth_chainId) returned "0x" for both -- no contract there, full stop.
+ * Entropy could be confirmed deployed on Robinhood Chain -- checked for
+ * real via eth_getCode against both services' real Arbitrum One
+ * addresses (VRF coordinator 0x3C0Ca6...B6f7a3e, Pyth Entropy
+ * 0x7698e9...20adac) on Robinhood Chain's real mainnet RPC (chainId
+ * 4663), which returned "0x" for both -- no contract there, full stop.
  *
- * The real fix for that specific problem: `drand`'s `evmnet` beacon
- * needs NO chain-specific contract deployed by anyone else at all. It is
- * a public, continuously-running, threshold-BLS randomness beacon
- * operated since 2020 by the League of Entropy -- a real, independently
- * governed consortium (Cloudflare, Protocol Labs, EPFL, ChainSafe,
- * Kudelski Security, and others; see https://drand.love/about/), none of
- * whom individually can predict or bias a future round. `evmnet`
- * specifically (launched 2024) signs on the BN254 curve so its output is
- * verifiable using EVM-native precompiles (ecAdd/ecMul/ecPairing at
- * 0x06/0x07/0x08) that have existed since the Byzantium hardfork on
- * every EVM chain, including Robinhood Chain -- confirmed for real, not
- * assumed, by calling those exact precompile addresses on Robinhood
- * Chain's live mainnet RPC and getting correct, real cryptographic
- * output back (an empty pairing check returning true; ecAdd(0,0)
- * returning (0,0)). There is nothing left to "confirm is deployed" here
- * -- the verifier is code THIS contract runs itself, using math the EVM
- * already provides.
+ * UNIFIED WITH THE REST OF plank.love, NOT A SEPARATE SYSTEM: this
+ * contract does NOT verify drand signatures itself. It reads verified
+ * randomness from DrandBeacon.sol -- the SAME shared, permissionless,
+ * verify-on-chain drand round cache MarketplankVaultV3.sol already
+ * depends on for its own random redemption. This used to be a bespoke,
+ * duplicate verifier (DrandBLSVerifier.sol, since deleted) built without
+ * realizing the shared beacon already existed in this repo; consolidating
+ * onto it means the whole protocol shares ONE audited BLS-verification
+ * surface instead of two, and this contract, the vault, and any future
+ * consumer (e.g. a wager-weighted airdrop draw) all trust the exact same
+ * cache of real, independently-verified drand rounds. See DrandBeacon.sol's
+ * own header for the full trust-model writeup (League of Entropy
+ * threshold BLS, BN254 EVM-native precompiles, deploy-time-verified
+ * public key) -- not re-litigated here.
  *
- * HOW IT WORKS: lockRound() computes the drand round number whose
- * genesis-time-and-period math guarantees it will be produced strictly
- * after the current block (genesisTime/period are evmnet's own fixed,
- * public protocol constants, not a deploy-time config choice -- see
- * DRAND_GENESIS_TIME/DRAND_PERIOD below), and stores it as the round
- * this game round is committed to. Once that round's time has passed,
- * ANYONE can fetch its public signature from any drand HTTP relay (a
- * public good, no API key, no fee) and call revealEntropy() with it --
- * exactly the same permissionless-reveal shape as PlankCrashV2's
- * revealEntropy(), just verifying a real BLS signature instead of
- * reading blockhash(). settleRound() is otherwise unchanged.
+ * HOW IT WORKS: lockRound() asks the beacon for the next drand round
+ * strictly after now (beacon.nextRoundAfter), adds a real safety margin
+ * (TARGET_ROUND_SAFETY_PERIODS -- see its own comment for why), and
+ * commits this round to it. Once that round's real-world due time has
+ * passed, ANYONE can relay its signature to the shared beacon (permissionless,
+ * beacon.submitRound() -- verified once there, not per-consumer) and then
+ * call this contract's revealEntropy(), which simply reads
+ * beacon.randomnessOrZero() -- no signature, no re-verification here.
+ * settleRound() is otherwise unchanged from PlankCrashV2.
  *
  * REAL, HONEST COST/BENEFIT vs the other two variants:
  *   - No fee, ever (drand's evmnet is a public good) -- unlike
@@ -56,23 +50,17 @@ import {IDrandVerifier} from "./IDrandVerifier.sol";
  *     or reimburse anything.
  *   - No owner surface at all, like PlankCrashEntropy.sol and unlike
  *     PlankCrashVRF.sol's disclosed ConfirmedOwner requirement.
- *   - The public key and beacon parameters are PERMANENT, network-wide
- *     constants (see the constants below, decomposed for real from the
- *     live https://api.drand.sh/v2/beacons/evmnet/info response using
- *     the same "kevincharm/noble-bn254-drand" tooling drand's own docs
- *     recommend) -- not configurable per-deploy, which is a feature
- *     (nothing for a deploy script to get wrong) and a real constraint
- *     (this contract can never point at a different beacon without a
- *     redeploy).
+ *   - The beacon's public key and timing parameters are READ from the
+ *     shared DrandBeacon, not duplicated as local constants -- one fewer
+ *     place for a mismatch between this contract and the rest of the
+ *     protocol to ever exist.
  *   - Genuinely decentralized trust: biasing a future round requires
  *     colluding across a THRESHOLD of League of Entropy's real,
  *     independent member organizations -- not "the sequencer" (V2) and
- *     not "one Pyth/Chainlink provider" (Entropy/VRF), a meaningfully
- *     larger, differently-composed set of parties who would all have to
- *     collude in advance of a specific round.
- *   - Real, disclosed limitation: nobody is economically bonded to call
- *     revealEntropy() promptly -- same permissionless-keeper-liveness
- *     shape V2 already has for its own revealEntropy(), mitigated the
+ *     not "one Pyth/Chainlink provider" (Entropy/VRF).
+ *   - Real, disclosed limitation: nobody is economically bonded to relay
+ *     a round to the beacon or call revealEntropy() promptly -- same
+ *     permissionless-keeper-liveness shape V2 already has, mitigated the
  *     same way (voidStaleRound() as the fallback, keeperRewardBps as the
  *     incentive once a round DOES settle).
  */
@@ -104,14 +92,15 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     uint256 public immutable bettingDurationSeconds;
     uint256 public immutable roundIntervalSeconds;
     uint256 public immutable genesisTimestamp;
-    // How long, in blocks, this contract will wait for ANYONE to call
-    // revealEntropy() with a real drand signature before voidStaleRound()
-    // becomes callable. Unlike blockhash's real 256-block EVM expiry
-    // (PlankCrashV2) or an oracle-network outage (VRF/Entropy), a drand
-    // round's signature is permanently, publicly fetchable forever once
-    // its time passes -- this window exists purely as an anti-griefing/
-    // keeper-liveness safety net (nobody bonded to call it promptly), not
-    // because the entropy itself could ever become unavailable.
+    // How long, in blocks, this contract will wait for ANYONE to relay
+    // the target round to the beacon and call revealEntropy() before
+    // voidStaleRound() becomes callable. Unlike blockhash's real
+    // 256-block EVM expiry (PlankCrashV2) or an oracle-network outage
+    // (VRF/Entropy), a drand round's signature is permanently, publicly
+    // fetchable forever once its time passes -- this window exists
+    // purely as an anti-griefing/keeper-liveness safety net (nobody
+    // bonded to relay/reveal promptly), not because the entropy itself
+    // could ever become unavailable.
     uint256 public immutable maxAwaitBlocks;
     uint256 public immutable maxElapsedBlocks;
     uint256 public immutable registrationWindowBlocks;
@@ -123,36 +112,34 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     address public immutable treasury;
     uint256 public accumulatedRake;
 
-    // ── drand evmnet beacon parameters -- REAL, PERMANENT, network-wide
-    // constants, not deploy-time config. The public key and DST used to
-    // actually verify signatures live in DrandBLSVerifier.sol -- split
-    // into its own contract for a real compiler reason, see this file's
-    // "WHY IT'S A SEPARATE CONTRACT" note near revealEntropy() below and
-    // DrandBLSVerifier.sol's own header. Only the timing parameters
-    // needed to compute a target round number live here.
-    uint256 private constant DRAND_GENESIS_TIME = 1727521075;
-    uint256 private constant DRAND_PERIOD = 3;
-    // Real safety margin, in whole drand periods, added on top of the
-    // strictly-next round -- absorbs normal clock skew between this
-    // chain's block.timestamp and drand's own genesis-time math so
-    // lockRound() never accidentally targets a round that's already (or
-    // about to be) producible before the lock transaction even confirms.
+    // The shared, protocol-wide drand round cache -- see this file's own
+    // header ("UNIFIED WITH THE REST OF plank.love") for why this reads
+    // from the same beacon MarketplankVaultV3 uses, instead of verifying
+    // signatures itself.
+    IDrandBeacon public immutable beacon;
+
+    // Real safety margin, in whole drand rounds, added on top of the
+    // strictly-next round the beacon reports -- absorbs normal clock
+    // skew between this chain's block.timestamp and drand's own
+    // genesis-time math so lockRound() never accidentally targets a
+    // round that's already (or about to be) producible before the lock
+    // transaction even confirms.
     //
-    // Sized at 20 periods (60s), not the original 2 (6s): a real,
-    // disclosed L2-specific risk, found during audit, not steady clock
-    // drift (which is self-cancelling -- revealEntropy()'s gate checks
-    // the same clock the target was picked against). Arbitrum-style
-    // Orbit sequencers can snap block.timestamp forward in a single step
-    // to catch up to wall-clock time after an idle gap with no
-    // transactions -- a documented sequencer behavior, not hypothetical.
-    // On a low-traffic contract, an idle gap after lockRound() could jump
-    // block.timestamp straight past a too-close target round's real due
-    // time, making its real signature (already public via any drand
-    // relay) revealable in the very next block -- collapsing the
-    // intended live-play window for whoever is watching the relay versus
-    // whoever isn't. 60s is generous headroom against ordinary idle-gap
-    // jumps; this remains a real, disclosed assumption about sequencer
-    // timestamp jump size, not a mathematical guarantee.
+    // Sized at 20 rounds (60s at evmnet's real 3s period), not a
+    // thinner margin: a real, disclosed L2-specific risk, found during
+    // audit, not steady clock drift (which is self-cancelling --
+    // presetCashOut's/revealEntropy's due-time checks read the same
+    // beacon.currentRoundAt() the target was picked against). Arbitrum-
+    // style Orbit sequencers can snap block.timestamp forward in a
+    // single step to catch up to wall-clock time after an idle gap with
+    // no transactions -- a documented sequencer behavior, not
+    // hypothetical. On a low-traffic contract, an idle gap after
+    // lockRound() could jump block.timestamp straight past a too-close
+    // target round's real due time, collapsing the intended live-play
+    // window for whoever is watching the relay versus whoever isn't. 20
+    // rounds is generous headroom against ordinary idle-gap jumps; this
+    // remains a real, disclosed assumption about sequencer timestamp
+    // jump size, not a mathematical guarantee.
     uint256 private constant TARGET_ROUND_SAFETY_PERIODS = 20;
 
     uint256 public currentRoundId;
@@ -192,9 +179,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     error CrashPointNotYetReached();
     error PastCrashPoint();
     error TargetUnreachable();
-    error DrandRoundNotYetDue();
-    error InvalidSignature();
-    error ZeroVerifier();
+    error RandomnessNotYetAvailable();
+    error ZeroBeacon();
     error RoundIntervalTooShort();
 
     struct Config {
@@ -209,20 +195,13 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         uint256 maxStakePerWalletBps;
         uint256 keeperRewardBps;
         address treasury;
-        address drandVerifier;
+        address beacon;
     }
 
-    // The standalone BLS verifier -- see DrandBLSVerifier.sol's header
-    // for why signature verification lives there instead of inline here.
-    // Typed as the interface, not the concrete contract, so tests can
-    // swap in a mock for game-logic coverage while DrandBLSVerifier's
-    // own real cryptography is proven independently (see
-    // test/contracts/DrandBLSVerifier.test.ts).
-    IDrandVerifier public immutable drandVerifier;
-
     constructor(Config memory cfg) {
-        if (cfg.drandVerifier == address(0)) revert ZeroVerifier();
-        if (cfg.drandVerifier.code.length == 0) revert ZeroVerifier();
+        if (cfg.beacon == address(0)) revert ZeroBeacon();
+        if (cfg.beacon.code.length == 0) revert ZeroBeacon();
+        beacon = IDrandBeacon(cfg.beacon);
         // If roundIntervalSeconds were smaller than the drand safety
         // window, two consecutive game rounds could compute the IDENTICAL
         // targetDrandRound -- nothing else would stop round N+1 from
@@ -235,7 +214,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         // whatever bettingDurationSeconds naturally imposes, already far
         // longer than the drand safety window at any realistic setting.
         if (cfg.roundIntervalSeconds != 0) {
-            if (cfg.roundIntervalSeconds <= (TARGET_ROUND_SAFETY_PERIODS + 1) * DRAND_PERIOD) {
+            if (cfg.roundIntervalSeconds <= (TARGET_ROUND_SAFETY_PERIODS + 1) * beacon.period()) {
                 revert RoundIntervalTooShort();
             }
         }
@@ -251,7 +230,6 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         maxStakePerWalletBps = cfg.maxStakePerWalletBps;
         keeperRewardBps = cfg.keeperRewardBps;
         treasury = cfg.treasury;
-        drandVerifier = IDrandVerifier(cfg.drandVerifier);
         _startRound(0);
     }
 
@@ -316,9 +294,9 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
 
     /// Locks the round and commits it to a specific future drand round --
     /// no request/response step, no fee. Anyone can independently
-    /// recompute targetDrandRound off-chain from lockBlock's timestamp,
-    /// exactly like V1/V2's entropyBlock was always independently
-    /// recomputable -- nothing here is a secret.
+    /// recompute targetDrandRound off-chain from lockBlock's timestamp
+    /// via the same beacon.nextRoundAfter() this calls -- nothing here
+    /// is a secret.
     function lockRound() external nonReentrant {
         uint256 id = currentRoundId;
         Round storage r = rounds[id];
@@ -335,7 +313,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
 
         r.phase = Phase.LIVE;
         r.lockBlock = block.number;
-        r.targetDrandRound = _targetDrandRound(block.timestamp);
+        r.targetDrandRound = beacon.nextRoundAfter(block.timestamp) + uint64(TARGET_ROUND_SAFETY_PERIODS);
         drandRoundToRoundId[r.targetDrandRound] = id;
         emit RoundLocked(id, r.lockBlock, r.targetDrandRound);
     }
@@ -353,23 +331,24 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     }
 
     /// ONLY valid while the target drand round is genuinely NOT YET DUE --
-    /// gated on real availability (block.timestamp < the round's own due
-    /// time), NOT on whether revealEntropy() has been called on-chain
-    /// yet. Real bug, found and fixed here (the same class of bug found
-    /// and fixed in PlankCrashV2.sol's presetCashOut -- see that file's
-    /// own comment for the full writeup): a drand evmnet round's real
-    /// signature is publicly fetchable via any drand HTTP relay the
-    /// instant its due time passes, regardless of whether anyone has
-    /// submitted a revealEntropy() transaction on THIS contract yet.
-    /// Gating on the on-chain flag alone would let anyone who fetches the
-    /// signature off-chain, verifies it themselves (or just trusts the
-    /// public relay), and computes the true crash point locally, call
-    /// presetCashOut with a guaranteed, risk-free maximum-multiplier
-    /// target before anyone bothers to reveal on-chain.
+    /// gated on real availability (beacon.currentRoundAt(now) < the
+    /// target round), NOT on whether revealEntropy() has been called on
+    /// THIS contract yet. Real bug, found and fixed here (the same class
+    /// of bug found and fixed in PlankCrashV2.sol's presetCashOut -- see
+    /// that file's own comment for the full writeup): a drand evmnet
+    /// round's real signature is publicly fetchable via any drand HTTP
+    /// relay the instant its due time passes, regardless of whether
+    /// anyone has relayed it to the shared beacon or called
+    /// revealEntropy() here yet. Gating on the on-chain flag alone would
+    /// let anyone who fetches the signature off-chain, verifies it
+    /// themselves (or just trusts the public relay), and computes the
+    /// true crash point locally, call presetCashOut with a guaranteed,
+    /// risk-free maximum-multiplier target before anyone bothers to
+    /// reveal on-chain.
     function presetCashOut(uint256 roundId, uint256 targetMultiplierBps) external nonReentrant {
         Round storage r = rounds[roundId];
         if (r.phase != Phase.LIVE) revert BadPhase();
-        if (r.entropyRevealed || block.timestamp >= DRAND_GENESIS_TIME + r.targetDrandRound * DRAND_PERIOD) {
+        if (r.entropyRevealed || beacon.currentRoundAt(block.timestamp) >= r.targetDrandRound) {
             revert EntropyAlreadyRevealed();
         }
         if (stakeOf[roundId][msg.sender] == 0) revert NoBet();
@@ -384,20 +363,19 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     }
 
     /// Permissionless, like PlankCrashV2's revealEntropy() -- anyone who
-    /// has fetched `targetDrandRound`'s real public signature from any
-    /// drand HTTP relay (e.g. https://api.drand.sh/v2/beacons/evmnet/rounds/{round})
-    /// can submit it. Verified for real here via BN254 pairing (delegated
-    /// to the standalone drandVerifier contract -- see its own header and
-    /// this file's DrandBLSVerifier import for why), not trusted from the
-    /// caller.
-    function revealEntropy(uint256 roundId, uint256[2] calldata signature) external {
+    /// has relayed targetDrandRound's real signature to the shared
+    /// beacon (beacon.submitRound(), verified there once for every
+    /// consumer) can call this. No signature is passed here and nothing
+    /// is re-verified -- this contract only reads the beacon's already-
+    /// verified cache.
+    function revealEntropy(uint256 roundId) external {
         Round storage r = rounds[roundId];
         if (r.phase != Phase.LIVE) revert BadPhase();
         if (r.entropyRevealed) revert EntropyAlreadyRevealed();
-        if (block.timestamp < DRAND_GENESIS_TIME + r.targetDrandRound * DRAND_PERIOD) revert DrandRoundNotYetDue();
-        if (!drandVerifier.verifyRound(r.targetDrandRound, signature)) revert InvalidSignature();
+        bytes32 randomness = beacon.randomnessOrZero(r.targetDrandRound);
+        if (randomness == bytes32(0)) revert RandomnessNotYetAvailable();
 
-        (uint256 trueMultiplierBps, uint256 trueElapsed) = _deriveCrash(keccak256(abi.encode(signature)));
+        (uint256 trueMultiplierBps, uint256 trueElapsed) = _deriveCrash(randomness);
         r.trueCrashElapsedBlocks = trueElapsed;
         r.entropyRevealed = true;
         emit EntropyRevealed(roundId, trueMultiplierBps, trueElapsed);
@@ -483,17 +461,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         emit Claimed(roundId, msg.sender, payout);
     }
 
-    // ── drand round targeting/verification ──────────────────────────────
-
-    function _targetDrandRound(uint256 deadline) private pure returns (uint64) {
-        uint256 delta = deadline - DRAND_GENESIS_TIME;
-        uint64 round = uint64((delta / DRAND_PERIOD) + ((delta % DRAND_PERIOD) > 0 ? 1 : 0));
-        return round + uint64(TARGET_ROUND_SAFETY_PERIODS);
-    }
-
-
     // ── Pure math -- byte-for-byte identical to PlankCrashV2's, not ──────
-    // ── re-derived, so all three contracts pay out the exact same curve ─
+    // ── re-derived, so all four contracts pay out the exact same curve ──
 
     function _effectiveCrashElapsed(Round storage r) private view returns (uint256) {
         return r.trueCrashElapsedBlocks < maxElapsedBlocks ? r.trueCrashElapsedBlocks : maxElapsedBlocks;
@@ -561,20 +530,17 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
 
 /*
  * DEPLOY CHECKLIST -- read before mainnet, not after:
- *   [ ] Re-fetch https://api.drand.sh/v2/beacons/evmnet/info immediately
- *       before deploy and diff it against the constants hardcoded above
- *       (chain_hash 04f1e906...66ec8c3) -- the League of Entropy governs
- *       evmnet's fate collectively; while there is "no plan to wind it
- *       down" as of this writing, that is a real, disclosed dependency
- *       on an external public good continuing to run, not a guarantee.
- *   [ ] Re-run the two eth_getCode/eth_call precompile probes against
- *       whatever RPC endpoint you're actually deploying through
- *       (rpc.mainnet.chain.robinhood.com was used to verify this) -- a
- *       different RPC provider fronting the same chain should return
- *       identical results, but verify against the real one you'll use.
- *   [ ] Load-test revealEntropy() against a real drand relay response
- *       shape end-to-end on a public testnet before mainnet, not just
- *       against the local mock (test/contracts/helpers/ -- see
- *       PlankCrashDrand.test.ts's own header for what the mock does and
- *       does not prove).
+ *   [ ] Deploy (or reuse the already-deployed) DrandBeacon.sol first --
+ *       see ITS OWN deploy-time-parameters section for the real chain
+ *       hash / public key verification steps required before IT is
+ *       deployable. This contract has no drand parameters of its own to
+ *       verify -- it only needs the beacon's real address.
+ *   [ ] If MarketplankVaultV3 already has a live DrandBeacon deployed on
+ *       the target chain, REUSE that exact address here -- that is the
+ *       entire point of the shared-cache design (one verified round
+ *       serves every consumer, and only one beacon needs auditing).
+ *   [ ] Confirm a real keeper (or the community) actually relays rounds
+ *       to the beacon promptly -- voidStaleRound()'s maxAwaitBlocks is
+ *       the fallback if nobody does, not a substitute for a reliable
+ *       relay process.
  */

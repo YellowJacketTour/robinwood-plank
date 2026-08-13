@@ -3,15 +3,15 @@ import { ethers, networkHelpers } from "./helpers/hardhat.js";
 
 /**
  * PlankCrashDrand's real delta from PlankCrashV2 (its header is required
- * reading first): drand evmnet entropy instead of blockhash, verified
- * via the standalone DrandBLSVerifier contract. This suite uses
- * MockDrandVerifier (a deterministic, caller-controlled stand-in) to
- * exercise the surrounding GAME LOGIC -- round targeting, cashOut
- * gating, settlement, keeper reward, voidStaleRound, curve parity --
- * without needing a real signature for a not-yet-existent future round
- * in every test. The real BLS cryptography this deliberately bypasses is
- * proven independently, for real, against actual historical drand
- * signatures in DrandBLSVerifier.test.ts -- not re-proven here.
+ * reading first): drand evmnet entropy read from the SHARED DrandBeacon
+ * cache MarketplankVaultV3.sol already depends on, instead of blockhash.
+ * This suite uses DrandBeaconMock -- the same real, pre-existing test
+ * double the vault's own suites use, not a bespoke one -- to exercise
+ * the surrounding GAME LOGIC (round targeting, cashOut gating,
+ * settlement, keeper reward, voidStaleRound, curve parity) without
+ * needing a real relayed signature in every test. The real BLS
+ * cryptography this deliberately bypasses is proven independently, for
+ * real, in test/contracts/DrandBeacon.bls.test.ts -- not re-proven here.
  */
 describe("PlankCrashDrand", () => {
   const BETTING_SECONDS = 5;
@@ -24,26 +24,17 @@ describe("PlankCrashDrand", () => {
   const MIN_PARTICIPANTS = 2n;
   const MIN_POOL = ethers.parseEther("0.01");
   const MAX_STAKE_BPS = 5000n;
-  // Real drand evmnet genesis/period, matching the contract's own
-  // hardcoded constants -- needed here only to compute how long to wait
-  // before a target round becomes "due" per the contract's own gate.
+  // Real drand evmnet genesis/period -- fed into DrandBeaconMock's own
+  // constructor below, matching what a real DrandBeacon deploy would use.
   const DRAND_GENESIS_TIME = 1727521075n;
   const DRAND_PERIOD = 3n;
-  const TARGET_ROUND_SAFETY_PERIODS = 2n;
-  // Any well-formed G1 point works against the mock -- it never actually
-  // runs the pairing check. Reusing DrandBLSVerifier.test.ts's real
-  // signature for round 19700000 here purely for realism, not because
-  // its cryptographic validity matters to this suite.
-  const ANY_SIGNATURE: [bigint, bigint] = [
-    1949372652777623059452286480617121015258151223408003143426288109451940808146n,
-    15774059631938790910616310917835606469673169251013786491967954562235893110699n,
-  ];
+  const TARGET_ROUND_SAFETY_PERIODS = 20n;
 
   async function deployAll() {
     const [deployer, treasury, alice, bob, carol] = await ethers.getSigners();
 
-    const Mock = await ethers.getContractFactory("MockDrandVerifier");
-    const mockVerifier: any = await Mock.deploy();
+    const Mock = await ethers.getContractFactory("DrandBeaconMock");
+    const beacon: any = await Mock.deploy(DRAND_PERIOD, DRAND_GENESIS_TIME);
 
     const Crash = await ethers.getContractFactory("PlankCrashDrand");
     const crash: any = await Crash.deploy({
@@ -58,10 +49,10 @@ describe("PlankCrashDrand", () => {
       maxStakePerWalletBps: MAX_STAKE_BPS,
       keeperRewardBps: KEEPER_REWARD_BPS,
       treasury: treasury.address,
-      drandVerifier: await mockVerifier.getAddress(),
+      beacon: await beacon.getAddress(),
     });
 
-    return { crash, mockVerifier, deployer, treasury, alice, bob, carol };
+    return { crash, beacon, deployer, treasury, alice, bob, carol };
   }
 
   async function closeBettingAndLock(crash: any) {
@@ -69,16 +60,16 @@ describe("PlankCrashDrand", () => {
     await crash.lockRound();
   }
 
-  /// Waits until the round's own targetDrandRound is actually "due" per
-  /// the contract's real gate (DRAND_GENESIS_TIME + targetDrandRound *
-  /// DRAND_PERIOD), matching TARGET_ROUND_SAFETY_PERIODS's real margin,
-  /// then reveals with the mock (which accepts unconditionally).
-  async function waitForDueAndReveal(crash: any, roundId: bigint) {
+  /// Waits until the round's own targetDrandRound is actually due, injects
+  /// a deterministic randomness value into the mock beacon (standing in
+  /// for a real relayed+verified signature), then reveals.
+  async function waitForDueAndReveal(crash: any, beacon: any, roundId: bigint, seedStr = "seed") {
     const round = await crash.rounds(roundId);
     const dueAt = DRAND_GENESIS_TIME + BigInt(round.targetDrandRound) * DRAND_PERIOD;
     const now = BigInt(await networkHelpers.time.latest());
     if (dueAt > now) await networkHelpers.time.increaseTo(dueAt);
-    await crash.revealEntropy(roundId, ANY_SIGNATURE);
+    await beacon.setRandomness(round.targetDrandRound, ethers.keccak256(ethers.toUtf8Bytes(seedStr)));
+    await crash.revealEntropy(roundId);
   }
 
   async function mineToCrashAndSettle(crash: any, roundId: bigint) {
@@ -103,47 +94,24 @@ describe("PlankCrashDrand", () => {
 
     const round = await crash.rounds(roundId);
     const expectedMinimalRound =
-      (lockTime - DRAND_GENESIS_TIME) / DRAND_PERIOD + 1n + TARGET_ROUND_SAFETY_PERIODS;
+      (lockTime - DRAND_GENESIS_TIME) / DRAND_PERIOD + 1n + 1n + TARGET_ROUND_SAFETY_PERIODS; // beacon's own nextRoundAfter is currentRoundAt+1
     expect(BigInt(round.targetDrandRound)).to.be.gte(expectedMinimalRound);
-    // The due time for that round must be strictly in the future relative
-    // to lock -- the whole point of the safety margin.
     const dueAt = DRAND_GENESIS_TIME + BigInt(round.targetDrandRound) * DRAND_PERIOD;
     expect(dueAt).to.be.gt(lockTime);
   });
 
-  it("revealEntropy rejects a round that isn't due yet, even with a signature the verifier would accept", async () => {
+  it("revealEntropy rejects a round whose randomness hasn't been relayed to the beacon yet", async () => {
     const { crash, alice, bob } = await deployAll();
     const roundId = await crash.currentRoundId();
     await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
     await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
     await closeBettingAndLock(crash);
 
-    await expect(crash.revealEntropy(roundId, ANY_SIGNATURE)).to.be.revertedWithCustomError(
-      crash,
-      "DrandRoundNotYetDue"
-    );
+    await expect(crash.revealEntropy(roundId)).to.be.revertedWithCustomError(crash, "RandomnessNotYetAvailable");
   });
 
-  it("revealEntropy rejects a signature the verifier says is invalid", async () => {
-    const { crash, mockVerifier, alice, bob } = await deployAll();
-    const roundId = await crash.currentRoundId();
-    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
-    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
-    await closeBettingAndLock(crash);
-
-    const round = await crash.rounds(roundId);
-    const dueAt = DRAND_GENESIS_TIME + BigInt(round.targetDrandRound) * DRAND_PERIOD;
-    await networkHelpers.time.increaseTo(dueAt);
-
-    await mockVerifier.setNextResult(false);
-    await expect(crash.revealEntropy(roundId, ANY_SIGNATURE)).to.be.revertedWithCustomError(
-      crash,
-      "InvalidSignature"
-    );
-  });
-
-  it("a real end-to-end round: lock targets a future drand round, revealEntropy verifies once due, and settlement pays out exactly like PlankCrashV2's blockhash-based flow", async () => {
-    const { crash, alice, bob } = await deployAll();
+  it("a real end-to-end round: lock targets a future drand round, revealEntropy reads it once relayed, and settlement pays out exactly like PlankCrashV2's blockhash-based flow", async () => {
+    const { crash, beacon, alice, bob } = await deployAll();
     const roundId = await crash.currentRoundId();
     await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
     await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
@@ -156,7 +124,7 @@ describe("PlankCrashDrand", () => {
     // Real cash-out before the (not yet knowable) crash point.
     await crash.connect(alice).cashOut(roundId);
 
-    await waitForDueAndReveal(crash, roundId);
+    await waitForDueAndReveal(crash, beacon, roundId, "plank-drand-1");
     const revealed = await crash.rounds(roundId);
     expect(revealed.entropyRevealed).to.equal(true);
 
@@ -186,13 +154,13 @@ describe("PlankCrashDrand", () => {
   });
 
   it("cashOut() is gated against the true crash point once drand has revealed it, same load-bearing property as PlankCrashV2", async () => {
-    const { crash, alice, bob } = await deployAll();
+    const { crash, beacon, alice, bob } = await deployAll();
     const roundId = await crash.currentRoundId();
     await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
     await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
     await closeBettingAndLock(crash);
 
-    await waitForDueAndReveal(crash, roundId);
+    await waitForDueAndReveal(crash, beacon, roundId, "seed-42");
     const round = await crash.rounds(roundId);
     const effective =
       round.trueCrashElapsedBlocks < BigInt(MAX_ELAPSED_BLOCKS) ? round.trueCrashElapsedBlocks : BigInt(MAX_ELAPSED_BLOCKS);
@@ -208,12 +176,13 @@ describe("PlankCrashDrand", () => {
     // fixed in PlankCrashV2.sol's presetCashOut -- see that test's own
     // writeup): a drand evmnet round's real signature is publicly
     // fetchable via any drand HTTP relay the instant its due time passes
-    // -- regardless of whether anyone has called revealEntropy() on this
-    // contract. Gating on the on-chain flag alone would let anyone who
-    // fetches the real signature off-chain call presetCashOut with a
-    // guaranteed, risk-free target before revealing on-chain. This test
-    // proves the gate now rejects it purely on due-time, without ever
-    // calling revealEntropy -- entropyRevealed stays false throughout.
+    // -- regardless of whether anyone has relayed it to the shared
+    // beacon or called revealEntropy() here yet. Gating on the on-chain
+    // flag alone would let anyone who fetches the real signature
+    // off-chain call presetCashOut with a guaranteed, risk-free target
+    // before revealing on-chain. This test proves the gate now rejects
+    // it purely on due-time (via beacon.currentRoundAt), without ever
+    // relaying to the beacon or calling revealEntropy.
     const { crash, alice, bob } = await deployAll();
     const roundId = await crash.currentRoundId();
     await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
@@ -224,7 +193,7 @@ describe("PlankCrashDrand", () => {
     const dueAt = DRAND_GENESIS_TIME + BigInt(round.targetDrandRound) * DRAND_PERIOD;
     await networkHelpers.time.increaseTo(dueAt);
 
-    expect((await crash.rounds(roundId)).entropyRevealed).to.equal(false); // deliberately never revealed
+    expect((await crash.rounds(roundId)).entropyRevealed).to.equal(false); // deliberately never revealed or relayed
 
     const targetBps = await crash._multiplierAt(5);
     await expect(crash.connect(alice).presetCashOut(roundId, targetBps)).to.be.revertedWithCustomError(
@@ -250,12 +219,12 @@ describe("PlankCrashDrand", () => {
   });
 
   it("presetCashOut is rejected once entropy has been revealed, same fairness gate as PlankCrashV2", async () => {
-    const { crash, alice, bob } = await deployAll();
+    const { crash, beacon, alice, bob } = await deployAll();
     const roundId = await crash.currentRoundId();
     await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
     await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
     await closeBettingAndLock(crash);
-    await waitForDueAndReveal(crash, roundId);
+    await waitForDueAndReveal(crash, beacon, roundId, "seed-7");
 
     const targetBps = await crash._multiplierAt(5);
     await expect(crash.connect(alice).presetCashOut(roundId, targetBps)).to.be.revertedWithCustomError(
@@ -271,8 +240,8 @@ describe("PlankCrashDrand", () => {
     await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
     await closeBettingAndLock(crash);
 
-    // Deliberately never call revealEntropy -- simulates nobody bothering
-    // to post the signature promptly.
+    // Deliberately never relay to the beacon or call revealEntropy --
+    // simulates nobody bothering to relay the round promptly.
     await expect(crash.voidStaleRound(roundId)).to.be.revertedWithCustomError(crash, "TooEarly");
     await networkHelpers.mine(MAX_AWAIT_BLOCKS + 1);
 
@@ -285,12 +254,12 @@ describe("PlankCrashDrand", () => {
   });
 
   it("settleRound splits the rake and pays the keeper reward, exactly like PlankCrashV2", async () => {
-    const { crash, treasury, alice, bob, carol } = await deployAll();
+    const { crash, beacon, treasury, alice, bob, carol } = await deployAll();
     const roundId = await crash.currentRoundId();
     await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
     await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
     await closeBettingAndLock(crash);
-    await waitForDueAndReveal(crash, roundId);
+    await waitForDueAndReveal(crash, beacon, roundId, "seed-settle");
 
     const roundBeforeSettle = await crash.rounds(roundId);
     const effective =
