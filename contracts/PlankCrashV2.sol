@@ -66,6 +66,62 @@ import {PullPayment} from "@openzeppelin/contracts/security/PullPayment.sol";
  *      (Robinhood Chain's real measured block time) instead of V1's
  *      constants, which were tuned against local dev's ~500ms-1s
  *      simulated blocks. See _multiplierAt's own comment for the math.
+ *   7. keeperRewardBps -- a small, fixed share of the RAKE (never of
+ *      players' distributable pool) paid to whoever actually calls
+ *      settleRound(). Every settlement-critical function here is
+ *      permissionless by design, which only actually stays timely if
+ *      someone is economically motivated to call it, rather than relying
+ *      on a frontend tab happening to be open. Same shape as Chainlink
+ *      Automation / Gelato / Keep3r's keeper-incentive pattern.
+ *   8. estimatedPayout() -- a real fix for a genuine economic-clarity gap
+ *      found by researching how pari-mutuel systems actually behave: this
+ *      game's payout is a SHARE of the pool split among however many
+ *      people end up winning, not a fixed stake*multiplier rate like a
+ *      house-bankrolled crash game pays. A player who's the sole winner
+ *      gets the whole distributable pool regardless of how small their
+ *      own multiplier was; one among many winners gets proportionally
+ *      less. This was already true and already correct math -- the gap
+ *      was that nothing exposed it, so a UI showing only "multiplier"
+ *      would silently mislead players into treating it as a promise. See
+ *      estimatedPayout()'s own comment for what it does and doesn't
+ *      guarantee.
+ *
+ * TRUST ASSUMPTIONS, DISCLOSED HONESTLY (researched, not hidden):
+ *   - Robinhood Chain runs a SINGLE, Robinhood-operated sequencer with
+ *     first-come-first-served ordering. Arbitrum's delayed-inbox force-
+ *     inclusion mechanism exists as a backstop against censorship, but its
+ *     fastest mode (the Censorship Timeout feature) still takes on the
+ *     order of 30+ minutes to kick in -- far too slow to matter for a
+ *     round that settles in minutes. This contract's fairness guarantees
+ *     (blockhash entropy, the reveal/settle split, the cash-out gate) are
+ *     airtight against OTHER PLAYERS and against this contract's own
+ *     deployer; they are not a defense against a malicious sequencer
+ *     operator, because no on-chain mechanism at real-time speed can be.
+ *     The residual risk is standard to every application on any single-
+ *     sequencer L2, not specific to this game, and is bounded in practice
+ *     by Robinhood having no stake in this game's outcomes (it collects
+ *     only the disclosed, outcome-independent rake).
+ *   - blockhash-derived randomness is, in general, manipulable by whoever
+ *     controls block production (a "grinding" attack: try candidate
+ *     blocks until one produces a favorable hash, publish only that one).
+ *     On a decentralized validator set this requires colluding with
+ *     whoever wins the relevant block; on Robinhood Chain, the sequencer
+ *     IS that party, unilaterally. A Chainlink VRF-style external
+ *     randomness oracle would remove this risk entirely at the cost of a
+ *     new trusted oracle dependency -- a real, considered future upgrade
+ *     path, not implemented here. Same "bounded by lack of incentive to
+ *     manipulate a game they have no stake in" reasoning as above applies
+ *     today.
+ *   - Rollover incentive, considered and ruled out: could a bettor
+ *     profitably "sandbag" a round (bet, never cash out, guarantee no
+ *     winners) to inflate the next round's rolled-over starting pool?
+ *     No -- the rollover isn't refunded to that round's losers, it's just
+ *     a bigger starting pool for whoever plays the NEXT round, diluted
+ *     across every bettor there equally per unit staked. Sandbagging costs
+ *     you 100% of your own stake for a benefit you cannot personally
+ *     capture disproportionately (you can't force yourself to be the only
+ *     bettor in the next round on a permissionless system). Net effect is
+ *     pure value destruction for the attacker, not an exploit.
  *
  * WHALE CAP -- HONEST LIMITS, READ BEFORE RELYING ON THIS: the
  * maxStakePerWalletBps check below (unchanged from V1) is a courtesy
@@ -111,6 +167,19 @@ contract PlankCrashV2 is ReentrancyGuard, PullPayment {
         uint256 pool;
         uint256 distributable;
         uint256 totalWinningWeight;
+        // Running sum of (stake * multiplier-at-cash-out) for every
+        // cashOut()/presetCashOut() call so far, updated O(1) per call --
+        // never a loop over players (see the contract header on why that
+        // matters here). Lets estimatedPayout() give real-time, honestly-
+        // labeled guidance without violating that principle. NOTE: this
+        // can include weight from a cash-out that later turns out to have
+        // been placed after the TRUE crash point (only possible pre-
+        // reveal, since cashOut() is gated against that once revealed --
+        // see cashOut()'s own comment), so it's a provisional estimate,
+        // not a guarantee, until registration closes -- exactly the same
+        // "odds fluctuate until post time" property real pari-mutuel
+        // horse-racing pools have always had.
+        uint256 provisionalWinningWeight;
         uint256 registrationDeadlineBlock;
         uint256 rolledOverFromPrevious;
     }
@@ -132,6 +201,17 @@ contract PlankCrashV2 is ReentrancyGuard, PullPayment {
     uint256 public immutable minPoolSize;
     uint256 public immutable maxStakePerWalletBps;
     address public immutable treasury;
+    // Share of the RAKE (never of players' distributable pool) paid to
+    // whoever actually calls settleRound(). Real gap this closes: every
+    // settlement-critical function here is permissionless by design (no
+    // admin, ever), which only works if someone is economically motivated
+    // to actually call it -- otherwise it depends on hope, a frontend's
+    // own JS running while a tab happens to be open, or the deployer
+    // altruistically running a keeper bot forever. This carves a small,
+    // fixed reward from the operator's own cut, the same shape Chainlink
+    // Automation/Gelato/Keep3r use for permissionless keeper incentives,
+    // so settlement stays timely even with zero players' tabs open.
+    uint256 public immutable keeperRewardBps;
     uint256 public accumulatedRake;
 
     uint256 public currentRoundId;
@@ -187,6 +267,7 @@ contract PlankCrashV2 is ReentrancyGuard, PullPayment {
         uint256 minParticipants;
         uint256 minPoolSize;
         uint256 maxStakePerWalletBps;
+        uint256 keeperRewardBps; // of the rake, not of players' distributable pool
         address treasury;
     }
 
@@ -201,6 +282,7 @@ contract PlankCrashV2 is ReentrancyGuard, PullPayment {
         minParticipants = cfg.minParticipants;
         minPoolSize = cfg.minPoolSize;
         maxStakePerWalletBps = cfg.maxStakePerWalletBps;
+        keeperRewardBps = cfg.keeperRewardBps;
         treasury = cfg.treasury;
         _startRound(0);
     }
@@ -314,6 +396,7 @@ contract PlankCrashV2 is ReentrancyGuard, PullPayment {
         uint256 elapsed = block.number - r.lockBlock;
         if (r.entropyRevealed && elapsed >= _effectiveCrashElapsed(r)) revert PastCrashPoint();
         cashOutBlockOf[roundId][msg.sender] = block.number;
+        r.provisionalWinningWeight += (stakeOf[roundId][msg.sender] * _multiplierAt(elapsed)) / 10000;
         emit CashedOut(roundId, msg.sender, block.number, false);
     }
 
@@ -356,6 +439,14 @@ contract PlankCrashV2 is ReentrancyGuard, PullPayment {
         uint256 targetElapsed = _invertMultiplier(targetMultiplierBps);
 
         cashOutBlockOf[roundId][msg.sender] = r.lockBlock + targetElapsed;
+        // Use the curve's REAL value at targetElapsed, not the raw
+        // targetMultiplierBps the caller passed in -- _invertMultiplier
+        // finds the smallest block that reaches AT LEAST the target, so
+        // the actual multiplier there can be a hair above what was asked
+        // for. This must match exactly what registerResult() will later
+        // compute (_multiplierAt(cashOutBlock - lockBlock)), or this
+        // running total would silently drift from the real weight sum.
+        r.provisionalWinningWeight += (stakeOf[roundId][msg.sender] * _multiplierAt(targetElapsed)) / 10000;
         emit CashedOut(roundId, msg.sender, r.lockBlock + targetElapsed, true);
     }
 
@@ -393,7 +484,17 @@ contract PlankCrashV2 is ReentrancyGuard, PullPayment {
         r.distributable = (r.pool * (10000 - rakeBps)) / 10000;
         r.registrationDeadlineBlock = block.number + registrationWindowBlocks;
         r.phase = Phase.CRASHED;
-        accumulatedRake += r.pool - r.distributable;
+
+        uint256 rake = r.pool - r.distributable;
+        // Keeper reward comes out of the operator's own rake, never out of
+        // players' distributable pool -- see keeperRewardBps's own
+        // comment. Paid via the same pull-based _asyncTransfer as every
+        // other payout here, to whoever's transaction actually landed
+        // first (permissionless, first-come-first-served, no special
+        // caller privilege).
+        uint256 keeperReward = (rake * keeperRewardBps) / 10000;
+        accumulatedRake += rake - keeperReward;
+        if (keeperReward > 0) _asyncTransfer(msg.sender, keeperReward);
 
         emit RoundCrashed(roundId, r.crashMultiplierBps, effective, r.trueCrashElapsedBlocks > maxElapsedBlocks);
         _startRound(0);
@@ -526,5 +627,35 @@ contract PlankCrashV2 is ReentrancyGuard, PullPayment {
             if (elapsed > effective) elapsed = effective;
         }
         return _multiplierAt(elapsed);
+    }
+
+    /// Real economic gap this closes: this game's payout is pari-mutuel,
+    /// not fixed-odds -- your actual claim is your weight's SHARE of
+    /// distributable among however many other people also end up winning,
+    /// not a guaranteed stake*multiplier like a house-bankrolled crash
+    /// game (Aviator, Pragmatic Play, etc.) pays. If you're the only
+    /// winner, you get the whole distributable pool regardless of how
+    /// small your own multiplier was; if many others also cashed out high,
+    /// your share shrinks accordingly. Nothing here changes that (it's
+    /// inherent to running with no bankroll -- see the contract header),
+    /// but a UI that only ever displayed "multiplier" without this context
+    /// would be misleading players into treating it as a fixed rate. This
+    /// gives an HONEST, real-time, on-chain-verifiable estimate: "if the
+    /// round crashed right now and only the current cohort of cashed-out
+    /// players won." It moves as more people cash out, and is only exact
+    /// once registration closes -- the same "odds fluctuate until post
+    /// time" property every real pari-mutuel pool (horse racing included)
+    /// has always had. Returns 0 if the caller hasn't cashed out (nothing
+    /// to estimate) or nobody has cashed out yet (undefined until someone
+    /// has).
+    function estimatedPayout(uint256 roundId, address player) external view returns (uint256) {
+        Round storage r = rounds[roundId];
+        if (r.provisionalWinningWeight == 0) return 0;
+        uint256 cashOutBlock = cashOutBlockOf[roundId][player];
+        if (cashOutBlock == 0) return 0;
+        uint256 myWeight = (stakeOf[roundId][player] * _multiplierAt(cashOutBlock - r.lockBlock)) / 10000;
+        uint256 poolNow = r.pool; // fixed since lock; distributable is a pure function of it
+        uint256 distributableNow = (poolNow * (10000 - rakeBps)) / 10000;
+        return (distributableNow * myWeight) / r.provisionalWinningWeight;
     }
 }

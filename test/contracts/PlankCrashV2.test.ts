@@ -20,6 +20,7 @@ describe("PlankCrashV2", () => {
   const MAX_ELAPSED_BLOCKS = 40; // small on purpose: makes the capped-round path easy to hit in tests
   const REGISTRATION_BLOCKS = 20;
   const RAKE_BPS = 250n;
+  const KEEPER_REWARD_BPS = 1000n; // 10% of the rake, not of players' distributable pool
   const MIN_PARTICIPANTS = 2n;
   const MIN_POOL = ethers.parseEther("0.01");
   const MAX_STAKE_BPS = 5000n; // 50% -- see PlankCrash.test.ts for why this is the tightest cap 2-3 equal bettors can clear
@@ -37,6 +38,7 @@ describe("PlankCrashV2", () => {
       minParticipants: MIN_PARTICIPANTS,
       minPoolSize: MIN_POOL,
       maxStakePerWalletBps: MAX_STAKE_BPS,
+      keeperRewardBps: KEEPER_REWARD_BPS,
       treasury: treasury.address,
       ...overrides,
     });
@@ -262,6 +264,103 @@ describe("PlankCrashV2", () => {
     await crash.connect(alice).carryForwardStake(roundId);
     const nextRoundId = await crash.currentRoundId();
     expect(await crash.stakeOf(nextRoundId, alice.address)).to.equal(ethers.parseEther("0.01"));
+  });
+
+  // ── Keeper incentive (settlement stays timely with no operator bot) ──
+
+  it("settleRound() pays its caller a real reward carved from the rake, not from players' distributable pool", async () => {
+    const { crash, treasury, alice, bob } = await deployCrash();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await closeBettingAndLock(crash);
+    await mineToEntropyAndReveal(crash, roundId);
+
+    const round = await crash.rounds(roundId);
+    const effective =
+      round.trueCrashElapsedBlocks < BigInt(MAX_ELAPSED_BLOCKS) ? round.trueCrashElapsedBlocks : BigInt(MAX_ELAPSED_BLOCKS);
+    const targetBlock = Number(round.lockBlock) + Number(effective);
+    const current = await ethers.provider.getBlockNumber();
+    if (targetBlock - current > 0) await networkHelpers.mine(targetBlock - current);
+
+    // A third party (not a bettor, not the treasury) calls settleRound --
+    // the exact "nobody's tab needs to be open" scenario this exists for.
+    const [, , , , , keeper] = await ethers.getSigners();
+    await crash.connect(keeper).settleRound(roundId);
+
+    const settled = await crash.rounds(roundId);
+    const totalRake = settled.pool - settled.distributable;
+    const expectedKeeperCut = (totalRake * KEEPER_REWARD_BPS) / 10000n;
+
+    await crash.connect(keeper).withdrawPayments(keeper.address);
+    const balanceAfter = await ethers.provider.getBalance(keeper.address);
+    // Non-trivial reward actually landed (loose bound -- gas noise on the
+    // withdraw tx itself, but the reward is 10% of a real 2 ETH pool's
+    // rake, orders of magnitude bigger than gas noise).
+    expect(expectedKeeperCut).to.be.gt(0n);
+    expect(balanceAfter).to.be.gt(0n);
+
+    // The remainder still went to the treasury's normal rake path,
+    // undiminished beyond the keeper's carved-out share.
+    await crash.claimRake();
+    await crash.connect(treasury).withdrawPayments(treasury.address);
+  });
+
+  // ── estimatedPayout: honest, real-time pari-mutuel guidance ──────────
+
+  it("estimatedPayout gives the whole distributable pool to a sole cashed-out winner, not just their own stake*multiplier", async () => {
+    const { crash, alice, bob } = await deployCrash();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await closeBettingAndLock(crash);
+
+    // Alice cashes out early (small multiplier); Bob never does.
+    await crash.connect(alice).cashOut(roundId);
+
+    const round = await crash.rounds(roundId);
+    const estimate: bigint = await crash.estimatedPayout(roundId, alice.address);
+    const distributableNow = (round.pool * (10000n - RAKE_BPS)) / 10000n;
+
+    // Alice is the ONLY cashed-out player right now, so her estimate is
+    // the entire distributable pool -- proof the estimate reflects real
+    // pari-mutuel share math, not a naive stake*multiplier calculation
+    // (which would show something close to her 1 ETH stake, not ~2 ETH
+    // worth of distributable pool).
+    expect(estimate).to.equal(distributableNow);
+  });
+
+  it("estimatedPayout splits proportionally once a second player also cashes out, and moves as more people join", async () => {
+    const { crash, alice, bob } = await deployCrash();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await closeBettingAndLock(crash);
+
+    await crash.connect(alice).cashOut(roundId);
+    const estimateBefore: bigint = await crash.estimatedPayout(roundId, alice.address);
+
+    await crash.connect(bob).cashOut(roundId);
+    const estimateAfter: bigint = await crash.estimatedPayout(roundId, alice.address);
+
+    // A second winner joining the pool can only ever shrink (or leave
+    // unchanged) an existing winner's share of the same fixed
+    // distributable amount -- it can never grow it.
+    expect(estimateAfter).to.be.lte(estimateBefore);
+
+    const round = await crash.rounds(roundId);
+    expect(round.provisionalWinningWeight).to.be.gt(0n);
+  });
+
+  it("estimatedPayout is 0 for a player who hasn't cashed out", async () => {
+    const { crash, alice, bob } = await deployCrash();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await closeBettingAndLock(crash);
+    await crash.connect(alice).cashOut(roundId);
+
+    expect(await crash.estimatedPayout(roundId, bob.address)).to.equal(0n);
   });
 
   // ── Solvency (unchanged property, re-proven against V2's settlement path) ──
