@@ -15,6 +15,13 @@ const config = defineConfig({
     version: "0.8.24",
     settings: {
       optimizer: { enabled: true, runs: 200 },
+      // Required by PlankCrashV2.sol -- its Config-struct constructor and
+      // large Round struct (view-returned by currentRound()) hit a real
+      // "stack too deep" error under the legacy codegen; viaIR is the
+      // standard, compiler-recommended fix. Applies repo-wide, so the
+      // full test suite was re-run after enabling this, not just the new
+      // contract's own tests, to confirm no other contract regressed.
+      viaIR: true,
       // Pinned to OpenZeppelin 4.x specifically to avoid Cancun-only opcodes
       // (mcopy) that OZ 5.x's Bytes.sol uses unconditionally — Robinhood
       // Chain's latest block has no excessBlobGas field, so Cancun support
