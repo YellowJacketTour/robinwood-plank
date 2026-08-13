@@ -639,23 +639,56 @@ contract PlankCrashV2 is ReentrancyGuard, PullPayment {
     /// your share shrinks accordingly. Nothing here changes that (it's
     /// inherent to running with no bankroll -- see the contract header),
     /// but a UI that only ever displayed "multiplier" without this context
-    /// would be misleading players into treating it as a fixed rate. This
-    /// gives an HONEST, real-time, on-chain-verifiable estimate: "if the
-    /// round crashed right now and only the current cohort of cashed-out
-    /// players won." It moves as more people cash out, and is only exact
-    /// once registration closes -- the same "odds fluctuate until post
-    /// time" property every real pari-mutuel pool (horse racing included)
-    /// has always had. Returns 0 if the caller hasn't cashed out (nothing
-    /// to estimate) or nobody has cashed out yet (undefined until someone
-    /// has).
+    /// would be misleading players into treating it as a fixed rate.
+    ///
+    /// TWO REGIMES, and this is the second real fix on this function (the
+    /// first found by actually re-reading it adversarially rather than
+    /// assuming it was done): while the round is still LIVE, this can only
+    /// ever be a provisional estimate -- "if the round crashed right now
+    /// and only the current cohort of cashed-out players won" -- using
+    /// provisionalWinningWeight, which by construction can include weight
+    /// from a cash-out that later turns out to have been past the true
+    /// crash point (see that field's own comment). Once the round has
+    /// actually settled (crashElapsedBlocks is final), this switches to
+    /// computing the player's REAL weight directly from the now-immutable
+    /// crash point and dividing by the round's real totalWinningWeight --
+    /// exact, not approximate, and it does NOT require the player to have
+    /// called registerResult() first. The one remaining approximation:
+    /// totalWinningWeight itself is only complete once every winner has
+    /// registered, so this number can still shrink (never grow) as more
+    /// real winners register post-settlement -- the same "odds aren't
+    /// final until the pool closes" property real pari-mutuel pools have,
+    /// just moved to a later, narrower window than before this fix.
     function estimatedPayout(uint256 roundId, address player) external view returns (uint256) {
         Round storage r = rounds[roundId];
-        if (r.provisionalWinningWeight == 0) return 0;
         uint256 cashOutBlock = cashOutBlockOf[roundId][player];
         if (cashOutBlock == 0) return 0;
+
+        if (r.phase == Phase.CRASHED || r.phase == Phase.SETTLED) {
+            bool won = (cashOutBlock - r.lockBlock) <= r.crashElapsedBlocks;
+            if (!won) return 0;
+            uint256 realWeight = (stakeOf[roundId][player] * _multiplierAt(cashOutBlock - r.lockBlock)) / 10000;
+            // Real bug caught by testing, not assumed away: gating this
+            // branch on totalWinningWeight == 0 (meaning "return 0") was
+            // WRONG -- totalWinningWeight only exists once at least one
+            // winner has called registerResult(), so that check silently
+            // returned 0 for genuine winners in the entire window between
+            // settleRound() and the first registration, directly
+            // contradicting this function's own documented "does not
+            // require registering first" guarantee. Falls back to the
+            // provisional denominator (already fully known at settlement
+            // time -- provisionalWinningWeight was accumulated live) until
+            // real registrations start superseding it.
+            if (r.totalWinningWeight > 0) {
+                return (r.distributable * realWeight) / r.totalWinningWeight;
+            }
+            if (r.provisionalWinningWeight == 0) return 0;
+            return (r.distributable * realWeight) / r.provisionalWinningWeight;
+        }
+
+        if (r.provisionalWinningWeight == 0) return 0;
         uint256 myWeight = (stakeOf[roundId][player] * _multiplierAt(cashOutBlock - r.lockBlock)) / 10000;
-        uint256 poolNow = r.pool; // fixed since lock; distributable is a pure function of it
-        uint256 distributableNow = (poolNow * (10000 - rakeBps)) / 10000;
+        uint256 distributableNow = (r.pool * (10000 - rakeBps)) / 10000; // pool is fixed since lock
         return (distributableNow * myWeight) / r.provisionalWinningWeight;
     }
 }

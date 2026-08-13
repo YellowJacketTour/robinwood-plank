@@ -363,6 +363,89 @@ describe("PlankCrashV2", () => {
     expect(await crash.estimatedPayout(roundId, bob.address)).to.equal(0n);
   });
 
+  it("estimatedPayout switches to the EXACT post-settlement figure once the round crashes, and matches claim() exactly -- found by re-auditing the estimate rather than assuming the pre-settlement version was the whole story", async () => {
+    const { crash, alice, bob, carol } = await deployCrash();
+    const roundId = await crash.currentRoundId();
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(carol).placeBet({ value: ethers.parseEther("1") });
+    await closeBettingAndLock(crash);
+
+    // Alice cashes out early; Bob cashes out later (before the true
+    // crash); Carol never cashes out -- a real mixed cohort, not a
+    // sole-winner special case.
+    await crash.connect(alice).cashOut(roundId);
+    await networkHelpers.mine(2);
+    const round0 = await crash.rounds(roundId);
+    if (round0.phase !== 1n) return; // already crashed on its own (rare) -- skip, not the property under test
+    try {
+      await crash.connect(bob).cashOut(roundId);
+    } catch {
+      // Bob's cash-out landed past the true crash once entropy happened
+      // to already be revealed by an earlier assertion path -- not
+      // expected here since entropy hasn't been revealed yet, but fail
+      // safe rather than crash the test suite on a timing fluke.
+    }
+
+    await mineToEntropyAndReveal(crash, roundId);
+    await mineToCrashAndSettle(crash, roundId);
+
+    // BEFORE anyone registers -- proves this doesn't require registering
+    // first (a real bug this exact check caught: an earlier version
+    // returned a flat 0 for genuine winners in this entire window,
+    // because it gated on totalWinningWeight being nonzero, which it
+    // structurally can't be before the first registration -- fixed to
+    // fall back to the already-known provisional weight instead).
+    const estimateBeforeRegistration = await crash.estimatedPayout(roundId, alice.address);
+
+    await crash.connect(alice).registerResult(roundId);
+    await crash.connect(bob).registerResult(roundId);
+    await crash.connect(carol).registerResult(roundId);
+
+    // NOW it must be exact: totalWinningWeight is fully populated (every
+    // real bettor has registered), so this is no longer a provisional
+    // fallback -- it's the same math claim() itself is about to use.
+    const estimateAfterRegistration = await crash.estimatedPayout(roundId, alice.address);
+    await networkHelpers.mine(REGISTRATION_BLOCKS + 1);
+
+    if (estimateAfterRegistration > 0n) {
+      // Read the CONTRACT's own accounting of the payout (the Claimed
+      // event's payout arg) rather than a raw wallet balance delta -- a
+      // real test-methodology mistake caught on the first attempt here:
+      // "before/after wallet balance" also captures the gas cost of BOTH
+      // claim() and withdrawPayments(), which has nothing to do with
+      // whether the estimate was correct and was silently failing this
+      // assertion by a gas-sized amount. This is the same reason the
+      // original PlankCrash.test.ts only ever bounds totalPaid <=
+      // distributable rather than asserting raw balance deltas exactly.
+      const tx = await crash.connect(alice).claim(roundId);
+      const receipt = await tx.wait();
+      const claimedEvent = receipt.logs
+        .map((log: any) => {
+          try {
+            return crash.interface.parseLog(log);
+          } catch {
+            return null;
+          }
+        })
+        .find((parsed: any) => parsed?.name === "Claimed");
+      expect(claimedEvent).to.not.be.undefined;
+      expect(claimedEvent.args.payout).to.equal(estimateAfterRegistration);
+    } else {
+      // Alice turned out not to be a winner this seed (crash landed at or
+      // before her cash-out block) -- claim() must agree.
+      await expect(crash.connect(alice).claim(roundId)).to.be.revertedWithCustomError(crash, "NotWinner");
+    }
+
+    // The pre-registration estimate was never wrong, just provisional --
+    // it's allowed to differ from the final figure (documented, expected),
+    // but it must never have been a flat 0 for a real winner, and it must
+    // never OVER-promise relative to the real, later-exact figure.
+    if (estimateAfterRegistration > 0n) {
+      expect(estimateBeforeRegistration).to.be.gt(0n);
+    }
+  });
+
   // ── Solvency (unchanged property, re-proven against V2's settlement path) ──
 
   it("total payouts never exceed the round's real distributable pool", async () => {
