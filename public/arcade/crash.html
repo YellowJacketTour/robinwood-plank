@@ -633,6 +633,26 @@ const beacon = new THREE.Mesh(
 );
 beacon.position.y = 8.3;
 towerGroup.add(beacon);
+
+// Real project art, not a procedural placeholder: the actual $PLANK logo
+// (public/images/plank-logo.webp, the same file the site's own branding
+// uses), mounted on the gantry like a real launch-site sign board.
+// colorSpace must be set explicitly to SRGBColorSpace -- textures loaded
+// this way default to whatever THREE.Color would, and skipping it is the
+// exact bug that made the whole sky read pale/washed-out earlier in this
+// scene's history: an sRGB image's bytes get used as linear values, then
+// gamma-re-encoded again on output.
+const logoTexture = new THREE.TextureLoader().load("../images/plank-logo.webp");
+logoTexture.colorSpace = THREE.SRGBColorSpace;
+const LOGO_ASPECT = 1765 / 1199; // real source image dimensions
+const logoPlaqueWidth = 1.15;
+const logoPlaque = new THREE.Mesh(
+  new THREE.PlaneGeometry(logoPlaqueWidth, logoPlaqueWidth * LOGO_ASPECT),
+  new THREE.MeshBasicMaterial({ map: logoTexture, transparent: true, side: THREE.DoubleSide })
+);
+logoPlaque.position.set(0.55, 5.4, 0);
+towerGroup.add(logoPlaque);
+
 towerGroup.position.set(-4.6, -2.3, -0.6);
 padGroup.add(towerGroup);
 
@@ -1276,7 +1296,26 @@ function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
 
-  flightProgress += (targetFlightProgress - flightProgress) * Math.min(1, dt * 4);
+  // Smooth per-frame extrapolation of the live multiplier -- see
+  // multiplierAtBlocksBps() above for why this is safe. Runs every frame,
+  // not just every ~1.2s poll, so both the number and the ascent it
+  // drives climb continuously instead of stepping.
+  if (phaseState === "live" && launchAt) {
+    const estElapsedBlocks = Math.max(0, (performance.now() - launchAt) / 1000);
+    const estBps = multiplierAtBlocksBps(estElapsedBlocks);
+    const xStr = bpsToXStr(estBps);
+    lastMult = Number(xStr);
+    setMultReadout(xStr, "live");
+    targetFlightProgress = 1 - 1 / (1 + (Number(xStr) - 1) / 2.5);
+  } else if (phaseState === "betting" && bettingEndsAtEstimateMs !== null) {
+    const secsLeft = Math.max(0, Math.ceil((bettingEndsAtEstimateMs - performance.now()) / 1000));
+    $("substatus").textContent = secsLeft > 0 ? `LAUNCHING IN ${secsLeft}s` : "LOCKING…";
+  }
+  // Tighter tracking than before (was dt*4): now that targetFlightProgress
+  // itself updates continuously every frame instead of jumping once per
+  // poll, flightProgress can afford to follow it more closely without
+  // reintroducing visible stepping.
+  flightProgress += (targetFlightProgress - flightProgress) * Math.min(1, dt * 9);
 
   const progress = phaseState === "crashed" ? Math.min(flightProgress, 1) : flightProgress;
   const groundY = -1.5, topY = 30;
@@ -1484,6 +1523,13 @@ let pollTimer = null;
 let betAmount = "0.01";
 let currentRoundIdCache = null;
 let lastMult = 1;
+// Real wall-clock anchor for the betting countdown, refreshed every poll
+// (see refresh()) but DISPLAYED every frame in frame() -- same reasoning
+// as multiplierAtBlocksBps() below: the chain only reports whole seconds
+// and only a few times a second, but the countdown should still tick
+// smoothly in real time between polls instead of jumping unevenly with
+// poll timing.
+let bettingEndsAtEstimateMs = null;
 
 // ── live multiplier graph + round-history ribbon (JetX/Rocketman/Aviator
 // convention: a rising stock-ticker-style curve for the live round, and an
@@ -1796,6 +1842,25 @@ function bpsToXStr(bps) {
   return v.toFixed(2);
 }
 
+// Real mirror of PlankCrash.sol's _multiplierAt(elapsedBlocks), not an
+// approximation: 10000 + 400*e + 20*e^2, bps. The multiplier readout and
+// ascent used to only update once per ~1.2s poll of liveMultiplierBps --
+// correct in value, but it made both the number and the astronaut's climb
+// visibly step/stutter instead of climbing smoothly, since three.js
+// renders at 60fps and the polled value only changed a few times a
+// second. Since the contract's curve is a pure, known function of elapsed
+// blocks, and the local dev chain mines on a fixed 1s interval
+// (evm_setIntervalMining in scripts/local-crash-setup.ts), elapsed real
+// seconds since launchAt is a genuinely accurate stand-in for elapsed
+// blocks -- so the climb can be extrapolated every single frame instead
+// of waiting on the next poll. The real polled value from refresh() is
+// still what the contract will actually pay out on; this only smooths
+// what's drawn between polls, and gets corrected back to the authoritative
+// value every ~1.2s the same way any client-side prediction does.
+function multiplierAtBlocksBps(elapsedBlocks) {
+  return 10000 + elapsedBlocks * 400 + elapsedBlocks * elapsedBlocks * 20;
+}
+
 function setMultReadout(xStr, cls) {
   const el = $("multReadout");
   el.className = "mult " + cls;
@@ -1979,33 +2044,42 @@ async function refresh() {
     if (phase === 0) {
       flightProgress = 0; targetFlightProgress = 0; crashedAt = null;
       setMultReadout("1.00", "idle");
+      // Anchor real wall-clock time to the chain's whole-second deadline;
+      // frame() ticks the displayed countdown down every frame from this,
+      // so it doesn't wait on (or jump around with) the next poll.
       const secsLeft = Math.max(0, Number(round.bettingEndsAt) - chainNow);
-      $("substatus").textContent = secsLeft > 0 ? `LAUNCHING IN ${secsLeft}s` : "LOCKING…";
+      bettingEndsAtEstimateMs = performance.now() + secsLeft * 1000;
       updatePrimaryButton(hasStake ? "waiting" : "betting-open");
     } else if (phase === 1) {
+      // The number and the astronaut's ascent are now driven every frame
+      // by the smooth extrapolation in frame() (see multiplierAtBlocksBps
+      // above), not by this poll directly -- this stayed correct in
+      // VALUE, but only updating a few times a second made both the
+      // readout and the climb visibly step instead of climbing smoothly.
+      // This poll is still the authoritative source of truth, though: use
+      // it to correct launchAt (and therefore the extrapolation) back in
+      // line with the real chain, the same server-reconciliation idea any
+      // client-side-predicted real-time game uses, so estimation error
+      // can never silently accumulate round after round.
       const liveBps = await crash.liveMultiplierBps(roundId);
-      const xStr = bpsToXStr(liveBps);
-      lastMult = Number(xStr);
-      setMultReadout(xStr, "live");
-      // Ascent speed must track the REAL underlying math: PlankCrash.sol's
-      // _multiplierAt(elapsedBlocks) = 10000 + e*400 + e^2*20 is quadratic
-      // in elapsed blocks, i.e. the round genuinely accelerates the longer
-      // it survives. A log-of-multiplier progress curve was a real bug --
-      // logarithms COMPRESS large values, so the climb would visually
-      // *decelerate* over time, the opposite of the contract's real
-      // behavior. Linear-in-multiplier was the first fix, but a hard /9
-      // denominator (full ascent only at 10x) turned out to be its own
-      // real bug: this contract's real crash distribution is pari-mutuel
-      // and heavily weighted under 5x (confirmed against real RoundCrashed
-      // history in the Stats panel), so the astronaut spent almost every
-      // round pinned in the bottom 10-20% of the screen -- reading as
-      // "stuck at the bottom." An asymptotic curve fixes this without
-      // reintroducing the log-compression bug: it climbs fast through the
-      // common 1x-5x range (e.g. 2x already reaches ~29% of the screen,
-      // 5x ~62%) while still climbing, never hard-capping, for the rare
-      // huge multiplier.
-      targetFlightProgress = 1 - 1 / (1 + (Number(xStr) - 1) / 2.5);
-      multGraphSamples.push(Number(xStr));
+      // Invert 10000 + 400e + 20e^2 = bps for e (elapsed blocks), positive
+      // root of the quadratic, then re-derive the launchAt that would
+      // produce that many elapsed blocks under the ~1 block/sec local
+      // dev cadence -- correcting drift instead of letting it compound.
+      const impliedElapsed = Math.max(0, (-400 + Math.sqrt(160000 + 80 * (Number(liveBps) - 10000))) / 40);
+      const impliedLaunchAt = performance.now() - impliedElapsed * 1000;
+      // Only ever correct FORWARD (smaller launchAt = larger elapsed
+      // estimate). The real multiplier is mathematically non-decreasing
+      // while LIVE -- a straight snap-to-implied here was a real, visible
+      // bug: whenever a block landed a little slower than the assumed 1/s
+      // (ordinary timing jitter, not an error), the correction would push
+      // launchAt LATER, momentarily shrinking the estimated elapsed time
+      // and making the displayed multiplier visibly tick backward for a
+      // frame. Clamping to min() makes reconciliation one-directional, so
+      // it can still catch the estimate up when the chain runs ahead, but
+      // can never make the display un-climb.
+      launchAt = Math.min(launchAt, impliedLaunchAt);
+      multGraphSamples.push(Number(bpsToXStr(liveBps)));
       if (multGraphSamples.length > 400) multGraphSamples.shift();
       drawMultGraph();
       $("substatus").textContent = "IN FLIGHT";
@@ -2050,7 +2124,14 @@ async function refresh() {
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   refresh();
-  pollTimer = setInterval(refresh, 1200);
+  // Was 1200ms. The multiplier/countdown are now driven smoothly every
+  // frame regardless of this cadence, but PHASE TRANSITIONS (crash
+  // landing, cash-out becoming available, a new round starting) still
+  // only become known to the client on the next poll -- so this is the
+  // real remaining source of latency for those specific moments. Tightened
+  // to 400ms; these are cheap read-only view calls against a local node,
+  // not transactions, so there's no real cost to polling faster.
+  pollTimer = setInterval(refresh, 400);
 }
 
 // A per-tab client-side evm_mine heartbeat was tried here and was a real,
