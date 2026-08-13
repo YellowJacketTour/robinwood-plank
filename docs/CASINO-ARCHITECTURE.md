@@ -135,13 +135,31 @@ through it end to end.
 
 ---
 
+## 5a. RATIFIED: the rake and its split
+
+Decided, and wired into `scripts/local-casino-setup.ts`:
+
+| Leg | % of pool | % of rake | Purpose |
+|---|---|---|---|
+| **Dev / ops** | **1.80%** | 40% | Real bills. Memetically anchored to the 8.1% NFT royalty. |
+| **Rolling jackpot** | **1.80%** | 40% | Matched 1:1 with the dev take — straight back to players. |
+| **$PLANK burn** | **0.90%** | 20% | Deflation for holders. |
+| **Total rake** | **4.50%** | 100% | **60% of every take returns to players.** |
+
+Two deliberate choices worth keeping:
+- **The total rake is low on purpose.** Rake is the single biggest driver of how
+  long a bankroll survives, and therefore of lifetime plays — the low-rake
+  poker-room lesson. Don't creep it up.
+- **`keeperRewardBps` is 0** while the keeper is dev-run (settlement cost comes
+  out of the dev leg). It is carved from the rake *before* the split, so raising
+  it proportionally shrinks all three legs — only raise it if third-party
+  keepers are opened up.
+
 ## 6. OPEN decisions (business, not code)
 
 These are exercised with example values in tests and the local deploy, but are
 real parameters to set deliberately before mainnet:
 
-- **Rake %** (`rakeBps`, default 2.5%) — the entire community-economics budget.
-- **Rake split** (`burnBps` / `airdropBps` / remainder) — example 45/45/10.
 - **Keeper/drawer/locker rewards** — sized to guarantee the permissionless
   functions actually get called without a dedicated operator, without meaningfully
   diluting the burn or the pot.

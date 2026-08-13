@@ -47,19 +47,29 @@ async function main() {
   const MAX_AWAIT_BLOCKS = 300; // ~30s at 100ms/block before a stuck round can be voided
   const MAX_ELAPSED_BLOCKS = 1800; // ~180s real; honestly-advertisable ~73x ceiling (see the contract)
   const REGISTRATION_WINDOW_BLOCKS = 50;
-  const RAKE_BPS = 250n; // 2.5% -- the whole community-economics budget comes from this
+  // RATIFIED RAKE: 4.5% total, memetically anchored to the 8.1% NFT
+  // royalty -- the dev/ops take is 1.8% of the pool, matched 1:1 by 1.8%
+  // straight back to the community jackpot, plus 0.9% to the burn. So of
+  // every 4.5 points taken, 2.7 (60%) returns to players as jackpot + token
+  // burn, and 1.8 covers real dev bills. Low total rake is deliberate: it
+  // is the single biggest driver of how long a bankroll survives, and
+  // therefore of lifetime plays (the low-rake poker-room lesson).
+  const RAKE_BPS = 450n; // 4.5% of the pool
   const MIN_PARTICIPANTS = 2n;
   const MIN_POOL = ethers.parseEther("0.01");
   const MAX_STAKE_BPS = 6000n;
-  const KEEPER_REWARD_BPS = 1000n; // 10% of the rake, to whoever settles
+  // 0 locally: the keeper is dev-run, so settlement costs come out of the
+  // dev leg rather than skimming the split. Set this ABOVE zero on mainnet
+  // if/when settlement is opened to third-party keepers -- it is carved
+  // from the rake before the split below, so a nonzero value proportionally
+  // reduces all three legs.
+  const KEEPER_REWARD_BPS = 0n;
 
-  // ── Community-economics split of the rake (the other 90% of it) ────
-  // Example values ONLY -- these are the real business knobs, exercised
-  // here so the wiring is proven, not a recommendation. 45% buys+burns
-  // $PLANK, 45% funds the wager-weighted airdrop, 10% to protocol
-  // treasury.
-  const BURN_BPS = 4500n;
-  const AIRDROP_BPS = 4500n;
+  // ── Split of that rake (bps of the rake, must sum to <= 10000) ─────
+  // 1.8 / 1.8 / 0.9 points of the pool -> 40% / 40% / 20% of the rake.
+  const BURN_BPS = 2000n; // 20% of rake = 0.9% of pool -> buys + burns $PLANK
+  const AIRDROP_BPS = 4000n; // 40% of rake = 1.8% of pool -> the rolling community jackpot
+  // remainder (40% of rake = 1.8% of pool) -> dev/ops treasury
   const BURN_KEEPER_REWARD_BPS = 500n; // 5% of ETH spent, to whoever executes a burn
   const MAX_ETH_PER_BURN = ethers.parseEther("1");
   const AIRDROP_EPOCH_SECONDS = 86400n; // daily draw -- fixed schedule, on purpose (see the contract)
@@ -154,14 +164,26 @@ async function main() {
   console.log("========================================================");
   console.log(" PlankCrashDrand      :", crashAddr);
   console.log(" PlankRakeDistributor :", await distributor.getAddress(), `(treasury of the crash)`);
-  console.log(" PlankBurnEngine      :", await burnEngine.getAddress(), `(${Number(BURN_BPS) / 100}% of rake)`);
-  console.log(" PlankAirdropPool     :", await airdropPool.getAddress(), `(${Number(AIRDROP_BPS) / 100}% of rake)`);
-  console.log(" Protocol treasury    :", treasury.address, `(${(10000 - Number(BURN_BPS) - Number(AIRDROP_BPS)) / 100}% of rake)`);
+  // Points OF THE POOL each leg actually receives, after the keeper carve.
+  const rakePct = Number(RAKE_BPS) / 100;
+  const afterKeeper = rakePct * (1 - Number(KEEPER_REWARD_BPS) / 10000);
+  const devPct = (afterKeeper * (10000 - Number(BURN_BPS) - Number(AIRDROP_BPS))) / 10000;
+  const jackpotPct = (afterKeeper * Number(AIRDROP_BPS)) / 10000;
+  const burnPct = (afterKeeper * Number(BURN_BPS)) / 10000;
+  console.log(" PlankBurnEngine      :", await burnEngine.getAddress(), `(${burnPct.toFixed(2)}% of pool -> burn)`);
+  console.log(" PlankAirdropPool     :", await airdropPool.getAddress(), `(${jackpotPct.toFixed(2)}% of pool -> jackpot)`);
+  console.log(" Dev/ops treasury     :", treasury.address, `(${devPct.toFixed(2)}% of pool)`);
   console.log(" DrandBeacon (mock)   :", await beacon.getAddress());
   console.log(" $PLANK (mock)        :", await plank.getAddress());
   console.log(" Universal Router mock:", await router.getAddress());
-  console.log("\n Rake budget: crash rake", Number(RAKE_BPS) / 100, "% -> keeper", Number(KEEPER_REWARD_BPS) / 100,
-    "% of rake, remainder split burn/airdrop/treasury", `${Number(BURN_BPS) / 100}/${Number(AIRDROP_BPS) / 100}/${(10000 - Number(BURN_BPS) - Number(AIRDROP_BPS)) / 100}%`);
+  console.log(
+    `\n Rake ${rakePct.toFixed(2)}% of pool  =  dev ${devPct.toFixed(2)}%  +  jackpot ${jackpotPct.toFixed(
+      2
+    )}%  +  burn ${burnPct.toFixed(2)}%`
+  );
+  console.log(
+    ` -> ${(((jackpotPct + burnPct) / rakePct) * 100).toFixed(0)}% of every take returns to players (jackpot + burn).`
+  );
   console.log(" Airdrop epoch        :", Number(AIRDROP_EPOCH_SECONDS) / 3600, "hours (FIXED schedule -- see the contract header)");
   console.log("\n Test accounts: alice/bob/carol (#2/#3/#4) each hold 10000 ETH.");
   console.log("\n Keeper loop each round (all permissionless):");
