@@ -94,6 +94,10 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
       minPoolSize: ethers.parseEther("0.01"),
       maxStakePerWalletBps: 6000n,
       keeperRewardBps: KEEPER_REWARD_BPS,
+      seedNumerator: 1n,
+      seedDenominator: 2n,
+      reserveShareBps: 0n,
+      reserveFloorWei: 0n,
       treasury: await distributor.getAddress(),
       beacon: await beacon.getAddress(),
     });

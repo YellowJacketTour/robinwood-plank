@@ -99,6 +99,18 @@ async function main() {
   const MIN_POOL = envBig("CASINO_MIN_POOL_WEI", ethers.parseEther("0.005"));
   const MAX_STAKE_BPS = envBig("CASINO_MAX_STAKE_BPS", 6000n);
 
+  // ── The Vault: the perpetual, never-zero, always-compounding prize pot.
+  // Each game is seeded with SEED_NUM/SEED_DEN of the Vault (a strict
+  // fraction, so it can never be drawn to zero), the Vault grows by
+  // RESERVE_SHARE_BPS of every round's rake (compounds on wins too) plus the
+  // whole pot of every busted round, and RESERVE_FLOOR_WEI is an optional
+  // hard floor. Defaults: release 1/8 (12.5%) per game, compound 40% of the
+  // rake -- a big, visibly-growing progressive pot that never resets.
+  const SEED_NUM = envBig("CASINO_SEED_NUMERATOR", 1n);
+  const SEED_DEN = envBig("CASINO_SEED_DENOMINATOR", 8n);
+  const RESERVE_SHARE_BPS = envBig("CASINO_RESERVE_SHARE_BPS", 4000n);
+  const RESERVE_FLOOR_WEI = envBig("CASINO_RESERVE_FLOOR_WEI", 0n);
+
   // Powerboard
   const EPOCH_SECONDS = envBig("CASINO_EPOCH_SECONDS", 86400n); // daily
   const EPOCH_GENESIS = envBig("CASINO_EPOCH_GENESIS", BigInt(Math.floor(Date.now() / 1000)));
@@ -161,6 +173,10 @@ async function main() {
     minPoolSize: MIN_POOL,
     maxStakePerWalletBps: MAX_STAKE_BPS,
     keeperRewardBps: KEEPER_REWARD_BPS,
+    seedNumerator: SEED_NUM,
+    seedDenominator: SEED_DEN,
+    reserveShareBps: RESERVE_SHARE_BPS,
+    reserveFloorWei: RESERVE_FLOOR_WEI,
     treasury: await distributor.getAddress(),
     beacon: BEACON,
   }); // nonce+2

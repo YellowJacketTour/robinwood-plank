@@ -55,6 +55,10 @@ describe("PlankCrashDrand — conservation of ETH (no public fund risk)", () => 
       minPoolSize: ethers.parseEther("0.001"),
       maxStakePerWalletBps: 8000n,
       keeperRewardBps: keeperBps,
+      seedNumerator: 1n,
+      seedDenominator: 2n,
+      reserveShareBps: 0n,
+      reserveFloorWei: 0n,
       treasury: treasury.address,
       beacon: await beacon.getAddress(),
     });

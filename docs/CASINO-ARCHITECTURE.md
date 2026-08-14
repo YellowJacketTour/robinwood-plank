@@ -318,3 +318,52 @@ no dependency cycle since it only needs the crash's final address.
 > payout redirect; without it, wins land in the crash's normal pull-escrow
 > (withdrawable to their wallet) instead. The buffer only decreases during a session
 > otherwise. This is a deliberate, safe scoping — not a stub.
+
+---
+
+## 9. The Vault — a perpetual, never-zero, always-compounding prize pot
+
+Every game is seeded from **the Vault** (`reserve`), a persistent prize reserve
+that is **mathematically incapable of reaching zero or going negative**, no matter
+how much players win.
+
+**The math (why it can never be emptied).** Each new round is seeded with only a
+*strict fraction* of the Vault:
+
+```
+seed = floor(reserve · seedNumerator / seedDenominator),   seedNumerator < seedDenominator
+reserve ← reserve − seed
+```
+
+Because `seedNumerator < seedDenominator`, integer division gives `seed ≤ reserve·num/den < reserve`
+for any `reserve ≥ 1`, so `reserve − seed` is strictly positive. A draw multiplies
+the balance by `(den−num)/den > 0` — a positive number times a positive number is
+positive. The Vault's **only** debit is this fractional seed; **winners are paid from
+the round pool, never from the Vault**, so no sequence of wins ever touches it. This
+is enforced at construction (`BadVaultConfig` rejects `num ≥ den`) and proven by a
+fuzz test that pays out far more than the Vault holds across mixed win/bust rounds
+while the Vault stays strictly positive (`PlankCrashDrandVault.test.ts`).
+
+**The growth engine (why it always grows).** Three streams feed the Vault, so it
+compounds on winning rounds too, not just busts:
+1. **Rake carve** — `reserveShareBps` of every round's net rake flows into the Vault
+   instead of the treasury (default 40%). Player-facing rake is unchanged; this only
+   reallocates within the take, so *more of the rake comes back as prizes*.
+2. **Bust windfalls** — the entire pot of every fully-busted round rolls in whole
+   (`sweepBustedRound`), for big jackpot jumps.
+3. **Donations** — anyone can `fundVault()` to prime or boost the progressive pot;
+   only a fraction is released per round, so a donation compounds across many games.
+
+**Steady state.** With constant pool `P`, rake carve `c` per round and release
+fraction `α`, the reserve converges to `R* = c·P/α` and the per-round seed converges
+to `c·P` — a self-funding progressive pot sitting on a permanent, un-emptyable buffer.
+Set `α` small (default `1/8`) for a large, slow-to-fill, visibly-growing pot.
+
+**Optional hard floor.** `reserveFloorWei` clamps the draw so the Vault is never taken
+below a fixed floor `F` — a stronger guarantee (`reserve ≥ F`) than the geometric one
+(`reserve > 0`).
+
+**UI hooks.** `reserve` (current Vault) and `nextSeed()` (what the next game starts
+with) are public; `VaultSeeded` / `VaultGrew` / `VaultFunded` events stream every
+change. Deploy knobs: `CASINO_SEED_NUMERATOR` / `CASINO_SEED_DENOMINATOR` /
+`CASINO_RESERVE_SHARE_BPS` / `CASINO_RESERVE_FLOOR_WEI`, all immutable after deploy.

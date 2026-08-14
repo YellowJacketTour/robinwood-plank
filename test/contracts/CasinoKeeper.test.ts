@@ -88,6 +88,10 @@ describe("Casino keeper — the loop runs itself", () => {
       minPoolSize: ethers.parseEther("0.01"),
       maxStakePerWalletBps: 6000n,
       keeperRewardBps: 1000n,
+      seedNumerator: 1n,
+      seedDenominator: 2n,
+      reserveShareBps: 0n,
+      reserveFloorWei: 0n,
       treasury: await distributor.getAddress(),
       beacon: await beacon.getAddress(),
     });

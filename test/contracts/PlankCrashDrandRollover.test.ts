@@ -39,6 +39,10 @@ describe("PlankCrashDrand — busted-round rollover", () => {
       minPoolSize: ethers.parseEther("0.01"),
       maxStakePerWalletBps: 6000n,
       keeperRewardBps: 0n,
+      seedNumerator: 1n,
+      seedDenominator: 2n,
+      reserveShareBps: 0n,
+      reserveFloorWei: 0n,
       treasury: treasury.address,
       beacon: await beacon.getAddress(),
     });
@@ -86,8 +90,8 @@ describe("PlankCrashDrand — busted-round rollover", () => {
 
     await crash.connect(keeper).sweepBustedRound(roundId);
 
-    // The money is now queued to seed the next round, not stranded.
-    expect(await crash.pendingRollover()).to.equal(distributable);
+    // The whole busted pot is now in the Vault, not stranded.
+    expect(await crash.reserve()).to.equal(distributable);
     const after = await crash.rounds(roundId);
     expect(after.distributable).to.equal(0n);
     expect(after.swept).to.equal(true);
@@ -112,19 +116,26 @@ describe("PlankCrashDrand — busted-round rollover", () => {
     const openRound = await crash.currentRoundId();
     await crash.lockRound(); // voids the empty stale round, starts the seeded one
 
+    // With this config the Vault releases a STRICT FRACTION (1/2) per game,
+    // so the new round is seeded with floor(reserve/2) and the Vault KEEPS
+    // the rest -- it is never emptied. That retained balance is the whole
+    // point: no game can ever start the forward carry at zero.
+    const seed = distributable / 2n; // floor(reserve * 1/2)
     const seededId = await crash.currentRoundId();
     expect(seededId).to.be.gt(openRound);
     const seeded = await crash.rounds(seededId);
-    expect(seeded.pool).to.equal(distributable);
-    expect(seeded.rolledOverFromPrevious).to.equal(distributable);
-    expect(await crash.pendingRollover()).to.equal(0n); // consumed exactly once
+    expect(seeded.pool).to.equal(seed);
+    expect(seeded.rolledOverFromPrevious).to.equal(seed);
+    // The Vault retains the un-seeded remainder -- strictly positive, forever.
+    expect(await crash.reserve()).to.equal(distributable - seed);
+    expect(await crash.reserve()).to.be.gt(0n);
 
-    // And it is real, spendable pot: a fresh pair of bettors now play for
-    // their own stakes PLUS the seeded money they never paid in.
+    // And the seed is a real, spendable pot: a fresh pair of bettors now play
+    // for their own stakes PLUS the seeded money they never paid in.
     await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
     await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
     const funded = await crash.rounds(seededId);
-    expect(funded.pool).to.equal(distributable + ethers.parseEther("2"));
+    expect(funded.pool).to.equal(seed + ethers.parseEther("2"));
   });
 
   it("a round WITH a winner cannot be swept -- the sweep is only ever a rescue for a fully-busted pot", async () => {

@@ -115,6 +115,12 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     address public immutable treasury;
     uint256 public accumulatedRake;
 
+    // ── The Vault: a perpetual, always-positive prize reserve ────────────
+    uint256 public immutable seedNumerator;
+    uint256 public immutable seedDenominator;
+    uint256 public immutable reserveShareBps;
+    uint256 public immutable reserveFloorWei;
+
     // The shared, protocol-wide drand round cache -- see this file's own
     // header ("UNIFIED WITH THE REST OF plank.love") for why this reads
     // from the same beacon MarketplankVaultV3 uses, instead of verifying
@@ -146,18 +152,21 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     uint256 private constant TARGET_ROUND_SAFETY_PERIODS = 20;
 
     uint256 public currentRoundId;
-    // ETH from fully-busted rounds (nobody cashed out, so nobody can ever
-    // claim) waiting to seed the next round that starts. Real bug this
-    // fixes: without it that ETH -- ~95.5% of a busted pool -- had NO
-    // claim path, NO sweep, and NO rescue, so it sat in the contract
-    // permanently. Fully-busted rounds are common at low crash
-    // multipliers, so this was a recurring, permanent loss to players.
-    // Rolling it forward keeps the money in the game and visibly seeds a
-    // bigger pot -- the lottery rollover mechanic, applied to the crash
-    // game, and a genuine positive-EV injection for whoever plays next
-    // (it is previously-lost player money returning to players, never
-    // dev revenue).
-    uint256 public pendingRollover;
+    // THE VAULT -- a perpetual, always-positive prize reserve that seeds
+    // every game and can never be emptied. It is fed by three streams:
+    //   (1) a share (reserveShareBps) of every round's rake -- the steady
+    //       compounding engine, so it grows on winning rounds too;
+    //   (2) the ENTIRE pot of every fully-busted round (nobody cashed out,
+    //       so nobody can ever claim it) -- windfall jumps;
+    //   (3) any direct donation via fundVault() -- sponsors/dev priming.
+    // Each new round is seeded with only a STRICT FRACTION of it
+    // (seed = floor(reserve * seedNumerator/seedDenominator), num < den),
+    // so a draw multiplies the balance by (den-num)/den > 0 and the Vault
+    // is mathematically incapable of reaching zero or negative: no amount
+    // of player winning can ever make the forward carry <= 0, because
+    // winners are paid from the round pool, never from the Vault, and the
+    // Vault's ONLY outflow is that fractional seed. See _seedFromReserve().
+    uint256 public reserve;
     mapping(uint256 => Round) public rounds;
     mapping(uint64 => uint256) public drandRoundToRoundId;
     mapping(uint256 => mapping(address => uint256)) public stakeOf;
@@ -197,6 +206,9 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     event ResultRegistered(uint256 indexed roundId, address indexed player, bool won, uint256 weight);
     event Claimed(uint256 indexed roundId, address indexed player, uint256 payout);
     event PoolRolledOver(uint256 indexed fromRoundId, uint256 amount);
+    event VaultSeeded(uint256 indexed roundId, uint256 seed, uint256 reserveAfter);
+    event VaultFunded(address indexed from, uint256 amount, uint256 reserveAfter);
+    event VaultGrew(uint256 indexed roundId, uint256 fromRake, uint256 reserveAfter);
 
     error BadPhase();
     error TooEarly();
@@ -220,6 +232,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     error AlreadySwept();
     error ZeroPlayer();
     error NotFunder();
+    error BadVaultConfig();
+    error NothingToFund();
 
     struct Config {
         uint256 bettingDurationSeconds;
@@ -234,6 +248,21 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         uint256 keeperRewardBps;
         address treasury;
         address beacon;
+        // ── The Vault (perpetual, never-zero prize reserve) ──────────────
+        // Each new round is seeded with a STRICT FRACTION of the Vault:
+        //   seed = floor(reserve * seedNumerator / seedDenominator)
+        // With seedNumerator < seedDenominator the Vault is multiplied by
+        // (den-num)/den > 0 on every draw, so it is arithmetically
+        // impossible for it to reach zero or go negative -- no sequence of
+        // player wins can ever empty the forward carry. See _seedFromReserve.
+        uint256 seedNumerator;
+        uint256 seedDenominator;
+        // Share (bps) of each round's NET rake that compounds back into the
+        // Vault instead of going to the treasury -- the growth engine.
+        uint256 reserveShareBps;
+        // Optional hard floor: the Vault is never drawn below this many wei
+        // (0 = pure geometric floor, which is already strictly positive).
+        uint256 reserveFloorWei;
     }
 
     constructor(Config memory cfg) {
@@ -268,7 +297,21 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         maxStakePerWalletBps = cfg.maxStakePerWalletBps;
         keeperRewardBps = cfg.keeperRewardBps;
         treasury = cfg.treasury;
-        _startRound(0);
+
+        // Vault: the seed fraction MUST be a proper fraction (0 < num < den)
+        // -- this is exactly what guarantees the reserve can never be drawn
+        // to zero. A share of 100% is allowed (den==num would zero it, so is
+        // rejected); reserveShareBps is a normal 0..10000 rake share.
+        if (cfg.seedDenominator == 0 || cfg.seedNumerator == 0 || cfg.seedNumerator >= cfg.seedDenominator) {
+            revert BadVaultConfig();
+        }
+        if (cfg.reserveShareBps > 10000) revert BadVaultConfig();
+        seedNumerator = cfg.seedNumerator;
+        seedDenominator = cfg.seedDenominator;
+        reserveShareBps = cfg.reserveShareBps;
+        reserveFloorWei = cfg.reserveFloorWei;
+
+        _startRound();
     }
 
     // ── Round lifecycle ──────────────────────────────────────────────────
@@ -279,21 +322,66 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         return genesisTimestamp + k * roundIntervalSeconds;
     }
 
-    function _startRound(uint256 rolledOver) private {
+    function _startRound() private {
         currentRoundId += 1;
         Round storage r = rounds[currentRoundId];
         r.phase = Phase.BETTING;
         r.bettingEndsAt = (currentRoundId == 1 || roundIntervalSeconds == 0)
             ? block.timestamp + bettingDurationSeconds
             : _nextSlot();
-        // Drain any swept busted-round pot into this round's starting pool.
-        // Consumed exactly once (pendingRollover is zeroed here), so the
-        // same ETH can never seed two rounds.
-        uint256 seeded = rolledOver + pendingRollover;
-        pendingRollover = 0;
+        // Seed the new pot with a STRICT FRACTION of the Vault. Tracked in
+        // rolledOverFromPrevious so a void returns exactly this seed to the
+        // Vault (see _rescueSeed) -- the seed has no owning player.
+        uint256 seeded = _seedFromReserve();
         r.pool = seeded;
         r.rolledOverFromPrevious = seeded;
         emit RoundStarted(currentRoundId, r.bettingEndsAt);
+        if (seeded > 0) emit VaultSeeded(currentRoundId, seeded, reserve);
+    }
+
+    /// Draws the seed for the next round out of the Vault and returns it,
+    /// updating `reserve`. THE non-negativity guarantee lives here:
+    ///   seed = floor(reserve * seedNumerator / seedDenominator)
+    /// With seedNumerator < seedDenominator, integer division gives
+    /// seed <= reserve*num/den < reserve for any reserve >= 1, so
+    /// `reserve - seed` is strictly positive. The optional floor only makes
+    /// the guarantee stronger (reserve >= reserveFloorWei). This is the ONLY
+    /// place the Vault is ever debited.
+    function _seedFromReserve() private returns (uint256 seed) {
+        uint256 avail = reserve;
+        if (avail == 0) return 0;
+        if (reserveFloorWei > 0 && avail <= reserveFloorWei) return 0; // preserve the floor
+        seed = (avail * seedNumerator) / seedDenominator; // floor, strictly < avail
+        if (reserveFloorWei > 0) {
+            uint256 maxDraw = avail - reserveFloorWei;
+            if (seed > maxDraw) seed = maxDraw;
+        }
+        // avail - seed > 0 always (seed < avail), so the Vault survives.
+        reserve = avail - seed;
+    }
+
+    /// What the NEXT round will be seeded with, given the Vault right now --
+    /// a pure mirror of _seedFromReserve for the UI ("next game starts with
+    /// X already in the pot; the Vault holds Y").
+    function nextSeed() external view returns (uint256 seed) {
+        uint256 avail = reserve;
+        if (avail == 0) return 0;
+        if (reserveFloorWei > 0 && avail <= reserveFloorWei) return 0;
+        seed = (avail * seedNumerator) / seedDenominator;
+        if (reserveFloorWei > 0) {
+            uint256 maxDraw = avail - reserveFloorWei;
+            if (seed > maxDraw) seed = maxDraw;
+        }
+    }
+
+    /// Anyone can grow the Vault directly -- dev priming, a sponsor boosting
+    /// the progressive pot, or a well-wisher. It only ever seeds future
+    /// player pots (never dev revenue), and only a fraction is released per
+    /// round, so a donation compounds across many games.
+    function fundVault() external payable {
+        if (msg.value == 0) revert NothingToFund();
+        reserve += msg.value;
+        emit VaultFunded(msg.sender, msg.value, reserve);
     }
 
     function placeBet() external payable nonReentrant {
@@ -405,7 +493,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
             // permanently locked -- a real HIGH found in audit. Recycling
             // r.rolledOverFromPrevious is exact and non-double-counting.
             _rescueSeed(r);
-            _startRound(0);
+            _startRound();
             return;
         }
 
@@ -494,11 +582,22 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
 
         uint256 rake = r.pool - r.distributable;
         uint256 keeperReward = (rake * keeperRewardBps) / 10000;
-        accumulatedRake += rake - keeperReward;
+        uint256 netRake = rake - keeperReward;
+        // Compound a share of the rake straight back into the Vault instead
+        // of sending it all to the treasury -- this is the steady growth
+        // engine that makes the prize pot grow on WINNING rounds too, not
+        // just on busts. Player-facing rake is unchanged; this only
+        // reallocates within the take (Vault vs treasury).
+        uint256 reserveCut = (netRake * reserveShareBps) / 10000;
+        if (reserveCut > 0) {
+            reserve += reserveCut;
+            emit VaultGrew(roundId, reserveCut, reserve);
+        }
+        accumulatedRake += netRake - reserveCut;
         if (keeperReward > 0) _asyncTransfer(msg.sender, keeperReward);
 
         emit RoundCrashed(roundId, r.crashMultiplierBps, effective, r.trueCrashElapsedBlocks > maxElapsedBlocks);
-        _startRound(0);
+        _startRound();
     }
 
     /// Anti-griefing liveness fallback -- see maxAwaitBlocks's own
@@ -516,7 +615,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         // See lockRound's under-threshold void: recycle the seed so it is
         // never locked in a voided round.
         _rescueSeed(r);
-        _startRound(0);
+        _startRound();
     }
 
     /// Returns a voided round's rolled-over SEED to pendingRollover so it
@@ -526,7 +625,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         uint256 seed = r.rolledOverFromPrevious;
         if (seed > 0) {
             r.rolledOverFromPrevious = 0;
-            pendingRollover += seed;
+            reserve += seed;
         }
     }
 
@@ -554,7 +653,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         r.swept = true;
         uint256 amount = r.distributable;
         r.distributable = 0;
-        pendingRollover += amount;
+        reserve += amount;
         emit PoolRolledOver(roundId, amount);
     }
 

@@ -177,6 +177,12 @@ async function main() {
     minPoolSize: MIN_POOL,
     maxStakePerWalletBps: MAX_STAKE_BPS,
     keeperRewardBps: KEEPER_REWARD_BPS,
+    // The Vault: seed each game with 1/8 of the reserve (never zero), grow it
+    // by 40% of every round's rake plus the whole pot of busted rounds.
+    seedNumerator: 1n,
+    seedDenominator: 8n,
+    reserveShareBps: 4000n,
+    reserveFloorWei: 0n,
     treasury: await distributor.getAddress(), // rake flows into the community-economics splitter
     beacon: await beacon.getAddress(),
   }); // nonce + 2

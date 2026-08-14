@@ -48,6 +48,10 @@ describe("PlankCrashDrand", () => {
       minPoolSize: MIN_POOL,
       maxStakePerWalletBps: MAX_STAKE_BPS,
       keeperRewardBps: KEEPER_REWARD_BPS,
+      seedNumerator: 1n,
+      seedDenominator: 2n,
+      reserveShareBps: 0n,
+      reserveFloorWei: 0n,
       treasury: treasury.address,
       beacon: await beacon.getAddress(),
     });
