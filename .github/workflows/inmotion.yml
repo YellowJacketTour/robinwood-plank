@@ -118,6 +118,12 @@ jobs:
       NEXT_PUBLIC_ZEROX_ENABLED: ${{ vars.NEXT_PUBLIC_ZEROX_ENABLED || 'false' }}
       NEXT_PUBLIC_ZEROX_CROSSCHAIN_ENABLED: ${{ vars.NEXT_PUBLIC_ZEROX_CROSSCHAIN_ENABLED || 'false' }}
       NEXT_PUBLIC_CROSSCHAIN_ENABLED: ${{ vars.NEXT_PUBLIC_CROSSCHAIN_ENABLED || 'false' }}
+      # Referral attribution. Build-time like the flags above, so turning it
+      # on or off is a rebuild + redeploy, not an env edit on the box. No
+      # secret to stage: the feature needs only Postgres, which the server
+      # already has. Attribution is PERMANENT once written (migration 010) --
+      # enabling this starts writing rows that only an admin revoke can clear.
+      NEXT_PUBLIC_REFERRAL_ENABLED: ${{ vars.NEXT_PUBLIC_REFERRAL_ENABLED || 'false' }}
       # 'reown' swaps the connect surface to AppKit; unset keeps the legacy
       # WalletConnect QR modal. Off in production until dogfooded.
       NEXT_PUBLIC_WALLET_UI: ${{ vars.NEXT_PUBLIC_WALLET_UI || '' }}

@@ -7,6 +7,7 @@ import TradeModeSwitch, {
   type TradeMode,
   type ZeroXStatusResponse,
 } from "@/components/trade/TradeModeSwitch";
+import ReferralPanel from "@/components/trade/ReferralPanel";
 import { TRADE_PAUSED } from "@/lib/constants";
 import { getCountdownParts } from "@/lib/trade";
 
@@ -35,6 +36,12 @@ export default function TradeWorkbench({ onModeChange, onZeroXStatusChange }: Pr
         <>
           <CopyCA />
           <TradeModeSwitch onModeChange={onModeChange} onStatusChange={onZeroXStatusChange} />
+          {/* Sits AFTER the swap widget, not competing with it — /trade's
+              primary task is swapping $PLANK (DESIGN.md, "each product page
+              must lead with its primary task"). Self-hides via its own
+              /api/referral/status check when not configured, same contract
+              as TradeModeSwitch's cross-chain tab. */}
+          <ReferralPanel />
         </>
       ) : (
         !TRADE_PAUSED && (
