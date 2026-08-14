@@ -26,13 +26,12 @@ import { TradeApiError } from "@/lib/uniswap-server";
  * one-step "buy $PLANK with a card" flow, because no such direct MoonPay
  * pair is confirmed to exist.
  *
- * KNOWN GAP -- order tracking. There is no MoonPay webhook handler and no
- * externalCustomerId on the outgoing URL, so once a buyer leaves for the
- * hosted checkout we learn nothing about what happened: no confirmation in
- * the app, and nothing to point at when someone asks where their money
- * went. Acceptable for a first cut behind a flag; it is the first thing to
- * build before this carries real volume, and it is also what gives us
- * visibility into abuse of our merchant key.
+ * ORDER TRACKING lives in lib/moonpay-orders.ts + app/api/moonpay/webhook:
+ * every URL built here carries an externalCustomerId that MoonPay echoes
+ * back on its signed order webhook, which is the only way we learn what
+ * became of a checkout after the buyer leaves. That is also our only
+ * visibility into our merchant key being used to drive volume we did not
+ * originate.
  */
 
 export const MOONPAY_ENABLED =
@@ -135,6 +134,12 @@ export function buildBuyWidgetUrl(walletAddress: string, currencyCode = DEFAULT_
     apiKey,
     currencyCode,
     walletAddress,
+    // Round-trips through the order webhook (app/api/moonpay/webhook), which
+    // is the only way we learn an order's outcome. The destination wallet
+    // itself is used as the id rather than a freshly minted opaque one: it
+    // needs no extra pre-checkout write to map back, and it discloses
+    // nothing new, since walletAddress is already in this same URL.
+    externalCustomerId: walletAddress.toLowerCase(),
   });
   const queryString = `?${params.toString()}`;
   const signature = sign(secretKey, queryString);
@@ -168,6 +173,7 @@ export function buildSellWidgetUrl(
     apiKey,
     baseCurrencyCode,
     refundWalletAddress,
+    externalCustomerId: refundWalletAddress.toLowerCase(),
   });
   // Optional pre-fill (MoonPayPanel.tsx sends the real, just-read USDG
   // balance). Validated as a plain positive decimal -- never trust a

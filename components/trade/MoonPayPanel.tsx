@@ -9,6 +9,52 @@ import { USDG_TOKEN } from "@/lib/constants";
 type MoonPayStatus = { enabled: boolean; configured: boolean; sandbox: boolean };
 type RampDirection = "buy" | "sell";
 
+type MoonPayOrder = {
+  orderId: string;
+  direction: string;
+  status: string;
+  baseCurrencyCode: string | null;
+  baseCurrencyAmount: number | null;
+  lastEventAt: string;
+};
+
+/**
+ * MoonPay's transaction statuses, mapped to the only three things a buyer
+ * needs to know: it worked, it is still going, or it did not. Anything
+ * unrecognised is shown as in-progress rather than hidden -- an order we
+ * cannot classify is exactly the one someone needs to see.
+ */
+type OrderTone = "done" | "pending" | "failed";
+
+const ORDER_TONE: Record<OrderTone, string> = {
+  done: "border-emerald-500/30 bg-emerald-950/20 text-emerald-300",
+  pending: "border-gold-500/30 bg-gold-500/10 text-gold-300",
+  failed: "border-red-500/30 bg-red-950/20 text-red-300",
+};
+
+function orderTone(status: string): OrderTone {
+  const s = status.toLowerCase();
+  if (s === "completed") return "done";
+  if (s === "failed" || s === "cancelled" || s === "canceled") return "failed";
+  return "pending";
+}
+
+function describeOrder(order: MoonPayOrder): string {
+  const amount =
+    order.baseCurrencyAmount !== null && order.baseCurrencyCode
+      ? ` (${order.baseCurrencyAmount} ${order.baseCurrencyCode.toUpperCase()})`
+      : "";
+  const verb = order.direction === "sell" ? "Cash-out" : "Purchase";
+  switch (orderTone(order.status)) {
+    case "done":
+      return `${verb} completed${amount}. Funds have been delivered.`;
+    case "failed":
+      return `${verb}${amount} did not go through (${order.status}). Nothing was delivered — contact MoonPay support if you were charged.`;
+    default:
+      return `${verb}${amount} in progress (${order.status}). MoonPay is still working on it; this updates automatically.`;
+  }
+}
+
 // One definition, in lib/constants.ts, shared with the swap selector's core
 // counter tokens (USDG is a routing hop in live quotes, so it is already in
 // the token list the buyer returns to). Decimals are 6, NOT the 18 most
@@ -55,6 +101,7 @@ export default function MoonPayPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [usdgBalance, setUsdgBalance] = useState<bigint | null>(null);
+  const [latestOrder, setLatestOrder] = useState<MoonPayOrder | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +133,43 @@ export default function MoonPayPanel() {
     });
     return () => {
       cancelled = true;
+    };
+  }, [account]);
+
+  // Order status for the connected wallet, from the webhook-fed store
+  // (app/api/moonpay/orders). Polled rather than pushed: a buyer completes
+  // the checkout in ANOTHER tab or on their phone, so there is no event in
+  // this tab to react to, and the settle time is minutes. Polling stops as
+  // soon as the newest order reaches a terminal state, so an idle panel is
+  // not a permanent timer.
+  useEffect(() => {
+    if (!account) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLatestOrder(null);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const poll = async () => {
+      try {
+        const resp = await fetch(`/api/moonpay/orders?wallet=${account}`);
+        const data = await resp.json();
+        if (cancelled) return;
+        const newest: MoonPayOrder | undefined = data?.orders?.[0];
+        setLatestOrder(newest ?? null);
+        if (newest && orderTone(newest.status) !== "pending") return;
+      } catch {
+        /* a failed status read must never break the ramp itself */
+        if (cancelled) return;
+      }
+      timer = setTimeout(poll, 15_000);
+    };
+    poll();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [account]);
 
@@ -182,9 +266,19 @@ export default function MoonPayPanel() {
 
       <p className="text-[0.72rem] leading-snug text-cream-muted">
         {direction === "buy"
-          ? "Real card, Apple Pay, Google Pay, or bank transfer via MoonPay — delivers USDG directly to your wallet on Robinhood Chain, no bridge. Convert USDG to $PLANK afterward using Swap above (import USDG by address)."
+          ? "Real card, Apple Pay, Google Pay, or bank transfer via MoonPay — delivers USDG directly to your wallet on Robinhood Chain, no bridge. Convert USDG to $PLANK afterward using Swap above — USDG is already in the token list."
           : "Send USDG from your wallet through MoonPay's real off-ramp and receive fiat in your bank or card."}
       </p>
+
+      {latestOrder && (
+        <p
+          className={`rounded-lg border px-3 py-2 text-[0.72rem] ${
+            ORDER_TONE[orderTone(latestOrder.status)]
+          }`}
+        >
+          {describeOrder(latestOrder)}
+        </p>
+      )}
 
       {!account ? (
         <p className="rounded-lg border border-line bg-panel-strong px-3 py-2 text-[0.72rem] text-cream-muted">
