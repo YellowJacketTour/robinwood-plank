@@ -31,6 +31,7 @@ describe("PlankBank — deposit, play instantly with a session key, withdraw", (
       ballRange: 26n,
       jackpotBall: 8n,
       consolationBps: 500n,
+      mustHitByEpochs: 0n,
     });
     // A throwaway treasury sink so rake distribution can't revert the flow.
     const distributor: any = await (
@@ -54,6 +55,8 @@ describe("PlankBank — deposit, play instantly with a session key, withdraw", (
       seedDenominator: 2n,
       reserveShareBps: 0n,
       reserveFloorWei: 0n,
+      reserveCap: 0n,
+      jackpotSink: ethers.ZeroAddress,
       treasury: await distributor.getAddress(),
       beacon: await beacon.getAddress(),
     });

@@ -367,3 +367,33 @@ below a fixed floor `F` — a stronger guarantee (`reserve ≥ F`) than the geom
 with) are public; `VaultSeeded` / `VaultGrew` / `VaultFunded` events stream every
 change. Deploy knobs: `CASINO_SEED_NUMERATOR` / `CASINO_SEED_DENOMINATOR` /
 `CASINO_RESERVE_SHARE_BPS` / `CASINO_RESERVE_FLOOR_WEI`, all immutable after deploy.
+
+---
+
+## 10. Unifying the Vault with the Powerboard: the cascade + the "must be won" guarantee
+
+**Cascade — the crash's growth feeds the daily lottery.** The Vault is capped
+(`reserveCap`); once it exceeds the cap, the overflow **spills into the Powerboard
+jackpot** via `jackpotSink.fund()`. So the rake carve fills the Vault first
+(short-cycle, per-game prizes) and, once it's full, everything above the cap flows
+to the jackpot (long-cycle, daily prize). This resolves the earlier dilution: the
+40% rake carve isn't lost to the Powerboard, it's *prioritized* — Vault first,
+jackpot gets the steady overflow — so at steady state the jackpot's funding is
+restored and the two are one coherent system. The spill is **best-effort** (a
+low-level `call`; a broken/absent sink just leaves the ETH in the Vault to spill
+next time), so a bad sink can never brick settlement, and only balance *above* the
+cap is ever moved — the never-zero floor is untouched. Config: `reserveCap` (0 =
+uncapped, no spill) and `jackpotSink` (0 = cascade off). Emits `VaultOverflow`.
+
+**"Must be won" — the guaranteed jackpot.** Left alone, the full jackpot only pays
+when the Plank Ball hits (`1/ballRange` per epoch — geometric, so the wait has an
+unbounded tail even though it self-caps at ~`1/consolationBps` × per-epoch funding
+via the consolation drain). `mustHitByEpochs` adds the real-lottery **"Must Be Won"**
+mechanic: if the jackpot hasn't paid for that many epochs, the next drawn epoch
+(with participants) **force-pays the entire jackpot regardless of the ball**. The
+clock (`lastJackpotHitEpoch`) starts at deployment and resets on every full payout
+(natural or forced). `guaranteedHitByEpoch()` exposes the deadline for a
+"guaranteed by <date>" headline; `JackpotForced` fires when the guarantee triggers.
+So: **someone wins a consolation every epoch** there are players, and **the full
+jackpot is guaranteed to pay out at least every `mustHitByEpochs` epochs** — it can
+never roll forever.

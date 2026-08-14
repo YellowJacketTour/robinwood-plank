@@ -5,6 +5,12 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.
 import {PullPayment} from "@openzeppelin/contracts/security/PullPayment.sol";
 import {IDrandBeacon} from "./IDrandBeacon.sol";
 
+/// The Powerboard's funding surface -- the Vault cascades its overflow here,
+/// unifying the crash's compounding growth with the daily rolling jackpot.
+interface IPlankJackpotSink {
+    function fund() external payable;
+}
+
 /**
  * Plank Crash Drand -- same pari-mutuel game as PlankCrashV2.sol (its
  * header is required reading first; this file only documents the delta),
@@ -120,6 +126,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     uint256 public immutable seedDenominator;
     uint256 public immutable reserveShareBps;
     uint256 public immutable reserveFloorWei;
+    uint256 public immutable reserveCap;
+    address public immutable jackpotSink;
 
     // The shared, protocol-wide drand round cache -- see this file's own
     // header ("UNIFIED WITH THE REST OF plank.love") for why this reads
@@ -209,6 +217,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     event VaultSeeded(uint256 indexed roundId, uint256 seed, uint256 reserveAfter);
     event VaultFunded(address indexed from, uint256 amount, uint256 reserveAfter);
     event VaultGrew(uint256 indexed roundId, uint256 fromRake, uint256 reserveAfter);
+    event VaultOverflow(uint256 spilledToJackpot, uint256 reserveAfter);
 
     error BadPhase();
     error TooEarly();
@@ -263,6 +272,14 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         // Optional hard floor: the Vault is never drawn below this many wei
         // (0 = pure geometric floor, which is already strictly positive).
         uint256 reserveFloorWei;
+        // ── Cascade: unify the Vault with the Powerboard jackpot ─────────
+        // Once the Vault exceeds reserveCap, the overflow spills into the
+        // jackpotSink (the Powerboard), so the crash's compounding growth
+        // feeds the daily lottery once the intra-round pot is "full".
+        //   reserveCap == 0  -> uncapped, never spills (Vault only).
+        //   jackpotSink == 0 -> cascade disabled (standalone crash).
+        uint256 reserveCap;
+        address jackpotSink;
     }
 
     constructor(Config memory cfg) {
@@ -310,6 +327,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         seedDenominator = cfg.seedDenominator;
         reserveShareBps = cfg.reserveShareBps;
         reserveFloorWei = cfg.reserveFloorWei;
+        reserveCap = cfg.reserveCap;
+        jackpotSink = cfg.jackpotSink;
 
         _startRound();
     }
@@ -382,6 +401,26 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (msg.value == 0) revert NothingToFund();
         reserve += msg.value;
         emit VaultFunded(msg.sender, msg.value, reserve);
+        _spillOverflow();
+    }
+
+    /// CASCADE: once the Vault is past its cap, spill the excess into the
+    /// Powerboard jackpot -- so the crash's compounding growth feeds the
+    /// daily lottery instead of hoarding. Best-effort: a broken/absent sink
+    /// simply leaves the ETH in the Vault (retried next time it grows), so a
+    /// sink can never brick settlement. Never touches the never-zero floor:
+    /// only balance ABOVE reserveCap is ever spilled.
+    function _spillOverflow() private {
+        address sink = jackpotSink;
+        uint256 cap = reserveCap;
+        if (sink == address(0) || cap == 0 || reserve <= cap) return;
+        uint256 excess = reserve - cap;
+        (bool ok, ) = sink.call{value: excess}(abi.encodeWithSignature("fund()"));
+        if (ok) {
+            reserve = cap;
+            emit VaultOverflow(excess, cap);
+        }
+        // if !ok: keep the excess in the Vault; it spills on the next growth.
     }
 
     function placeBet() external payable nonReentrant {
@@ -595,6 +634,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         }
         accumulatedRake += netRake - reserveCut;
         if (keeperReward > 0) _asyncTransfer(msg.sender, keeperReward);
+        if (reserveCut > 0) _spillOverflow(); // cascade any overflow to the jackpot
 
         emit RoundCrashed(roundId, r.crashMultiplierBps, effective, r.trueCrashElapsedBlocks > maxElapsedBlocks);
         _startRound();
@@ -655,6 +695,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         r.distributable = 0;
         reserve += amount;
         emit PoolRolledOver(roundId, amount);
+        _spillOverflow(); // a big bust windfall can push the Vault past its cap
     }
 
     /// Records `player`'s result. Callable BY ANYONE on any player's

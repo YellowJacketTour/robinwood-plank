@@ -82,6 +82,12 @@ async function main() {
   const BALL_RANGE = 26n;
   const JACKPOT_BALL = 8n;
   const CONSOLATION_BPS = 500n; // 5% paid on a miss, 95% rolls over
+  // "Must be won": the full jackpot is guaranteed to pay out at least this
+  // often (in daily epochs) even if the ball never naturally hits.
+  const MUST_HIT_EPOCHS = 30n;
+  // The Vault caps here; overflow cascades into the Powerboard jackpot, so
+  // the crash's compounding growth feeds the daily lottery once it's full.
+  const RESERVE_CAP = ethers.parseEther("2");
   const MOCK_PLANK_PER_WEI = 1000n; // arbitrary local exchange rate for the mock router
 
   // ── Independent pieces first (no dependency cycle) ─────────────────
@@ -150,6 +156,7 @@ async function main() {
     ballRange: BALL_RANGE,
     jackpotBall: JACKPOT_BALL,
     consolationBps: CONSOLATION_BPS,
+    mustHitByEpochs: MUST_HIT_EPOCHS,
   }); // nonce
   await airdropPool.waitForDeployment();
 
@@ -183,6 +190,8 @@ async function main() {
     seedDenominator: 8n,
     reserveShareBps: 4000n,
     reserveFloorWei: 0n,
+    reserveCap: RESERVE_CAP,
+    jackpotSink: await airdropPool.getAddress(), // cascade Vault overflow -> jackpot
     treasury: await distributor.getAddress(), // rake flows into the community-economics splitter
     beacon: await beacon.getAddress(),
   }); // nonce + 2

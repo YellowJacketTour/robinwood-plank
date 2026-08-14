@@ -52,6 +52,8 @@ describe("PlankCrashDrand", () => {
       seedDenominator: 2n,
       reserveShareBps: 0n,
       reserveFloorWei: 0n,
+      reserveCap: 0n,
+      jackpotSink: ethers.ZeroAddress,
       treasury: treasury.address,
       beacon: await beacon.getAddress(),
     });

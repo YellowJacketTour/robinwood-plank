@@ -41,6 +41,8 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
       seedDenominator: 4n, // release 25% of the Vault per game
       reserveShareBps: 4000n, // compound 40% of the rake back in
       reserveFloorWei: 0n,
+      reserveCap: 0n,
+      jackpotSink: ethers.ZeroAddress,
       treasury: treasury.address,
       beacon: await beacon.getAddress(),
       ...over,
@@ -169,6 +171,44 @@ describe("PlankCrashDrand — the Vault (never-zero, always-compounding prize po
     expect(evs.length).to.equal(1);
     expect(evs[0].args.fromRake).to.equal(expectedCarve);
     expect(await crash.reserve()).to.be.gt(before); // net grew
+  });
+
+  it("CASCADE: once the Vault is past its cap, the overflow spills into the Powerboard jackpot (crash growth unified with the lottery)", async () => {
+    // A real Powerboard is the sink. The crash caps its Vault and spills the
+    // rest into pb.fund(), so the compounding crash growth feeds the daily
+    // jackpot instead of hoarding.
+    const [, , alice] = await ethers.getSigners();
+    const beacon: any = await (await ethers.getContractFactory("DrandBeaconMock")).deploy(DRAND_PERIOD, DRAND_GENESIS);
+    const pb: any = await (
+      await ethers.getContractFactory("PlankPowerboard")
+    ).deploy({
+      beacon: await beacon.getAddress(),
+      allowedSources: [],
+      genesisTimestamp: DRAND_GENESIS,
+      epochDuration: 3600n,
+      drawerRewardBps: 200n,
+      ballRange: 26n,
+      jackpotBall: 8n,
+      consolationBps: 500n,
+      mustHitByEpochs: 0n,
+    });
+    const { crash } = await deploy({
+      seedNumerator: 1n,
+      seedDenominator: 4n,
+      reserveShareBps: 0n,
+      reserveCap: ethers.parseEther("1"),
+      jackpotSink: await pb.getAddress(),
+    });
+
+    // Fund the Vault above its cap -> it caps, and the overflow lands in the jackpot.
+    await crash.connect(alice).fundVault({ value: ethers.parseEther("1.5") });
+    expect(await crash.reserve()).to.equal(ethers.parseEther("1")); // capped
+    expect(await pb.jackpot()).to.equal(ethers.parseEther("0.5")); // overflow cascaded
+
+    // More growth keeps capping and spilling -- the jackpot keeps receiving.
+    await crash.connect(alice).fundVault({ value: ethers.parseEther("0.3") });
+    expect(await crash.reserve()).to.equal(ethers.parseEther("1"));
+    expect(await pb.jackpot()).to.equal(ethers.parseEther("0.8"));
   });
 
   it("respects a hard floor: the Vault is never drawn below reserveFloorWei", async () => {

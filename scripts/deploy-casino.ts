@@ -110,6 +110,12 @@ async function main() {
   const SEED_DEN = envBig("CASINO_SEED_DENOMINATOR", 8n);
   const RESERVE_SHARE_BPS = envBig("CASINO_RESERVE_SHARE_BPS", 4000n);
   const RESERVE_FLOOR_WEI = envBig("CASINO_RESERVE_FLOOR_WEI", 0n);
+  // Cascade: the Vault caps here and spills its overflow into the Powerboard
+  // jackpot, unifying the crash's growth with the daily lottery. Default cap
+  // 2 ETH. mustHitByEpochs guarantees the full jackpot pays out at least that
+  // often (in epochs) even if the ball never naturally hits.
+  const RESERVE_CAP = envBig("CASINO_RESERVE_CAP_WEI", ethers.parseEther("2"));
+  const MUST_HIT_EPOCHS = envBig("CASINO_MUST_HIT_EPOCHS", 30n);
 
   // Powerboard
   const EPOCH_SECONDS = envBig("CASINO_EPOCH_SECONDS", 86400n); // daily
@@ -152,6 +158,7 @@ async function main() {
     ballRange: BALL_RANGE,
     jackpotBall: JACKPOT_BALL,
     consolationBps: CONSOLATION_BPS,
+    mustHitByEpochs: MUST_HIT_EPOCHS,
   }); // nonce
   await powerboard.waitForDeployment();
 
@@ -177,6 +184,8 @@ async function main() {
     seedDenominator: SEED_DEN,
     reserveShareBps: RESERVE_SHARE_BPS,
     reserveFloorWei: RESERVE_FLOOR_WEI,
+    reserveCap: RESERVE_CAP,
+    jackpotSink: await powerboard.getAddress(), // cascade Vault overflow -> jackpot
     treasury: await distributor.getAddress(),
     beacon: BEACON,
   }); // nonce+2

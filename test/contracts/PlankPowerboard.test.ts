@@ -55,6 +55,7 @@ describe("PlankPowerboard", () => {
       ballRange: BALL_RANGE,
       jackpotBall: JACKPOT_BALL,
       consolationBps: CONSOLATION_BPS,
+      mustHitByEpochs: 0n,
     });
     return { pb, beacon, source, other, deployer, alice, bob, drawer };
   }
@@ -95,6 +96,7 @@ describe("PlankPowerboard", () => {
       ballRange: BALL_RANGE,
       jackpotBall: JACKPOT_BALL,
       consolationBps: CONSOLATION_BPS,
+      mustHitByEpochs: 0n,
     };
     // ballRange 1 -> every epoch is a guaranteed jackpot, no rollover.
     await expect(PB.deploy({ ...base, ballRange: 1n })).to.be.revertedWithCustomError(PB, "BadConfig");
@@ -237,5 +239,52 @@ describe("PlankPowerboard", () => {
       if ((await pb.epochs(epoch)).winner === alice.address) aliceWins++;
     }
     expect(aliceWins).to.be.gte(8);
+  });
+
+  it("MUST BE WON: after mustHitByEpochs misses the next draw force-pays the FULL jackpot, no matter the ball", async () => {
+    const [deployer, alice, bob, drawer] = await ethers.getSigners();
+    const beacon: any = await (await ethers.getContractFactory("DrandBeaconMock")).deploy(DRAND_PERIOD, DRAND_GENESIS);
+    const source: any = await (await ethers.getContractFactory("MockWagerSource")).deploy();
+    const pb: any = await (
+      await ethers.getContractFactory("PlankPowerboard")
+    ).deploy({
+      beacon: await beacon.getAddress(),
+      allowedSources: [await source.getAddress()],
+      genesisTimestamp: DRAND_GENESIS,
+      epochDuration: EPOCH,
+      drawerRewardBps: DRAWER_REWARD_BPS,
+      ballRange: BALL_RANGE,
+      jackpotBall: JACKPOT_BALL,
+      consolationBps: CONSOLATION_BPS,
+      mustHitByEpochs: 3n, // must pay out at least every 3 epochs
+    });
+    void bob;
+
+    const missSeed = findSeed(false);
+    expect(ballFor(missSeed)).to.not.equal(JACKPOT_BALL);
+    await pb.fund({ value: ethers.parseEther("10") });
+    // The clock starts at deployment, so the guarantee is due 3 epochs out.
+    const e0 = await pb.currentEpoch();
+    expect(await pb.guaranteedHitByEpoch()).to.equal(e0 + 3n);
+
+    // The first 3 epochs are real MISSES -> consolation only, jackpot rolls.
+    for (let r = 1; r <= 3; r++) {
+      const epoch = await playEpoch(pb, beacon, source, alice, r, missSeed, drawer);
+      expect((await pb.epochs(epoch)).jackpotHit).to.equal(false);
+    }
+
+    // The 4th epoch (e0+3): still a MISS ball, but the guarantee is due -> FULL jackpot pays.
+    const potBefore = await pb.jackpot();
+    const epoch = await playEpoch(pb, beacon, source, alice, 4, missSeed, drawer);
+    expect(epoch).to.equal(e0 + 3n);
+    const e = await pb.epochs(epoch);
+    expect(ballFor(missSeed)).to.not.equal(JACKPOT_BALL); // the ball still missed
+    expect(e.jackpotHit).to.equal(true); // ...but the guarantee forced a full payout
+    expect(e.prize).to.equal(potBefore); // the WHOLE pot
+    expect(await pb.jackpot()).to.equal(0n); // fully paid, reset
+    expect(await pb.jackpotsHit()).to.equal(1n);
+    // The clock reset: next guarantee is 3 epochs out from here.
+    expect(await pb.guaranteedHitByEpoch()).to.equal(e0 + 6n);
+    void deployer;
   });
 });

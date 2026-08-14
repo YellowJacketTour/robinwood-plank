@@ -75,6 +75,7 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
       ballRange: BALL_RANGE,
       jackpotBall: JACKPOT_BALL,
       consolationBps: CONSOLATION_BPS,
+      mustHitByEpochs: 0n,
     });
 
     const distributor: any = await (
@@ -98,6 +99,8 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
       seedDenominator: 2n,
       reserveShareBps: 0n,
       reserveFloorWei: 0n,
+      reserveCap: 0n,
+      jackpotSink: ethers.ZeroAddress,
       treasury: await distributor.getAddress(),
       beacon: await beacon.getAddress(),
     });

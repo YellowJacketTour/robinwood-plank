@@ -93,10 +93,19 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
     /// Hard ceiling on the keeper's draw reward -- see the constructor.
     uint256 private constant MAX_DRAWER_REWARD_BPS = 500;
 
+    /// "MUST BE WON" guarantee: if the jackpot has not hit for this many
+    /// epochs, the next drawn epoch (with participants) pays the FULL jackpot
+    /// regardless of the ball -- the real-lottery mechanic that caps how long
+    /// the pot can roll without paying out. 0 disables it (pure geometric).
+    uint256 public immutable mustHitByEpochs;
+
     /// The rolling jackpot. Grows with every rake deposit and every miss.
     uint256 public jackpot;
     uint256 public totalPaidOut;
     uint256 public jackpotsHit;
+    /// Last epoch the full jackpot paid out (natural or forced). The
+    /// "must be won" clock counts from here. Starts at 0 (genesis epoch).
+    uint256 public lastJackpotHitEpoch;
 
     mapping(address => bool) public isAllowedSource;
 
@@ -148,6 +157,7 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
         uint256 jackpotRemaining
     );
     event EpochSkipped(uint256 indexed epoch, uint256 jackpotRolled, string reason);
+    event JackpotForced(uint256 indexed epoch, uint256 prize);
 
     error ZeroAddress();
     error BadConfig();
@@ -169,6 +179,7 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
         uint256 ballRange;
         uint256 jackpotBall;
         uint256 consolationBps;
+        uint256 mustHitByEpochs; // 0 = disabled (pure geometric jackpot)
     }
 
     constructor(Config memory cfg) {
@@ -199,6 +210,11 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
         ballRange = cfg.ballRange;
         jackpotBall = cfg.jackpotBall;
         consolationBps = cfg.consolationBps;
+        mustHitByEpochs = cfg.mustHitByEpochs;
+        // Start the "must be won" clock at deployment, not epoch 0 -- the
+        // genesis can be an earlier timestamp, so currentEpoch() may already
+        // be large; without this the guarantee would read as due immediately.
+        lastJackpotHitEpoch = currentEpoch();
         for (uint256 i = 0; i < cfg.allowedSources.length; i++) {
             if (cfg.allowedSources[i] == address(0)) revert ZeroAddress();
             isAllowedSource[cfg.allowedSources[i]] = true;
@@ -295,7 +311,13 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
         uint256 ball = (uint256(keccak256(abi.encodePacked(randomness, "PLANK_BALL"))) % ballRange) + 1;
 
         address winner = _segmentOwnerOf(epoch, ticket);
-        bool hit = (ball == jackpotBall);
+        // Natural hit (the ball landed on jackpotBall), OR the "must be won"
+        // guarantee has come due: the pot has rolled mustHitByEpochs epochs
+        // without paying out, so this drawn epoch pays the FULL jackpot no
+        // matter the ball. Either way, someone takes the whole pot.
+        bool natural = (ball == jackpotBall);
+        bool forced = mustHitByEpochs > 0 && epoch > lastJackpotHitEpoch && (epoch - lastJackpotHitEpoch) >= mustHitByEpochs;
+        bool hit = natural || forced;
         uint256 prize = hit ? jackpot : (jackpot * consolationBps) / 10000;
 
         jackpot -= prize;
@@ -304,7 +326,11 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
         e.drawnBall = ball;
         e.jackpotHit = hit;
         e.prize = prize;
-        if (hit) jackpotsHit += 1;
+        if (hit) {
+            jackpotsHit += 1;
+            if (epoch > lastJackpotHitEpoch) lastJackpotHitEpoch = epoch; // reset the clock
+            if (forced && !natural) emit JackpotForced(epoch, prize);
+        }
         totalPaidOut += prize;
 
         uint256 drawerReward = (prize * drawerRewardBps) / 10000;
@@ -347,6 +373,14 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
     function previewPrizes() external view returns (uint256 ifJackpotHit, uint256 ifMiss) {
         ifJackpotHit = jackpot;
         ifMiss = (jackpot * consolationBps) / 10000;
+    }
+
+    /// The latest epoch by which the full jackpot is GUARANTEED to pay out
+    /// (0 if the guarantee is disabled). The UI can headline "guaranteed by
+    /// <date>" from this.
+    function guaranteedHitByEpoch() external view returns (uint256) {
+        if (mustHitByEpochs == 0) return 0;
+        return lastJackpotHitEpoch + mustHitByEpochs;
     }
 
     function participantCount(uint256 epoch) external view returns (uint256) {

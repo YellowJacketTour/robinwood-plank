@@ -69,6 +69,7 @@ describe("Casino keeper — the loop runs itself", () => {
       ballRange: 26n,
       jackpotBall: 8n,
       consolationBps: 500n,
+      mustHitByEpochs: 0n,
     });
 
     const distributor: any = await (
@@ -92,6 +93,8 @@ describe("Casino keeper — the loop runs itself", () => {
       seedDenominator: 2n,
       reserveShareBps: 0n,
       reserveFloorWei: 0n,
+      reserveCap: 0n,
+      jackpotSink: ethers.ZeroAddress,
       treasury: await distributor.getAddress(),
       beacon: await beacon.getAddress(),
     });
