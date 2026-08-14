@@ -1630,6 +1630,27 @@ function maybeDismissBoot() {
 // ── chain plumbing ──────────────────────────────────────────────────────
 let provider, signer, crash, abi;
 let pollTimer = null;
+
+// ── PlankBank instant-play (deposit once, play with a browser session key,
+//    withdraw what's left). These are the ONLY new functions beyond the V2
+//    ABI the page already fetches, so they live in their own minimal ABIs.
+const BANK_ADDR = "0x610178dA211FEF7D417bC0e6FeD39F05609AD788";
+const BANK_ABI = [
+  "function deposit() payable",
+  "function withdraw(uint256 amount)",
+  "function withdrawAll()",
+  "function grantSession(address key, uint128 spendCap, uint64 expiry)",
+  "function revokeSession(address key)",
+  "function betVia(address game, uint256 amount)",
+  "function cashOutVia(address game, uint256 roundId)",
+  "function balanceOf(address) view returns (uint256)",
+];
+const CRASH_EXT_ABI = ["function setPayoutRedirect(address sink)"];
+let bank = null; // bound to the root signer (deposit/withdraw/grant)
+let crashExt = null; // root signer, for setPayoutRedirect
+let sessionSigner = null; // ephemeral browser keypair
+let sessionBank = null; // bank bound to the session key (betVia/cashOutVia)
+let bankMode = false; // when true, play routes through the buffer, no popup
 let betAmount = "0.01";
 let currentRoundIdCache = null;
 let lastMult = 1;
@@ -1942,6 +1963,12 @@ async function connectToChain(rpcUrl, address, pk, label) {
   if (!ethers.isAddress(address)) throw new Error("Bad contract address");
   crash = new ethers.Contract(address, abi, signer);
   maxElapsedBlocksCache = await crash.maxElapsedBlocks();
+  // Bind the instant-play helpers to the same signer/chain.
+  try {
+    bank = new ethers.Contract(BANK_ADDR, BANK_ABI, signer);
+    crashExt = new ethers.Contract(address, CRASH_EXT_ABI, signer);
+    if (typeof refreshBankUI === "function") refreshBankUI();
+  } catch (_) { /* bank optional; game still works without it */ }
   $("connDot").classList.add("on");
   toast("Connected as " + label);
   closeSheet();
@@ -1972,7 +1999,7 @@ $("connectBtn").addEventListener("click", async () => {
 // real minParticipants can be met without a second human in a second tab.
 // SIMULATE_ADDR must match whatever scripts/local-crash-setup.ts last
 // printed as CRASH_ADDRESS -- update it after every fresh local deploy.
-const SIMULATE_ADDR = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+const SIMULATE_ADDR = "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318";
 const SIM_RPC = "http://127.0.0.1:8545";
 let botBetTimer = null;
 let botBetAttemptedRound = null;
@@ -2105,9 +2132,14 @@ let uiState = "disconnected"; // disconnected | betting-open | waiting | live-ho
 async function doPlaceBet(viaButton) {
   if (viaButton) { primaryBtn.disabled = true; primaryBtn.textContent = "PLACING BET…"; }
   try {
-    const tx = await crash.placeBet({ value: ethers.parseEther(betAmount) });
+    // Bank mode: the browser session key bets from the pre-funded buffer --
+    // no wallet popup. Otherwise the classic per-bet path.
+    const tx = bankMode && sessionBank
+      ? await sessionBank.betVia(crash.target, ethers.parseEther(betAmount))
+      : await crash.placeBet({ value: ethers.parseEther(betAmount) });
     await tx.wait();
-    toast((autoPlay ? "Auto-bet: " : "Bet placed: ") + betAmount + " ETH");
+    toast((autoPlay ? "Auto-bet: " : "Bet placed: ") + betAmount + " ETH" + (bankMode ? " (instant, from buffer)" : ""));
+    if (bankMode && typeof refreshBankUI === "function") refreshBankUI();
     return true;
   } catch (err) {
     toast("Bet failed: " + (err.shortMessage || err.message));
@@ -2119,9 +2151,13 @@ async function doCashOut(viaButton) {
   if (viaButton) { primaryBtn.disabled = true; primaryBtn.textContent = "CASHING OUT…"; }
   try {
     const roundId = await crash.currentRoundId();
-    const tx = await crash.cashOut(roundId);
+    const liveBps = await crash.liveMultiplierBps(roundId);
+    const tx = bankMode && sessionBank
+      ? await sessionBank.cashOutVia(crash.target, roundId)
+      : await crash.cashOut(roundId);
     await tx.wait();
-    toast("Cashed out at " + bpsToXStr(await crash.liveMultiplierBps(roundId)) + "x");
+    toast("Cashed out at " + bpsToXStr(liveBps) + "x" + (bankMode ? " (win recycles to buffer)" : ""));
+    if (bankMode && typeof refreshBankUI === "function") refreshBankUI();
     return true;
   } catch (err) {
     // A real, meaningful outcome under V2's reveal/settle split, not a
@@ -2652,6 +2688,119 @@ function closeStats() {
 }
 $("statsRefresh").addEventListener("click", runStatsScan);
 $("statsFilter").addEventListener("input", renderStats);
+
+// ── Instant Play (PlankBank) logic. Lives INSIDE this module so it shares
+//    the live bank/crashExt/sessionBank/signer bindings declared above. ──
+let bankBusy = false;
+
+async function refreshBankUI() {
+  const body = document.getElementById("bankBody");
+  if (!body) return;
+  if (!bank || !signer) {
+    body.innerHTML = '<div class="bk-sub">Connect (or Simulate) to enable one-signature-in, popup-free play.</div>';
+    return;
+  }
+  let bal = 0n;
+  try { bal = await bank.balanceOf(signer.address); } catch (_) {}
+  const balStr = (+ethers.formatEther(bal)).toFixed(4);
+  if (bankMode && sessionSigner) {
+    const k = sessionSigner.address;
+    body.innerHTML =
+      '<div class="bk-buf">' + balStr + ' <span style="font-size:12px;color:#8fb7a0">ETH buffer</span></div>' +
+      '<div class="bk-sub" style="margin-top:4px">Playing via session key ' +
+        '<span class="bk-key">' + k.slice(0,6) + '…' + k.slice(-4) + '</span> — every bet is instant, no popup. ' +
+        'Wins recycle back into the buffer.</div>' +
+      '<div class="bk-row"><button id="bkLeave" class="ghost" style="flex:1">Leave &amp; withdraw</button></div>';
+    document.getElementById("bkLeave").onclick = leaveInstantPlay;
+  } else {
+    body.innerHTML =
+      (bal > 0n ? '<div class="bk-sub" style="margin-bottom:6px">Buffer holds <b style="color:#fff">' + balStr + ' ETH</b> from a prior session.</div>' : '') +
+      '<div class="bk-sub">Deposit once, then bet with no wallet prompt.</div>' +
+      '<div class="bk-row"><input id="bkDep" type="number" min="0.05" step="0.1" value="1.0" />' +
+      '<button id="bkEnter">Enter</button></div>';
+    document.getElementById("bkEnter").onclick = () => {
+      enterInstantPlay(document.getElementById("bkDep").value);
+    };
+  }
+}
+
+async function enterInstantPlay(depositEth) {
+  if (bankBusy) return;
+  if (!bank || !signer) { toast("Connect first"); return; }
+  const dep = parseFloat(depositEth);
+  if (!(dep > 0)) { toast("Enter a deposit amount"); return; }
+  bankBusy = true;
+  const btn = document.getElementById("bkEnter");
+  if (btn) { btn.disabled = true; btn.textContent = "Entering…"; }
+  try {
+    const value = ethers.parseEther(String(dep));
+    await (await bank.deposit({ value })).wait();
+    const sk = ethers.Wallet.createRandom().connect(provider);
+    await (await signer.sendTransaction({ to: sk.address, value: ethers.parseEther("0.25") })).wait();
+    const cap = value * 100n;
+    const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600);
+    await (await bank.grantSession(sk.address, cap, expiry)).wait();
+    await (await crashExt.setPayoutRedirect(BANK_ADDR)).wait();
+    sessionSigner = sk;
+    sessionBank = bank.connect(sk);
+    bankMode = true;
+    toast("Instant play ON — bet & cash out with no popups");
+  } catch (err) {
+    toast("Enter failed: " + (err.shortMessage || err.message));
+  } finally {
+    bankBusy = false;
+    refreshBankUI();
+  }
+}
+
+async function leaveInstantPlay() {
+  if (bankBusy) return;
+  bankBusy = true;
+  const btn = document.getElementById("bkLeave");
+  if (btn) { btn.disabled = true; btn.textContent = "Leaving…"; }
+  try {
+    if (sessionSigner) { try { await (await bank.revokeSession(sessionSigner.address)).wait(); } catch (_) {} }
+    bankMode = false; sessionBank = null; sessionSigner = null;
+    const bal = await bank.balanceOf(signer.address);
+    if (bal > 0n) await (await bank.withdrawAll()).wait();
+    toast("Left instant play — buffer withdrawn to your wallet");
+  } catch (err) {
+    toast("Leave failed: " + (err.shortMessage || err.message));
+  } finally {
+    bankBusy = false;
+    refreshBankUI();
+  }
+}
+
+refreshBankUI();
 </script>
+
+<!-- ── Instant Play (PlankBank) ─────────────────────────────────────────
+     Deposit once, authorize a throwaway in-browser session key, then bet /
+     cash out with NO wallet popup, straight from the pre-funded buffer.
+     Wins recycle back into the buffer; leave withdraws whatever is left.
+     This is the real production flow, driven here by the dev key. ──────── -->
+<style>
+  #bankPanel{position:fixed;left:16px;bottom:16px;z-index:60;width:270px;
+    font-family:inherit;background:rgba(10,14,12,.92);border:1px solid rgba(61,220,132,.35);
+    border-radius:14px;padding:14px 15px;backdrop-filter:blur(8px);
+    box-shadow:0 8px 30px rgba(0,0,0,.5);color:#e8f5ec}
+  #bankPanel h4{margin:0 0 8px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+    color:#3ddc84;display:flex;align-items:center;gap:6px}
+  #bankPanel .bk-row{display:flex;gap:7px;align-items:center;margin-top:8px}
+  #bankPanel .bk-buf{font-variant-numeric:tabular-nums;font-size:20px;font-weight:700;color:#fff}
+  #bankPanel .bk-sub{font-size:11px;color:#8fb7a0;line-height:1.35}
+  #bankPanel input{flex:1;min-width:0;background:#04120b;border:1px solid rgba(61,220,132,.3);
+    color:#e8f5ec;border-radius:8px;padding:7px 9px;font:inherit;font-size:13px}
+  #bankPanel button{background:#3ddc84;color:#04210f;border:0;border-radius:8px;
+    padding:7px 11px;font:inherit;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap}
+  #bankPanel button.ghost{background:transparent;color:#8fb7a0;border:1px solid rgba(143,183,160,.35)}
+  #bankPanel button:disabled{opacity:.5;cursor:default}
+  #bankPanel .bk-key{font-family:ui-monospace,monospace;font-size:11px;color:#3ddc84}
+</style>
+<div id="bankPanel">
+  <h4>⚡ Instant Play</h4>
+  <div id="bankBody"></div>
+</div>
 </body>
 </html>
