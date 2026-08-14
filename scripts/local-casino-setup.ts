@@ -190,10 +190,15 @@ async function main() {
     );
   }
 
+  // PlankBank -- instant-UX deposit/play/withdraw buffer (whitelists the crash).
+  const bank = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr]);
+  await bank.waitForDeployment();
+
   console.log("\n========================================================");
   console.log(" plank.love unified casino -- LOCAL dev stack (chainId 31337)");
   console.log("========================================================");
   console.log(" PlankCrashDrand      :", crashAddr);
+  console.log(" PlankBank            :", await bank.getAddress(), "(deposit -> instant session-key play -> withdraw)");
   console.log(" PlankRakeDistributor :", await distributor.getAddress(), `(treasury of the crash)`);
   // Points OF THE POOL each leg actually receives, after the keeper carve.
   const rakePct = Number(RAKE_BPS) / 100;

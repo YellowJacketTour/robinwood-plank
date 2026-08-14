@@ -167,6 +167,24 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     mapping(uint256 => mapping(address => uint256)) private _weightOf;
     mapping(uint256 => uint256) public participantCount;
     mapping(uint256 => bool) public voided;
+
+    // ── Bank / on-behalf integration (additive; the self-serve paths above
+    //    are untouched) ──────────────────────────────────────────────────
+    //
+    // `placeBetFor` lets an escrow contract (PlankBank) fund a bet for a
+    // player so the player never signs per-bet -- the stake is still
+    // attributed to the PLAYER for pari-mutuel weight, exactly as a
+    // self-placed bet. betFundedBy records who funded it so ONLY that
+    // funder can drive an on-behalf cash-out (nobody else can cash a
+    // player out early against their will).
+    mapping(uint256 => mapping(address => address)) public betFundedBy;
+    // A player may opt in to have their winnings pushed to a sink (their
+    // bank) instead of the pull-escrow, so wins recycle into the play
+    // buffer with no extra signature. Opt-in and self-set only, so a bad
+    // sink can only ever harm the player who chose it -- and even then the
+    // push falls back to normal escrow on failure, so funds are never
+    // stuck. See claim().
+    mapping(address => address) public payoutRedirect;
     mapping(uint256 => mapping(address => bool)) public carriedForward;
 
     event RoundStarted(uint256 indexed roundId, uint256 bettingEndsAt);
@@ -200,6 +218,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     error RoundIntervalTooShort();
     error RoundHasWinners();
     error AlreadySwept();
+    error ZeroPlayer();
+    error NotFunder();
 
     struct Config {
         uint256 bettingDurationSeconds;
@@ -291,6 +311,54 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         r.pool = poolAfter;
         participantCount[currentRoundId] += 1;
         emit BetPlaced(currentRoundId, msg.sender, msg.value);
+    }
+
+    /// Places a bet FOR `player`, funded by msg.value (the caller supplies
+    /// the ETH). The stake is attributed to `player` for pari-mutuel weight
+    /// exactly as if they had called placeBet themselves; the only
+    /// difference is who signed and who paid. Used by PlankBank to let a
+    /// depositor play from their pre-funded balance without signing each
+    /// bet. Records the funder so cashOutFor is restricted to them.
+    function placeBetFor(address player) external payable nonReentrant {
+        if (player == address(0)) revert ZeroPlayer();
+        Round storage r = rounds[currentRoundId];
+        if (r.phase != Phase.BETTING) revert BadPhase();
+        if (block.timestamp >= r.bettingEndsAt) revert TooLate();
+        if (stakeOf[currentRoundId][player] != 0) revert AlreadyBet();
+
+        uint256 poolAfter = r.pool + msg.value;
+        if (r.pool != 0 && msg.value * 10000 > poolAfter * maxStakePerWalletBps) {
+            revert StakeExceedsCap();
+        }
+
+        stakeOf[currentRoundId][player] = msg.value;
+        r.pool = poolAfter;
+        participantCount[currentRoundId] += 1;
+        betFundedBy[currentRoundId][player] = msg.sender;
+        emit BetPlaced(currentRoundId, player, msg.value);
+    }
+
+    /// Cash out on `player`'s behalf. Restricted to the address that funded
+    /// the bet via placeBetFor -- i.e. the bank the player deposited into,
+    /// which enforces the player's own session-key authorization before
+    /// calling this. No one else can force a player's early cash-out.
+    function cashOutFor(uint256 roundId, address player) external nonReentrant {
+        if (betFundedBy[roundId][player] != msg.sender) revert NotFunder();
+        Round storage r = rounds[roundId];
+        if (r.phase != Phase.LIVE) revert BadPhase();
+        if (stakeOf[roundId][player] == 0) revert NoBet();
+        if (cashOutBlockOf[roundId][player] != 0) revert AlreadyCashedOut();
+        uint256 elapsed = block.number - r.lockBlock;
+        if (r.entropyRevealed && elapsed >= _effectiveCrashElapsed(r)) revert PastCrashPoint();
+        cashOutBlockOf[roundId][player] = block.number;
+        r.provisionalWinningWeight += (stakeOf[roundId][player] * _multiplierAt(elapsed)) / 10000;
+        emit CashedOut(roundId, player, block.number, false);
+    }
+
+    /// Opt in (or out, with address(0)) to have future winnings pushed to
+    /// `sink` instead of held in the pull-escrow. Self-set only.
+    function setPayoutRedirect(address sink) external {
+        payoutRedirect[msg.sender] = sink;
     }
 
     function carryForwardStake(uint256 fromRoundId) external nonReentrant {
@@ -538,7 +606,18 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
 
         claimed[roundId][player] = true;
         uint256 payout = (r.distributable * weight) / r.totalWinningWeight;
-        _asyncTransfer(player, payout);
+        address sink = payoutRedirect[player];
+        if (sink != address(0)) {
+            // Push into the player's chosen sink (their bank) so wins
+            // recycle into the play buffer. Best-effort: a failing sink
+            // falls back to normal pull-escrow so funds are never stuck,
+            // and reentrancy is blocked by nonReentrant. Because sink is
+            // self-set, a griefing sink only ever harms its own owner.
+            (bool ok, ) = sink.call{value: payout}(abi.encodeWithSignature("creditFor(address)", player));
+            if (!ok) _asyncTransfer(player, payout);
+        } else {
+            _asyncTransfer(player, payout);
+        }
         emit Claimed(roundId, player, payout);
     }
 

@@ -171,12 +171,20 @@ async function main() {
     throw new Error(`Crash address prediction failed (predicted ${predictedCrash}, got ${crashAddr}). An intervening tx shifted the nonce.`);
   }
 
+  // ── 4. PlankBank -- the deposit/instant-play/withdraw buffer. Whitelists
+  //     the crash both as a bet target and as the sole address allowed to
+  //     recycle winnings via creditFor. No dependency cycle: it only needs
+  //     the crash's final address.
+  const bank = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr]);
+  await bank.waitForDeployment();
+
   console.log("\n===================== DEPLOYED =====================");
   console.log("PlankV2TwapOracle   :", await oracle.getAddress());
   console.log("PlankBurnEngine     :", await burnEngine.getAddress());
   console.log("PlankPowerboard     :", await powerboard.getAddress());
   console.log("PlankRakeDistributor:", await distributor.getAddress());
   console.log("PlankCrashDrand     :", crashAddr);
+  console.log("PlankBank           :", await bank.getAddress());
   console.log("====================================================");
   console.log("\nrake", Number(RAKE_BPS) / 100 + "% -> dev/jackpot/burn split",
     `${(10000 - Number(BURN_BPS) - Number(AIRDROP_BPS)) / 100}/${Number(AIRDROP_BPS) / 100}/${Number(BURN_BPS) / 100}% of rake`);
@@ -185,6 +193,9 @@ async function main() {
   console.log("  2. Prime the TWAP: call oracle.update() now, wait one TWAP window, call it again. Burns revert until primed.");
   console.log("  3. Fund the keeper wallet with gas and run scripts/casino-keeper.ts pointed at these addresses.");
   console.log("  4. Sanity-play one round on-chain and confirm settle/register/claim/draw all work before publicizing.");
+  console.log("  5. (Instant UX) In the frontend: on 'enter', have the player deposit() to PlankBank,");
+  console.log("     grantSession(localKey, cap, expiry), and crash.setPayoutRedirect(bank) so wins recycle.");
+  console.log("     The local session key then drives betVia/cashOutVia with no per-bet popup.");
 }
 
 main().catch((err) => {

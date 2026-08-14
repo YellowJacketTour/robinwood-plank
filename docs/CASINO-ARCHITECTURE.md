@@ -268,3 +268,53 @@ crash's deploy address from the deployer's nonce and passing it into the airdrop
 pool up front — see `scripts/local-casino-setup.ts`. The three core deploys must
 be consecutive with no intervening transactions, or the predicted nonce is wrong
 (the script asserts the prediction matched).
+
+---
+
+## 8. Instant UX: PlankBank (deposit → play → withdraw) + session keys
+
+`PlankBank` is the "sign to get in, play instantly, sign to leave" buffer that
+removes the per-bet wallet popup without a rollup or any account-abstraction
+infrastructure (none is live on Robinhood Chain yet). Robinhood Chain is already
+a ~100ms-block L2, so instant play only needs the *signing* friction removed, not
+a faster chain.
+
+**The three-signature entry, then never again:**
+1. `bank.deposit()` — fund a play buffer.
+2. `bank.grantSession(localKey, spendCap, expiry)` — authorize a throwaway keypair
+   the frontend holds locally, bounded by a cumulative spend cap and an expiry.
+3. `crash.setPayoutRedirect(bank)` — opt winnings into recycling straight back
+   into the buffer.
+
+**Then play is popup-free:** the local session key calls `bank.betVia(game, amount)`
+and `bank.cashOutVia(game, roundId)`. The bank debits the player's buffer and calls
+the crash's additive `placeBetFor(player)` / `cashOutFor(roundId, player)` — the
+stake is attributed to the *player* for pari-mutuel weight exactly as a self-placed
+bet. **Exit** is `bank.withdraw` / `withdrawAll` (root key only).
+
+**Money flow back:** a bank-funded bet records its funder; on `claim`, if the player
+opted into the redirect, the crash *pushes* the payout to `bank.creditFor(player)`
+(best-effort, with a safe fallback to the normal pull-escrow if the sink reverts),
+so wins land back in the buffer and play continues with no re-deposit. Losses simply
+leave the buffer smaller.
+
+**Security invariants (from-scratch, tested in `PlankBank.test.ts`):**
+- A **session key is strictly weaker than the root key**: it can bet only up to its
+  cap, only until expiry, only on whitelisted games, and can **never** withdraw.
+  `spent` is never reset on re-grant, so a raised cap is a true lifetime ceiling.
+- **No balance minting**: `creditFor` is callable only by a whitelisted game; there
+  is no bare `receive()`, so stray ETH can't be mis-credited.
+- **No forced early cash-out**: `cashOutFor` is restricted to the exact address that
+  funded the bet (the bank), which itself enforces the player's session authorization.
+- **A griefing payout sink only harms its own owner** (the redirect is self-set) and
+  even then falls back to escrow, so funds are never stuck.
+- CEI + `nonReentrant` on every ETH move.
+
+The bank has **no admin, no upgrade path**, and its whitelisted game set is fixed at
+construction. It is deployed after the crash (step 4 in `scripts/deploy-casino.ts`);
+no dependency cycle since it only needs the crash's final address.
+
+> **Honest v1 note:** winnings recycle into the buffer *only if* the player set the
+> payout redirect; without it, wins land in the crash's normal pull-escrow
+> (withdrawable to their wallet) instead. The buffer only decreases during a session
+> otherwise. This is a deliberate, safe scoping — not a stub.
