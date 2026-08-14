@@ -382,6 +382,14 @@
       <button class="chip" data-amt="0.05">0.05</button>
       <button class="chip" data-amt="0.1">0.10</button>
     </div>
+    <div class="stake-row" id="autoRow" style="opacity:.55">
+      <button class="chip" id="autoToggle" title="Bet every round and cash out at your target automatically">AUTO&nbsp;▶</button>
+      <span style="display:flex;align-items:center;gap:6px;font:600 13px/1 inherit;color:var(--muted,#9aa7bd);letter-spacing:.02em">
+        cash&nbsp;out&nbsp;at
+        <input id="autoTargetInput" type="number" min="1.1" step="0.1" value="2.0"
+          style="width:56px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:inherit;font:inherit;text-align:center" />x
+      </span>
+    </div>
     <button class="primary-btn" id="primaryBtn" disabled>CONNECT WALLET</button>
     <div class="btn-sub" id="btnSub">&nbsp;</div>
     <button class="sim-btn" id="simBtn">▶ Simulate — no wallet needed</button>
@@ -1755,9 +1763,9 @@ async function loadAbi() {
   abi = await res.json();
 }
 
-document.querySelectorAll(".chip").forEach((chip) => {
+document.querySelectorAll(".chip[data-amt]").forEach((chip) => {
   chip.addEventListener("click", () => {
-    document.querySelectorAll(".chip").forEach((c) => c.classList.remove("active"));
+    document.querySelectorAll(".chip[data-amt]").forEach((c) => c.classList.remove("active"));
     chip.classList.add("active");
     betAmount = chip.dataset.amt;
     // Real bug: this set betAmount correctly, but nothing re-rendered the
@@ -1771,6 +1779,45 @@ document.querySelectorAll(".chip").forEach((chip) => {
     if (typeof uiState !== "undefined") updatePrimaryButton(uiState);
   });
 });
+
+// AUTO-PLAY state (declared here, above wireAutoPlay, so the toggle wiring
+// isn't in the temporal dead zone). The betting/cashing logic that uses
+// these lives further down in the AUTO-PLAY section.
+let autoPlay = false;
+let autoTarget = 2.0; // cash out at this multiplier
+let autoBetRound = null; // roundId we've already auto-bet this round
+let autoCashRound = null; // roundId we've already auto-cashed this round
+let autoBusy = false; // a bet/cashout tx is in flight
+
+// AUTO-PLAY toggle + target wiring. One click arms it; from then on the
+// poll's autoPlayTick does the betting and cashing for you.
+(function wireAutoPlay() {
+  const toggle = $("autoToggle");
+  const targetInput = $("autoTargetInput");
+  function renderToggle() {
+    toggle.classList.toggle("active", autoPlay);
+    toggle.style.background = autoPlay ? "var(--accent-2,#3ddc84)" : "";
+    toggle.style.color = autoPlay ? "#04210f" : "";
+    toggle.innerHTML = autoPlay ? "AUTO&nbsp;⏸" : "AUTO&nbsp;▶";
+    $("autoRow").style.outline = autoPlay ? "1px solid rgba(61,220,132,.5)" : "none";
+  }
+  toggle.addEventListener("click", () => {
+    autoPlay = !autoPlay;
+    // Fresh arming shouldn't be blocked by a guard left over from a round
+    // that already happened before auto was on.
+    autoBetRound = null;
+    autoCashRound = null;
+    renderToggle();
+    toast(autoPlay ? `Auto-play ON — betting ${betAmount} ETH, cashing at ${autoTarget}x` : "Auto-play OFF");
+  });
+  targetInput.addEventListener("change", () => {
+    const v = Number(targetInput.value);
+    autoTarget = Number.isFinite(v) && v >= 1.1 ? v : 2.0;
+    targetInput.value = String(autoTarget);
+    if (autoPlay) toast(`Auto cash-out target: ${autoTarget}x`);
+  });
+  renderToggle();
+})();
 
 // The exact keys printed by scripts/local-crash-setup.ts -- derived from
 // the standard Hardhat mnemonic and verified against this node's real
@@ -2045,45 +2092,86 @@ function celebrate(xNum) {
 const primaryBtn = $("primaryBtn");
 let uiState = "disconnected"; // disconnected | betting-open | waiting | live-hold | cashed | settling
 
-primaryBtn.addEventListener("click", async () => {
-  if (uiState === "betting-open") {
-    primaryBtn.disabled = true;
-    primaryBtn.textContent = "PLACING BET…";
-    try {
-      const tx = await crash.placeBet({ value: ethers.parseEther(betAmount) });
-      await tx.wait();
-      toast("Bet placed: " + betAmount + " ETH");
-    } catch (err) {
-      toast("Bet failed: " + (err.shortMessage || err.message));
+// ── AUTO-PLAY ────────────────────────────────────────────────────────────
+// One toggle and the whole loop runs hands-free: it places your bet at the
+// start of every round and cashes you out the instant the live multiplier
+// reaches your target. Everything else (lock, reveal, settle, next round)
+// is already automated by keeperTick + the poll, so with auto-play on the
+// only thing you ever do is decide when to stop. Per-round guards make each
+// action fire at most once, and a busy latch prevents overlapping txs.
+// (State vars autoPlay/autoTarget/autoBetRound/autoCashRound/autoBusy are
+// declared above wireAutoPlay to avoid a temporal-dead-zone error.)
+
+async function doPlaceBet(viaButton) {
+  if (viaButton) { primaryBtn.disabled = true; primaryBtn.textContent = "PLACING BET…"; }
+  try {
+    const tx = await crash.placeBet({ value: ethers.parseEther(betAmount) });
+    await tx.wait();
+    toast((autoPlay ? "Auto-bet: " : "Bet placed: ") + betAmount + " ETH");
+    return true;
+  } catch (err) {
+    toast("Bet failed: " + (err.shortMessage || err.message));
+    return false;
+  }
+}
+
+async function doCashOut(viaButton) {
+  if (viaButton) { primaryBtn.disabled = true; primaryBtn.textContent = "CASHING OUT…"; }
+  try {
+    const roundId = await crash.currentRoundId();
+    const tx = await crash.cashOut(roundId);
+    await tx.wait();
+    toast("Cashed out at " + bpsToXStr(await crash.liveMultiplierBps(roundId)) + "x");
+    return true;
+  } catch (err) {
+    // A real, meaningful outcome under V2's reveal/settle split, not a
+    // generic failure: the round's true crash point was already revealed
+    // and real elapsed blocks caught up to it between the decision and the
+    // transaction landing -- the ticker shows this the instant refresh runs.
+    if ((err.shortMessage || err.message || "").includes("PastCrashPoint")) {
+      toast("Too late -- the round already crashed before this landed.");
+    } else {
+      toast("Cash out failed: " + (err.shortMessage || err.message));
     }
-    refresh();
-  } else if (uiState === "live-hold") {
-    primaryBtn.disabled = true;
-    primaryBtn.textContent = "CASHING OUT…";
-    try {
-      const roundId = await crash.currentRoundId();
-      const tx = await crash.cashOut(roundId);
-      await tx.wait();
-      toast("Cashed out at " + bpsToXStr(await crash.liveMultiplierBps(roundId)) + "x");
-    } catch (err) {
-      // A real, meaningful outcome under V2's reveal/settle split, not a
-      // generic failure: the round's true crash point was already
-      // revealed and real elapsed blocks caught up to it between the
-      // click and the transaction landing -- the ticker itself will show
-      // this the instant refresh() runs again.
-      if ((err.shortMessage || err.message || "").includes("PastCrashPoint")) {
-        toast("Too late -- the round already crashed before this landed.");
-      } else {
-        toast("Cash out failed: " + (err.shortMessage || err.message));
+    return false;
+  }
+}
+
+primaryBtn.addEventListener("click", async () => {
+  if (uiState === "betting-open") { await doPlaceBet(true); refresh(); }
+  else if (uiState === "live-hold") { await doCashOut(true); refresh(); }
+});
+
+// Called from the poll (both real + simulate paths) with the current round
+// state, so auto-play acts on the SAME authoritative data the UI renders.
+async function autoPlayTick(phase, roundId, hasStake, hasCashedOut, liveBps) {
+  if (!autoPlay || autoBusy || !signer) return;
+  const rid = roundId.toString();
+  try {
+    if (phase === 0 && !hasStake && autoBetRound !== rid) {
+      autoBusy = true; autoBetRound = rid;
+      await doPlaceBet(false);
+    } else if (phase === 1 && hasStake && !hasCashedOut && autoCashRound !== rid) {
+      if (Number(liveBps) >= autoTarget * 10000) {
+        autoBusy = true; autoCashRound = rid;
+        await doCashOut(false);
       }
     }
-    refresh();
+  } finally {
+    autoBusy = false;
   }
-});
+}
 
 function updatePrimaryButton(state, opts = {}) {
   uiState = state;
-  const chips = document.querySelectorAll(".chip");
+  const chips = document.querySelectorAll(".chip[data-amt]");
+  // The auto controls become usable the moment a wallet/sim is connected,
+  // and stay usable in every phase (you can arm or disarm auto-play any
+  // time, even mid-flight).
+  const connected = state !== "disconnected";
+  $("autoRow").style.opacity = connected ? "1" : "0.55";
+  $("autoToggle").disabled = !connected;
+  $("autoTargetInput").disabled = !connected;
   switch (state) {
     case "disconnected":
       primaryBtn.className = "primary-btn"; primaryBtn.disabled = true;
@@ -2240,6 +2328,7 @@ async function refresh() {
       const secsLeft = Math.max(0, Number(round.bettingEndsAt) - chainNow);
       bettingEndsAtEstimateMs = performance.now() + secsLeft * 1000;
       updatePrimaryButton(hasStake ? "waiting" : "betting-open");
+      autoPlayTick(0, roundId, hasStake, hasCashedOut, 0n);
     } else if (phase === 1) {
       // The number and the astronaut's ascent are now driven every frame
       // by the smooth extrapolation in frame() (see multiplierAtBlocksBps
@@ -2288,6 +2377,7 @@ async function refresh() {
         const estStr = Number(ethers.formatEther(est)).toFixed(4);
         updatePrimaryButton("cashed", { sub: `Cashed out — ~${estStr} ETH if the round ended right now` });
       } else updatePrimaryButton("live-hold", { sub: `Staked ${ethers.formatEther(stake)} ETH` });
+      autoPlayTick(1, roundId, hasStake, hasCashedOut, liveBps);
     } else {
       if (crashedAt === null) { crashedAt = performance.now(); shakeAmount = 1.4; spawnParticles(0xff4d6a, 60, 3.5); }
       const xStr = bpsToXStr(round.crashMultiplierBps);
