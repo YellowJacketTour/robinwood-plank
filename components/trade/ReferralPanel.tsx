@@ -165,11 +165,31 @@ export default function ReferralPanel() {
     }
   }
 
+  // Reads this wallet's info, then mints its invite code if it has none yet.
+  // The read no longer allocates (that made a public GET write for any wallet
+  // in a query string), so the panel asks explicitly — once per wallet, for
+  // the connected wallet only.
   useEffect(() => {
     if (!status?.enabled || !status?.configured || !account) return;
     let cancelled = false;
     fetch(`/api/referral/me?wallet=${account}`)
       .then((r) => (r.ok ? r.json() : null))
+      .then(async (d: ReferralInfo | null) => {
+        if (cancelled) return d;
+        if (d && !d.code) {
+          try {
+            const minted = await fetch("/api/referral/code", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ wallet: account }),
+            }).then((r) => (r.ok ? r.json() : null));
+            if (minted?.code) return { ...d, code: minted.code as string };
+          } catch {
+            /* link just stays pending -- the count and referredBy still render */
+          }
+        }
+        return d;
+      })
       .then((d: ReferralInfo | null) => {
         if (!cancelled) setInfo(d);
       })
