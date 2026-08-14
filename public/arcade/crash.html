@@ -70,8 +70,19 @@
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
   .brand .round { font-family: var(--font-mono); font-size: 11px; color: var(--ink-dim); }
-  .stats { display: flex; gap: 18px; font-family: var(--font-mono); font-size: 12px; color: var(--ink-dim); }
+  .stats { display: flex; gap: 18px; align-items: center; font-family: var(--font-mono); font-size: 12px; color: var(--ink-dim); }
   .stats b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .vault-stat { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+    border-radius: 999px; border: 1px solid rgba(62,224,140,0.35); color: var(--win);
+    background: rgba(62,224,140,0.07); cursor: help; }
+  .vault-stat b { color: var(--win-glow); font-family: var(--font-display); font-weight: 400; }
+  .vault-stat i { font-style: normal; color: var(--ink-dim); font-size: 10.5px; }
+  .vault-stat.bump { animation: vault-bump 0.6s ease; }
+  @keyframes vault-bump {
+    0% { transform: scale(1); }
+    35% { transform: scale(1.09); box-shadow: 0 0 22px rgba(62,224,140,0.5); }
+    100% { transform: scale(1); }
+  }
   .gear {
     width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line);
     background: rgba(255,255,255,0.03); color: var(--ink-dim); cursor: pointer;
@@ -389,6 +400,9 @@
       <span class="round" id="roundLabel">ROUND —</span>
     </div>
     <div class="stats">
+      <span class="vault-stat" id="vaultStat" title="The Prize Vault: a perpetual reserve that seeds every game and can never hit zero. It grows from every pot and every bust.">
+        ⬢ VAULT <b id="vaultAmt">—</b><i id="vaultSeed"></i>
+      </span>
       <span>POOL <b id="poolStat">—</b></span>
       <span>PLAYERS <b id="playersStat">—</b></span>
     </div>
@@ -1705,7 +1719,11 @@ const BANK_ABI = [
   "function cashOutVia(address game, uint256 roundId)",
   "function balanceOf(address) view returns (uint256)",
 ];
-const CRASH_EXT_ABI = ["function setPayoutRedirect(address sink)"];
+const CRASH_EXT_ABI = [
+  "function setPayoutRedirect(address sink)",
+  "function reserve() view returns (uint256)",
+  "function nextSeed() view returns (uint256)",
+];
 let bank = null; // bound to the root signer (deposit/withdraw/grant)
 let crashExt = null; // root signer, for setPayoutRedirect
 let sessionSigner = null; // ephemeral browser keypair
@@ -2028,6 +2046,7 @@ async function connectToChain(rpcUrl, address, pk, label) {
     bank = new ethers.Contract(BANK_ADDR, BANK_ABI, signer);
     crashExt = new ethers.Contract(address, CRASH_EXT_ABI, signer);
     if (typeof refreshBankUI === "function") refreshBankUI();
+    if (typeof refreshVault === "function") refreshVault();
   } catch (_) { /* bank optional; game still works without it */ }
   $("connDot").classList.add("on");
   toast("Connected as " + label);
@@ -2283,6 +2302,26 @@ function showScoreboardForRound(roundId, round) {
   // Auto-dismiss after the roster has had time to read, unless a newer crash
   // replaces it first.
   scoreboardDismiss = setTimeout(hideScoreboard, 9000);
+}
+
+// The Prize Vault readout: the perpetual, never-zero reserve that seeds every
+// game. Shows the current Vault and what the next game will be seeded with,
+// and pulses green whenever it grows -- the "always compounding" signal.
+let lastVaultWei = null;
+async function refreshVault() {
+  if (!crashExt) return;
+  try {
+    const [reserve, seed] = await Promise.all([crashExt.reserve(), crashExt.nextSeed()]);
+    const amtEl = $("vaultAmt");
+    const seedEl = $("vaultSeed");
+    if (amtEl) amtEl.textContent = (+ethers.formatEther(reserve)).toFixed(4) + " ETH";
+    if (seedEl) seedEl.textContent = seed > 0n ? "· next +" + (+ethers.formatEther(seed)).toFixed(4) : "";
+    if (lastVaultWei !== null && reserve > lastVaultWei) {
+      const chip = $("vaultStat");
+      if (chip) { chip.classList.remove("bump"); void chip.offsetWidth; chip.classList.add("bump"); }
+    }
+    lastVaultWei = reserve;
+  } catch (_) { /* transient */ }
 }
 
 // Event-driven: watch for the newest RoundCrashed and show its scoreboard,
@@ -2696,7 +2735,7 @@ function startPolling() {
   // to 400ms; these are cheap read-only view calls against a local node,
   // not transactions, so there's no real cost to polling faster.
   pollTimer = setInterval(refresh, 400);
-  pollTimer2 = setInterval(pollScoreboard, 600);
+  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); }, 600);
 }
 
 // A per-tab client-side evm_mine heartbeat was tried here and was a real,
