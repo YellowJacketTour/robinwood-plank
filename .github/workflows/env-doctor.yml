@@ -1,0 +1,94 @@
+name: Env doctor (read-only)
+
+# TEMPORARY, dispatch-only diagnostic.
+#
+# Setting NEXT_PUBLIC_REFERRAL_ENABLED=false and running a green deploy left
+# the running server still reporting enabled:true. That makes the repository
+# variable useless as a kill switch, so referrals had to be disabled in code
+# instead. This tells us why, from the box, without guessing.
+#
+# STRICTLY READ-ONLY, and it prints ONLY `NEXT_PUBLIC_*` keys. Those are
+# public by design (they are inlined into the client bundle). Everything else
+# in .env.production is a secret — PGPASSWORD, API keys — and must never reach
+# an Actions log, so nothing here cats the file.
+#
+# Delete this workflow once the runtime-flag path is fixed and proven.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  doctor:
+    runs-on: ubuntu-latest
+    environment: inmotion-staging
+    env:
+      INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+      INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+      INMOTION_USER: ${{ secrets.INMOTION_USER }}
+      INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+      INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+      INMOTION_APP_DIR: ${{ vars.INMOTION_APP_DIR }}
+    steps:
+      - name: Install SSH key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: Report runtime flag state
+        shell: bash
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- "$INMOTION_APP_DIR" <<'REMOTE'
+          set -euo pipefail
+          app_dir="$1"
+          env_file="$app_dir/shared/.env.production"
+
+          echo "=== NEXT_PUBLIC_* in shared/.env.production (public values only)"
+          if [ -f "$env_file" ]; then
+            grep -E '^NEXT_PUBLIC_' "$env_file" || echo "(no NEXT_PUBLIC_ lines at all)"
+            echo
+            echo "total lines in env file: $(wc -l < "$env_file")"
+            echo "env file mtime: $(date -r "$env_file" -u '+%Y-%m-%dT%H:%M:%SZ')"
+          else
+            echo "MISSING: $env_file"
+          fi
+
+          echo
+          echo "=== duplicate NEXT_PUBLIC_REFERRAL_ENABLED lines? (last one wins in dotenv)"
+          grep -c '^NEXT_PUBLIC_REFERRAL_ENABLED=' "$env_file" || true
+
+          echo
+          echo "=== leftover staged flag files (should be consumed each deploy)"
+          ls -la "$app_dir/shared/runtime-secrets/" 2>/dev/null | grep -i 'next-public-flags' || echo "(none staged — consumed or never delivered)"
+
+          echo
+          echo "=== passenger restart marker"
+          if [ -f "$app_dir/tmp/restart.txt" ]; then
+            echo "restart.txt mtime: $(date -r "$app_dir/tmp/restart.txt" -u '+%Y-%m-%dT%H:%M:%SZ')"
+          else
+            echo "no tmp/restart.txt"
+          fi
+
+          echo
+          echo "=== cPanel-injected app env (this OVERRIDES the file: process.loadEnvFile does not replace an already-set var)"
+          # .env files under the cPanel app root, and any Passenger-level env
+          # declarations, are the ones that would win over shared/.env.production.
+          for candidate in "$app_dir/.env" "$app_dir/.env.production" "$app_dir/current/.env" "$app_dir/current/.env.production"; do
+            if [ -f "$candidate" ]; then
+              echo "PRESENT: $candidate"
+              grep -E '^NEXT_PUBLIC_' "$candidate" || echo "  (no NEXT_PUBLIC_ lines)"
+            fi
+          done
+          echo "(nothing listed above = no shadowing env file)"
+
+          echo
+          echo "=== running app: which release is current"
+          ls -la "$app_dir/current" 2>/dev/null | head -2 || echo "(no current symlink)"
+          REMOTE
