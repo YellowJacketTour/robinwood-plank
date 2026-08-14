@@ -1,4 +1,4 @@
-import { CHAIN, CONTRACT_ADDRESS, NATIVE_TOKEN_ADDRESS, TOKEN } from "@/lib/constants";
+import { CHAIN, CONTRACT_ADDRESS, NATIVE_TOKEN_ADDRESS, TOKEN, USDG_TOKEN } from "@/lib/constants";
 
 /**
  * Server-side counter-token allowlist for the trade widget.
@@ -66,12 +66,10 @@ export const PLANK_TOKEN: CounterToken = {
  * Blockscout match is a low-holder lookalike, deliberately NOT listed.
  */
 const CORE_COUNTERS: CounterToken[] = [
-  {
-    address: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
-    symbol: "USDG",
-    name: "Global Dollar",
-    decimals: 6,
-  },
+  // Single definition in lib/constants.ts — components/trade/MoonPayPanel.tsx
+  // needs the same address/decimals to read a balance, and cannot import this
+  // module (it would pull `pg` into the client bundle).
+  { ...USDG_TOKEN },
   {
     address: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
     symbol: "WETH",

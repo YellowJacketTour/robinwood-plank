@@ -421,6 +421,30 @@ export const MARKET_FEE_RECIPIENT = "0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8"
 export const MARKET_OFFER_CURRENCY = "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73";
 
 /**
+ * USDG (Global Dollar) — the asset MoonPay delivers onto Robinhood Chain,
+ * and a routing hop in live quotes.
+ *
+ * HARD-CODED ON PURPOSE, same reasoning as MARKET_OFFER_CURRENCY above:
+ * Blockscout carries same-symbol impostors, so this must never be resolved
+ * by symbol lookup. Verified by direct RPC call against mainnet — name()
+ * = "Global Dollar", symbol() = "USDG", decimals() = 6. Six, NOT the 18
+ * most ERC-20s use; a formatter that assumes 18 misreports a balance by a
+ * factor of a trillion.
+ *
+ * Lives here rather than in lib/uniswap-tokenlist.ts because both a client
+ * component (components/trade/MoonPayPanel.tsx, which reads a USDG balance)
+ * and that server-side module need it, and importing the tokenlist from the
+ * browser drags lib/postgres.ts and the `pg` driver into the client bundle.
+ * This file has no imports at all, so it is safe from either side.
+ */
+export const USDG_TOKEN = {
+  address: "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+  symbol: "USDG",
+  name: "Global Dollar",
+  decimals: 6,
+} as const;
+
+/**
  * STARTUP ASSERTION (audit 2026-07-27, AUDIT-1): PERMIT2_ADDRESS shipped with
  * a truncated 39-hex-char literal, which made the swap approval allowlist
  * unmatchable and killed every $PLANK sell. TypeScript cannot catch a
@@ -442,6 +466,7 @@ export const EXPORTED_ADDRESS_CONSTANTS: Readonly<Record<string, string>> =
     CONDUIT_CONTROLLER_ADDRESS,
     MARKET_FEE_RECIPIENT,
     MARKET_OFFER_CURRENCY,
+    "USDG_TOKEN.address": USDG_TOKEN.address,
     ...(MARKET_VAULT_ADDRESS ? { MARKET_VAULT_ADDRESS } : {}),
     ...Object.fromEntries(
       MARKET_VAULT_LEGACY_ADDRESSES.map((a, i) => [`MARKET_VAULT_LEGACY_ADDRESS_${i}`, a])
