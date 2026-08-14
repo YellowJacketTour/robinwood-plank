@@ -17,7 +17,7 @@ describe("PlankBurnEngine (Tier-2, oracle-floored)", () => {
   const R_PLANK = ethers.parseEther("100000"); // 1000 PLANK per WETH
   const FAIR_RATE = 1000n; // plankOutPerWei that matches the pool's fair price
   const MAX_ETH_PER_CALL = ethers.parseEther("1");
-  const KEEPER_REWARD_BPS = 500n; // 5%
+  const KEEPER_REWARD_BPS = 100n; // 1% (<= the 2% engine ceiling)
   const MAX_SLIPPAGE_BPS = 500n; // 5%
 
   async function deployAll(routerRate = FAIR_RATE) {

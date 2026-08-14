@@ -70,7 +70,7 @@ async function main() {
   const BURN_BPS = 2000n; // 20% of rake = 0.9% of pool -> buys + burns $PLANK
   const AIRDROP_BPS = 4000n; // 40% of rake = 1.8% of pool -> the rolling community jackpot
   // remainder (40% of rake = 1.8% of pool) -> dev/ops treasury
-  const BURN_KEEPER_REWARD_BPS = 500n; // 5% of ETH spent, to whoever executes a burn
+  const BURN_KEEPER_REWARD_BPS = 100n; // 1% (<= the 2% engine ceiling)
   const MAX_ETH_PER_BURN = ethers.parseEther("1");
   const AIRDROP_EPOCH_SECONDS = 86400n; // daily draw -- fixed schedule, on purpose (see the contract)
   const AIRDROP_DRAWER_REWARD_BPS = 200n; // 2% of the prize, to whoever calls the draw

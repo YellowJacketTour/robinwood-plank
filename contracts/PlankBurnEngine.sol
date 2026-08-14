@@ -74,6 +74,11 @@ contract PlankBurnEngine is ReentrancyGuard {
     /// floor becomes meaningless.
     uint256 public immutable maxSlippageBps;
     uint256 private constant MAX_SLIPPAGE_CEILING_BPS = 1000; // 10%
+    // The keeper reward is a SEPARATE ETH payout from the engine's balance
+    // (not the buyback proceeds), so an unbounded value would let whoever
+    // wins the keeper race drain the pool. Hard-capped -- it only needs to
+    // cover gas plus a small incentive.
+    uint256 private constant MAX_KEEPER_REWARD_CEILING_BPS = 200; // 2%
 
     uint256 public totalEthSpent;
     uint256 public totalPlankBurned;
@@ -101,7 +106,9 @@ contract PlankBurnEngine is ReentrancyGuard {
         if (plank_ == address(0) || v2Router_ == address(0) || weth_ == address(0) || oracle_ == address(0)) {
             revert ZeroAddress();
         }
-        if (maxSlippageBps_ > MAX_SLIPPAGE_CEILING_BPS || keeperRewardBps_ > 10000) revert BadConfig();
+        if (maxSlippageBps_ > MAX_SLIPPAGE_CEILING_BPS || keeperRewardBps_ > MAX_KEEPER_REWARD_CEILING_BPS) {
+            revert BadConfig();
+        }
         plank = IERC20Burnable(plank_);
         v2Router = IUniswapV2Router(v2Router_);
         weth = weth_;

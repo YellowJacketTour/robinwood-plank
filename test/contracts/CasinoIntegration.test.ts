@@ -42,7 +42,7 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
     ).deploy(await weth.getAddress(), await plank.getAddress(), ethers.parseEther("100"), ethers.parseEther("100000"));
     const oracle: any = await (
       await ethers.getContractFactory("PlankV2TwapOracle")
-    ).deploy(await pair.getAddress(), 60n, 3600n);
+    ).deploy(await pair.getAddress(), 60n, 240n);
     const router: any = await (
       await ethers.getContractFactory("MockV2Router")
     ).deploy(await plank.getAddress(), MOCK_PLANK_PER_WEI);
@@ -55,7 +55,7 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
       await weth.getAddress(),
       await oracle.getAddress(),
       ethers.parseEther("100"),
-      500n,
+      100n,
       500n
     );
 

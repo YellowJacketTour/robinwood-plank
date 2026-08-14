@@ -60,6 +60,15 @@ contract PlankV2TwapOracle {
     uint224 public price1Average;
     uint256 public lastUpdate;
 
+    /// Floors/ceilings that keep a deploy from silently defeating the
+    /// TWAP: a window below MIN_WINDOW degenerates toward a spot (sandwich-
+    /// able) oracle, and a staleness allowance far larger than the window
+    /// would let consult() serve an average old enough to no longer reflect
+    /// the market. Both are immutable, so a bad deploy is unrecoverable --
+    /// hence enforced here, not just documented.
+    uint256 private constant MIN_WINDOW = 30;
+    uint256 private constant MAX_STALENESS_MULTIPLE = 8;
+
     error BadConfig();
     error PeriodNotElapsed();
     error NotInitialized();
@@ -68,7 +77,9 @@ contract PlankV2TwapOracle {
     error NoReserves();
 
     constructor(address pair_, uint256 windowSize_, uint256 maxStaleness_) {
-        if (pair_ == address(0) || windowSize_ == 0 || maxStaleness_ < windowSize_) revert BadConfig();
+        if (pair_ == address(0)) revert BadConfig();
+        if (windowSize_ < MIN_WINDOW) revert BadConfig();
+        if (maxStaleness_ < windowSize_ || maxStaleness_ > windowSize_ * MAX_STALENESS_MULTIPLE) revert BadConfig();
         IUniswapV2Pair p = IUniswapV2Pair(pair_);
         pair = p;
         token0 = p.token0();
