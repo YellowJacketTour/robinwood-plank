@@ -152,6 +152,44 @@ export async function claimReferral(
   };
 }
 
+/**
+ * Admin-only correction path. REVOKES an attribution -- it does not, and
+ * must not, redirect one.
+ *
+ * The distinction is the whole design. An UPDATE would let an operator hand
+ * a wallet's attribution to a referrer of their choosing, which quietly
+ * breaks the property that makes this table trustworthy: that every row on
+ * file was signed by the wallet it names. A DELETE cannot do that. After a
+ * revoke the wallet is simply unattributed, and the only way it gets a new
+ * referrer is the normal path -- that user signing a fresh claim. So the
+ * invariant survives operator intervention:
+ *
+ *   every attribution on file was signed by the referred wallet.
+ *
+ * That is strictly weaker than an admin edit and strictly more useful than
+ * nothing, which is why it is the correction path rather than an UPDATE.
+ * The alternative to having this at all is hand-written SQL against
+ * production the first time someone confirms an invite they regret.
+ *
+ * @returns whether a row was actually removed, so the caller can tell
+ *   "revoked" from "there was nothing on file" instead of reporting a
+ *   no-op as a success.
+ */
+export async function revokeReferral(referredWallet: string): Promise<{ revoked: boolean }> {
+  if (!isReferralConfigured()) {
+    throw new TradeApiError(503, "REFERRAL_NOT_CONFIGURED", "Referral tracking is not configured on the server.");
+  }
+  const referred = normalizeAddress(referredWallet);
+  if (!isEthAddress(referred)) {
+    throw new TradeApiError(400, "BAD_WALLET_ADDRESS", "referredWallet must be a valid 0x address.");
+  }
+  const result = await postgresQuery(
+    `DELETE FROM plank_referrals WHERE referred_wallet = $1`,
+    [referred]
+  );
+  return { revoked: (result.rowCount ?? 0) > 0 };
+}
+
 export async function getReferralInfo(
   wallet: string
 ): Promise<{ referredBy: string | null; referredCount: number }> {

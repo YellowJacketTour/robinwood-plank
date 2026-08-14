@@ -294,6 +294,28 @@ The PostgreSQL password remains only in the server's `.env.production`.
 
 `NEXT_PUBLIC_*` values are build inputs, not runtime secrets.
 
+### Enabling referral attribution
+
+One repository variable, no secrets — the feature needs only Postgres, which
+the server already has:
+
+- `NEXT_PUBLIC_REFERRAL_ENABLED=true`. Build-time, so turning it on or off is
+  a rebuild + redeploy, not an env edit on the box.
+
+Migration `010_referral_attribution.sql` applies automatically on activation.
+
+**Understand before enabling:** attribution is permanent by construction. The
+first claim for a wallet wins, every row is signed by the wallet it names, and
+no code path updates a row. Enabling starts writing records that only an admin
+revoke can clear.
+
+The correction path is `DELETE /api/admin/referral` — admin-signed, action-
+logged, and deliberately not wired into any UI. It **revokes** an attribution;
+it cannot redirect one. After a revoke the wallet is unattributed and can only
+gain a new referrer through the normal signed flow, which preserves the
+property that every row on file was signed by the wallet it names. Use it when
+someone confirms an invite in error, rather than editing the table by hand.
+
 ## 9. Automatic CI/CD behavior
 
 Pull requests to `dev` and `master` run:
