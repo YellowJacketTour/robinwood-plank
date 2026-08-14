@@ -294,13 +294,27 @@ The PostgreSQL password remains only in the server's `.env.production`.
 
 `NEXT_PUBLIC_*` values are build inputs, not runtime secrets.
 
+**A `NEXT_PUBLIC_*` flag that a SERVER module reads needs both halves.** Next
+inlines these into the client bundle at build time, so the build env is enough
+for anything only the browser reads. It is not enough for a flag read in a
+server module (`lib/referral-server.ts`, `lib/moonpay-server.ts`): the
+standalone server evaluates `process.env.NEXT_PUBLIC_X` at runtime on the box,
+where the variable does not exist unless the deploy writes it into
+`shared/.env.production`. The symptom is a status route reporting `false` after
+a build that clearly had the flag set to `true`, with the panel — which gates
+on that route, not on its own bundled copy — staying hidden. The deploy now
+stages those flags into the server env; add new ones to that list, not only to
+the build env block.
+
 ### Enabling referral attribution
 
 One repository variable, no secrets — the feature needs only Postgres, which
 the server already has:
 
-- `NEXT_PUBLIC_REFERRAL_ENABLED=true`. Build-time, so turning it on or off is
-  a rebuild + redeploy, not an env edit on the box.
+- `NEXT_PUBLIC_REFERRAL_ENABLED=true`, then redeploy. The deploy bakes it into
+  the client bundle *and* writes it into `shared/.env.production` for the
+  server side — `lib/referral-server.ts` reads it at runtime, so the build
+  alone leaves `/api/referral/status` reporting `false` and the panel hidden.
 
 Migration `010_referral_attribution.sql` applies automatically on activation.
 
