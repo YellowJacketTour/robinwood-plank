@@ -18,6 +18,13 @@ import { signMessage } from "@/lib/wallet";
 /** Client-safe copy of lib/referral-server.ts's REFERRAL_PROOF_DOMAIN. */
 export const REFERRAL_PROOF_DOMAIN = "plank-referral";
 
+/**
+ * Client-safe copy of app/api/portfolio/route.ts's PORTFOLIO_PROOF_DOMAIN.
+ * Distinct domain on purpose: a signature collected to READ a portfolio must
+ * never be replayable as a referral claim or a wallet link.
+ */
+export const PORTFOLIO_PROOF_DOMAIN = "portfolio-read";
+
 export async function buildWalletProof(
   address: string,
   domain: string,
