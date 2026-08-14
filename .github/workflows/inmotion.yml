@@ -252,6 +252,7 @@ jobs:
           UNISWAP_API_KEY: ${{ secrets.UNISWAP_API_KEY }}
           RPC_URL: ${{ secrets.RPC_URL }}
           ZEROX_API_KEY: ${{ secrets.ZEROX_API_KEY }}
+          NEXT_PUBLIC_REFERRAL_ENABLED: ${{ vars.NEXT_PUBLIC_REFERRAL_ENABLED || 'false' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -310,6 +311,28 @@ jobs:
               "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.zerox-api-key.${RELEASE_SHA}"
             rm -f "$zerox_secret"
           fi
+          # Feature flags that are ALSO read server-side.
+          #
+          # NEXT_PUBLIC_* is inlined into the CLIENT bundle at build time, so
+          # the build env above is enough for anything the browser reads. It is
+          # NOT enough for a flag a server module reads: in the standalone
+          # server `process.env.NEXT_PUBLIC_X` is evaluated at runtime on the
+          # box, where the variable does not exist. lib/referral-server.ts is
+          # exactly that case, so /api/referral/status kept reporting
+          # enabled:false after a build that had the flag set to true, and the
+          # panel — which gates on that route, not on its own bundled copy —
+          # stayed hidden. Verified in production before this fix.
+          #
+          # Written UNCONDITIONALLY, unlike the optional secrets above: the
+          # value resolves to 'false' when the variable is unset, and turning
+          # the flag back off has to overwrite a stale 'true' on the server or
+          # rollback silently does nothing.
+          flag_file="$RUNNER_TEMP/next-public-flags"
+          printf 'NEXT_PUBLIC_REFERRAL_ENABLED=%s\n' "${NEXT_PUBLIC_REFERRAL_ENABLED:-false}" > "$flag_file"
+          retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+            "$flag_file" \
+            "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.next-public-flags.${RELEASE_SHA}"
+          rm -f "$flag_file"
 
       - name: Migrate, activate, and restart Passenger
         shell: bash
@@ -356,6 +379,21 @@ jobs:
             chmod 600 "$env_file.next"
             mv -f "$env_file.next" "$env_file"
             rm -f "$staged_zerox_key"
+          fi
+          # Server-side feature flags (see the staging side for why the build
+          # env alone is not enough). The staged file is already NAME=value
+          # lines, so each is upserted by name rather than hardcoding one.
+          staged_flags="$app_dir/shared/runtime-secrets/.next-public-flags.$release_sha"
+          if [ -s "$staged_flags" ]; then
+            env_file="$app_dir/shared/.env.production"
+            while IFS='=' read -r flag_name flag_value; do
+              [ -n "$flag_name" ] || continue
+              grep -v "^${flag_name}=" "$env_file" > "$env_file.next" || true
+              printf '%s=%s\n' "$flag_name" "$flag_value" >> "$env_file.next"
+              chmod 600 "$env_file.next"
+              mv -f "$env_file.next" "$env_file"
+            done < "$staged_flags"
+            rm -f "$staged_flags"
           fi
           release_dir="$app_dir/releases/$release_sha"
           mkdir -p "$release_dir" "$app_dir/shared" "$app_dir/tmp" "$app_dir/logs"
