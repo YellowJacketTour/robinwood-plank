@@ -91,12 +91,24 @@ export type KeeperConfig = {
   powerboard: string;
   beacon: string;
   distributor: string;
+  /** The buyback engine + its TWAP oracle. When both are set, tick()
+   * keeps the oracle primed and burns any ETH the distributor has routed
+   * to the engine -- closing the value-back-to-holders leg so the whole
+   * loop is self-driving, not dependent on an out-of-band caller. */
+  burnEngine?: string;
+  oracle?: string;
   /** drand HTTP relay + chain hash, only needed when not using a mock beacon. */
   drandApi?: string;
   drandChainHash?: string;
   /** LOCAL DEV ONLY -- see KEEPER_MOCK_BEACON in the header. */
   mockBeacon?: boolean;
 };
+
+const ORACLE_ABI = ["function update()"];
+const BURN_ENGINE_ABI = [
+  "function executeBurn(uint256 ethAmount)",
+  "function maxEthPerCall() view returns (uint256)",
+];
 
 /** Best-effort send: every step is idempotent, and a revert usually just
  * means "another caller already did this" or "not ready yet" -- both are
@@ -247,6 +259,24 @@ export async function tick(
       crash.withdrawPayments(cfg.distributor), `${owed} wei`);
   }
 
+  // ── 9b. Keep the TWAP fresh and burn any ETH routed to the engine ──
+  // Closes the value-back-to-holders leg on-chain: refresh the oracle so
+  // executeBurn's fair-price floor is available (update() reverts if a
+  // full window hasn't elapsed -- that's fine, caught as a no-op), then
+  // buy+burn up to maxEthPerCall of whatever the distributor has sent.
+  if (cfg.oracle && cfg.burnEngine) {
+    await attempt(actions, "oracle.update", () => new Contract(cfg.oracle!, ORACLE_ABI, signer).update());
+    const engine = new Contract(cfg.burnEngine, BURN_ENGINE_ABI, signer);
+    const engineBal = await provider.getBalance(cfg.burnEngine);
+    if (engineBal > 0n) {
+      const cap: bigint = await engine.maxEthPerCall();
+      const amount = engineBal < cap ? engineBal : cap;
+      // Reverts harmlessly if the oracle isn't primed yet (unprimed/stale)
+      // -- the ETH just waits for the next tick, never at risk.
+      await attempt(actions, "executeBurn", () => engine.executeBurn(amount), `${amount} wei`);
+    }
+  }
+
   // ── 10. Powerboard draw on the fixed schedule ─────────────────────
   const epoch: bigint = await powerboard.currentEpoch();
   if (epoch > 0n) {
@@ -293,6 +323,8 @@ async function main() {
     powerboard: required("POWERBOARD_ADDRESS"),
     beacon: required("BEACON_ADDRESS"),
     distributor: required("DISTRIBUTOR_ADDRESS"),
+    burnEngine: process.env.BURN_ENGINE_ADDRESS?.trim() || undefined,
+    oracle: process.env.ORACLE_ADDRESS?.trim() || undefined,
     drandApi: process.env.DRAND_API?.trim() || "https://api.drand.sh",
     drandChainHash: process.env.DRAND_CHAIN_HASH?.trim(),
     mockBeacon: process.env.KEEPER_MOCK_BEACON === "1",

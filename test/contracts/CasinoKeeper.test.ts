@@ -98,10 +98,12 @@ describe("Casino keeper — the loop runs itself", () => {
       powerboard: await powerboard.getAddress(),
       beacon: await beacon.getAddress(),
       distributor: await distributor.getAddress(),
+      burnEngine: await burnEngine.getAddress(),
+      oracle: await oracle.getAddress(),
       mockBeacon: true, // local stand-in for a relayed drand signature
     };
 
-    return { crash, powerboard, distributor, burnEngine, beacon, cfg, treasury, alice, bob, keeper, stranger };
+    return { crash, powerboard, distributor, burnEngine, oracle, plank, beacon, cfg, treasury, alice, bob, keeper, stranger };
   }
 
   /// Runs the keeper repeatedly, mining/advancing between ticks so the
@@ -151,6 +153,31 @@ describe("Casino keeper — the loop runs itself", () => {
     // Rake was pushed through the 3-way split without anyone asking.
     expect(await distributor.totalReceived()).to.be.gt(0n);
     expect(await powerboard.jackpot()).to.be.gt(0n);
+  });
+
+  it("CLOSES THE BURN LEG: the keeper primes the TWAP and buys+burns the ETH the distributor routed to the engine -- value returns to holders with no out-of-band caller", async () => {
+    const { crash, burnEngine, plank, cfg, alice, bob, keeper } = await deployCasino();
+
+    // Let a full 60s TWAP window pass so the keeper's first oracle.update()
+    // succeeds. That expires the initial betting round, so void it (it has
+    // no bets) and play in the fresh round that starts.
+    await networkHelpers.time.increase(61);
+    await crash.lockRound(); // voids the stale empty round, opens a new one
+
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await networkHelpers.time.increase(6);
+
+    await runKeeper(cfg, keeper, 16);
+
+    // The distributor's burn leg (0.9% of the pool) reached the engine and
+    // the keeper converted+burned it -- no human, no out-of-band caller.
+    expect(await burnEngine.totalEthSpent()).to.be.gt(0n);
+    expect(await burnEngine.totalPlankBurned()).to.be.gt(0n);
+    // Nothing is left stranded in the engine beyond a sub-maxEthPerCall dust
+    // remainder that the next tick will sweep.
+    expect(await ethers.provider.getBalance(await burnEngine.getAddress())).to.be.lt(ethers.parseEther("1"));
+    void plank;
   });
 
   it("PUBLIC: a completely different, unprivileged account can pick up mid-round and finish it", async () => {
