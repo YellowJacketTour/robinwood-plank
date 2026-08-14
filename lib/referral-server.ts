@@ -31,8 +31,23 @@ import { TradeApiError } from "@/lib/uniswap-server";
  * on the same open question, not a shortcut.
  */
 
-export const REFERRAL_ENABLED =
-  process.env.NEXT_PUBLIC_REFERRAL_ENABLED?.trim().toLowerCase() === "true";
+/**
+ * HARD OFF, pending a redesign. Not env-controlled on purpose.
+ *
+ * The feature was enabled in production and taken back down the same day: it
+ * recorded a PERMANENT attribution and asked the user to sign for it, while
+ * nothing anywhere consumed that attribution — no credit on trades, on mints,
+ * or on anything else. Users were being asked to sign a permanent record for
+ * a benefit that did not exist, and the copy implied one ("credited as
+ * invited by you, permanently").
+ *
+ * The literal is deliberate rather than flipping the repository variable back
+ * to false: the variable path failed to take effect on the running server
+ * during the takedown, and a kill switch that depends on the thing that just
+ * failed is not a kill switch. Restore the env-driven form only once the
+ * redesign lands AND the runtime-flag path is proven end to end.
+ */
+export const REFERRAL_ENABLED = false;
 
 function normalizeAddress(value: string): string {
   return value.trim().toLowerCase();
