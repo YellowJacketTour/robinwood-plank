@@ -4,21 +4,25 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { isAddress, formatEther } from "ethers";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useWallet } from "@/lib/wallet-context";
+import { buildWalletProof, PORTFOLIO_PROOF_DOMAIN } from "@/lib/wallet-proof-client";
 
 type PortfolioPosition = {
   vaultAddress: string;
   vaultName: string;
   vaultShortName: string;
   sharesHeldWei: string;
-  costBasisWei: string;
-  avgCostPerShareWei: string;
-  realizedPnlWei: string;
+  // Owner-only (app/api/portfolio/route.ts): absent unless the viewer proved
+  // they control this wallet. Optional here so a stranger's summary view
+  // cannot be read as a missing field.
+  costBasisWei?: string;
+  avgCostPerShareWei?: string;
+  realizedPnlWei?: string;
   realizedProceedsWei: string;
   realizedCostWei: string;
-  feeDragWei: string;
-  unmatchedSharesWei: string;
-  unmatchedProceedsWei: string;
-  eventCount: number;
+  feeDragWei?: string;
+  unmatchedSharesWei?: string;
+  unmatchedProceedsWei?: string;
+  eventCount?: number;
   updatedAt: string;
   currentNavPerShareWei: string;
   navSource: "live" | "unavailable";
@@ -28,6 +32,8 @@ type PortfolioPosition = {
 
 type PortfolioResponse = {
   wallet: string;
+  /** True when the request carried a valid ownership proof for `wallet`. */
+  owner?: boolean;
   positions: PortfolioPosition[];
   note?: string;
   error?: string;
@@ -97,7 +103,30 @@ export default function PortfolioView() {
   useEffect(() => {
     if (!wallet) return;
     let cancelled = false;
-    fetch(`/api/portfolio?wallet=${encodeURIComponent(wallet)}`, { cache: "no-store" })
+    // Cost basis and PnL are owner-only (see app/api/portfolio/route.ts).
+    // When the viewer IS the wallet being viewed, sign a read proof so the
+    // full accounting comes back; looking up anyone else returns the
+    // chain-derivable summary and needs no signature. A refused or failed
+    // signature degrades to that same summary rather than erroring — the
+    // page still works, it just shows less.
+    const withProof = async (): Promise<Record<string, string>> => {
+      if (!connectedAddress || connectedAddress.toLowerCase() !== wallet.toLowerCase()) return {};
+      try {
+        const proof = await buildWalletProof(connectedAddress, PORTFOLIO_PROOF_DOMAIN, "read", {
+          wallet: wallet.toLowerCase(),
+        });
+        return {
+          "x-plank-portfolio-proof": btoa(JSON.stringify(proof)),
+        };
+      } catch {
+        return {};
+      }
+    };
+
+    withProof()
+      .then((headers) =>
+        fetch(`/api/portfolio?wallet=${encodeURIComponent(wallet)}`, { cache: "no-store", headers })
+      )
       .then(async (res) => {
         const json = (await res.json()) as PortfolioResponse;
         if (!res.ok) throw new Error(json.message || json.error || `HTTP ${res.status}`);
@@ -114,7 +143,11 @@ export default function PortfolioView() {
     return () => {
       cancelled = true;
     };
-  }, [wallet]);
+    // connectedAddress is a real dependency, not lint noise: connecting a
+    // wallet after the page has loaded is exactly when a viewer becomes the
+    // owner, and without a refetch they would keep seeing the stranger's
+    // summary of their own portfolio.
+  }, [wallet, connectedAddress]);
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -144,10 +177,13 @@ export default function PortfolioView() {
     let value = ZERO;
     let hasUnmatched = false;
     for (const p of data.positions) {
-      realized += BigInt(p.realizedPnlWei);
+      // Every one of these is owner-only except currentValueWei. Guarding
+      // rather than defaulting to "0": a stranger's view must show no PnL
+      // at all, not a confident zero.
+      if (p.realizedPnlWei) realized += BigInt(p.realizedPnlWei);
       if (p.unrealizedPnlWei) unrealized += BigInt(p.unrealizedPnlWei);
       if (p.currentValueWei) value += BigInt(p.currentValueWei);
-      if (BigInt(p.unmatchedSharesWei) > ZERO) hasUnmatched = true;
+      if (p.unmatchedSharesWei && BigInt(p.unmatchedSharesWei) > ZERO) hasUnmatched = true;
     }
     return { realized, unrealized, value, hasUnmatched };
   }, [data]);
@@ -291,7 +327,7 @@ export default function PortfolioView() {
                     <dt className="text-[0.6875rem] font-black uppercase tracking-wide text-cream-muted">
                       Avg cost / share
                     </dt>
-                    <dd className="mt-0.5 font-bold text-cream">{fmtEth(p.avgCostPerShareWei, 5)} ETH</dd>
+                    <dd className="mt-0.5 font-bold text-cream">{p.avgCostPerShareWei ? `${fmtEth(p.avgCostPerShareWei, 5)} ETH` : "—"}</dd>
                   </div>
                   <div>
                     <dt className="text-[0.6875rem] font-black uppercase tracking-wide text-cream-muted">
@@ -314,7 +350,7 @@ export default function PortfolioView() {
                       Realized PnL
                     </dt>
                     <dd className={`mt-0.5 font-bold ${pnlClass(p.realizedPnlWei)}`}>
-                      {fmtEth(p.realizedPnlWei)} ETH
+                      {p.realizedPnlWei ? `${fmtEth(p.realizedPnlWei)} ETH` : "—"}
                     </dd>
                   </div>
                   <div>
@@ -327,23 +363,23 @@ export default function PortfolioView() {
                     <dt className="text-[0.6875rem] font-black uppercase tracking-wide text-cream-muted">
                       Fee drag
                     </dt>
-                    <dd className="mt-0.5 font-bold text-cream">{fmtEth(p.feeDragWei)} ETH</dd>
+                    <dd className="mt-0.5 font-bold text-cream">{p.feeDragWei ? `${fmtEth(p.feeDragWei)} ETH` : "—"}</dd>
                   </div>
                   <div>
                     <dt className="text-[0.6875rem] font-black uppercase tracking-wide text-cream-muted">
                       Events
                     </dt>
-                    <dd className="mt-0.5 font-bold text-cream">{p.eventCount}</dd>
+                    <dd className="mt-0.5 font-bold text-cream">{p.eventCount ?? "—"}</dd>
                   </div>
                 </dl>
 
-                {BigInt(p.unmatchedSharesWei) > ZERO && (
+                {p.unmatchedSharesWei && BigInt(p.unmatchedSharesWei) > ZERO && (
                   <div className="mt-3 rounded-md border border-gold-500/40 bg-wood-950/60 p-3">
                     <p className="text-xs font-black uppercase tracking-wide text-gold-300">
                       Untracked shares
                     </p>
                     <p className="mt-1 text-xs text-cream-muted">
-                      {fmtEth(p.unmatchedSharesWei, 4)} shares sold/redeemed with no known cost basis
+                      {fmtEth(p.unmatchedSharesWei ?? "0", 4)} shares sold/redeemed with no known cost basis
                       in this cohort&apos;s history — {fmtEth(p.unmatchedProceedsWei)} ETH of proceeds
                       excluded from Realized PnL above.
                     </p>
