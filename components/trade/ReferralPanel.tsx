@@ -165,10 +165,11 @@ export default function ReferralPanel() {
     }
   }
 
-  // Reads this wallet's info, then mints its invite code if it has none yet.
+  // Reads this wallet's info, then issues its invite code if it has none yet.
   // The read no longer allocates (that made a public GET write for any wallet
   // in a query string), so the panel asks explicitly — once per wallet, for
-  // the connected wallet only.
+  // the connected wallet only. "Issue", not "mint" -- mint means the NFT
+  // mint on this site.
   useEffect(() => {
     if (!status?.enabled || !status?.configured || !account) return;
     let cancelled = false;
@@ -178,12 +179,12 @@ export default function ReferralPanel() {
         if (cancelled) return d;
         if (d && !d.code) {
           try {
-            const minted = await fetch("/api/referral/code", {
+            const issued = await fetch("/api/referral/code", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ wallet: account }),
             }).then((r) => (r.ok ? r.json() : null));
-            if (minted?.code) return { ...d, code: minted.code as string };
+            if (issued?.code) return { ...d, code: issued.code as string };
           } catch {
             /* link just stays pending -- the count and referredBy still render */
           }
