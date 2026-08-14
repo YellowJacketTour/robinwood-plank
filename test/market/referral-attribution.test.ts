@@ -29,10 +29,9 @@ async function proofFor(
   opts?: { timestamp?: number }
 ): Promise<WalletProof> {
   const timestamp = opts?.timestamp ?? Date.now();
-  const payloadJson = JSON.stringify({
-    referred: referred.toLowerCase(),
-    referrer: referrer.toLowerCase(),
-  });
+  // The signed payload names the REF as the user saw it (an opaque code, or
+  // an address from a pre-code link) -- see lib/referral-codes.ts.
+  const payloadJson = JSON.stringify({ referred: referred.toLowerCase(), ref: referrer });
   const message = walletProofMessage(
     REFERRAL_PROOF_DOMAIN,
     "claim",
@@ -76,10 +75,7 @@ test("a proof from another feature's domain is rejected", async () => {
   // claim must never authorise a permanent referral attribution.
   const victim = Wallet.createRandom();
   const timestamp = Date.now();
-  const payloadJson = JSON.stringify({
-    referred: victim.address.toLowerCase(),
-    referrer: REFERRER.toLowerCase(),
-  });
+  const payloadJson = JSON.stringify({ referred: victim.address.toLowerCase(), ref: REFERRER });
   const message = walletProofMessage(
     "plank-checks",
     "claim",
