@@ -1,4 +1,4 @@
-import { getOrCreateReferralCode } from "@/lib/referral-codes";
+import { peekReferralCode } from "@/lib/referral-codes";
 import { getReferralInfo, REFERRAL_ENABLED } from "@/lib/referral-server";
 import { publicError, publicJson, rateLimit } from "@/lib/security";
 import { TradeApiError } from "@/lib/uniswap-server";
@@ -21,13 +21,14 @@ export async function GET(req: Request) {
       throw new TradeApiError(400, "MISSING_WALLET_ADDRESS", "wallet query param is required.");
     }
 
-    // The code is allocated here, on first view, rather than by a dedicated
-    // endpoint: a wallet's code only matters once someone looks at their own
-    // invite panel, and one round trip beats two. Stable once created, so a
-    // link that has already been shared keeps resolving forever.
+    // READ ONLY. Allocation lives in POST /api/referral/code, not here:
+    // this route takes any wallet from a query string, so minting inside it
+    // meant an unauthenticated public GET that writes, and one an attacker
+    // could point at an enumerated list of addresses to grow the table
+    // indefinitely. `code` is null until the owner's panel asks for one.
     const [info, code] = await Promise.all([
       getReferralInfo(wallet),
-      getOrCreateReferralCode(wallet),
+      peekReferralCode(wallet),
     ]);
     return publicJson({ ...info, code });
   } catch (err) {

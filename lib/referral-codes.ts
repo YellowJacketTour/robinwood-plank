@@ -70,6 +70,25 @@ function requireConfigured(): void {
  * makes concurrent first-views converge on one code rather than racing to
  * create two.
  */
+/**
+ * This wallet's code if it already has one, WITHOUT allocating.
+ *
+ * Exists so a read endpoint can stay a read. Allocation used to happen
+ * inside /api/referral/me, which meant querying any address minted a row —
+ * an unauthenticated public GET that writes, and one an attacker can point
+ * at an enumerated list of wallets to grow the table indefinitely.
+ */
+export async function peekReferralCode(walletAddress: string): Promise<string | null> {
+  requireConfigured();
+  const wallet = walletAddress.trim().toLowerCase();
+  if (!HEX_ADDRESS.test(wallet)) return null;
+  const result = await postgresQuery<{ code: string }>(
+    `SELECT code FROM plank_referral_codes WHERE wallet_address = $1`,
+    [wallet]
+  );
+  return result.rows[0]?.code ?? null;
+}
+
 export async function getOrCreateReferralCode(walletAddress: string): Promise<string> {
   requireConfigured();
   const wallet = walletAddress.trim().toLowerCase();
