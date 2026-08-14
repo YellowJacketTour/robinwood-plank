@@ -1,27 +1,39 @@
 import { expect } from "chai";
-import { ethers } from "./helpers/hardhat.js";
+import { ethers, networkHelpers } from "./helpers/hardhat.js";
 
 /**
- * PlankBurnEngine, post-security-rewrite. The whole safety model is now
- * "the engine, not the caller, controls the swap recipient" -- the caller
- * supplies only the pool path and a min-out, never a command program and
- * never a destination. These tests prove the ETH cannot be redirected,
- * that the path is validated to WETH-in/PLANK-out, and that 100% of the
- * real received PLANK is burned.
+ * PlankBurnEngine, Tier-2 design. The caller supplies ONLY the ETH amount;
+ * the engine fixes the recipient (itself), the route ([WETH,PLANK]), and
+ * the minimum output (a TWAP-derived fair floor). These tests prove the
+ * two attacks are both closed on-chain:
+ *   - REDIRECTION: output always lands on the engine and is burned.
+ *   - BAD PRICE: an execution below the oracle's fair floor is REJECTED,
+ *     even though the caller would love to accept it.
  */
-describe("PlankBurnEngine", () => {
+describe("PlankBurnEngine (Tier-2, oracle-floored)", () => {
+  const WINDOW = 1800n;
+  const MAX_STALE = 3600n;
+  const R_WETH = ethers.parseEther("100");
+  const R_PLANK = ethers.parseEther("100000"); // 1000 PLANK per WETH
+  const FAIR_RATE = 1000n; // plankOutPerWei that matches the pool's fair price
   const MAX_ETH_PER_CALL = ethers.parseEther("1");
   const KEEPER_REWARD_BPS = 500n; // 5%
-  const PLANK_OUT_PER_WEI = 1000n;
+  const MAX_SLIPPAGE_BPS = 500n; // 5%
 
-  async function deployAll(plankOutPerWei = PLANK_OUT_PER_WEI) {
+  async function deployAll(routerRate = FAIR_RATE) {
     const [deployer, keeper] = await ethers.getSigners();
 
+    const weth: any = await (await ethers.getContractFactory("MockERC20Burnable")).deploy();
     const plank: any = await (await ethers.getContractFactory("MockERC20Burnable")).deploy();
-    const weth: any = await (await ethers.getContractFactory("MockWethToken")).deploy();
+    const pair: any = await (
+      await ethers.getContractFactory("MockV2Pair")
+    ).deploy(await weth.getAddress(), await plank.getAddress(), R_WETH, R_PLANK);
+    const oracle: any = await (
+      await ethers.getContractFactory("PlankV2TwapOracle")
+    ).deploy(await pair.getAddress(), WINDOW, MAX_STALE);
     const router: any = await (
-      await ethers.getContractFactory("MockSwapRouter")
-    ).deploy(await plank.getAddress(), await weth.getAddress(), plankOutPerWei);
+      await ethers.getContractFactory("MockV2Router")
+    ).deploy(await plank.getAddress(), routerRate);
 
     const engine: any = await (
       await ethers.getContractFactory("PlankBurnEngine")
@@ -29,118 +41,135 @@ describe("PlankBurnEngine", () => {
       await plank.getAddress(),
       await router.getAddress(),
       await weth.getAddress(),
+      await oracle.getAddress(),
       MAX_ETH_PER_CALL,
-      KEEPER_REWARD_BPS
+      KEEPER_REWARD_BPS,
+      MAX_SLIPPAGE_BPS
     );
-
-    // A valid single-hop path: WETH (20) + fee (3) + PLANK (20).
-    const path = ethers.concat([await weth.getAddress(), "0x000bb8", await plank.getAddress()]);
-    return { engine, plank, weth, router, path, deployer, keeper };
+    return { engine, oracle, pair, router, plank, weth, deployer, keeper };
   }
 
-  it("rejects a zero address in the constructor", async () => {
-    const [deployer] = await ethers.getSigners();
-    const plank: any = await (await ethers.getContractFactory("MockERC20Burnable")).deploy();
+  async function prime(oracle: any) {
+    await networkHelpers.time.increase(Number(WINDOW) + 1);
+    await oracle.update();
+  }
+
+  it("rejects zero addresses and an over-loose slippage in the constructor", async () => {
+    const [d] = await ethers.getSigners();
     const Engine = await ethers.getContractFactory("PlankBurnEngine");
     await expect(
-      Engine.deploy(ethers.ZeroAddress, deployer.address, deployer.address, MAX_ETH_PER_CALL, KEEPER_REWARD_BPS)
+      Engine.deploy(ethers.ZeroAddress, d.address, d.address, d.address, 1n, 0n, 100n)
     ).to.be.revertedWithCustomError(Engine, "ZeroAddress");
+    await expect(
+      Engine.deploy(d.address, d.address, d.address, d.address, 1n, 0n, 2000n)
+    ).to.be.revertedWithCustomError(Engine, "BadConfig"); // slippage > 10% ceiling
   });
 
-  it("wraps its own ETH, swaps to the engine, and burns 100% of the real received PLANK", async () => {
-    const { engine, plank, path, deployer, keeper } = await deployAll();
+  it("burns fair-priced PLANK: caller supplies only the amount, output lands on the engine and is destroyed", async () => {
+    const { engine, oracle, plank, deployer, keeper } = await deployAll();
+    await prime(oracle);
     await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
 
     const ethAmount = ethers.parseEther("0.1");
-    const expectedPlankOut = ethAmount * PLANK_OUT_PER_WEI;
+    const expectedPlank = ethAmount * FAIR_RATE; // 100 PLANK
     const expectedKeeperReward = (ethAmount * KEEPER_REWARD_BPS) / 10000n;
 
     const keeperBefore = await ethers.provider.getBalance(keeper.address);
-    const tx = await engine.connect(keeper).executeBurn(path, ethAmount, expectedPlankOut);
+    const tx = await engine.connect(keeper).executeBurn(ethAmount);
     const receipt = await tx.wait();
     const gasCost = receipt!.gasUsed * receipt!.gasPrice;
 
-    // All received PLANK was burned -- the engine holds none.
-    expect(await plank.balanceOf(await engine.getAddress())).to.equal(0n);
-    expect(await plank.totalSupply()).to.equal(0n); // minted then burned
-    expect(await engine.totalPlankBurned()).to.equal(expectedPlankOut);
+    expect(await plank.balanceOf(await engine.getAddress())).to.equal(0n); // nothing retained
+    expect(await plank.balanceOf(keeper.address)).to.equal(0n); // caller got nothing
+    expect(await engine.totalPlankBurned()).to.equal(expectedPlank);
     expect(await engine.totalEthSpent()).to.equal(ethAmount);
 
-    // Keeper got exactly the disclosed reward, from the engine's balance.
     const keeperAfter = await ethers.provider.getBalance(keeper.address);
     expect(keeperAfter - keeperBefore + gasCost).to.equal(expectedKeeperReward);
   });
 
-  it("SECURITY: the swap output always lands on the engine, never on a caller-chosen address -- the router only ever mints to the engine's own recipient", async () => {
-    const { engine, plank, path, deployer, keeper } = await deployAll();
+  it("SECURITY (the whole point): an execution BELOW the TWAP fair floor is rejected -- a rigged/sandwiched price cannot be forced through", async () => {
+    // Router is rigged to pay HALF the fair rate (a sandwiched/manipulated
+    // execution). The oracle's TWAP still says the fair rate is ~1000, so
+    // the engine's floor (fair - 5%) is far above what this execution
+    // yields -> the swap is rejected. The caller cannot lower the floor.
+    const { engine, oracle, deployer, keeper } = await deployAll(FAIR_RATE / 2n);
+    await prime(oracle);
     await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
-    const attackerBefore = await plank.balanceOf(keeper.address);
-    await engine.connect(keeper).executeBurn(path, ethers.parseEther("0.1"), 0n);
-    // The caller (keeper) received ZERO PLANK -- it went to the engine and
-    // was burned. There is no calldata a caller can supply to change that.
-    expect(await plank.balanceOf(keeper.address)).to.equal(attackerBefore);
-    // And the engine leaked no ETH beyond the disclosed keeper reward:
-    // balance dropped by exactly ethAmount (spent) ... it's all wrapped +
-    // swapped + burned, nothing swept out.
+
+    await expect(engine.connect(keeper).executeBurn(ethers.parseEther("0.1"))).to.be.revertedWith(
+      "INSUFFICIENT_OUTPUT_AMOUNT"
+    );
+    // Nothing was spent or burned -- the community's ETH is untouched.
+    expect(await engine.totalEthSpent()).to.equal(0n);
   });
 
-  it("rejects a path that does not start at WETH and end at PLANK", async () => {
-    const { engine, plank, weth, deployer, keeper } = await deployAll();
+  it("accepts an execution within the allowed slippage band, rejects just outside it", async () => {
+    // Just inside: pay 96% of fair (slippage 4% < 5% allowed) -> ok.
+    {
+      const { engine, oracle, deployer, keeper } = await deployAll((FAIR_RATE * 96n) / 100n);
+      await prime(oracle);
+      await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
+      await engine.connect(keeper).executeBurn(ethers.parseEther("0.1"));
+      expect(await engine.totalEthSpent()).to.equal(ethers.parseEther("0.1"));
+    }
+    // Just outside: pay 94% of fair (slippage 6% > 5% allowed) -> rejected.
+    {
+      const { engine, oracle, deployer, keeper } = await deployAll((FAIR_RATE * 94n) / 100n);
+      await prime(oracle);
+      await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
+      await expect(engine.connect(keeper).executeBurn(ethers.parseEther("0.1"))).to.be.revertedWith(
+        "INSUFFICIENT_OUTPUT_AMOUNT"
+      );
+    }
+  });
+
+  it("a spot sandwich right before the burn does NOT lower the floor -- the TWAP is unmoved, so a bad fill still reverts", async () => {
+    const { engine, oracle, pair, router, deployer, keeper } = await deployAll(FAIR_RATE);
+    await prime(oracle);
     await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
 
-    // Output token is WETH instead of PLANK -> a caller trying to receive
-    // the wrong token is rejected outright.
-    const wrongOut = ethers.concat([await weth.getAddress(), "0x000bb8", await weth.getAddress()]);
-    await expect(engine.connect(keeper).executeBurn(wrongOut, ethers.parseEther("0.1"), 0n)).to.be.revertedWithCustomError(
-      engine,
-      "BadPath"
-    );
+    // Attacker front-runs: crash the spot price AND rig the router to match
+    // the new (bad) spot. If the engine used spot, this would let the burn
+    // through at the rigged rate.
+    await pair.setReserves(R_WETH, R_PLANK / 10n); // spot ~100
+    await router.setPlankOutPerWei(FAIR_RATE / 10n); // execution ~100
 
-    // Input token is PLANK instead of WETH -> rejected too.
-    const wrongIn = ethers.concat([await plank.getAddress(), "0x000bb8", await plank.getAddress()]);
-    await expect(engine.connect(keeper).executeBurn(wrongIn, ethers.parseEther("0.1"), 0n)).to.be.revertedWithCustomError(
-      engine,
-      "BadPath"
-    );
-
-    // Malformed length -> rejected.
-    await expect(engine.connect(keeper).executeBurn("0x1234", ethers.parseEther("0.1"), 0n)).to.be.revertedWithCustomError(
-      engine,
-      "BadPath"
+    // But the floor comes from the TWAP (~1000), so the rigged fill is far
+    // below it and reverts. The sandwich is neutralized.
+    await expect(engine.connect(keeper).executeBurn(ethers.parseEther("0.1"))).to.be.revertedWith(
+      "INSUFFICIENT_OUTPUT_AMOUNT"
     );
   });
 
-  it("reverts if the real swap output falls below minPlankOut (slippage protection)", async () => {
-    const { engine, path, deployer, keeper } = await deployAll();
+  it("reverts a burn while the oracle is unprimed or stale (funds wait, never move)", async () => {
+    const { engine, oracle, deployer, keeper } = await deployAll();
     await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
-    const ethAmount = ethers.parseEther("0.1");
-    const realOut = ethAmount * PLANK_OUT_PER_WEI;
-    // The router itself enforces amountOutMinimum, so demanding more than
-    // the pool yields reverts inside the swap ("Too little received").
-    await expect(engine.connect(keeper).executeBurn(path, ethAmount, realOut + 1n)).to.be.revertedWith(
-      "Too little received"
+    // Unprimed:
+    await expect(engine.connect(keeper).executeBurn(ethers.parseEther("0.1"))).to.be.revertedWithCustomError(
+      oracle,
+      "NotInitialized"
     );
-  });
-
-  it("reverts if the route yields zero output", async () => {
-    const { engine, router, path, deployer, keeper } = await deployAll();
-    await router.setPlankOutPerWei(0n);
-    await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
-    await expect(engine.connect(keeper).executeBurn(path, ethers.parseEther("0.1"), 0n)).to.be.revertedWithCustomError(
-      engine,
-      "NoSwapOutput"
+    // Prime then let it go stale:
+    await prime(oracle);
+    await networkHelpers.time.increase(Number(MAX_STALE) + 10);
+    await expect(engine.connect(keeper).executeBurn(ethers.parseEther("0.1"))).to.be.revertedWithCustomError(
+      oracle,
+      "StaleOracle"
     );
   });
 
   it("enforces the per-call rate limit and the balance floor", async () => {
-    const { engine, path, deployer, keeper } = await deployAll();
+    const { engine, oracle, deployer, keeper } = await deployAll();
+    await prime(oracle);
     await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("5") });
-    await expect(engine.connect(keeper).executeBurn(path, MAX_ETH_PER_CALL + 1n, 0n)).to.be.revertedWithCustomError(
+    await expect(engine.connect(keeper).executeBurn(MAX_ETH_PER_CALL + 1n)).to.be.revertedWithCustomError(
       engine,
       "ExceedsRateLimit"
     );
-    const { engine: empty } = await deployAll();
-    await expect(empty.connect(keeper).executeBurn(path, ethers.parseEther("0.01"), 0n)).to.be.revertedWithCustomError(
+    const { engine: empty, oracle: o2 } = await deployAll();
+    await prime(o2);
+    await expect(empty.connect(keeper).executeBurn(ethers.parseEther("0.01"))).to.be.revertedWithCustomError(
       empty,
       "NothingToBurn"
     );

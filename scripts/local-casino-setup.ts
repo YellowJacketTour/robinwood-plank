@@ -91,25 +91,39 @@ async function main() {
   const plank = await (await ethers.getContractFactory("MockERC20Burnable")).deploy();
   await plank.waitForDeployment();
 
-  const weth = await (await ethers.getContractFactory("MockWethToken")).deploy();
+  const weth = await (await ethers.getContractFactory("MockERC20Burnable")).deploy();
   await weth.waitForDeployment();
 
-  // Constrained V3-style swap router (recipient set by the engine, not the
-  // caller) -- see PlankBurnEngine's security header for why it is NOT the
-  // general Universal Router.
+  // Canonical V2 pair (the DEEP pool) + its TWAP oracle. Locally we seed a
+  // 100 WETH : 100000 PLANK pool (1000 PLANK/WETH). On mainnet these are the
+  // real deep PLANK/WETH v2 pair and a real V2 router.
+  const pair = await (
+    await ethers.getContractFactory("MockV2Pair")
+  ).deploy(await weth.getAddress(), await plank.getAddress(), ethers.parseEther("100"), ethers.parseEther("100000"));
+  await pair.waitForDeployment();
+  const TWAP_WINDOW = 60n; // short locally so the keeper primes it fast
+  const TWAP_MAX_STALE = 300n;
+  const oracle = await (
+    await ethers.getContractFactory("PlankV2TwapOracle")
+  ).deploy(await pair.getAddress(), TWAP_WINDOW, TWAP_MAX_STALE);
+  await oracle.waitForDeployment();
+
   const router = await (
-    await ethers.getContractFactory("MockSwapRouter")
-  ).deploy(await plank.getAddress(), await weth.getAddress(), MOCK_PLANK_PER_WEI);
+    await ethers.getContractFactory("MockV2Router")
+  ).deploy(await plank.getAddress(), MOCK_PLANK_PER_WEI);
   await router.waitForDeployment();
 
+  const BURN_MAX_SLIPPAGE_BPS = 500n; // 5%
   const burnEngine = await (
     await ethers.getContractFactory("PlankBurnEngine")
   ).deploy(
     await plank.getAddress(),
     await router.getAddress(),
     await weth.getAddress(),
+    await oracle.getAddress(),
     MAX_ETH_PER_BURN,
-    BURN_KEEPER_REWARD_BPS
+    BURN_KEEPER_REWARD_BPS,
+    BURN_MAX_SLIPPAGE_BPS
   );
   await burnEngine.waitForDeployment();
 
@@ -211,7 +225,7 @@ async function main() {
   console.log("   5. powerboard.claimTickets(crash, roundId, player) for each bettor");
   console.log("   5b. crash.registerResult(roundId, player) + crash.claim(roundId, player) for each winner (keeper CAN do this on their behalf)");
   console.log("   5c. crash.sweepBustedRound(roundId) if the whole field busted -> rolls the pot into the next round");
-  console.log("   6. burnEngine.executeBurn(path, ethAmount, minPlankOut)   when ETH has accrued (path = WETH..PLANK)");
+  console.log("   6. oracle.update() every window, then burnEngine.executeBurn(ethAmount)   (floor comes from the TWAP, not the caller)");
   console.log("   7. once a day: powerboard.requestDraw(epoch) -> ... -> powerboard.drawWinner(epoch)");
   console.log("========================================================\n");
 
