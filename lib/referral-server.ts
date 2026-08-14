@@ -1,4 +1,5 @@
 import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
+import { resolveReferrer } from "@/lib/referral-codes";
 import { verifyWalletProof, type WalletProof } from "@/lib/wallet-proof";
 import { TradeApiError } from "@/lib/uniswap-server";
 
@@ -75,16 +76,19 @@ export const REFERRAL_PROOF_DOMAIN = "plank-referral";
  */
 export function verifyReferralProof(
   referredWallet: string,
-  referrerWallet: string,
+  ref: string,
   proof: WalletProof,
   now?: number
 ): boolean {
   const referred = normalizeAddress(referredWallet);
   if (!isEthAddress(referred)) return false;
-  const payloadJson = JSON.stringify({
-    referred,
-    referrer: normalizeAddress(referrerWallet),
-  });
+  // Signs the REF AS THE USER SAW IT -- the opaque code from the invite link,
+  // not the address it resolves to. With codes the browser never learns the
+  // referrer's address, so signing the address would mean asking someone to
+  // authorise something resolved behind their back. Signing the code keeps
+  // the signature over exactly what was on screen, and still binds the claim
+  // to one specific invite.
+  const payloadJson = JSON.stringify({ referred, ref: ref.trim() });
   const verdict = verifyWalletProof(REFERRAL_PROOF_DOMAIN, "claim", payloadJson, proof, { now });
   return verdict.ok && verdict.address === referred;
 }
@@ -108,22 +112,30 @@ export function verifyReferralProof(
  */
 export async function claimReferral(
   referredWallet: string,
-  referrerWallet: string,
+  ref: string,
   proof: WalletProof
 ): Promise<{ referrerWallet: string; alreadyClaimed: boolean }> {
   if (!isReferralConfigured()) {
     throw new TradeApiError(503, "REFERRAL_NOT_CONFIGURED", "Referral tracking is not configured on the server.");
   }
   const referred = normalizeAddress(referredWallet);
-  const referrer = normalizeAddress(referrerWallet);
-  if (!isEthAddress(referred) || !isEthAddress(referrer)) {
-    throw new TradeApiError(400, "BAD_WALLET_ADDRESS", "Both wallet addresses must be valid 0x addresses.");
+  if (!isEthAddress(referred)) {
+    throw new TradeApiError(400, "BAD_WALLET_ADDRESS", "referredWallet must be a valid 0x address.");
+  }
+
+  // Proof is checked against the ref STRING before it is resolved, so a
+  // signature is bound to the invite the user actually accepted rather than
+  // to whatever that happens to point at.
+  if (!verifyReferralProof(referred, ref, proof)) {
+    throw new TradeApiError(401, "BAD_PROOF", "Could not verify control of the referred wallet.");
+  }
+
+  const referrer = await resolveReferrer(ref);
+  if (!referrer || !isEthAddress(referrer)) {
+    throw new TradeApiError(400, "BAD_REFERRAL_CODE", "That invite link is not valid.");
   }
   if (referred === referrer) {
     throw new TradeApiError(400, "SELF_REFERRAL", "You cannot refer yourself.");
-  }
-  if (!verifyReferralProof(referred, referrer, proof)) {
-    throw new TradeApiError(401, "BAD_PROOF", "Could not verify control of the referred wallet.");
   }
 
   // RETURNING tells us whether THIS statement inserted the row. Without it

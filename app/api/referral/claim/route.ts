@@ -6,7 +6,14 @@ import { TradeApiError } from "@/lib/uniswap-server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type Body = { referredWallet?: unknown; referrerWallet?: unknown; proof?: unknown };
+type Body = {
+  referredWallet?: unknown;
+  /** Opaque invite code, or a raw 0x address from a pre-code link. */
+  ref?: unknown;
+  /** Accepted for links minted before opaque codes existed. */
+  referrerWallet?: unknown;
+  proof?: unknown;
+};
 
 function parseProof(raw: unknown): WalletProof {
   if (!raw || typeof raw !== "object") {
@@ -34,9 +41,17 @@ export async function POST(req: Request) {
 
     const body = await readJsonBody<Body>(req);
     const referredWallet = typeof body.referredWallet === "string" ? body.referredWallet.trim() : "";
-    const referrerWallet = typeof body.referrerWallet === "string" ? body.referrerWallet.trim() : "";
-    if (!referredWallet || !referrerWallet) {
-      throw new TradeApiError(400, "MISSING_WALLET_ADDRESS", "referredWallet and referrerWallet are both required.");
+    // `ref` is the invite as the user saw it — an opaque code, or a raw
+    // address from a link minted before codes existed. `referrerWallet` is
+    // the old field name, still accepted so an early link keeps working.
+    const ref =
+      typeof body.ref === "string" && body.ref.trim()
+        ? body.ref.trim()
+        : typeof body.referrerWallet === "string"
+          ? body.referrerWallet.trim()
+          : "";
+    if (!referredWallet || !ref) {
+      throw new TradeApiError(400, "MISSING_REF", "referredWallet and ref are both required.");
     }
 
     // The referred wallet must PROVE it controls the address being
@@ -45,7 +60,7 @@ export async function POST(req: Request) {
     // lib/referral-server.ts's verifyReferralProof for the full reasoning.
     const proof = parseProof(body.proof);
 
-    const result = await claimReferral(referredWallet, referrerWallet, proof);
+    const result = await claimReferral(referredWallet, ref, proof);
     return publicJson(result);
   } catch (err) {
     return publicError(err, "Unexpected error recording referral.");
