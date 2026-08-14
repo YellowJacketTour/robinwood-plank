@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, Share2, Users } from "lucide-react";
 import { useWallet } from "@/lib/wallet-context";
+import { buildWalletProof, REFERRAL_PROOF_DOMAIN } from "@/lib/wallet-proof-client";
 
 type ReferralStatus = { enabled: boolean; configured: boolean };
 type ReferralInfo = { referredBy: string | null; referredCount: number };
@@ -70,6 +71,9 @@ export default function ReferralPanel() {
   const [status, setStatus] = useState<ReferralStatus | null>(null);
   const [info, setInfo] = useState<ReferralInfo | null>(null);
   const [copied, setCopied] = useState(false);
+  const [pendingRef, setPendingRef] = useState<string | null>(null);
+  const [claiming, setClaiming] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
   const claimedRef = useRef(false);
 
   // Capture ?ref= into localStorage on every mount, unconditionally --
@@ -96,28 +100,53 @@ export default function ReferralPanel() {
     };
   }, []);
 
-  // Auto-claim: only once per page load, only once a wallet is actually
-  // connected, only when a referral code is actually on file (URL param or
-  // the persisted one from an earlier page view). Never re-claims on every
-  // render, and the server independently rejects a self-referral or a
-  // second, different referrer for a wallet that already has one on file
-  // (lib/referral-server.ts's own immutability guarantee) -- this is a
-  // convenience trigger, not the source of truth for correctness.
+  // A pending referral is surfaced as an explicit action, NOT auto-claimed.
+  //
+  // The claim now requires a signature from the referred wallet (attribution
+  // is permanent and has no repair path -- see lib/referral-server.ts). That
+  // makes silent auto-claim the wrong shape twice over: it would fire an
+  // unexplained personal_sign prompt the instant a wallet connects, and it
+  // would ask someone to sign a permanent record without saying so. So the
+  // panel asks, explains what the signature does, and only then claims.
   useEffect(() => {
-    if (!status?.enabled || !status?.configured || !account || claimedRef.current) return;
+    if (!status?.enabled || !status?.configured || !account) return;
     const ref = getPendingReferral();
-    if (!ref || ref.toLowerCase() === account.toLowerCase()) return;
-    claimedRef.current = true;
-    fetch("/api/referral/claim", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ referredWallet: account, referrerWallet: ref }),
-    })
-      .then(() => clearPendingReferral())
-      .catch(() => {
-        /* best-effort -- stays in localStorage, retried next time this mounts */
-      });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPendingRef(ref && ref.toLowerCase() !== account.toLowerCase() ? ref : null);
   }, [status, account]);
+
+  async function handleClaim() {
+    if (!account || !pendingRef || claimedRef.current) return;
+    claimedRef.current = true;
+    setClaiming(true);
+    setClaimError(null);
+    try {
+      const proof = await buildWalletProof(account, REFERRAL_PROOF_DOMAIN, "claim", {
+        referred: account.toLowerCase(),
+        referrer: pendingRef.toLowerCase(),
+      });
+      const resp = await fetch("/api/referral/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ referredWallet: account, referrerWallet: pendingRef, proof }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.message || data.error || `status ${resp.status}`);
+      clearPendingReferral();
+      setPendingRef(null);
+      setInfo((prev) => ({
+        referredBy: data.referrerWallet ?? pendingRef,
+        referredCount: prev?.referredCount ?? 0,
+      }));
+    } catch (err) {
+      // Rejecting the signature must be recoverable, not a dead end: the
+      // code stays in localStorage and the button comes back.
+      claimedRef.current = false;
+      setClaimError(err instanceof Error ? err.message : "Could not record the invite.");
+    } finally {
+      setClaiming(false);
+    }
+  }
 
   useEffect(() => {
     if (!status?.enabled || !status?.configured || !account) return;
@@ -221,6 +250,30 @@ export default function ReferralPanel() {
               {copied ? "Copied!" : "Copy"}
             </button>
           </div>
+          {pendingRef && !info?.referredBy && (
+            <div className="space-y-2 rounded-lg border border-gold-500/30 bg-gold-500/10 px-3 py-2.5">
+              <p className="text-[0.72rem] leading-snug text-gold-300">
+                You arrived from {shortAddr(pendingRef)}&apos;s invite. Confirming signs a message
+                with your wallet to prove it&apos;s yours — free, no transaction, no gas. This is
+                recorded <strong>permanently</strong> and can&apos;t be changed afterwards.
+              </p>
+              <button
+                type="button"
+                onClick={handleClaim}
+                disabled={claiming}
+                className="flex min-h-10 w-full items-center justify-center rounded-md bg-gold-500 px-3 text-xs font-bold uppercase tracking-wide text-on-gold transition-colors hover:bg-gold-400 disabled:opacity-60"
+              >
+                {claiming ? "Waiting for signature…" : "Confirm invite"}
+              </button>
+            </div>
+          )}
+
+          {claimError && (
+            <p className="rounded-lg border border-red-500/30 bg-red-950/20 px-3 py-2 text-[0.72rem] text-red-300">
+              {claimError}
+            </p>
+          )}
+
           {info?.referredBy && (
             <p className="text-[0.68rem] text-cream-muted">
               You were invited by {shortAddr(info.referredBy)}.
