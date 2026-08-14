@@ -118,6 +118,11 @@ jobs:
       NEXT_PUBLIC_ZEROX_ENABLED: ${{ vars.NEXT_PUBLIC_ZEROX_ENABLED || 'false' }}
       NEXT_PUBLIC_ZEROX_CROSSCHAIN_ENABLED: ${{ vars.NEXT_PUBLIC_ZEROX_CROSSCHAIN_ENABLED || 'false' }}
       NEXT_PUBLIC_CROSSCHAIN_ENABLED: ${{ vars.NEXT_PUBLIC_CROSSCHAIN_ENABLED || 'false' }}
+      # MoonPay fiat ramp. Build-time like the flags above, which is the whole
+      # point of it being a VARIABLE: turning the ramp on or off is a rebuild
+      # + redeploy, NOT an env edit on the box. Nothing appears for users
+      # until this is 'true' AND the server has the MOONPAY_* secrets below.
+      NEXT_PUBLIC_MOONPAY_ENABLED: ${{ vars.NEXT_PUBLIC_MOONPAY_ENABLED || 'false' }}
       # 'reown' swaps the connect surface to AppKit; unset keeps the legacy
       # WalletConnect QR modal. Off in production until dogfooded.
       NEXT_PUBLIC_WALLET_UI: ${{ vars.NEXT_PUBLIC_WALLET_UI || '' }}
@@ -246,6 +251,10 @@ jobs:
           UNISWAP_API_KEY: ${{ secrets.UNISWAP_API_KEY }}
           RPC_URL: ${{ secrets.RPC_URL }}
           ZEROX_API_KEY: ${{ secrets.ZEROX_API_KEY }}
+          MOONPAY_API_KEY: ${{ secrets.MOONPAY_API_KEY }}
+          MOONPAY_SECRET_KEY: ${{ secrets.MOONPAY_SECRET_KEY }}
+          MOONPAY_WEBHOOK_KEY: ${{ secrets.MOONPAY_WEBHOOK_KEY }}
+          MOONPAY_ENV: ${{ vars.MOONPAY_ENV || 'sandbox' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -304,6 +313,38 @@ jobs:
               "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.zerox-api-key.${RELEASE_SHA}"
             rm -f "$zerox_secret"
           fi
+          # MoonPay fiat ramp — four server-side values, staged exactly like
+          # the two above (file over scp, never argv). A loop rather than four
+          # more copies of the same eight lines; the mapping is
+          # ENV_VAR_NAME:staged-file-basename.
+          #
+          # MOONPAY_SECRET_KEY (sk_*) signs outgoing checkout URLs;
+          # MOONPAY_WEBHOOK_KEY (wk_*) verifies inbound order webhooks. They
+          # are DIFFERENT secrets from the MoonPay dashboard — swapping them
+          # breaks both directions at once, so they are staged separately and
+          # never derived from one another.
+          #
+          # Any absent value is simply skipped: the ramp stays hidden
+          # (NEXT_PUBLIC_MOONPAY_ENABLED is independent), and a missing
+          # webhook key makes /api/moonpay/webhook return 503 rather than
+          # silently accepting unsigned events.
+          for pair in \
+            "MOONPAY_API_KEY:moonpay-api-key" \
+            "MOONPAY_SECRET_KEY:moonpay-secret-key" \
+            "MOONPAY_WEBHOOK_KEY:moonpay-webhook-key" \
+            "MOONPAY_ENV:moonpay-env"; do
+            var_name="${pair%%:*}"
+            file_name="${pair#*:}"
+            var_value="$(printenv "$var_name" || true)"
+            if [ -n "$var_value" ]; then
+              staged="$RUNNER_TEMP/$file_name"
+              printf '%s' "$var_value" > "$staged"
+              retry scp -i "$HOME/.ssh/inmotion" -P "$port" \
+                "$staged" \
+                "${INMOTION_USER}@${INMOTION_HOST}:${INMOTION_APP_DIR}/shared/runtime-secrets/.${file_name}.${RELEASE_SHA}"
+              rm -f "$staged"
+            fi
+          done
 
       - name: Migrate, activate, and restart Passenger
         shell: bash
@@ -351,6 +392,27 @@ jobs:
             mv -f "$env_file.next" "$env_file"
             rm -f "$staged_zerox_key"
           fi
+          # Same upsert for the MoonPay values, looped for the same reason as
+          # the staging side. Each is independent: staging only MOONPAY_ENV
+          # (say, to move sandbox -> production) leaves the existing keys in
+          # place rather than clearing them.
+          for pair in \
+            "moonpay-api-key:MOONPAY_API_KEY" \
+            "moonpay-secret-key:MOONPAY_SECRET_KEY" \
+            "moonpay-webhook-key:MOONPAY_WEBHOOK_KEY" \
+            "moonpay-env:MOONPAY_ENV"; do
+            file_name="${pair%%:*}"
+            var_name="${pair#*:}"
+            staged_moonpay="$app_dir/shared/runtime-secrets/.${file_name}.${release_sha}"
+            if [ -s "$staged_moonpay" ]; then
+              env_file="$app_dir/shared/.env.production"
+              grep -v "^${var_name}=" "$env_file" > "$env_file.next" || true
+              printf '%s=%s\n' "$var_name" "$(cat "$staged_moonpay")" >> "$env_file.next"
+              chmod 600 "$env_file.next"
+              mv -f "$env_file.next" "$env_file"
+              rm -f "$staged_moonpay"
+            fi
+          done
           release_dir="$app_dir/releases/$release_sha"
           mkdir -p "$release_dir" "$app_dir/shared" "$app_dir/tmp" "$app_dir/logs"
           tar -xzf "$app_dir/incoming/$release_sha.tgz" -C "$release_dir"

@@ -294,6 +294,37 @@ The PostgreSQL password remains only in the server's `.env.production`.
 
 `NEXT_PUBLIC_*` values are build inputs, not runtime secrets.
 
+### Enabling the MoonPay fiat ramp
+
+The ramp ships inert. Turning it on takes two secrets, one variable, and one
+setting in MoonPay's own dashboard — all four, or it stays hidden or half-works.
+
+1. **Actions secrets** (staged to the server as files over `scp`, never argv,
+   then upserted into `shared/.env.production` — same path as `ZEROX_API_KEY`):
+   - `MOONPAY_API_KEY` — publishable key (`pk_test_*` / `pk_live_*`).
+   - `MOONPAY_SECRET_KEY` — `sk_*`. Signs the checkout URLs we send out.
+   - `MOONPAY_WEBHOOK_KEY` — `wk_*`. Verifies the order webhooks MoonPay sends
+     back. **A different secret from `sk_*`**, on the same dashboard tab.
+     Swapping the two breaks both directions at once.
+2. **Repository variables**:
+   - `NEXT_PUBLIC_MOONPAY_ENABLED=true` — build-time, so flipping it is a
+     rebuild + redeploy, *not* an edit on the box. Leaving it unset/false
+     hides the panel no matter what else is configured.
+   - `MOONPAY_ENV=sandbox` until live keys are approved, then `production`.
+3. **In the MoonPay dashboard**, point the webhook URL at
+   `https://plank.love/api/moonpay/webhook`.
+
+Live keys require MoonPay merchant onboarding/KYB, which has a lead time —
+start it before it blocks a launch. Sandbox keys are self-serve.
+
+Verify after deploying: `/api/moonpay/status` should report
+`{"enabled":true,"configured":true,"sandbox":…}`. If `MOONPAY_WEBHOOK_KEY` is
+missing, `/api/moonpay/webhook` returns **503** on every delivery and no order
+ever reaches a confirmed state in the UI — it will never silently accept an
+unsigned event. Order rows land in `moonpay_orders` (migration 011); that
+table is also the only place merchant-key abuse would show up, as orders we
+did not originate.
+
 ## 9. Automatic CI/CD behavior
 
 Pull requests to `dev` and `master` run:
