@@ -31,10 +31,33 @@
 import hardhat from "hardhat";
 const { ethers } = await hardhat.network.create();
 
+/**
+ * CONFIRMED Robinhood Chain mainnet addresses (verified on-chain
+ * 2026-08-14). Env vars override these; unset falls back to the confirmed
+ * value so the only thing you MUST still supply is CASINO_V2_ROUTER (the
+ * Uniswap v2 Router02 for factory 0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f
+ * -- confirm it before deploying; swapExactETHForTokens must route against
+ * the pair below).
+ */
+const CONFIRMED: Record<string, string> = {
+  // $PLANK ERC20Burnable.
+  CASINO_PLANK_TOKEN: "0x69420eaf0eBF43E08F621B014f25cEfDfA7e2DDc",
+  // WETH (verified proxy over Arbitrum aeWETH; see lib/constants.ts).
+  CASINO_WETH: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+  // The DEEP PLANK/WETH v2 pair: token0=WETH, token1=PLANK, factory
+  // 0x8bceaa40...937f. Both the burn venue and the TWAP price source.
+  CASINO_V2_PAIR: "0x01b1BEf6fBA02c846eA5c4Ff59193988B5f86F73",
+  // The shared DrandBeacon ALREADY deployed and already relayed for the
+  // vault (see docs/marketplank/DEPLOY-V3-RUNBOOK.md + relay-drand.yml) --
+  // reused here, so the casino gets verified randomness from infrastructure
+  // that is already running. No new beacon, no new relay.
+  CASINO_DRAND_BEACON: "0x87d584df130FED0Fe540954eD48CE2691A18D619",
+};
+
 function required(name: string): string {
-  const v = process.env[name]?.trim();
-  if (!v || !/^0x[0-9a-fA-F]{40}$/.test(v)) {
-    throw new Error(`Missing/invalid required address env var ${name} (got: ${v ?? "unset"})`);
+  const v = (process.env[name]?.trim() || CONFIRMED[name] || "").trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(v)) {
+    throw new Error(`Missing/invalid required address env var ${name} (got: ${v || "unset"})`);
   }
   return v;
 }

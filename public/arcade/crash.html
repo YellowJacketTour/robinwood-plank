@@ -1306,6 +1306,12 @@ let flightProgress = 0; // 0..1, drives ascent height -- smoothed toward targetF
 // renders ~60fps but the underlying value only changed a few times a
 // second. flightProgress now eases toward this target every frame instead.
 let targetFlightProgress = 0;
+// Vertical velocity of the ascent, integrated by a critically-damped
+// spring in frame() so the climb has real momentum and acceleration --
+// it eases into motion, chases the (continuously-rising) target with a
+// little inertia, and settles without stair-stepping. Replaces the old
+// exponential ease, which both lagged and stepped.
+let flightVel = 0;
 let crashedAt = null;
 let launchAt = null; // performance.now() at moment LIVE begins -- ignition kick
 let shakeAmount = 0;
@@ -1355,7 +1361,12 @@ function frame() {
     const xStr = bpsToXStr(estBps);
     lastMult = Number(xStr);
     setMultReadout(xStr, "live");
-    targetFlightProgress = 1 - 1 / (1 + (Number(xStr) - 1) / 2.5);
+    // Drive the ascent from the CONTINUOUS multiplier (estBps/10000), NOT
+    // the 2-decimal display string -- feeding the rounded string made the
+    // height jump in 0.01 steps (the stair-stepping). This compression maps
+    // multiplier -> [0,1) altitude, smooth at every instant.
+    const mExact = estBps / 10000;
+    targetFlightProgress = 1 - 1 / (1 + (mExact - 1) / 2.5);
     // The contract's real instantaneous rate of climb is the derivative
     // of _multiplierAt: 40 + (2/5)*elapsedBlocks bps/block. Normalized
     // against ~358 blocks (where the re-derived curve reaches ~5x --
@@ -1369,11 +1380,19 @@ function frame() {
     $("substatus").textContent = secsLeft > 0 ? `LAUNCHING IN ${secsLeft}s` : "LOCKING…";
   }
   velocityNorm += (targetVelocityNorm - velocityNorm) * Math.min(1, dt * 3);
-  // Tighter tracking than before (was dt*4): now that targetFlightProgress
-  // itself updates continuously every frame instead of jumping once per
-  // poll, flightProgress can afford to follow it more closely without
-  // reintroducing visible stepping.
-  flightProgress += (targetFlightProgress - flightProgress) * Math.min(1, dt * 9);
+  // Critically-damped spring toward the (continuously-rising) target: real
+  // acceleration physics rather than an exponential ease. The craft builds
+  // velocity into the climb, chases the target with a touch of inertia, and
+  // settles without overshoot or stepping. omega sets responsiveness; at
+  // critical damping (zeta=1) there is no bounce. Semi-implicit Euler,
+  // stable for the dt<=0.05 clamp above.
+  {
+    const omega = 6.0; // rad/s -- ~0.3s settle, snappy but weighty
+    const accel = omega * omega * (targetFlightProgress - flightProgress) - 2 * omega * flightVel;
+    flightVel += accel * dt;
+    flightProgress += flightVel * dt;
+    if (flightProgress < 0) { flightProgress = 0; if (flightVel < 0) flightVel = 0; }
+  }
 
   const progress = phaseState === "crashed" ? Math.min(flightProgress, 1) : flightProgress;
   const groundY = -1.5, topY = 30;
@@ -1472,10 +1491,15 @@ function frame() {
 
   // Chalkstronaut position + tilt
   if (chalkstronautSprite) {
-    chalkstronautSprite.position.set(Math.sin(t * 0.4) * (phaseState === "live" ? 0.4 : 0), astronautY, 0);
+    // Sway narrows as thrust builds (a craft under hard acceleration
+    // tracks straighter), and a small velocity-driven lean sells the
+    // G-force -- the nose pitches with how fast it's actually climbing.
+    const swayAmp = phaseState === "live" ? 0.4 * (1 - velocityNorm * 0.6) : 0;
+    chalkstronautSprite.position.set(Math.sin(t * 0.4) * swayAmp, astronautY, 0);
+    const accelLean = phaseState === "live" ? -Math.max(-0.25, Math.min(0.25, flightVel * 0.5)) : 0;
     chalkstronautSprite.material.rotation = phaseState === "crashed"
       ? -Math.min((performance.now() - (crashedAt || performance.now())) / 260, 1) * 1.1
-      : Math.sin(t * 1.1) * 0.06;
+      : Math.sin(t * 1.1) * 0.06 * (1 - velocityNorm) + accelLean;
     thrusterLight.position.copy(chalkstronautSprite.position).y -= 1;
     // Engine light flickers faster and burns hotter as velocityNorm rises
     // -- a real rocket's exhaust gets more violent under higher thrust,
@@ -2208,7 +2232,7 @@ async function refresh() {
     const hasCashedOut = cashOutBlock > 0n;
 
     if (phase === 0) {
-      flightProgress = 0; targetFlightProgress = 0; crashedAt = null;
+      flightProgress = 0; targetFlightProgress = 0; flightVel = 0; crashedAt = null;
       setMultReadout("1.00", "idle");
       // Anchor real wall-clock time to the chain's whole-second deadline;
       // frame() ticks the displayed countdown down every frame from this,
