@@ -152,6 +152,59 @@
     50% { box-shadow: 0 0 140px rgba(255,200,87,0.75); }
   }
 
+  /* Post-crash SCOREBOARD -- the whole roster for the round: who exited in
+     time and at what multiplier, who was caught in the crash, and the
+     totals. Built entirely from the round's own emitted events. Slides up
+     from the bottom of the stage; pointer-events off so it never blocks. */
+  .scoreboard {
+    position: absolute; left: 50%; bottom: 12px; transform: translate(-50%, 12px);
+    z-index: 26; width: min(440px, calc(100% - 24px));
+    background: rgba(8,11,20,0.92); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 16px;
+    padding: 14px 16px 12px; opacity: 0; pointer-events: none;
+    box-shadow: 0 12px 44px rgba(0,0,0,0.55);
+    transition: opacity .35s ease, transform .4s cubic-bezier(.2,1.2,.4,1);
+  }
+  .scoreboard.show { opacity: 1; transform: translate(-50%, 0); }
+  .sb-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+    border-bottom: 1px solid var(--line); padding-bottom: 9px; margin-bottom: 9px;
+  }
+  .sb-head .sb-round { font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--ink-dim); }
+  .sb-head .sb-crash { font-family: var(--font-display); font-size: 26px; line-height: 1;
+    color: var(--lose); text-shadow: 0 0 30px rgba(255,77,106,0.45); }
+  .sb-head .sb-crash small { font-size: 11px; font-family: var(--font-mono);
+    letter-spacing: .1em; display: block; text-align: right; color: var(--ink-dim);
+    text-shadow: none; margin-bottom: 2px; }
+  .sb-sect { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em;
+    text-transform: uppercase; margin: 8px 0 5px; display: flex; gap: 6px; align-items: center; }
+  .sb-sect.win { color: var(--win); }
+  .sb-sect.bust { color: var(--lose); }
+  .sb-sect .sb-count { color: var(--ink-dim); font-weight: 400; letter-spacing: .06em; }
+  .sb-rows { display: flex; flex-direction: column; gap: 3px; max-height: 168px; overflow-y: auto; }
+  .sb-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center;
+    font-family: var(--font-mono); font-size: 12px; padding: 4px 8px; border-radius: 8px;
+    background: rgba(255,255,255,0.03); }
+  .sb-row.me { outline: 1px solid rgba(255,255,255,0.22); background: rgba(255,255,255,0.07); }
+  .sb-row .sb-who { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sb-row .sb-who .sb-tag { color: var(--ink-dim); font-size: 10px; margin-left: 5px; }
+  .sb-row .sb-x { font-family: var(--font-display); font-variant-numeric: tabular-nums; }
+  .sb-row.win .sb-x { color: var(--win); }
+  .sb-row.bust .sb-x { color: var(--lose); opacity: .8; }
+  .sb-row .sb-amt { font-variant-numeric: tabular-nums; text-align: right; min-width: 78px; }
+  .sb-row.win .sb-amt { color: var(--win-glow); }
+  .sb-row.bust .sb-amt { color: var(--ink-dim); }
+  .sb-empty { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-dim);
+    font-style: italic; padding: 3px 8px; }
+  .sb-foot { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+    border-top: 1px solid var(--line); margin-top: 10px; padding-top: 9px; }
+  .sb-stat { text-align: center; }
+  .sb-stat .sb-k { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-dim); }
+  .sb-stat .sb-v { font-family: var(--font-display); font-size: 15px; font-variant-numeric: tabular-nums;
+    margin-top: 2px; }
+
   /* Stock-ticker-style rising multiplier curve -- the other universal
      crash-game primitive. Sits low in the stage, behind the 3D scene's
      focal point, so it reads as data readout rather than competing with
@@ -372,6 +425,12 @@
       <div class="result-mult" id="resultMult"></div>
       <div class="result-delta" id="resultDelta"></div>
     </div>
+    <!-- Post-crash SCOREBOARD: the whole roster for the round -- who exited
+         in time (with the exact multiplier they locked), who was caught in
+         the crash, and the totals. Built from the round's own emitted
+         events (BetPlaced / CashedOut / RoundCrashed / ResultRegistered /
+         Claimed), not fabricated. -->
+    <div class="scoreboard" id="scoreboard"></div>
   </div>
 
   <div class="deck">
@@ -1630,6 +1689,7 @@ function maybeDismissBoot() {
 // ── chain plumbing ──────────────────────────────────────────────────────
 let provider, signer, crash, abi;
 let pollTimer = null;
+let pollTimer2 = null;
 
 // ── PlankBank instant-play (deposit once, play with a browser session key,
 //    withdraw what's left). These are the ONLY new functions beyond the V2
@@ -2102,6 +2162,147 @@ function hideOutcome() {
   $("resultCard").classList.remove("show");
 }
 
+// ── Post-crash SCOREBOARD ───────────────────────────────────────────────
+// The full roster for a crashed round, built from the round's OWN emitted
+// events -- no fabricated data. Winner/loser is derived deterministically
+// from each player's cash-out block vs the round's real crash point (the
+// same rule the contract settles on), so it's correct the instant the crash
+// lands, before the keeper has even registered anyone. When ResultRegistered
+// /Claimed events do arrive, they take over as the authoritative source and
+// real payouts replace the pari-mutuel estimate.
+let scoreboardTimer = null;
+const _shortAddr = (a) => a.slice(0, 6) + "…" + a.slice(-4);
+
+async function renderScoreboard(roundId, round) {
+  // Only for a real crash (a voided round has no crash multiplier / roster).
+  if (!(round.crashMultiplierBps > 0n)) return;
+
+  const [bets, cashes, registers, claims] = await Promise.all([
+    crash.queryFilter(crash.filters.BetPlaced(roundId)),
+    crash.queryFilter(crash.filters.CashedOut(roundId)),
+    crash.queryFilter(crash.filters.ResultRegistered(roundId)),
+    crash.queryFilter(crash.filters.Claimed(roundId)),
+  ]);
+
+  const lockBlock = Number(round.lockBlock);
+  const crashElapsed = Number(round.crashElapsedBlocks);
+  const me = signer ? signer.address.toLowerCase() : null;
+
+  const stakeBy = new Map();
+  for (const e of bets) stakeBy.set(e.args.player.toLowerCase(), e.args.amount);
+  const cashBy = new Map();
+  for (const e of cashes) cashBy.set(e.args.player.toLowerCase(), { atBlock: Number(e.args.atBlock), preset: e.args.preset });
+  const payoutBy = new Map();
+  for (const e of claims) payoutBy.set(e.args.player.toLowerCase(), e.args.payout);
+  const registeredWon = new Map();
+  for (const e of registers) registeredWon.set(e.args.player.toLowerCase(), e.args.won);
+
+  const winners = [], busted = [];
+  let poolWagered = 0n, lostTotal = 0n;
+  for (const [addr, stake] of stakeBy) {
+    poolWagered += stake;
+    const c = cashBy.get(addr);
+    // Authoritative once the keeper registers; otherwise derive from the
+    // real crash point exactly as the contract will.
+    const won = registeredWon.has(addr)
+      ? registeredWon.get(addr)
+      : (!!c && (c.atBlock - lockBlock) <= crashElapsed);
+    if (won && c) {
+      const exitBps = multiplierAtBlocksBps(c.atBlock - lockBlock);
+      winners.push({ addr, stake, exitBps, exitX: exitBps / 10000, preset: c.preset, payout: payoutBy.get(addr) ?? null });
+    } else {
+      busted.push({ addr, stake, cashedLate: !!c });
+      lostTotal += stake;
+    }
+  }
+  winners.sort((a, b) => b.exitBps - a.exitBps);
+  busted.sort((a, b) => (b.stake > a.stake ? 1 : b.stake < a.stake ? -1 : 0));
+
+  // Prize pool to survivors = pool minus rake (use the real settled figure
+  // once available). Estimate each winner's pari-mutuel share by weight
+  // (stake x locked multiplier) until their real Claimed payout lands.
+  const distributable = round.distributable > 0n ? round.distributable : (poolWagered * 955n) / 1000n;
+  let totalWeight = 0n;
+  for (const w of winners) { w.weight = (w.stake * BigInt(w.exitBps)) / 10000n; totalWeight += w.weight; }
+
+  const fmt = (wei) => (+ethers.formatEther(wei)).toFixed(4);
+  const rowsHtml = (arr, kind) => arr.length ? arr.map((r) => {
+    const meTag = r.addr === me ? '<span class="sb-tag">YOU</span>' : '';
+    if (kind === "win") {
+      const pay = r.payout != null ? "+" + fmt(r.payout) : (totalWeight > 0n ? "~" + fmt((distributable * r.weight) / totalWeight) : "—");
+      const presetTag = r.preset ? '<span class="sb-tag">auto</span>' : '';
+      return `<div class="sb-row win${r.addr === me ? " me" : ""}"><span class="sb-who">${_shortAddr(r.addr)}${meTag}${presetTag}</span><span class="sb-x">${r.exitX.toFixed(2)}x</span><span class="sb-amt">${pay} ETH</span></div>`;
+    }
+    const why = r.cashedLate ? '<span class="sb-tag">too late</span>' : '<span class="sb-tag">rode it</span>';
+    return `<div class="sb-row bust${r.addr === me ? " me" : ""}"><span class="sb-who">${_shortAddr(r.addr)}${meTag}${why}</span><span class="sb-x">—</span><span class="sb-amt">-${fmt(r.stake)} ETH</span></div>`;
+  }).join("") : '<div class="sb-empty">' + (kind === "win" ? "No survivors — the whole pot rolls into the next round." : "Everyone cashed out in time.") + "</div>";
+
+  const el = $("scoreboard");
+  el.innerHTML =
+    `<div class="sb-head">
+       <div class="sb-round">Round #${roundId.toString()}<br/>Scoreboard</div>
+       <div class="sb-crash"><small>Crashed at</small>${bpsToXStr(round.crashMultiplierBps)}x</div>
+     </div>
+     <div class="sb-sect win">Exited in time <span class="sb-count">${winners.length}</span></div>
+     <div class="sb-rows">${rowsHtml(winners, "win")}</div>
+     <div class="sb-sect bust">Caught in the crash <span class="sb-count">${busted.length}</span></div>
+     <div class="sb-rows">${rowsHtml(busted, "bust")}</div>
+     <div class="sb-foot">
+       <div class="sb-stat"><div class="sb-k">Pool</div><div class="sb-v">${fmt(poolWagered)}</div></div>
+       <div class="sb-stat"><div class="sb-k">To survivors</div><div class="sb-v" style="color:var(--win)">${winners.length ? fmt(distributable) : "0.0000"}</div></div>
+       <div class="sb-stat"><div class="sb-k">Lost</div><div class="sb-v" style="color:var(--lose)">${fmt(lostTotal)}</div></div>
+     </div>`;
+  el.classList.add("show");
+}
+
+function hideScoreboard() {
+  const el = $("scoreboard");
+  if (el) el.classList.remove("show");
+}
+
+// Show the scoreboard at the crash and keep it refreshing (payouts fill in
+// as the keeper registers + claims), then auto-dismiss it. Kept independent
+// of currentRoundId, since the keeper can advance the round past the crash
+// before the UI's own poll would ever catch phase 2.
+let scoreboardDismiss = null;
+function showScoreboardForRound(roundId, round) {
+  clearTimeout(scoreboardTimer);
+  clearTimeout(scoreboardDismiss);
+  renderScoreboard(roundId, round).catch(() => {});
+  // Re-render a few times so real Claimed payouts replace the estimates as
+  // the keeper registers + claims each winner.
+  let n = 0;
+  const poll = () => {
+    if (n++ >= 5) return;
+    scoreboardTimer = setTimeout(async () => {
+      try { const r = await crash.rounds(roundId); await renderScoreboard(roundId, r); } catch (_) {}
+      poll();
+    }, 1500);
+  };
+  poll();
+  // Auto-dismiss after the roster has had time to read, unless a newer crash
+  // replaces it first.
+  scoreboardDismiss = setTimeout(hideScoreboard, 9000);
+}
+
+// Event-driven: watch for the newest RoundCrashed and show its scoreboard,
+// no matter what the current round is now. Runs on the same poll cadence.
+let lastScoreboardRound = -1n;
+async function pollScoreboard() {
+  if (!crash) return;
+  try {
+    const evs = await crash.queryFilter(crash.filters.RoundCrashed());
+    if (!evs.length) return;
+    const last = evs[evs.length - 1];
+    const rid = last.args.roundId;
+    if (rid > lastScoreboardRound) {
+      lastScoreboardRound = rid;
+      const rd = await crash.rounds(rid);
+      if (rd.crashMultiplierBps > 0n) showScoreboardForRound(rid, rd);
+    }
+  } catch (_) { /* transient */ }
+}
+
 // Real celebration, scaled to the real result -- not a fixed-size fireworks
 // burst regardless of outcome. intensityNorm (0..1) is a log scale of the
 // player's own cash-out multiplier: log2 because a crash multiplier is
@@ -2485,6 +2686,7 @@ async function refresh() {
 
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
+  if (pollTimer2) clearInterval(pollTimer2);
   refresh();
   // Was 1200ms. The multiplier/countdown are now driven smoothly every
   // frame regardless of this cadence, but PHASE TRANSITIONS (crash
@@ -2494,6 +2696,7 @@ function startPolling() {
   // to 400ms; these are cheap read-only view calls against a local node,
   // not transactions, so there's no real cost to polling faster.
   pollTimer = setInterval(refresh, 400);
+  pollTimer2 = setInterval(pollScoreboard, 600);
 }
 
 // A per-tab client-side evm_mine heartbeat was tried here and was a real,
