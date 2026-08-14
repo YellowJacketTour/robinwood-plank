@@ -330,6 +330,13 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
             emit RoundVoided(id, r.pool, "under-threshold");
             voided[id] = true;
             r.phase = Phase.SETTLED;
+            // Return any rolled-over SEED to pendingRollover before the new
+            // round starts. The seed has no owning player (carryForwardStake
+            // only recovers per-player stakeOf, never the seed), so if a
+            // voided round's seed weren't recycled here it would be
+            // permanently locked -- a real HIGH found in audit. Recycling
+            // r.rolledOverFromPrevious is exact and non-double-counting.
+            _rescueSeed(r);
             _startRound(0);
             return;
         }
@@ -438,7 +445,21 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         emit RoundVoided(roundId, r.pool, "reveal-timeout");
         voided[roundId] = true;
         r.phase = Phase.SETTLED;
+        // See lockRound's under-threshold void: recycle the seed so it is
+        // never locked in a voided round.
+        _rescueSeed(r);
         _startRound(0);
+    }
+
+    /// Returns a voided round's rolled-over SEED to pendingRollover so it
+    /// seeds a future round instead of being stranded. Zeroes
+    /// rolledOverFromPrevious so a later read can't double-count it.
+    function _rescueSeed(Round storage r) private {
+        uint256 seed = r.rolledOverFromPrevious;
+        if (seed > 0) {
+            r.rolledOverFromPrevious = 0;
+            pendingRollover += seed;
+        }
     }
 
     function claimRake() external nonReentrant {

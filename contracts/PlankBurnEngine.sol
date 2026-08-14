@@ -5,65 +5,86 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.
 
 interface IERC20Burnable {
     function balanceOf(address account) external view returns (uint256);
+    function approve(address spender, uint256 amount) external returns (bool);
     function burn(uint256 amount) external;
 }
 
-/// Minimal surface of Uniswap's Universal Router this contract calls
-/// (see https://developers.uniswap.org/docs/contracts/universal-router).
-interface IUniversalRouter {
-    function execute(bytes calldata commands, bytes[] calldata inputs, uint256 deadline) external payable;
+interface IWETH {
+    function deposit() external payable;
+    function approve(address spender, uint256 amount) external returns (bool);
+}
+
+/// The minimal, CONSTRAINED swap surface this contract calls -- the
+/// Uniswap V3 SwapRouter(02) `exactInput` shape. Critically this is NOT
+/// the general Universal Router: it takes a typed swap with an
+/// engine-chosen `recipient`, not an arbitrary caller-supplied command
+/// program. That single difference is what makes redirection impossible
+/// -- see the header.
+interface ISwapRouter {
+    struct ExactInputParams {
+        bytes path;
+        address recipient;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+    }
+
+    function exactInput(ExactInputParams calldata params) external payable returns (uint256 amountOut);
 }
 
 /**
  * PlankBurnEngine -- accumulates ETH earmarked for buyback-and-burn (fed
- * by PlankRakeDistributor.sol) and permissionlessly converts it to real,
+ * by PlankRakeDistributor) and permissionlessly converts it to real,
  * on-chain-burned $PLANK.
  *
- * WHY THIS DOESN'T HARDCODE A SWAP ROUTE, DISCLOSED HONESTLY: a real
- * survey of this repo's own frontend data layer (lib/plank-pools.ts)
- * found $PLANK liquidity is fragmented across MULTIPLE real venues --
- * Uniswap v2/v3/v4 and Sushiswap v3 pools, tracked via DexScreener/
- * GeckoTerminal because there is no single canonical pool. Hardcoding
- * one specific pool/fee-tier here would risk routing against a thin or
- * stale pool the moment liquidity migrates -- a real, concrete failure
- * mode, not a hypothetical one. The actual $PLANK frontend already
- * solves real routing the same way this does: build the swap off-chain
- * (Uniswap's Trading API, which aggregates across all real venues) and
- * submit the resulting calldata on-chain to the real, canonical
- * Universal Router (0x8876789976dEcBfCbBbe364623C63652db8C0904 on
- * Robinhood Chain -- see lib/constants.ts's UNIVERSAL_ROUTER_ADDRESS,
- * cross-checked against this contract's own immutable at deploy time).
- * executeBurn() takes the same shape of caller-supplied route.
+ * SECURITY REWRITE (a real CRITICAL found in audit). The previous version
+ * forwarded native ETH into the Uniswap UNIVERSAL ROUTER with a
+ * caller-supplied command program and only checked the PLANK balance
+ * delta. That was exploitable: the Universal Router's own SWEEP / TRANSFER
+ * commands can pay the forwarded ETH to an arbitrary recipient, so an
+ * attacker could swap dust to >= minPlankOut PLANK (satisfying the delta
+ * check), SWEEP the rest of the ETH to themselves, and burn ~nothing --
+ * draining the engine maxEthPerCall at a time. The balance-delta trick
+ * cannot fix that, because the vulnerability is that a caller-controlled
+ * command interpreter had CUSTODY of the engine's ETH.
  *
- * WHY THAT'S SAFE DESPITE BEING CALLER-SUPPLIED, NOT A TRUST HOLE: the
- * swap's output can ONLY ever flow back to this contract (Universal
- * Router sends output tokens to whatever recipient the caller's own
- * inputs specify, but this function reads the REAL post-swap PLANK
- * balance delta on THIS contract and burns exactly that -- it never
- * forwards, approves, or sends PLANK anywhere else). A caller who
- * supplies a bad route either reverts harmlessly or executes a
- * genuinely poor-price swap -- the worst possible outcome is "less
- * PLANK got burned for the ETH spent," never fund theft, because there
- * is no code path that could ever send the swap's output, or any of
- * this contract's ETH, to an arbitrary address. keeperRewardBps exists
- * to make honest, careful routing worth someone's while.
+ * THE FIX -- the engine, never the caller, controls the destination:
+ *   1. The engine wraps its OWN ETH into WETH.
+ *   2. It approves the swap router for exactly that amount.
+ *   3. It calls a CONSTRAINED exactInput swap with `recipient =
+ *      address(this)` hardcoded -- the caller supplies ONLY the pool
+ *      `path` and a `minPlankOut`, never a command program and never a
+ *      recipient. The router pulls exactly the approved WETH and sends the
+ *      output PLANK back to the engine; there is no SWEEP/TRANSFER lever,
+ *      so the ETH cannot be redirected.
+ *   4. The approval is reset to 0, the real received PLANK is measured,
+ *      required to be >= minPlankOut, and 100% of it is burned.
+ * The path is additionally validated to start at WETH and end at PLANK, so
+ * a caller can't route the input somewhere else or receive a different
+ * token. The worst a caller can now do is pick a bad pool (a poor price,
+ * bounded by minPlankOut) -- they can never take custody of the ETH.
+ *
+ * DEPLOY REQUIREMENT, DISCLOSED HONESTLY: `swapRouter` MUST be a real,
+ * confirmed exactInput-capable V3-style SwapRouter on the target chain
+ * (NOT the general Universal Router -- that reintroduces the hole). This
+ * was not independently confirmed as deployed on Robinhood Chain as part
+ * of writing this, exactly like the VRF/Entropy contracts' own disclosed
+ * deploy checks. Confirm it before mainnet.
+ *
+ * RESIDUAL (MEDIUM, disclosed): executeBurn pays keeperRewardBps of the
+ * ETH spent to whoever calls it. A griefer can still repeatedly burn at a
+ * self-set-low minPlankOut / poor price purely to farm that reward,
+ * bleeding the queue at bad prices (though every call still burns real
+ * PLANK). It is bounded by maxEthPerCall and by keeperRewardBps being
+ * small; without a reliable on-chain PLANK price oracle (liquidity is
+ * fragmented across many pools) a tighter on-chain fairness floor isn't
+ * available. Keep keeperRewardBps small and maxEthPerCall modest.
  */
 contract PlankBurnEngine is ReentrancyGuard {
     IERC20Burnable public immutable plank;
-    IUniversalRouter public immutable universalRouter;
-    address public immutable weth;
+    ISwapRouter public immutable swapRouter;
+    IWETH public immutable weth;
 
-    // Rate limit: caps how much of the accumulated ETH queue a single
-    // executeBurn() call can spend, so one bad-price call (malicious or
-    // just careless) can only ever waste a bounded slice of the queue,
-    // never the whole thing at once.
     uint256 public immutable maxEthPerCall;
-    // Small, fixed share of the ETH actually spent this call, paid to
-    // the caller from this contract's OWN remaining balance (never from
-    // the swap output) -- same keeper-incentive shape used throughout
-    // this protocol's other contracts (see PlankCrashV2.sol's
-    // keeperRewardBps), sized to make honest routing worth doing without
-    // meaningfully diluting the burn.
     uint256 public immutable keeperRewardBps;
 
     uint256 public totalEthSpent;
@@ -77,19 +98,20 @@ contract PlankBurnEngine is ReentrancyGuard {
     error ExceedsRateLimit();
     error NoSwapOutput();
     error SlippageExceeded();
+    error BadPath();
     error EthTransferFailed();
 
     constructor(
         address plank_,
-        address universalRouter_,
+        address swapRouter_,
         address weth_,
         uint256 maxEthPerCall_,
         uint256 keeperRewardBps_
     ) {
-        if (plank_ == address(0) || universalRouter_ == address(0) || weth_ == address(0)) revert ZeroAddress();
+        if (plank_ == address(0) || swapRouter_ == address(0) || weth_ == address(0)) revert ZeroAddress();
         plank = IERC20Burnable(plank_);
-        universalRouter = IUniversalRouter(universalRouter_);
-        weth = weth_;
+        swapRouter = ISwapRouter(swapRouter_);
+        weth = IWETH(weth_);
         maxEthPerCall = maxEthPerCall_;
         keeperRewardBps = keeperRewardBps_;
     }
@@ -98,41 +120,46 @@ contract PlankBurnEngine is ReentrancyGuard {
         emit Received(msg.value);
     }
 
-    /// Permissionless. `ethAmount` must be pre-wrapped/swapped for by the
-    /// caller's own `commands`/`inputs` (a real Universal Router route --
-    /// see this file's header for why that's built off-chain rather than
-    /// hardcoded here). This contract fronts `ethAmount` of its own
-    /// balance as msg.value to the router call; the caller controls
-    /// WHERE that ETH gets routed, never WHERE the output goes (always
-    /// back here, verified by balance delta) or whether it gets burned
-    /// (always, unconditionally).
-    ///
-    /// `minPlankOut` is real slippage protection, and it protects the
-    /// COMMUNITY, not the caller: an honest keeper sets it from the
-    /// current fair price so a sandwich bot cannot force the burn to
-    /// execute at a manipulated, terrible rate (which would burn far less
-    /// $PLANK per ETH than the community deserves). A malicious keeper
-    /// can of course set it to 0 -- but they already control the route,
-    /// so this takes nothing away from them; it only ever ADDS the
-    /// ability for an honest caller to refuse a bad fill. There is no
-    /// setting of minPlankOut that lets anyone extract value; the worst
-    /// case remains "less got burned," never theft.
-    function executeBurn(
-        bytes calldata commands,
-        bytes[] calldata inputs,
-        uint256 ethAmount,
-        uint256 minPlankOut,
-        uint256 deadline
-    ) external nonReentrant {
+    /**
+     * Permissionless. Wraps `ethAmount` of the engine's own balance and
+     * swaps it to $PLANK along the caller-supplied `path`, then burns 100%
+     * of what comes back. The caller controls WHICH pools (`path`) and the
+     * minimum acceptable output (`minPlankOut`); it can never control the
+     * recipient (always this contract) -- see the header for why that's the
+     * whole security model.
+     *
+     * @param path       a V3 swap path, WETH-in .. PLANK-out (validated).
+     * @param ethAmount  how much of the engine's ETH to convert this call.
+     * @param minPlankOut slippage floor; the swap must yield at least this.
+     */
+    function executeBurn(bytes calldata path, uint256 ethAmount, uint256 minPlankOut) external nonReentrant {
         if (ethAmount == 0 || ethAmount > address(this).balance) revert NothingToBurn();
         if (ethAmount > maxEthPerCall) revert ExceedsRateLimit();
+        _validatePath(path);
 
+        // 1. Wrap our own ETH and approve exactly what the swap will pull.
+        weth.deposit{value: ethAmount}();
+        weth.approve(address(swapRouter), ethAmount);
+
+        // 2. Constrained swap: recipient is US, not the caller. The caller
+        //    cannot express "send the ETH/output anywhere else".
         uint256 plankBefore = plank.balanceOf(address(this));
-        universalRouter.execute{value: ethAmount}(commands, inputs, deadline);
+        swapRouter.exactInput(
+            ISwapRouter.ExactInputParams({
+                path: path,
+                recipient: address(this),
+                amountIn: ethAmount,
+                amountOutMinimum: minPlankOut
+            })
+        );
+        // 3. Belt-and-suspenders: drop any residual allowance, and trust
+        //    the measured balance delta over the router's return value.
+        weth.approve(address(swapRouter), 0);
         uint256 received = plank.balanceOf(address(this)) - plankBefore;
         if (received == 0) revert NoSwapOutput();
         if (received < minPlankOut) revert SlippageExceeded();
 
+        // 4. Burn everything received.
         plank.burn(received);
         totalEthSpent += ethAmount;
         totalPlankBurned += received;
@@ -145,5 +172,17 @@ contract PlankBurnEngine is ReentrancyGuard {
         }
 
         emit BurnExecuted(msg.sender, ethAmount, received, keeperReward);
+    }
+
+    /// A V3 path is token(20) fee(3) token(20) [fee(3) token(20)]... . We
+    /// require the input token to be WETH and the output token to be PLANK,
+    /// so the caller can neither spend a different input nor receive a
+    /// different output than the burn intends.
+    function _validatePath(bytes calldata path) private view {
+        // Smallest valid single-hop path: 20 + 3 + 20 = 43 bytes.
+        if (path.length < 43 || (path.length - 20) % 23 != 0) revert BadPath();
+        address first = address(bytes20(path[0:20]));
+        address last = address(bytes20(path[path.length - 20:path.length]));
+        if (first != address(weth) || last != address(plank)) revert BadPath();
     }
 }

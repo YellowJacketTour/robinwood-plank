@@ -33,12 +33,13 @@ describe("Casino keeper — the loop runs itself", () => {
 
     const beacon: any = await (await ethers.getContractFactory("DrandBeaconMock")).deploy(DRAND_PERIOD, DRAND_GENESIS);
     const plank: any = await (await ethers.getContractFactory("MockERC20Burnable")).deploy();
+    const weth: any = await (await ethers.getContractFactory("MockWethToken")).deploy();
     const router: any = await (
-      await ethers.getContractFactory("MockUniversalRouter")
-    ).deploy(await plank.getAddress(), 1000n);
+      await ethers.getContractFactory("MockSwapRouter")
+    ).deploy(await plank.getAddress(), await weth.getAddress(), 1000n);
     const burnEngine: any = await (
       await ethers.getContractFactory("PlankBurnEngine")
-    ).deploy(await plank.getAddress(), await router.getAddress(), deployer.address, ethers.parseEther("100"), 500n);
+    ).deploy(await plank.getAddress(), await router.getAddress(), await weth.getAddress(), ethers.parseEther("100"), 500n);
 
     const nonce = await deployer.getNonce();
     const predictedCrash = ethers.getCreateAddress({ from: deployer.address, nonce: nonce + 2 });

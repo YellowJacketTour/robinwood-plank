@@ -36,13 +36,15 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
 
     const beacon: any = await (await ethers.getContractFactory("DrandBeaconMock")).deploy(DRAND_PERIOD, DRAND_GENESIS);
     const plank: any = await (await ethers.getContractFactory("MockERC20Burnable")).deploy();
+    const weth: any = await (await ethers.getContractFactory("MockWethToken")).deploy();
     const router: any = await (
-      await ethers.getContractFactory("MockUniversalRouter")
-    ).deploy(await plank.getAddress(), MOCK_PLANK_PER_WEI);
+      await ethers.getContractFactory("MockSwapRouter")
+    ).deploy(await plank.getAddress(), await weth.getAddress(), MOCK_PLANK_PER_WEI);
 
     const burnEngine: any = await (
       await ethers.getContractFactory("PlankBurnEngine")
-    ).deploy(await plank.getAddress(), await router.getAddress(), deployer.address, ethers.parseEther("100"), 500n);
+    ).deploy(await plank.getAddress(), await router.getAddress(), await weth.getAddress(), ethers.parseEther("100"), 500n);
+    const burnPath = ethers.concat([await weth.getAddress(), "0x000bb8", await plank.getAddress()]);
 
     // Resolve the immutable dependency cycle by predicting the crash
     // address (airdropPool[nonce] -> distributor[nonce+1] -> crash[nonce+2]).
@@ -84,11 +86,11 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
     });
 
     expect((await crash.getAddress()).toLowerCase()).to.equal(predictedCrash.toLowerCase());
-    return { beacon, plank, router, burnEngine, airdropPool, distributor, crash, deployer, treasury, alice, bob, keeper };
+    return { beacon, plank, router, burnEngine, burnPath, airdropPool, distributor, crash, deployer, treasury, alice, bob, keeper };
   }
 
   it("a full round's rake really flows into a real $PLANK burn AND a real wager-weighted airdrop", async () => {
-    const { beacon, plank, burnEngine, airdropPool, distributor, crash, treasury, alice, bob, keeper } =
+    const { beacon, plank, burnEngine, burnPath, airdropPool, distributor, crash, treasury, alice, bob, keeper } =
       await deployCasino();
 
     // ── Two real bets ──────────────────────────────────────────────
@@ -151,7 +153,7 @@ describe("Casino integration (rake -> burn + airdrop)", () => {
     const before = await plank.totalSupply();
     await burnEngine
       .connect(keeper)
-      .executeBurn("0x", [], ethToBurn, 0n, Math.floor(Date.now() / 1000) + 3600);
+      .executeBurn(burnPath, ethToBurn, 0n);
     // Mock mints then the engine burns -> net supply unchanged, but the
     // engine's counter proves a real burn of the real received amount ran.
     expect(await plank.totalSupply()).to.equal(before);

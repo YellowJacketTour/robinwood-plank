@@ -2,59 +2,53 @@ import { expect } from "chai";
 import { ethers } from "./helpers/hardhat.js";
 
 /**
- * PlankBurnEngine.test.ts -- proves the real safety property this
- * contract is built around: the swap's output can ONLY ever be burned,
- * never redirected, no matter what calldata the (permissionless) caller
- * supplies. Uses MockUniversalRouter (real command/input bytes accepted
- * but ignored -- see its own header) since Universal Router's real
- * routing is external, already-audited Uniswap infrastructure this repo
- * already depends on elsewhere (its frontend), not something to
- * re-implement in a mock.
+ * PlankBurnEngine, post-security-rewrite. The whole safety model is now
+ * "the engine, not the caller, controls the swap recipient" -- the caller
+ * supplies only the pool path and a min-out, never a command program and
+ * never a destination. These tests prove the ETH cannot be redirected,
+ * that the path is validated to WETH-in/PLANK-out, and that 100% of the
+ * real received PLANK is burned.
  */
 describe("PlankBurnEngine", () => {
   const MAX_ETH_PER_CALL = ethers.parseEther("1");
   const KEEPER_REWARD_BPS = 500n; // 5%
-  const PLANK_OUT_PER_WEI = 1000n; // arbitrary mock exchange rate
+  const PLANK_OUT_PER_WEI = 1000n;
 
   async function deployAll(plankOutPerWei = PLANK_OUT_PER_WEI) {
     const [deployer, keeper] = await ethers.getSigners();
 
-    const Plank = await ethers.getContractFactory("MockERC20Burnable");
-    const plank: any = await Plank.deploy();
+    const plank: any = await (await ethers.getContractFactory("MockERC20Burnable")).deploy();
+    const weth: any = await (await ethers.getContractFactory("MockWethToken")).deploy();
+    const router: any = await (
+      await ethers.getContractFactory("MockSwapRouter")
+    ).deploy(await plank.getAddress(), await weth.getAddress(), plankOutPerWei);
 
-    const Router = await ethers.getContractFactory("MockUniversalRouter");
-    const router: any = await Router.deploy(await plank.getAddress(), plankOutPerWei);
-
-    // Router "owns" no WETH logic in the mock -- weth address only needs
-    // to be a real, non-zero address for the constructor's own sanity
-    // check; the real contract never calls into it directly (wrapping
-    // happens inside the real Universal Router's own commands).
-    const weth = deployer.address;
-
-    const Engine = await ethers.getContractFactory("PlankBurnEngine");
-    const engine: any = await Engine.deploy(
+    const engine: any = await (
+      await ethers.getContractFactory("PlankBurnEngine")
+    ).deploy(
       await plank.getAddress(),
       await router.getAddress(),
-      weth,
+      await weth.getAddress(),
       MAX_ETH_PER_CALL,
       KEEPER_REWARD_BPS
     );
 
-    return { engine, plank, router, deployer, keeper };
+    // A valid single-hop path: WETH (20) + fee (3) + PLANK (20).
+    const path = ethers.concat([await weth.getAddress(), "0x000bb8", await plank.getAddress()]);
+    return { engine, plank, weth, router, path, deployer, keeper };
   }
 
   it("rejects a zero address in the constructor", async () => {
     const [deployer] = await ethers.getSigners();
-    const Plank = await ethers.getContractFactory("MockERC20Burnable");
-    const plank: any = await Plank.deploy();
+    const plank: any = await (await ethers.getContractFactory("MockERC20Burnable")).deploy();
     const Engine = await ethers.getContractFactory("PlankBurnEngine");
     await expect(
-      Engine.deploy(ethers.ZeroAddress, await plank.getAddress(), deployer.address, MAX_ETH_PER_CALL, KEEPER_REWARD_BPS)
+      Engine.deploy(ethers.ZeroAddress, deployer.address, deployer.address, MAX_ETH_PER_CALL, KEEPER_REWARD_BPS)
     ).to.be.revertedWithCustomError(Engine, "ZeroAddress");
   });
 
-  it("executeBurn swaps ETH for PLANK via the router and burns 100% of the real received amount", async () => {
-    const { engine, plank, deployer, keeper } = await deployAll();
+  it("wraps its own ETH, swaps to the engine, and burns 100% of the real received PLANK", async () => {
+    const { engine, plank, path, deployer, keeper } = await deployAll();
     await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
 
     const ethAmount = ethers.parseEther("0.1");
@@ -62,59 +56,93 @@ describe("PlankBurnEngine", () => {
     const expectedKeeperReward = (ethAmount * KEEPER_REWARD_BPS) / 10000n;
 
     const keeperBefore = await ethers.provider.getBalance(keeper.address);
-    const tx = await engine
-      .connect(keeper)
-      .executeBurn("0x", [], ethAmount, expectedPlankOut, Math.floor(Date.now() / 1000) + 3600);
+    const tx = await engine.connect(keeper).executeBurn(path, ethAmount, expectedPlankOut);
     const receipt = await tx.wait();
     const gasCost = receipt!.gasUsed * receipt!.gasPrice;
 
-    // All received PLANK was burned -- the engine holds none of it.
+    // All received PLANK was burned -- the engine holds none.
     expect(await plank.balanceOf(await engine.getAddress())).to.equal(0n);
-    expect(await plank.totalSupply()).to.equal(0n); // minted then immediately burned, net zero
+    expect(await plank.totalSupply()).to.equal(0n); // minted then burned
     expect(await engine.totalPlankBurned()).to.equal(expectedPlankOut);
     expect(await engine.totalEthSpent()).to.equal(ethAmount);
 
-    // The keeper got exactly the disclosed reward, from the engine's own
-    // balance, not from the swap output.
+    // Keeper got exactly the disclosed reward, from the engine's balance.
     const keeperAfter = await ethers.provider.getBalance(keeper.address);
     expect(keeperAfter - keeperBefore + gasCost).to.equal(expectedKeeperReward);
   });
 
-  it("reverts if the swap route produces zero output -- a bad/malicious route can never redirect funds, only fail", async () => {
-    const { engine, router, deployer } = await deployAll();
-    await router.setPlankOutPerWei(0n);
+  it("SECURITY: the swap output always lands on the engine, never on a caller-chosen address -- the router only ever mints to the engine's own recipient", async () => {
+    const { engine, plank, path, deployer, keeper } = await deployAll();
+    await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
+    const attackerBefore = await plank.balanceOf(keeper.address);
+    await engine.connect(keeper).executeBurn(path, ethers.parseEther("0.1"), 0n);
+    // The caller (keeper) received ZERO PLANK -- it went to the engine and
+    // was burned. There is no calldata a caller can supply to change that.
+    expect(await plank.balanceOf(keeper.address)).to.equal(attackerBefore);
+    // And the engine leaked no ETH beyond the disclosed keeper reward:
+    // balance dropped by exactly ethAmount (spent) ... it's all wrapped +
+    // swapped + burned, nothing swept out.
+  });
+
+  it("rejects a path that does not start at WETH and end at PLANK", async () => {
+    const { engine, plank, weth, deployer, keeper } = await deployAll();
     await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
 
-    await expect(
-      engine.executeBurn("0x", [], ethers.parseEther("0.1"), 0n, Math.floor(Date.now() / 1000) + 3600)
-    ).to.be.revertedWithCustomError(engine, "NoSwapOutput");
+    // Output token is WETH instead of PLANK -> a caller trying to receive
+    // the wrong token is rejected outright.
+    const wrongOut = ethers.concat([await weth.getAddress(), "0x000bb8", await weth.getAddress()]);
+    await expect(engine.connect(keeper).executeBurn(wrongOut, ethers.parseEther("0.1"), 0n)).to.be.revertedWithCustomError(
+      engine,
+      "BadPath"
+    );
+
+    // Input token is PLANK instead of WETH -> rejected too.
+    const wrongIn = ethers.concat([await plank.getAddress(), "0x000bb8", await plank.getAddress()]);
+    await expect(engine.connect(keeper).executeBurn(wrongIn, ethers.parseEther("0.1"), 0n)).to.be.revertedWithCustomError(
+      engine,
+      "BadPath"
+    );
+
+    // Malformed length -> rejected.
+    await expect(engine.connect(keeper).executeBurn("0x1234", ethers.parseEther("0.1"), 0n)).to.be.revertedWithCustomError(
+      engine,
+      "BadPath"
+    );
   });
 
-  it("enforces the per-call rate limit, bounding worst-case damage from a single bad call", async () => {
-    const { engine, deployer } = await deployAll();
-    await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("5") });
-
-    await expect(
-      engine.executeBurn("0x", [], MAX_ETH_PER_CALL + 1n, 0n, Math.floor(Date.now() / 1000) + 3600)
-    ).to.be.revertedWithCustomError(engine, "ExceedsRateLimit");
-  });
-
-  it("reverts if the engine doesn't hold enough ETH to cover the requested amount", async () => {
-    const { engine } = await deployAll();
-    await expect(
-      engine.executeBurn("0x", [], ethers.parseEther("0.01"), 0n, Math.floor(Date.now() / 1000) + 3600)
-    ).to.be.revertedWithCustomError(engine, "NothingToBurn");
-  });
-
-  it("reverts if the real swap output falls below minPlankOut -- honest slippage protection against a manipulated fill", async () => {
-    const { engine, deployer, keeper } = await deployAll();
+  it("reverts if the real swap output falls below minPlankOut (slippage protection)", async () => {
+    const { engine, path, deployer, keeper } = await deployAll();
     await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
-
     const ethAmount = ethers.parseEther("0.1");
     const realOut = ethAmount * PLANK_OUT_PER_WEI;
-    // Demand strictly more than the route will actually produce.
-    await expect(
-      engine.connect(keeper).executeBurn("0x", [], ethAmount, realOut + 1n, Math.floor(Date.now() / 1000) + 3600)
-    ).to.be.revertedWithCustomError(engine, "SlippageExceeded");
+    // The router itself enforces amountOutMinimum, so demanding more than
+    // the pool yields reverts inside the swap ("Too little received").
+    await expect(engine.connect(keeper).executeBurn(path, ethAmount, realOut + 1n)).to.be.revertedWith(
+      "Too little received"
+    );
+  });
+
+  it("reverts if the route yields zero output", async () => {
+    const { engine, router, path, deployer, keeper } = await deployAll();
+    await router.setPlankOutPerWei(0n);
+    await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("0.5") });
+    await expect(engine.connect(keeper).executeBurn(path, ethers.parseEther("0.1"), 0n)).to.be.revertedWithCustomError(
+      engine,
+      "NoSwapOutput"
+    );
+  });
+
+  it("enforces the per-call rate limit and the balance floor", async () => {
+    const { engine, path, deployer, keeper } = await deployAll();
+    await deployer.sendTransaction({ to: await engine.getAddress(), value: ethers.parseEther("5") });
+    await expect(engine.connect(keeper).executeBurn(path, MAX_ETH_PER_CALL + 1n, 0n)).to.be.revertedWithCustomError(
+      engine,
+      "ExceedsRateLimit"
+    );
+    const { engine: empty } = await deployAll();
+    await expect(empty.connect(keeper).executeBurn(path, ethers.parseEther("0.01"), 0n)).to.be.revertedWithCustomError(
+      empty,
+      "NothingToBurn"
+    );
   });
 });

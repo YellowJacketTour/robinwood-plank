@@ -91,9 +91,15 @@ async function main() {
   const plank = await (await ethers.getContractFactory("MockERC20Burnable")).deploy();
   await plank.waitForDeployment();
 
+  const weth = await (await ethers.getContractFactory("MockWethToken")).deploy();
+  await weth.waitForDeployment();
+
+  // Constrained V3-style swap router (recipient set by the engine, not the
+  // caller) -- see PlankBurnEngine's security header for why it is NOT the
+  // general Universal Router.
   const router = await (
-    await ethers.getContractFactory("MockUniversalRouter")
-  ).deploy(await plank.getAddress(), MOCK_PLANK_PER_WEI);
+    await ethers.getContractFactory("MockSwapRouter")
+  ).deploy(await plank.getAddress(), await weth.getAddress(), MOCK_PLANK_PER_WEI);
   await router.waitForDeployment();
 
   const burnEngine = await (
@@ -101,7 +107,7 @@ async function main() {
   ).deploy(
     await plank.getAddress(),
     await router.getAddress(),
-    deployer.address, // weth: only sanity-checked non-zero locally; real wrapping is inside the real router's commands
+    await weth.getAddress(),
     MAX_ETH_PER_BURN,
     BURN_KEEPER_REWARD_BPS
   );
@@ -205,7 +211,7 @@ async function main() {
   console.log("   5. powerboard.claimTickets(crash, roundId, player) for each bettor");
   console.log("   5b. crash.registerResult(roundId, player) + crash.claim(roundId, player) for each winner (keeper CAN do this on their behalf)");
   console.log("   5c. crash.sweepBustedRound(roundId) if the whole field busted -> rolls the pot into the next round");
-  console.log("   6. burnEngine.executeBurn(route, ethAmount, minPlankOut, deadline)   when ETH has accrued");
+  console.log("   6. burnEngine.executeBurn(path, ethAmount, minPlankOut)   when ETH has accrued (path = WETH..PLANK)");
   console.log("   7. once a day: powerboard.requestDraw(epoch) -> ... -> powerboard.drawWinner(epoch)");
   console.log("========================================================\n");
 

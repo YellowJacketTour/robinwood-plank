@@ -53,12 +53,20 @@ contract PlankRakeDistributor {
     uint256 public totalToBurn;
     uint256 public totalToAirdrop;
     uint256 public totalToTreasury;
+    // Per-leg ETH that a delivery attempt failed to push, retained here
+    // and retryable via flush(). See receive() for why delivery is
+    // best-effort rather than all-or-nothing.
+    uint256 public stuckBurn;
+    uint256 public stuckAirdrop;
+    uint256 public stuckTreasury;
 
     event RakeDistributed(uint256 amount, uint256 toBurn, uint256 toAirdrop, uint256 toTreasury);
+    event LegStuck(string leg, uint256 amount);
+    event LegFlushed(string leg, uint256 amount);
 
     error ZeroAddress();
     error SplitExceeds100Percent();
-    error EthTransferFailed();
+    error NothingStuck();
 
     constructor(address burnEngine_, address jackpot_, address treasury_, uint256 burnBps_, uint256 airdropBps_) {
         if (burnEngine_ == address(0) || jackpot_ == address(0) || treasury_ == address(0)) revert ZeroAddress();
@@ -70,6 +78,18 @@ contract PlankRakeDistributor {
         airdropBps = airdropBps_;
     }
 
+    /**
+     * BEST-EFFORT, NOT ALL-OR-NOTHING -- a real audit fix. Each leg is
+     * attempted independently, and a leg that reverts (a paused/buggy
+     * jackpot, a treasury that became a reverting contract) is RETAINED
+     * here and retryable via flush(), never reverting the whole receive().
+     * Without this, one bad recipient would revert every upstream
+     * withdrawPayments-to-distributor forever and strand ALL rake in the
+     * crash contracts' escrows. The split accounting is booked in full up
+     * front regardless of delivery, so a leg being temporarily stuck never
+     * loses or double-counts ETH -- it is either delivered now or held for
+     * flush().
+     */
     receive() external payable {
         uint256 amount = msg.value;
         uint256 toBurn = (amount * burnBps) / 10000;
@@ -82,16 +102,55 @@ contract PlankRakeDistributor {
         totalToTreasury += toTreasury;
         emit RakeDistributed(amount, toBurn, toAirdrop, toTreasury);
 
-        if (toBurn > 0) {
-            (bool ok, ) = burnEngine.call{value: toBurn}("");
-            if (!ok) revert EthTransferFailed();
+        if (toBurn > 0 && !_sendRaw(burnEngine, toBurn)) {
+            stuckBurn += toBurn;
+            emit LegStuck("burn", toBurn);
         }
-        if (toAirdrop > 0) {
-            jackpot.fund{value: toAirdrop}();
+        if (toAirdrop > 0 && !_fundJackpot(toAirdrop)) {
+            stuckAirdrop += toAirdrop;
+            emit LegStuck("airdrop", toAirdrop);
         }
-        if (toTreasury > 0) {
-            (bool ok, ) = treasury.call{value: toTreasury}("");
-            if (!ok) revert EthTransferFailed();
+        if (toTreasury > 0 && !_sendRaw(treasury, toTreasury)) {
+            stuckTreasury += toTreasury;
+            emit LegStuck("treasury", toTreasury);
+        }
+    }
+
+    /// Permissionless retry of any leg that previously failed to deliver.
+    /// No admin, no privilege -- anyone can nudge stuck funds to their
+    /// fixed, immutable destination once that destination is healthy again.
+    function flush() external {
+        bool did;
+        uint256 b = stuckBurn;
+        if (b > 0 && _sendRaw(burnEngine, b)) {
+            stuckBurn = 0;
+            did = true;
+            emit LegFlushed("burn", b);
+        }
+        uint256 a = stuckAirdrop;
+        if (a > 0 && _fundJackpot(a)) {
+            stuckAirdrop = 0;
+            did = true;
+            emit LegFlushed("airdrop", a);
+        }
+        uint256 t = stuckTreasury;
+        if (t > 0 && _sendRaw(treasury, t)) {
+            stuckTreasury = 0;
+            did = true;
+            emit LegFlushed("treasury", t);
+        }
+        if (!did) revert NothingStuck();
+    }
+
+    function _sendRaw(address to, uint256 value) private returns (bool ok) {
+        (ok, ) = to.call{value: value}("");
+    }
+
+    function _fundJackpot(uint256 value) private returns (bool) {
+        try jackpot.fund{value: value}() {
+            return true;
+        } catch {
+            return false;
         }
     }
 }

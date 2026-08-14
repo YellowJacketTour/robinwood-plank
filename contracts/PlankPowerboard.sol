@@ -90,6 +90,8 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
     /// PlankCrashDrand.sol's own reasoning -- see that file for the full
     /// writeup (Orbit sequencer timestamp-jump risk).
     uint256 private constant DRAW_ROUND_SAFETY_PERIODS = 20;
+    /// Hard ceiling on the keeper's draw reward -- see the constructor.
+    uint256 private constant MAX_DRAWER_REWARD_BPS = 500;
 
     /// The rolling jackpot. Grows with every rake deposit and every miss.
     uint256 public jackpot;
@@ -178,6 +180,16 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
         // pot would grow forever with no way to win it.
         if (cfg.ballRange < 2) revert BadConfig();
         if (cfg.jackpotBall == 0 || cfg.jackpotBall > cfg.ballRange) revert BadConfig();
+        // Hard cap the drawer's cut independent of consolation. Without
+        // this, a legal drawerRewardBps of up to 100% would let whoever
+        // calls the permissionless drawWinner() take the entire prize --
+        // including a full jackpot hit -- leaving the winner nothing. Real
+        // audit finding; the reward only needs to cover gas plus a small
+        // incentive, so 5% is a generous ceiling.
+        if (cfg.drawerRewardBps > MAX_DRAWER_REWARD_BPS) revert BadConfig();
+        // consolation must leave something to roll over, or the "rolling
+        // jackpot" degenerates into the old flat pay-out-every-epoch raffle.
+        if (cfg.consolationBps >= 10000) revert BadConfig();
         if (cfg.drawerRewardBps + cfg.consolationBps > 10000) revert BadConfig();
 
         beacon = IDrandBeacon(cfg.beacon);
@@ -219,6 +231,11 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
     /// themselves unlimited odds.
     function claimTickets(address source, uint256 sourceRoundId, address player) external {
         if (!isAllowedSource[source]) revert UnknownSource();
+        // A source whose stakeOf(round, address(0)) ever returns nonzero
+        // would otherwise credit tickets to the zero address, and a win
+        // there escrows ETH to address(0) -- permanently locked (not
+        // stealable, but real ETH stranded). Reject it outright.
+        if (player == address(0)) revert ZeroAddress();
         uint256 amount = IWagerSource(source).stakeOf(sourceRoundId, player);
         if (amount == 0) revert NoStake();
 
