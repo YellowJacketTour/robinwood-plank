@@ -34,8 +34,34 @@ import { TradeApiError } from "@/lib/uniswap-server";
  * originate.
  */
 
-export const MOONPAY_ENABLED =
-  process.env.NEXT_PUBLIC_MOONPAY_ENABLED?.trim().toLowerCase() === "true";
+/**
+ * HARD OFF, pending a working kill switch. Not env-controlled on purpose.
+ *
+ * NEXT_PUBLIC_* is inlined into the SERVER bundle at build time whenever the
+ * build environment defines it -- measured on this toolchain, not inferred.
+ * This module is server-side, and the deploy workflow already puts
+ * NEXT_PUBLIC_MOONPAY_ENABLED in the build env, so on merge this flag would
+ * have been frozen into the release as a literal with no runtime path left.
+ * Turning the ramp off afterwards would have required a rebuild, and the
+ * repository variable would have looked like a switch while controlling
+ * nothing.
+ *
+ * That is exactly what happened to referrals: the variable was set to false,
+ * a deploy ran green, the running server kept reporting enabled, and the
+ * feature had to be disabled in source. This one is being disarmed BEFORE it
+ * ships rather than after.
+ *
+ * The variable was also already set to `true` on the repository while this
+ * branch was unmerged, so merging would have shipped the ramp live.
+ *
+ * TO RE-ENABLE: not by restoring this line. Move the flag to a DB-resolved
+ * kill switch on a name WITHOUT the NEXT_PUBLIC_ prefix (see
+ * app/api/trade/status/route.ts, which ORs a database override over the baked
+ * value so a pause lands without a deploy), and prove the switch works on a
+ * throwaway flag first. test/market/server-feature-flags.test.ts on `dev`
+ * fails if this returns in the old shape.
+ */
+export const MOONPAY_ENABLED = false;
 
 const DEFAULT_CURRENCY_CODE = "usdg";
 

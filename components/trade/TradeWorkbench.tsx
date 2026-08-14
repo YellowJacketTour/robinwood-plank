@@ -7,7 +7,6 @@ import TradeModeSwitch, {
   type TradeMode,
   type ZeroXStatusResponse,
 } from "@/components/trade/TradeModeSwitch";
-import MoonPayPanel from "@/components/trade/MoonPayPanel";
 import { TRADE_PAUSED } from "@/lib/constants";
 import { getCountdownParts } from "@/lib/trade";
 
@@ -41,7 +40,6 @@ export default function TradeWorkbench({ onModeChange, onZeroXStatusChange }: Pr
               product page must lead with its primary task"). Self-hides via
               its own /api/moonpay/status check when not configured, same
               contract as TradeModeSwitch's cross-chain tab. */}
-          <MoonPayPanel />
         </>
       ) : (
         !TRADE_PAUSED && (
