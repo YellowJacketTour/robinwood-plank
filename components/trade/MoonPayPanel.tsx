@@ -4,18 +4,17 @@ import { useEffect, useState } from "react";
 import { CreditCard, ExternalLink, Landmark } from "lucide-react";
 import { useWallet } from "@/lib/wallet-context";
 import { getErc20Balance } from "@/lib/wallet";
+import { USDG_TOKEN } from "@/lib/constants";
 
 type MoonPayStatus = { enabled: boolean; configured: boolean; sandbox: boolean };
 type RampDirection = "buy" | "sell";
 
-// Confirmed 2026-08-12 directly on-chain against Robinhood Chain mainnet
-// (symbol() returns "USDG", decimals() returns 6 -- NOT the 18 most ERC-20s
-// use, verified rather than assumed) -- independently cross-checked against
-// Paxos's own USDG mainnet docs and Blockscout before relying on it here.
-// Not present anywhere else in this codebase (this app's SwapWidget trades
-// $PLANK against native ETH, never USDG), so it's scoped to this file.
-const USDG_ADDRESS = "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168";
-const USDG_DECIMALS = 6;
+// One definition, in lib/constants.ts, shared with the swap selector's core
+// counter tokens (USDG is a routing hop in live quotes, so it is already in
+// the token list the buyer returns to). Decimals are 6, NOT the 18 most
+// ERC-20s use -- which is why formatUsdg exists rather than a default
+// 18-decimal formatter.
+const { address: USDG_ADDRESS, decimals: USDG_DECIMALS } = USDG_TOKEN;
 
 function formatUsdg(raw: bigint): string {
   const divisor = BigInt(10) ** BigInt(USDG_DECIMALS);
@@ -36,8 +35,10 @@ function formatUsdg(raw: bigint): string {
  *
  * Same wallet-gate pattern as SwapWidget: explains what connecting unlocks
  * before asking (DESIGN.md, "Wallet gates explain what connection unlocks
- * before asking the user to connect"), and never accepts a destination
- * address other than the caller's own connected wallet.
+ * before asking the user to connect"). The destination is always the
+ * address this panel currently has connected -- see lib/moonpay-server.ts
+ * for why the SERVER deliberately does not try to enforce that, and why it
+ * does not need to.
  *
  * Off-ramp automation: once connected, this reads the real USDG balance
  * (lib/wallet.ts's own getErc20Balance -- the same helper SwapWidget uses

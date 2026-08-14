@@ -19,16 +19,47 @@ import { TradeApiError } from "@/lib/uniswap-server";
  * (moonpay.com/newsroom/moonpay-robinhoodchain, MoonPay's own announcement).
  * This is a DIFFERENT asset than the ETH/$PLANK pair SwapWidget trades --
  * MoonPay lands real USDG in the connected wallet; converting that to
- * $PLANK is a second, separate step through the existing swap UI (import
- * USDG by address, same "any ERC-20 by address" path SwapWidget already
- * supports). Not a guessed one-step "buy $PLANK with a card" flow, because
- * no such direct MoonPay pair is confirmed to exist.
+ * $PLANK is a second, separate step through the existing swap UI. That step
+ * needs no import: USDG is already pinned in lib/uniswap-tokenlist.ts's
+ * core counter tokens and shows up as a routing hop in live quotes, so it
+ * is in the swap selector the moment the buyer returns. Not a guessed
+ * one-step "buy $PLANK with a card" flow, because no such direct MoonPay
+ * pair is confirmed to exist.
+ *
+ * KNOWN GAP -- order tracking. There is no MoonPay webhook handler and no
+ * externalCustomerId on the outgoing URL, so once a buyer leaves for the
+ * hosted checkout we learn nothing about what happened: no confirmation in
+ * the app, and nothing to point at when someone asks where their money
+ * went. Acceptable for a first cut behind a flag; it is the first thing to
+ * build before this carries real volume, and it is also what gives us
+ * visibility into abuse of our merchant key.
  */
 
 export const MOONPAY_ENABLED =
   process.env.NEXT_PUBLIC_MOONPAY_ENABLED?.trim().toLowerCase() === "true";
 
 const DEFAULT_CURRENCY_CODE = "usdg";
+
+/**
+ * Currency codes this integration will sign a URL for. `currencyCode` is
+ * client-supplied, and while URLSearchParams makes param injection
+ * impossible, an unbounded value means we HMAC a checkout for any string a
+ * caller invents -- a typo then fails deep inside MoonPay's hosted flow
+ * instead of at our edge, with our signature on it. USDG is the only asset
+ * MoonPay confirms delivering onto Robinhood Chain today; extend this list
+ * when that changes, not the callers.
+ */
+const SUPPORTED_CURRENCY_CODES = new Set(["usdg"]);
+
+function assertSupportedCurrency(code: string): void {
+  if (!SUPPORTED_CURRENCY_CODES.has(code.trim().toLowerCase())) {
+    throw new TradeApiError(
+      400,
+      "UNSUPPORTED_CURRENCY",
+      "That currency is not supported by this ramp."
+    );
+  }
+}
 
 function requireSecrets(): { apiKey: string; secretKey: string } {
   const apiKey = process.env.MOONPAY_API_KEY;
@@ -68,17 +99,36 @@ function isEthAddress(value: string): boolean {
 }
 
 /**
- * Real buy (on-ramp) widget URL. walletAddress must be the CALLER'S OWN
- * connected wallet -- this route never accepts a destination on behalf of
- * someone else, same non-custodial boundary as every trade route in this
- * app. externalCustomerId round-trips through MoonPay's webhook (once
- * configured) so a future order-status feature can key back to a session
- * without trusting anything client-supplied at that point.
+ * Real buy (on-ramp) widget URL.
+ *
+ * ON THE DESTINATION ADDRESS, deliberately: `walletAddress` is whatever the
+ * caller sends, and the server does NOT prove the caller controls it. That
+ * is not an oversight, so don't "fix" it with a wallet-proof signature:
+ *
+ *  - There is no integrity property to protect. The destination is the
+ *    buyer's own wallet, and the buyer is the one paying. Sending someone
+ *    else's address here means paying for crypto that lands in their wallet
+ *    -- a gift, not an attack.
+ *  - A signature would not stop the abuse people reach for this to stop.
+ *    Anyone building a URL to a wallet THEY control can sign for it
+ *    perfectly well, and a signed URL is a bearer token the moment it
+ *    exists.
+ *  - It would cost real UX: a personal_sign prompt in front of a
+ *    card purchase, which reads as "why is this asking me to sign
+ *    something to spend money?" -- the single worst place in the app to
+ *    add a wallet interaction.
+ *
+ * The exposure that IS real -- someone driving volume through URLs signed
+ * with our merchant key, so fraud/chargebacks land against our MoonPay
+ * account -- is a merchant-account problem, addressed with MoonPay's own
+ * fraud tooling plus the order-tracking webhook noted in the module header,
+ * not with a signature at this layer.
  */
 export function buildBuyWidgetUrl(walletAddress: string, currencyCode = DEFAULT_CURRENCY_CODE): { url: string; sandbox: boolean } {
   if (!isEthAddress(walletAddress)) {
     throw new TradeApiError(400, "BAD_WALLET_ADDRESS", "walletAddress must be a valid 0x address.");
   }
+  assertSupportedCurrency(currencyCode);
   const { apiKey, secretKey } = requireSecrets();
 
   const params = new URLSearchParams({
@@ -111,6 +161,7 @@ export function buildSellWidgetUrl(
   if (!isEthAddress(refundWalletAddress)) {
     throw new TradeApiError(400, "BAD_WALLET_ADDRESS", "refundWalletAddress must be a valid 0x address.");
   }
+  assertSupportedCurrency(baseCurrencyCode);
   const { apiKey, secretKey } = requireSecrets();
 
   const params = new URLSearchParams({
