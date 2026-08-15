@@ -85,6 +85,16 @@ export async function GET(req: Request): Promise<Response> {
     // 2) Live listings for name/price filtering + result payload. Search by
     //    name substring means the token's display name (RobinWood traits
     //    encode it as the Base trait; fall back to token id).
+    // OURS ONLY, DELIBERATELY. Foreign venues (OpenSea, PulpMarket) are merged
+    // into the book at request time by lib/market/book.ts and are absent here
+    // on purpose: this is a SEARCH surface with price filters, and its result
+    // cards are not venue-aware — no badge, no link-out, and a Buy affordance
+    // that assumes our own order. Foreign rows would put unbuyable items in
+    // front of a buyer with nothing marking them, which is the exact hazard
+    // isForeignListing() exists to prevent on /market.
+    //
+    // Consequence: /discover's floor can read higher than /market's. That is
+    // correct, not a bug — see the note in lib/market/trending.ts.
     const allListings = (
       await Promise.all(slugs.map((slug) => getListings(slug)))
     ).flat();
