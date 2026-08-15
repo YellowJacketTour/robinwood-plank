@@ -1,4 +1,5 @@
 import { durableKv as kv, hasDurableKv } from "@/lib/market/durable-kv";
+import type { NormalisedForeignListing } from "@/lib/market/foreign-listings";
 
 /**
  * OpenSea API v2 client with a self-renewing credential.
@@ -349,13 +350,15 @@ export async function fetchOpenSeaListings(
 /** Cached, normalised OpenSea listings. No TTL — see migration 003. */
 export const OPENSEA_LISTINGS_KV = "plank:market:opensea-listings-v1";
 
-export type NormalisedOpenSeaListing = {
-  tokenId: string;
-  priceWei: string;
-  maker: string;
-  /** ISO-8601, or null when OpenSea gives no end time. */
-  expiresAt: string | null;
-};
+/**
+ * Alias of the shared foreign-listing shape (lib/market/foreign-listings.ts).
+ *
+ * Kept as a named export because callers and tests already import this name.
+ * It is no longer a distinct type: the book merges every venue through one
+ * shape, and having each marketplace define its own was what typed mergeBook
+ * to OpenSea specifically.
+ */
+export type NormalisedOpenSeaListing = NormalisedForeignListing;
 
 const ITEM_TYPE_ERC721 = 2;
 
@@ -393,7 +396,10 @@ export function normaliseOpenSeaListings(
       tokenId: String(offer.identifierOrCriteria),
       priceWei: total.toString(),
       maker: p.offerer.toLowerCase(),
+      // OpenSea's end time is not read here; mergeBook substitutes a
+      // far-future sentinel so these never land in "expiring soon".
       expiresAt: null,
+      venue: "opensea",
     });
   }
   return out;
