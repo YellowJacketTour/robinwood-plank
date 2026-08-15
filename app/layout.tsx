@@ -9,6 +9,7 @@ import SplashIntro from "@/components/SplashIntro";
 import SiteBanner from "@/components/SiteBanner";
 import MigrateBanner from "@/components/MigrateBanner";
 import ArtServiceWorker from "@/components/ArtServiceWorker";
+import VersionUpdatePrompt from "@/components/VersionUpdatePrompt";
 import { rootMetadata } from "@/lib/seo";
 import { WalletProvider } from "@/lib/wallet-context";
 
@@ -49,6 +50,10 @@ export default function RootLayout({
           <WoodAmpProvider>
             <SplashIntro />
             <ArtServiceWorker />
+            {/* Tells a stale tab a new build shipped. DEPLOYMENT_VERSION is
+                the release SHA in production and unset locally, so this is
+                inert in dev rather than prompting against a fixed marker. */}
+            <VersionUpdatePrompt currentBuild={process.env.DEPLOYMENT_VERSION?.trim() || null} />
             <PlankBackground />
             <HoloField />
             {/* Admin-managed announcement — renders nothing unless enabled */}
