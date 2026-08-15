@@ -320,28 +320,60 @@ export async function splitLiveOrders<T extends { id?: string; rawOrder?: unknow
     }
   }
 
-  const live: T[] = [];
-  const dead: Array<{ item: T; reason: string }> = [];
-  for (const item of items) {
+  // Verdicts by original index, so the split preserves input order no matter
+  // what order the checks actually finish in.
+  const verdicts = new Array<{ dead: boolean; reason?: string }>(items.length);
+
+  const classify = async (index: number): Promise<void> => {
+    const item = items[index];
     const key = orderCacheKey(item);
     const cached = key ? livenessCache.get(key) : undefined;
     if (cached && now - cached.at < LIVENESS_TTL_MS) {
-      if (cached.dead) dead.push({ item, reason: cached.reason ?? "dead" });
-      else live.push(item);
-      continue;
+      verdicts[index] = { dead: cached.dead, reason: cached.reason };
+      return;
     }
 
     const liveness = await getOrderLiveness(item.rawOrder);
     if (liveness.known) {
       const reason = liveness.dead ? liveness.reason : undefined;
       if (key) livenessCache.set(key, { dead: liveness.dead, at: now, reason });
-      if (liveness.dead) dead.push({ item, reason: reason ?? "dead" });
-      else live.push(item);
+      verdicts[index] = { dead: liveness.dead, reason };
     } else {
       // Unknown — keep it (fail open for display) and do not cache the miss.
-      live.push(item);
+      verdicts[index] = { dead: false };
     }
-  }
+  };
+
+  // Bounded concurrency, deliberately NOT Promise.all over every order.
+  //
+  // This loop was sequential, and each getOrderLiveness makes up to five
+  // chained eth_calls. With ~72 live listings that is ~300 serial round-trips
+  // to a public RPC — measured at 12.2s on a cold process in production,
+  // which is close enough to a proxy timeout that a slow RPC takes the whole
+  // order book down. The caches below it are per-process, so every Passenger
+  // worker and every deploy pays that again.
+  //
+  // A full fan-out would be worse, not better: fetch-rpc.ts opens a circuit
+  // breaker after three consecutive failures, so 300 simultaneous calls would
+  // rate-limit the endpoint and trip the breaker, taking the book down harder
+  // than the latency does. A small pool gets the bulk of the win without
+  // becoming the thing that causes the outage.
+  const CONCURRENCY = 6;
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(CONCURRENCY, items.length) }, async () => {
+    for (let i = cursor++; i < items.length; i = cursor++) {
+      await classify(i);
+    }
+  });
+  await Promise.all(workers);
+
+  const live: T[] = [];
+  const dead: Array<{ item: T; reason: string }> = [];
+  items.forEach((item, i) => {
+    const verdict = verdicts[i] ?? { dead: false };
+    if (verdict.dead) dead.push({ item, reason: verdict.reason ?? "dead" });
+    else live.push(item);
+  });
   return { live, dead };
 }
 
