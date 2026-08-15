@@ -67,7 +67,14 @@ export function mergeBook(
   // the order the callers happened to concatenate their arrays in — so the
   // grid could reshuffle between refreshes with no data change. Venue name is
   // arbitrary but deterministic, which is the only property that matters.
-  const foreign = [...theirs].sort((a, b) => a.venue.localeCompare(b.venue));
+  // Defensive on `venue` even though the venue modules now stamp it on read.
+  // An earlier version dereferenced it directly, which threw a TypeError on
+  // every stored OpenSea row written before the field existed — and took the
+  // whole order book down, because a row from a cache is only ever as new as
+  // the writer that wrote it.
+  const foreign = [...theirs].sort((a, b) =>
+    String(a.venue ?? "").localeCompare(String(b.venue ?? ""))
+  );
 
   for (const t of foreign) {
     const tokenId = String(t.tokenId);
@@ -87,7 +94,16 @@ export function mergeBook(
     // order book request — the same fail-soft posture the venue modules take
     // when a marketplace is down.
     const externalUrlFor = EXTERNAL_URL[t.venue];
-    if (typeof externalUrlFor !== "function") continue;
+    if (typeof externalUrlFor !== "function") {
+      // Unreachable now that both venue modules stamp on read, so this is
+      // pure defence. LOUD defence: silently dropping rows here would have
+      // hidden 52 real OpenSea listings behind a guard whose stated purpose
+      // was to protect the book — losing the inventory it meant to save.
+      console.warn(
+        `[book] dropping listing for token ${t.tokenId}: unknown venue ${JSON.stringify(t.venue)}`
+      );
+      continue;
+    }
 
     byToken.set(tokenId, {
       id: `${t.venue}-${collectionSlug}-${tokenId}`,

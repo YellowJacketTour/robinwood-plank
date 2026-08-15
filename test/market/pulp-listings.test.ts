@@ -198,3 +198,49 @@ test("a row with an unknown venue is skipped, not thrown on", () => {
   assert.equal(book.length, 1);
   assert.equal(book[0].tokenId, "1");
 });
+
+test("REGRESSION: a stored row with NO venue must not take down the book", () => {
+  // This is the bug that took /api/market/orders down twice.
+  //
+  // readOpenSeaListings returns the KV blob as-is, and that blob is data AT
+  // REST written by whatever normaliser was deployed when it was written.
+  // `venue` was added to the writer long after 52 OpenSea rows already
+  // existed, so production served rows WITHOUT the field while every local
+  // run had it — local KV is rewritten by the first cron pass.
+  //
+  // mergeBook then did `a.venue.localeCompare(b.venue)` and threw a
+  // TypeError. GET had no try/catch, so it escaped as a 500 with an empty
+  // body.
+  //
+  // The suite stayed green because the fixture in book-merge.test.ts was
+  // edited to ADD `venue` in the same commit that made it required — the
+  // test was changed to match the type instead of the data. Hence this test
+  // deliberately constructs the OLD shape.
+  const legacyRow = {
+    tokenId: "7",
+    priceWei: "9000000000000000",
+    maker: "0x2222222222222222222222222222222222222222",
+    expiresAt: null,
+    // no `venue` — exactly what production held
+  } as unknown as NormalisedForeignListing;
+
+  assert.doesNotThrow(() => mergeBook([OURS({ tokenId: "1" })], [legacyRow], "robinwood"));
+
+  // Two or more rows: Array.prototype.sort skips the comparator entirely
+  // below two elements, so a single-row fixture cannot catch this.
+  const second = { ...legacyRow, tokenId: "8" } as NormalisedForeignListing;
+  assert.doesNotThrow(() => mergeBook([], [legacyRow, second], "robinwood"));
+});
+
+test("a legacy row is still dropped rather than shown unlinkable — but loudly", () => {
+  // With venue stamped on read this is unreachable in practice. If it ever
+  // happens the row cannot get a link-out, and a foreign row with no
+  // destination is worse than an absent one — but it must be logged, not
+  // silently swallowed, because the last silent drop hid 52 real listings.
+  const legacyRow = {
+    tokenId: "7", priceWei: "900", maker: "0xz", expiresAt: null,
+  } as unknown as NormalisedForeignListing;
+  const book = mergeBook([OURS({ tokenId: "1" })], [legacyRow], "robinwood");
+  assert.equal(book.length, 1);
+  assert.equal(book[0].tokenId, "1");
+});

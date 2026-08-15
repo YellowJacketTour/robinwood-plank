@@ -153,7 +153,11 @@ export function normalisePulpListings(nfts: readonly PulpNft[]): NormalisedForei
 export async function readPulpListings(): Promise<NormalisedForeignListing[]> {
   if (!hasDurableKv()) return [];
   try {
-    return (await kv.get<NormalisedForeignListing[]>(PULP_LISTINGS_KV)) ?? [];
+    const rows = (await kv.get<NormalisedForeignListing[]>(PULP_LISTINGS_KV)) ?? [];
+    // Stamped on read for the same reason as the OpenSea blob: stored rows
+    // are only ever as new as the writer that wrote them, and a consumer must
+    // not assume a field that data at rest predates.
+    return rows.map((row) => ({ ...row, venue: "pulp" as const }));
   } catch {
     return [];
   }

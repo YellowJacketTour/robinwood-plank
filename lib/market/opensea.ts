@@ -413,7 +413,20 @@ export function openSeaTokenUrl(contract: string, tokenId: string): string {
 export async function readOpenSeaListings(): Promise<NormalisedOpenSeaListing[]> {
   if (!hasDurableKv()) return [];
   try {
-    return (await kv.get<NormalisedOpenSeaListing[]>(OPENSEA_LISTINGS_KV)) ?? [];
+    const rows = (await kv.get<NormalisedOpenSeaListing[]>(OPENSEA_LISTINGS_KV)) ?? [];
+    // STAMP THE VENUE ON READ, not only on write.
+    //
+    // This blob is data AT REST, written by whatever version of the
+    // normaliser was deployed at the time. `venue` was added to the writer
+    // long after rows already existed, so every stored row predating it comes
+    // back without the field — and a consumer that assumes it is present
+    // throws on real production data while passing every local test, because
+    // local KV gets rewritten by the first cron run.
+    //
+    // That is not hypothetical: it took /api/market/orders down twice. Read
+    // is the right layer to fix it — idempotent, needs no migration, and does
+    // not wait for a cron pass to repair the book.
+    return rows.map((row) => ({ ...row, venue: "opensea" as const }));
   } catch {
     return [];
   }

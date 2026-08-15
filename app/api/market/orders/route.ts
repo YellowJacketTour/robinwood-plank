@@ -88,6 +88,19 @@ function annotateRoyaltyEnforcement<T extends {
 }
 
 export async function GET(req: Request) {
+  try {
+    return await handleGet(req);
+  } catch (err) {
+    // POST and DELETE have always wrapped; GET never did, so any throw here
+    // escaped into the framework and surfaced as a 500 with an EMPTY body and
+    // no content-type — which is close to undebuggable from the outside, and
+    // cost two production rollbacks to track down. A readable JSON error is
+    // the difference between "the book is broken" and knowing why.
+    return publicError(err, "Failed to load the order book.");
+  }
+}
+
+async function handleGet(req: Request) {
   const limited = rateLimit(req, { key: "market-orders-get", limit: 120, windowMs: 60_000 });
   if (limited) return limited;
 
