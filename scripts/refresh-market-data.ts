@@ -69,6 +69,7 @@ const explicit = [
   "--traits",
   "--collection",
   "--opensea",
+  "--pulp",
   "--official-assets",
   "--token-registry",
   "--owners",
@@ -80,8 +81,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "official-assets", "token-registry", "owners"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -259,6 +260,20 @@ async function main(): Promise<void> {
       ? `volume=${stats.volume ?? "?"} sales=${stats.sales ?? "?"} floor=${stats.floorPrice ?? "?"}`
       : "no stats";
     return `${statsPart}, ${listings.length} listings`;
+  });
+
+  // PulpMarket listings for the same collection. Independent of the opensea
+  // step in both directions: either venue can fail without touching the
+  // other's rows, and neither writes anything the other reads.
+  //
+  // ONE REQUEST PER PASS. Their docs ask for "no more than about one request
+  // per second" and publish no hard limit, so this deliberately lives on the
+  // cron rather than being called per visitor — even though their CORS header
+  // would allow a browser to call it directly.
+  await step("pulp", async () => {
+    const { refreshPulpListings } = await import("../lib/market/pulp");
+    const listings = await refreshPulpListings();
+    return `${listings.length} listings`;
   });
 
   // Robinhood's own token registry. Backs the "Official" badge in the swap

@@ -1,4 +1,5 @@
 import { durableKv as kv, hasDurableKv } from "@/lib/market/durable-kv";
+import type { NormalisedForeignListing } from "@/lib/market/foreign-listings";
 
 /**
  * OpenSea API v2 client with a self-renewing credential.
@@ -349,13 +350,15 @@ export async function fetchOpenSeaListings(
 /** Cached, normalised OpenSea listings. No TTL — see migration 003. */
 export const OPENSEA_LISTINGS_KV = "plank:market:opensea-listings-v1";
 
-export type NormalisedOpenSeaListing = {
-  tokenId: string;
-  priceWei: string;
-  maker: string;
-  /** ISO-8601, or null when OpenSea gives no end time. */
-  expiresAt: string | null;
-};
+/**
+ * Alias of the shared foreign-listing shape (lib/market/foreign-listings.ts).
+ *
+ * Kept as a named export because callers and tests already import this name.
+ * It is no longer a distinct type: the book merges every venue through one
+ * shape, and having each marketplace define its own was what typed mergeBook
+ * to OpenSea specifically.
+ */
+export type NormalisedOpenSeaListing = NormalisedForeignListing;
 
 const ITEM_TYPE_ERC721 = 2;
 
@@ -393,7 +396,10 @@ export function normaliseOpenSeaListings(
       tokenId: String(offer.identifierOrCriteria),
       priceWei: total.toString(),
       maker: p.offerer.toLowerCase(),
+      // OpenSea's end time is not read here; mergeBook substitutes a
+      // far-future sentinel so these never land in "expiring soon".
       expiresAt: null,
+      venue: "opensea",
     });
   }
   return out;
@@ -407,7 +413,20 @@ export function openSeaTokenUrl(contract: string, tokenId: string): string {
 export async function readOpenSeaListings(): Promise<NormalisedOpenSeaListing[]> {
   if (!hasDurableKv()) return [];
   try {
-    return (await kv.get<NormalisedOpenSeaListing[]>(OPENSEA_LISTINGS_KV)) ?? [];
+    const rows = (await kv.get<NormalisedOpenSeaListing[]>(OPENSEA_LISTINGS_KV)) ?? [];
+    // STAMP THE VENUE ON READ, not only on write.
+    //
+    // This blob is data AT REST, written by whatever version of the
+    // normaliser was deployed at the time. `venue` was added to the writer
+    // long after rows already existed, so every stored row predating it comes
+    // back without the field — and a consumer that assumes it is present
+    // throws on real production data while passing every local test, because
+    // local KV gets rewritten by the first cron run.
+    //
+    // That is not hypothetical: it took /api/market/orders down twice. Read
+    // is the right layer to fix it — idempotent, needs no migration, and does
+    // not wait for a cron pass to repair the book.
+    return rows.map((row) => ({ ...row, venue: "opensea" as const }));
   } catch {
     return [];
   }

@@ -8,8 +8,10 @@ import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/market/rarityClient";
 import { formatRank } from "@/lib/rarity";
 import {
+  isForeignListing,
   isMarketplankRelistRequired,
   MARKETPLANK_RELIST_MESSAGE,
+  venueLabel,
   type Listing,
   type MarketCollection,
 } from "@/lib/market/types";
@@ -223,8 +225,8 @@ export default function ItemDetail({
         <div className="flex shrink-0 items-start gap-3 border-b border-line px-4 py-3 sm:px-5">
           <div className="min-w-0 flex-1">
             <p className="text-[0.6rem] font-black uppercase tracking-[0.14em] text-gold-300">
-              {listing?.venue === "opensea"
-                ? "OpenSea · Display only"
+              {listing && isForeignListing(listing)
+                ? `${venueLabel(listing)} · Display only`
                 : `Marketplank · ${listing ? "Listed" : "Unlisted"}`}
               {detail?.rarity && (
                 <span className="ml-2" style={{ color: tierColor(detail.rarity.tier) }}>
@@ -517,7 +519,7 @@ export default function ItemDetail({
         </div>
 
         <div className="flex shrink-0 flex-col gap-2 border-t border-line px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:flex-wrap sm:px-5">
-          {listing && listing.venue === "opensea" ? (
+          {listing && isForeignListing(listing) ? (
             /**
              * Foreign listing: no rawOrder to fulfil, so this can only ever
              * link out — same affordance and copy as ListingCard's "View" so
@@ -530,7 +532,7 @@ export default function ItemDetail({
               rel="noopener noreferrer"
               className="inline-flex min-h-12 flex-1 items-center justify-center gap-1.5 rounded-lg border border-[#58BDF0]/40 px-4 py-3 text-sm font-bold text-[#58BDF0] transition hover:border-[#58BDF0]"
             >
-              View on OpenSea
+              View on {venueLabel(listing)}
               <ExternalLink size={14} strokeWidth={2.5} aria-hidden />
             </a>
           ) : (
@@ -560,13 +562,13 @@ export default function ItemDetail({
               type="button"
               onClick={() => onOffer(tokenId)}
               title={
-                listing?.venue === "opensea"
-                  ? "Creates a separate Marketplank offer; it does not modify the OpenSea listing."
+                listing && isForeignListing(listing)
+                  ? `Creates a separate Marketplank offer; it does not modify the ${venueLabel(listing)} listing.`
                   : undefined
               }
               className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg border border-line-strong px-4 py-3 text-sm font-bold text-gold-300 transition hover:border-gold-400"
             >
-              {listing?.venue === "opensea" ? "Make Marketplank offer" : "Offer"}
+              {listing && isForeignListing(listing) ? "Make Marketplank offer" : "Offer"}
             </button>
           )}
           <a
