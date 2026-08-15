@@ -1,5 +1,4 @@
 import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
-import type { NormalisedForeignListing } from "@/lib/market/foreign-listings";
 import { ethCallFree } from "@/lib/market/fetch-rpc";
 import { getCollection } from "@/lib/market/collections";
 import { resolveTokenImage } from "@/lib/market/token-image";
@@ -128,56 +127,13 @@ export async function GET(req: Request) {
   if (kind === "offer") return publicJson({ kind, items: annotatedLive });
 
   const { readOpenSeaListings } = await import("@/lib/market/opensea");
-  const { readPulpListings } = await import("@/lib/market/pulp");
   const { mergeBook } = await import("@/lib/market/book");
-
-  /**
-   * Read one venue's cached rows without letting it affect the request.
-   *
-   * Each venue swallows its own failure, so one marketplace being unreadable
-   * never removes another's rows. The TIMEOUT is the important part: this
-   * route is already the most expensive read in the app on a cold start
-   * (on-chain liveness for every one of our own orders), and the venue reads
-   * are the cheapest thing in it — single cached-value lookups, ~5ms warm.
-   * Bounding them guarantees that stays true, so adding a marketplace can
-   * never be what tips this endpoint over a proxy timeout.
-   *
-   * Falling back to [] rather than failing: a book missing one venue's rows
-   * is degraded, a book that does not load at all is broken.
-   */
-  const readVenue = async (
-    label: string,
-    read: () => Promise<NormalisedForeignListing[]>
-  ): Promise<NormalisedForeignListing[]> => {
-    try {
-      return await Promise.race([
-        read(),
-        new Promise<NormalisedForeignListing[]>((resolve) =>
-          setTimeout(() => {
-            console.warn(`[market/orders] ${label} listings read timed out; serving without them`);
-            resolve([]);
-          }, 2_000)
-        ),
-      ]);
-    } catch {
-      return [];
-    }
-  };
-
-  // Sequential, not Promise.all: these are milliseconds each, and running
-  // them in parallel doubles the concurrent Postgres connections this route
-  // holds against a pool whose default max is 4. There is nothing to win and
-  // a contention mode to lose.
-  const foreign = [
-    ...(await readVenue("opensea", readOpenSeaListings)),
-    ...(await readVenue("pulp", readPulpListings)),
-  ];
+  const foreign = await readOpenSeaListings().catch(() => []);
 
   // Serve foreign listings OUR artwork. The collection image map already holds
   // every token, built by the cron from Blockscout + IPFS, so there is no
-  // reason to depend on a marketplace for a picture we own — and without it
-  // every foreign row falls back to the collection logo and the grid looks
-  // broken.
+  // reason to depend on OpenSea for a picture we own — and without it every
+  // OpenSea row falls back to the collection logo and the grid looks broken.
   let imageByTokenId: Record<string, string> | undefined;
   if (foreign.length > 0) {
     try {

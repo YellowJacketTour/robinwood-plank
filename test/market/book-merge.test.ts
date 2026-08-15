@@ -28,9 +28,6 @@ const theirs = (tokenId: string, priceWei: string) => ({
   priceWei,
   maker: "0x2222222222222222222222222222222222222222",
   expiresAt: null,
-  // Foreign rows now carry their own venue — the book merges several
-  // marketplaces, so it can no longer assume which one a row came from.
-  venue: "opensea" as const,
 });
 
 test("a token listed on both venues appears once, at the cheaper price", () => {
