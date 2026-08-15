@@ -127,22 +127,13 @@ export async function GET(req: Request) {
   if (kind === "offer") return publicJson({ kind, items: annotatedLive });
 
   const { readOpenSeaListings } = await import("@/lib/market/opensea");
-  const { readPulpListings } = await import("@/lib/market/pulp");
   const { mergeBook } = await import("@/lib/market/book");
-  // Each venue is read independently and each swallows its own failure: one
-  // marketplace being down must not remove the other's rows from the book.
-  const foreign = (
-    await Promise.all([
-      readOpenSeaListings().catch(() => []),
-      readPulpListings().catch(() => []),
-    ])
-  ).flat();
+  const foreign = await readOpenSeaListings().catch(() => []);
 
   // Serve foreign listings OUR artwork. The collection image map already holds
   // every token, built by the cron from Blockscout + IPFS, so there is no
-  // reason to depend on a marketplace for a picture we own — and without it
-  // every foreign row falls back to the collection logo and the grid looks
-  // broken.
+  // reason to depend on OpenSea for a picture we own — and without it every
+  // OpenSea row falls back to the collection logo and the grid looks broken.
   let imageByTokenId: Record<string, string> | undefined;
   if (foreign.length > 0) {
     try {

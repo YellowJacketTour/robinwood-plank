@@ -1,25 +1,11 @@
 import Image from "next/image";
 import { ExternalLink } from "lucide-react";
 import {
-  isForeignListing,
   isMarketplankRelistRequired,
   MARKETPLANK_RELIST_MESSAGE,
-  venueLabel,
   type Listing,
-  type ListingVenue,
   type MarketCollection,
 } from "@/lib/market/types";
-
-/**
- * Badge colour per venue, plus ours. Each foreign venue gets its own brand
- * colour so the badge is recognisable at a glance rather than reading as a
- * generic "not us" tag; ours keeps the site gold.
- */
-const VENUE_BADGE_CLASS: Record<ListingVenue | "marketplank", string> = {
-  opensea: "bg-[#58BDF0]/15 text-[#58BDF0]",
-  pulp: "bg-[#F0803C]/15 text-[#F0803C]",
-  marketplank: "bg-gold-500/15 text-gold-300",
-};
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
@@ -162,19 +148,14 @@ export default function ListingCard({
             </p>
             <EthUsdValue wei={listing.priceWei} className="block text-[0.62rem] tabular-nums text-foreground/50" />
           </div>
-          {isForeignListing(listing) ? (
+          {listing.venue === "opensea" ? (
             /**
-             * Foreign listing: link out, never a Buy button. OpenSea's order
-             * routes through a conduit we do not control and PulpMarket's API
-             * exposes no signature at all, so a Buy here would be us promising
-             * a fill we cannot guarantee — the exact failure that made stale
-             * listings revert for buyers. A different label, a different
-             * colour and an outbound arrow mean nobody clicks expecting one
-             * flow and lands in another.
-             *
-             * Keyed on isForeignListing, never on one venue literal: a
-             * comparison against "opensea" would drop every other foreign
-             * venue into the Buy branch below.
+             * Foreign listing: link out, never a Buy button. The order routes
+             * through a conduit we do not control, so a Buy here would be us
+             * promising a fill we cannot guarantee — the exact failure that
+             * made stale listings revert for buyers. A different label, a
+             * different colour and an outbound arrow mean nobody clicks
+             * expecting one flow and lands in another.
              */
             <a
               href={listing.externalUrl}
@@ -184,7 +165,7 @@ export default function ListingCard({
             >
               View
               <ExternalLink size={12} strokeWidth={2.5} aria-hidden />
-              <span className="sr-only">on {venueLabel(listing)}, opens in a new tab</span>
+              <span className="sr-only">on OpenSea, opens in a new tab</span>
             </a>
           ) : relistRequired ? (
             <span
@@ -224,10 +205,12 @@ export default function ListingCard({
            */
           <span
             className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[0.55rem] font-black uppercase tracking-wider ${
-              VENUE_BADGE_CLASS[listing.venue ?? "marketplank"]
+              listing.venue === "opensea"
+                ? "bg-[#58BDF0]/15 text-[#58BDF0]"
+                : "bg-gold-500/15 text-gold-300"
             }`}
           >
-            {venueLabel(listing)}
+            {listing.venue === "opensea" ? "OpenSea" : "Marketplank"}
           </span>
         )}
         <div className="flex items-center justify-between gap-2">
@@ -243,13 +226,13 @@ export default function ListingCard({
                 type="button"
                 onClick={() => onOffer(listing)}
                 title={
-                  isForeignListing(listing)
-                    ? `Creates a separate Marketplank offer; it does not modify the ${venueLabel(listing)} listing.`
+                  listing.venue === "opensea"
+                    ? "Creates a separate Marketplank offer; it does not modify the OpenSea listing."
                     : undefined
                 }
                 className="min-h-11 flex-1 rounded-md border border-line-strong text-xs font-bold text-gold-300 transition hover:border-gold-400 sm:text-sm"
               >
-                {isForeignListing(listing) ? "Make offer" : "Offer"}
+                {listing.venue === "opensea" ? "Make offer" : "Offer"}
               </button>
             )}
             {selectable && (
