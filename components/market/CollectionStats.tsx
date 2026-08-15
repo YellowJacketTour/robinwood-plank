@@ -73,14 +73,6 @@ export default function CollectionStats({
   // already count. It is deliberately not labelled "Marketplank volume":
   // claiming another venue's trades as our own would be a lie, and excluding
   // them would understate the collection.
-  // "Floor price" spans every venue too, for the same reason and one more:
-  // this chip sits directly above a grid that DISPLAYS foreign listings, so a
-  // floor that ignored the cheapest visible card would contradict the page in
-  // front of the reader. It is the real floor of the collection, not the floor
-  // of our own book.
-  //
-  // /discover and the trending rail deliberately do NOT match this — see the
-  // note in lib/market/trending.ts. Those numbers can legitimately differ.
   const stats: { label: string; value: string; wei?: string | bigint | null }[] = [
     {
       label: "Floor price",

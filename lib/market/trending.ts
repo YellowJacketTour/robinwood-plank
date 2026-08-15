@@ -3,26 +3,6 @@ import { readChainActivity } from "@/lib/market/chain-events";
 import { getListings } from "@/lib/market/orders-store";
 import { collectionFloorWei } from "@/lib/market/floors";
 
-/**
- * OURS-ONLY, DELIBERATELY — do not "fix" this to match /market's floor.
- *
- * getListings() returns our own book; foreign venues (OpenSea, PulpMarket)
- * are merged in at request time by lib/market/book.ts and never enter this
- * path. That is intentional on two grounds:
- *
- *  - Every volume and velocity signal below comes from OUR settled-sales
- *    ledger. Pairing a cross-venue floor with ours-only volume produces a
- *    half-and-half metric, and this is a RANKING, where consistent inputs
- *    matter more than any single figure being maximally true.
- *  - /discover has the same shape and a stronger reason: it is a search
- *    surface with price filters whose cards are not venue-aware, so foreign
- *    rows there would put unbuyable items in front of buyers with no badge
- *    and no link-out — the exact hazard the venue predicate exists to stop.
- *
- * So /market's floor can legitimately read lower than the trending rail's.
- * They measure different things on different pages.
- */
-
 /** The subset of a ledger sale event these signal computations actually need. */
 type TrendingSale = { priceWei: string; timestamp: string | null; txHash: string };
 

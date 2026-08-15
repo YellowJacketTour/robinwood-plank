@@ -1,26 +1,17 @@
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
-import { openSeaTokenUrl } from "@/lib/market/opensea";
-import { pulpTokenUrl } from "@/lib/market/pulp";
-import type { NormalisedForeignListing } from "@/lib/market/foreign-listings";
-import type { Listing, ListingVenue } from "@/lib/market/types";
+import {
+  openSeaTokenUrl,
+  type NormalisedOpenSeaListing,
+} from "@/lib/market/opensea";
+import type { Listing } from "@/lib/market/types";
 
 /**
- * Where a foreign row links to, per venue. Adding a marketplace means adding
- * a line here and nothing else in this file.
- */
-const EXTERNAL_URL: Record<ListingVenue, (contract: string, tokenId: string) => string> = {
-  opensea: openSeaTokenUrl,
-  pulp: pulpTokenUrl,
-};
-
-/**
- * Combine our own book with every foreign venue's into one view of the market.
+ * Combine our own book with OpenSea's into one view of the market.
  *
- * The collection genuinely trades on other marketplaces, so a book showing
- * only our listings tells buyers the market is thinner and pricier than it is.
- * Showing all of them is the honest picture — but only if which is which is
- * unmistakable, so every foreign row is tagged and links out rather than
- * offering a Buy button.
+ * The collection genuinely trades on both venues, so a book showing only our
+ * listings tells buyers the market is thinner and pricier than it is. Showing
+ * both is the honest picture — but only if which is which is unmistakable, so
+ * every foreign row is tagged and links out rather than offering a Buy button.
  */
 
 /**
@@ -33,20 +24,17 @@ const EXTERNAL_URL: Record<ListingVenue, (contract: string, tokenId: string) => 
  */
 export function mergeBook(
   ours: Listing[],
-  /** Every foreign venue's rows, already normalised and concatenated. */
-  theirs: NormalisedForeignListing[],
+  theirs: NormalisedOpenSeaListing[],
   collectionSlug: string,
   /**
    * tokenId -> artwork URI, from our own collection index.
    *
-   * Foreign listings arrive with no usable image. Left unresolved they fall
-   * back to the collection logo, so a grid of foreign rows renders as
-   * identical placeholders — which reads as broken, and the art is the
-   * product. We already know every token's artwork: the index holds all
-   * 1,542, built from Blockscout and IPFS. Never take a venue's image; we
-   * have it, and theirs would be a third-party dependency for something we
-   * own. (PulpMarket's is additionally a relative path on their own image
-   * proxy, so it would hotlink and bypass our same-origin proxy contract.)
+   * Foreign listings arrive with no image. Left unresolved they fall back to
+   * the collection logo, so a grid of OpenSea rows renders as identical
+   * placeholders — which reads as broken, and the art is the product. We
+   * already know every token's artwork: the index holds all 1,542, built from
+   * Blockscout and IPFS. Never ask OpenSea for it; we have it, theirs would be
+   * a third-party dependency for something we own.
    */
   imageByTokenId?: Map<string, string> | Record<string, string>
 ): Listing[] {
@@ -62,14 +50,7 @@ export function mergeBook(
   const byToken = new Map<string, Listing>();
   for (const l of ours) byToken.set(String(l.tokenId), l);
 
-  // Stable ordering before the cheapest-wins pass. Two venues can hold the
-  // same token at the SAME price, and without this the winner would depend on
-  // the order the callers happened to concatenate their arrays in — so the
-  // grid could reshuffle between refreshes with no data change. Venue name is
-  // arbitrary but deterministic, which is the only property that matters.
-  const foreign = [...theirs].sort((a, b) => a.venue.localeCompare(b.venue));
-
-  for (const t of foreign) {
+  for (const t of theirs) {
     const tokenId = String(t.tokenId);
     const existing = byToken.get(tokenId);
     let cheaper = true;
@@ -82,25 +63,18 @@ export function mergeBook(
     }
     if (!cheaper) continue;
 
-    // Skip a row whose venue we have no link for rather than throwing. One
-    // malformed row from one marketplace module must not take down the whole
-    // order book request — the same fail-soft posture the venue modules take
-    // when a marketplace is down.
-    const externalUrlFor = EXTERNAL_URL[t.venue];
-    if (typeof externalUrlFor !== "function") continue;
-
     byToken.set(tokenId, {
-      id: `${t.venue}-${collectionSlug}-${tokenId}`,
+      id: `opensea-${collectionSlug}-${tokenId}`,
       collectionSlug,
       tokenId,
       maker: t.maker,
       priceWei: t.priceWei,
-      // Not every venue publishes an end time. A far-future value keeps this
+      // OpenSea does not always give an end time. A far-future value keeps this
       // out of "expiring soon" treatments without inventing a deadline.
       expiresAt: t.expiresAt ?? new Date(Date.now() + 365 * 86_400_000).toISOString(),
       kind: "fixed",
-      venue: t.venue,
-      externalUrl: externalUrlFor(NFT_CONTRACT_ADDRESS, tokenId),
+      venue: "opensea",
+      externalUrl: openSeaTokenUrl(NFT_CONTRACT_ADDRESS, tokenId),
       // Ours first (already resolved at listing time), then our own index.
       ...(() => {
         const img = existing?.imageUrl || lookupImage(tokenId);
