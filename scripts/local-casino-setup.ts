@@ -29,6 +29,18 @@
 import hardhat from "hardhat";
 const { ethers } = await hardhat.network.create();
 
+// TEST_RIG=1 relaxes the two settings that exist specifically to model
+// realistic production constraints (the whale-dominance cap and requiring
+// a second real participant) -- neither is a game-math bug, they're
+// deliberate anti-abuse/anti-empty-round design. A tester who needs to
+// freely place any bet size without a competing bettor first (to exercise
+// UI/flow, not to validate the cap itself) wants them OFF; anyone
+// validating the REAL production cap behavior wants the default (unset).
+// See scripts/test-rig.ts for the companion CLI (fund-vault, fund-jackpot,
+// competitor bets, rigged crash/jackpot outcomes) built to run against
+// EITHER mode.
+const TEST_RIG = process.env.TEST_RIG === "1";
+
 async function main() {
   const [deployer, treasury, alice, bob, carol] = await ethers.getSigners();
   // Block cadence + timestamp behavior come from the "node" network config
@@ -60,9 +72,13 @@ async function main() {
   // is the single biggest driver of how long a bankroll survives, and
   // therefore of lifetime plays (the low-rake poker-room lesson).
   const RAKE_BPS = 450n; // 4.5% of the pool
-  const MIN_PARTICIPANTS = 2n;
+  const MIN_PARTICIPANTS = TEST_RIG ? 1n : 2n;
   const MIN_POOL = ethers.parseEther("0.01");
-  const MAX_STAKE_BPS = 6000n;
+  // 10000 bps = 100% = the whale-dominance cap can never trigger (your own
+  // stake can never exceed 100% of the pool including itself). This is a
+  // TEST-ONLY relaxation -- 6000 (60%) is the real, deliberate production
+  // value and stays the default whenever TEST_RIG isn't set.
+  const MAX_STAKE_BPS = TEST_RIG ? 10000n : 6000n;
   // 0 locally: the keeper is dev-run, so settlement costs come out of the
   // dev leg rather than skimming the split. Set this ABOVE zero on mainnet
   // if/when settlement is opened to third-party keepers -- it is carved
@@ -77,7 +93,14 @@ async function main() {
   // remainder (40% of rake = 1.8% of pool) -> dev/ops treasury
   const BURN_KEEPER_REWARD_BPS = 100n; // 1% (<= the 2% engine ceiling)
   const MAX_ETH_PER_BURN = ethers.parseEther("1");
-  const AIRDROP_EPOCH_SECONDS = 86400n; // daily draw -- fixed schedule, on purpose (see the contract)
+  // 24h is the real, deliberate production cadence; under TEST_RIG this is
+  // dropped to 2 minutes so a tester can actually walk multiple epochs
+  // (including the "must be won" forced-payout path, which only matters
+  // over MANY epochs) without waiting real days for genuinely new,
+  // undrawn epochs to reach. scripts/test-rig.ts's rig-jackpot can only
+  // rig an epoch that hasn't been drawn yet -- at a 24h cadence there's
+  // effectively only ever one such epoch available to test against.
+  const AIRDROP_EPOCH_SECONDS = TEST_RIG ? 120n : 86400n;
   const AIRDROP_DRAWER_REWARD_BPS = 200n; // 2% of the prize, to whoever calls the draw
   // POWERBOARD rollover engine: each daily draw picks a Plank Ball in
   // [1, BALL_RANGE]. Land on JACKPOT_BALL (1-in-26, so roughly monthly)
@@ -256,6 +279,7 @@ async function main() {
     distributor: await distributor.getAddress(),
     oracle: await oracle.getAddress(),
     burnEngine: await burnEngine.getAddress(),
+    testRig: TEST_RIG,
   };
   fs.writeFileSync(
     new URL("../public/arcade/deploy-addresses.local.json", import.meta.url),
@@ -265,6 +289,11 @@ async function main() {
 
   console.log("\n========================================================");
   console.log(" plank.love unified casino -- LOCAL dev stack (chainId 31337)");
+  if (TEST_RIG) {
+    console.log(" *** TEST_RIG MODE -- whale-cap disabled (100%), solo betting allowed (minParticipants=1) ***");
+    console.log(" *** NOT production settings. Redeploy without TEST_RIG=1 to test the real 60%/2-participant rules. ***");
+    console.log(" *** Companion CLI: npx hardhat run scripts/test-rig.ts --network localhost -- <command> ... ***");
+  }
   console.log("========================================================");
   console.log(" PlankCrashDrand      :", crashAddr);
   console.log(" PlankBank            :", await bank.getAddress(), "(deposit -> instant session-key play -> withdraw)");
