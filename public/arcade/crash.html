@@ -121,6 +121,9 @@
   }
   .mult.live { color: var(--win); text-shadow: 0 0 46px rgba(62,224,140,0.45); }
   .mult.crashed { color: var(--lose); text-shadow: 0 0 46px rgba(255,77,106,0.5); }
+  /* FUELING: on the pad, charging on $PLANK toward 1.00x liftoff -- an amber
+     "fuel" glow, distinct from the green flight and the red crash. */
+  .mult.fueling { color: var(--gold, #ffc857); text-shadow: 0 0 40px rgba(255,200,87,0.4); opacity: 0.92; }
   .mult .x { font-size: 0.42em; opacity: 0.7; margin-left: 2px; }
   .substatus {
     margin-top: 10px; font-family: var(--font-mono); font-size: 12.5px;
@@ -1458,7 +1461,17 @@ function frame() {
     targetVelocityNorm = Math.min(1, estElapsedBlocks / 358);
   } else if (phaseState === "betting" && bettingEndsAtEstimateMs !== null) {
     const secsLeft = Math.max(0, Math.ceil((bettingEndsAtEstimateMs - performance.now()) / 1000));
-    $("substatus").textContent = secsLeft > 0 ? `LAUNCHING IN ${secsLeft}s` : "LOCKING…";
+    // FUELING phase: on the launchpad the rocket charges from 0.00 up to
+    // 1.00x -- that's the $PLANK "fuel" filling the tank before liftoff. The
+    // readout climbs 0->1 over the betting window; the moment it locks, the
+    // real flight takes over from 1.00x and beyond.
+    const totalMs = (bettingDurationCache || 8) * 1000;
+    const remainMs = Math.max(0, bettingEndsAtEstimateMs - performance.now());
+    const fuel = Math.max(0, Math.min(1, 1 - remainMs / totalMs));
+    setMultReadout(fuel.toFixed(2), "fueling");
+    // The exhaust/altitude sits on the pad (0) and only the gauge fills.
+    targetFlightProgress = 0;
+    $("substatus").textContent = secsLeft > 0 ? `⛽ FUELING · LAUNCH IN ${secsLeft}s` : "IGNITION…";
   }
   velocityNorm += (targetVelocityNorm - velocityNorm) * Math.min(1, dt * 3);
   // Critically-damped spring toward the (continuously-rising) target: real
@@ -1723,7 +1736,9 @@ const CRASH_EXT_ABI = [
   "function setPayoutRedirect(address sink)",
   "function reserve() view returns (uint256)",
   "function nextSeed() view returns (uint256)",
+  "function bettingDurationSeconds() view returns (uint256)",
 ];
+let bettingDurationCache = 8;
 let bank = null; // bound to the root signer (deposit/withdraw/grant)
 let crashExt = null; // root signer, for setPayoutRedirect
 let sessionSigner = null; // ephemeral browser keypair
@@ -2045,6 +2060,7 @@ async function connectToChain(rpcUrl, address, pk, label) {
   try {
     bank = new ethers.Contract(BANK_ADDR, BANK_ABI, signer);
     crashExt = new ethers.Contract(address, CRASH_EXT_ABI, signer);
+    try { bettingDurationCache = Number(await crashExt.bettingDurationSeconds()); } catch (_) {}
     if (typeof refreshBankUI === "function") refreshBankUI();
     if (typeof refreshVault === "function") refreshVault();
   } catch (_) { /* bank optional; game still works without it */ }
@@ -2597,7 +2613,7 @@ async function refresh() {
 
     if (phase === 0) {
       flightProgress = 0; targetFlightProgress = 0; flightVel = 0; crashedAt = null;
-      setMultReadout("1.00", "idle");
+      setMultReadout("0.00", "fueling");
       // Anchor real wall-clock time to the chain's whole-second deadline;
       // frame() ticks the displayed countdown down every frame from this,
       // so it doesn't wait on (or jump around with) the next poll.
