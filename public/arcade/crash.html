@@ -83,6 +83,44 @@
     35% { transform: scale(1.09); box-shadow: 0 0 22px rgba(62,224,140,0.5); }
     100% { transform: scale(1); }
   }
+  /* Powerboard: the lottery every crash bet already earns a ticket toward --
+     violet, distinct from the Vault's green and fuel's amber. */
+  .pb-stat { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+    border-radius: 999px; border: 1px solid rgba(178,143,255,0.35); color: #c9adff;
+    background: rgba(150,110,255,0.08); cursor: pointer; user-select: none; }
+  .pb-stat b { color: #dcc8ff; font-family: var(--font-display); font-weight: 400; }
+  .pb-stat i { font-style: normal; color: var(--ink-dim); font-size: 10.5px; }
+  .pb-stat.bump { animation: pb-bump 0.6s ease; }
+  @keyframes pb-bump {
+    0% { transform: scale(1); }
+    35% { transform: scale(1.09); box-shadow: 0 0 22px rgba(178,143,255,0.5); }
+    100% { transform: scale(1); }
+  }
+  .pb-popover { position: fixed; top: 54px; right: 16px; z-index: 70; width: 300px;
+    background: rgba(16,12,24,0.95); border: 1px solid rgba(178,143,255,0.35);
+    border-radius: 14px; padding: 14px 15px; backdrop-filter: blur(8px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55); color: #ece3ff;
+    opacity: 0; pointer-events: none; transform: translateY(-6px);
+    transition: opacity .25s ease, transform .25s ease; }
+  .pb-popover.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+  .pb-pop-head { display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #c9adff;
+    font-weight: 700; margin-bottom: 6px; }
+  .pb-pop-close { cursor: pointer; color: var(--ink-dim); font-size: 13px; }
+  .pb-pop-close:hover { color: #fff; }
+  .pb-pop-sub { font-size: 11px; color: #b3a3d9; line-height: 1.45; margin-bottom: 10px; }
+  .pb-row { display: flex; justify-content: space-between; align-items: baseline;
+    padding: 5px 0; border-top: 1px solid rgba(178,143,255,0.14); font-size: 12.5px; }
+  .pb-row:first-of-type { border-top: none; }
+  .pb-row .pb-k { color: #b3a3d9; }
+  .pb-row .pb-v { font-variant-numeric: tabular-nums; font-weight: 600; color: #fff; }
+  .pb-row .pb-v.hi { color: #dcc8ff; }
+  .pb-guarantee { margin-top: 10px; padding: 8px 10px; background: rgba(178,143,255,0.08);
+    border: 1px solid rgba(178,143,255,0.2); border-radius: 9px; font-size: 11px;
+    color: #dcc8ff; line-height: 1.4; }
+  .payout-note { text-align: center; font-size: 10.5px; color: var(--ink-dim);
+    letter-spacing: .01em; margin-bottom: 8px; cursor: help; opacity: .82; }
+  .payout-note:hover { opacity: 1; color: var(--ink); }
   .gear {
     width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line);
     background: rgba(255,255,255,0.03); color: var(--ink-dim); cursor: pointer;
@@ -406,11 +444,23 @@
       <span class="vault-stat" id="vaultStat" title="The Prize Vault: a perpetual reserve that seeds every game and can never hit zero. It grows from every pot and every bust.">
         ⬢ VAULT <b id="vaultAmt">—</b><i id="vaultSeed"></i>
       </span>
+      <span class="pb-stat" id="pbStat" title="Click for details">
+        🎟 <b id="pbTickets">—</b><i id="pbJackpot"></i>
+      </span>
       <span>POOL <b id="poolStat">—</b></span>
       <span>PLAYERS <b id="playersStat">—</b></span>
     </div>
     <div class="gear" id="statsBtn" title="Stats">📊</div>
     <div class="gear" id="gearBtn" title="Connection settings">⚙</div>
+  </div>
+
+  <!-- Powerboard detail popover: every crash bet already earns a real,
+       wager-weighted lottery ticket toward this rolling jackpot -- this
+       makes that otherwise-invisible mechanic visible and explained. -->
+  <div id="pbPopover" class="pb-popover">
+    <div class="pb-pop-head">🎟 Powerboard <span class="pb-pop-close" id="pbPopClose">✕</span></div>
+    <div class="pb-pop-sub">Every crash bet earns you a lottery ticket automatically -- no extra cost, no separate purchase. More wagered = more tickets = better odds.</div>
+    <div id="pbPopBody"></div>
   </div>
 
   <!-- Universal crash-game convention (Aviator, JetX, Spaceman, Rocketman
@@ -451,6 +501,9 @@
   </div>
 
   <div class="deck">
+    <div class="payout-note" title="Your payout isn't stake × multiplier — everyone who cashes out in time splits the pot by (their stake × their own multiplier). Cashing out earlier than others grows your share; more people cashing out late shrinks everyone's per-share.">
+      ⓘ Payout = your share of the shared pot, split by stake × your cash-out multiplier — not a fixed stake × multiplier payout
+    </div>
     <div class="avatar-row" id="avatarRow" style="display:none"></div>
     <div class="stake-row" id="stakeRow">
       <button class="chip active" data-amt="0.01">0.01</button>
@@ -1731,6 +1784,7 @@ const BANK_ABI = [
   "function betVia(address game, uint256 amount)",
   "function cashOutVia(address game, uint256 roundId)",
   "function balanceOf(address) view returns (uint256)",
+  "function sessions(address key) view returns (address player, uint128 spendCap, uint128 spent, uint64 expiry, bool revoked)",
 ];
 const CRASH_EXT_ABI = [
   "function setPayoutRedirect(address sink)",
@@ -1760,6 +1814,26 @@ const PLANK_ABI = [
 ];
 let fuelBooster = null;
 let plankToken = null;
+
+// ── Powerboard: every crash bet already earns a wager-weighted lottery
+// ticket toward a daily, rolling jackpot -- previously invisible in this
+// UI even though it's fully live on-chain. Read-only surface (claiming is
+// keeper-driven), so this only needs view functions.
+const POWERBOARD_ADDR = "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853";
+const POWERBOARD_ABI = [
+  "function currentEpoch() view returns (uint256)",
+  "function jackpot() view returns (uint256)",
+  "function ticketsOf(uint256 epoch, address player) view returns (uint256)",
+  "function epochs(uint256) view returns (uint256 totalTickets, uint64 targetDrandRound, bool drawRequested, bool drawn, bool jackpotHit, uint256 drawnBall, address winner, uint256 prize)",
+  "function previewPrizes() view returns (uint256 ifJackpotHit, uint256 ifMiss)",
+  "function jackpotOddsOneIn() view returns (uint256)",
+  "function guaranteedHitByEpoch() view returns (uint256)",
+  "function epochDuration() view returns (uint256)",
+  "function genesisTimestamp() view returns (uint256)",
+  "function participantCount(uint256 epoch) view returns (uint256)",
+];
+let powerboard = null;
+
 let bank = null; // bound to the root signer (deposit/withdraw/grant)
 let crashExt = null; // root signer, for setPayoutRedirect
 let sessionSigner = null; // ephemeral browser keypair
@@ -2086,9 +2160,14 @@ async function connectToChain(rpcUrl, address, pk, label) {
       fuelBooster = new ethers.Contract(FUEL_BOOSTER_ADDR, FUEL_BOOSTER_ABI, signer);
       plankToken = new ethers.Contract(PLANK_ADDR, PLANK_ABI, signer);
     } catch (_) { /* fuel booster optional; game still works without it */ }
+    try {
+      powerboard = new ethers.Contract(POWERBOARD_ADDR, POWERBOARD_ABI, signer);
+    } catch (_) { /* powerboard optional; game still works without it */ }
     if (typeof refreshBankUI === "function") refreshBankUI();
     if (typeof refreshVault === "function") refreshVault();
     if (typeof refreshFuelUI === "function") refreshFuelUI();
+    if (typeof refreshPowerboardUI === "function") refreshPowerboardUI();
+    if (typeof tryRestoreSession === "function") tryRestoreSession();
   } catch (_) { /* bank optional; game still works without it */ }
   $("connDot").classList.add("on");
   toast("Connected as " + label);
@@ -2403,7 +2482,7 @@ async function refreshFuelUI() {
     const capPct = cap > 0n ? Math.min(100, Number((ethBoosted * 100n) / cap)) : 0;
 
     body.innerHTML =
-      '<div class="fl-sub">Burn $PLANK any time to grow the shared Vault. Never touches your own stake, cash-out, or crash odds.</div>' +
+      '<div class="fl-sub">Burn $PLANK anytime to grow the pot everyone plays for next — a bigger seed for every future round, for the whole table. (It never changes your own stake, cash-out, or crash odds — this is purely a gift to the pot.)</div>' +
       '<div class="fl-stats">' +
         '<div class="fl-stat"><div class="fl-k">Burned</div><div class="fl-v">' + (+ethers.formatEther(plankBurned)).toLocaleString(undefined, {maximumFractionDigits:0}) + '</div></div>' +
         '<div class="fl-stat"><div class="fl-k">Boosted</div><div class="fl-v">' + (+ethers.formatEther(ethBoosted)).toFixed(4) + ' Ξ</div></div>' +
@@ -2442,6 +2521,79 @@ async function burnFuelAction(amountStr) {
     refreshFuelUI();
   }
 }
+
+// Powerboard: makes the otherwise-invisible lottery mechanic visible. Every
+// crash bet already earns a real, wager-weighted ticket toward this daily
+// rolling jackpot (keeper-driven claimTickets, no player action needed) --
+// this panel is purely a READOUT of that already-live system.
+let lastPbJackpotWei = null;
+
+function fmtDuration(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (h > 0) return h + "h " + m + "m";
+  if (m > 0) return m + "m " + s + "s";
+  return s + "s";
+}
+
+async function refreshPowerboardUI() {
+  if (!powerboard) return;
+  try {
+    const epoch = await powerboard.currentEpoch();
+    const [jackpotWei, myTickets, ep, oddsOneIn, guaranteedBy, epochDuration, genesisTs, participants] = await Promise.all([
+      powerboard.jackpot(),
+      signer ? powerboard.ticketsOf(epoch, signer.address) : Promise.resolve(0n),
+      powerboard.epochs(epoch),
+      powerboard.jackpotOddsOneIn(),
+      powerboard.guaranteedHitByEpoch(),
+      powerboard.epochDuration(),
+      powerboard.genesisTimestamp(),
+      powerboard.participantCount(epoch),
+    ]);
+    const totalTickets = ep.totalTickets;
+
+    // Header chip: your tickets + the jackpot headline.
+    const ticketsEl = $("pbTickets");
+    const jackpotEl = $("pbJackpot");
+    if (ticketsEl) ticketsEl.textContent = (+ethers.formatEther(myTickets)).toLocaleString(undefined, {maximumFractionDigits: 2});
+    if (jackpotEl) jackpotEl.textContent = "· jackpot " + (+ethers.formatEther(jackpotWei)).toFixed(3) + " Ξ";
+    if (lastPbJackpotWei !== null && jackpotWei > lastPbJackpotWei) {
+      const chip = $("pbStat");
+      if (chip) { chip.classList.remove("bump"); void chip.offsetWidth; chip.classList.add("bump"); }
+    }
+    lastPbJackpotWei = jackpotWei;
+
+    // Popover detail body (only worth computing while it's actually open).
+    const pop = $("pbPopover");
+    if (pop && pop.classList.contains("show")) {
+      const oddsText = totalTickets > 0n
+        ? "1 in " + (Number(totalTickets) / Math.max(1, Number(myTickets))).toLocaleString(undefined, {maximumFractionDigits: 1})
+        : "—";
+      const now = Math.floor(Date.now() / 1000);
+      const epochEndsAt = Number(genesisTs) + (Number(epoch) + 1) * Number(epochDuration);
+      const secsToDraw = epochEndsAt - now;
+      const guaranteeText = guaranteedBy > 0n
+        ? "Full jackpot guaranteed to pay out by epoch " + guaranteedBy.toString() + " even if the ball never hits."
+        : null;
+
+      $("pbPopBody").innerHTML =
+        '<div class="pb-row"><span class="pb-k">Your tickets today</span><span class="pb-v hi">' + (+ethers.formatEther(myTickets)).toFixed(4) + '</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Total tickets today</span><span class="pb-v">' + (+ethers.formatEther(totalTickets)).toFixed(4) + '</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Players today</span><span class="pb-v">' + participants.toString() + '</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Your odds today</span><span class="pb-v hi">' + oddsText + '</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Jackpot</span><span class="pb-v">' + (+ethers.formatEther(jackpotWei)).toFixed(4) + ' Ξ</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Ball odds (jackpot hit)</span><span class="pb-v">1 in ' + oddsOneIn.toString() + '</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Next draw</span><span class="pb-v">' + fmtDuration(secsToDraw) + '</span></div>' +
+        (guaranteeText ? '<div class="pb-guarantee">🔒 ' + guaranteeText + '</div>' : '');
+    }
+  } catch (_) { /* transient */ }
+}
+
+$("pbStat").addEventListener("click", () => {
+  $("pbPopover").classList.toggle("show");
+  refreshPowerboardUI();
+});
+$("pbPopClose").addEventListener("click", () => $("pbPopover").classList.remove("show"));
 
 // Event-driven: watch for the newest RoundCrashed and show its scoreboard,
 // no matter what the current round is now. Runs on the same poll cadence.
@@ -2778,7 +2930,7 @@ async function refresh() {
         // let "Cashed out, waiting…" imply a number nobody can see yet.
         const est = await crash.estimatedPayout(roundId, signer.address);
         const estStr = Number(ethers.formatEther(est)).toFixed(4);
-        updatePrimaryButton("cashed", { sub: `Cashed out — ~${estStr} ETH if the round ended right now` });
+        updatePrimaryButton("cashed", { sub: `Cashed out — ~${estStr} ETH (shared pot — can shrink as others cash out too)` });
       } else updatePrimaryButton("live-hold", { sub: `Staked ${ethers.formatEther(stake)} ETH` });
       autoPlayTick(1, roundId, hasStake, hasCashedOut, liveBps);
     } else {
@@ -2862,7 +3014,7 @@ function startPolling() {
   // to 400ms; these are cheap read-only view calls against a local node,
   // not transactions, so there's no real cost to polling faster.
   pollTimer = setInterval(refresh, 400);
-  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); refreshFuelUI(); }, 600);
+  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); refreshFuelUI(); refreshPowerboardUI(); }, 600);
 }
 
 // A per-tab client-side evm_mine heartbeat was tried here and was a real,
@@ -3093,6 +3245,56 @@ async function refreshBankUI() {
   }
 }
 
+// ── Session persistence across page reloads ──────────────────────────────
+// A session key is deliberately LOW-STAKES to persist: it can never
+// withdraw, it's capped, and it expires -- unlike a root wallet key, so
+// storing it in localStorage is a reasonable, bounded trade for not making
+// a returning player redo the whole Enter flow every single visit even
+// though their funds were always safe on-chain the whole time. Scoped per
+// (chain, bank, player) so switching accounts/networks can't cross-wire a
+// stale key.
+function sessionStorageKey(playerAddr) {
+  const chainId = provider && provider._network ? provider._network.chainId : "local";
+  return "plankcrash_session_" + chainId + "_" + BANK_ADDR + "_" + playerAddr.toLowerCase();
+}
+function saveSessionLocally(playerAddr, sk, expiry) {
+  try {
+    localStorage.setItem(sessionStorageKey(playerAddr), JSON.stringify({ pk: sk.privateKey, expiry: expiry.toString() }));
+  } catch (_) { /* localStorage unavailable (private mode etc) -- just skip persistence */ }
+}
+function clearSessionLocally(playerAddr) {
+  try { localStorage.removeItem(sessionStorageKey(playerAddr)); } catch (_) {}
+}
+
+// Called once on connect. Restores a saved session key if -- and only if --
+// it's still genuinely valid ON-CHAIN (not expired, not revoked, still
+// pointed at this player): a stale localStorage entry alone is never
+// trusted blindly.
+async function tryRestoreSession() {
+  if (!bank || !signer || bankMode) return;
+  let saved;
+  try {
+    const raw = localStorage.getItem(sessionStorageKey(signer.address));
+    if (!raw) return;
+    saved = JSON.parse(raw);
+  } catch (_) { return; }
+  try {
+    const sk = new ethers.Wallet(saved.pk, provider);
+    const s = await bank.sessions(sk.address);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const stillValid = s.player.toLowerCase() === signer.address.toLowerCase() && !s.revoked && Number(s.expiry) > nowSec;
+    if (!stillValid) { clearSessionLocally(signer.address); return; }
+    sessionSigner = sk;
+    sessionBank = bank.connect(sk);
+    bankMode = true;
+    toast("Instant play resumed from your last visit");
+  } catch (_) {
+    clearSessionLocally(signer.address);
+  } finally {
+    refreshBankUI();
+  }
+}
+
 async function enterInstantPlay(depositEth) {
   if (bankBusy) return;
   if (!bank || !signer) { toast("Connect first"); return; }
@@ -3113,6 +3315,7 @@ async function enterInstantPlay(depositEth) {
     sessionSigner = sk;
     sessionBank = bank.connect(sk);
     bankMode = true;
+    saveSessionLocally(signer.address, sk, expiry);
     toast("Instant play ON — bet & cash out with no popups");
   } catch (err) {
     toast("Enter failed: " + (err.shortMessage || err.message));
@@ -3130,6 +3333,7 @@ async function leaveInstantPlay() {
   try {
     if (sessionSigner) { try { await (await bank.revokeSession(sessionSigner.address)).wait(); } catch (_) {} }
     bankMode = false; sessionBank = null; sessionSigner = null;
+    clearSessionLocally(signer.address);
     const bal = await bank.balanceOf(signer.address);
     if (bal > 0n) await (await bank.withdrawAll()).wait();
     toast("Left instant play — buffer withdrawn to your wallet");
