@@ -34,6 +34,12 @@
  *     (hardhat_setBalance -- genuinely unlimited, this is a devnet RPC
  *     method, not a token mint)
  *
+ *   RIG_CMD=mint-plank RIG_A1=alice RIG_A2=1000000 \
+ *     npx hardhat run scripts/test-rig.ts --network localhost
+ *     (mints unlimited mock $PLANK to fuel-burn test with -- the mock
+ *     token's mint() is wide open by design for exactly this; the real
+ *     $PLANK on mainnet has no such function)
+ *
  *   RIG_CMD=claim-tickets RIG_A1=alice RIG_A2=2 \
  *     npx hardhat run scripts/test-rig.ts --network localhost
  *     (claims Powerboard tickets for alice's bet in crash round 2 -- do
@@ -88,6 +94,10 @@ const BEACON_ABI = [
   "function setRandomness(uint64 round, bytes32 value) external",
   "function isRoundAvailable(uint64 round) view returns (bool)",
 ];
+const PLANK_ABI = [
+  "function mint(address to, uint256 amount) external",
+  "function balanceOf(address) view returns (uint256)",
+];
 
 async function loadManifest() {
   const fs = await import("node:fs");
@@ -138,6 +148,7 @@ async function main() {
   const crash = new ethers.Contract(manifest.crash, CRASH_ABI, operator);
   const powerboard = new ethers.Contract(manifest.powerboard, POWERBOARD_ABI, operator);
   const beacon = new ethers.Contract(manifest.beacon, BEACON_ABI, operator);
+  const plank = new ethers.Contract(manifest.plank, PLANK_ABI, operator);
 
   if (cmd === "status") {
     const id = await crash.currentRoundId();
@@ -150,8 +161,24 @@ async function main() {
     console.log("powerboard epoch:", epoch.toString(), "jackpot:", ethers.formatEther(jackpot), "ETH");
     for (const [name, signer] of Object.entries(named)) {
       const bal = await ethers.provider.getBalance(signer.address);
-      console.log(` ${name.padEnd(9)} ${signer.address}  ${ethers.formatEther(bal)} ETH`);
+      const plankBal = await plank.balanceOf(signer.address);
+      console.log(
+        ` ${name.padEnd(9)} ${signer.address}  ${ethers.formatEther(bal)} ETH  ${ethers.formatEther(plankBal)} $PLANK`
+      );
     }
+    return;
+  }
+
+  if (cmd === "mint-plank") {
+    if (!a1 || !a2) throw new Error("RIG_A1=<account> RIG_A2=<plankAmount> required");
+    const signer = named[a1];
+    if (!signer) throw new Error(`unknown account "${a1}" -- use deployer|alice|bob|carol`);
+    // Permissionless on the mock token (see contracts/test/MockERC20Burnable.sol)
+    // -- genuinely unlimited, mints new supply out of thin air. The real
+    // $PLANK on mainnet has no such function; never available there.
+    const tx = await plank.mint(signer.address, ethers.parseEther(a2));
+    await tx.wait();
+    console.log(`minted ${a2} $PLANK to ${a1} -- new balance: ${ethers.formatEther(await plank.balanceOf(signer.address))}`);
     return;
   }
 
