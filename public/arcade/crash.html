@@ -138,6 +138,69 @@
   .pb-guarantee { margin-top: 10px; padding: 8px 10px; background: rgba(178,143,255,0.08);
     border: 1px solid rgba(178,143,255,0.2); border-radius: 9px; font-size: 11px;
     color: #dcc8ff; line-height: 1.4; }
+
+  /* ── Verify popover: same shape as the Powerboard one, teal instead of
+     violet so it reads as its own distinct trust surface. ────────────── */
+  .verify-popover { position: fixed; top: 54px; right: 16px; z-index: 70; width: 320px;
+    background: rgba(8,20,18,0.95); border: 1px solid rgba(94,220,200,0.35);
+    border-radius: 14px; padding: 14px 15px; backdrop-filter: blur(8px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55); color: #dcfff8;
+    opacity: 0; pointer-events: none; transform: translateY(-6px);
+    transition: opacity .25s ease, transform .25s ease; }
+  .verify-popover.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+  .verify-pop-head { display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #5edcc8;
+    font-weight: 700; margin-bottom: 6px; }
+  .verify-pop-close { cursor: pointer; color: var(--ink-dim); font-size: 13px; }
+  .verify-pop-close:hover { color: #fff; }
+  .verify-pop-sub { font-size: 11px; color: #9fd9cd; line-height: 1.45; margin-bottom: 10px; }
+  .vf-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    padding: 5px 0; border-top: 1px solid rgba(94,220,200,0.14); font-size: 12px; }
+  .vf-row:first-of-type { border-top: none; }
+  .vf-row .vf-k { color: #9fd9cd; flex: none; }
+  .vf-row .vf-v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600;
+    color: #fff; text-align: right; overflow-wrap: anywhere; }
+  .vf-row .vf-v.pending { color: #9fd9cd; font-style: italic; font-weight: 400; }
+  .vf-link { display: block; margin-top: 10px; font-size: 11px; color: #5edcc8;
+    text-decoration: none; border: 1px solid rgba(94,220,200,0.3); border-radius: 8px;
+    padding: 7px 10px; text-align: center; }
+  .vf-link:hover { background: rgba(94,220,200,0.08); }
+  .vf-note { margin-top: 10px; padding: 8px 10px; background: rgba(94,220,200,0.08);
+    border: 1px solid rgba(94,220,200,0.2); border-radius: 9px; font-size: 10.5px;
+    color: #9fd9cd; line-height: 1.4; }
+
+  /* ── LIVE tote board: same visual family as the post-crash scoreboard
+     (.sb-*), new .lb-* names since rows need a THIRD state (still flying)
+     the post-crash roster never has. Pinned above the deck instead of the
+     scoreboard's dead-center position, since this one is meant to be
+     glanced at WHILE deciding to cash out, not read after the fact. ──── */
+  .live-board {
+    position: absolute; left: 50%; bottom: 12px; transform: translate(-50%, 12px);
+    z-index: 24; width: min(440px, calc(100% - 24px));
+    background: rgba(8,11,20,0.92); backdrop-filter: blur(10px);
+    border: 1px solid rgba(62,224,140,0.22); border-radius: 16px;
+    padding: 12px 16px 11px; opacity: 0; pointer-events: none;
+    box-shadow: 0 12px 44px rgba(0,0,0,0.55);
+    transition: opacity .3s ease, transform .35s cubic-bezier(.2,1.2,.4,1);
+  }
+  .live-board.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+  .lb-head { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--win); margin-bottom: 6px; }
+  .lb-pot { font-size: 11.5px; color: var(--ink-dim); margin-bottom: 8px; line-height: 1.4; }
+  .lb-pot b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .lb-rows { display: flex; flex-direction: column; gap: 3px; max-height: 152px; overflow-y: auto; }
+  .lb-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center;
+    font-family: var(--font-mono); font-size: 12px; padding: 4px 8px; border-radius: 8px;
+    background: rgba(255,255,255,0.03); }
+  .lb-row.me { outline: 1px solid rgba(255,255,255,0.22); background: rgba(255,255,255,0.07); }
+  .lb-row .lb-who { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lb-row .lb-who .lb-tag { color: var(--ink-dim); font-size: 10px; margin-left: 5px; }
+  .lb-row .lb-status { font-variant-numeric: tabular-nums; }
+  .lb-row.flying .lb-status { color: var(--gold, #ffc857); }
+  .lb-row.cashed .lb-status { color: var(--win); }
+  .lb-row .lb-est { font-variant-numeric: tabular-nums; text-align: right; min-width: 78px; color: var(--win-glow); }
+  .lb-empty { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-dim);
+    font-style: italic; padding: 3px 8px; }
   .payout-note { text-align: center; font-size: 10.5px; color: var(--ink-dim);
     letter-spacing: .01em; margin-bottom: 8px; cursor: help; opacity: .82; }
   .payout-note:hover { opacity: 1; color: var(--ink); }
@@ -496,6 +559,7 @@
       <span>PLAYERS <b id="playersStat">—</b></span>
     </div>
     <div class="gear sfx-toggle" id="sfxBtn" title="Sound" role="button" aria-label="Toggle sound" aria-pressed="true">🔊</div>
+    <div class="gear" id="verifyBtn" title="Verify this round's randomness" role="button" aria-label="Verify this round's randomness" tabindex="0">🔒</div>
     <div class="gear" id="statsBtn" title="Stats" role="button" aria-label="Open stats and leaderboard" tabindex="0">📊</div>
     <div class="gear" id="gearBtn" title="Connection settings" role="button" aria-label="Open connection settings" tabindex="0">⚙</div>
   </div>
@@ -507,6 +571,20 @@
     <div class="pb-pop-head">🎟 Powerboard <span class="pb-pop-close" id="pbPopClose" role="button" aria-label="Close Powerboard details" tabindex="0">✕</span></div>
     <div class="pb-pop-sub">Every crash bet earns you a lottery ticket automatically -- no extra cost, no separate purchase. More wagered = more tickets = better odds.</div>
     <div id="pbPopBody"></div>
+  </div>
+
+  <!-- Verify popover: PlankCrash's real trust story, made visible. Unlike
+       a centralized "provably fair" seed/hash scheme (verify AFTER the
+       fact, against a server that could in principle have cheated before
+       publishing its seed), this round's crash point was derived from the
+       League of Entropy's public drand beacon -- a threshold-BLS network
+       nobody, including this game's own operator, can predict or bias.
+       Anyone can independently check the beacon's own public record for
+       this exact round number matches what the contract used. -->
+  <div id="verifyPopover" class="verify-popover">
+    <div class="verify-pop-head">🔒 Verify this round <span class="verify-pop-close" id="verifyPopClose" role="button" aria-label="Close verification details" tabindex="0">✕</span></div>
+    <div class="verify-pop-sub">The crash point isn't a seed the operator could pre-select and only reveal later -- it's derived from the League of Entropy's public drand beacon, a randomness network no single party (including us) controls or can predict.</div>
+    <div id="verifyPopBody"></div>
   </div>
 
   <!-- Universal crash-game convention (Aviator, JetX, Spaceman, Rocketman
@@ -544,6 +622,18 @@
          events (BetPlaced / CashedOut / RoundCrashed / ResultRegistered /
          Claimed), not fabricated. -->
     <div class="scoreboard" id="scoreboard"></div>
+
+    <!-- LIVE tote board: the same "pool ÷ competing claims" transparency a
+         horse-racing tote board gives bettors, made concrete for a payout
+         model where your return depends on what everyone else does, not
+         just your own timing. Shows every current participant (real
+         BetPlaced/CashedOut events for THIS round, not fabricated) and,
+         for anyone still flying, a live "if you cashed out this instant"
+         estimate -- computed the same way for every flying player, since
+         the multiplier is round-wide, not per-player. Only ever shown
+         during Phase.LIVE; the post-crash scoreboard above takes over
+         once the real outcome is known. -->
+    <div class="live-board" id="liveBoard"></div>
   </div>
 
   <div class="deck">
@@ -672,14 +762,16 @@ async function loadDeployAddresses() {
     if (m.fuelBooster) FUEL_BOOSTER_ADDR = m.fuelBooster;
     if (m.plank) PLANK_ADDR = m.plank;
     if (m.powerboard) POWERBOARD_ADDR = m.powerboard;
+    if (m.beacon) BEACON_ADDR = m.beacon;
     if (m.crash) SIMULATE_ADDR = m.crash;
     console.log("[deploy-addresses] synced from deploy-addresses.local.json (generated " + (m.generatedAt || "?") + ")");
   } catch (_) { /* no manifest available -- keep the hardcoded fallbacks */ }
 }
-// Invoked once all five address `let`s below have their hardcoded fallback
-// values assigned -- see the call site right after SIMULATE_ADDR's
-// declaration, not here (a `let` is in its temporal-dead-zone until its own
-// declaration line runs, so calling this before then would throw).
+// Invoked once all six address `let`s below (including BEACON_ADDR, up
+// above with rakeBpsCache) have their hardcoded fallback values assigned --
+// see the call site right after SIMULATE_ADDR's declaration, not here (a
+// `let` is in its temporal-dead-zone until its own declaration line runs,
+// so calling this before then would throw).
 
 // ── THREE.JS scene: launch pad → atmosphere → deep space ────────────────
 // Real WebGL pipeline: PBR materials, a two-color gradient sky dome (vertex
@@ -1950,8 +2042,22 @@ const CRASH_EXT_ABI = [
   "function bettingDurationSeconds() view returns (uint256)",
   "function seedNumerator() view returns (uint256)",
   "function seedDenominator() view returns (uint256)",
+  "function rakeBps() view returns (uint256)",
 ];
 let bettingDurationCache = 8;
+let rakeBpsCache = 450; // 4.5% -- overwritten with the real immutable value on connect
+
+// ── DrandBeacon: the actual verifiable-randomness source every round's
+// crash point and every Powerboard draw derives from. Read-only here (the
+// Verify popover below); named beaconContract, not `beacon`, since that
+// identifier is already the THREE.js launch-pad mesh above.
+let BEACON_ADDR = "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+const BEACON_ABI = [
+  "function randomnessOrZero(uint64 round) view returns (bytes32)",
+  "function isRoundAvailable(uint64 round) view returns (bool)",
+  "function chainHash() view returns (bytes32)",
+];
+let beaconContract = null;
 
 // ── Fuel the next launch: burn $PLANK (any time -- burnFuel() has no phase
 //    check) to boost the shared Vault. Never touches the burner's own odds.
@@ -2331,6 +2437,7 @@ async function connectToChain(rpcUrl, address, pk, label) {
     bank = new ethers.Contract(BANK_ADDR, BANK_ABI, signer);
     crashExt = new ethers.Contract(address, CRASH_EXT_ABI, signer);
     try { bettingDurationCache = Number(await crashExt.bettingDurationSeconds()); } catch (_) {}
+    try { rakeBpsCache = Number(await crashExt.rakeBps()); } catch (_) {}
     try {
       fuelBooster = new ethers.Contract(FUEL_BOOSTER_ADDR, FUEL_BOOSTER_ABI, signer);
       plankToken = new ethers.Contract(PLANK_ADDR, PLANK_ABI, signer);
@@ -2338,6 +2445,9 @@ async function connectToChain(rpcUrl, address, pk, label) {
     try {
       powerboard = new ethers.Contract(POWERBOARD_ADDR, POWERBOARD_ABI, signer);
     } catch (_) { /* powerboard optional; game still works without it */ }
+    try {
+      beaconContract = new ethers.Contract(BEACON_ADDR, BEACON_ABI, provider);
+    } catch (_) { /* verify popover optional; game still works without it */ }
     if (typeof refreshBankUI === "function") refreshBankUI();
     if (typeof refreshVault === "function") refreshVault();
     if (typeof refreshFuelUI === "function") refreshFuelUI();
@@ -2602,6 +2712,108 @@ function hideScoreboard() {
   if (el) el.classList.remove("show");
 }
 
+// ── LIVE tote board ──────────────────────────────────────────────────────
+// The pari-mutuel version of a horse-racing tote board: while the round is
+// still flying, show every participant and what they'd walk away with
+// RIGHT NOW -- not after the fact. This is the direct answer to "does
+// anyone else present pool odds this way" from the earlier design
+// conversation: yes, exactly this way, just applied to a live crash round
+// instead of a pre-race pool.
+let liveBoardBusy = false;
+async function renderLiveBoard(roundId, round) {
+  if (liveBoardBusy) return;
+  liveBoardBusy = true;
+  try {
+    const [bets, cashes] = await Promise.all([
+      crash.queryFilter(crash.filters.BetPlaced(roundId)),
+      crash.queryFilter(crash.filters.CashedOut(roundId)),
+    ]);
+    if (bets.length === 0) { hideLiveBoard(); return; }
+
+    const lockBlock = Number(round.lockBlock);
+    const blockNow = await provider.getBlockNumber();
+    const elapsed = Math.max(0, blockNow - lockBlock);
+    const liveBps = BigInt(multiplierAtBlocksBps(elapsed));
+    const me = signer ? signer.address.toLowerCase() : null;
+
+    const cashBy = new Map();
+    for (const e of cashes) cashBy.set(e.args.player.toLowerCase(), Number(e.args.atBlock));
+
+    // distributableNow: what the pot would be if settled at this exact
+    // pool size (grows as late bets... wait, betting's closed by LIVE --
+    // this is just the pool.pool as of the last poll, rake already known).
+    const distributableNow = (round.pool * BigInt(10000 - rakeBpsCache)) / 10000n;
+    // Everyone who's ALREADY cashed out has a locked weight (counted in
+    // round.provisionalWinningWeight by the contract itself). Anyone still
+    // flying would add stake * the SAME live multiplier if they cashed out
+    // this instant -- the multiplier is round-wide, not per-player, so
+    // this hypothetical is exactly computable for every flier at once.
+    const rows = [];
+    let hypotheticalTotalWeight = round.provisionalWinningWeight;
+    const flyingRows = [];
+    for (const e of bets) {
+      const addr = e.args.player.toLowerCase();
+      const stake = e.args.amount;
+      const cashedAtBlock = cashBy.get(addr);
+      if (cashedAtBlock !== undefined) {
+        const exitBps = BigInt(multiplierAtBlocksBps(cashedAtBlock - lockBlock));
+        const weight = (stake * exitBps) / 10000n;
+        const est = round.provisionalWinningWeight > 0n ? (distributableNow * weight) / round.provisionalWinningWeight : 0n;
+        rows.push({ addr, stake, status: "cashed", exitBps, est });
+      } else {
+        const hypotheticalWeight = (stake * liveBps) / 10000n;
+        flyingRows.push({ addr, stake, hypotheticalWeight });
+      }
+    }
+    for (const f of flyingRows) hypotheticalTotalWeight += f.hypotheticalWeight;
+    for (const f of flyingRows) {
+      const est = hypotheticalTotalWeight > 0n ? (distributableNow * f.hypotheticalWeight) / hypotheticalTotalWeight : 0n;
+      rows.push({ addr: f.addr, stake: f.stake, status: "flying", est });
+    }
+    // Flying first (the ones still making a decision are the ones this
+    // panel is for), then cashed, each group by stake size descending.
+    rows.sort((a, b) => {
+      if (a.status !== b.status) return a.status === "flying" ? -1 : 1;
+      return b.stake > a.stake ? 1 : b.stake < a.stake ? -1 : 0;
+    });
+
+    const fmt = (wei) => (+ethers.formatEther(wei)).toFixed(4);
+    const rowsHtml = rows.length ? rows.map((r) => {
+      const meTag = r.addr === me ? '<span class="lb-tag">YOU</span>' : "";
+      const statusHtml = r.status === "flying" ? "FLYING" : `<span style="color:var(--win)">${(Number(r.exitBps) / 10000).toFixed(2)}x</span>`;
+      return `<div class="lb-row ${r.status}${r.addr === me ? " me" : ""}"><span class="lb-who">${_shortAddr(r.addr)}${meTag}</span><span class="lb-status">${statusHtml}</span><span class="lb-est">~${fmt(r.est)} ETH</span></div>`;
+    }).join("") : '<div class="lb-empty">No bets yet this round.</div>';
+
+    const flyingCount = flyingRows.length;
+    const cashedCount = rows.length - flyingCount;
+    $("liveBoard").innerHTML =
+      `<div class="lb-head">🔴 Live · Round #${roundId.toString()} in flight</div>
+       <div class="lb-pot">Pool right now <b>${fmt(round.pool)} ETH</b> · ${flyingCount} flying · ${cashedCount} locked in</div>
+       <div class="lb-rows">${rowsHtml}</div>`;
+    $("liveBoard").classList.add("show");
+  } catch (_) {
+    // transient -- a mid-scan round transition is fine, next poll corrects it
+  } finally {
+    liveBoardBusy = false;
+  }
+}
+function hideLiveBoard() {
+  const el = $("liveBoard");
+  if (el) el.classList.remove("show");
+}
+async function pollLiveBoard() {
+  if (!crash) return;
+  try {
+    const roundId = await crash.currentRoundId();
+    const round = await crash.currentRound();
+    if (Number(round.phase) === 1) {
+      renderLiveBoard(roundId, round);
+    } else {
+      hideLiveBoard();
+    }
+  } catch (_) { /* transient */ }
+}
+
 // Show the scoreboard at the crash and keep it refreshing (payouts fill in
 // as the keeper registers + claims), then auto-dismiss it. Kept independent
 // of currentRoundId, since the keeper can advance the round past the crash
@@ -2806,6 +3018,67 @@ $("pbStat").addEventListener("click", () => {
 });
 $("pbPopClose").addEventListener("click", () => $("pbPopover").classList.remove("show"));
 
+// ── Verify popover: shows the CURRENT round's real drand round number and
+// its randomness, once revealed, straight from the beacon this contract
+// actually reads -- not a claim, a live on-chain read anyone else could
+// run themselves. drand's public API lets anyone independently fetch the
+// signature for a given round number and confirm it matches what the
+// contract used, with zero trust in this game's operator required either
+// way -- that's the whole point of a threshold-BLS public beacon over a
+// centralized "provably fair" seed scheme.
+// Real bug caught before shipping: this was first written with a
+// fabricated chain hash, which would have sent every "verify" click to
+// either a 404 or (worse) a real but WRONG drand chain, undermining the
+// entire point of this feature. Fixed properly: chainHash is a public
+// immutable on the REAL DrandBeacon contract (read live below, so this is
+// always correct for whatever chain the deployed beacon actually verifies
+// against -- never a value baked into this file). The mock beacon used
+// for local dev has no such field, so this constant is only ever the
+// fallback for that case, and even then it's the exact value
+// DrandBeacon.sol's own header documents for evmnet, with the same
+// "verify, don't trust this comment" caveat that file itself carries.
+const DRAND_CHAIN_HASH_FALLBACK = "04f1e9062b8a81f848fded9c12306733282b2727ecced50032187751166ec8c3";
+async function refreshVerifyPopover() {
+  const body = $("verifyPopBody");
+  if (!body || !crash) return;
+  try {
+    const roundId = await crash.currentRoundId();
+    const round = await crash.rounds(roundId);
+    const drandRound = round.targetDrandRound.toString();
+    let chainHash = DRAND_CHAIN_HASH_FALLBACK;
+    if (beaconContract) {
+      try { chainHash = (await beaconContract.chainHash()).replace(/^0x/, ""); } catch (_) { /* mock beacon has no chainHash() -- keep fallback */ }
+    }
+    let randomnessHtml = '<span class="vf-v pending">not yet available</span>';
+    let derivedHtml = "";
+    if (round.entropyRevealed && beaconContract) {
+      try {
+        const randomness = await beaconContract.randomnessOrZero(round.targetDrandRound);
+        randomnessHtml = `<span class="vf-v">${randomness.slice(0, 10)}…${randomness.slice(-8)}</span>`;
+        const effective = round.trueCrashElapsedBlocks < maxElapsedBlocksCache ? round.trueCrashElapsedBlocks : maxElapsedBlocksCache;
+        const derivedBps = multiplierAtBlocksBps(Number(effective));
+        derivedHtml =
+          `<div class="vf-row"><span class="vf-k">Derived elapsed blocks</span><span class="vf-v">${round.trueCrashElapsedBlocks}</span></div>` +
+          `<div class="vf-row"><span class="vf-k">Derived crash point</span><span class="vf-v">${(derivedBps / 10000).toFixed(2)}x</span></div>`;
+      } catch (_) { /* beacon read failed -- leave as pending */ }
+    }
+    body.innerHTML =
+      `<div class="vf-row"><span class="vf-k">Round</span><span class="vf-v">#${roundId.toString()}</span></div>` +
+      `<div class="vf-row"><span class="vf-k">drand round #</span><span class="vf-v">${drandRound}</span></div>` +
+      `<div class="vf-row"><span class="vf-k">Randomness</span>${randomnessHtml}</div>` +
+      derivedHtml +
+      `<a class="vf-link" href="https://api.drand.sh/${chainHash}/public/${drandRound}" target="_blank" rel="noopener">Check drand round ${drandRound} independently ↗</a>` +
+      `<div class="vf-note">Local dev uses a mock beacon (setRandomness is a test-only injection point -- see DrandBeaconMock.sol) since there's no local drand network to relay from. On a real deployment this same round number resolves against the actual League of Entropy beacon at the link above, and the contract only ever reads what's already public there -- it can't inject anything itself.</div>`;
+  } catch (_) {
+    body.innerHTML = '<div class="vf-row"><span class="vf-k">Unavailable</span><span class="vf-v pending">connect first</span></div>';
+  }
+}
+$("verifyBtn").addEventListener("click", () => {
+  $("verifyPopover").classList.toggle("show");
+  refreshVerifyPopover();
+});
+$("verifyPopClose").addEventListener("click", () => $("verifyPopover").classList.remove("show"));
+
 // Event-driven: watch for the newest RoundCrashed and show its scoreboard,
 // no matter what the current round is now. Runs on the same poll cadence.
 let lastScoreboardRound = -1n;
@@ -2820,6 +3093,13 @@ async function pollScoreboard() {
       lastScoreboardRound = rid;
       const rd = await crash.rounds(rid);
       if (rd.crashMultiplierBps > 0n) showScoreboardForRound(rid, rd);
+      // Event-driven Stats auto-refresh: the gamification research finding
+      // from earlier ("treat every player action as an event that updates
+      // visible state, not a static view requiring manual refresh") --
+      // re-scan automatically on every real round-crash event, but ONLY
+      // while the panel is actually open, so this never burns a
+      // queryFilter scan on a closed panel nobody's looking at.
+      if ($("statsPanel").classList.contains("show")) runStatsScan();
     }
   } catch (_) { /* transient */ }
 }
@@ -3323,7 +3603,7 @@ function startPolling() {
   // to 400ms; these are cheap read-only view calls against a local node,
   // not transactions, so there's no real cost to polling faster.
   pollTimer = setInterval(refresh, 400);
-  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); refreshFuelUI(); refreshPowerboardUI(); }, 600);
+  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); refreshFuelUI(); refreshPowerboardUI(); pollLiveBoard(); }, 600);
 }
 
 // A per-tab client-side evm_mine heartbeat was tried here and was a real,

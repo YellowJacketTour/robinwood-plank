@@ -82,3 +82,4 @@ public/arcade/deploy-addresses.local.json
 /playwright-report/
 /blob-report/
 test/e2e/.hardhat-node.pid
+test/e2e/.casino-keeper.pid
