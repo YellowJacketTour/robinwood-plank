@@ -2699,11 +2699,20 @@ async function burnFuelAction(amountStr) {
   if (!fuelBooster || !plankToken || !signer) { toast("Connect first"); return; }
   const amt = parseFloat(amountStr);
   if (!(amt > 0)) { toast("Enter an amount of $PLANK to burn"); return; }
+  const wei = ethers.parseEther(String(amt));
+  // Check first instead of letting the burn revert on it -- this account
+  // (most commonly Deployer, via Simulate mode) may genuinely hold none;
+  // that's expected, not a bug, but "execution reverted" doesn't tell a
+  // player that's what happened or what to do about it.
+  const currentBal = await plankToken.balanceOf(signer.address).catch(() => 0n);
+  if (currentBal < wei) {
+    toast(`You only have ${ethers.formatEther(currentBal)} $PLANK -- burn a smaller amount, or switch to an account that holds some.`, "error");
+    return;
+  }
   fuelBusy = true;
   const btn = document.getElementById("flBurn");
   if (btn) { btn.disabled = true; btn.textContent = "Burning…"; }
   try {
-    const wei = ethers.parseEther(String(amt));
     const allowance = await plankToken.allowance(signer.address, FUEL_BOOSTER_ADDR);
     if (allowance < wei) {
       await (await plankToken.approve(FUEL_BOOSTER_ADDR, wei)).wait();
@@ -2869,8 +2878,22 @@ async function doPlaceBet(viaButton) {
 // actually deployed, see plankcrashv2-abi.json's own generation comment).
 // BadPhase/TooEarly is the single most likely one anyone will ever hit:
 // clicking LAUNCH in the last instant before a round locks.
+//
+// Real bug this fixes: ethers v6 does NOT populate err.revert on a
+// CallExceptionError from a real network provider the way it does for
+// Hardhat's own in-process error path -- err.revert was null on every
+// actual revert tested against a live RPC node, even with the full ABI
+// (verified directly: the SAME abi, via a fresh Interface, parses the
+// exact same err.data correctly). The error's raw selector is right
+// there on err.data the whole time; parse it explicitly instead of
+// trusting a property that silently never populates.
 function friendlyRevertReason(err) {
-  const name = err && err.revert && err.revert.name;
+  let name = null;
+  try {
+    if (err && err.data && crash) {
+      name = crash.interface.parseError(err.data).name;
+    }
+  } catch (_) { /* not a recognized custom error -- fall through */ }
   if (name === "BadPhase" || name === "TooEarly" || name === "TooLate") {
     return "Betting just closed for this round -- try the next one.";
   }
