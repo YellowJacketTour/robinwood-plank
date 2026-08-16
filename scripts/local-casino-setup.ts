@@ -209,11 +209,29 @@ async function main() {
   const bank = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr]);
   await bank.waitForDeployment();
 
+  // PlankFuelBooster -- burn $PLANK on the launchpad to boost the shared
+  // Vault (never the burner's own odds). Priced off the same TWAP oracle the
+  // burn engine trusts; capped per-burn and per-round so no whale can either
+  // dominate a single burn or drain a whole round's boost alone.
+  const FUEL_MAX_PER_BURN = ethers.parseEther("0.05");
+  const FUEL_MAX_PER_ROUND = ethers.parseEther("0.2");
+  const fuelBooster = await (
+    await ethers.getContractFactory("PlankFuelBooster")
+  ).deploy(await plank.getAddress(), await oracle.getAddress(), crashAddr, FUEL_MAX_PER_BURN, FUEL_MAX_PER_ROUND);
+  await fuelBooster.waitForDeployment();
+  // Seed its boost pool + hand test accounts some $PLANK to burn, purely for
+  // local playability -- mainnet funding is a real deploy-time decision.
+  await (await fuelBooster.fund({ value: ethers.parseEther("2") })).wait();
+  await (await plank.mint(alice.address, ethers.parseEther("5000"))).wait();
+  await (await plank.mint(bob.address, ethers.parseEther("5000"))).wait();
+  await (await plank.mint(carol.address, ethers.parseEther("5000"))).wait();
+
   console.log("\n========================================================");
   console.log(" plank.love unified casino -- LOCAL dev stack (chainId 31337)");
   console.log("========================================================");
   console.log(" PlankCrashDrand      :", crashAddr);
   console.log(" PlankBank            :", await bank.getAddress(), "(deposit -> instant session-key play -> withdraw)");
+  console.log(" PlankFuelBooster     :", await fuelBooster.getAddress(), "(burn $PLANK -> boosts the shared Vault, never your own odds)");
   console.log(" PlankRakeDistributor :", await distributor.getAddress(), `(treasury of the crash)`);
   // Points OF THE POOL each leg actually receives, after the keeper carve.
   const rakePct = Number(RAKE_BPS) / 100;
@@ -235,8 +253,9 @@ async function main() {
   console.log(
     ` -> ${(((jackpotPct + burnPct) / rakePct) * 100).toFixed(0)}% of every take returns to players (jackpot + burn).`
   );
-  console.log(" Powerboard draw      :", Number(AIRDROP_EPOCH_SECONDS) / 3600, "h cadence, Plank Ball 1-in-" + BALL_RANGE + " for the full pot, " + Number(CONSOLATION_BPS)/100 + "% consolation on a miss (rest rolls over)");
-  console.log("\n Test accounts: alice/bob/carol (#2/#3/#4) each hold 10000 ETH.");
+  console.log(" Powerboard draw      :", Number(AIRDROP_EPOCH_SECONDS) / 3600, "h cadence, Plank Ball 1-in-" + BALL_RANGE + " for the full pot, " + Number(CONSOLATION_BPS)/100 + "% consolation on a miss (rest rolls over), guaranteed by epoch " + MUST_HIT_EPOCHS + " if it never naturally hits");
+  console.log(" Vault (never-zero)   : seeds every round with 1/8 of the reserve, grows 40% of net rake + busted pots; caps at", ethers.formatEther(RESERVE_CAP), "ETH then overflow cascades into the Powerboard jackpot");
+  console.log("\n Test accounts: alice/bob/carol (#2/#3/#4) each hold 10000 ETH + 5000 mock $PLANK to burn as fuel.");
   console.log("\n Keeper loop each round (all permissionless):");
   console.log("   1. crash.lockRound()        once betting closes");
   console.log("   2. beacon.setRandomness(round, value) + crash.revealEntropy(roundId)   once the drand round is due");
@@ -247,6 +266,8 @@ async function main() {
   console.log("   5c. crash.sweepBustedRound(roundId) if the whole field busted -> rolls the pot into the next round");
   console.log("   6. oracle.update() every window, then burnEngine.executeBurn(ethAmount)   (floor comes from the TWAP, not the caller)");
   console.log("   7. once a day: powerboard.requestDraw(epoch) -> ... -> powerboard.drawWinner(epoch)");
+  console.log("\n Players (optional, anyone): plank.approve(fuelBooster, amount) then fuelBooster.burnFuel(amount)");
+  console.log("   -- burns real $PLANK, boosts the shared Vault by its fair TWAP value. Never touches your own stake/odds.");
   console.log("========================================================\n");
 
   void [alice, bob, carol];

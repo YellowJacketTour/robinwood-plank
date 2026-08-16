@@ -203,6 +203,17 @@ async function main() {
   const bank = await (await ethers.getContractFactory("PlankBank")).deploy([crashAddr]);
   await bank.waitForDeployment();
 
+  // ── 5. PlankFuelBooster -- burn $PLANK on the launchpad to boost the
+  //     shared Vault (never the burner's own odds). Priced off the SAME
+  //     TWAP oracle the burn engine already trusts. No dependency cycle:
+  //     only needs the crash's final address + the oracle.
+  const FUEL_MAX_PER_BURN_WEI = envBig("CASINO_FUEL_MAX_PER_BURN_WEI", ethers.parseEther("0.1"));
+  const FUEL_MAX_PER_ROUND_WEI = envBig("CASINO_FUEL_MAX_PER_ROUND_WEI", ethers.parseEther("0.5"));
+  const fuelBooster = await (
+    await ethers.getContractFactory("PlankFuelBooster")
+  ).deploy(PLANK, await oracle.getAddress(), crashAddr, FUEL_MAX_PER_BURN_WEI, FUEL_MAX_PER_ROUND_WEI);
+  await fuelBooster.waitForDeployment();
+
   console.log("\n===================== DEPLOYED =====================");
   console.log("PlankV2TwapOracle   :", await oracle.getAddress());
   console.log("PlankBurnEngine     :", await burnEngine.getAddress());
@@ -210,6 +221,7 @@ async function main() {
   console.log("PlankRakeDistributor:", await distributor.getAddress());
   console.log("PlankCrashDrand     :", crashAddr);
   console.log("PlankBank           :", await bank.getAddress());
+  console.log("PlankFuelBooster    :", await fuelBooster.getAddress());
   console.log("====================================================");
   console.log("\nrake", Number(RAKE_BPS) / 100 + "% -> dev/jackpot/burn split",
     `${(10000 - Number(BURN_BPS) - Number(AIRDROP_BPS)) / 100}/${Number(AIRDROP_BPS) / 100}/${Number(BURN_BPS) / 100}% of rake`);
@@ -221,6 +233,9 @@ async function main() {
   console.log("  5. (Instant UX) In the frontend: on 'enter', have the player deposit() to PlankBank,");
   console.log("     grantSession(localKey, cap, expiry), and crash.setPayoutRedirect(bank) so wins recycle.");
   console.log("     The local session key then drives betVia/cashOutVia with no per-bet popup.");
+  console.log("  6. (Fuel) Send ETH to fuelBooster.fund() to seed its boost pool. Players then");
+  console.log("     plank.approve(fuelBooster, amount) + fuelBooster.burnFuel(amount) to burn $PLANK");
+  console.log("     for a fair-value boost to the shared Vault -- never their own odds.");
 }
 
 main().catch((err) => {

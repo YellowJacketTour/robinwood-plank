@@ -397,3 +397,38 @@ clock (`lastJackpotHitEpoch`) starts at deployment and resets on every full payo
 So: **someone wins a consolation every epoch** there are players, and **the full
 jackpot is guaranteed to pay out at least every `mustHitByEpochs` epochs** — it can
 never roll forever.
+
+---
+
+## 11. Fuel the pad, not your own odds: burning $PLANK into the Vault
+
+`PlankFuelBooster.sol` lets any player burn real $PLANK on the launchpad (the
+0→1.00x "fueling" window in the arcade) to grow the **shared** Vault — never
+their own stake, cash-out timing, or crash-point odds, which stay fixed by
+drand and the pari-mutuel pool, completely untouched by this contract.
+
+**Why this can't become pay-to-win, by construction:** burning only ever calls
+`crash.fundVault()` — the exact same permissionless function any donor could
+call. A whale who burns a fortune buys the *whole table* a bigger future prize
+pot, not a better bet for themselves.
+
+**Where the ETH comes from, honestly:** burning $PLANK does not conjure ETH.
+The booster holds a pre-funded `boostPool` (topped up via `fund()` — treasury,
+sponsor, or well-wisher) and releases up to the **fair TWAP value** of what was
+burned — priced by the *same* `PlankV2TwapOracle` `PlankBurnEngine`'s buybacks
+already trust, so it inherits that oracle's sandwich-resistance. Burning past
+the caps below still burns in full (real, honored deflation); only the *boost*
+is capped:
+- `maxBoostPerBurnWei` — ceiling on any one `burnFuel()` call.
+- `maxBoostPerRoundWei` — ceiling on total boost while a given crash round is
+  current, tracked against the crash's own `currentRoundId()` so it resets
+  automatically every round with no separate epoch bookkeeping.
+- `boostPool` itself — can never release more than it holds.
+
+**Pricing safety:** if the oracle is unprimed or stale, `burnFuel()` reverts
+**atomically** — the player's $PLANK is never spent on an unpriceable,
+unrewarded boost (the same "funds wait, never move" discipline
+`PlankBurnEngine` applies to its own swaps).
+
+Deployed after the crash (needs its final address + the oracle); no dependency
+cycle. Env knobs: `CASINO_FUEL_MAX_PER_BURN_WEI` / `CASINO_FUEL_MAX_PER_ROUND_WEI`.
