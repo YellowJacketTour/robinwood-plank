@@ -2436,8 +2436,18 @@ async function connectToChain(rpcUrl, address, pk, label) {
   try {
     bank = new ethers.Contract(BANK_ADDR, BANK_ABI, signer);
     crashExt = new ethers.Contract(address, CRASH_EXT_ABI, signer);
-    try { bettingDurationCache = Number(await crashExt.bettingDurationSeconds()); } catch (_) {}
-    try { rakeBpsCache = Number(await crashExt.rakeBps()); } catch (_) {}
+    // Independent reads, fetched concurrently rather than as two sequential
+    // awaits -- connect-time latency has been a recurring real issue this
+    // session (see the e2e suite's own documented connect-timeout
+    // flakiness), so a second RPC round-trip added here without batching
+    // it against the first would be a real, avoidable regression, not a
+    // hypothetical one.
+    const [bettingDurationResult, rakeBpsResult] = await Promise.allSettled([
+      crashExt.bettingDurationSeconds(),
+      crashExt.rakeBps(),
+    ]);
+    if (bettingDurationResult.status === "fulfilled") bettingDurationCache = Number(bettingDurationResult.value);
+    if (rakeBpsResult.status === "fulfilled") rakeBpsCache = Number(rakeBpsResult.value);
     try {
       fuelBooster = new ethers.Contract(FUEL_BOOSTER_ADDR, FUEL_BOOSTER_ABI, signer);
       plankToken = new ethers.Contract(PLANK_ADDR, PLANK_ABI, signer);
