@@ -4,6 +4,13 @@
 <meta charset="utf-8" />
 <title>PlankCrash</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="description" content="An on-chain pari-mutuel crash game with a never-zero prize Vault, a real rolling Powerboard jackpot, and instant popup-free play." />
+<meta name="theme-color" content="#05070c" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%80%3C/text%3E%3C/svg%3E" />
+<meta property="og:title" content="PlankCrash" />
+<meta property="og:description" content="An on-chain pari-mutuel crash game with a never-zero prize Vault and a real rolling jackpot." />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
 <style>
   /* Bungee -- a real, OFL-licensed display face (Google Fonts, vendored
      locally, no CDN dependency at runtime), chosen for the mission-patch/
@@ -33,6 +40,19 @@
     --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  /* Visible keyboard-focus everywhere interactive, without a mouse-click
+     outline (":focus-visible" already scopes that natively) -- a real,
+     cheap accessibility gap otherwise, and it's zero-risk to add. */
+  button:focus-visible, [role="button"]:focus-visible, input:focus-visible, a:focus-visible {
+    outline: 2px solid var(--accent-glow, #ff8a5c); outline-offset: 2px; border-radius: 6px;
+  }
+  /* Respect the OS "reduce motion" setting at the CSS level too (the JS
+     side separately trims particle counts/screen-shake -- see
+     prefersReducedMotion in the game script) so CSS transitions/animations
+     collapse to near-instant for anyone who's opted out of motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  }
   html, body {
     margin: 0; height: 100%; overflow: hidden;
     background: var(--bg-0); color: var(--ink);
@@ -378,11 +398,36 @@
   .advanced summary { font-size: 11px; color: var(--ink-dim); cursor: pointer; letter-spacing: 0.04em; }
   .advanced input { margin-top: 8px; }
 
+  /* Top-center, out of the way of the Bank/Fuel side panels (bottom-left/
+     right) and the Powerboard popover (top-right) -- the one clear lane
+     left on screen. Each toast is its own dismissible, typed card instead
+     of a fading debug-log line, per the redesign. */
   .toast-log {
-    position: fixed; left: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
-    z-index: 15; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-dim);
-    max-width: 44vw; opacity: 0.55; pointer-events: none; line-height: 1.6;
+    position: fixed; left: 50%; top: calc(64px + env(safe-area-inset-top));
+    transform: translateX(-50%); z-index: 80; display: flex; flex-direction: column;
+    gap: 6px; align-items: center; pointer-events: none; max-width: min(420px, 92vw);
   }
+  .toast-item {
+    display: flex; align-items: center; gap: 8px; padding: 9px 14px;
+    border-radius: 10px; background: rgba(10,14,20,0.94); backdrop-filter: blur(6px);
+    border: 1px solid var(--line); box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    font-family: var(--font-mono); font-size: 12px; color: var(--ink);
+    opacity: 0; transform: translateY(-10px) scale(0.97);
+    transition: opacity .25s ease, transform .25s cubic-bezier(.2,1.2,.4,1);
+    pointer-events: auto; max-width: 100%;
+  }
+  .toast-item.show { opacity: 1; transform: translateY(0) scale(1); }
+  .toast-item.leaving { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  .toast-item .toast-icon { flex: none; font-size: 13px; line-height: 1; }
+  .toast-item .toast-text { line-height: 1.4; word-break: break-word; }
+  .toast-item.success { border-color: rgba(62,224,140,0.4); }
+  .toast-item.success .toast-icon { color: var(--win); }
+  .toast-item.error { border-color: rgba(255,77,106,0.4); }
+  .toast-item.error .toast-icon { color: var(--lose); }
+  .toast-item.win { border-color: rgba(255,200,87,0.5); box-shadow: 0 8px 30px rgba(255,200,87,0.25); }
+  .toast-item.win .toast-icon { color: var(--gold, #ffc857); }
+  .toast-item.info .toast-icon { color: var(--ink-dim); }
+  .sfx-toggle { cursor: pointer; }
 
   /* ── stats panel ─────────────────────────────────────────────────── */
   .stats-backdrop {
@@ -444,21 +489,22 @@
       <span class="vault-stat" id="vaultStat" title="The Prize Vault: a perpetual reserve that seeds every game and can never hit zero. It grows from every pot and every bust.">
         ⬢ VAULT <b id="vaultAmt">—</b><i id="vaultSeed"></i>
       </span>
-      <span class="pb-stat" id="pbStat" title="Click for details">
+      <span class="pb-stat" id="pbStat" title="Click for details" role="button" aria-label="Open Powerboard lottery details" tabindex="0">
         🎟 <b id="pbTickets">—</b><i id="pbJackpot"></i>
       </span>
       <span>POOL <b id="poolStat">—</b></span>
       <span>PLAYERS <b id="playersStat">—</b></span>
     </div>
-    <div class="gear" id="statsBtn" title="Stats">📊</div>
-    <div class="gear" id="gearBtn" title="Connection settings">⚙</div>
+    <div class="gear sfx-toggle" id="sfxBtn" title="Sound" role="button" aria-label="Toggle sound" aria-pressed="true">🔊</div>
+    <div class="gear" id="statsBtn" title="Stats" role="button" aria-label="Open stats and leaderboard" tabindex="0">📊</div>
+    <div class="gear" id="gearBtn" title="Connection settings" role="button" aria-label="Open connection settings" tabindex="0">⚙</div>
   </div>
 
   <!-- Powerboard detail popover: every crash bet already earns a real,
        wager-weighted lottery ticket toward this rolling jackpot -- this
        makes that otherwise-invisible mechanic visible and explained. -->
   <div id="pbPopover" class="pb-popover">
-    <div class="pb-pop-head">🎟 Powerboard <span class="pb-pop-close" id="pbPopClose">✕</span></div>
+    <div class="pb-pop-head">🎟 Powerboard <span class="pb-pop-close" id="pbPopClose" role="button" aria-label="Close Powerboard details" tabindex="0">✕</span></div>
     <div class="pb-pop-sub">Every crash bet earns you a lottery ticket automatically -- no extra cost, no separate purchase. More wagered = more tickets = better odds.</div>
     <div id="pbPopBody"></div>
   </div>
@@ -524,7 +570,7 @@
     <button class="sim-btn" id="simBtn">▶ Simulate — no wallet needed</button>
   </div>
 
-  <div class="toast-log" id="toastLog"></div>
+  <div class="toast-log" id="toastLog" aria-live="polite" aria-atomic="false"></div>
 </div>
 
 <div class="stats-backdrop" id="statsBackdrop"></div>
@@ -1435,6 +1481,83 @@ function resize() {
 }
 window.addEventListener("resize", resize);
 
+// ── Multi-sensory feedback: sound + haptics ──────────────────────────────
+// 2026 crash/gambling UX research is explicit that combined visual+audio+
+// haptic feedback on every action is what makes an interface feel
+// responsive and "in your control" (a glow alone reads as decoration; a
+// glow + a chime + a buzz reads as the game acknowledging you) -- and that
+// the cash-out button specifically needs to feel instant, since it's used
+// under genuine time pressure. Synthesized entirely via WebAudio (no mp3/
+// wav asset files -- zero load time, zero missing-asset risk) so every cue
+// is a short, cheap oscillator burst. Muted by default is wrong for a game
+// that leans on audio feedback, so this defaults ON but is one tap to mute,
+// and the choice persists.
+let sfxEnabled = (() => { try { return localStorage.getItem("plankcrash_sfx") !== "off"; } catch (_) { return true; } })();
+let audioCtx = null;
+function ensureAudioCtx() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { return null; }
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  return audioCtx;
+}
+// A short tone burst: freq (Hz), duration (s), shape, and a gain envelope
+// (quick attack, exponential decay) so nothing ever clicks/pops.
+function playTone(freq, dur, type, gainPeak) {
+  if (!sfxEnabled) return;
+  const ctx = ensureAudioCtx();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type || "sine";
+  osc.frequency.setValueAtTime(freq, ctx.currentTime);
+  gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(gainPeak || 0.18, ctx.currentTime + 0.012);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + dur + 0.02);
+}
+function playNoiseBurst(dur, gainPeak) {
+  if (!sfxEnabled) return;
+  const ctx = ensureAudioCtx();
+  if (!ctx) return;
+  const bufferSize = Math.floor(ctx.sampleRate * dur);
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(gainPeak || 0.22, ctx.currentTime);
+  src.connect(gain).connect(ctx.destination);
+  src.start();
+}
+const sfx = {
+  click: () => playTone(720, 0.05, "square", 0.05),
+  betPlaced: () => { playTone(440, 0.09, "triangle", 0.14); playTone(660, 0.11, "triangle", 0.1); },
+  ignition: () => playNoiseBurst(0.35, 0.16),
+  cashOut: () => { playTone(660, 0.08, "sine", 0.16); playTone(880, 0.1, "sine", 0.14); playTone(1320, 0.14, "sine", 0.1); },
+  win: () => { playTone(880, 0.1, "triangle", 0.16); setTimeout(() => playTone(1320, 0.14, "triangle", 0.14), 90); setTimeout(() => playTone(1760, 0.22, "triangle", 0.12), 180); },
+  crash: () => { playNoiseBurst(0.4, 0.2); playTone(110, 0.35, "sawtooth", 0.14); },
+  error: () => { playTone(220, 0.16, "square", 0.1); },
+};
+function setSfxEnabled(on) {
+  sfxEnabled = on;
+  try { localStorage.setItem("plankcrash_sfx", on ? "on" : "off"); } catch (_) {}
+}
+
+// Haptics: a short buzz on mobile at the same moments sfx fires. No-ops
+// silently on desktop/unsupported browsers (Vibration API is best-effort).
+function haptic(pattern) {
+  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (_) {}
+}
+
+// Respect the OS "reduce motion" setting -- screen shake, particle bursts,
+// and camera warp are exciting for most players but a genuine discomfort
+// trigger for some; this is a real, cheap accessibility win, not a nice-to-have.
+const prefersReducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 let phaseState = "idle"; // idle | betting | live | crashed
 let flightProgress = 0; // 0..1, drives ascent height -- smoothed toward targetFlightProgress every frame
 // The raw value read from the contract, updated once per ~1.2s poll. Was
@@ -1956,12 +2079,30 @@ let attemptedClaimThisRound = false;
 let maxElapsedBlocksCache = null;
 let outcomeShownForRound = null;
 
-function toast(msg) {
-  const el = document.createElement("div");
-  el.textContent = msg;
+const TOAST_ICONS = { success: "✓", error: "✕", win: "🏆", info: "ⓘ" };
+function toast(msg, type) {
+  type = type || "info";
   const log = $("toastLog");
-  log.prepend(el);
-  while (log.children.length > 6) log.removeChild(log.lastChild);
+  const el = document.createElement("div");
+  el.className = "toast-item " + type;
+  el.setAttribute("role", type === "error" ? "alert" : "status");
+  const icon = document.createElement("span");
+  icon.className = "toast-icon";
+  icon.textContent = TOAST_ICONS[type] || TOAST_ICONS.info;
+  const text = document.createElement("span");
+  text.className = "toast-text";
+  text.textContent = msg;
+  el.append(icon, text);
+  log.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("show"));
+  // Cap the visible queue so a burst of events (e.g. auto-play) doesn't
+  // pile up an unreadable stack.
+  while (log.children.length > 4) log.removeChild(log.firstChild);
+  const life = type === "error" ? 4200 : 3200;
+  setTimeout(() => {
+    el.classList.add("leaving");
+    setTimeout(() => el.remove(), 260);
+  }, life);
 }
 
 async function loadAbi() {
@@ -2622,8 +2763,9 @@ async function pollScoreboard() {
 function celebrate(xNum) {
   const intensityNorm = Math.max(0, Math.min(1, Math.log2(Math.max(1, xNum)) / 4)); // 1.0 reached around 16x
   const particleColor = xNum >= 10 ? 0xffc857 : 0x3ee08c;
-  spawnParticles(particleColor, Math.round(40 + intensityNorm * 160), 2 + intensityNorm * 4.5);
-  shakeAmount = Math.max(shakeAmount, 0.32 + intensityNorm * 1.1);
+  spawnParticles(particleColor, prefersReducedMotion ? 10 : Math.round(40 + intensityNorm * 160), 2 + intensityNorm * 4.5);
+  shakeAmount = Math.max(shakeAmount, prefersReducedMotion ? 0 : 0.32 + intensityNorm * 1.1);
+  sfx.win(); haptic(intensityNorm > 0.5 ? [30, 40, 30, 40, 60] : [30, 40, 60]);
 }
 
 // ── primary button state machine ────────────────────────────────────────
@@ -2641,6 +2783,11 @@ let uiState = "disconnected"; // disconnected | betting-open | waiting | live-ho
 // declared above wireAutoPlay to avoid a temporal-dead-zone error.)
 
 async function doPlaceBet(viaButton) {
+  // Fires SYNCHRONOUSLY, before any await -- the player's tap is
+  // acknowledged instantly, independent of how long the tx actually takes
+  // to confirm. This is the "instant response" 2026 crash-UX research
+  // calls out as load-bearing for feeling in-control, not decorative.
+  sfx.click(); haptic(15);
   if (viaButton) { primaryBtn.disabled = true; primaryBtn.textContent = "PLACING BET…"; }
   try {
     // Bank mode: the browser session key bets from the pre-funded buffer --
@@ -2649,16 +2796,22 @@ async function doPlaceBet(viaButton) {
       ? await sessionBank.betVia(crash.target, ethers.parseEther(betAmount))
       : await crash.placeBet({ value: ethers.parseEther(betAmount) });
     await tx.wait();
-    toast((autoPlay ? "Auto-bet: " : "Bet placed: ") + betAmount + " ETH" + (bankMode ? " (instant, from buffer)" : ""));
+    sfx.betPlaced(); haptic(30);
+    toast((autoPlay ? "Auto-bet: " : "Bet placed: ") + betAmount + " ETH" + (bankMode ? " (instant, from buffer)" : ""), "success");
     if (bankMode && typeof refreshBankUI === "function") refreshBankUI();
     return true;
   } catch (err) {
-    toast("Bet failed: " + (err.shortMessage || err.message));
+    sfx.error();
+    toast("Bet failed: " + (err.shortMessage || err.message), "error");
     return false;
   }
 }
 
 async function doCashOut(viaButton) {
+  // Same instant-acknowledgment principle -- THE most time-pressured
+  // action in the whole game, per the same research, so it gets feedback
+  // before a single await runs.
+  sfx.click(); haptic(15);
   if (viaButton) { primaryBtn.disabled = true; primaryBtn.textContent = "CASHING OUT…"; }
   try {
     const roundId = await crash.currentRoundId();
@@ -2667,7 +2820,8 @@ async function doCashOut(viaButton) {
       ? await sessionBank.cashOutVia(crash.target, roundId)
       : await crash.cashOut(roundId);
     await tx.wait();
-    toast("Cashed out at " + bpsToXStr(liveBps) + "x" + (bankMode ? " (win recycles to buffer)" : ""));
+    sfx.cashOut(); haptic([20, 30, 20]);
+    toast("Cashed out at " + bpsToXStr(liveBps) + "x" + (bankMode ? " (win recycles to buffer)" : ""), "success");
     if (bankMode && typeof refreshBankUI === "function") refreshBankUI();
     return true;
   } catch (err) {
@@ -2675,14 +2829,43 @@ async function doCashOut(viaButton) {
     // generic failure: the round's true crash point was already revealed
     // and real elapsed blocks caught up to it between the decision and the
     // transaction landing -- the ticker shows this the instant refresh runs.
+    sfx.error();
     if ((err.shortMessage || err.message || "").includes("PastCrashPoint")) {
-      toast("Too late -- the round already crashed before this landed.");
+      toast("Too late -- the round already crashed before this landed.", "error");
     } else {
-      toast("Cash out failed: " + (err.shortMessage || err.message));
+      toast("Cash out failed: " + (err.shortMessage || err.message), "error");
     }
     return false;
   }
 }
+
+// Keyboard access for every div/span styled as a clickable control
+// (role="button" + tabindex="0"): Enter/Space activates it, same as a real
+// <button>. One delegated listener covers all of them, present and future.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const el = e.target.closest && e.target.closest('[role="button"]');
+  if (!el) return;
+  e.preventDefault();
+  el.click();
+});
+
+// Sound toggle: reflects the persisted preference on load, one tap to flip.
+(function wireSfxToggle() {
+  const btn = document.getElementById("sfxBtn");
+  if (!btn) return;
+  const paint = () => {
+    btn.textContent = sfxEnabled ? "🔊" : "🔇";
+    btn.setAttribute("aria-pressed", sfxEnabled ? "true" : "false");
+    btn.title = sfxEnabled ? "Sound on (tap to mute)" : "Sound off (tap to unmute)";
+  };
+  paint();
+  btn.addEventListener("click", () => {
+    setSfxEnabled(!sfxEnabled);
+    if (sfxEnabled) { ensureAudioCtx(); sfx.click(); } // unmuting also unlocks WebAudio on this user gesture
+    paint();
+  });
+})();
 
 primaryBtn.addEventListener("click", async () => {
   if (uiState === "betting-open") { await doPlaceBet(true); refresh(); }
@@ -2867,8 +3050,9 @@ async function refresh() {
       // the crash burst's isotropic emitter (real rocket ignition really
       // does billow outward in every direction off the deck, unlike the
       // tight downward cruise-thrust cone used the rest of the flight).
-      spawnParticles(0xffb37a, 50, 2.4);
-      shakeAmount = 0.5;
+      spawnParticles(0xffb37a, prefersReducedMotion ? 12 : 50, 2.4);
+      shakeAmount = prefersReducedMotion ? 0 : 0.5;
+      sfx.ignition(); haptic(40);
     }
 
     const stake = signer ? await crash.stakeOf(roundId, signer.address) : 0n;
@@ -2934,7 +3118,12 @@ async function refresh() {
       } else updatePrimaryButton("live-hold", { sub: `Staked ${ethers.formatEther(stake)} ETH` });
       autoPlayTick(1, roundId, hasStake, hasCashedOut, liveBps);
     } else {
-      if (crashedAt === null) { crashedAt = performance.now(); shakeAmount = 1.4; spawnParticles(0xff4d6a, 60, 3.5); }
+      if (crashedAt === null) {
+        crashedAt = performance.now();
+        shakeAmount = prefersReducedMotion ? 0 : 1.4;
+        spawnParticles(0xff4d6a, prefersReducedMotion ? 15 : 60, 3.5);
+        sfx.crash(); haptic([50, 30, 80]);
+      }
       const xStr = bpsToXStr(round.crashMultiplierBps);
       // Snap the target to the real, final crash multiplier -- not
       // whatever the last LIVE poll happened to sample -- so the
