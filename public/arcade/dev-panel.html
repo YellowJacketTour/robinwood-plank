@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>PlankCrash — Dev Panel</title>
+<meta name="robots" content="noindex" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px; background: #0a0e0c; color: #e8f5ec;
+    font: 13px/1.5 ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  h1 { font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: #ffc857; margin: 0 0 4px; }
+  .warn {
+    background: rgba(255, 138, 92, .12); border: 1px solid rgba(255, 138, 92, .4);
+    color: #ffb37a; padding: 8px 12px; border-radius: 8px; margin-bottom: 18px; font-size: 12px;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  section {
+    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 10px; padding: 14px;
+  }
+  section h2 {
+    font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #8fb7a0;
+    margin: 0 0 10px; display: flex; align-items: center; gap: 6px;
+  }
+  .row { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  label { color: #8fb7a0; font-size: 11px; min-width: 46px; }
+  input, select {
+    background: #04120b; border: 1px solid rgba(61,220,132,.3); color: #e8f5ec;
+    border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 12px; flex: 1; min-width: 70px;
+  }
+  button {
+    background: #3ddc84; color: #04210f; border: 0; border-radius: 6px;
+    padding: 6px 12px; font: inherit; font-weight: 700; font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: #4fef97; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.warn-btn { background: #ffc857; }
+  #status { white-space: pre; font-size: 12px; line-height: 1.6; color: #c9e8d4; }
+  #log {
+    margin-top: 18px; background: #04120b; border: 1px solid rgba(255,255,255,.08); border-radius: 8px;
+    padding: 10px 12px; height: 160px; overflow-y: auto; font-size: 11px; color: #8fb7a0;
+  }
+  #log div { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+  #log div.err { color: #ff8a5c; }
+  #log div.ok { color: #3ddc84; }
+  .hint { color: #6b8c78; font-size: 10.5px; margin-top: 6px; line-height: 1.4; }
+</style>
+</head>
+<body>
+<h1>⚙ PlankCrash — Dev Panel</h1>
+<div class="warn">
+  DEV-ONLY. Talks directly to the same local Hardhat node crash.html uses (127.0.0.1:8545) --
+  never a real chain (there's no possible way to mint tokens, set balances, or rig randomness against one).
+  This file ships in the repo alongside test-rig.ts as a browser front-end for the same capabilities,
+  but nothing here is reachable from, or referenced by, crash.html itself.
+</div>
+
+<div id="status">connecting…</div>
+
+<div class="grid" style="margin-top: 14px">
+
+  <section>
+    <h2>🤖 Bot bet size</h2>
+    <div class="hint">
+      Changes what the Simulate-mode background bot (Bob) bets each round in crash.html --
+      via a localStorage key crash.html reads on its own, so this page never touches that file.
+      Open/reload crash.html in another tab to pick it up on its next bot tick.
+    </div>
+    <div class="row">
+      <label>ETH</label>
+      <input id="botAmt" type="number" step="0.01" min="0" value="0.01" />
+      <button onclick="setBotAmt()">Save</button>
+      <button onclick="resetBotAmt()">Reset (0.01)</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>💰 Mint $PLANK</h2>
+    <div class="hint">Permissionless on the mock token -- genuinely unlimited, mints new supply.</div>
+    <div class="row">
+      <label>Account</label>
+      <select id="mintAcct"><option>deployer</option><option>alice</option><option>bob</option><option>carol</option></select>
+    </div>
+    <div class="row">
+      <label>Amount</label>
+      <input id="mintAmt" type="number" value="100000" />
+      <button onclick="mintPlank()">Mint</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>⛽ Top-up ETH</h2>
+    <div class="hint">hardhat_setBalance -- devnet-only RPC, genuinely unlimited.</div>
+    <div class="row">
+      <label>Account</label>
+      <select id="topupAcct"><option>deployer</option><option>alice</option><option>bob</option><option>carol</option></select>
+    </div>
+    <div class="row">
+      <label>Amount</label>
+      <input id="topupAmt" type="number" value="100000" />
+      <button onclick="topUp()">Set balance</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>🎲 Competitor bet</h2>
+    <div class="hint">Places a real bet from a chosen account in the current live round.</div>
+    <div class="row">
+      <label>Account</label>
+      <select id="betAcct"><option>alice</option><option>bob</option><option>carol</option><option>deployer</option></select>
+    </div>
+    <div class="row">
+      <label>ETH</label>
+      <input id="betAmt" type="number" step="0.01" value="1" />
+      <button onclick="placeBet()">Bet</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>⬢ Fund Vault</h2>
+    <div class="row">
+      <label>ETH</label>
+      <input id="vaultAmt" type="number" step="0.1" value="1" />
+      <button onclick="fundVault()">Fund</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>🎟 Fund Jackpot</h2>
+    <div class="row">
+      <label>ETH</label>
+      <input id="jackpotAmt" type="number" step="0.1" value="0.5" />
+      <button onclick="fundJackpot()">Fund</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>🎯 Rig crash outcome</h2>
+    <div class="hint">
+      Forces the CURRENT LIVE round to crash at ~this multiplier. Races a running background
+      keeper -- for a deterministic result, stop the keeper and use Tick below instead.
+    </div>
+    <div class="row">
+      <label>Target</label>
+      <input id="rigMult" type="number" step="0.1" value="2.5" />x
+      <button class="warn-btn" onclick="rigCrash()">Rig</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>🎟 Rig jackpot</h2>
+    <div class="hint">Forces the next drawable epoch's ball to hit or miss. Needs claimed tickets in that epoch first (see below).</div>
+    <div class="row">
+      <button class="warn-btn" onclick="rigJackpot(true)">Force HIT</button>
+      <button class="warn-btn" onclick="rigJackpot(false)">Force MISS</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>🎫 Claim tickets</h2>
+    <div class="hint">Needed before rig-jackpot can draw a populated epoch.</div>
+    <div class="row">
+      <label>Account</label>
+      <select id="ticketAcct"><option>alice</option><option>bob</option><option>carol</option><option>deployer</option></select>
+    </div>
+    <div class="row">
+      <label>Round</label>
+      <input id="ticketRound" type="number" placeholder="crash round id" />
+      <button onclick="claimTickets()">Claim</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>⏱ Manual tick</h2>
+    <div class="hint">Single lock/reveal/settle step -- run repeatedly instead of the background keeper while precision-rigging outcomes.</div>
+    <div class="row">
+      <button onclick="tick()">Tick once</button>
+    </div>
+  </section>
+
+</div>
+
+<div id="log"></div>
+
+<script src="vendor/ethers.umd.min.js"></script>
+<script>
+const RPC_URL = "http://127.0.0.1:8545";
+const provider = new ethers.JsonRpcProvider(RPC_URL);
+
+// Same standard hardhat/anvil test mnemonic every other script in this repo
+// derives from -- never hardcoded strings (a hand-typed key bit this
+// session already, once).
+const MNEMONIC = "test test test test test test test test test test test junk";
+function walletFor(index) {
+  return ethers.HDNodeWallet.fromPhrase(MNEMONIC, undefined, `m/44'/60'/0'/0/${index}`).connect(provider);
+}
+const ACCOUNTS = { deployer: walletFor(0), alice: walletFor(2), bob: walletFor(3), carol: walletFor(4) };
+
+const CRASH_ABI = [
+  "function currentRoundId() view returns (uint256)",
+  "function rounds(uint256) view returns (uint8 phase, bool entropyRevealed, bool swept, uint64 targetDrandRound, uint256 bettingEndsAt, uint256 lockBlock, uint256 trueCrashElapsedBlocks, uint256 crashElapsedBlocks, uint256 crashMultiplierBps, uint256 pool, uint256 distributable, uint256 totalWinningWeight, uint256 provisionalWinningWeight, uint256 registrationDeadlineBlock, uint256 rolledOverFromPrevious)",
+  "function placeBet() payable",
+  "function lockRound()",
+  "function revealEntropy(uint256 roundId)",
+  "function settleRound(uint256 roundId)",
+  "function fundVault() payable",
+  "function reserve() view returns (uint256)",
+  "function maxElapsedBlocks() view returns (uint256)",
+];
+const POWERBOARD_ABI = [
+  "function currentEpoch() view returns (uint256)",
+  "function epochs(uint256) view returns (uint256 totalTickets, uint64 targetDrandRound, bool drawRequested, bool drawn, bool jackpotHit, uint256 drawnBall, address winner, uint256 prize)",
+  "function jackpot() view returns (uint256)",
+  "function fund() payable",
+  "function requestDraw(uint256 epoch)",
+  "function drawWinner(uint256 epoch)",
+  "function ballRange() view returns (uint256)",
+  "function jackpotBall() view returns (uint256)",
+  "function claimTickets(address source, uint256 sourceRoundId, address player)",
+];
+const BEACON_ABI = [
+  "function setRandomness(uint64 round, bytes32 value) external",
+  "function isRoundAvailable(uint64 round) view returns (bool)",
+];
+const PLANK_ABI = [
+  "function mint(address to, uint256 amount) external",
+  "function balanceOf(address) view returns (uint256)",
+];
+
+let manifest, crash, powerboard, beacon, plank;
+
+function log(msg, cls) {
+  const el = document.getElementById("log");
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
+  el.prepend(line);
+}
+
+async function init() {
+  const res = await fetch("deploy-addresses.local.json", { cache: "no-store" });
+  manifest = await res.json();
+  const op = ACCOUNTS.deployer;
+  crash = new ethers.Contract(manifest.crash, CRASH_ABI, op);
+  powerboard = new ethers.Contract(manifest.powerboard, POWERBOARD_ABI, op);
+  beacon = new ethers.Contract(manifest.beacon, BEACON_ABI, op);
+  plank = new ethers.Contract(manifest.plank, PLANK_ABI, op);
+  try {
+    const saved = localStorage.getItem("plankcrash_bot_bet_eth");
+    if (saved) document.getElementById("botAmt").value = saved;
+  } catch (_) {}
+  await refreshStatus();
+  setInterval(refreshStatus, 3000);
+}
+
+async function refreshStatus() {
+  try {
+    const id = await crash.currentRoundId();
+    const r = await crash.rounds(id);
+    const reserve = await crash.reserve();
+    const epoch = await powerboard.currentEpoch();
+    const jackpot = await powerboard.jackpot();
+    const lines = [
+      `deploy:  ${manifest.generatedAt}  (testRig: ${manifest.testRig})`,
+      `round:   #${id}  phase ${r.phase}  pool ${ethers.formatEther(r.pool)} ETH`,
+      `vault:   ${ethers.formatEther(reserve)} ETH`,
+      `powerboard: epoch ${epoch}  jackpot ${ethers.formatEther(jackpot)} ETH`,
+      "",
+    ];
+    for (const [name, w] of Object.entries(ACCOUNTS)) {
+      const bal = await provider.getBalance(w.address);
+      const pbal = await plank.balanceOf(w.address);
+      lines.push(`${name.padEnd(9)} ${w.address}  ${Number(ethers.formatEther(bal)).toFixed(2).padStart(10)} ETH  ${Number(ethers.formatEther(pbal)).toFixed(0).padStart(8)} $PLANK`);
+    }
+    document.getElementById("status").textContent = lines.join("\n");
+  } catch (e) {
+    document.getElementById("status").textContent = "status unavailable: " + e.message;
+  }
+}
+
+function setBotAmt() {
+  const v = document.getElementById("botAmt").value;
+  localStorage.setItem("plankcrash_bot_bet_eth", v);
+  log(`bot bet size set to ${v} ETH -- takes effect on crash.html's next bot tick`, "ok");
+}
+function resetBotAmt() {
+  localStorage.removeItem("plankcrash_bot_bet_eth");
+  document.getElementById("botAmt").value = "0.01";
+  log("bot bet size reset to default (0.01 ETH)", "ok");
+}
+
+async function mintPlank() {
+  const acct = document.getElementById("mintAcct").value;
+  const amt = document.getElementById("mintAmt").value;
+  try {
+    const tx = await plank.connect(ACCOUNTS.deployer).mint(ACCOUNTS[acct].address, ethers.parseEther(amt));
+    await tx.wait();
+    log(`minted ${amt} $PLANK to ${acct}`, "ok");
+    refreshStatus();
+  } catch (e) { log("mint failed: " + (e.shortMessage || e.message), "err"); }
+}
+
+async function topUp() {
+  const acct = document.getElementById("topupAcct").value;
+  const amt = document.getElementById("topupAmt").value;
+  try {
+    await provider.send("hardhat_setBalance", [ACCOUNTS[acct].address, ethers.toBeHex(ethers.parseEther(amt))]);
+    log(`${acct} balance set to ${amt} ETH`, "ok");
+    refreshStatus();
+  } catch (e) { log("top-up failed: " + (e.shortMessage || e.message), "err"); }
+}
+
+async function placeBet() {
+  const acct = document.getElementById("betAcct").value;
+  const amt = document.getElementById("betAmt").value;
+  try {
+    const tx = await crash.connect(ACCOUNTS[acct]).placeBet({ value: ethers.parseEther(amt) });
+    await tx.wait();
+    log(`${acct} bet ${amt} ETH`, "ok");
+    refreshStatus();
+  } catch (e) { log("bet failed: " + (e.shortMessage || e.message), "err"); }
+}
+
+async function fundVault() {
+  const amt = document.getElementById("vaultAmt").value;
+  try {
+    const tx = await crash.fundVault({ value: ethers.parseEther(amt) });
+    await tx.wait();
+    log(`funded vault with ${amt} ETH`, "ok");
+    refreshStatus();
+  } catch (e) { log("fund-vault failed: " + (e.shortMessage || e.message), "err"); }
+}
+
+async function fundJackpot() {
+  const amt = document.getElementById("jackpotAmt").value;
+  try {
+    const tx = await powerboard.fund({ value: ethers.parseEther(amt) });
+    await tx.wait();
+    log(`funded jackpot with ${amt} ETH`, "ok");
+    refreshStatus();
+  } catch (e) { log("fund-jackpot failed: " + (e.shortMessage || e.message), "err"); }
+}
+
+function entropyForMultiplier(multiplierBps) {
+  if (multiplierBps <= 10000n) return ethers.zeroPadValue(ethers.toBeHex(0), 32);
+  const r = 10000n - 100000000n / multiplierBps;
+  if (r < 0n || r > 9999n) throw new Error(`multiplier ${multiplierBps} bps out of range`);
+  return ethers.zeroPadValue(ethers.toBeHex(r), 32);
+}
+
+async function rigCrash() {
+  const target = document.getElementById("rigMult").value;
+  const targetBps = BigInt(Math.round(parseFloat(target) * 10000));
+  try {
+    const id = await crash.currentRoundId();
+    const r = await crash.rounds(id);
+    if (Number(r.phase) !== 1) throw new Error(`round ${id} is phase ${r.phase}, not LIVE -- lock it first`);
+    if (r.entropyRevealed) throw new Error(`round ${id} already revealed -- too late`);
+    const entropy = entropyForMultiplier(targetBps);
+    await (await beacon.setRandomness(r.targetDrandRound, entropy)).wait();
+    await (await crash.revealEntropy(id)).wait();
+    log(`round ${id} rigged for ${target}x`, "ok");
+    refreshStatus();
+  } catch (e) { log("rig-crash failed: " + (e.shortMessage || e.message), "err"); }
+}
+
+function entropyForBall(wantHit, ballRange, jackpotBall) {
+  for (let i = 0; i < 5000; i++) {
+    const candidate = ethers.zeroPadValue(ethers.toBeHex(BigInt(i)), 32);
+    const packed = ethers.solidityPacked(["bytes32", "string"], [candidate, "PLANK_BALL"]);
+    const ball = (BigInt(ethers.keccak256(packed)) % ballRange) + 1n;
+    if (wantHit === (ball === jackpotBall)) return candidate;
+  }
+  throw new Error("no matching entropy found");
+}
+
+async function rigJackpot(wantHit) {
+  try {
+    const epoch = (await powerboard.currentEpoch()) - 1n;
+    const e = await powerboard.epochs(epoch);
+    if (e.drawn) throw new Error(`epoch ${epoch} already drawn`);
+    const ballRange = await powerboard.ballRange();
+    const jackpotBall = await powerboard.jackpotBall();
+    const entropy = entropyForBall(wantHit, ballRange, jackpotBall);
+    if (!e.drawRequested) await (await powerboard.requestDraw(epoch)).wait();
+    const e2 = await powerboard.epochs(epoch);
+    await (await beacon.setRandomness(e2.targetDrandRound, entropy)).wait();
+    await (await powerboard.drawWinner(epoch)).wait();
+    log(`epoch ${epoch} drawn -- targeted ${wantHit ? "HIT" : "MISS"}`, "ok");
+    refreshStatus();
+  } catch (e) { log("rig-jackpot failed: " + (e.shortMessage || e.message), "err"); }
+}
+
+async function claimTickets() {
+  const acct = document.getElementById("ticketAcct").value;
+  const roundId = document.getElementById("ticketRound").value;
+  try {
+    const tx = await powerboard.claimTickets(manifest.crash, roundId, ACCOUNTS[acct].address);
+    await tx.wait();
+    log(`claimed tickets for ${acct} in crash round ${roundId}`, "ok");
+  } catch (e) { log("claim-tickets failed: " + (e.shortMessage || e.message), "err"); }
+}
+
+async function tick() {
+  try {
+    const id = await crash.currentRoundId();
+    const r = await crash.rounds(id);
+    if (Number(r.phase) === 0 && BigInt(Math.floor(Date.now() / 1000)) >= r.bettingEndsAt) {
+      await (await crash.lockRound()).wait();
+      log(`locked round ${id}`, "ok");
+    } else if (Number(r.phase) === 1 && !r.entropyRevealed) {
+      const available = await beacon.isRoundAvailable(r.targetDrandRound);
+      if (!available) { log(`round ${id} not yet due for reveal`, "err"); return; }
+      await (await crash.revealEntropy(id)).wait();
+      log(`revealed entropy for round ${id}`, "ok");
+    } else if (Number(r.phase) === 1 && r.entropyRevealed) {
+      const maxElapsed = await crash.maxElapsedBlocks();
+      const effective = r.trueCrashElapsedBlocks < maxElapsed ? r.trueCrashElapsedBlocks : maxElapsed;
+      const blockNow = await provider.getBlockNumber();
+      if (BigInt(blockNow) - r.lockBlock >= effective) {
+        await (await crash.settleRound(id)).wait();
+        log(`settled round ${id}`, "ok");
+      } else {
+        log(`round ${id}: crash point not reached yet`, "err");
+      }
+    } else {
+      log(`round ${id} is phase ${r.phase} -- nothing to do`, "err");
+    }
+    refreshStatus();
+  } catch (e) { log("tick failed: " + (e.shortMessage || e.message), "err"); }
+}
+
+init();
+</script>
+</body>
+</html>

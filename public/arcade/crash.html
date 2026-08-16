@@ -2413,8 +2413,14 @@ async function startBotBettor() {
       const stake = await botCrash.stakeOf(roundId, bobAcc.address);
       if (stake > 0n) { botBetAttemptedRound = key; return; }
       botBetAttemptedRound = key;
-      await (await botCrash.placeBet({ value: ethers.parseEther("0.01") })).wait();
-      toast("Bot bettor (Bob) placed a real 0.01 ETH bet");
+      // Dev-only override, invisible to normal play: dev-panel.html writes
+      // this key so the bot's bet size can be tuned for testing (whale-cap
+      // interaction, competitor sizing, etc.) without touching this file.
+      // Absent (the normal case), behavior is unchanged -- still 0.01 ETH.
+      let botAmt = "0.01";
+      try { botAmt = localStorage.getItem("plankcrash_bot_bet_eth") || "0.01"; } catch (_) {}
+      await (await botCrash.placeBet({ value: ethers.parseEther(botAmt) })).wait();
+      toast("Bot bettor (Bob) placed a real " + botAmt + " ETH bet");
     } catch {
       /* races with the real player's own bet timing -- silent by design */
     } finally {
