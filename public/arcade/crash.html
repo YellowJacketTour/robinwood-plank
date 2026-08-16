@@ -2381,6 +2381,20 @@ await loadDeployAddresses();
 const SIM_RPC = "http://127.0.0.1:8545";
 let botBetTimer = null;
 let botBetAttemptedRound = null;
+// Real bug this fixes: setInterval's callback is async, but setInterval
+// does NOT wait for a tick's promise to resolve before scheduling the
+// next one. If a placeBet tx (send + .wait()) ever takes longer than the
+// 2.5s interval -- plausible under any real load, including this page's
+// OWN other activity sending transactions from different accounts on the
+// same node -- a second tick could fire and race the first for Bob's next
+// nonce before the first transaction's nonce was ever incorporated,
+// producing exactly the "nonce already used" / "nonce too low" failures
+// this bot has been quietly swallowing (its catch block was silent "by
+// design" for legitimate round-timing races, which also hid this real
+// self-inflicted one). Guarded the same way every other background actor
+// in this file already is (fuelBusy/bankBusy/autoBusy): a tick that's
+// still in flight blocks the next one from starting at all.
+let botBetBusy = false;
 
 async function startBotBettor() {
   if (botBetTimer) clearInterval(botBetTimer);
@@ -2388,6 +2402,8 @@ async function startBotBettor() {
   const botSigner = new ethers.Wallet(bobAcc.pk, provider);
   const botCrash = new ethers.Contract(SIMULATE_ADDR, abi, botSigner);
   botBetTimer = setInterval(async () => {
+    if (botBetBusy) return;
+    botBetBusy = true;
     try {
       const roundId = await botCrash.currentRoundId();
       const round = await botCrash.currentRound();
@@ -2401,6 +2417,8 @@ async function startBotBettor() {
       toast("Bot bettor (Bob) placed a real 0.01 ETH bet");
     } catch {
       /* races with the real player's own bet timing -- silent by design */
+    } finally {
+      botBetBusy = false;
     }
   }, 2500);
 }

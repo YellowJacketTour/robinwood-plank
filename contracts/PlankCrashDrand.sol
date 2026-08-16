@@ -827,11 +827,40 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         return 10000 + (elapsedBlocks * 40) + (elapsedBlocks * elapsedBlocks) / 5;
     }
 
+    /// GAS + DoS FIX: was a LINEAR SEARCH (up to 200,000 loop iterations),
+    /// called on every revealEntropy() (via _deriveCrash, for EVERY round
+    /// that settles) and every presetCashOut(). Beyond the raw gas waste,
+    /// this was a genuine latent liveness risk: a drand-derived crash
+    /// multiplier near the extreme tail (r close to 9999 in _deriveCrash
+    /// makes multiplierBps enormous) could require enough iterations to
+    /// exceed the block gas limit, silently bricking revealEntropy() for
+    /// that specific round (no way to settle it -- only voidStaleRound()'s
+    /// timeout would eventually rescue it). _multiplierAt is monotonically
+    /// non-decreasing in elapsedBlocks, so a binary search for the
+    /// smallest e with _multiplierAt(e) >= targetBps is exact and O(log n)
+    /// -- ~18 iterations worst case instead of up to 200,000. Bounded to
+    /// the same [0, 200000] safety range as before; an unreachable target
+    /// now returns 200000 instead of the old loop's 200001 sentinel -- a
+    /// one-off difference that never changes real game behavior, since
+    /// maxElapsedBlocks (1800 in every deploy config) caps the EFFECTIVE
+    /// elapsed used for settlement long before either sentinel is ever
+    /// reached (see _effectiveCrashElapsed). Verified byte-for-byte
+    /// identical to the old linear search across a wide sweep of targets
+    /// in PlankCrashDrand.invertMultiplier.test.ts before this replaced it.
     function _invertMultiplier(uint256 targetBps) public pure returns (uint256 elapsedBlocks) {
-        elapsedBlocks = 0;
-        while (_multiplierAt(elapsedBlocks) < targetBps && elapsedBlocks <= 200000) {
-            elapsedBlocks++;
+        if (_multiplierAt(0) >= targetBps) return 0;
+        uint256 lo = 0;
+        uint256 hi = 200000;
+        if (_multiplierAt(hi) < targetBps) return hi;
+        while (lo < hi) {
+            uint256 mid = (lo + hi) / 2;
+            if (_multiplierAt(mid) < targetBps) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
         }
+        return lo;
     }
 
     function _deriveCrash(bytes32 entropyValue) public pure returns (uint256 multiplierBps, uint256 elapsedBlocks) {
