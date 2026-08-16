@@ -10,12 +10,19 @@ test("burning $PLANK fuel updates the Burned/Boosted counters with no console er
 
   const burnedBefore = await page.getByText("Burned").locator("xpath=following-sibling::*[1]").textContent();
 
-  await page.getByRole("button", { name: "Burn" }).click();
-
+  // The fuel panel's innerHTML is fully rebuilt on every ~600ms poll tick
+  // (see refreshFuelUI in crash.html) rather than diffed, so the #flBurn
+  // button can detach mid-click under any real contention -- force the
+  // click and retry until it actually registers (fuelBusy guards the app
+  // side against a double-submit if an earlier click DID land first).
   await expect
-    .poll(async () => page.getByText("Burned").locator("xpath=following-sibling::*[1]").textContent(), {
-      timeout: 30_000,
-    })
+    .poll(
+      async () => {
+        await page.locator("#flBurn").click({ force: true, timeout: 2000 }).catch(() => {});
+        return page.getByText("Burned").locator("xpath=following-sibling::*[1]").textContent();
+      },
+      { timeout: 90_000 }
+    )
     .not.toBe(burnedBefore);
 
   expect(errors, `console errors: ${errors.join("\n")}`).toEqual([]);

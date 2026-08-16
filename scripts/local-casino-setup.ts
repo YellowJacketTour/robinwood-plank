@@ -254,6 +254,8 @@ async function main() {
     powerboard: await airdropPool.getAddress(),
     beacon: await beacon.getAddress(),
     distributor: await distributor.getAddress(),
+    oracle: await oracle.getAddress(),
+    burnEngine: await burnEngine.getAddress(),
   };
   fs.writeFileSync(
     new URL("../public/arcade/deploy-addresses.local.json", import.meta.url),
@@ -303,6 +305,19 @@ async function main() {
   console.log("   7. once a day: powerboard.requestDraw(epoch) -> ... -> powerboard.drawWinner(epoch)");
   console.log("\n Players (optional, anyone): plank.approve(fuelBooster, amount) then fuelBooster.burnFuel(amount)");
   console.log("   -- burns real $PLANK, boosts the shared Vault by its fair TWAP value. Never touches your own stake/odds.");
+  console.log("\n IMPORTANT for fuel burns to work: the TWAP oracle starts UNPRIMED (consult()");
+  console.log(" reverts NotInitialized until update() is called at least once, and update()");
+  console.log(" itself reverts PeriodNotElapsed until a full window has passed since deploy).");
+  console.log(" Run the keeper with ORACLE_ADDRESS + BURN_ENGINE_ADDRESS set so it primes this");
+  console.log(" for you -- without them, every burnFuel() call reverts, forever:");
+  console.log(
+    `   ORACLE_ADDRESS=${await oracle.getAddress()} BURN_ENGINE_ADDRESS=${await burnEngine.getAddress()} \\`
+  );
+  console.log("   KEEPER_RPC_URL=http://127.0.0.1:8545 KEEPER_PK=<a funded local test key> \\");
+  console.log(
+    `   CRASH_ADDRESS=${crashAddr} POWERBOARD_ADDRESS=${await airdropPool.getAddress()} BEACON_ADDRESS=${await beacon.getAddress()} DISTRIBUTOR_ADDRESS=${await distributor.getAddress()} \\`
+  );
+  console.log("   KEEPER_MOCK_BEACON=1 npx hardhat run scripts/casino-keeper.ts --network localhost");
   console.log("========================================================\n");
 
   void [alice, bob, carol];

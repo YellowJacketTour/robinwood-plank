@@ -96,6 +96,12 @@ export default async function globalSetup() {
         POWERBOARD_ADDRESS: manifest.powerboard,
         BEACON_ADDRESS: manifest.beacon,
         DISTRIBUTOR_ADDRESS: manifest.distributor,
+        // Without these, the TWAP oracle never gets primed (consult()
+        // reverts NotInitialized forever) and fuel-burn.spec.ts's burnFuel
+        // call reverts every time -- see local-casino-setup.ts's own
+        // printed warning about this, added after finding it live.
+        ORACLE_ADDRESS: manifest.oracle,
+        BURN_ENGINE_ADDRESS: manifest.burnEngine,
         KEEPER_MOCK_BEACON: "1",
         KEEPER_INTERVAL_MS: "1500",
       },

@@ -363,9 +363,26 @@ async function main() {
 // Only auto-run when executed directly -- the same direct-execution guard
 // scripts/relay-drand.ts uses -- so tick() above stays importable by tests
 // without kicking off an infinite loop on import.
+//
+// This script's own usage header says to run it via
+// `npx hardhat run scripts/casino-keeper.ts`, but under that invocation
+// process.argv[1] is hardhat's OWN cli.js, not this file -- hardhat's
+// `run` task puts the actual target script path at argv[3] instead
+// (`[node, cli.js, "run", "<script>", ...flags]`). Checking only argv[1]
+// meant `main()` silently never ran under the documented invocation: the
+// process would start, do nothing, and exit 0, which looked like "the
+// keeper is running" but never advanced a single round. Check both shapes.
+function resolvedOrUndefined(p: string | undefined): string | undefined {
+  if (!p) return undefined;
+  try {
+    return realpathSync(p);
+  } catch {
+    return undefined;
+  }
+}
+const thisFile = realpathSync(fileURLToPath(import.meta.url));
 const isDirectRun =
-  process.argv[1] !== undefined &&
-  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  resolvedOrUndefined(process.argv[1]) === thisFile || resolvedOrUndefined(process.argv[3]) === thisFile;
 
 if (isDirectRun) {
   main().catch((err) => {
