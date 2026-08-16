@@ -78,12 +78,30 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         SETTLED
     }
 
+    // GAS OPTIMIZATION: the four small fields (phase 1B, entropyRevealed 1B,
+    // swept 1B, targetDrandRound 8B = 11 bytes total) are grouped FIRST so
+    // Solidity packs all four into ONE 32-byte storage slot, instead of
+    // each being isolated in its own slot by the uint256 fields around it
+    // (the previous declaration order interleaved them, wasting 2 whole
+    // slots per round -- phase alone in slot 0, swept alone in the last
+    // slot, each burning ~31 bytes of a slot nothing else could share).
+    // This is a PURE storage-layout change: the field VALUES, types, and
+    // every accessor (rounds(id).phase, .swept, etc.) are unchanged -- only
+    // which slot each lives in. The auto-generated rounds() getter's
+    // TUPLE ORDER changes to match this new declaration order, which is
+    // why every hardcoded ABI string across the frontend/tests/scripts
+    // that decodes rounds() was updated in the same change (see the git
+    // log for the full list) -- ethers decodes tuple fields by the ABI's
+    // declared order+names, so those call sites needed the new order, but
+    // no code that reads decoded fields BY NAME (round.phase, round.pool,
+    // etc.) needed to change at all.
     struct Round {
         Phase phase;
+        bool entropyRevealed;
+        bool swept;
+        uint64 targetDrandRound;
         uint256 bettingEndsAt;
         uint256 lockBlock;
-        uint64 targetDrandRound;
-        bool entropyRevealed;
         uint256 trueCrashElapsedBlocks;
         uint256 crashElapsedBlocks;
         uint256 crashMultiplierBps;
@@ -93,9 +111,6 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         uint256 provisionalWinningWeight;
         uint256 registrationDeadlineBlock;
         uint256 rolledOverFromPrevious;
-        // Set once a fully-busted round's distributable has been swept
-        // into pendingRollover -- see sweepBustedRound().
-        bool swept;
     }
 
     uint256 public immutable bettingDurationSeconds;

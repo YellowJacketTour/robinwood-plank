@@ -49,7 +49,7 @@ import { fetchRound, parseG1 } from "./relay-drand.js";
 
 const CRASH_ABI = [
   "function currentRoundId() view returns (uint256)",
-  "function rounds(uint256) view returns (uint8 phase, uint256 bettingEndsAt, uint256 lockBlock, uint64 targetDrandRound, bool entropyRevealed, uint256 trueCrashElapsedBlocks, uint256 crashElapsedBlocks, uint256 crashMultiplierBps, uint256 pool, uint256 distributable, uint256 totalWinningWeight, uint256 provisionalWinningWeight, uint256 registrationDeadlineBlock, uint256 rolledOverFromPrevious, bool swept)",
+  "function rounds(uint256) view returns (uint8 phase, bool entropyRevealed, bool swept, uint64 targetDrandRound, uint256 bettingEndsAt, uint256 lockBlock, uint256 trueCrashElapsedBlocks, uint256 crashElapsedBlocks, uint256 crashMultiplierBps, uint256 pool, uint256 distributable, uint256 totalWinningWeight, uint256 provisionalWinningWeight, uint256 registrationDeadlineBlock, uint256 rolledOverFromPrevious)",
   "function maxElapsedBlocks() view returns (uint256)",
   "function minParticipants() view returns (uint256)",
   "function participantCount(uint256) view returns (uint256)",

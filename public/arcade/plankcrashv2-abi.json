@@ -997,9 +997,24 @@
     "name": "rounds",
     "outputs": [
       {
-        "internalType": "enum PlankCrashV2.Phase",
+        "internalType": "enum PlankCrashDrand.Phase",
         "name": "phase",
         "type": "uint8"
+      },
+      {
+        "internalType": "bool",
+        "name": "entropyRevealed",
+        "type": "bool"
+      },
+      {
+        "internalType": "bool",
+        "name": "swept",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint64",
+        "name": "targetDrandRound",
+        "type": "uint64"
       },
       {
         "internalType": "uint256",
@@ -1010,16 +1025,6 @@
         "internalType": "uint256",
         "name": "lockBlock",
         "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "entropyBlock",
-        "type": "uint256"
-      },
-      {
-        "internalType": "bool",
-        "name": "entropyRevealed",
-        "type": "bool"
       },
       {
         "internalType": "uint256",
