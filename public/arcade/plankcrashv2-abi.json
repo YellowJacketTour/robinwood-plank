@@ -15,7 +15,7 @@
           },
           {
             "internalType": "uint256",
-            "name": "entropyDelayBlocks",
+            "name": "maxAwaitBlocks",
             "type": "uint256"
           },
           {
@@ -57,9 +57,44 @@
             "internalType": "address",
             "name": "treasury",
             "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "beacon",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "seedNumerator",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "seedDenominator",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "reserveShareBps",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "reserveFloorWei",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "reserveCap",
+            "type": "uint256"
+          },
+          {
+            "internalType": "address",
+            "name": "jackpotSink",
+            "type": "address"
           }
         ],
-        "internalType": "struct PlankCrashV2.Config",
+        "internalType": "struct PlankCrashDrand.Config",
         "name": "cfg",
         "type": "tuple"
       }
@@ -89,7 +124,17 @@
   },
   {
     "inputs": [],
+    "name": "AlreadySwept",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "BadPhase",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "BadVaultConfig",
     "type": "error"
   },
   {
@@ -104,17 +149,7 @@
   },
   {
     "inputs": [],
-    "name": "EntropyExpired",
-    "type": "error"
-  },
-  {
-    "inputs": [],
     "name": "EntropyNotRevealed",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "EntropyNotYetAvailable",
     "type": "error"
   },
   {
@@ -124,12 +159,37 @@
   },
   {
     "inputs": [],
+    "name": "NotFunder",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "NotWinner",
     "type": "error"
   },
   {
     "inputs": [],
+    "name": "NothingToFund",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "PastCrashPoint",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "RandomnessNotYetAvailable",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "RoundHasWinners",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "RoundIntervalTooShort",
     "type": "error"
   },
   {
@@ -150,6 +210,16 @@
   {
     "inputs": [],
     "name": "TooLate",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroBeacon",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ZeroPlayer",
     "type": "error"
   },
   {
@@ -264,6 +334,25 @@
       {
         "indexed": true,
         "internalType": "uint256",
+        "name": "fromRoundId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "PoolRolledOver",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
         "name": "roundId",
         "type": "uint256"
       },
@@ -337,9 +426,9 @@
       },
       {
         "indexed": false,
-        "internalType": "uint256",
-        "name": "entropyBlock",
-        "type": "uint256"
+        "internalType": "uint64",
+        "name": "targetDrandRound",
+        "type": "uint64"
       }
     ],
     "name": "RoundLocked",
@@ -390,10 +479,104 @@
     "type": "event"
   },
   {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "from",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "reserveAfter",
+        "type": "uint256"
+      }
+    ],
+    "name": "VaultFunded",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roundId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "fromRake",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "reserveAfter",
+        "type": "uint256"
+      }
+    ],
+    "name": "VaultGrew",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "spilledToJackpot",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "reserveAfter",
+        "type": "uint256"
+      }
+    ],
+    "name": "VaultOverflow",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roundId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "seed",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "reserveAfter",
+        "type": "uint256"
+      }
+    ],
+    "name": "VaultSeeded",
+    "type": "event"
+  },
+  {
     "inputs": [
       {
         "internalType": "bytes32",
-        "name": "entropy",
+        "name": "entropyValue",
         "type": "bytes32"
       }
     ],
@@ -459,6 +642,43 @@
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "beacon",
+    "outputs": [
+      {
+        "internalType": "contract IDrandBeacon",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "betFundedBy",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
       }
     ],
     "stateMutability": "view",
@@ -557,6 +777,29 @@
         "internalType": "uint256",
         "name": "roundId",
         "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
+      }
+    ],
+    "name": "cashOutFor",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roundId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
       }
     ],
     "name": "claim",
@@ -602,9 +845,24 @@
       {
         "components": [
           {
-            "internalType": "enum PlankCrashV2.Phase",
+            "internalType": "enum PlankCrashDrand.Phase",
             "name": "phase",
             "type": "uint8"
+          },
+          {
+            "internalType": "bool",
+            "name": "entropyRevealed",
+            "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "swept",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint64",
+            "name": "targetDrandRound",
+            "type": "uint64"
           },
           {
             "internalType": "uint256",
@@ -615,16 +873,6 @@
             "internalType": "uint256",
             "name": "lockBlock",
             "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "entropyBlock",
-            "type": "uint256"
-          },
-          {
-            "internalType": "bool",
-            "name": "entropyRevealed",
-            "type": "bool"
           },
           {
             "internalType": "uint256",
@@ -672,7 +920,7 @@
             "type": "uint256"
           }
         ],
-        "internalType": "struct PlankCrashV2.Round",
+        "internalType": "struct PlankCrashDrand.Round",
         "name": "",
         "type": "tuple"
       }
@@ -694,8 +942,14 @@
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "entropyDelayBlocks",
+    "inputs": [
+      {
+        "internalType": "uint64",
+        "name": "",
+        "type": "uint64"
+      }
+    ],
+    "name": "drandRoundToRoundId",
     "outputs": [
       {
         "internalType": "uint256",
@@ -732,6 +986,13 @@
   },
   {
     "inputs": [],
+    "name": "fundVault",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "genesisTimestamp",
     "outputs": [
       {
@@ -745,7 +1006,39 @@
   },
   {
     "inputs": [],
+    "name": "jackpotSink",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "keeperRewardBps",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "largestStakeInRound",
     "outputs": [
       {
         "internalType": "uint256",
@@ -780,6 +1073,19 @@
     "name": "lockRound",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "maxAwaitBlocks",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -835,6 +1141,19 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "nextSeed",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "seed",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -873,8 +1192,40 @@
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "payoutRedirect",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "placeBet",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
+      }
+    ],
+    "name": "placeBetFor",
     "outputs": [],
     "stateMutability": "payable",
     "type": "function"
@@ -916,6 +1267,11 @@
         "internalType": "uint256",
         "name": "roundId",
         "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
       }
     ],
     "name": "registerResult",
@@ -950,6 +1306,58 @@
   {
     "inputs": [],
     "name": "registrationWindowBlocks",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "reserve",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "reserveCap",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "reserveFloorWei",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "reserveShareBps",
     "outputs": [
       {
         "internalType": "uint256",
@@ -1076,6 +1484,45 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "seedDenominator",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "seedNumerator",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "sink",
+        "type": "address"
+      }
+    ],
+    "name": "setPayoutRedirect",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -1110,6 +1557,19 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roundId",
+        "type": "uint256"
+      }
+    ],
+    "name": "sweepBustedRound",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {

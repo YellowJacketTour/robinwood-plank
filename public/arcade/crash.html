@@ -2857,9 +2857,30 @@ async function doPlaceBet(viaButton) {
     return true;
   } catch (err) {
     sfx.error();
-    toast("Bet failed: " + (err.shortMessage || err.message), "error");
+    toast("Bet failed: " + friendlyRevertReason(err), "error");
     return false;
   }
+}
+
+// Translates the contract's own custom errors into a message that actually
+// tells a player what to do next, instead of a raw ABI error name (or
+// "unknown custom error" entirely, which is what an out-of-date ABI
+// produces -- decoding depends on the contract's error list matching what's
+// actually deployed, see plankcrashv2-abi.json's own generation comment).
+// BadPhase/TooEarly is the single most likely one anyone will ever hit:
+// clicking LAUNCH in the last instant before a round locks.
+function friendlyRevertReason(err) {
+  const name = err && err.revert && err.revert.name;
+  if (name === "BadPhase" || name === "TooEarly" || name === "TooLate") {
+    return "Betting just closed for this round -- try the next one.";
+  }
+  if (name === "StakeExceedsCap") {
+    return "That bet would be too large a share of this round's pool -- try a smaller amount.";
+  }
+  if (name === "AlreadyBet") {
+    return "You've already got a bet in this round.";
+  }
+  return (err && (err.shortMessage || err.message)) || "unknown error";
 }
 
 async function doCashOut(viaButton) {
@@ -3063,9 +3084,24 @@ async function keeperTick(round, roundId, blockNum, chainNow) {
 async function refresh() {
   if (!crash) return;
   try {
-    const roundId = await crash.currentRoundId();
-    const round = await crash.currentRound();
-    const blockNum = await provider.getBlockNumber();
+    // Fetched concurrently, not as four sequential awaits. Real bug this
+    // fixes: under real load (e.g. the keeper mining a new block every
+    // couple seconds), several blocks could land BETWEEN the roundId/round
+    // read and the blockNum/chainNow read below. If that happened right at
+    // a round's first poll, chainNow could already be past round.bettingEndsAt
+    // even though the round had just opened -- and since bettingEndsAtEstimateMs
+    // is anchored only ONCE per round (by design, see below), that single
+    // bad snapshot froze the countdown at "IGNITION..." for the round's
+    // entire duration even though the chain's own betting window was fine.
+    // Promise.all issues all four in the same tick, which ethers v6 batches
+    // into one JSON-RPC request -- reflecting one consistent block, not
+    // whichever block happened to be latest by the time each awaited call
+    // finally resolved.
+    const [roundId, round, blockNum] = await Promise.all([
+      crash.currentRoundId(),
+      crash.currentRound(),
+      provider.getBlockNumber(),
+    ]);
     const chainNow = (await provider.getBlock(blockNum)).timestamp;
 
     if (currentRoundIdCache !== roundId.toString()) {
