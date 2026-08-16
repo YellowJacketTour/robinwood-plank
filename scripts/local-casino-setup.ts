@@ -253,6 +253,7 @@ async function main() {
     plank: await plank.getAddress(),
     powerboard: await airdropPool.getAddress(),
     beacon: await beacon.getAddress(),
+    distributor: await distributor.getAddress(),
   };
   fs.writeFileSync(
     new URL("../public/arcade/deploy-addresses.local.json", import.meta.url),

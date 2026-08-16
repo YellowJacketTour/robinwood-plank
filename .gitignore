@@ -76,3 +76,9 @@ deploy-out/
 # scripts/local-casino-setup.ts on every run; crash.html auto-syncs to it,
 # never committed (it's a snapshot of one machine's local deploy).
 public/arcade/deploy-addresses.local.json
+
+# Playwright e2e regression suite (test/e2e) run artifacts
+/test-results/
+/playwright-report/
+/blob-report/
+test/e2e/.hardhat-node.pid
