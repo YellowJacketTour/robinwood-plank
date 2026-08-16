@@ -89,6 +89,57 @@ describe("PlankCrashDrand", () => {
     await crash.settleRound(roundId);
   }
 
+  it("WHALE-CAP BYPASS (audit finding, fixed): a wallet can't defeat maxStakePerWalletBps just by betting first into a zero-seeded pool", async () => {
+    const { crash, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+
+    // The per-bet check is `r.pool != 0 && ...`, a no-op for whoever bets
+    // FIRST into an unseeded pool (poolAfter == their own stake, so the
+    // ratio check is vacuous) -- Alice can still place an oversized first
+    // bet with no revert here, exactly as before the fix.
+    const whaleStake = ethers.parseEther("10");
+    await crash.connect(alice).placeBet({ value: whaleStake });
+    expect(await crash.largestStakeInRound(roundId)).to.equal(whaleStake);
+
+    // Bob bets a small, ordinary amount as the second participant.
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.1") });
+
+    // THE FIX: lockRound() retroactively checks the FINAL pool. Alice's
+    // 10 ETH is ~99% of the ~10.1 ETH pool, far past the 50% cap
+    // (MAX_STAKE_BPS=5000) -- the round voids instead of proceeding with a
+    // whale-dominated pot, regardless of bet order.
+    await networkHelpers.time.increase(BETTING_SECONDS + 1);
+    await expect(crash.lockRound())
+      .to.emit(crash, "RoundVoided")
+      .withArgs(roundId, whaleStake + ethers.parseEther("0.1"), "whale-dominated");
+
+    const round = await crash.rounds(roundId);
+    expect(Number(round.phase)).to.equal(3); // SETTLED (voided)
+    expect(await crash.voided(roundId)).to.equal(true);
+
+    // Nothing is lost: both stakes carry forward to the fresh round exactly
+    // like an ordinary under-threshold void.
+    const freshRoundId = await crash.currentRoundId();
+    expect(freshRoundId).to.be.gt(roundId);
+    await crash.connect(alice).carryForwardStake(roundId);
+    await crash.connect(bob).carryForwardStake(roundId);
+    expect(await crash.stakeOf(freshRoundId, alice.address)).to.equal(whaleStake);
+    expect(await crash.stakeOf(freshRoundId, bob.address)).to.equal(ethers.parseEther("0.1"));
+  });
+
+  it("a normal, reasonably-sized first bet is NOT penalized by the whale-dominance check", async () => {
+    const { crash, alice, bob } = await deployAll();
+    const roundId = await crash.currentRoundId();
+    // Alice bets first, but a size that stays under the 50% cap once Bob's
+    // comparable bet joins -- the round should lock normally, not void.
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+    await networkHelpers.time.increase(BETTING_SECONDS + 1);
+    await expect(crash.lockRound()).to.emit(crash, "RoundLocked");
+    const round = await crash.rounds(roundId);
+    expect(Number(round.phase)).to.equal(1); // LIVE, not voided
+  });
+
   it("lockRound commits to a target drand round strictly after now, with the real safety margin applied", async () => {
     const { crash, alice, bob } = await deployAll();
     const roundId = await crash.currentRoundId();

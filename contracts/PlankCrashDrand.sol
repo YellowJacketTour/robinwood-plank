@@ -184,6 +184,19 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     mapping(uint256 => mapping(address => uint256)) private _weightOf;
     mapping(uint256 => uint256) public participantCount;
     mapping(uint256 => bool) public voided;
+    // The largest single stake placed in a round so far -- tracked so
+    // lockRound() can enforce the whale cap against the FINAL pool at lock
+    // time, order-independent. Real bug this closes: the per-bet cap check
+    // (`r.pool != 0 && ...`) is a no-op for whoever bets FIRST in a round
+    // with no seed, since poolAfter == their own stake makes the ratio
+    // check vacuous -- anyone willing to be first (trivial; no MEV needed)
+    // could stake an unbounded amount, defeating the cap's entire purpose
+    // of preventing single-wallet domination. This retroactive check
+    // catches it regardless of bet order: if the final pool's largest
+    // single stake still exceeds maxStakePerWalletBps of the final pool,
+    // the round voids exactly like under-threshold (stakes carry forward
+    // via carryForwardStake, nothing lost, no rake taken).
+    mapping(uint256 => uint256) public largestStakeInRound;
 
     // ── Bank / on-behalf integration (additive; the self-serve paths above
     //    are untouched) ──────────────────────────────────────────────────
@@ -397,7 +410,19 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     /// the progressive pot, or a well-wisher. It only ever seeds future
     /// player pots (never dev revenue), and only a fraction is released per
     /// round, so a donation compounds across many games.
-    function fundVault() external payable {
+    ///
+    /// nonReentrant matters here specifically because of _spillOverflow's
+    /// own external call: it computes `excess = reserve - cap` BEFORE
+    /// calling out, then unconditionally sets `reserve = cap` on success --
+    /// correct against a single top-level call, but a nested reentrant call
+    /// (e.g. via placeBet/settleRound/sweepBustedRound, which also touch
+    /// `reserve` and are themselves nonReentrant, sharing this same guard)
+    /// could otherwise add to `reserve` mid-call only to have it clobbered
+    /// by the outer call's unconditional `reserve = cap` once its own
+    /// external call returns -- an accounting bug (ETH still physically in
+    /// the contract, but silently dropped out of the Vault's bookkeeping),
+    /// not a theft, but a real integrity gap this guard closes outright.
+    function fundVault() external payable nonReentrant {
         if (msg.value == 0) revert NothingToFund();
         reserve += msg.value;
         emit VaultFunded(msg.sender, msg.value, reserve);
@@ -437,6 +462,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         stakeOf[currentRoundId][msg.sender] = msg.value;
         r.pool = poolAfter;
         participantCount[currentRoundId] += 1;
+        if (msg.value > largestStakeInRound[currentRoundId]) largestStakeInRound[currentRoundId] = msg.value;
         emit BetPlaced(currentRoundId, msg.sender, msg.value);
     }
 
@@ -461,6 +487,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         stakeOf[currentRoundId][player] = msg.value;
         r.pool = poolAfter;
         participantCount[currentRoundId] += 1;
+        if (msg.value > largestStakeInRound[currentRoundId]) largestStakeInRound[currentRoundId] = msg.value;
         betFundedBy[currentRoundId][player] = msg.sender;
         emit BetPlaced(currentRoundId, player, msg.value);
     }
@@ -507,6 +534,7 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         stakeOf[currentRoundId][msg.sender] = amount;
         cur.pool = poolAfter;
         participantCount[currentRoundId] += 1;
+        if (amount > largestStakeInRound[currentRoundId]) largestStakeInRound[currentRoundId] = amount;
         emit BetPlaced(currentRoundId, msg.sender, amount);
     }
 
@@ -521,8 +549,13 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (r.phase != Phase.BETTING) revert BadPhase();
         if (block.timestamp < r.bettingEndsAt) revert TooEarly();
 
-        if (participantCount[id] < minParticipants || r.pool < minPoolSize) {
-            emit RoundVoided(id, r.pool, "under-threshold");
+        // Whale-dominance check, evaluated against the FINAL pool at lock
+        // time so it can't be defeated by simply being the first bettor
+        // (the per-bet check below is a no-op for a zero-seeded pool's
+        // first entrant -- see largestStakeInRound's own comment).
+        bool whaleDominated = r.pool > 0 && largestStakeInRound[id] * 10000 > r.pool * maxStakePerWalletBps;
+        if (participantCount[id] < minParticipants || r.pool < minPoolSize || whaleDominated) {
+            emit RoundVoided(id, r.pool, whaleDominated ? "whale-dominated" : "under-threshold");
             voided[id] = true;
             r.phase = Phase.SETTLED;
             // Return any rolled-over SEED to pendingRollover before the new

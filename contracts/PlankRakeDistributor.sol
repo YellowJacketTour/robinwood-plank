@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+
 /// Powerboard's funding surface -- see PlankPowerboard.sol. Kept as a
 /// minimal interface so the jackpot implementation can evolve without
 /// redeploying the distributor.
@@ -36,7 +38,7 @@ interface IPlankJackpot {
  * immediately is simpler and has no pull-step griefing surface to worry
  * about in the first place.
  */
-contract PlankRakeDistributor {
+contract PlankRakeDistributor is ReentrancyGuard {
     address public immutable burnEngine;
     IPlankJackpot public immutable jackpot;
     address public immutable treasury;
@@ -89,8 +91,19 @@ contract PlankRakeDistributor {
      * front regardless of delivery, so a leg being temporarily stuck never
      * loses or double-counts ETH -- it is either delivered now or held for
      * flush().
+     *
+     * nonReentrant here and on flush(): each leg reads its stuck balance,
+     * makes an external call, and only zeroes the balance on success (by
+     * design -- zeroing BEFORE the call would strand real ETH on a failed
+     * send, since the amount would no longer be tracked as retryable even
+     * though it never left the contract). That ordering is correct against
+     * a single top-level call, but a nested reentrant call could observe
+     * the not-yet-zeroed balance and trigger a second successful send of
+     * the same amount. The guard blocks any nested call outright before it
+     * could ever reach that read, closing the gap without touching the
+     * (correct) zero-on-success ordering.
      */
-    receive() external payable {
+    receive() external payable nonReentrant {
         uint256 amount = msg.value;
         uint256 toBurn = (amount * burnBps) / 10000;
         uint256 toAirdrop = (amount * airdropBps) / 10000;
@@ -119,7 +132,7 @@ contract PlankRakeDistributor {
     /// Permissionless retry of any leg that previously failed to deliver.
     /// No admin, no privilege -- anyone can nudge stuck funds to their
     /// fixed, immutable destination once that destination is healthy again.
-    function flush() external {
+    function flush() external nonReentrant {
         bool did;
         uint256 b = stuckBurn;
         if (b > 0 && _sendRaw(burnEngine, b)) {

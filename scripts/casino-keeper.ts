@@ -44,7 +44,7 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { Contract, JsonRpcProvider, Wallet, type Provider, type Signer } from "ethers";
+import { Contract, JsonRpcProvider, Wallet, hexlify, randomBytes, type Provider, type Signer } from "ethers";
 import { fetchRound, parseG1 } from "./relay-drand.js";
 
 const CRASH_ABI = [
@@ -181,9 +181,21 @@ export async function tick(
         const available: boolean = await beacon.isRoundAvailable(r.targetDrandRound);
         if (!available) {
           if (cfg.mockBeacon) {
-            // LOCAL DEV ONLY: stand in for a real relayed signature.
+            // LOCAL DEV ONLY: stand in for a real relayed signature. Real
+            // bug this fixes: the filler used to be the crash round's own
+            // ID left-padded into bytes32 (e.g. round 25 -> ...0x19), a
+            // small, slowly-incrementing integer. PlankCrashDrand's
+            // _deriveCrash takes entropy % 10000 -- for small sequential
+            // IDs that's just the ID itself, and nearby IDs almost always
+            // land in the same coarse elapsedBlocks bucket (multiplierBps
+            // in [10001,10079] all invert to elapsedBlocks=1), so every
+            // early round crashed at the SAME ~1.004x. Cryptographically
+            // random bytes give the real spread the crash curve is
+            // designed to produce -- this is still just a local mock
+            // standing in for a real drand signature, not a security
+            // property; production reads genuine BLS-verified randomness.
             const mock = new Contract(cfg.beacon, MOCK_BEACON_ABI, signer);
-            const filler = "0x" + (id.toString(16).padStart(64, "0"));
+            const filler = hexlify(randomBytes(32));
             await attempt(actions, "mockBeacon.setRandomness", () =>
               mock.setRandomness(r.targetDrandRound, filler)
             );
@@ -289,7 +301,9 @@ export async function tick(
         const available: boolean = await beacon.isRoundAvailable(e.targetDrandRound);
         if (!available) {
           const mock = new Contract(cfg.beacon, MOCK_BEACON_ABI, signer);
-          const filler = "0x" + ((prev + 7n).toString(16).padStart(64, "0"));
+          // Same fix as the crash's own mock filler above -- a real random
+          // value instead of a small offset from the epoch number.
+          const filler = hexlify(randomBytes(32));
           await attempt(actions, "mockBeacon.setRandomness(draw)", () =>
             mock.setRandomness(e.targetDrandRound, filler));
         }
