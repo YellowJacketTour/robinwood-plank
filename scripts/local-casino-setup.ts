@@ -43,7 +43,12 @@ async function main() {
   const DRAND_GENESIS = 1727521075n;
 
   // ── Crash game config (fast, playable local timings) ───────────────
-  const BETTING_SECONDS = 8;
+  // Was 8s -- read as rushed for a local demo, especially the 0->1.00x
+  // "fueling" ramp (which IS the betting window, by design -- see
+  // crash.html's frame()). Mainnet's own deploy-casino.ts default is
+  // already 30s (CASINO_BETTING_SECONDS); this just brings local dev in
+  // line with that real pacing instead of a compressed test-speed value.
+  const BETTING_SECONDS = 20;
   const MAX_AWAIT_BLOCKS = 300; // ~30s at 100ms/block before a stuck round can be voided
   const MAX_ELAPSED_BLOCKS = 1800; // ~180s real; honestly-advertisable ~73x ceiling (see the contract)
   const REGISTRATION_WINDOW_BLOCKS = 50;

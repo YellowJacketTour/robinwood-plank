@@ -68,10 +68,14 @@ contract PlankFuelBooster is ReentrancyGuard {
     uint256 public totalPlankBurned;
     uint256 public totalEthBoosted;
 
-    // Rolling per-round cap, keyed off the crash's OWN round counter so it
-    // resets automatically with no separate epoch bookkeeping.
+    // Rolling per-round stats, keyed off the crash's OWN round counter so
+    // they reset automatically with no separate epoch bookkeeping. Tracks
+    // BOTH the boost used (for the cap) and the raw PLANK burned (for the
+    // UI's "X $PLANK burned this round" readout) -- the two can diverge
+    // once a cap is hit, since burning past a cap still burns in full.
     uint256 private _capRoundId;
     uint256 private _capUsedThisRound;
+    uint256 private _plankBurnedThisRound;
 
     event Funded(address indexed from, uint256 amount, uint256 poolAfter);
     event FuelBurned(
@@ -122,6 +126,7 @@ contract PlankFuelBooster is ReentrancyGuard {
         if (roundId != _capRoundId) {
             _capRoundId = roundId;
             _capUsedThisRound = 0;
+            _plankBurnedThisRound = 0;
         }
 
         uint256 boost = fairEth;
@@ -134,6 +139,7 @@ contract PlankFuelBooster is ReentrancyGuard {
         // actually converts into a Vault boost above the caps.
         plank.burnFrom(msg.sender, plankAmount);
         totalPlankBurned += plankAmount;
+        _plankBurnedThisRound += plankAmount;
 
         if (boost > 0) {
             _capUsedThisRound += boost;
@@ -151,5 +157,23 @@ contract PlankFuelBooster is ReentrancyGuard {
         roundId = crash.currentRoundId();
         used = roundId == _capRoundId ? _capUsedThisRound : 0;
         cap = maxBoostPerRoundWei;
+    }
+
+    /// UI helper: the full "how much fuel has THIS round's tank received"
+    /// readout -- raw $PLANK burned (uncapped -- burning past the boost cap
+    /// still counts here) alongside the ETH that actually boosted the
+    /// Vault (capped). Burning is allowed at ANY time -- there is no phase
+    /// check in burnFuel() -- so this simply reports against whichever
+    /// round is current right now; a burn always feeds the NEXT launch.
+    function roundFuelStats()
+        external
+        view
+        returns (uint256 roundId, uint256 plankBurnedThisRound, uint256 ethBoostedThisRound, uint256 boostCapWei)
+    {
+        roundId = crash.currentRoundId();
+        bool sameRound = roundId == _capRoundId;
+        plankBurnedThisRound = sameRound ? _plankBurnedThisRound : 0;
+        ethBoostedThisRound = sameRound ? _capUsedThisRound : 0;
+        boostCapWei = maxBoostPerRoundWei;
     }
 }

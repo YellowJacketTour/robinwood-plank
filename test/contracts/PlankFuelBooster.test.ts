@@ -209,6 +209,43 @@ describe("PlankFuelBooster — burn $PLANK to grow the shared Vault, never your 
     expect(await crash.reserve()).to.equal(reserveBefore + fairEach);
   });
 
+  it("ROUND FUEL STATS: reports raw $PLANK burned (uncapped) alongside the ETH that actually boosted (capped), and resets with the round", async () => {
+    const { booster, oracle, plank, crash, alice, bob } = await deploy({ perBurn: ethers.parseEther("0.15"), perRound: ethers.parseEther("0.15") });
+    await prime(oracle);
+    await booster.fund({ value: ethers.parseEther("5") });
+
+    const amt = ethers.parseEther("100"); // fair value ~0.1 ETH
+    const fairEach = await oracle.consult(await plank.getAddress(), amt);
+    await plank.connect(alice).approve(await booster.getAddress(), amt);
+    await plank.connect(bob).approve(await booster.getAddress(), amt);
+
+    let [rid, plankBurned, ethBoosted, cap] = await booster.roundFuelStats();
+    expect(plankBurned).to.equal(0n);
+    expect(ethBoosted).to.equal(0n);
+    expect(cap).to.equal(ethers.parseEther("0.15"));
+
+    await booster.connect(alice).burnFuel(amt);
+    [rid, plankBurned, ethBoosted, cap] = await booster.roundFuelStats();
+    expect(plankBurned).to.equal(amt);
+    expect(ethBoosted).to.equal(fairEach);
+
+    // Bob's burn pushes past the round cap: HIS FULL PLANK still burns and
+    // is counted (uncapped total), but the ETH boost stalls at the cap --
+    // exactly the honest "burned X, only Y converted" split the UI needs.
+    await booster.connect(bob).burnFuel(amt);
+    [rid, plankBurned, ethBoosted, cap] = await booster.roundFuelStats();
+    expect(plankBurned).to.equal(amt * 2n); // both burns counted in full
+    expect(ethBoosted).to.equal(ethers.parseEther("0.15")); // capped
+
+    // A new round resets both counters to zero.
+    await networkHelpers.time.increase(31);
+    await crash.lockRound();
+    const [rid2, plankBurned2, ethBoosted2] = await booster.roundFuelStats();
+    expect(rid2).to.be.gt(rid);
+    expect(plankBurned2).to.equal(0n);
+    expect(ethBoosted2).to.equal(0n);
+  });
+
   it("POOL CAP: never releases more ETH than the boost pool actually holds", async () => {
     const { booster, oracle, plank, crash, alice } = await deploy({ perBurn: ethers.parseEther("1"), perRound: ethers.parseEther("1") });
     await prime(oracle);
