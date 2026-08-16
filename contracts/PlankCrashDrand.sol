@@ -448,16 +448,37 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         // if !ok: keep the excess in the Vault; it spills on the next growth.
     }
 
+    /// Real bug this fixes: the wallet cap used to be checked against the
+    /// RAW pool (r.pool), which includes the Vault's free seed
+    /// (rolledOverFromPrevious) -- a house-funded bonus, not another
+    /// player's money. Once the Vault ran thin (a small/depleted reserve,
+    /// e.g. after many rounds' worth of 1/8 draws with little fresh
+    /// funding), a round could be seeded with only a few thousandths of an
+    /// ETH, and the RATIO check would then reject even the smallest
+    /// ordinary bet as "dominating" that tiny seed -- making it impossible
+    /// to place ANY bet at all on a thin-Vault round. The cap's real
+    /// purpose is preventing one wallet from dominating OTHER PLAYERS'
+    /// stakes, so it's now measured against player-contributed pool only
+    /// (pool minus the seed), which also correctly keeps exempting
+    /// whoever bets first (playerPoolBefore is 0 for them regardless of
+    /// how big the seed is, same as before).
+    function _checkStakeCap(Round storage r, uint256 poolBefore, uint256 stakeAmount) private view {
+        uint256 seed = r.rolledOverFromPrevious;
+        uint256 playerPoolBefore = poolBefore > seed ? poolBefore - seed : 0;
+        uint256 playerPoolAfter = playerPoolBefore + stakeAmount;
+        if (playerPoolBefore != 0 && stakeAmount * 10000 > playerPoolAfter * maxStakePerWalletBps) {
+            revert StakeExceedsCap();
+        }
+    }
+
     function placeBet() external payable nonReentrant {
         Round storage r = rounds[currentRoundId];
         if (r.phase != Phase.BETTING) revert BadPhase();
         if (block.timestamp >= r.bettingEndsAt) revert TooLate();
         if (stakeOf[currentRoundId][msg.sender] != 0) revert AlreadyBet();
 
+        _checkStakeCap(r, r.pool, msg.value);
         uint256 poolAfter = r.pool + msg.value;
-        if (r.pool != 0 && msg.value * 10000 > poolAfter * maxStakePerWalletBps) {
-            revert StakeExceedsCap();
-        }
 
         stakeOf[currentRoundId][msg.sender] = msg.value;
         r.pool = poolAfter;
@@ -479,10 +500,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (block.timestamp >= r.bettingEndsAt) revert TooLate();
         if (stakeOf[currentRoundId][player] != 0) revert AlreadyBet();
 
+        _checkStakeCap(r, r.pool, msg.value);
         uint256 poolAfter = r.pool + msg.value;
-        if (r.pool != 0 && msg.value * 10000 > poolAfter * maxStakePerWalletBps) {
-            revert StakeExceedsCap();
-        }
 
         stakeOf[currentRoundId][player] = msg.value;
         r.pool = poolAfter;
@@ -525,10 +544,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (cur.phase != Phase.BETTING) revert BadPhase();
         if (stakeOf[currentRoundId][msg.sender] != 0) revert AlreadyBet();
 
+        _checkStakeCap(cur, cur.pool, amount);
         uint256 poolAfter = cur.pool + amount;
-        if (cur.pool != 0 && amount * 10000 > poolAfter * maxStakePerWalletBps) {
-            revert StakeExceedsCap();
-        }
 
         carriedForward[fromRoundId][msg.sender] = true;
         stakeOf[currentRoundId][msg.sender] = amount;
@@ -552,8 +569,13 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         // Whale-dominance check, evaluated against the FINAL pool at lock
         // time so it can't be defeated by simply being the first bettor
         // (the per-bet check below is a no-op for a zero-seeded pool's
-        // first entrant -- see largestStakeInRound's own comment).
-        bool whaleDominated = r.pool > 0 && largestStakeInRound[id] * 10000 > r.pool * maxStakePerWalletBps;
+        // first entrant -- see largestStakeInRound's own comment). Measured
+        // against PLAYER-contributed pool only (excludes the Vault's free
+        // seed), same reasoning as _checkStakeCap: a thin seed shouldn't
+        // make an otherwise-fair round look whale-dominated.
+        uint256 seedAmt = r.rolledOverFromPrevious;
+        uint256 playerPoolFinal = r.pool > seedAmt ? r.pool - seedAmt : 0;
+        bool whaleDominated = playerPoolFinal > 0 && largestStakeInRound[id] * 10000 > playerPoolFinal * maxStakePerWalletBps;
         if (participantCount[id] < minParticipants || r.pool < minPoolSize || whaleDominated) {
             emit RoundVoided(id, r.pool, whaleDominated ? "whale-dominated" : "under-threshold");
             voided[id] = true;

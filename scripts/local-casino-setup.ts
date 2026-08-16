@@ -231,6 +231,35 @@ async function main() {
   await (await plank.mint(bob.address, ethers.parseEther("5000"))).wait();
   await (await plank.mint(carol.address, ethers.parseEther("5000"))).wait();
 
+  // Real bug this closes: crash.html hardcodes contract addresses as JS
+  // constants, and every fresh redeploy (a new node, or just re-running
+  // this script) can hand out DIFFERENT addresses even with an identical
+  // deploy sequence (CREATE address depends on the deployer's nonce, which
+  // isn't perfectly pinned to "0" across every environment this script
+  // runs in) -- so a stale hardcoded address silently pointed the frontend
+  // at contracts that no longer exist, or worse, at a DIFFERENT stack from
+  // an earlier session, producing exactly the "reverts for no reason"
+  // symptom that looks like a game bug but is actually just address drift.
+  // Writing the addresses this run actually used, every run, and having
+  // the frontend fetch+override its hardcoded fallbacks from this file on
+  // load (see crash.html's loadDeployAddresses()) means a redeploy can
+  // never again leave the UI silently talking to the wrong contracts.
+  const fs = await import("node:fs");
+  const manifest = {
+    generatedAt: new Date().toISOString(),
+    crash: crashAddr,
+    bank: await bank.getAddress(),
+    fuelBooster: await fuelBooster.getAddress(),
+    plank: await plank.getAddress(),
+    powerboard: await airdropPool.getAddress(),
+    beacon: await beacon.getAddress(),
+  };
+  fs.writeFileSync(
+    new URL("../public/arcade/deploy-addresses.local.json", import.meta.url),
+    JSON.stringify(manifest, null, 2)
+  );
+  console.log("\n(wrote public/arcade/deploy-addresses.local.json -- the frontend auto-syncs to it on load)");
+
   console.log("\n========================================================");
   console.log(" plank.love unified casino -- LOCAL dev stack (chainId 31337)");
   console.log("========================================================");

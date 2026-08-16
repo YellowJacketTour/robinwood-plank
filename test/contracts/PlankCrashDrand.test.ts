@@ -140,6 +140,36 @@ describe("PlankCrashDrand", () => {
     expect(Number(round.phase)).to.equal(1); // LIVE, not voided
   });
 
+  it("THIN-VAULT-SEED BUG (found live, fixed): a tiny Vault seed must never block an ordinary bet", async () => {
+    const { crash, alice, bob } = await deployAll();
+
+    // Fund the Vault with a small amount, then void the currently-open
+    // (unseeded) round so a FRESH round starts and picks up a small seed
+    // from it -- reproducing exactly what happened live: after a long
+    // session the Vault had drawn down to a thin reserve, so the next
+    // round's seed was a few thousandths of an ETH.
+    await crash.connect(alice).fundVault({ value: ethers.parseEther("0.001") });
+    await networkHelpers.time.increase(BETTING_SECONDS + 1);
+    await crash.lockRound(); // voids the empty round (0 participants), starts a new one seeded from the Vault
+
+    const roundId = await crash.currentRoundId();
+    const seeded = await crash.rounds(roundId);
+    expect(seeded.pool).to.be.gt(0n);
+    expect(seeded.pool).to.be.lt(ethers.parseEther("0.001")); // genuinely tiny -- 1/8 of 0.001 ETH
+
+    // An ORDINARY bet (the UI's own smallest quick-bet chip) must NOT
+    // revert just because it dwarfs a house-funded seed that isn't another
+    // player's money. Under the bug this reverted with StakeExceedsCap --
+    // a real success (no throw) is the assertion here.
+    await crash.connect(alice).placeBet({ value: ethers.parseEther("0.01") });
+    await crash.connect(bob).placeBet({ value: ethers.parseEther("0.01") });
+
+    // And the round proceeds to lock normally -- not voided as whale-dominated.
+    await networkHelpers.time.increase(BETTING_SECONDS + 1);
+    await expect(crash.lockRound()).to.emit(crash, "RoundLocked");
+    expect(Number((await crash.rounds(roundId)).phase)).to.equal(1); // LIVE
+  });
+
   it("lockRound commits to a target drand round strictly after now, with the real safety margin applied", async () => {
     const { crash, alice, bob } = await deployAll();
     const roundId = await crash.currentRoundId();

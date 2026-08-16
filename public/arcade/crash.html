@@ -647,6 +647,40 @@ import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 const { ethers } = window;
 const $ = (id) => document.getElementById(id);
 
+// ── Deploy-address auto-sync ─────────────────────────────────────────────
+// Real bug this closes: every hardcoded address below (BANK_ADDR,
+// FUEL_BOOSTER_ADDR, PLANK_ADDR, POWERBOARD_ADDR, SIMULATE_ADDR) used to be
+// a fixed JS constant, and a fresh local redeploy can hand out DIFFERENT
+// contract addresses even from an identical deploy sequence (CREATE address
+// depends on the deployer's nonce, which isn't perfectly pinned across every
+// environment this runs in) -- so a stale address silently pointed the
+// whole UI at contracts that no longer exist, producing exactly the
+// "reverts for no reason" symptom that reads as a game bug but is actually
+// just address drift. scripts/local-casino-setup.ts now writes the
+// addresses it actually used to deploy-addresses.local.json on every run;
+// this fetches that file (same-origin, best-effort) and overrides the
+// hardcoded fallbacks BEFORE anything else in the page can use them. If the
+// file doesn't exist (a real deploy with no local manifest, e.g. mainnet
+// static hosting) this silently keeps the hardcoded values -- never blocks
+// page load either way.
+async function loadDeployAddresses() {
+  try {
+    const res = await fetch("deploy-addresses.local.json", { cache: "no-store" });
+    if (!res.ok) return;
+    const m = await res.json();
+    if (m.bank) BANK_ADDR = m.bank;
+    if (m.fuelBooster) FUEL_BOOSTER_ADDR = m.fuelBooster;
+    if (m.plank) PLANK_ADDR = m.plank;
+    if (m.powerboard) POWERBOARD_ADDR = m.powerboard;
+    if (m.crash) SIMULATE_ADDR = m.crash;
+    console.log("[deploy-addresses] synced from deploy-addresses.local.json (generated " + (m.generatedAt || "?") + ")");
+  } catch (_) { /* no manifest available -- keep the hardcoded fallbacks */ }
+}
+// Invoked once all five address `let`s below have their hardcoded fallback
+// values assigned -- see the call site right after SIMULATE_ADDR's
+// declaration, not here (a `let` is in its temporal-dead-zone until its own
+// declaration line runs, so calling this before then would throw).
+
 // ── THREE.JS scene: launch pad → atmosphere → deep space ────────────────
 // Real WebGL pipeline: PBR materials, a two-color gradient sky dome (vertex
 // shader), UnrealBloomPass post-processing, GPU point-sprite starfield and
@@ -1897,7 +1931,7 @@ let pollTimer2 = null;
 // ── PlankBank instant-play (deposit once, play with a browser session key,
 //    withdraw what's left). These are the ONLY new functions beyond the V2
 //    ABI the page already fetches, so they live in their own minimal ABIs.
-const BANK_ADDR = "0x610178dA211FEF7D417bC0e6FeD39F05609AD788";
+let BANK_ADDR = "0x610178dA211FEF7D417bC0e6FeD39F05609AD788";
 const BANK_ABI = [
   "function deposit() payable",
   "function withdraw(uint256 amount)",
@@ -1921,8 +1955,8 @@ let bettingDurationCache = 8;
 
 // ── Fuel the next launch: burn $PLANK (any time -- burnFuel() has no phase
 //    check) to boost the shared Vault. Never touches the burner's own odds.
-const FUEL_BOOSTER_ADDR = "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e";
-const PLANK_ADDR = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"; // local mock; the real $PLANK on mainnet
+let FUEL_BOOSTER_ADDR = "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e";
+let PLANK_ADDR = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"; // local mock; the real $PLANK on mainnet
 const FUEL_BOOSTER_ABI = [
   "function burnFuel(uint256 plankAmount)",
   "function roundFuelStats() view returns (uint256 roundId, uint256 plankBurnedThisRound, uint256 ethBoostedThisRound, uint256 boostCapWei)",
@@ -1942,7 +1976,7 @@ let plankToken = null;
 // ticket toward a daily, rolling jackpot -- previously invisible in this
 // UI even though it's fully live on-chain. Read-only surface (claiming is
 // keeper-driven), so this only needs view functions.
-const POWERBOARD_ADDR = "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853";
+let POWERBOARD_ADDR = "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853";
 const POWERBOARD_ABI = [
   "function currentEpoch() view returns (uint256)",
   "function jackpot() view returns (uint256)",
@@ -2340,7 +2374,10 @@ $("connectBtn").addEventListener("click", async () => {
 // real minParticipants can be met without a second human in a second tab.
 // SIMULATE_ADDR must match whatever scripts/local-crash-setup.ts last
 // printed as CRASH_ADDRESS -- update it after every fresh local deploy.
-const SIMULATE_ADDR = "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318";
+let SIMULATE_ADDR = "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318";
+// All five address fallbacks above are now assigned -- safe to sync from
+// the deploy manifest, well before any connect/Simulate button is usable.
+await loadDeployAddresses();
 const SIM_RPC = "http://127.0.0.1:8545";
 let botBetTimer = null;
 let botBetAttemptedRound = null;
