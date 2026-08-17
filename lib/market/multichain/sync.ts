@@ -19,6 +19,34 @@ const ADAPTERS: Record<string, ChainAdapter> = {
   [magicEdenSolanaAdapter.name]: magicEdenSolanaAdapter,
 };
 
+/**
+ * Minimum gap between consecutive calls TO THE SAME ADAPTER, in ms.
+ *
+ * Not a theoretical precaution: syncing 363 real Magic Eden collections
+ * with no pacing at all (this loop's original form) measured ~315 calls/min
+ * and produced 99 real 429s out of 363 — confirmed live 2026-08-17, not
+ * assumed. magic-eden's /stats endpoint's own response header advertises
+ * x-ratelimit-limit: 180 (per minute); 400ms between calls caps this at
+ * 150/min, a safety margin under that rather than racing right up to it.
+ * alchemy-nft has no adapter-specific pacing need at this volume (its demo
+ * key already warns loudly above; a real key raises the ceiling a lot more
+ * than one extra 400ms per call would).
+ */
+const ADAPTER_MIN_INTERVAL_MS: Record<string, number> = {
+  [magicEdenSolanaAdapter.name]: 400,
+};
+
+const lastCallAt = new Map<string, number>();
+
+async function pace(adapterName: string): Promise<void> {
+  const minInterval = ADAPTER_MIN_INTERVAL_MS[adapterName];
+  if (!minInterval) return;
+  const last = lastCallAt.get(adapterName) ?? 0;
+  const wait = minInterval - (Date.now() - last);
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  lastCallAt.set(adapterName, Date.now());
+}
+
 export type MultichainSyncResult = {
   synced: number;
   failed: number;
@@ -56,6 +84,7 @@ export async function runMultichainSync(): Promise<MultichainSyncResult> {
       continue;
     }
     try {
+      await pace(adapter.name);
       const snapshot = await adapter.fetchSnapshot({
         chainSlug: collection.chainSlug,
         contractAddress: collection.contractAddress,

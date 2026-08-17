@@ -33,15 +33,41 @@ export type CollectionSnapshot = {
   listedCount: number | null;
 };
 
+/** One entry from a ranked-discovery call — enough to register + seed a snapshot in one step. */
+export type DiscoveredCollection = {
+  contractAddress: string;
+  name: string | null;
+  imageUrl: string | null;
+  volumeRank: number | null;
+  floorPriceRank: number | null;
+};
+
 /**
  * A chain adapter knows how to turn ONE (chainSlug, contractAddress) pair
  * into a CollectionSnapshot, using whatever third-party API is appropriate
  * for that chain. Each adapter is free to fail loudly (throw) -- the sync
  * orchestrator (sync.ts) is what decides how a thrown error is recorded, so
  * an adapter never needs its own error-swallowing logic.
+ *
+ * discoverTopCollections is OPTIONAL and deliberately not on every adapter:
+ * it requires the upstream API to expose a genuine ranked-list endpoint
+ * (symbol/address + volume + floor in one call), which is real for some
+ * providers (Magic Eden's public stats-search, confirmed live) and NOT
+ * confirmed free for others (OpenSea's official v2 /collections list has no
+ * floor/volume fields at all per their own docs -- a per-collection /stats
+ * call exists but needs the slug already known, which is the discovery
+ * problem, not a solution to it). An adapter without this method simply
+ * can't back automatic top-N discovery yet -- see
+ * scripts/discover-multichain-collections.ts for how that's surfaced
+ * honestly rather than silently skipped.
  */
 export type ChainAdapter = {
   /** Matches the `adapter` column in plank_multichain_collections. */
   readonly name: string;
   fetchSnapshot(input: { chainSlug: string; contractAddress: string }): Promise<CollectionSnapshot>;
+  discoverTopCollections?(input: {
+    chainSlug: string;
+    metric: "volume" | "floorPrice";
+    limit: number;
+  }): Promise<DiscoveredCollection[]>;
 };
