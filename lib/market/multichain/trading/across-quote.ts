@@ -20,13 +20,33 @@
  * (0x09aea4b2242abC8bb4BB78D537A67a245A7bEC64 for Base) matches the
  * address independently pulled from across-protocol/contracts' GitHub
  * source in foreign-chain-registry.ts -- two independent sources agreeing.
+ *
+ * CHAIN COVERAGE -- 5 of the 7 OpenSea-supported foreign EVM chains
+ * -----------------------------------------------------------------------
+ * Two real, live-confirmed gaps, neither affecting the direct (non-Across)
+ * buy-now/sweep path via MarketplankForeignFeeRouter -- that path doesn't
+ * depend on Across at all:
+ * - Avalanche: Across has NO Avalanche deployment whatsoever
+ *   (across-protocol/contracts' deployments/ directory has no avalanche
+ *   folder -- checked, not assumed).
+ * - BNB Chain: DOES have a real, deployed, verified SpokePool contract
+ *   (real bytecode, a live chainId() call returning exactly 56) -- but
+ *   every WETH/WBNB-denominated deposit route to or from it, in BOTH
+ *   directions, returns Across's own {"code":"ROUTE_NOT_ENABLED"} error,
+ *   confirmed live 2026-08-17 by actually attempting the calls. The
+ *   contract exists; Across's live relayer/liquidity network does not
+ *   currently support this chain for the native-currency route this
+ *   service needs. Deliberately NOT wired here as a result -- claiming it
+ *   works because the contract exists, without checking the actual route,
+ *   is exactly the kind of gap this whole effort has been built to catch
+ *   rather than repeat.
  */
 import { fetchListingFulfillmentData } from "@/lib/market/multichain/trading/foreign-orders";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 const ACROSS_API = "https://app.across.to/api";
 
-/** Real per-chain Across SpokePool addresses -- pulled from across-protocol/contracts' GitHub deployments/{chain}/{Chain}_SpokePool.json, verified live via eth_getCode + a live chainId() call matching each chain's real id (see MarketplankAcrossReceiver.sol's header for the full verification). */
+/** Real per-chain Across SpokePool addresses -- pulled from across-protocol/contracts' GitHub deployments/{chain}/{Chain}_SpokePool.json, verified live via eth_getCode + a live chainId() call matching each chain's real id (see MarketplankAcrossReceiver.sol's header and this file's own header for the full verification). Avalanche and BNB Chain deliberately absent -- see header. */
 export const ACROSS_SPOKE_POOL: Record<number, string> = {
   1: "0xFBc81a18EcDa8E6A91275cFDF5FC6d91A7C5AE80",
   8453: "0x6C99671B249af73B2847D92123d823Cb3875E399",
@@ -35,7 +55,7 @@ export const ACROSS_SPOKE_POOL: Record<number, string> = {
   137: "0x68ec189Ca4d950D960BB59B56742ec292E7D2C17",
 };
 
-/** Canonical wrapped-native-token address per chain -- the only input/output token this quote service supports today (ETH-denominated purchases only, matching MarketplankAcrossReceiver's own scope). */
+/** Canonical wrapped-native-token address per chain -- the only input/output token this quote service supports today (native-currency-denominated purchases only, matching MarketplankAcrossReceiver's own scope). */
 const WRAPPED_NATIVE: Record<number, string> = {
   1: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
   8453: "0x4200000000000000000000000000000000000006",

@@ -133,6 +133,15 @@ export function foreignFeeRouterAddress(chainSlug: string): string | null {
  * deployment happens on that specific chain. A null entry means the
  * cross-chain-via-Across path is unavailable there; callers must fail
  * closed, never guess an address.
+ *
+ * "avax-mainnet" is DELIBERATELY ABSENT, not an oversight: confirmed live
+ * 2026-08-17 that Across Protocol has no Avalanche deployment at all (see
+ * across-quote.ts's header). Avalanche keeps full direct buy-now/sweep
+ * support via MarketplankForeignFeeRouter (FOREIGN_FEE_ROUTER_ADDRESS
+ * above, unaffected) -- only the pay-from-any-chain Across path can never
+ * exist there until Across itself deploys one. "bnb-mainnet" IS present:
+ * Across's BNB Chain deployment (a Universal_SpokePool) was verified live
+ * the same way as every other chain here.
  */
 export const FOREIGN_ACROSS_RECEIVER_ADDRESS: Record<string, string | null> = {
   "eth-mainnet": null,
@@ -140,10 +149,30 @@ export const FOREIGN_ACROSS_RECEIVER_ADDRESS: Record<string, string | null> = {
   "arb-mainnet": null,
   "base-mainnet": null,
   "opt-mainnet": null,
+  "bnb-mainnet": null,
 };
 
 export function foreignAcrossReceiverAddress(chainSlug: string): string | null {
   return FOREIGN_ACROSS_RECEIVER_ADDRESS[chainSlug] ?? null;
+}
+
+/**
+ * MarketplankDeBridgeExecutor's deployed address per DESTINATION chain
+ * (contracts/MarketplankDeBridgeExecutor.sol) -- the BNB-Chain-capable
+ * counterpart to FOREIGN_ACROSS_RECEIVER_ADDRESS, since Across has no live
+ * route there (see that contract's header). Same null-until-deployed
+ * posture as every other address registry in this file.
+ */
+export const FOREIGN_DEBRIDGE_EXECUTOR_ADDRESS: Record<string, string | null> = {
+  "eth-mainnet": null,
+  "polygon-mainnet": null,
+  "arb-mainnet": null,
+  "base-mainnet": null,
+  "opt-mainnet": null,
+};
+
+export function foreignDeBridgeExecutorAddress(chainSlug: string): string | null {
+  return FOREIGN_DEBRIDGE_EXECUTOR_ADDRESS[chainSlug] ?? null;
 }
 
 /**

@@ -47,7 +47,7 @@
  * in the first place (see lib/market/types.ts's Listing.venue doc).
  */
 import { Contract, BrowserProvider } from "ethers";
-import { foreignChainByChainSlug, foreignFeeRouterAddress, foreignAcrossReceiverAddress } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { foreignChainByChainSlug, foreignFeeRouterAddress, foreignAcrossReceiverAddress, foreignDeBridgeExecutorAddress } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getEthereumProvider, ensureChain } from "@/lib/wallet";
 
 /** Mirrors foreign-orders.ts's ForeignSeaportOrder shape -- redeclared here rather than imported, since importing that module's types would pull the whole (server-only) module along with them under some bundler configurations. */
@@ -332,4 +332,69 @@ export async function buyCrossChainViaAcross(input: {
   );
   await tx.wait();
   return { txHash: tx.hash };
+}
+
+/**
+ * deBridge counterpart to buyCrossChainViaAcross -- pay WBNB on BNB Chain,
+ * receive an NFT purchased on a different chain via
+ * MarketplankDeBridgeExecutor. See that contract's header for why this
+ * exists (Across has no live BNB Chain route) and debridge-quote.ts for
+ * the real, live-verified request schema.
+ *
+ * Unlike Across's depositV3 (called directly on the SpokePool with
+ * hand-built parameters), deBridge's own API returns a ready-to-send
+ * {to, data, value} -- this function still fetches that server-side (same
+ * OpenSea-key reason as buyCrossChainViaAcross) and submits it exactly as
+ * returned, via the connected wallet, to deBridge's own real on-chain
+ * contract (the "Crosschain Forwarder Proxy") -- never executed by our
+ * server.
+ */
+export async function buyCrossChainViaDeBridge(input: {
+  destinationChainSlug: string;
+  orderHash: string;
+  inputAmountWei: string;
+}): Promise<AcrossPurchaseResult> {
+  const executorAddress = foreignDeBridgeExecutorAddress(input.destinationChainSlug);
+  if (!executorAddress) {
+    throw new Error(
+      `foreign-fulfill: MarketplankDeBridgeExecutor is not yet deployed on ${input.destinationChainSlug} -- ` +
+        "cross-chain purchase via deBridge is intentionally unavailable until that happens."
+    );
+  }
+
+  const injected = getEthereumProvider();
+  if (!injected) throw new Error("No wallet found.");
+  const BNB_CHAIN_ID = 56;
+  await ensureChain({
+    chainId: BNB_CHAIN_ID,
+    name: "bnb-mainnet",
+    nativeCurrencySymbol: "BNB",
+    rpcUrl: "",
+    blockExplorerUrl: "",
+  });
+  const browserProvider = new BrowserProvider(injected, { chainId: BNB_CHAIN_ID, name: "bnb-mainnet" });
+  const signer = await browserProvider.getSigner();
+  const senderAddress = await signer.getAddress();
+
+  const res = await fetch("/api/market/multichain/debridge-quote", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      executorAddress,
+      orderHash: input.orderHash,
+      destinationChainSlug: input.destinationChainSlug,
+      recipient: senderAddress,
+      senderAddress,
+      inputAmountWei: input.inputAmountWei,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to build deBridge quote (${res.status})`);
+  }
+  const { tx } = (await res.json()) as { tx: { to: string; data: string; value: string } };
+
+  const txResponse = await signer.sendTransaction({ to: tx.to, data: tx.data, value: tx.value });
+  await txResponse.wait();
+  return { txHash: txResponse.hash };
 }
