@@ -42,7 +42,7 @@
  * indexed by a real marketplace) instead of inventing a new heuristic.
  */
 import { postgresQuery } from "@/lib/postgres";
-import { upsertTrackedCollection } from "@/lib/market/multichain/store";
+import { upsertTrackedCollection, recordActivity, getTopByActivity } from "@/lib/market/multichain/store";
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
 
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
@@ -154,6 +154,13 @@ export async function runEvmDiscoveryScan(input: {
     tally.set(key, (tally.get(key) ?? 0) + 1);
   }
 
+  // Record EVERY contract seen this window, not just discovery candidates --
+  // this is what turns the scanner into a self-hosted ranking source (see
+  // migration 015 and store.ts's recordActivity/getTopByActivity), a slow
+  // grind across the full dataset that pays off later even for contracts
+  // too quiet to cross MIN_TRANSFERS_TO_CONSIDER in any single window.
+  await recordActivity(input.chainSlug, tally);
+
   const candidates = [...tally.entries()].filter(([, count]) => count >= MIN_TRANSFERS_TO_CONSIDER);
 
   let registered = 0;
@@ -214,6 +221,79 @@ const DISCOVERY_CHAINS = [
   "avax-mainnet",
   "zksync-mainnet",
 ];
+
+export type RankingPromotionResult = {
+  chainSlug: string;
+  ranked: number;
+  registered: number;
+  skippedNoMetadata: number;
+  error?: string;
+};
+
+/**
+ * The other half of the self-hosted ranking: reads back
+ * plank_multichain_activity_stats' trailing-window top-N for a chain (built
+ * up for free by every runEvmDiscoveryScan call's recordActivity) and
+ * registers any of those top contracts that aren't tracked yet. Where
+ * MIN_TRANSFERS_TO_CONSIDER catches a contract the moment it's active
+ * enough in ONE 10-block window, this catches a contract that's
+ * consistently, quietly active across MANY windows -- the "slow grind
+ * across the biggest dataset" the per-tick discovery floor can't see.
+ */
+export async function runOwnRankingPromotion(input: {
+  chainSlug: string;
+  windowDays?: number;
+  limit?: number;
+}): Promise<RankingPromotionResult> {
+  const windowDays = input.windowDays ?? 7;
+  const limit = input.limit ?? 50;
+  try {
+    const ranked = await getTopByActivity(input.chainSlug, windowDays, limit);
+    let registered = 0;
+    let skippedNoMetadata = 0;
+    for (const entry of ranked) {
+      try {
+        const snapshot = await alchemyNftAdapter.fetchSnapshot({
+          chainSlug: input.chainSlug,
+          contractAddress: entry.contractAddress,
+        });
+        if (!snapshot.name) {
+          skippedNoMetadata += 1;
+          continue;
+        }
+        const id = await upsertTrackedCollection({
+          chainSlug: input.chainSlug,
+          chainId: EVM_CHAIN_ID[input.chainSlug] ?? null,
+          contractAddress: entry.contractAddress,
+          adapter: alchemyNftAdapter.name,
+          isVaultBacked: false,
+        });
+        const { writeSnapshot } = await import("@/lib/market/multichain/store");
+        await writeSnapshot(id, snapshot);
+        registered += 1;
+      } catch {
+        skippedNoMetadata += 1;
+      }
+    }
+    return { chainSlug: input.chainSlug, ranked: ranked.length, registered, skippedNoMetadata };
+  } catch (error) {
+    return {
+      chainSlug: input.chainSlug,
+      ranked: 0,
+      registered: 0,
+      skippedNoMetadata: 0,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export async function runAllOwnRankingPromotions(): Promise<RankingPromotionResult[]> {
+  const results: RankingPromotionResult[] = [];
+  for (const chainSlug of DISCOVERY_CHAINS) {
+    results.push(await runOwnRankingPromotion({ chainSlug }));
+  }
+  return results;
+}
 
 export async function runAllEvmDiscoveryScans(): Promise<DiscoveryScanResult[]> {
   const apiKey = process.env.ALCHEMY_API_KEY?.trim();

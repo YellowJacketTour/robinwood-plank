@@ -159,3 +159,59 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
     syncError: row.sync_error,
   }));
 }
+
+/**
+ * Accumulates one scan window's per-contract Transfer tally into
+ * plank_multichain_activity_stats (migration 015) -- the self-hosted
+ * replacement for a third-party EVM ranking API. Called for EVERY contract
+ * seen in a scan (not just candidates crossing the discovery floor), so the
+ * table grinds toward a complete picture of chain activity over time even
+ * for contracts never individually registered.
+ */
+export async function recordActivity(
+  chainSlug: string,
+  tally: Map<string, number>
+): Promise<void> {
+  if (tally.size === 0) return;
+  const day = new Date().toISOString().slice(0, 10);
+  // One upsert per contract -- these scans are small (a 10-block window),
+  // so a batched multi-row INSERT isn't worth the extra query-building
+  // complexity here.
+  for (const [contractAddress, count] of tally) {
+    await postgresQuery(
+      `INSERT INTO plank_multichain_activity_stats (chain_slug, contract_address, activity_day, transfer_count)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (chain_slug, contract_address, activity_day)
+       DO UPDATE SET transfer_count = plank_multichain_activity_stats.transfer_count + EXCLUDED.transfer_count`,
+      [chainSlug, contractAddress, day, count]
+    );
+  }
+}
+
+export type ActivityRankEntry = { contractAddress: string; totalTransfers: number };
+
+/**
+ * Our own ranking: top contracts by SUMMED transfer_count over the trailing
+ * window, for one chain. This is what "top by volume" means without a
+ * third-party ranking endpoint -- real, observed activity we scanned
+ * ourselves, not a marketplace's notion of dollar volume.
+ */
+export async function getTopByActivity(
+  chainSlug: string,
+  windowDays: number,
+  limit: number
+): Promise<ActivityRankEntry[]> {
+  const result = await postgresQuery<{ contract_address: string; total_transfers: string }>(
+    `SELECT contract_address, SUM(transfer_count) AS total_transfers
+     FROM plank_multichain_activity_stats
+     WHERE chain_slug = $1 AND activity_day >= CURRENT_DATE - $2::int
+     GROUP BY contract_address
+     ORDER BY total_transfers DESC
+     LIMIT $3`,
+    [chainSlug, windowDays, limit]
+  );
+  return result.rows.map((row) => ({
+    contractAddress: row.contract_address,
+    totalTransfers: Number(row.total_transfers),
+  }));
+}

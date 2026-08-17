@@ -76,6 +76,7 @@ const explicit = [
   "--events",
   "--multichain",
   "--discover-evm",
+  "--own-ranking",
 ].filter((t) => args.has(t));
 
 /** Full runs include the expensive collection-wide rebuilds; incremental ones don't. */
@@ -83,8 +84,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "own-ranking"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "own-ranking"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -405,6 +406,26 @@ async function main(): Promise<void> {
       r.error
         ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
         : `${r.chainSlug}: blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidates} candidates, ${r.skippedNoMetadata} no-metadata)`
+    );
+    return parts.join("; ");
+  });
+
+  // The reverse-engineered ranking source: Magic Eden's Reservoir-powered
+  // v4 EVM API (the one real candidate for a free cross-EVM ranking
+  // endpoint) has been confirmed live 2026-08-17, multiple retests, as
+  // "503 no healthy upstream" -- a genuine outage, not a missing feature.
+  // Rather than block on it, this reads back what discover-evm's per-tick
+  // scans have been accumulating into plank_multichain_activity_stats
+  // (migration 015) all along: our OWN observed top-by-transfer-volume
+  // ranking, built for free from data already collected. Runs last so it
+  // benefits from this tick's own discover-evm activity write.
+  await step("own-ranking", async () => {
+    const { runAllOwnRankingPromotions } = await import("../lib/market/multichain/discovery/evm-log-scan");
+    const runs = await runAllOwnRankingPromotions();
+    const parts = runs.map((r) =>
+      r.error
+        ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+        : `${r.chainSlug}: ${r.ranked} ranked, +${r.registered} new (${r.skippedNoMetadata} no-metadata)`
     );
     return parts.join("; ");
   });
