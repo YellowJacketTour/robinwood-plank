@@ -27,6 +27,12 @@ const ALCHEMY_NETWORK_SUBDOMAIN: Record<string, string> = {
   "arb-mainnet": "arb-mainnet",
   "base-mainnet": "base-mainnet",
   "opt-mainnet": "opt-mainnet",
+  // BNB Smart Chain, Avalanche, zkSync -- confirmed live 2026-08-17 (both
+  // the NFT API subdomain AND the raw Node API /v2/ endpoint responded
+  // correctly, not just DNS-resolved) before being added here.
+  "bnb-mainnet": "bnb-mainnet",
+  "avax-mainnet": "avax-mainnet",
+  "zksync-mainnet": "zksync-mainnet",
 };
 
 function apiKey(): string {

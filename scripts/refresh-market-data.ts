@@ -75,6 +75,7 @@ const explicit = [
   "--owners",
   "--events",
   "--multichain",
+  "--discover-evm",
 ].filter((t) => args.has(t));
 
 /** Full runs include the expensive collection-wide rebuilds; incremental ones don't. */
@@ -82,8 +83,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -389,6 +390,23 @@ async function main(): Promise<void> {
         ? ` — ${run.errors.slice(0, 5).map((e) => `${e.chainSlug}:${e.contractAddress.slice(0, 10)} (${e.error.slice(0, 60)})`).join("; ")}`
         : "")
     );
+  });
+
+  // Free, always-scanning EVM collection discovery -- watches raw chain
+  // activity instead of asking a ranking API (none exists for free as of
+  // 2026-08-17; see lib/market/multichain/discovery/evm-log-scan.ts's
+  // header). Runs AFTER multichain on purpose: any collection this
+  // discovers gets its first snapshot written immediately, so the very
+  // next --multichain tick has nothing new to catch up on.
+  await step("discover-evm", async () => {
+    const { runAllEvmDiscoveryScans } = await import("../lib/market/multichain/discovery/evm-log-scan");
+    const runs = await runAllEvmDiscoveryScans();
+    const parts = runs.map((r) =>
+      r.error
+        ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+        : `${r.chainSlug}: blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidates} candidates, ${r.skippedNoMetadata} no-metadata)`
+    );
+    return parts.join("; ");
   });
 
   const failed = results.filter((r) => !r.ok);
