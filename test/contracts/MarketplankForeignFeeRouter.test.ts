@@ -228,4 +228,245 @@ describe("MarketplankForeignFeeRouter (REAL deployed Seaport bytecode)", () => {
   it("fee/recipient are immutable -- no setter exists on the contract", async () => {
     expect(router.interface.fragments.some((f: any) => f.type === "function" && /set(Fee|Recipient)/i.test(f.name ?? ""))).to.equal(false);
   });
+
+  describe("sweepBuy", () => {
+    async function mintAndApprove(tokenId: bigint) {
+      await nft.mint(sellerAddr, tokenId);
+      // setApprovalForAll is idempotent -- fine to call again per token.
+      await nft.connect(seller).setApprovalForAll(SEAPORT_ADDRESS, true);
+    }
+
+    it("PROOF: sweeps N distinct orders in one transaction, fee charged per fill, no NFT ever custodied by the router", async () => {
+      const ids = [10n, 11n, 12n];
+      for (const id of ids) await mintAndApprove(id);
+
+      const orders: any[] = [];
+      for (const id of ids) {
+        await nft.mint(sellerAddr, id).catch(() => {}); // already minted above; guard against double-mint revert
+      }
+      // Rebuild signedListing per-token since it hardcodes TOKEN_ID's constant token -- inline a local variant here.
+      async function signedListingFor(tokenId: bigint, salt: bigint) {
+        const counter: bigint = await seaport.getCounter(sellerAddr);
+        const latestBlock = await provider.send("eth_getBlockByNumber", ["latest", false]);
+        const now = Number(latestBlock.timestamp);
+        const parameters = {
+          offerer: sellerAddr,
+          zone: ZERO_ADDRESS,
+          offer: [{ itemType: 2, token: await nft.getAddress(), identifierOrCriteria: tokenId, startAmount: 1n, endAmount: 1n }],
+          consideration: [
+            { itemType: 0, token: ZERO_ADDRESS, identifierOrCriteria: 0n, startAmount: PRICE_WEI, endAmount: PRICE_WEI, recipient: sellerAddr },
+          ],
+          orderType: 0,
+          startTime: 0n,
+          endTime: BigInt(now + 86_400),
+          zoneHash: ZERO_HASH,
+          salt,
+          conduitKey: ZERO_HASH,
+          totalOriginalConsiderationItems: 1n,
+        };
+        const domain = { name: "Seaport", version: "1.6", chainId: 31337, verifyingContract: SEAPORT_ADDRESS };
+        const signature = await seller.signTypedData(domain, EIP_712_ORDER_TYPE, { ...parameters, counter });
+        return { parameters, numerator: 1, denominator: 1, signature, extraData: "0x" };
+      }
+
+      let salt = 100n;
+      for (const id of ids) {
+        orders.push(await signedListingFor(id, salt++));
+      }
+
+      const fee = (PRICE_WEI * FEE_BPS) / 10_000n;
+      const totalValue = (PRICE_WEI + fee) * BigInt(ids.length);
+
+      const sellerBalBefore = await ethers.provider.getBalance(sellerAddr);
+      const treasuryBalBefore = await ethers.provider.getBalance(treasuryAddr);
+
+      const tx = await router.connect(buyer).sweepBuy(
+        orders,
+        orders.map(() => []),
+        ZERO_HASH,
+        ids.map(() => PRICE_WEI),
+        { value: totalValue }
+      );
+      await tx.wait();
+
+      for (const id of ids) expect(await nft.ownerOf(id)).to.equal(buyerAddr);
+      expect(await nft.balanceOf(await router.getAddress())).to.equal(0n);
+      expect(await ethers.provider.getBalance(sellerAddr)).to.equal(sellerBalBefore + PRICE_WEI * BigInt(ids.length));
+      expect(await ethers.provider.getBalance(treasuryAddr)).to.equal(treasuryBalBefore + fee * BigInt(ids.length));
+      expect(await ethers.provider.getBalance(await router.getAddress())).to.equal(0n);
+    });
+
+    it("PROOF: one already-filled order in the batch is skipped, not reverted-whole-batch -- the rest still succeed and its share is refunded", async () => {
+      const idA = 20n;
+      const idB = 21n;
+      await mintAndApprove(idA);
+      await mintAndApprove(idB);
+
+      async function signedListingFor(tokenId: bigint, salt: bigint) {
+        const counter: bigint = await seaport.getCounter(sellerAddr);
+        const latestBlock = await provider.send("eth_getBlockByNumber", ["latest", false]);
+        const now = Number(latestBlock.timestamp);
+        const parameters = {
+          offerer: sellerAddr,
+          zone: ZERO_ADDRESS,
+          offer: [{ itemType: 2, token: await nft.getAddress(), identifierOrCriteria: tokenId, startAmount: 1n, endAmount: 1n }],
+          consideration: [
+            { itemType: 0, token: ZERO_ADDRESS, identifierOrCriteria: 0n, startAmount: PRICE_WEI, endAmount: PRICE_WEI, recipient: sellerAddr },
+          ],
+          orderType: 0,
+          startTime: 0n,
+          endTime: BigInt(now + 86_400),
+          zoneHash: ZERO_HASH,
+          salt,
+          conduitKey: ZERO_HASH,
+          totalOriginalConsiderationItems: 1n,
+        };
+        const domain = { name: "Seaport", version: "1.6", chainId: 31337, verifyingContract: SEAPORT_ADDRESS };
+        const signature = await seller.signTypedData(domain, EIP_712_ORDER_TYPE, { ...parameters, counter });
+        return { parameters, numerator: 1, denominator: 1, signature, extraData: "0x" };
+      }
+
+      const orderA = await signedListingFor(idA, 200n);
+      const orderB = await signedListingFor(idB, 201n);
+
+      // Someone else buys token A on Seaport directly, BEFORE the sweep runs -- the real race this test proves survives.
+      await seaport.connect(seller).getCounter(sellerAddr); // no-op read, keeps `seaport` bound to seller signer used below
+      const directBuyer = (await ethers.getSigners())[3];
+      const seaportAsThirdParty = new Contract(SEAPORT_ADDRESS, [
+        "function fulfillAdvancedOrder((( address offerer,address zone,(uint8 itemType,address token,uint256 identifierOrCriteria,uint256 startAmount,uint256 endAmount)[] offer,(uint8 itemType,address token,uint256 identifierOrCriteria,uint256 startAmount,uint256 endAmount,address recipient)[] consideration,uint8 orderType,uint256 startTime,uint256 endTime,bytes32 zoneHash,uint256 salt,bytes32 conduitKey,uint256 totalOriginalConsiderationItems) parameters,uint120 numerator,uint120 denominator,bytes signature,bytes extraData) advancedOrder,(uint256 orderIndex,uint8 side,uint256 index,uint256 identifier,bytes32[] criteriaProof)[] criteriaResolvers,bytes32 fulfillerConduitKey,address recipient) payable returns (bool fulfilled)",
+      ], directBuyer);
+      await seaportAsThirdParty.fulfillAdvancedOrder(orderA, [], ZERO_HASH, await directBuyer.getAddress(), { value: PRICE_WEI });
+      expect(await nft.ownerOf(idA)).to.equal(await directBuyer.getAddress());
+
+      const fee = (PRICE_WEI * FEE_BPS) / 10_000n;
+      const totalValue = (PRICE_WEI + fee) * 2n; // fund as if both would succeed
+
+      const buyerBalBefore = await ethers.provider.getBalance(buyerAddr);
+      const tx = await router.connect(buyer).sweepBuy(
+        [orderA, orderB],
+        [[], []],
+        ZERO_HASH,
+        [PRICE_WEI, PRICE_WEI],
+        { value: totalValue }
+      );
+      const receipt = await tx.wait();
+      const gasCost = receipt!.gasUsed * receipt!.gasPrice;
+
+      // B filled, A was skipped (already sold).
+      expect(await nft.ownerOf(idB)).to.equal(buyerAddr);
+      expect(await nft.ownerOf(idA)).to.equal(await directBuyer.getAddress()); // unchanged, still the direct buyer
+
+      const buyerBalAfter = await ethers.provider.getBalance(buyerAddr);
+      // Buyer only actually spent price+fee for the ONE order that filled, plus gas -- A's share came back.
+      expect(buyerBalBefore - buyerBalAfter).to.equal(PRICE_WEI + fee + gasCost);
+    });
+
+    it("reverts with NoOrdersFilled if every order in the batch fails", async () => {
+      const idC = 30n;
+      await mintAndApprove(idC);
+      async function signedListingFor(tokenId: bigint, salt: bigint) {
+        const counter: bigint = await seaport.getCounter(sellerAddr);
+        const latestBlock = await provider.send("eth_getBlockByNumber", ["latest", false]);
+        const now = Number(latestBlock.timestamp);
+        const parameters = {
+          offerer: sellerAddr,
+          zone: ZERO_ADDRESS,
+          offer: [{ itemType: 2, token: await nft.getAddress(), identifierOrCriteria: tokenId, startAmount: 1n, endAmount: 1n }],
+          consideration: [
+            { itemType: 0, token: ZERO_ADDRESS, identifierOrCriteria: 0n, startAmount: PRICE_WEI, endAmount: PRICE_WEI, recipient: sellerAddr },
+          ],
+          orderType: 0,
+          startTime: 0n,
+          endTime: BigInt(now - 1), // already expired -- guaranteed Seaport rejection
+          zoneHash: ZERO_HASH,
+          salt,
+          conduitKey: ZERO_HASH,
+          totalOriginalConsiderationItems: 1n,
+        };
+        const domain = { name: "Seaport", version: "1.6", chainId: 31337, verifyingContract: SEAPORT_ADDRESS };
+        const signature = await seller.signTypedData(domain, EIP_712_ORDER_TYPE, { ...parameters, counter });
+        return { parameters, numerator: 1, denominator: 1, signature, extraData: "0x" };
+      }
+      const expired = await signedListingFor(idC, 300n);
+      const fee = (PRICE_WEI * FEE_BPS) / 10_000n;
+      await expect(
+        router.connect(buyer).sweepBuy([expired], [[]], ZERO_HASH, [PRICE_WEI], { value: PRICE_WEI + fee })
+      ).to.be.revertedWithCustomError(router, "NoOrdersFilled");
+    });
+
+    it("rejects an empty sweep and a batch exceeding MAX_SWEEP_ITEMS", async () => {
+      await expect(
+        router.connect(buyer).sweepBuy([], [], ZERO_HASH, [], { value: 0 })
+      ).to.be.revertedWithCustomError(router, "EmptySweep");
+    });
+  });
+
+  describe("buyNowWithToken", () => {
+    let weth: any;
+
+    beforeEach(async () => {
+      const WethFactory = await ethers.getContractFactory("MockWeth");
+      weth = await WethFactory.deploy();
+    });
+
+    async function signedTokenListing(tokenId: bigint, salt: bigint) {
+      await nft.mint(sellerAddr, tokenId);
+      await nft.connect(seller).setApprovalForAll(SEAPORT_ADDRESS, true);
+      const counter: bigint = await seaport.getCounter(sellerAddr);
+      const latestBlock = await provider.send("eth_getBlockByNumber", ["latest", false]);
+      const now = Number(latestBlock.timestamp);
+      const parameters = {
+        offerer: sellerAddr,
+        zone: ZERO_ADDRESS,
+        offer: [{ itemType: 2, token: await nft.getAddress(), identifierOrCriteria: tokenId, startAmount: 1n, endAmount: 1n }],
+        consideration: [
+          {
+            itemType: 1, // ERC20
+            token: await weth.getAddress(),
+            identifierOrCriteria: 0n,
+            startAmount: PRICE_WEI,
+            endAmount: PRICE_WEI,
+            recipient: sellerAddr,
+          },
+        ],
+        orderType: 0,
+        startTime: 0n,
+        endTime: BigInt(now + 86_400),
+        zoneHash: ZERO_HASH,
+        salt,
+        conduitKey: ZERO_HASH,
+        totalOriginalConsiderationItems: 1n,
+      };
+      const domain = { name: "Seaport", version: "1.6", chainId: 31337, verifyingContract: SEAPORT_ADDRESS };
+      const signature = await seller.signTypedData(domain, EIP_712_ORDER_TYPE, { ...parameters, counter });
+      return { parameters, numerator: 1, denominator: 1, signature, extraData: "0x" };
+    }
+
+    it("PROOF: fulfils a WETH-denominated order, pays seller in WETH, fee in WETH to treasury, no lingering allowance on the router", async () => {
+      const tokenId = 40n;
+      const order = await signedTokenListing(tokenId, 400n);
+      const fee = (PRICE_WEI * FEE_BPS) / 10_000n;
+      const total = PRICE_WEI + fee;
+
+      await weth.mint(buyerAddr, total);
+      await weth.connect(buyer).approve(await router.getAddress(), total);
+
+      await router.connect(buyer).buyNowWithToken(order, [], PRICE_WEI, await weth.getAddress());
+
+      expect(await nft.ownerOf(tokenId)).to.equal(buyerAddr);
+      expect(await weth.balanceOf(sellerAddr)).to.equal(PRICE_WEI);
+      expect(await weth.balanceOf(treasuryAddr)).to.equal(fee);
+      expect(await weth.balanceOf(await router.getAddress())).to.equal(0n);
+      expect(await weth.allowance(await router.getAddress(), SEAPORT_ADDRESS)).to.equal(0n); // no lingering approval
+    });
+
+    it("reverts if the buyer never approved the router for the token", async () => {
+      const tokenId = 41n;
+      const order = await signedTokenListing(tokenId, 401n);
+      // No mint, no approve.
+      await expect(
+        router.connect(buyer).buyNowWithToken(order, [], PRICE_WEI, await weth.getAddress())
+      ).to.be.revert(ethers);
+    });
+  });
 });

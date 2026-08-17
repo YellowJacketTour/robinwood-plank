@@ -2,6 +2,8 @@
 pragma solidity ^0.8.20;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @dev Seaport structs, declared at file scope (Solidity does not allow
 /// nested `interface` declarations inside a contract body) -- field order
@@ -105,15 +107,31 @@ interface ISeaport {
  *   NFT's onERC721Received hook, etc. can affect the buyer's own receipt
  *   but can never leave an asset stuck IN this router).
  *
- * SCOPE (V1) -- DELIBERATELY NARROW, NOT A SHORTCUT
- * -----------------------------------------------------
- * ETH-denominated single-order buy-now only. Sweep (multiple orders via
- * Seaport's fulfillAvailableAdvancedOrders) and ERC20/WETH-denominated
- * orders are NOT implemented here -- both need materially different
- * accounting (partial-fill handling for sweep; an ERC20 pull-then-approve
- * step for token-denominated orders) that deserves its own dedicated
- * design and test pass rather than being bolted on under time pressure.
- * Extending this contract, not routing around it, is the intended path.
+ * SCOPE
+ * -----
+ * buyNow: ETH-denominated single-order buy-now (V1).
+ * sweepBuy: multiple ETH-denominated orders in one transaction (V2) -- NOT
+ *   Seaport's fulfillAvailableAdvancedOrders (that function's offer/
+ *   consideration "fulfillment component" aggregation arrays are a real,
+ *   documented source of aggregator bugs when built for heterogeneous
+ *   orders from different offerers). Instead, sweepBuy loops N independent
+ *   fulfillAdvancedOrder calls -- the exact same audited entry point
+ *   buyNow already uses -- wrapped in try/catch so ONE order that's
+ *   already been bought by someone else (a real, common race in a sweep)
+ *   degrades to "skip it and refund its share," not "revert the whole
+ *   batch." Every successful fill still goes through Seaport's own full
+ *   verification; nothing about the per-order safety guarantees changes
+ *   from calling buyNow N times.
+ * buyNowWithToken: ERC20/WETH-denominated single-order buy-now (V2) -- the
+ *   fulfiller's OWN token payment always uses fulfillerConduitKey =
+ *   bytes32(0), so Seaport pulls directly from this contract's balance via
+ *   a plain approval to Seaport itself; this is independent of the
+ *   order's own (the offerer's) conduitKey field, which governs how the
+ *   OFFERER's item moves, not the fulfiller's payment -- confirmed by
+ *   Seaport's own ABI separating these two conduit choices. The approval
+ *   is set to exactly the order price before the call and reset to zero
+ *   after, defense-in-depth against a lingering allowance even though
+ *   Seaport is expected to pull the exact amount in the same transaction.
  *
  * @dev Immutable configuration -- no admin key can change the fee recipient
  *      or fee rate after deployment, matching lib/constants.ts's existing
@@ -122,6 +140,8 @@ interface ISeaport {
  *      behind access control.
  */
 contract MarketplankForeignFeeRouter is ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
     /// @notice The real, canonical Seaport 1.6 contract on this chain (same address on every EVM chain this router is deployed to -- see lib/market/multichain/trading/foreign-chain-registry.ts).
     address public immutable seaport;
 
@@ -135,12 +155,23 @@ contract MarketplankForeignFeeRouter is ReentrancyGuard {
     /// @dev Sanity ceiling, not a governance knob -- prevents an obviously-wrong constructor argument (e.g. a misplaced decimal turning 180 into 18000) from ever being deployable.
     uint256 private constant MAX_FEE_BPS = 1_000; // 10%
 
+    /// @dev sweepBuy caps the batch size, not as a fee/pricing decision but a
+    /// gas-griefing guard: an unbounded array of orders could be crafted to
+    /// exceed the block gas limit and make the whole sweep unmineable.
+    uint256 private constant MAX_SWEEP_ITEMS = 50;
+
     error FeeTooHigh(uint256 requested, uint256 max);
     error ZeroAddress();
     error InsufficientPayment(uint256 required, uint256 sent);
     error SeaportCallFailed();
+    error ArrayLengthMismatch();
+    error EmptySweep();
+    error SweepTooLarge(uint256 requested, uint256 max);
+    error NoOrdersFilled();
 
     event ForeignOrderFulfilled(address indexed buyer, uint256 orderPriceWei, uint256 feeWei);
+    event ForeignSweepItemFulfilled(address indexed buyer, uint256 orderIndex, uint256 orderPriceWei, uint256 feeWei);
+    event ForeignSweepItemSkipped(address indexed buyer, uint256 orderIndex);
 
     constructor(address seaport_, address feeRecipient_, uint256 feeBps_) {
         if (seaport_ == address(0) || feeRecipient_ == address(0)) revert ZeroAddress();
@@ -204,5 +235,125 @@ contract MarketplankForeignFeeRouter is ReentrancyGuard {
         }
 
         emit ForeignOrderFulfilled(msg.sender, orderPriceWei, fee);
+    }
+
+    /**
+     * @notice Fulfil several ETH-denominated foreign-marketplace orders in
+     *         one transaction (a "sweep"), collecting Marketplank's fee on
+     *         each one that actually fills.
+     * @dev Best-effort per item: if an individual order fails (already
+     *      sold, expired, cancelled -- a real and common race the instant
+     *      a sweep touches more than one seller), that item is SKIPPED,
+     *      not reverted-whole-batch. msg.value must cover the worst case
+     *      (every order succeeding); anything not spent on orders that
+     *      actually filled is refunded, including the fee portion for any
+     *      skipped item. Reverts only if EVERY order in the batch fails --
+     *      a sweep that buys nothing is not a success.
+     */
+    function sweepBuy(
+        AdvancedOrder[] calldata orders,
+        CriteriaResolver[][] calldata criteriaResolvers,
+        bytes32 fulfillerConduitKey,
+        uint256[] calldata orderPricesWei
+    ) external payable nonReentrant returns (bool[] memory filled) {
+        uint256 count = orders.length;
+        if (count == 0) revert EmptySweep();
+        if (count > MAX_SWEEP_ITEMS) revert SweepTooLarge(count, MAX_SWEEP_ITEMS);
+        if (criteriaResolvers.length != count || orderPricesWei.length != count) revert ArrayLengthMismatch();
+
+        filled = new bool[](count);
+        uint256 totalSpent;
+        uint256 fillCount;
+
+        for (uint256 i = 0; i < count; i++) {
+            uint256 price = orderPricesWei[i];
+            uint256 fee = (price * feeBps) / BPS_DENOMINATOR;
+            uint256 needed = price + fee;
+
+            // Never attempt an order this transaction can't possibly afford
+            // even in isolation -- cheaper than letting Seaport's own call
+            // revert-and-catch for the same reason, and keeps the "did we
+            // even try" signal (this counts as skipped, not a Seaport
+            // rejection) accurate for the emitted event.
+            if (totalSpent + needed > msg.value) {
+                emit ForeignSweepItemSkipped(msg.sender, i);
+                continue;
+            }
+
+            try ISeaport(seaport).fulfillAdvancedOrder{value: price}(
+                orders[i],
+                criteriaResolvers[i],
+                fulfillerConduitKey,
+                msg.sender
+            ) returns (bool ok) {
+                if (!ok) {
+                    emit ForeignSweepItemSkipped(msg.sender, i);
+                    continue;
+                }
+                (bool feeSent, ) = feeRecipient.call{value: fee}("");
+                if (!feeSent) revert SeaportCallFailed();
+                totalSpent += needed;
+                fillCount++;
+                filled[i] = true;
+                emit ForeignSweepItemFulfilled(msg.sender, i, price, fee);
+            } catch {
+                emit ForeignSweepItemSkipped(msg.sender, i);
+            }
+        }
+
+        if (fillCount == 0) revert NoOrdersFilled();
+
+        uint256 refund = msg.value - totalSpent;
+        if (refund > 0) {
+            (bool refunded, ) = msg.sender.call{value: refund}("");
+            if (!refunded) revert SeaportCallFailed();
+        }
+    }
+
+    /**
+     * @notice Fulfil one ERC20/WETH-denominated foreign-marketplace order,
+     *         collecting Marketplank's fee on top.
+     * @dev The buyer must have approved THIS CONTRACT (not Seaport) for at
+     *      least `orderPriceTokenAmount + fee` in `token` before calling --
+     *      the standard ERC20 two-step pattern, identical in shape to the
+     *      wallet-side approval step lib/market/seaport.ts's own offer
+     *      flow already asks users for on Robinhood Chain.
+     * @param token The ERC20 (e.g. WETH) the order's consideration is priced in.
+     * @param orderPriceTokenAmount The order's total token consideration (buyer-facing quoted price, before Marketplank's fee).
+     */
+    function buyNowWithToken(
+        AdvancedOrder calldata order,
+        CriteriaResolver[] calldata criteriaResolvers,
+        uint256 orderPriceTokenAmount,
+        address token
+    ) external nonReentrant {
+        uint256 fee = (orderPriceTokenAmount * feeBps) / BPS_DENOMINATOR;
+        uint256 total = orderPriceTokenAmount + fee;
+
+        IERC20(token).safeTransferFrom(msg.sender, address(this), total);
+
+        // Always fulfillerConduitKey = 0 for OUR OWN payment: Seaport then
+        // pulls directly from this contract's balance via a plain
+        // approval, independent of the order's own conduitKey (that field
+        // governs how the OFFERER's item moves, a separate concern -- see
+        // header comment). Approve exactly the order price, not `total`
+        // (the fee never needs to leave this contract via Seaport).
+        IERC20(token).forceApprove(seaport, orderPriceTokenAmount);
+        bool fulfilled = ISeaport(seaport).fulfillAdvancedOrder(
+            order,
+            criteriaResolvers,
+            bytes32(0),
+            msg.sender
+        );
+        // Defense-in-depth: reset the approval even on the success path,
+        // in case Seaport pulled less than the full approved amount for
+        // any reason (e.g. a partial-fill numerator/denominator on the
+        // order) -- never leave a standing allowance on this contract.
+        IERC20(token).forceApprove(seaport, 0);
+        if (!fulfilled) revert SeaportCallFailed();
+
+        IERC20(token).safeTransfer(feeRecipient, fee);
+
+        emit ForeignOrderFulfilled(msg.sender, orderPriceTokenAmount, fee);
     }
 }
