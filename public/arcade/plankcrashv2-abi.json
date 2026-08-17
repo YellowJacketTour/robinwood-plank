@@ -159,6 +159,11 @@
   },
   {
     "inputs": [],
+    "name": "NotDeployer",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "NotFunder",
     "type": "error"
   },
@@ -175,6 +180,11 @@
   {
     "inputs": [],
     "name": "PastCrashPoint",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ProgressionAlreadySet",
     "type": "error"
   },
   {
@@ -1250,6 +1260,19 @@
   },
   {
     "inputs": [],
+    "name": "progression",
+    "outputs": [
+      {
+        "internalType": "contract IPlankProgression",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "rakeBps",
     "outputs": [
       {
@@ -1518,6 +1541,19 @@
       }
     ],
     "name": "setPayoutRedirect",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "progression_",
+        "type": "address"
+      }
+    ],
+    "name": "setProgression",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
