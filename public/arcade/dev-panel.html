@@ -209,6 +209,19 @@ const CRASH_ABI = [
   "function fundVault() payable",
   "function reserve() view returns (uint256)",
   "function maxElapsedBlocks() view returns (uint256)",
+  // Without these declared, ethers' Interface.parseError() has nothing to
+  // match a revert selector against and always throws -- friendlyRevertReason
+  // would silently fall through to the raw "unknown custom error" message
+  // this whole thing exists to replace, exactly the bug this fixes.
+  "error BadPhase()",
+  "error TooEarly()",
+  "error TooLate()",
+  "error AlreadyBet()",
+  "error StakeExceedsCap()",
+  "error EntropyNotRevealed()",
+  "error EntropyAlreadyRevealed()",
+  "error RandomnessNotYetAvailable()",
+  "error CrashPointNotYetReached()",
 ];
 const POWERBOARD_ABI = [
   "function currentEpoch() view returns (uint256)",
@@ -220,6 +233,12 @@ const POWERBOARD_ABI = [
   "function ballRange() view returns (uint256)",
   "function jackpotBall() view returns (uint256)",
   "function claimTickets(address source, uint256 sourceRoundId, address player)",
+  "error DrawNotYetRequested()",
+  "error EpochAlreadyDrawn()",
+  "error RandomnessNotYetAvailable()",
+  "error AlreadyClaimed()",
+  "error NoStake()",
+  "error UnknownSource()",
 ];
 const BEACON_ABI = [
   "function setRandomness(uint64 round, bytes32 value) external",
@@ -238,6 +257,31 @@ function log(msg, cls) {
   if (cls) line.className = cls;
   line.textContent = "[" + new Date().toLocaleTimeString() + "] " + msg;
   el.prepend(line);
+}
+
+// Same fix crash.html's own friendlyRevertReason needed: ethers v6 does
+// NOT populate err.revert on a CallExceptionError from a real RPC node
+// (confirmed directly against this exact node earlier this session) --
+// the raw selector is on err.data the whole time, so parse it against
+// the contract's own interface instead of trusting a property that
+// never actually fills in. Every action here (bet, rig-crash, tick, ...)
+// shares this because they all hit the SAME class of revert: acting on
+// a round/epoch in the wrong phase is the single most likely error a
+// dev-panel user will ever see (e.g. trying "Competitor bet" against a
+// round that's already gone LIVE -- betting only works during phase 0).
+function friendlyRevertReason(err, contract) {
+  let name = null;
+  try {
+    if (err && err.data && contract) name = contract.interface.parseError(err.data).name;
+  } catch (_) { /* not a recognized custom error -- fall through */ }
+  if (name === "BadPhase") return "wrong phase for this action right now (e.g. betting is closed once a round is LIVE) -- check `status` first";
+  if (name === "TooEarly" || name === "TooLate") return "wrong timing for this action right now -- check `status` first";
+  if (name === "StakeExceedsCap") return "that stake is too large a share of the pool (60% whale cap)";
+  if (name === "AlreadyBet") return "that account already has a bet in this round";
+  if (name === "RandomnessNotYetAvailable") return "entropy not revealed yet for this round/epoch";
+  if (name === "EpochAlreadyDrawn") return "that epoch was already drawn -- too late to rig it";
+  if (name) return name; // a real decoded error name is still more useful than the raw fallback below
+  return (err && (err.shortMessage || err.message)) || "unknown error";
 }
 
 async function init() {
@@ -300,7 +344,7 @@ async function mintPlank() {
     await tx.wait();
     log(`minted ${amt} $PLANK to ${acct}`, "ok");
     refreshStatus();
-  } catch (e) { log("mint failed: " + (e.shortMessage || e.message), "err"); }
+  } catch (e) { log("mint failed: " + friendlyRevertReason(e, plank), "err"); }
 }
 
 async function topUp() {
@@ -321,7 +365,7 @@ async function placeBet() {
     await tx.wait();
     log(`${acct} bet ${amt} ETH`, "ok");
     refreshStatus();
-  } catch (e) { log("bet failed: " + (e.shortMessage || e.message), "err"); }
+  } catch (e) { log("bet failed: " + friendlyRevertReason(e, crash), "err"); }
 }
 
 async function fundVault() {
@@ -331,7 +375,7 @@ async function fundVault() {
     await tx.wait();
     log(`funded vault with ${amt} ETH`, "ok");
     refreshStatus();
-  } catch (e) { log("fund-vault failed: " + (e.shortMessage || e.message), "err"); }
+  } catch (e) { log("fund-vault failed: " + friendlyRevertReason(e, crash), "err"); }
 }
 
 async function fundJackpot() {
@@ -341,7 +385,7 @@ async function fundJackpot() {
     await tx.wait();
     log(`funded jackpot with ${amt} ETH`, "ok");
     refreshStatus();
-  } catch (e) { log("fund-jackpot failed: " + (e.shortMessage || e.message), "err"); }
+  } catch (e) { log("fund-jackpot failed: " + friendlyRevertReason(e, powerboard), "err"); }
 }
 
 function entropyForMultiplier(multiplierBps) {
@@ -364,7 +408,7 @@ async function rigCrash() {
     await (await crash.revealEntropy(id)).wait();
     log(`round ${id} rigged for ${target}x`, "ok");
     refreshStatus();
-  } catch (e) { log("rig-crash failed: " + (e.shortMessage || e.message), "err"); }
+  } catch (e) { log("rig-crash failed: " + friendlyRevertReason(e, crash), "err"); }
 }
 
 function entropyForBall(wantHit, ballRange, jackpotBall) {
@@ -391,7 +435,7 @@ async function rigJackpot(wantHit) {
     await (await powerboard.drawWinner(epoch)).wait();
     log(`epoch ${epoch} drawn -- targeted ${wantHit ? "HIT" : "MISS"}`, "ok");
     refreshStatus();
-  } catch (e) { log("rig-jackpot failed: " + (e.shortMessage || e.message), "err"); }
+  } catch (e) { log("rig-jackpot failed: " + friendlyRevertReason(e, powerboard), "err"); }
 }
 
 async function claimTickets() {
@@ -401,7 +445,7 @@ async function claimTickets() {
     const tx = await powerboard.claimTickets(manifest.crash, roundId, ACCOUNTS[acct].address);
     await tx.wait();
     log(`claimed tickets for ${acct} in crash round ${roundId}`, "ok");
-  } catch (e) { log("claim-tickets failed: " + (e.shortMessage || e.message), "err"); }
+  } catch (e) { log("claim-tickets failed: " + friendlyRevertReason(e, powerboard), "err"); }
 }
 
 async function tick() {
@@ -430,7 +474,7 @@ async function tick() {
       log(`round ${id} is phase ${r.phase} -- nothing to do`, "err");
     }
     refreshStatus();
-  } catch (e) { log("tick failed: " + (e.shortMessage || e.message), "err"); }
+  } catch (e) { log("tick failed: " + friendlyRevertReason(e, crash), "err"); }
 }
 
 init();
