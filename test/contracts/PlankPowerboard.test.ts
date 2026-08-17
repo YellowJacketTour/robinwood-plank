@@ -287,4 +287,35 @@ describe("PlankPowerboard", () => {
     expect(await pb.guaranteedHitByEpoch()).to.equal(e0 + 6n);
     void deployer;
   });
+
+  describe("progression wiring (optional; see PlankProgression.sol)", () => {
+    it("setProgression is restricted to this contract's own deployer, exactly once", async () => {
+      const { pb, alice } = await deploy();
+      const progression: any = await (
+        await ethers.getContractFactory("PlankProgression")
+      ).deploy(ethers.ZeroAddress, ethers.ZeroAddress, await pb.getAddress());
+      const progressionAddr = await progression.getAddress();
+
+      await expect(pb.connect(alice).setProgression(progressionAddr)).to.be.revertedWithCustomError(
+        pb,
+        "NotDeployer"
+      );
+      await (await pb.setProgression(progressionAddr)).wait();
+      expect(await pb.progression()).to.equal(progressionAddr);
+      await expect(pb.setProgression(progressionAddr)).to.be.revertedWithCustomError(pb, "ProgressionAlreadySet");
+    });
+
+    it("a real claimTickets call records the claim on the wired progression contract", async () => {
+      const { pb, source, alice } = await deploy();
+      const progression: any = await (
+        await ethers.getContractFactory("PlankProgression")
+      ).deploy(ethers.ZeroAddress, ethers.ZeroAddress, await pb.getAddress());
+      await (await pb.setProgression(await progression.getAddress())).wait();
+
+      expect((await progression.statsOf(alice.address)).powerboardClaims).to.equal(0n);
+      await source.setStake(1, alice.address, ethers.parseEther("1"));
+      await (await pb.claimTickets(await source.getAddress(), 1, alice.address)).wait();
+      expect((await progression.statsOf(alice.address)).powerboardClaims).to.equal(1n);
+    });
+  });
 });

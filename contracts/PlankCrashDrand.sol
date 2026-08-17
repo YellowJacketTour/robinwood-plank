@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {PullPayment} from "@openzeppelin/contracts/security/PullPayment.sol";
 import {IDrandBeacon} from "./IDrandBeacon.sol";
+import {IPlankProgression} from "./IPlankProgression.sol";
 
 /// The Powerboard's funding surface -- the Vault cascades its overflow here,
 /// unifying the crash's compounding growth with the daily rolling jackpot.
@@ -135,6 +136,11 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     uint256 public immutable keeperRewardBps;
     address public immutable treasury;
     uint256 public accumulatedRake;
+
+    // ── Optional progression/leveling layer (see setProgression() and
+    // PlankProgression.sol's own header for the full reasoning) ─────────
+    address private immutable _deployer;
+    IPlankProgression public progression; // address(0) == feature disabled, exact pre-existing behavior
 
     // ── The Vault: a perpetual, always-positive prize reserve ────────────
     uint256 public immutable seedNumerator;
@@ -271,6 +277,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     error NotFunder();
     error BadVaultConfig();
     error NothingToFund();
+    error ProgressionAlreadySet();
+    error NotDeployer();
 
     struct Config {
         uint256 bettingDurationSeconds;
@@ -311,6 +319,15 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     }
 
     constructor(Config memory cfg) {
+        // Captured automatically as the constructor's own caller -- NOT a
+        // constructor parameter, so this required zero changes to any
+        // existing test or deploy script's call site. Used exactly once,
+        // by setProgression() below, to wire up an entirely optional
+        // feature; never checked again after that single call succeeds.
+        // Not an ongoing owner/admin role -- there is no function anywhere
+        // in this contract this address can call more than once, and none
+        // of them touch funds, odds, or outcomes.
+        _deployer = msg.sender;
         if (cfg.beacon == address(0)) revert ZeroBeacon();
         if (cfg.beacon.code.length == 0) revert ZeroBeacon();
         beacon = IDrandBeacon(cfg.beacon);
@@ -359,6 +376,24 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         jackpotSink = cfg.jackpotSink;
 
         _startRound();
+    }
+
+    /// Wires this contract to a deployed PlankProgression, EXACTLY once.
+    /// Deliberately not a constructor parameter: PlankProgression's own
+    /// constructor needs THIS contract's address up front (it gates
+    /// recordBet to only its wired crash address), so either this contract
+    /// or that one has to exist first -- this is the "deploy the dependent
+    /// contract, then wire it up" side of that cycle, the same two-step
+    /// shape any circular on-chain dependency needs somewhere. Restricted
+    /// to the address that deployed THIS contract (see _deployer's own
+    /// comment: captured automatically, not a stored owner/admin role) so
+    /// a front-runner can't grief a legitimate deploy by wiring in a
+    /// garbage address first and permanently bricking placeBet() against
+    /// calls that would revert on it.
+    function setProgression(address progression_) external {
+        if (msg.sender != _deployer) revert NotDeployer();
+        if (address(progression) != address(0)) revert ProgressionAlreadySet();
+        progression = IPlankProgression(progression_);
     }
 
     // ── Round lifecycle ──────────────────────────────────────────────────
@@ -486,20 +521,50 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         }
     }
 
+    /// Applies the optional progression layer to a fresh bet of `grossStake`
+    /// wei from `player`: enforces the rank-based absolute cap (in ADDITION
+    /// to _checkStakeCap's own pool-relative 60% rule -- the caller checks
+    /// that separately, against the NET amount this returns), skims any
+    /// rank-based entry premium straight into the Vault (never counted
+    /// toward the payer's own pari-mutuel weight -- see
+    /// PlankProgression.sol's header for why this exists and what it's
+    /// actually defending against), and records the bet for progression
+    /// purposes. A pure no-op returning grossStake unchanged when
+    /// progression is unset (address(0)): every existing round of behavior
+    /// is preserved exactly when this optional feature was never wired up.
+    function _applyProgression(address player, uint256 grossStake) private returns (uint256 netStake) {
+        IPlankProgression p = progression;
+        if (address(p) == address(0)) return grossStake;
+
+        if (grossStake > p.capFor(player)) revert StakeExceedsCap();
+
+        uint256 premiumBps = p.premiumBpsFor(player, grossStake);
+        uint256 premium = (grossStake * premiumBps) / 10000;
+        netStake = grossStake - premium;
+
+        if (premium > 0) {
+            reserve += premium;
+            emit VaultFunded(player, premium, reserve);
+            _spillOverflow();
+        }
+        p.recordBet(player, grossStake);
+    }
+
     function placeBet() external payable nonReentrant {
         Round storage r = rounds[currentRoundId];
         if (r.phase != Phase.BETTING) revert BadPhase();
         if (block.timestamp >= r.bettingEndsAt) revert TooLate();
         if (stakeOf[currentRoundId][msg.sender] != 0) revert AlreadyBet();
 
-        _checkStakeCap(r, r.pool, msg.value);
-        uint256 poolAfter = r.pool + msg.value;
+        uint256 stakeAmount = _applyProgression(msg.sender, msg.value);
+        _checkStakeCap(r, r.pool, stakeAmount);
+        uint256 poolAfter = r.pool + stakeAmount;
 
-        stakeOf[currentRoundId][msg.sender] = msg.value;
+        stakeOf[currentRoundId][msg.sender] = stakeAmount;
         r.pool = poolAfter;
         participantCount[currentRoundId] += 1;
-        if (msg.value > largestStakeInRound[currentRoundId]) largestStakeInRound[currentRoundId] = msg.value;
-        emit BetPlaced(currentRoundId, msg.sender, msg.value);
+        if (stakeAmount > largestStakeInRound[currentRoundId]) largestStakeInRound[currentRoundId] = stakeAmount;
+        emit BetPlaced(currentRoundId, msg.sender, stakeAmount);
     }
 
     /// Places a bet FOR `player`, funded by msg.value (the caller supplies
@@ -515,15 +580,20 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         if (block.timestamp >= r.bettingEndsAt) revert TooLate();
         if (stakeOf[currentRoundId][player] != 0) revert AlreadyBet();
 
-        _checkStakeCap(r, r.pool, msg.value);
-        uint256 poolAfter = r.pool + msg.value;
+        // Progression tracks PLAYER, not msg.sender -- the Bank is a
+        // regular caller here funding on the player's behalf, same as any
+        // other funder; rank belongs to whoever the stake (and the risk)
+        // actually belongs to.
+        uint256 stakeAmount = _applyProgression(player, msg.value);
+        _checkStakeCap(r, r.pool, stakeAmount);
+        uint256 poolAfter = r.pool + stakeAmount;
 
-        stakeOf[currentRoundId][player] = msg.value;
+        stakeOf[currentRoundId][player] = stakeAmount;
         r.pool = poolAfter;
         participantCount[currentRoundId] += 1;
-        if (msg.value > largestStakeInRound[currentRoundId]) largestStakeInRound[currentRoundId] = msg.value;
+        if (stakeAmount > largestStakeInRound[currentRoundId]) largestStakeInRound[currentRoundId] = stakeAmount;
         betFundedBy[currentRoundId][player] = msg.sender;
-        emit BetPlaced(currentRoundId, player, msg.value);
+        emit BetPlaced(currentRoundId, player, stakeAmount);
     }
 
     /// Cash out on `player`'s behalf. Restricted to the address that funded

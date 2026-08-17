@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {PullPayment} from "@openzeppelin/contracts/security/PullPayment.sol";
 import {IDrandBeacon} from "./IDrandBeacon.sol";
+import {IPlankProgression} from "./IPlankProgression.sol";
 
 /// The read surface every plank.love game already exposes for its own
 /// pari-mutuel accounting -- PlankCrashV2/VRF/Entropy/Drand and
@@ -99,6 +100,13 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
     /// the pot can roll without paying out. 0 disables it (pure geometric).
     uint256 public immutable mustHitByEpochs;
 
+    // ── Optional progression/leveling layer -- see setProgression() and
+    // PlankProgression.sol's own header. Same pattern as PlankCrashDrand's
+    // own wiring: _deployer captured automatically, not a parameter or an
+    // ongoing admin role.
+    address private immutable _deployer;
+    IPlankProgression public progression;
+
     /// The rolling jackpot. Grows with every rake deposit and every miss.
     uint256 public jackpot;
     uint256 public totalPaidOut;
@@ -169,6 +177,8 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
     error DrawNotYetRequested();
     error DrawAlreadyRequested();
     error RandomnessNotYetAvailable();
+    error ProgressionAlreadySet();
+    error NotDeployer();
 
     struct Config {
         address beacon;
@@ -183,6 +193,7 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
     }
 
     constructor(Config memory cfg) {
+        _deployer = msg.sender;
         if (cfg.beacon == address(0)) revert ZeroAddress();
         if (cfg.epochDuration == 0) revert BadConfig();
         // A ball range of 1 would make every epoch a guaranteed jackpot
@@ -219,6 +230,16 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
             if (cfg.allowedSources[i] == address(0)) revert ZeroAddress();
             isAllowedSource[cfg.allowedSources[i]] = true;
         }
+    }
+
+    /// Wires this contract to a deployed PlankProgression, EXACTLY once, by
+    /// whoever deployed THIS contract -- see PlankCrashDrand.setProgression's
+    /// own comment for the full reasoning (same pattern, same narrow,
+    /// one-shot, non-fund-touching privilege).
+    function setProgression(address progression_) external {
+        if (msg.sender != _deployer) revert NotDeployer();
+        if (address(progression) != address(0)) revert ProgressionAlreadySet();
+        progression = IPlankProgression(progression_);
     }
 
     function currentEpoch() public view returns (uint256) {
@@ -271,6 +292,7 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
             distinctParticipants[epoch] += 1;
         }
         emit TicketsClaimed(epoch, source, sourceRoundId, player, amount);
+        if (address(progression) != address(0)) progression.recordPowerboardClaim(player);
     }
 
     /// Permissionless, once the epoch has genuinely closed. Commits the

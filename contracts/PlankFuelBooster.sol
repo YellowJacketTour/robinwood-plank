@@ -2,6 +2,7 @@
 pragma solidity 0.8.24;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {IPlankProgression} from "./IPlankProgression.sol";
 
 interface IBurnableFrom {
     function burnFrom(address account, uint256 amount) external;
@@ -64,6 +65,13 @@ contract PlankFuelBooster is ReentrancyGuard {
     uint256 public immutable maxBoostPerBurnWei;
     uint256 public immutable maxBoostPerRoundWei;
 
+    // ── Optional progression/leveling layer -- see setProgression() and
+    // PlankProgression.sol's own header. Same pattern as PlankCrashDrand's
+    // own wiring: _deployer captured automatically, not a parameter or an
+    // ongoing admin role.
+    address private immutable _deployer;
+    IPlankProgression public progression;
+
     uint256 public boostPool;
     uint256 public totalPlankBurned;
     uint256 public totalEthBoosted;
@@ -90,8 +98,11 @@ contract PlankFuelBooster is ReentrancyGuard {
     error BadConfig();
     error ZeroAmount();
     error NothingToFund();
+    error ProgressionAlreadySet();
+    error NotDeployer();
 
     constructor(address plank_, address oracle_, address crash_, uint256 maxBoostPerBurnWei_, uint256 maxBoostPerRoundWei_) {
+        _deployer = msg.sender;
         if (plank_ == address(0) || oracle_ == address(0) || crash_ == address(0)) revert ZeroAddress();
         if (maxBoostPerBurnWei_ == 0 || maxBoostPerRoundWei_ == 0) revert BadConfig();
         if (maxBoostPerBurnWei_ > maxBoostPerRoundWei_) revert BadConfig();
@@ -100,6 +111,16 @@ contract PlankFuelBooster is ReentrancyGuard {
         crash = IVaultFundable(crash_);
         maxBoostPerBurnWei = maxBoostPerBurnWei_;
         maxBoostPerRoundWei = maxBoostPerRoundWei_;
+    }
+
+    /// Wires this contract to a deployed PlankProgression, EXACTLY once, by
+    /// whoever deployed THIS contract -- see PlankCrashDrand.setProgression's
+    /// own comment for the full reasoning (same pattern, same narrow,
+    /// one-shot, non-fund-touching privilege).
+    function setProgression(address progression_) external {
+        if (msg.sender != _deployer) revert NotDeployer();
+        if (address(progression) != address(0)) revert ProgressionAlreadySet();
+        progression = IPlankProgression(progression_);
     }
 
     /// Tops up the ETH boost pool. Open to anyone -- treasury, a sponsor, a
@@ -149,6 +170,7 @@ contract PlankFuelBooster is ReentrancyGuard {
         }
 
         emit FuelBurned(roundId, msg.sender, plankAmount, fairEth, boost);
+        if (address(progression) != address(0)) progression.recordFuelBurn(msg.sender);
     }
 
     /// UI helper: how much boost headroom is left for the round that is

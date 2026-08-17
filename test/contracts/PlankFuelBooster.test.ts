@@ -286,4 +286,42 @@ describe("PlankFuelBooster — burn $PLANK to grow the shared Vault, never your 
     // just her) is what actually grew.
     expect(await crash.reserve()).to.be.gt(0n);
   });
+
+  describe("progression wiring (optional; see PlankProgression.sol)", () => {
+    it("setProgression is restricted to this contract's own deployer, exactly once", async () => {
+      const { booster, alice } = await deploy();
+      const progression: any = await (
+        await ethers.getContractFactory("PlankProgression")
+      ).deploy(ethers.ZeroAddress, await booster.getAddress(), ethers.ZeroAddress);
+      const progressionAddr = await progression.getAddress();
+
+      await expect(booster.connect(alice).setProgression(progressionAddr)).to.be.revertedWithCustomError(
+        booster,
+        "NotDeployer"
+      );
+      await (await booster.setProgression(progressionAddr)).wait();
+      expect(await booster.progression()).to.equal(progressionAddr);
+      await expect(booster.setProgression(progressionAddr)).to.be.revertedWithCustomError(
+        booster,
+        "ProgressionAlreadySet"
+      );
+    });
+
+    it("a real burnFuel call records the burn on the wired progression contract", async () => {
+      const { plank, oracle, crash, booster, alice, bob } = await deploy();
+      const progression: any = await (
+        await ethers.getContractFactory("PlankProgression")
+      ).deploy(await crash.getAddress(), await booster.getAddress(), ethers.ZeroAddress);
+      await (await booster.setProgression(await progression.getAddress())).wait();
+
+      expect((await progression.statsOf(alice.address)).fuelBurns).to.equal(0n);
+      await crash.connect(alice).placeBet({ value: ethers.parseEther("1") });
+      await crash.connect(bob).placeBet({ value: ethers.parseEther("1") });
+      await prime(oracle);
+      const amt = ethers.parseEther("10");
+      await plank.connect(alice).approve(await booster.getAddress(), amt);
+      await (await booster.connect(alice).burnFuel(amt)).wait();
+      expect((await progression.statsOf(alice.address)).fuelBurns).to.equal(1n);
+    });
+  });
 });
