@@ -797,6 +797,7 @@ const $ = (id) => document.getElementById(id);
 // file doesn't exist (a real deploy with no local manifest, e.g. mainnet
 // static hosting) this silently keeps the hardcoded values -- never blocks
 // page load either way.
+let REMOTE_DEPLOY = false;
 async function loadDeployAddresses() {
   try {
     const res = await fetch("deploy-addresses.local.json", { cache: "no-store" });
@@ -809,6 +810,26 @@ async function loadDeployAddresses() {
     if (m.progression) PROGRESSION_ADDR = m.progression;
     if (m.beacon) BEACON_ADDR = m.beacon;
     if (m.crash) SIMULATE_ADDR = m.crash;
+    // "Simulate" assumes the well-known Hardhat mnemonic's accounts are
+    // pre-funded, which is only ever true against a fresh local node --
+    // it has no meaning against a real deployed chain. A manifest from
+    // scripts/testnet-casino-setup.ts sets `network`/`rpcUrl` to signal
+    // exactly that case, so the button can say so instead of failing with
+    // an opaque BAD_DATA "is the local node running?" error the first
+    // time someone clicks it on a hosted build.
+    if (m.network && m.network !== "local") {
+      REMOTE_DEPLOY = true;
+      if (m.rpcUrl) {
+        const rpcField = document.getElementById("rpc");
+        if (rpcField) rpcField.value = m.rpcUrl;
+      }
+      const simBtn = document.getElementById("simBtn");
+      if (simBtn) {
+        simBtn.textContent = "Simulate unavailable on " + m.network;
+        simBtn.disabled = true;
+        simBtn.title = "Simulate only works against a local Hardhat node -- use Connect Wallet with a custom private key instead.";
+      }
+    }
     console.log("[deploy-addresses] synced from deploy-addresses.local.json (generated " + (m.generatedAt || "?") + ")");
   } catch (_) { /* no manifest available -- keep the hardcoded fallbacks */ }
 }
@@ -2624,6 +2645,10 @@ async function startBotBettor() {
 }
 
 $("simBtn").addEventListener("click", async () => {
+  if (REMOTE_DEPLOY) {
+    toast("Simulate only works locally -- use Connect Wallet with a custom private key on this deploy.", "error");
+    return;
+  }
   try {
     await connectToChain(SIM_RPC, SIMULATE_ADDR, LOCAL_ACCOUNTS[0].pk, "Deployer (Simulate mode)");
     await startBotBettor();
