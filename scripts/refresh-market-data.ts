@@ -74,6 +74,7 @@ const explicit = [
   "--token-registry",
   "--owners",
   "--events",
+  "--multichain",
 ].filter((t) => args.has(t));
 
 /** Full runs include the expensive collection-wide rebuilds; incremental ones don't. */
@@ -81,8 +82,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -373,6 +374,21 @@ async function main(): Promise<void> {
     const { getCollectionIndex } = await import("../lib/market/collection-index");
     const index = await getCollectionIndex();
     return `${index.count}/${index.totalSupply} tokens`;
+  });
+
+  // Multi-chain collection index — completely independent of every step
+  // above (different tables, different upstream APIs, no Robinhood-chain
+  // dependency), so a failure here never blocks or is blocked by the rest
+  // of this run. See lib/market/multichain/ for the adapter architecture.
+  await step("multichain", async () => {
+    const { runMultichainSync } = await import("../lib/market/multichain/sync");
+    const run = await runMultichainSync();
+    return (
+      `${run.synced} synced, ${run.failed} failed, ${run.skipped} skipped` +
+      (run.errors.length > 0
+        ? ` — ${run.errors.slice(0, 5).map((e) => `${e.chainSlug}:${e.contractAddress.slice(0, 10)} (${e.error.slice(0, 60)})`).join("; ")}`
+        : "")
+    );
   });
 
   const failed = results.filter((r) => !r.ok);
