@@ -1,0 +1,124 @@
+/**
+ * DeFiLlama NFT API adapter (nft.llama.fi) -- Ethereum mainnet only.
+ *
+ * WHY THIS EXISTS
+ * ----------------
+ * The chase for a free EVM ranking API hit real dead ends this session:
+ * Reservoir/SimpleHash shut down in 2025; Magic Eden's Reservoir-powered
+ * v4 EVM API is PERMANENTLY retired (Magic Eden exited EVM/Bitcoin
+ * entirely, March-April 2026, confirmed via live 503s + news of the
+ * shutdown -- not a temporary outage); Moralis's documented
+ * hottest-collections/top-collections routes 404 on a verified-valid key
+ * (the SDK ships the route, the backend doesn't serve it -- looks
+ * deprecated, not plan-gated: the live dashboard has no Market Data
+ * product listed at all); NFTScan's key authenticates but every call,
+ * even the cheapest, 403s with "Up to maximum CU usage" on a brand-new
+ * account (the advertised free signup CU never actually landed).
+ *
+ * DeFiLlama's NFT endpoint is the one that actually works exactly as
+ * advertised: verified live 2026-08-17, GET https://nft.llama.fi/collections
+ * with NO auth, NO key, NO rate-limit hit across repeated calls, returning
+ * floor price + name + image + totalSupply for 4,118 tracked collections in
+ * one response. DeFiLlama is a long-running, widely-used, proven free data
+ * source (not a startup that might vanish next quarter) -- the strongest
+ * "actually free, actually works" find of this whole investigation.
+ *
+ * THE REAL LIMITATION
+ * --------------------
+ * Confirmed live: neither /collections nor /collection/:id expose a volume
+ * field -- only floorPrice + floorPricePctChange1Day/7Day. This adapter is
+ * therefore floor-price-ranking ONLY; discoverTopCollections({metric:
+ * "volume"}) returns an empty array rather than guessing or throwing (see
+ * that method's comment). Real top-by-volume EVM coverage still comes from
+ * this app's self-hosted activity ranking (see
+ * lib/market/multichain/discovery/evm-log-scan.ts's recordActivity /
+ * getTopByActivity), which is unaffected by any of this.
+ *
+ * Also confirmed live: no chain field is present on any record, and every
+ * spot-checked collectionId is an Ethereum mainnet contract address (the
+ * image CDN URLs are literally img.reservoir.tools, suggesting DeFiLlama's
+ * NFT tracking inherited its dataset from Reservoir's infrastructure before
+ * that shut down) -- so this adapter only maps to "eth-mainnet".
+ */
+import type { ChainAdapter, CollectionSnapshot, DiscoveredCollection } from "@/lib/market/multichain/types";
+
+type LlamaCollection = {
+  collectionId: string;
+  name: string | null;
+  symbol: string | null;
+  image: string | null;
+  totalSupply: number | null;
+  onSaleCount: number | null;
+  floorPrice: number | null;
+};
+
+const COLLECTIONS_URL = "https://nft.llama.fi/collections";
+
+// A single GET returns the whole dataset (~4k rows, no pagination) -- cache
+// it in-process for a short window so a batch of fetchSnapshot calls in one
+// sync run (see sync.ts) doesn't refetch 4k rows per collection.
+let cache: { at: number; rows: LlamaCollection[] } | null = null;
+const CACHE_TTL_MS = 60_000;
+
+async function fetchAllCollections(): Promise<LlamaCollection[]> {
+  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.rows;
+  const res = await fetch(COLLECTIONS_URL, { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`defillama-nft: ${res.status} ${res.statusText} fetching ${COLLECTIONS_URL}`);
+  const rows = (await res.json()) as LlamaCollection[];
+  cache = { at: Date.now(), rows };
+  return rows;
+}
+
+/**
+ * Same 18-decimal-equivalent wei string every other adapter in this
+ * directory uses -- DeFiLlama reports floorPrice as decimal ETH.
+ */
+function toWeiString(decimalAmount: number | null): string | null {
+  if (decimalAmount == null || !Number.isFinite(decimalAmount) || decimalAmount <= 0) return null;
+  const scaled = Math.round(decimalAmount * 1e9);
+  return (BigInt(scaled) * BigInt(1_000_000_000)).toString();
+}
+
+export const defillamaNftAdapter: ChainAdapter = {
+  name: "defillama-nft",
+  async fetchSnapshot({ contractAddress }): Promise<CollectionSnapshot> {
+    const rows = await fetchAllCollections();
+    const match = rows.find((r) => r.collectionId.toLowerCase() === contractAddress.toLowerCase());
+    if (!match) {
+      throw new Error(`defillama-nft: ${contractAddress} not in nft.llama.fi/collections`);
+    }
+    return {
+      name: match.name,
+      imageUrl: match.image,
+      externalUrl: null, // DeFiLlama's collection payload has no marketplace link field
+      floorPriceWei: toWeiString(match.floorPrice),
+      floorPriceCurrency: match.floorPrice != null ? "ETH" : null,
+      floorPriceMarketplace: match.floorPrice != null ? "defillama" : null,
+      totalSupply: match.totalSupply,
+      listedCount: match.onSaleCount,
+    };
+  },
+
+  async discoverTopCollections({ metric, limit }): Promise<DiscoveredCollection[]> {
+    if (metric === "volume") {
+      // Confirmed live: no volume field anywhere in this API. Returning []
+      // rather than throwing keeps discover-multichain-collections.ts's
+      // Promise.all([volume, floorPrice]) from failing the whole chain over
+      // a metric this source simply doesn't have -- the floorPrice half
+      // still runs.
+      return [];
+    }
+    const rows = await fetchAllCollections();
+    const ranked = [...rows]
+      .filter((r) => r.floorPrice != null && r.floorPrice > 0)
+      .sort((a, b) => (b.floorPrice ?? 0) - (a.floorPrice ?? 0))
+      .slice(0, limit);
+    return ranked.map((r, i) => ({
+      contractAddress: r.collectionId,
+      name: r.name,
+      imageUrl: r.image,
+      volumeRank: null,
+      floorPriceRank: i + 1,
+    }));
+  },
+};

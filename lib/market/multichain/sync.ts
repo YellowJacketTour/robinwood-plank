@@ -6,6 +6,7 @@
  */
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
 import { magicEdenSolanaAdapter } from "@/lib/market/multichain/adapters/magiceden-solana";
+import { defillamaNftAdapter } from "@/lib/market/multichain/adapters/defillama-nft";
 import {
   hasMultichainStore,
   listTrackedCollections,
@@ -17,6 +18,7 @@ import type { ChainAdapter } from "@/lib/market/multichain/types";
 const ADAPTERS: Record<string, ChainAdapter> = {
   [alchemyNftAdapter.name]: alchemyNftAdapter,
   [magicEdenSolanaAdapter.name]: magicEdenSolanaAdapter,
+  [defillamaNftAdapter.name]: defillamaNftAdapter,
 };
 
 /**

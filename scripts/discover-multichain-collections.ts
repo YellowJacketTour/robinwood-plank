@@ -20,17 +20,25 @@
  * one). That overlap is exactly what "remove dupes" resolves, per
  * contractAddress within a chain.
  */
-import { alchemyNftAdapter } from "../lib/market/multichain/adapters/alchemy-nft";
 import { magicEdenSolanaAdapter } from "../lib/market/multichain/adapters/magiceden-solana";
+import { defillamaNftAdapter } from "../lib/market/multichain/adapters/defillama-nft";
 import { hasMultichainStore, upsertTrackedCollection } from "../lib/market/multichain/store";
 import type { ChainAdapter, DiscoveredCollection } from "../lib/market/multichain/types";
 
 /**
  * Which chains this script tries to discover into. chainId is null for
  * non-EVM chains, matching plank_multichain_collections' schema.
+ *
+ * eth-mainnet appears TWICE, once per adapter, on purpose: alchemy-nft has
+ * no discoverTopCollections (no confirmed free EVM ranking source there),
+ * while defillama-nft does (see that adapter's header for why -- free,
+ * proven, no-auth, floor-price-only). Registering both means a discovered
+ * collection's `adapter` column ends up as whichever adapter discovered it
+ * first per contract; upsertTrackedCollection dedupes by (chainSlug,
+ * contractAddress) regardless of which adapter's sync it then uses.
  */
 const DISCOVERY_TARGETS: Array<{ chainSlug: string; chainId: number | null; adapter: ChainAdapter }> = [
-  { chainSlug: "eth-mainnet", chainId: 1, adapter: alchemyNftAdapter },
+  { chainSlug: "eth-mainnet", chainId: 1, adapter: defillamaNftAdapter },
   { chainSlug: "solana-mainnet", chainId: null, adapter: magicEdenSolanaAdapter },
 ];
 
