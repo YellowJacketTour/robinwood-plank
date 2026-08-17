@@ -127,6 +127,26 @@ export function foreignFeeRouterAddress(chainSlug: string): string | null {
 }
 
 /**
+ * MarketplankAcrossReceiver's deployed address per DESTINATION chain
+ * (contracts/MarketplankAcrossReceiver.sol). Same posture as
+ * FOREIGN_FEE_ROUTER_ADDRESS -- every entry null until a real, reviewed
+ * deployment happens on that specific chain. A null entry means the
+ * cross-chain-via-Across path is unavailable there; callers must fail
+ * closed, never guess an address.
+ */
+export const FOREIGN_ACROSS_RECEIVER_ADDRESS: Record<string, string | null> = {
+  "eth-mainnet": null,
+  "polygon-mainnet": null,
+  "arb-mainnet": null,
+  "base-mainnet": null,
+  "opt-mainnet": null,
+};
+
+export function foreignAcrossReceiverAddress(chainSlug: string): string | null {
+  return FOREIGN_ACROSS_RECEIVER_ADDRESS[chainSlug] ?? null;
+}
+
+/**
  * UI-DISPLAY ESTIMATE ONLY -- matches MarketplankForeignFeeRouter's
  * constructor argument at intended deployment time (1.8%, chosen to stay
  * "plank lore consistent," half of OpenSea's ~2.5% standard fee). The

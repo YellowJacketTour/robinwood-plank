@@ -47,7 +47,7 @@
  * in the first place (see lib/market/types.ts's Listing.venue doc).
  */
 import { Contract, BrowserProvider } from "ethers";
-import { foreignChainByChainSlug, foreignFeeRouterAddress } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { foreignChainByChainSlug, foreignFeeRouterAddress, foreignAcrossReceiverAddress } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getEthereumProvider, ensureChain } from "@/lib/wallet";
 
 /** Mirrors foreign-orders.ts's ForeignSeaportOrder shape -- redeclared here rather than imported, since importing that module's types would pull the whole (server-only) module along with them under some bundler configurations. */
@@ -238,4 +238,98 @@ export async function sweepForeignListings(input: {
   );
   await tx.wait();
   return { txHash: tx.hash, attempted: freshOrders.length };
+}
+
+const SPOKE_POOL_ABI = [
+  "function depositV3(address depositor,address recipient,address inputToken,address outputToken,uint256 inputAmount,uint256 outputAmount,uint256 destinationChainId,address exclusiveRelayer,uint32 quoteTimestamp,uint32 fillDeadline,uint32 exclusivityParameter,bytes calldata message) external payable",
+];
+
+export type AcrossPurchaseResult = { txHash: string };
+
+/**
+ * Pay on ANY Across-supported origin chain, receive an NFT purchased on a
+ * DIFFERENT (destination) chain via MarketplankAcrossReceiver -- the
+ * genuinely open-source, no-proprietary-middleman cross-chain path (see
+ * MarketplankAcrossReceiver.sol's header and lib/market/multichain/trading
+ * /across-quote.ts for the full verification this is built on).
+ *
+ * Ends with a real depositV3 call directly to the real, canonical,
+ * OpenZeppelin-audited Across SpokePool contract on the origin chain --
+ * NOT to any proprietary API. The quote route
+ * (app/api/market/multichain/across-quote) only builds calldata server-side
+ * (it needs the OpenSea key, which must never reach this client-side
+ * module -- same reason as fetchFulfillmentData/fetchFloorListingSummaries
+ * above); it never executes or custodies anything.
+ *
+ * ETH sent directly as msg.value (Across's own depositV3 explicitly
+ * supports this when inputToken is the chain's wrapped-native address --
+ * confirmed from SpokePool.sol's own doc comment: "the caller can
+ * optionally pass in native token as msg.value, provided msg.value =
+ * inputTokenAmount"), so no separate WETH wrap/approve step is needed on
+ * the origin chain.
+ */
+export async function buyCrossChainViaAcross(input: {
+  originChainId: number;
+  destinationChainSlug: string;
+  orderHash: string;
+  /** What the buyer is willing to pay on the origin chain, in wei -- must exceed the order price by enough to cover Across's relayer fee; across-quote.ts's own check will reject an insufficient amount rather than silently under-quoting. */
+  inputAmountWei: string;
+}): Promise<AcrossPurchaseResult> {
+  const receiverAddress = foreignAcrossReceiverAddress(input.destinationChainSlug);
+  if (!receiverAddress) {
+    throw new Error(
+      `foreign-fulfill: MarketplankAcrossReceiver is not yet deployed on ${input.destinationChainSlug} -- ` +
+        "cross-chain purchase via Across is intentionally unavailable until that happens."
+    );
+  }
+
+  const injected = getEthereumProvider();
+  if (!injected) throw new Error("No wallet found.");
+  await ensureChain({
+    chainId: input.originChainId,
+    name: `chain-${input.originChainId}`,
+    nativeCurrencySymbol: "ETH",
+    rpcUrl: "",
+    blockExplorerUrl: "",
+  });
+  const browserProvider = new BrowserProvider(injected, { chainId: input.originChainId, name: `chain-${input.originChainId}` });
+  const signer = await browserProvider.getSigner();
+  const buyerAddress = await signer.getAddress();
+
+  const res = await fetch("/api/market/multichain/across-quote", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      originChainId: input.originChainId,
+      destinationChainSlug: input.destinationChainSlug,
+      receiverAddress,
+      orderHash: input.orderHash,
+      recipient: buyerAddress,
+      inputAmount: input.inputAmountWei,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to build cross-chain quote (${res.status})`);
+  }
+  const { deposit } = (await res.json()) as { deposit: Record<string, unknown> };
+
+  const spokePool = new Contract(deposit.spokePoolAddress as string, SPOKE_POOL_ABI, signer);
+  const tx = await spokePool.depositV3(
+    buyerAddress,
+    receiverAddress,
+    deposit.inputToken,
+    deposit.outputToken,
+    deposit.inputAmount,
+    deposit.outputAmount,
+    deposit.destinationChainId,
+    deposit.exclusiveRelayer,
+    deposit.quoteTimestamp,
+    deposit.fillDeadline,
+    deposit.exclusivityParameter,
+    deposit.message,
+    { value: input.inputAmountWei }
+  );
+  await tx.wait();
+  return { txHash: tx.hash };
 }
