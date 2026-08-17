@@ -202,21 +202,55 @@ contract MarketplankForeignFeeRouter is ReentrancyGuard {
         bytes32 fulfillerConduitKey,
         uint256 orderPriceWei
     ) external payable nonReentrant {
+        _buyNow(order, criteriaResolvers, fulfillerConduitKey, orderPriceWei, msg.sender);
+    }
+
+    /**
+     * @notice Same as buyNow, but the NFT goes to an explicitly named
+     *         recipient instead of msg.sender -- for a caller that is
+     *         itself a contract acting on someone else's behalf (e.g.
+     *         MarketplankAcrossReceiver, receiving funds FROM Across on
+     *         behalf of a real end user who paid on a different chain).
+     *         Refunds of overpaid ETH still go to msg.sender, never
+     *         `recipient` -- the payer is who is owed change, not
+     *         necessarily who receives the NFT. Mirrors Seaport's own
+     *         fulfillAdvancedOrder, which already supports an explicit
+     *         recipient distinct from the fulfiller -- this is not new
+     *         risk, just exposing a capability Seaport itself already has.
+     */
+    function buyNowFor(
+        AdvancedOrder calldata order,
+        CriteriaResolver[] calldata criteriaResolvers,
+        bytes32 fulfillerConduitKey,
+        uint256 orderPriceWei,
+        address recipient
+    ) external payable nonReentrant {
+        if (recipient == address(0)) revert ZeroAddress();
+        _buyNow(order, criteriaResolvers, fulfillerConduitKey, orderPriceWei, recipient);
+    }
+
+    function _buyNow(
+        AdvancedOrder calldata order,
+        CriteriaResolver[] calldata criteriaResolvers,
+        bytes32 fulfillerConduitKey,
+        uint256 orderPriceWei,
+        address recipient
+    ) private {
         uint256 fee = (orderPriceWei * feeBps) / BPS_DENOMINATOR;
         uint256 required = orderPriceWei + fee;
         if (msg.value < required) revert InsufficientPayment(required, msg.value);
 
-        // Recipient = the buyer, not this contract -- the NFT never touches
-        // this router (see header comment). Seaport itself enforces that
-        // `order`'s consideration is satisfied by the ETH forwarded here; if
-        // it is not, Seaport reverts and this whole transaction reverts with
-        // it (nonReentrant + no state changes before this call means a
-        // revert here leaves nothing to unwind).
+        // Recipient = the named buyer, not this contract -- the NFT never
+        // touches this router (see header comment). Seaport itself
+        // enforces that `order`'s consideration is satisfied by the ETH
+        // forwarded here; if it is not, Seaport reverts and this whole
+        // transaction reverts with it (nonReentrant + no state changes
+        // before this call means a revert here leaves nothing to unwind).
         bool fulfilled = ISeaport(seaport).fulfillAdvancedOrder{value: orderPriceWei}(
             order,
             criteriaResolvers,
             fulfillerConduitKey,
-            msg.sender
+            recipient
         );
         if (!fulfilled) revert SeaportCallFailed();
 
@@ -227,14 +261,15 @@ contract MarketplankForeignFeeRouter is ReentrancyGuard {
         // external call above either reverts the whole transaction or is
         // the exact accounted-for amount, so this is the only place a
         // caller-controlled excess is returned, and reentrancy is already
-        // blocked for the whole function by nonReentrant.
+        // blocked for the whole function by nonReentrant. Goes to
+        // msg.sender (the payer), never `recipient` -- see buyNowFor's doc.
         uint256 refund = msg.value - required;
         if (refund > 0) {
             (bool refunded, ) = msg.sender.call{value: refund}("");
             if (!refunded) revert SeaportCallFailed();
         }
 
-        emit ForeignOrderFulfilled(msg.sender, orderPriceWei, fee);
+        emit ForeignOrderFulfilled(recipient, orderPriceWei, fee);
     }
 
     /**

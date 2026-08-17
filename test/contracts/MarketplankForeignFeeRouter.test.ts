@@ -229,6 +229,33 @@ describe("MarketplankForeignFeeRouter (REAL deployed Seaport bytecode)", () => {
     expect(router.interface.fragments.some((f: any) => f.type === "function" && /set(Fee|Recipient)/i.test(f.name ?? ""))).to.equal(false);
   });
 
+  it("PROOF: buyNowFor delivers the NFT to an explicit recipient distinct from the payer, refund still goes to the payer", async () => {
+    const order = await signedListing(5n);
+    const fee = (PRICE_WEI * FEE_BPS) / 10_000n;
+    const overpay = ethers.parseEther("0.02");
+    const [, , , someoneElse] = await ethers.getSigners();
+    const recipientAddr = await someoneElse.getAddress();
+
+    const buyerBalBefore = await ethers.provider.getBalance(buyerAddr);
+    const tx = await router.connect(buyer).buyNowFor(order, [], ZERO_HASH, PRICE_WEI, recipientAddr, {
+      value: PRICE_WEI + fee + overpay,
+    });
+    const receipt = await tx.wait();
+    const gasCost = receipt!.gasUsed * receipt!.gasPrice;
+
+    expect(await nft.ownerOf(TOKEN_ID)).to.equal(recipientAddr); // NFT to the named recipient, not the payer
+    const buyerBalAfter = await ethers.provider.getBalance(buyerAddr);
+    expect(buyerBalBefore - buyerBalAfter).to.equal(PRICE_WEI + fee + gasCost); // overpay refunded to the PAYER
+  });
+
+  it("buyNowFor rejects a zero-address recipient", async () => {
+    const order = await signedListing(6n);
+    const fee = (PRICE_WEI * FEE_BPS) / 10_000n;
+    await expect(
+      router.connect(buyer).buyNowFor(order, [], ZERO_HASH, PRICE_WEI, ZERO_ADDRESS, { value: PRICE_WEI + fee })
+    ).to.be.revertedWithCustomError(router, "ZeroAddress");
+  });
+
   describe("sweepBuy", () => {
     async function mintAndApprove(tokenId: bigint) {
       await nft.mint(sellerAddr, tokenId);
