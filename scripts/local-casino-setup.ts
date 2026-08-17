@@ -254,6 +254,23 @@ async function main() {
   await (await plank.mint(bob.address, ethers.parseEther("5000"))).wait();
   await (await plank.mint(carol.address, ethers.parseEther("5000"))).wait();
 
+  // PlankProgression -- Sapling -> Stick -> Board -> Plank -> Big Beam ->
+  // Wooden Whale. Optional; deployed and wired here so local dev always
+  // exercises the real, full stack. Unlike the crash/distributor/airdropPool
+  // cycle above, this needs no address prediction: it's deployed AFTER the
+  // three contracts it references, using their real (now-known) addresses,
+  // then wired into each via their own one-time setProgression() -- see
+  // PlankCrashDrand.setProgression's own comment for why that's a deployer-
+  // gated call rather than a constructor parameter or a fully open one.
+  const progression = await (
+    await ethers.getContractFactory("PlankProgression")
+  ).deploy(crashAddr, await fuelBooster.getAddress(), await airdropPool.getAddress());
+  await progression.waitForDeployment();
+  const progressionAddr = await progression.getAddress();
+  await (await crash.setProgression(progressionAddr)).wait();
+  await (await fuelBooster.setProgression(progressionAddr)).wait();
+  await (await airdropPool.setProgression(progressionAddr)).wait();
+
   // Real bug this closes: crash.html hardcodes contract addresses as JS
   // constants, and every fresh redeploy (a new node, or just re-running
   // this script) can hand out DIFFERENT addresses even with an identical
@@ -279,6 +296,7 @@ async function main() {
     distributor: await distributor.getAddress(),
     oracle: await oracle.getAddress(),
     burnEngine: await burnEngine.getAddress(),
+    progression: progressionAddr,
     testRig: TEST_RIG,
   };
   fs.writeFileSync(
@@ -298,6 +316,7 @@ async function main() {
   console.log(" PlankCrashDrand      :", crashAddr);
   console.log(" PlankBank            :", await bank.getAddress(), "(deposit -> instant session-key play -> withdraw)");
   console.log(" PlankFuelBooster     :", await fuelBooster.getAddress(), "(burn $PLANK -> boosts the shared Vault, never your own odds)");
+  console.log(" PlankProgression     :", progressionAddr, "(Sapling -> Stick -> Board -> Plank -> Big Beam -> Wooden Whale)");
   console.log(" PlankRakeDistributor :", await distributor.getAddress(), `(treasury of the crash)`);
   // Points OF THE POOL each leg actually receives, after the keeper carve.
   const rakePct = Number(RAKE_BPS) / 100;
