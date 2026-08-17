@@ -1702,12 +1702,13 @@ let crashedAt = null;
 let launchAt = null; // performance.now() at moment LIVE begins -- ignition kick
 let shakeAmount = 0;
 let padClampOpen = 0; // 0=closed (cradling the rocket), 1=open (launched), eased in frame()
-// 0..1, how fast the round is currently accelerating -- the contract's
-// real rate of climb (d bps / d elapsedBlocks = 400 + 40*elapsedBlocks)
-// grows linearly with elapsed blocks, i.e. the round genuinely speeds up
-// the longer it survives. Drives FOV punch-in, thruster intensity, and
-// engine rumble so that real acceleration is felt, not just displayed as
-// a bigger number -- eased in frame() so it climbs and releases smoothly.
+// 0..1, how fast the round is currently accelerating -- driven directly
+// off the SAME quadratic curve the on-screen multiplier itself climbs
+// (_multiplierAt), not a separate linear proxy for it (see frame()'s own
+// comment on the real bug that was). Drives FOV punch-in, thruster
+// intensity, and engine rumble so the number's real acceleration is
+// actually felt, not just displayed -- eased in frame() so it climbs and
+// releases smoothly rather than stepping.
 let velocityNorm = 0;
 const GATE_PROGRESS = 0.746; // where the wormhole gate sits, in flightProgress terms
 let warpTriggeredForRound = false; // resets on round change, so it can fire again next round
@@ -1753,14 +1754,22 @@ function frame() {
     // multiplier -> [0,1) altitude, smooth at every instant.
     const mExact = estBps / 10000;
     targetFlightProgress = 1 - 1 / (1 + (mExact - 1) / 2.5);
-    // The contract's real instantaneous rate of climb is the derivative
-    // of _multiplierAt: 40 + (2/5)*elapsedBlocks bps/block. Normalized
-    // against ~358 blocks (where the re-derived curve reaches ~5x --
-    // solved from 10000 + 40e + e^2/5 = 50000, not eyeballed) so it reads
-    // as "hit full intensity" around the point most rounds have already
-    // crashed, rather than needing an extreme multiplier to ever feel
-    // fast. This constant must move if the curve constants above ever do.
-    targetVelocityNorm = Math.min(1, estElapsedBlocks / 358);
+    // Real bug this fixes: velocityNorm (drives shake, thruster intensity,
+    // engine light, FOV punch-in -- everything that's supposed to SELL
+    // "it's accelerating, cash out") used to be estElapsedBlocks/358 -- a
+    // flat LINEAR ramp against raw elapsed time. But the number on screen
+    // is quadratic (_multiplierAt = 10000 + 40e + e^2/5, so its own rate
+    // of climb grows linearly with e, not constant) -- meaning the real
+    // multiplier visibly speeds up while the tension driving every other
+    // visual cue was climbing at a flat, constant rate the whole time. The
+    // number accelerated; the feel of it didn't. Driving straight off
+    // mExact (already computed above, already the exact same curve the
+    // readout shows) instead of a separate elapsed-time proxy makes
+    // velocityNorm inherit that same acceleration for free -- it's the
+    // same quadratic curve, not a hand-tuned imitation of one. Still hits
+    // full intensity around 5x (mExact-1)/4 == 1 at mExact==5), same
+    // "most rounds have already crashed by here" design target as before.
+    targetVelocityNorm = Math.min(1, (mExact - 1) / 4);
   } else if (phaseState === "betting" && bettingEndsAtEstimateMs !== null) {
     const secsLeft = Math.max(0, Math.ceil((bettingEndsAtEstimateMs - performance.now()) / 1000));
     // FUELING phase: on the launchpad the rocket charges from 0.00 up to
