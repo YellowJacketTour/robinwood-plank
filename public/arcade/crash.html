@@ -139,6 +139,37 @@
     border: 1px solid rgba(178,143,255,0.2); border-radius: 9px; font-size: 11px;
     color: #dcc8ff; line-height: 1.4; }
 
+  /* ── Progression: your rank (Sapling -> Wooden Whale), earned by playing --
+     amber/wood tone, distinct from the Vault's green and Powerboard's violet. */
+  .rank-stat { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+    border-radius: 999px; border: 1px solid rgba(224,168,84,0.35); color: #f0c98a;
+    background: rgba(224,168,84,0.08); cursor: pointer; user-select: none; }
+  .rank-stat b { color: #ffdca0; font-family: var(--font-display); font-weight: 400; }
+  .rank-stat.bump { animation: rank-bump 0.9s ease; }
+  @keyframes rank-bump {
+    0% { transform: scale(1); }
+    35% { transform: scale(1.15); box-shadow: 0 0 28px rgba(224,168,84,0.6); }
+    100% { transform: scale(1); }
+  }
+  .rank-popover { position: fixed; top: 54px; right: 16px; z-index: 70; width: 300px;
+    background: rgba(24,17,8,0.95); border: 1px solid rgba(224,168,84,0.35);
+    border-radius: 14px; padding: 14px 15px; backdrop-filter: blur(8px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.55); color: #fbe9cc;
+    opacity: 0; pointer-events: none; transform: translateY(-6px);
+    transition: opacity .25s ease, transform .25s ease; }
+  .rank-popover.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+  .rank-pop-head { display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #f0c98a;
+    font-weight: 700; margin-bottom: 6px; }
+  .rank-pop-close { cursor: pointer; color: var(--ink-dim); font-size: 13px; }
+  .rank-pop-close:hover { color: #fff; }
+  .rank-pop-sub { font-size: 11px; color: #d9b384; line-height: 1.45; margin-bottom: 10px; }
+  .rank-bar-track { height: 8px; border-radius: 999px; background: rgba(224,168,84,0.14);
+    overflow: hidden; margin: 8px 0 4px; }
+  .rank-bar-fill { height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, #b97f2d, #ffdca0); transition: width .4s ease; }
+  .rank-bar-label { font-size: 10.5px; color: #d9b384; text-align: right; }
+
   /* ── Verify popover: same shape as the Powerboard one, teal instead of
      violet so it reads as its own distinct trust surface. ────────────── */
   .verify-popover { position: fixed; top: 54px; right: 16px; z-index: 70; width: 320px;
@@ -555,6 +586,9 @@
       <span class="pb-stat" id="pbStat" title="Click for details" role="button" aria-label="Open Powerboard lottery details" tabindex="0">
         🎟 <b id="pbTickets">—</b><i id="pbJackpot"></i>
       </span>
+      <span class="rank-stat" id="rankStat" title="Click for details" role="button" aria-label="Open rank details" tabindex="0">
+        🪵 <b id="rankName">—</b>
+      </span>
       <span>POOL <b id="poolStat">—</b></span>
       <span>PLAYERS <b id="playersStat">—</b></span>
     </div>
@@ -571,6 +605,16 @@
     <div class="pb-pop-head">🎟 Powerboard <span class="pb-pop-close" id="pbPopClose" role="button" aria-label="Close Powerboard details" tabindex="0">✕</span></div>
     <div class="pb-pop-sub">Every crash bet earns you a lottery ticket automatically -- no extra cost, no separate purchase. More wagered = more tickets = better odds.</div>
     <div id="pbPopBody"></div>
+  </div>
+
+  <!-- Rank popover: every wallet levels up by playing -- Sapling through
+       Wooden Whale -- unlocking a bigger per-bet cap and a lower entry
+       premium as it goes. Makes the cap/premium math visible instead of a
+       silent revert the first time a bet is rejected. -->
+  <div id="rankPopover" class="rank-popover">
+    <div class="rank-pop-head">🪵 Rank <span class="rank-pop-close" id="rankPopClose" role="button" aria-label="Close rank details" tabindex="0">✕</span></div>
+    <div class="rank-pop-sub">Playing rounds and wagering ETH raises your rank, which raises your max bet and lowers the entry fee on larger bets. Sapling → Stick → Board → Plank → Big Beam → Wooden Whale.</div>
+    <div id="rankPopBody"></div>
   </div>
 
   <!-- Verify popover: PlankCrash's real trust story, made visible. Unlike
@@ -762,6 +806,7 @@ async function loadDeployAddresses() {
     if (m.fuelBooster) FUEL_BOOSTER_ADDR = m.fuelBooster;
     if (m.plank) PLANK_ADDR = m.plank;
     if (m.powerboard) POWERBOARD_ADDR = m.powerboard;
+    if (m.progression) PROGRESSION_ADDR = m.progression;
     if (m.beacon) BEACON_ADDR = m.beacon;
     if (m.crash) SIMULATE_ADDR = m.crash;
     console.log("[deploy-addresses] synced from deploy-addresses.local.json (generated " + (m.generatedAt || "?") + ")");
@@ -2106,6 +2151,22 @@ const POWERBOARD_ABI = [
 ];
 let powerboard = null;
 
+// ── Progression: every wallet has a rank (Sapling -> Stick -> Board ->
+// Plank -> Big Beam -> Wooden Whale) earned by playing, that raises the
+// per-bet cap and lowers the entry premium. Read-only view surface here --
+// recordBet/recordFuelBurn/recordPowerboardClaim are called by the wired
+// contracts themselves, never directly from the UI.
+let PROGRESSION_ADDR = "0x959922bE3CAee4b8Cd9a407cc3ac1C251C2007B1";
+const PROGRESSION_ABI = [
+  "function rankOf(address player) view returns (uint8)",
+  "function capFor(address player) view returns (uint256)",
+  "function wageredNeededForNextRank(address player) view returns (uint256)",
+  "function statsOf(address) view returns (uint32 roundsPlayed, uint128 cumulativeWagered, uint32 fuelBurns, uint32 powerboardClaims, uint40 firstBetAt)",
+];
+const RANK_NAMES = ["Sapling", "Stick", "Board", "Plank", "Big Beam", "Wooden Whale"];
+let progression = null;
+let lastKnownRank = null; // used to detect a rank-up moment across polls
+
 let bank = null; // bound to the root signer (deposit/withdraw/grant)
 let crashExt = null; // root signer, for setPayoutRedirect
 let sessionSigner = null; // ephemeral browser keypair
@@ -2465,12 +2526,16 @@ async function connectToChain(rpcUrl, address, pk, label) {
       powerboard = new ethers.Contract(POWERBOARD_ADDR, POWERBOARD_ABI, signer);
     } catch (_) { /* powerboard optional; game still works without it */ }
     try {
+      progression = new ethers.Contract(PROGRESSION_ADDR, PROGRESSION_ABI, signer);
+    } catch (_) { /* progression optional; game still works without it */ }
+    try {
       beaconContract = new ethers.Contract(BEACON_ADDR, BEACON_ABI, provider);
     } catch (_) { /* verify popover optional; game still works without it */ }
     if (typeof refreshBankUI === "function") refreshBankUI();
     if (typeof refreshVault === "function") refreshVault();
     if (typeof refreshFuelUI === "function") refreshFuelUI();
     if (typeof refreshPowerboardUI === "function") refreshPowerboardUI();
+    if (typeof refreshProgressionUI === "function") refreshProgressionUI();
     if (typeof tryRestoreSession === "function") tryRestoreSession();
   } catch (_) { /* bank optional; game still works without it */ }
   $("connDot").classList.add("on");
@@ -3037,6 +3102,60 @@ $("pbStat").addEventListener("click", () => {
 });
 $("pbPopClose").addEventListener("click", () => $("pbPopover").classList.remove("show"));
 
+async function refreshProgressionUI() {
+  if (!progression || !signer) return;
+  try {
+    const [rank, cap, wageredNeeded, stats] = await Promise.all([
+      progression.rankOf(signer.address),
+      progression.capFor(signer.address),
+      progression.wageredNeededForNextRank(signer.address),
+      progression.statsOf(signer.address),
+    ]);
+    const rankNum = Number(rank);
+    const rankName = RANK_NAMES[rankNum] || "—";
+
+    const nameEl = $("rankName");
+    if (nameEl) nameEl.textContent = rankName;
+
+    // Rank-up detection: only fires once we've actually observed a prior
+    // rank for this session (not on the very first poll after connect,
+    // which would otherwise "celebrate" a rank the player already had).
+    if (lastKnownRank !== null && rankNum > lastKnownRank) {
+      const chip = $("rankStat");
+      if (chip) { chip.classList.remove("bump"); void chip.offsetWidth; chip.classList.add("bump"); }
+      toast("Ranked up to " + rankName + "! Bigger bets unlocked.", "win");
+      if (typeof celebrate === "function") celebrate(4);
+    }
+    lastKnownRank = rankNum;
+
+    const pop = $("rankPopover");
+    if (pop && pop.classList.contains("show")) {
+      const isMaxRank = rankNum >= RANK_NAMES.length - 1;
+      const capStr = (+ethers.formatEther(cap)).toFixed(3);
+      const wageredStr = (+ethers.formatEther(stats.cumulativeWagered)).toFixed(4);
+      const nextStr = isMaxRank ? null : (+ethers.formatEther(wageredNeeded)).toFixed(4);
+      const barPct = isMaxRank ? 100 : Math.max(2, Math.min(100,
+        100 * Number(stats.cumulativeWagered) / Math.max(1, Number(stats.cumulativeWagered) + Number(wageredNeeded))));
+
+      $("rankPopBody").innerHTML =
+        '<div class="pb-row"><span class="pb-k">Rank</span><span class="pb-v hi">' + rankName + '</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Max bet</span><span class="pb-v">' + capStr + ' Ξ</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Rounds played</span><span class="pb-v">' + stats.roundsPlayed.toString() + '</span></div>' +
+        '<div class="pb-row"><span class="pb-k">Total wagered</span><span class="pb-v">' + wageredStr + ' Ξ</span></div>' +
+        (isMaxRank
+          ? '<div class="pb-guarantee">🏆 Max rank reached -- no cap, no entry fee.</div>'
+          : '<div class="rank-bar-track"><div class="rank-bar-fill" style="width:' + barPct.toFixed(1) + '%"></div></div>' +
+            '<div class="rank-bar-label">' + nextStr + ' Ξ more wagered to rank up</div>');
+    }
+  } catch (_) { /* transient */ }
+}
+
+$("rankStat").addEventListener("click", () => {
+  $("rankPopover").classList.toggle("show");
+  refreshProgressionUI();
+});
+$("rankPopClose").addEventListener("click", () => $("rankPopover").classList.remove("show"));
+
 // ── Verify popover: shows the CURRENT round's real drand round number and
 // its randomness, once revealed, straight from the beacon this contract
 // actually reads -- not a claim, a live on-chain read anyone else could
@@ -3203,6 +3322,11 @@ function friendlyRevertReason(err) {
     return "Betting just closed for this round -- try the next one.";
   }
   if (name === "StakeExceedsCap") {
+    if (progression && signer) {
+      return "That bet is above your current rank's max bet" +
+        (lastKnownRank !== null ? " (" + RANK_NAMES[lastKnownRank] + ")" : "") +
+        " -- keep playing to rank up and unlock bigger bets.";
+    }
     return "That bet would be too large a share of this round's pool -- try a smaller amount.";
   }
   if (name === "AlreadyBet") {
@@ -3622,7 +3746,7 @@ function startPolling() {
   // to 400ms; these are cheap read-only view calls against a local node,
   // not transactions, so there's no real cost to polling faster.
   pollTimer = setInterval(refresh, 400);
-  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); refreshFuelUI(); refreshPowerboardUI(); pollLiveBoard(); }, 600);
+  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); refreshFuelUI(); refreshPowerboardUI(); refreshProgressionUI(); pollLiveBoard(); }, 600);
 }
 
 // A per-tab client-side evm_mine heartbeat was tried here and was a real,
