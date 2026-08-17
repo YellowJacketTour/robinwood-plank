@@ -798,6 +798,9 @@ const $ = (id) => document.getElementById(id);
 // static hosting) this silently keeps the hardcoded values -- never blocks
 // page load either way.
 let REMOTE_DEPLOY = false;
+let REMOTE_NETWORK_NAME = "";
+let REMOTE_RPC_URL = "";
+let REMOTE_SIM_KEY = "";
 async function loadDeployAddresses() {
   try {
     const res = await fetch("deploy-addresses.local.json", { cache: "no-store" });
@@ -810,24 +813,35 @@ async function loadDeployAddresses() {
     if (m.progression) PROGRESSION_ADDR = m.progression;
     if (m.beacon) BEACON_ADDR = m.beacon;
     if (m.crash) SIMULATE_ADDR = m.crash;
-    // "Simulate" assumes the well-known Hardhat mnemonic's accounts are
-    // pre-funded, which is only ever true against a fresh local node --
-    // it has no meaning against a real deployed chain. A manifest from
-    // scripts/testnet-casino-setup.ts sets `network`/`rpcUrl` to signal
-    // exactly that case, so the button can say so instead of failing with
-    // an opaque BAD_DATA "is the local node running?" error the first
-    // time someone clicks it on a hosted build.
+    // Local Simulate assumes the well-known Hardhat mnemonic's accounts
+    // are pre-funded, which is only true against a fresh local node --
+    // meaningless against a real deployed chain, and used to fail with an
+    // opaque BAD_DATA "is the local node running?" error the first time
+    // someone clicked it on a hosted build. A manifest from
+    // scripts/testnet-casino-setup.ts instead carries its own rpcUrl (and
+    // optionally a simulateKey -- a shared, worthless-testnet-ETH burner
+    // key meant for exactly this one-click "friend can just play" case)
+    // so Simulate keeps working, just pointed at the real deploy instead
+    // of localhost.
     if (m.network && m.network !== "local") {
       REMOTE_DEPLOY = true;
+      REMOTE_NETWORK_NAME = m.network;
       if (m.rpcUrl) {
+        REMOTE_RPC_URL = m.rpcUrl;
         const rpcField = document.getElementById("rpc");
         if (rpcField) rpcField.value = m.rpcUrl;
       }
-      const simBtn = document.getElementById("simBtn");
-      if (simBtn) {
-        simBtn.textContent = "Simulate unavailable on " + m.network;
-        simBtn.disabled = true;
-        simBtn.title = "Simulate only works against a local Hardhat node -- use Connect Wallet with a custom private key instead.";
+      if (m.simulateKey) {
+        REMOTE_SIM_KEY = m.simulateKey;
+        const simBtn = document.getElementById("simBtn");
+        if (simBtn) simBtn.textContent = "▶ Simulate — plays on " + m.network;
+      } else {
+        const simBtn = document.getElementById("simBtn");
+        if (simBtn) {
+          simBtn.textContent = "Simulate unavailable on " + m.network;
+          simBtn.disabled = true;
+          simBtn.title = "This deploy has no Simulate key configured -- use Connect Wallet with a custom private key instead.";
+        }
       }
     }
     console.log("[deploy-addresses] synced from deploy-addresses.local.json (generated " + (m.generatedAt || "?") + ")");
@@ -2645,8 +2659,24 @@ async function startBotBettor() {
 }
 
 $("simBtn").addEventListener("click", async () => {
+  // Remote friend-test deploys (scripts/testnet-casino-setup.ts) carry
+  // their own rpcUrl + a shared simulateKey in the manifest -- same idea
+  // as local Simulate's hardcoded Hardhat account, just sourced from the
+  // deploy instead of a well-known local mnemonic. No bot-bettor: these
+  // deploys are configured with minParticipants=1, so a second bettor
+  // isn't needed the way it is for the real 2-participant local default.
   if (REMOTE_DEPLOY) {
-    toast("Simulate only works locally -- use Connect Wallet with a custom private key on this deploy.", "error");
+    if (!REMOTE_SIM_KEY) {
+      toast("This deploy has no Simulate key configured -- use Connect Wallet with a custom private key instead.", "error");
+      return;
+    }
+    try {
+      await connectToChain(REMOTE_RPC_URL, SIMULATE_ADDR, REMOTE_SIM_KEY, "Simulate (" + REMOTE_NETWORK_NAME + ")");
+      $("simBtn").classList.add("hide");
+      toast("Simulate mode: real contract on " + REMOTE_NETWORK_NAME + ", real testnet ETH");
+    } catch (err) {
+      toast("Simulate failed: " + err.message);
+    }
     return;
   }
   try {
