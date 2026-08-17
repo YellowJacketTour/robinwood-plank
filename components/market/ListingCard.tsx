@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { ExternalLink } from "lucide-react";
 import {
+  isCrossChainBuyable,
   isForeignListing,
   isMarketplankRelistRequired,
   MARKETPLANK_RELIST_MESSAGE,
@@ -25,6 +26,7 @@ import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { withImageWidth } from "@/lib/ipfs";
 import EthUsdValue from "@/components/market/EthUsdValue";
+import { chainDisplayName } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 type Props = {
   listing: Listing;
@@ -162,19 +164,21 @@ export default function ListingCard({
             </p>
             <EthUsdValue wei={listing.priceWei} className="block text-[0.62rem] tabular-nums text-foreground/50" />
           </div>
-          {isForeignListing(listing) ? (
+          {isForeignListing(listing) && !isCrossChainBuyable(listing) ? (
             /**
-             * Foreign listing: link out, never a Buy button. OpenSea's order
-             * routes through a conduit we do not control and PulpMarket's API
-             * exposes no signature at all, so a Buy here would be us promising
-             * a fill we cannot guarantee — the exact failure that made stale
-             * listings revert for buyers. A different label, a different
-             * colour and an outbound arrow mean nobody clicks expecting one
-             * flow and lands in another.
+             * Foreign listing with no genuine fulfillment path: link out,
+             * never a Buy button. PulpMarket's API exposes no signature at
+             * all, and a Robinhood-Chain-native OpenSea row routes through a
+             * conduit our own order-validation deliberately fails closed on
+             * — a Buy here would be us promising a fill we cannot guarantee,
+             * the exact failure that made stale listings revert for buyers.
+             * A different label, a different colour and an outbound arrow
+             * mean nobody clicks expecting one flow and lands in another.
              *
-             * Keyed on isForeignListing, never on one venue literal: a
-             * comparison against "opensea" would drop every other foreign
-             * venue into the Buy branch below.
+             * Keyed on isForeignListing && !isCrossChainBuyable, never on one
+             * venue literal: a comparison against "opensea" would drop every
+             * other foreign venue (or a legitimately buyable cross-chain
+             * OpenSea row) into the wrong branch.
              */
             <a
               href={listing.externalUrl}
@@ -204,7 +208,20 @@ export default function ListingCard({
               type="button"
               disabled={!canFill}
               onClick={() => onBuy?.(listing)}
-              title={canFill ? undefined : "You don't own a plank this bid can take."}
+              title={
+                !canFill
+                  ? "You don't own a plank this bid can take."
+                  : isCrossChainBuyable(listing)
+                    ? // Fee stated in THIS trade's own terms, not a blanket
+                      // number — surface-contracts.md's fee rule ("never
+                      // present one fee model as if it applied to all of
+                      // them") extended from vault copy to this cross-chain
+                      // path, since the foreign fee (1.8%, MarketplankForeignFeeRouter)
+                      // is genuinely different from the native Marketplank
+                      // fee model this same button uses elsewhere.
+                      `Settles on ${chainDisplayName(listing.foreignChainSlug!)} via ${venueLabel(listing)}. A 1.8% Marketplank fee is added on top of the listed price.`
+                    : undefined
+              }
               className={`min-h-11 rounded-md px-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-100 sm:px-3 sm:text-sm ${
                 isOffer
                   ? "min-w-16 bg-emerald-500 text-wood-950 hover:bg-emerald-400 sm:min-w-[4.25rem]"
@@ -221,6 +238,11 @@ export default function ListingCard({
            * OpenSea would make "unmarked" mean "ours" — an inference, and
            * inferences fail for anyone landing mid-scroll. Explicit costs a
            * little more ink and removes the ambiguity entirely.
+           *
+           * A cross-chain-buyable row adds the chain name too ("OpenSea ·
+           * Base") — venue alone would leave a real Buy button next to a
+           * price with no indication it settles on a different chain than
+           * the one the wallet is currently connected to.
            */
           <span
             className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[0.55rem] font-black uppercase tracking-wider ${
@@ -228,6 +250,7 @@ export default function ListingCard({
             }`}
           >
             {venueLabel(listing)}
+            {listing.foreignChainSlug ? ` · ${chainDisplayName(listing.foreignChainSlug)}` : ""}
           </span>
         )}
         <div className="flex items-center justify-between gap-2">

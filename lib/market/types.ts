@@ -70,12 +70,24 @@ export type Listing = {
    * a foreign orderbook: the collection genuinely trades elsewhere too, and
    * hiding that would show buyers an incomplete market.
    *
-   * Foreign listings are never given a Buy button. OpenSea's orders reference
-   * a conduit we do not control and pay no creator royalty, and our own
-   * order-validation deliberately fails closed on a non-zero conduitKey.
-   * PulpMarket's public API is read-only and exposes no signature at all, so
-   * there is nothing to fulfil even in principle. They link out instead, so
-   * the venue that settles the trade is the venue the buyer chose.
+   * On Robinhood Chain, foreign listings are never given a Buy button: an
+   * OpenSea order there references a conduit our own order-validation
+   * deliberately fails closed on (a Robinhood-Chain-specific safety rail
+   * against treating a foreign order as equivalent to our own book), and
+   * PulpMarket's public API is read-only with no signature at all, so there
+   * is nothing to fulfil even in principle.
+   *
+   * On a FOREIGN chain (see foreignChainSlug below), a "venue: opensea"
+   * listing CAN be genuinely bought — via
+   * lib/market/multichain/trading/foreign-fulfill.ts and the deployed
+   * MarketplankForeignFeeRouter, which calls the real Seaport contract
+   * directly rather than treating the order as part of our own book. That
+   * order-validation conduitKey rail doesn't apply here: it exists to
+   * protect the integrity of OUR orderbook, and a foreign-chain trade never
+   * touches it. Creator royalty is whatever the real order's own
+   * consideration embeds (OpenSea's own enforcement), not something this
+   * app adds or removes. Check isCrossChainBuyable(), not this field alone,
+   * before rendering a Buy affordance.
    *
    * TEST FOR "FOREIGN" WITH isForeignListing(), NEVER `venue === "opensea"`.
    * Absence-means-ours plus a widening union is a trap: a comparison against
@@ -85,7 +97,37 @@ export type Listing = {
   venue?: ListingVenue;
   /** Where to send the buyer for a foreign listing. */
   externalUrl?: string;
+  /**
+   * Present only for a listing sourced from a chain other than Robinhood
+   * Chain — one of lib/market/multichain/trading/foreign-chain-registry.ts's
+   * FOREIGN_CHAINS chainSlugs. Undefined means this listing is either ours
+   * or a Robinhood-Chain-native foreign listing (Pulp/legacy OpenSea rows).
+   */
+  foreignChainSlug?: string;
+  /**
+   * The real order hash, needed to fetch a genuinely fulfillable signed
+   * order via fetchListingFulfillmentData() immediately before signing —
+   * never cached, since OpenSea's summary/display data (what populates the
+   * rest of this Listing) carries no usable signature. Present only when
+   * this specific listing is known to be safely re-fetchable that way.
+   */
+  foreignOrderHash?: string;
 };
+
+/**
+ * True only for a foreign listing that can genuinely be bought in-app right
+ * now: sourced from OpenSea (the only venue with a proven fulfillment-data
+ * path — see foreign-orders.ts), tagged with the foreign chain it lives on,
+ * and carrying the order hash needed to re-fetch a real signature. Every
+ * other foreign listing (PulpMarket always; a Robinhood-Chain-native
+ * OpenSea row) stays View-only — see the Listing.venue doc comment for why
+ * those two cases are permanently different, not merely unimplemented.
+ */
+export function isCrossChainBuyable(
+  listing: Pick<Listing, "venue" | "foreignChainSlug" | "foreignOrderHash">
+): boolean {
+  return listing.venue === "opensea" && Boolean(listing.foreignChainSlug) && Boolean(listing.foreignOrderHash);
+}
 
 /**
  * True when this listing is held by a marketplace other than ours.

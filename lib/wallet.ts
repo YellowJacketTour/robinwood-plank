@@ -269,6 +269,92 @@ export async function ensureRobinhoodChain(): Promise<void> {
   }
 }
 
+/**
+ * Metadata needed to prompt a wallet to add/switch to a chain it may not
+ * already know about — the EIP-3085 wallet_addEthereumChain shape, kept
+ * minimal to exactly what that call needs.
+ */
+export type ChainSwitchTarget = {
+  chainId: number;
+  name: string;
+  nativeCurrencySymbol: string;
+  rpcUrl: string;
+  blockExplorerUrl: string;
+};
+
+/**
+ * Generalized version of switchToRobinhoodChain/ensureRobinhoodChain, for
+ * ANY target chain -- parameterized rather than duplicated, reusing the
+ * exact same battle-tested WalletConnect-timeout + wallet_addEthereumChain
+ * fallback logic (this app has real, documented wallet quirks around chain
+ * switching; a naive from-scratch version for foreign chains would have
+ * silently regressed all of that). Additive: switchToRobinhoodChain and
+ * ensureRobinhoodChain above are untouched, still the Robinhood-Chain path.
+ */
+export async function ensureChain(target: ChainSwitchTarget): Promise<void> {
+  let id: number;
+  try {
+    id = await getChainId();
+  } catch {
+    throw new Error("Could not read wallet network. Close modal, reconnect once.");
+  }
+  if (id === target.chainId) return;
+
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+  const chainIdHex = `0x${target.chainId.toString(16)}`;
+
+  const switchReq = () =>
+    provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chainIdHex }] });
+
+  const withTimeout = <T,>(p: Promise<T>, ms: number) =>
+    Promise.race([
+      p,
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("Network switch timed out")), ms)),
+    ]);
+
+  try {
+    await withTimeout(switchReq() as Promise<unknown>, isWalletConnectActive() ? 3000 : 12_000);
+  } catch (err) {
+    const code = (err as { code?: number })?.code;
+    if (code === 4902 || code === -32603 || code === -32601) {
+      try {
+        await withTimeout(
+          provider.request({
+            method: "wallet_addEthereumChain",
+            params: [
+              {
+                chainId: chainIdHex,
+                chainName: target.name,
+                nativeCurrency: { name: target.nativeCurrencySymbol, symbol: target.nativeCurrencySymbol, decimals: 18 },
+                rpcUrls: [target.rpcUrl],
+                blockExplorerUrls: [target.blockExplorerUrl],
+              },
+            ],
+          }) as Promise<unknown>,
+          isWalletConnectActive() ? 4000 : 15_000
+        );
+        await withTimeout(switchReq() as Promise<unknown>, 3000).catch(() => {});
+      } catch {
+        throw new Error(
+          isWalletConnectActive()
+            ? `Switch Rabby network to ${target.name} (chain ${target.chainId}), then retry.`
+            : `Add/switch to ${target.name} (chain ${target.chainId}) in your wallet, then retry.`
+        );
+      }
+    } else if (isWalletConnectActive()) {
+      throw new Error(`Switch Rabby network to ${target.name} (chain ${target.chainId}), then retry.`);
+    } else {
+      throw err;
+    }
+  }
+
+  const after = await getChainId();
+  if (after !== target.chainId) {
+    throw new Error(`Switch wallet network to ${target.name} (chain ${target.chainId}).`);
+  }
+}
+
 export function toHexQuantity(value: string | number | bigint): string {
   if (typeof value === "string" && value.startsWith("0x")) return value;
   // Uniswap often returns decimal strings like "86172000"
