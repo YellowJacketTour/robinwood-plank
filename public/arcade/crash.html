@@ -596,6 +596,7 @@
     <div class="gear" id="verifyBtn" title="Verify this round's randomness" role="button" aria-label="Verify this round's randomness" tabindex="0">🔒</div>
     <div class="gear" id="statsBtn" title="Stats" role="button" aria-label="Open stats and leaderboard" tabindex="0">📊</div>
     <div class="gear" id="gearBtn" title="Connection settings" role="button" aria-label="Open connection settings" tabindex="0">⚙</div>
+    <a class="gear hide" id="adminLinkBtn" href="dev-panel-testnet.html" title="Testnet admin panel" aria-label="Open the testnet admin panel" style="text-decoration: none; display: none">🛠</a>
   </div>
 
   <!-- Powerboard detail popover: every crash bet already earns a real,
@@ -826,6 +827,8 @@ async function loadDeployAddresses() {
     if (m.network && m.network !== "local") {
       REMOTE_DEPLOY = true;
       REMOTE_NETWORK_NAME = m.network;
+      const adminLink = document.getElementById("adminLinkBtn");
+      if (adminLink) adminLink.style.display = "";
       if (m.rpcUrl) {
         REMOTE_RPC_URL = m.rpcUrl;
         const rpcField = document.getElementById("rpc");
@@ -3003,6 +3006,7 @@ async function refreshVault() {
 // round's burn activity and what % bigger the next pot is because of it,
 // and lets the connected player burn straight from the panel.
 let fuelBusy = false;
+let fuelUiEverRendered = false;
 
 async function refreshFuelUI() {
   const body = $("fuelBody");
@@ -3046,8 +3050,18 @@ async function refreshFuelUI() {
       '<button id="flBurn">Burn</button></div>' +
       '<div class="fl-bal">Your balance: ' + (+ethers.formatEther(myBal)).toLocaleString(undefined, {maximumFractionDigits:2}) + ' $PLANK</div>';
     document.getElementById("flBurn").onclick = () => burnFuelAction(document.getElementById("flAmt").value);
+    fuelUiEverRendered = true;
   } catch (_) {
-    body.innerHTML = '<div class="fl-sub">Fuel booster not available on this deployment.</div>';
+    // A single failed poll (RPC hiccup/rate-limit, especially on a public
+    // remote RPC) shouldn't blank out an already-successful render -- that
+    // reads as the widget "coming in and out" every few seconds, which
+    // looks like a real bug even though the underlying contract call is
+    // fine. Only show the fallback message if we've never rendered real
+    // data yet, so a genuine "not available on this deployment" case still
+    // says so.
+    if (!fuelUiEverRendered) {
+      body.innerHTML = '<div class="fl-sub">Fuel booster not available on this deployment.</div>';
+    }
   }
 }
 
@@ -3800,8 +3814,21 @@ function startPolling() {
   // real remaining source of latency for those specific moments. Tightened
   // to 400ms; these are cheap read-only view calls against a local node,
   // not transactions, so there's no real cost to polling faster.
-  pollTimer = setInterval(refresh, 400);
-  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); refreshFuelUI(); refreshPowerboardUI(); refreshProgressionUI(); pollLiveBoard(); }, 600);
+  // The 400ms/600ms cadence above assumes a local node -- cheap, no rate
+  // limit. Robinhood Chain Testnet's public RPC is explicitly documented
+  // as rate-limited (see docs.robinhood.com/chain/connecting), and this
+  // page fires 5+ parallel read calls every poll across several widgets;
+  // at the local cadence that's enough request volume to intermittently
+  // 429 or time out, which read as REAL widgets (Fuel, Powerboard,
+  // Progression) failing and falling back to their "not available"
+  // message every few polls -- a visible flicker that looks like a bug
+  // but is really just RPC throttling. Backing off substantially on a
+  // REMOTE_DEPLOY fixes the flicker without losing correctness -- these
+  // are read-only view calls, not anything time-critical to a transaction.
+  const pollMs = REMOTE_DEPLOY ? 2500 : 400;
+  const pollMs2 = REMOTE_DEPLOY ? 4000 : 600;
+  pollTimer = setInterval(refresh, pollMs);
+  pollTimer2 = setInterval(() => { pollScoreboard(); refreshVault(); refreshFuelUI(); refreshPowerboardUI(); refreshProgressionUI(); pollLiveBoard(); }, pollMs2);
 }
 
 // A per-tab client-side evm_mine heartbeat was tried here and was a real,

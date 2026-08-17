@@ -51,12 +51,17 @@
 </style>
 </head>
 <body>
-<h1>⚙ PlankCrash — Testnet Admin Panel</h1>
+<div class="row" style="justify-content: space-between; margin-bottom: 4px">
+  <h1 style="margin: 0">⚙ PlankCrash — Testnet Admin Panel</h1>
+  <a href="crash.html" style="text-decoration: none">
+    <button type="button">▶ Play</button>
+  </a>
+</div>
 <div class="warn">
   PUBLIC TESTNET, worthless test ETH only. Talks directly to Robinhood Chain Testnet (chainId 46630) using
   a shared burner private key -- treat that key as public, never send anything of real value to it.
   DrandBeaconMock's setRandomness is permissionless, so outcomes here are riggable by design: this is a
-  private mechanics/UI test, not a fair public game. Play the actual game at <a href="crash.html">crash.html</a>.
+  private mechanics/UI test, not a fair public game.
 </div>
 
 <div id="status">paste the admin private key below to connect…</div>
@@ -183,7 +188,14 @@
 // to deploy scripts/testnet-casino-setup.ts. Every admin action here runs
 // as that same key; there's no "pick which local test account" concept
 // because there's only one funded account.
-const RPC_URL = "https://rpc.testnet.chain.robinhood.com";
+// The public RPC's own CORS header is malformed
+// ("Access-Control-Allow-Origin: *,*", duplicated) -- every browser fetch()
+// rejects that outright, even though curl/node don't enforce CORS at all
+// (which is exactly why this looked fine in every non-browser check).
+// Routed through this deploy's own /rpc Cloudflare Pages Function (see
+// functions/rpc.js in the staged bundle), which proxies to the real RPC
+// and returns a single valid header instead.
+const RPC_URL = "https://plankcrash-friend-test.pages.dev/rpc";
 const CHAIN_ID = 46630;
 
 // The admin key is entered at runtime (see connect() below), never

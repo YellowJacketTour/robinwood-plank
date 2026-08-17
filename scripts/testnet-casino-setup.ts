@@ -222,7 +222,13 @@ async function main() {
     generatedAt: new Date().toISOString(),
     network: "robinhood-testnet",
     chainId: 46630,
-    rpcUrl: "https://rpc.testnet.chain.robinhood.com",
+    // NOT the raw public RPC -- its CORS header is malformed ("*,*",
+    // duplicated) and every browser fetch() rejects it outright, even
+    // though non-browser checks (curl, node) never enforce CORS at all.
+    // Point at this deploy's own /rpc Cloudflare Pages Function (see
+    // functions/rpc.js) instead, which proxies to the real RPC and fixes
+    // the header. Update this if the friend-test site's domain changes.
+    rpcUrl: "https://plankcrash-friend-test.pages.dev/rpc",
     strict: STRICT,
     crash: crashAddr,
     bank: await bank.getAddress(),
