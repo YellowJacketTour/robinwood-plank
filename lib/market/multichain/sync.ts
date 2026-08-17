@@ -5,6 +5,7 @@
  * concurrently is how you earn a rate limit, not how you avoid one.
  */
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
+import { magicEdenSolanaAdapter } from "@/lib/market/multichain/adapters/magiceden-solana";
 import {
   hasMultichainStore,
   listTrackedCollections,
@@ -15,6 +16,7 @@ import type { ChainAdapter } from "@/lib/market/multichain/types";
 
 const ADAPTERS: Record<string, ChainAdapter> = {
   [alchemyNftAdapter.name]: alchemyNftAdapter,
+  [magicEdenSolanaAdapter.name]: magicEdenSolanaAdapter,
 };
 
 export type MultichainSyncResult = {

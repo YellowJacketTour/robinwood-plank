@@ -21,6 +21,16 @@ const SEED_COLLECTIONS = [
     adapter: "alchemy-nft",
     label: "Bored Ape Yacht Club (proof-of-concept — first non-Robinhood collection wired end-to-end)",
   },
+  {
+    chainSlug: "solana-mainnet",
+    chainId: null,
+    // Magic Eden's collection SYMBOL, not a contract address — see
+    // adapters/magiceden-solana.ts's header for why Solana has no ERC-721-
+    // style single contract address to key on.
+    contractAddress: "degods",
+    adapter: "magiceden-solana",
+    label: "DeGods (proof-of-concept — first non-EVM chain wired end-to-end)",
+  },
 ];
 
 async function main() {
