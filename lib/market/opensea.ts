@@ -181,7 +181,17 @@ export async function ensureOpenSeaKey(): Promise<KeyEnsureResult> {
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    if (!stored) {
+    // Re-read rather than trusting the `stored` captured at the top of this
+    // function: if another process (another Passenger worker, another cron
+    // overlap) successfully wrote a real key while THIS call was in flight,
+    // `stored` here is stale-null even though a good key now exists. Writing
+    // the empty placeholder unconditionally on stale-null was a real bug --
+    // confirmed live 2026-08-17, two ensureOpenSeaKey() calls close together
+    // clobbered a just-issued valid key with this placeholder. Only seed the
+    // placeholder (so openSeaKeyStatus has something sane to report on a
+    // true first-ever failure) if a FRESH read still finds nothing.
+    const freshlyStored = await readStored();
+    if (!freshlyStored) {
       await writeStored({
         apiKey: "",
         expiresAt: new Date(0).toISOString(),
