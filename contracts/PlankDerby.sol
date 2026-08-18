@@ -37,6 +37,7 @@ contract PlankDerby is ReentrancyGuard, PullPayment {
     uint256 public immutable minParticipants;
     uint256 public immutable minPoolSize;
     uint256 public immutable maxStakePerWalletBps; // of pool, e.g. 5000 = 50%
+    uint256 public immutable keeperRewardBps; // of rake, paid to whoever calls finishRace()
     address public immutable treasury;
 
     uint256 public accumulatedRake;
@@ -85,6 +86,7 @@ contract PlankDerby is ReentrancyGuard, PullPayment {
         uint256 _minParticipants,
         uint256 _minPoolSize,
         uint256 _maxStakePerWalletBps,
+        uint256 _keeperRewardBps,
         address _treasury
     ) {
         if (_treasury == address(0)) revert ZeroAddress();
@@ -95,6 +97,7 @@ contract PlankDerby is ReentrancyGuard, PullPayment {
         minParticipants = _minParticipants;
         minPoolSize = _minPoolSize;
         maxStakePerWalletBps = _maxStakePerWalletBps;
+        keeperRewardBps = _keeperRewardBps;
         treasury = _treasury;
         _startRace(0);
     }
@@ -187,7 +190,11 @@ contract PlankDerby is ReentrancyGuard, PullPayment {
     /// Draws the winning horse from the blockhash of a block that did not
     /// exist at lock time -- unknowable to anyone, including the deployer,
     /// until it is mined. Same entropy source and 256-block window
-    /// constraint as PlankCrashV2.revealEntropy().
+    /// constraint as PlankCrashV2.revealEntropy(). Permissionless, with a
+    /// real keeper reward out of the round's own rake (never out of
+    /// bettors' distributable pool) -- see voidStaleRound's own comment
+    /// for why this incentive matters given Robinhood Chain's real block
+    /// time.
     function finishRace(uint256 raceId) external nonReentrant {
         Race storage r = races[raceId];
         if (r.phase != Phase.LOCKED) revert BadPhase();
@@ -199,9 +206,37 @@ contract PlankDerby is ReentrancyGuard, PullPayment {
         r.distributable = (r.pool * (10000 - rakeBps)) / 10000;
         r.registrationDeadlineBlock = block.number + registrationWindowBlocks;
         r.phase = Phase.FINISHED;
-        accumulatedRake += r.pool - r.distributable;
+
+        uint256 rake = r.pool - r.distributable;
+        uint256 keeperReward = (rake * keeperRewardBps) / 10000;
+        accumulatedRake += rake - keeperReward;
+        if (keeperReward > 0) _asyncTransfer(msg.sender, keeperReward);
 
         emit RaceFinished(raceId, r.winningHorse);
+        _startRace(0);
+    }
+
+    /// Anti-griefing liveness fallback -- without this, a race that nobody
+    /// calls finishRace() on before blockhash(targetBlock) falls out of
+    /// the EVM's real 256-block window would hang in LOCKED forever with
+    /// every bettor's real stake trapped inside it (finishRace() itself
+    /// reverts once past that window, and no other function can move a
+    /// LOCKED race to any other phase). On Robinhood Chain's real ~100ms
+    /// block time that 256-block window is only ~25 real seconds --
+    /// exactly the same liveness gap PlankCrashV2.voidStaleRound() exists
+    /// to close for its own blockhash-based entropy, ported here
+    /// verbatim. Permissionless; voids exactly like an under-threshold
+    /// race in lockRace() -- pool total doesn't move automatically, each
+    /// bettor carries their own stake forward via the existing
+    /// carryForwardStake() path.
+    function voidStaleRound(uint256 raceId) external nonReentrant {
+        Race storage r = races[raceId];
+        if (r.phase != Phase.LOCKED) revert BadPhase();
+        if (block.number <= r.targetBlock + 256) revert TooEarly();
+
+        emit RaceVoided(raceId, r.pool, "target-block-expired");
+        voided[raceId] = true;
+        r.phase = Phase.SETTLED;
         _startRace(0);
     }
 

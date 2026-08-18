@@ -22,6 +22,7 @@ async function main() {
   const MIN_PARTICIPANTS = 2n;
   const MIN_POOL = ethers.parseEther("0.01");
   const MAX_STAKE_BPS = 6000n; // 60%
+  const KEEPER_REWARD_BPS = 1000n; // 10% of the rake, same convention as crash's local setup
 
   const Derby = await ethers.getContractFactory("PlankDerby");
   const derby = await Derby.deploy(
@@ -32,6 +33,7 @@ async function main() {
     MIN_PARTICIPANTS,
     MIN_POOL,
     MAX_STAKE_BPS,
+    KEEPER_REWARD_BPS,
     treasury.address
   );
   await derby.waitForDeployment();

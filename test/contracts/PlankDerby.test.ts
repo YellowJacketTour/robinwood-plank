@@ -20,6 +20,7 @@ describe("PlankDerby", () => {
   // 50% boundary. 50% is the tightest cap this suite's roughly-equal test
   // bettors can mathematically clear.
   const MAX_STAKE_BPS = 5000n; // 50%
+  const KEEPER_REWARD_BPS = 1000n; // 10% of the rake, not of bettors' distributable pool -- same convention as PlankCrashV2.test.ts
 
   async function deployDerby() {
     const [, treasury, alice, bob, carol] = await ethers.getSigners();
@@ -32,6 +33,7 @@ describe("PlankDerby", () => {
       MIN_PARTICIPANTS,
       MIN_POOL,
       MAX_STAKE_BPS,
+      KEEPER_REWARD_BPS,
       treasury.address
     );
     return { derby, treasury, alice, bob, carol };
@@ -215,5 +217,86 @@ describe("PlankDerby", () => {
     await derby.claimRake();
     await derby.connect(treasury).withdrawPayments(treasury.address);
     expect(await derby.accumulatedRake()).to.equal(0n);
+  });
+
+  // ── Liveness: the target-block escape hatch (real fund-loss finding, fixed 2026-08-19) ──
+
+  it("voidStaleRound reverts before the blockhash window actually expires", async () => {
+    const { derby, alice, bob } = await deployDerby();
+    const raceId = await derby.currentRaceId();
+    await derby.connect(alice).placeBet(0, { value: ethers.parseEther("0.01") });
+    await derby.connect(bob).placeBet(1, { value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(derby);
+
+    await expect(derby.voidStaleRound(raceId)).to.be.revertedWithCustomError(derby, "TooEarly");
+  });
+
+  it("voidStaleRound rescues a race nobody called finishRace() on before the blockhash window expires, and the stake carries forward -- without this, every bettor's stake would be permanently stranded", async () => {
+    const { derby, alice, bob } = await deployDerby();
+    const raceId = await derby.currentRaceId();
+    await derby.connect(alice).placeBet(0, { value: ethers.parseEther("0.01") });
+    await derby.connect(bob).placeBet(1, { value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(derby);
+
+    const race = await derby.races(raceId);
+    const current = await ethers.provider.getBlockNumber();
+    await networkHelpers.mine(Number(race.targetBlock) - current + 257);
+
+    // Confirm finishRace() itself is now permanently unsatisfiable for this
+    // race (the exact stuck state voidStaleRound exists to rescue from).
+    await expect(derby.finishRace(raceId)).to.be.revertedWithCustomError(derby, "TargetBlockExpired");
+
+    await derby.voidStaleRound(raceId);
+    expect(await derby.voided(raceId)).to.equal(true);
+
+    await derby.connect(alice).carryForwardStake(raceId);
+    const nextRaceId = await derby.currentRaceId();
+    expect(await derby.stakeOf(nextRaceId, alice.address)).to.equal(ethers.parseEther("0.01"));
+  });
+
+  it("voidStaleRound reverts on a race that already finished normally", async () => {
+    const { derby, alice, bob } = await deployDerby();
+    const raceId = await derby.currentRaceId();
+    await derby.connect(alice).placeBet(0, { value: ethers.parseEther("0.01") });
+    await derby.connect(bob).placeBet(1, { value: ethers.parseEther("0.01") });
+    await closeBettingAndLock(derby);
+    await mineToTargetAndFinish(derby, raceId);
+
+    await expect(derby.voidStaleRound(raceId)).to.be.revertedWithCustomError(derby, "BadPhase");
+  });
+
+  // ── Keeper incentive (finishRace() stays timely with no operator bot watching) ──
+
+  it("finishRace() pays its caller a real reward carved from the rake, not from bettors' distributable pool", async () => {
+    const { derby, treasury, alice, bob } = await deployDerby();
+    const raceId = await derby.currentRaceId();
+    await derby.connect(alice).placeBet(0, { value: ethers.parseEther("1") });
+    await derby.connect(bob).placeBet(1, { value: ethers.parseEther("1") });
+    await closeBettingAndLock(derby);
+
+    const race = await derby.races(raceId);
+    const target = race.targetBlock;
+    const current = await ethers.provider.getBlockNumber();
+    const toMine = Number(target) - current + 1;
+    if (toMine > 0) await networkHelpers.mine(toMine);
+
+    // A third party (not a bettor, not the treasury) calls finishRace --
+    // the exact "nobody's tab needs to be open" scenario this exists for.
+    const [, , , , , keeper] = await ethers.getSigners();
+    await derby.connect(keeper).finishRace(raceId);
+
+    const finished = await derby.races(raceId);
+    const totalRake = finished.pool - finished.distributable;
+    const expectedKeeperCut = (totalRake * KEEPER_REWARD_BPS) / 10000n;
+    expect(expectedKeeperCut).to.be.gt(0n);
+
+    await derby.connect(keeper).withdrawPayments(keeper.address);
+    const keeperBalance = await ethers.provider.getBalance(keeper.address);
+    expect(keeperBalance).to.be.gt(0n);
+
+    // The remainder still went to the treasury's normal rake path,
+    // undiminished beyond the keeper's carved-out share.
+    await derby.claimRake();
+    await derby.connect(treasury).withdrawPayments(treasury.address);
   });
 });
