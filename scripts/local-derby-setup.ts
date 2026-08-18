@@ -16,7 +16,7 @@ async function main() {
   const [deployer, treasury] = await ethers.getSigners();
 
   const BETTING_SECONDS = 20;
-  const REVEAL_DELAY_BLOCKS = 2;
+  const MAX_AWAIT_BLOCKS = 300; // same convention as PlankCrashDrand's local setup
   const REGISTRATION_WINDOW_BLOCKS = 50;
   const RAKE_BPS = 250n; // 2.5%
   const MIN_PARTICIPANTS = 2n;
@@ -24,17 +24,28 @@ async function main() {
   const MAX_STAKE_BPS = 6000n; // 60%
   const KEEPER_REWARD_BPS = 1000n; // 10% of the rake, same convention as crash's local setup
 
+  // Local dev-only beacon, same pattern as local-casino-setup.ts's own
+  // PlankCrashDrand stack -- real drand genesis/period so targetDrandRound
+  // math matches a real deploy, randomness injected via setRandomness()
+  // instead of a relayed BLS signature. See DrandBeaconMock.sol: TEST ONLY.
+  const DRAND_PERIOD = 3n;
+  const DRAND_GENESIS = 1727521075n;
+  const beacon = await (await ethers.getContractFactory("DrandBeaconMock")).deploy(DRAND_PERIOD, DRAND_GENESIS);
+  await beacon.waitForDeployment();
+  const beaconAddr = await beacon.getAddress();
+
   const Derby = await ethers.getContractFactory("PlankDerby");
   const derby = await Derby.deploy(
     BETTING_SECONDS,
-    REVEAL_DELAY_BLOCKS,
+    MAX_AWAIT_BLOCKS,
     REGISTRATION_WINDOW_BLOCKS,
     RAKE_BPS,
     MIN_PARTICIPANTS,
     MIN_POOL,
     MAX_STAKE_BPS,
     KEEPER_REWARD_BPS,
-    treasury.address
+    treasury.address,
+    beaconAddr
   );
   await derby.waitForDeployment();
   const derbyAddr = await derby.getAddress();
@@ -61,10 +72,11 @@ async function main() {
   console.log(" PlankDerby local dev stack is live on http://127.0.0.1:8545 (chainId 31337)");
   console.log("========================================================");
   console.log(" PlankDerby address :", derbyAddr);
+  console.log(" DrandBeacon (mock) :", beaconAddr);
   console.log(" Treasury (acct #1) :", treasury.address);
   console.log(" Horses             : 6 (id 0-5)");
   console.log(" Betting window     :", BETTING_SECONDS, "seconds");
-  console.log(" Reveal delay       :", REVEAL_DELAY_BLOCKS, "blocks after lock");
+  console.log(" Max await (void)   :", MAX_AWAIT_BLOCKS, "blocks after lock");
   console.log(" Whale cap          :", (Number(MAX_STAKE_BPS) / 100).toFixed(0) + "%");
   console.log(" Min pool / players :", ethers.formatEther(MIN_POOL), "ETH /", MIN_PARTICIPANTS.toString());
   console.log("\n--- paste into public/arcade/derby.html's config, or your wallet ---");
