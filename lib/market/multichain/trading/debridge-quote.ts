@@ -42,6 +42,36 @@ const BNB_CHAIN_ID = 56;
 
 const DEBRIDGE_API = "https://dln.debridge.finance/v1.0";
 
+/**
+ * CRITICAL, fixed 2026-08-19: the buyer's real BNB/stablecoin value is
+ * approved to and sent directly to whatever address this API's response
+ * puts in `tx.to` (see foreign-fulfill.ts's buyCrossChainViaDeBridge,
+ * which approves and sends to it unconditionally). Before this fix,
+ * `tx.to` was trusted straight from this file's own unauthenticated,
+ * keyless HTTP response with no runtime check at all -- the address this
+ * header used to only document in a COMMENT ("confirmed live... as the
+ * real tx.to") was never actually compared against anything at runtime.
+ * This is the EXACT SAME vulnerability class across-quote.ts's own header
+ * already documents fixing for `spokePoolAddress` -- a compromised,
+ * DNS-hijacked, or MITM'd response to this one fetch call could otherwise
+ * redirect a real fund transfer to an attacker's contract. The ONLY
+ * source of truth for this address is this hardcoded constant, sourced
+ * from deBridge's own real, audited "Crosschain Forwarder Proxy" contract
+ * (cross-checked against a real search result and this API's own response
+ * during initial integration) -- an unexpected `tx.to` must fail loudly,
+ * never silently proceed.
+ */
+export const KNOWN_DEBRIDGE_FORWARDER = "0x663DC15D3C1aC63ff12E45Ab68FeA3F0a883C251";
+
+/** Pure, directly-testable allowlist check -- separated from quoteDeBridgeCrossChainPurchase so this specific fund-safety invariant has real, isolated test coverage without needing to mock the whole order-fetch + deBridge-quote network chain. */
+export function assertKnownDeBridgeForwarder(txTo: string): void {
+  if (txTo.toLowerCase() !== KNOWN_DEBRIDGE_FORWARDER.toLowerCase()) {
+    throw new Error(
+      `debridge-quote: API returned an unexpected tx.to (${txTo}) -- expected the verified Crosschain Forwarder Proxy (${KNOWN_DEBRIDGE_FORWARDER}). Refusing to approve or send real funds to an unverified address.`
+    );
+  }
+}
+
 /** Canonical wrapped-native-token address per chain deBridge genuinely routes for this app -- BNB Chain only today (see header on why Across covers the rest). */
 const WRAPPED_NATIVE: Record<number, string> = {
   56: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", // WBNB, verified live (3,124 bytes real bytecode)
@@ -141,5 +171,6 @@ export async function quoteDeBridgeCrossChainPurchase(input: {
     throw new Error(`debridge-quote: ${res.status} ${body.errorMessage ?? body.errorId ?? "unknown error"}`);
   }
   const result = (await res.json()) as { tx: DeBridgeDepositTx };
+  assertKnownDeBridgeForwarder(result.tx.to);
   return { orderPriceWei, tx: result.tx };
 }
