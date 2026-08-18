@@ -50,14 +50,22 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const [collectionsRes, listingsRes] = await Promise.all([
-        fetch("/api/market/multichain").then((r) => r.json()),
-        fetch(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=40`).then((r) => r.json()),
-      ]);
-      const tracked = (collectionsRes.collections ?? []).find(
-        (c: { chainSlug: string; contractAddress: string }) =>
-          c.chainSlug === chainSlug && c.contractAddress.toLowerCase() === collectionSlug.toLowerCase()
+      // Collection identity comes from the SAME response as the listings.
+      // An earlier version looked it up in /api/market/multichain by
+      // matching contractAddress against collectionSlug -- those are
+      // different identifiers entirely (an OpenSea slug like "gribbits" is
+      // never a 0x address), so the lookup silently never matched and every
+      // card fell back to an EMPTY image src. Real-browser loading caught
+      // it: 120 console errors and an art-less grid. One source, no
+      // cross-referencing by mismatched key.
+      const res = await fetch(
+        `/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=40`
       );
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as {
+        collection: { slug: string; name: string; imageUrl: string | null; contractAddress: string };
+        listings: Listing[];
+      };
       // MarketCollection carries Robinhood-Chain-specific bookkeeping
       // (feeBps/royaltyBps/royaltyRecipient) that has no meaning for a
       // foreign collection -- real royalty is whatever the real Seaport
@@ -66,17 +74,17 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       // a gap: ListingCard/BuyConfirm only read collection.name/image for
       // a cross-chain listing's display, never these fields.
       setCollection({
-        slug: collectionSlug,
-        name: tracked?.name ?? collectionSlug,
-        contractAddress: collectionSlug,
+        slug: data.collection.slug,
+        name: data.collection.name,
+        contractAddress: data.collection.contractAddress,
         tokenStandard: "ERC721",
-        image: tracked?.imageUrl ?? "",
+        image: data.collection.imageUrl ?? "",
         trustBadges: [],
         feeBps: 0,
         royaltyBps: 0,
         royaltyRecipient: "0x0000000000000000000000000000000000000000",
       });
-      setListings((listingsRes.listings ?? []) as Listing[]);
+      setListings(data.listings ?? []);
     } catch {
       setLoadError("Could not load this collection's listings right now.");
     } finally {
