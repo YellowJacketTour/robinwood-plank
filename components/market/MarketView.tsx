@@ -1251,6 +1251,18 @@ export default function MarketView() {
               labelled={false}
             >
               <div className="space-y-3">
+                {/* Quiet link, not a headline -- same precedent as
+                    /floorboards' own footer/hint-only entry point
+                    (docs/surface-contracts.md). The fixed six-tab rail
+                    cannot gain a seventh tab for this, so the global
+                    multichain market gets a small text link here instead
+                    of new tab-rail real estate. */}
+                <a
+                  href="/market/multichain"
+                  className="inline-flex items-center gap-1 text-xs font-bold text-gold-300 hover:text-gold-200"
+                >
+                  Explore the global market (all chains) →
+                </a>
                 <EventCountdown />
                 {COLLECTION && (
                   <CollectionStats
