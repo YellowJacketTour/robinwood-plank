@@ -45,7 +45,7 @@ import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, recordActivity, getTopByActivity } from "@/lib/market/multichain/store";
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
 
-const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
 /** Mirrors alchemy-nft.ts's ALCHEMY_NETWORK_SUBDOMAIN chainSlug set. */
 const EVM_CHAIN_ID: Record<string, number> = {
@@ -101,12 +101,12 @@ type RawLog = { address: string; topics: string[]; blockNumber: string };
  *      keyword list -- a real naming convention observed across every
  *      confirmed example this session found.
  */
-function isNotRealCollectibleArt(name: string | null, imageUrl: string | null): boolean {
+export function isNotRealCollectibleArt(name: string | null, imageUrl: string | null): boolean {
   if (!name || !imageUrl) return true;
   return /\bposition(s)?\b|\bmaker order\b|\borderbook\b/i.test(name);
 }
 
-async function rpcCall<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
+export async function rpcCall<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
   const res = await fetch(rpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -117,7 +117,7 @@ async function rpcCall<T>(rpcUrl: string, method: string, params: unknown[]): Pr
   return json.result as T;
 }
 
-async function readCursor(chainSlug: string): Promise<number | null> {
+export async function readCursor(chainSlug: string): Promise<number | null> {
   const result = await postgresQuery<{ last_scanned_block: string }>(
     `SELECT last_scanned_block FROM plank_multichain_discovery_cursor WHERE chain_slug = $1`,
     [chainSlug]
@@ -125,7 +125,7 @@ async function readCursor(chainSlug: string): Promise<number | null> {
   return result.rows[0] ? Number(result.rows[0].last_scanned_block) : null;
 }
 
-async function writeCursor(chainSlug: string, block: number): Promise<void> {
+export async function writeCursor(chainSlug: string, block: number): Promise<void> {
   await postgresQuery(
     `INSERT INTO plank_multichain_discovery_cursor (chain_slug, last_scanned_block, updated_at)
      VALUES ($1, $2, NOW())

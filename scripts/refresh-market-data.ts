@@ -76,6 +76,7 @@ const explicit = [
   "--events",
   "--multichain",
   "--discover-evm",
+  "--discover-robinhood",
   "--own-ranking",
   "--scaffold-rarity",
 ].filter((t) => args.has(t));
@@ -95,8 +96,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "own-ranking", "scaffold-rarity"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "own-ranking"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-robinhood", "own-ranking", "scaffold-rarity"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-robinhood", "own-ranking"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -419,6 +420,17 @@ async function main(): Promise<void> {
         : `${r.chainSlug}: blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidates} candidates, ${r.skippedNoMetadata} no-metadata)`
     );
     return parts.join("; ");
+  });
+
+  // "Stage B" for the HOME chain itself -- see robinhood-chain-scan.ts's
+  // own header for why this can't reuse discover-evm's Alchemy-metadata
+  // validation (Robinhood Chain is a private Orbit L3 Alchemy doesn't
+  // list). Runs the same conservative CHUNK_BLOCKS window every tick,
+  // same cadence as every other discovery step.
+  await step("discover-robinhood", async () => {
+    const { runRobinhoodChainDiscoveryScan } = await import("../lib/market/multichain/discovery/robinhood-chain-scan");
+    const r = await runRobinhoodChainDiscoveryScan();
+    return `blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidatesSeen} candidates, ${r.skippedNotArt} not-art)`;
   });
 
   // The reverse-engineered ranking source: Magic Eden's Reservoir-powered
