@@ -10,7 +10,7 @@ import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign
 import { TRANSFER_TOPIC, rpcCall } from "@/lib/market/multichain/discovery/evm-log-scan";
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 import { publicError, rateLimit } from "@/lib/security";
-import { isSolanaChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -157,7 +157,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ tokenIds: [], items: [] }, { headers: { "Cache-Control": "no-store" } });
   }
 
-  if (chainSlug === "robinhood") {
+  if (isRobinhoodChainSlug(chainSlug)) {
     try {
       const rpcUrl = ROBINHOOD_RPC_URLS[0];
       if (!rpcUrl) {

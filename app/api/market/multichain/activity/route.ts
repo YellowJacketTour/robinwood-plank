@@ -18,7 +18,7 @@ import { getCollectionAsync } from "@/lib/market/collections-server";
 import { TRANSFER_TOPIC, rpcCall } from "@/lib/market/multichain/discovery/evm-log-scan";
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 import { publicError, rateLimit } from "@/lib/security";
-import { isSolanaChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -78,11 +78,23 @@ export async function GET(req: NextRequest) {
   // Robinhood Chain: no OpenSea events endpoint, and no permanent ledger for
   // an arbitrary auto-discovered collection (see ACTIVITY_SCAN_BLOCKS's own
   // comment) -- so this scans real raw Transfer logs directly. HONEST
-  // LIMITATION: there is no price oracle for these auto-discovered
-  // collections the way OpenSea's payment data supplies one for a real
-  // foreign chain, so every event here is reported as a plain "transfer"
-  // with priceWei: null rather than guessing which transfers were sales.
-  if (chainSlug === "robinhood") {
+  // LIMITATION, DELIBERATELY NOT WORKED AROUND: the ONLY thing fetched
+  // below is eth_getLogs against the NFT contract's own Transfer topic --
+  // no native-value, no ERC-20 "payment" log, and no marketplace/Seaport
+  // event from the same transaction is fetched alongside it. That means
+  // there genuinely is no real sale-vs-gift signal available from this
+  // data alone: distinguishing a real sale would need at least one more
+  // RPC call per candidate tx (eth_getTransactionByHash for its `value`,
+  // or a second eth_getLogs pass for a paired ERC-20/Seaport
+  // OrderFulfilled log in the same transactionHash) to see whether real
+  // payment moved alongside the Transfer -- work this pass does not do.
+  // So every event here is reported as a plain "transfer" with
+  // priceWei: null rather than guessing which transfers were sales; this
+  // is why Volume/Highest-sale can never populate for a Robinhood-Chain
+  // collection today, not a bug to silently work around with a fabricated
+  // heuristic (same "honest gap over fabricated data" discipline as
+  // ACTIVITY_SCAN_BLOCKS's own comment above).
+  if (isRobinhoodChainSlug(chainSlug)) {
     try {
       const collection = await getCollectionAsync(collectionSlug);
       if (!collection) {

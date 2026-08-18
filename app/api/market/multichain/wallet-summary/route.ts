@@ -28,6 +28,7 @@ import { resolveOwnedTokenIds } from "@/app/api/market/multichain/owned/route";
 import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 import { listTrackedCollections } from "@/lib/market/multichain/store";
 import { getListings, getOffers } from "@/lib/market/orders-store";
+import { ROBINHOOD_CHAIN_SLUG, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -93,7 +94,7 @@ async function fetchOwnedRobinhood(owner: string): Promise<{ owned: OwnedItem[];
   if (!rpcUrl) return { owned: [], truncated: false };
 
   const tracked = await listTrackedCollections().catch(() => []);
-  const robinhoodCollections = tracked.filter((c) => c.chainSlug === "robinhood");
+  const robinhoodCollections = tracked.filter((c) => isRobinhoodChainSlug(c.chainSlug));
   const truncated = robinhoodCollections.length > MAX_COLLECTIONS;
   const bounded = robinhoodCollections.slice(0, MAX_COLLECTIONS);
 
@@ -102,7 +103,7 @@ async function fetchOwnedRobinhood(owner: string): Promise<{ owned: OwnedItem[];
       try {
         const tokenIds = await resolveOwnedTokenIds(rpcUrl, c.contractAddress, owner);
         return tokenIds.map((tokenId) => ({
-          chainSlug: "robinhood",
+          chainSlug: ROBINHOOD_CHAIN_SLUG,
           contractAddress: c.contractAddress,
           collectionName: c.name,
           tokenId,
@@ -140,12 +141,12 @@ async function fetchRobinhoodMakerActivity(
       ]);
       const mine = listings
         .filter((l) => l.maker.toLowerCase() === owner.toLowerCase())
-        .map((l) => ({ chainSlug: "robinhood", collectionName: c.name, tokenId: l.tokenId, priceWei: l.priceWei }));
+        .map((l) => ({ chainSlug: ROBINHOOD_CHAIN_SLUG, collectionName: c.name, tokenId: l.tokenId, priceWei: l.priceWei }));
       // Every offer on a collection the wallet holds tokens in -- same
       // "offers on what you own" semantics the foreign branch already uses
       // (collectionOffers isn't filtered by maker, myListings is).
       const bids = collectionOffers.map((o) => ({
-        chainSlug: "robinhood",
+        chainSlug: ROBINHOOD_CHAIN_SLUG,
         collectionName: c.name,
         priceWei: o.priceWei,
         maker: o.maker,
@@ -193,7 +194,7 @@ export async function GET(req: NextRequest) {
     // starve Robinhood Chain out entirely on a wallet with many foreign
     // holdings.
     const robinhoodMakerCollections = [...distinctCollections.values()]
-      .filter((c) => c.chainSlug === "robinhood")
+      .filter((c) => isRobinhoodChainSlug(c.chainSlug))
       .map((c) => ({ contractAddress: c.contractAddress, name: c.collectionName }));
 
     let myListings: Array<{ chainSlug: string; collectionName: string | null; tokenId: string; priceWei: string }> = [];

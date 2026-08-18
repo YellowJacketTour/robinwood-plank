@@ -21,7 +21,7 @@ import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { getOffers } from "@/lib/market/orders-store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
 import { publicError, rateLimit } from "@/lib/security";
-import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { isNonEvmChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
   // "robinhood" branch: no OpenSea equivalent exists for the home chain, so
   // native offers (lib/market/orders-store.ts) are adapted into the SAME
   // response shape this route returns for real foreign chains.
-  if (chainSlug === "robinhood") {
+  if (isRobinhoodChainSlug(chainSlug)) {
     try {
       const collection = await getCollectionAsync(collectionSlug);
       if (!collection) {

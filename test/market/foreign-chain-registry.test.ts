@@ -9,6 +9,7 @@ import {
   chainBrandColor,
   chainGlyph,
   chainDisplayName,
+  nativeCurrencySymbol,
 } from "../../lib/market/multichain/trading/foreign-chain-registry";
 
 test("foreignChainByChainSlug returns null (never throws) for an unknown chain", () => {
@@ -65,4 +66,25 @@ test("chainDisplayName never returns an empty string for a real chain", () => {
 
 test("chainDisplayName falls back to something (not empty/undefined) for an unknown slug rather than throwing", () => {
   assert.ok(chainDisplayName("totally-unknown-chain").length > 0);
+});
+
+// nativeCurrencySymbol -- extracted from the two ternaries that used to be
+// duplicated in MultichainCollectionView.tsx (ForeignOfferForm's
+// currencySymbol prop and ForeignOfferConfirm's), so this is the real,
+// copied-not-invented mapping.
+test("nativeCurrencySymbol returns SOL whenever isSolana is true, regardless of chainSlug", () => {
+  assert.equal(nativeCurrencySymbol("solana-mainnet", true), "SOL");
+  assert.equal(nativeCurrencySymbol("eth-mainnet", true), "SOL");
+});
+
+test("nativeCurrencySymbol returns the real per-chain wrapped-gas symbol for BNB Chain and Avalanche", () => {
+  assert.equal(nativeCurrencySymbol("bnb-mainnet", false), "WBNB");
+  assert.equal(nativeCurrencySymbol("avax-mainnet", false), "WAVAX");
+});
+
+test("nativeCurrencySymbol defaults to WETH for every other EVM chain (matches the original duplicated ternaries' default)", () => {
+  assert.equal(nativeCurrencySymbol("eth-mainnet", false), "WETH");
+  assert.equal(nativeCurrencySymbol("polygon-mainnet", false), "WETH");
+  assert.equal(nativeCurrencySymbol("base-mainnet", false), "WETH");
+  assert.equal(nativeCurrencySymbol("totally-unknown-chain", false), "WETH");
 });

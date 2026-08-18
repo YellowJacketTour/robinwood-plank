@@ -36,6 +36,17 @@
 
 export const SOLANA_CHAIN_SLUG = "solana-mainnet";
 export const BITCOIN_CHAIN_SLUG = "bitcoin-mainnet";
+/**
+ * Robinhood Chain's own chainSlug -- NOT part of FOREIGN_CHAINS (see that
+ * file's header: it is this app's own home chain, traded via
+ * lib/market/seaport.ts + lib/constants.ts, not the foreign-Seaport path)
+ * and not one of the two non-EVM families above either (it IS an EVM chain,
+ * just this app's own). Was previously a raw "robinhood" string literal
+ * repeated across every multichain route/component -- pulled out here, next
+ * to its sibling chain-identity constants, rather than into
+ * foreign-chain-registry.ts (which is EVM-foreign-chain-typed only).
+ */
+export const ROBINHOOD_CHAIN_SLUG = "robinhood";
 
 export function isSolanaChainSlug(chainSlug: string): boolean {
   return chainSlug === SOLANA_CHAIN_SLUG;
@@ -48,4 +59,8 @@ export function isBitcoinChainSlug(chainSlug: string): boolean {
 /** True for either non-EVM chain family this app trades on -- the single question most branches actually need ("is this an ethers/Seaport chain or not"). */
 export function isNonEvmChainSlug(chainSlug: string): boolean {
   return isSolanaChainSlug(chainSlug) || isBitcoinChainSlug(chainSlug);
+}
+
+export function isRobinhoodChainSlug(chainSlug: string): boolean {
+  return chainSlug === ROBINHOOD_CHAIN_SLUG;
 }

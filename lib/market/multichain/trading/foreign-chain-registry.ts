@@ -169,6 +169,23 @@ export function chainGlyph(chainSlug: string): string {
 }
 
 /**
+ * The real native/wrapped-gas currency symbol a price on this chain is
+ * actually denominated in for display -- pulled out of two places
+ * (ForeignOfferForm's currencySymbol prop and ForeignOfferConfirm's) that
+ * had independently duplicated the exact same ternary. `isSolana` is a
+ * separate parameter (not derived from chainSlug here) because callers
+ * already have it computed via non-evm-chains.ts's isSolanaChainSlug, and
+ * this file deliberately stays EVM-only otherwise (see FOREIGN_CHAINS'
+ * own header on why Solana/Bitcoin aren't folded into this registry).
+ */
+export function nativeCurrencySymbol(chainSlug: string, isSolana: boolean): string {
+  if (isSolana) return "SOL";
+  if (chainSlug === "bnb-mainnet") return "WBNB";
+  if (chainSlug === "avax-mainnet") return "WAVAX";
+  return "WETH";
+}
+
+/**
  * Canonical WETH (or chain-native wrapped-gas-token) address per foreign
  * chain -- Seaport cannot pull native ETH from an offerer at fulfillment
  * time (same constraint lib/market/seaport.ts's own buildOffer documents

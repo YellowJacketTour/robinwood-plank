@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isSolanaChainSlug, isBitcoinChainSlug, isNonEvmChainSlug, SOLANA_CHAIN_SLUG, BITCOIN_CHAIN_SLUG } from "../../lib/market/multichain/trading/non-evm-chains";
+import {
+  isSolanaChainSlug,
+  isBitcoinChainSlug,
+  isNonEvmChainSlug,
+  isRobinhoodChainSlug,
+  SOLANA_CHAIN_SLUG,
+  BITCOIN_CHAIN_SLUG,
+  ROBINHOOD_CHAIN_SLUG,
+} from "../../lib/market/multichain/trading/non-evm-chains";
 import { isCrossChainBuyable, VENUE_LABELS } from "../../lib/market/types";
 
 // Real, unmocked assertions on the chain-family recognition every new
@@ -28,6 +36,15 @@ test("isNonEvmChainSlug is true for exactly the two non-EVM chains and false for
   assert.equal(isNonEvmChainSlug("robinhood"), false);
   assert.equal(isNonEvmChainSlug("eth-mainnet"), false);
   assert.equal(isNonEvmChainSlug("base-mainnet"), false);
+});
+
+test("isRobinhoodChainSlug matches only the real Robinhood Chain slug, replacing the raw string-literal comparisons it was extracted from", () => {
+  assert.equal(isRobinhoodChainSlug(ROBINHOOD_CHAIN_SLUG), true);
+  assert.equal(isRobinhoodChainSlug("robinhood"), true);
+  assert.equal(isRobinhoodChainSlug(SOLANA_CHAIN_SLUG), false);
+  assert.equal(isRobinhoodChainSlug(BITCOIN_CHAIN_SLUG), false);
+  assert.equal(isRobinhoodChainSlug("eth-mainnet"), false);
+  assert.equal(isRobinhoodChainSlug(""), false);
 });
 
 // isCrossChainBuyable is the single gate ListingCard/openSweepPreview/etc

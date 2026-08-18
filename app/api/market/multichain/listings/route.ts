@@ -35,7 +35,7 @@ import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { getListings } from "@/lib/market/orders-store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
 import { publicError, rateLimit } from "@/lib/security";
-import { isSolanaChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import type { Listing } from "@/lib/market/types";
 
 export const dynamic = "force-dynamic";
@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
   // one curated collection, see getCollectionAsync's own header), so this
   // branch adapts the native Listing[] shape into the same response shape
   // the rest of this route already returns for real foreign chains.
-  if (chainSlug === "robinhood") {
+  if (isRobinhoodChainSlug(chainSlug)) {
     try {
       const collection = await getCollectionAsync(collectionSlug);
       if (!collection) {

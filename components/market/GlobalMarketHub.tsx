@@ -7,6 +7,7 @@ import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/tradi
 import { swrJson } from "@/lib/market/swr-fetch";
 import ChainIcon from "@/components/market/ChainIcon";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
+import { ROBINHOOD_CHAIN_SLUG } from "@/lib/market/multichain/trading/non-evm-chains";
 
 /**
  * Some collection images (any sourced from lib/market/multichain/adapters/
@@ -164,7 +165,7 @@ function GradeBadge({ score }: { score: number }) {
 // Solana, Base, Ethereum, BNB Chain first, then the remaining EVM chains.
 const ALL_CHAIN_SLUGS_ORDER = [
   "bitcoin-mainnet",
-  "robinhood",
+  ROBINHOOD_CHAIN_SLUG,
   "solana-mainnet",
   "base-mainnet",
   "eth-mainnet",

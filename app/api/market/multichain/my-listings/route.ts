@@ -14,7 +14,7 @@ import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign
 import { getListings } from "@/lib/market/orders-store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
 import { publicError, rateLimit } from "@/lib/security";
-import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { isNonEvmChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
 
   // Robinhood Chain's own book -- same pattern as listings/route.ts's
   // "robinhood" branch, filtered down to this wallet's own orders.
-  if (chainSlug === "robinhood") {
+  if (isRobinhoodChainSlug(chainSlug)) {
     try {
       const collection = await getCollectionAsync(collectionSlug);
       if (!collection) {

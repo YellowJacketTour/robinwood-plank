@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
 import { hasMultichainStore, listCollectionsWithSnapshots, getTopByActivity } from "@/lib/market/multichain/store";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { isSolanaChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -89,7 +89,7 @@ export async function GET(req: Request) {
         // offer a "buy" affordance this deployment can't actually fulfill,
         // matching this route's own honest-not-fabricated posture
         // elsewhere (see floorChangePct below).
-        tradeable: Boolean(foreignChainByChainSlug(c.chainSlug)) || c.chainSlug === "robinhood" || isSolanaChainSlug(c.chainSlug),
+        tradeable: Boolean(foreignChainByChainSlug(c.chainSlug)) || isRobinhoodChainSlug(c.chainSlug) || isSolanaChainSlug(c.chainSlug),
         recentActivity: activityByContract.get(`${c.chainSlug}:${c.contractAddress.toLowerCase()}`) ?? 0,
         creatorHandle: c.creatorHandle,
         creatorAddress: c.creatorAddress,

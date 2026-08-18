@@ -19,8 +19,9 @@ import { connectWallet } from "@/lib/wallet";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import type { SendFeeQuote } from "@/lib/market/send-fee";
 import type { BatchSendStatus } from "@/lib/market/transfer";
-import { chainDisplayName, FOREIGN_FEE_BPS, foreignOfferCurrency } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { isSolanaChainSlug, isBitcoinChainSlug, isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { chainDisplayName, FOREIGN_FEE_BPS, foreignOfferCurrency, nativeCurrencySymbol } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { isSolanaChainSlug, isBitcoinChainSlug, isNonEvmChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
 import { isCrossChainBuyable, venueLabel, type Listing, type MarketCollection } from "@/lib/market/types";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import MarketNav from "@/components/market/MarketNav";
@@ -262,6 +263,48 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     return () => clearInterval(id);
   }, [load]);
 
+  // Real ETH/SOL/BTC USD prices -- same shared fetch + short-TTL swr pattern
+  // GlobalMarketHub.tsx's own usdPrices effect uses. usdPrices stays {} (not
+  // fabricated zeros) until this resolves, so every USD-dependent render
+  // checks for a real price before showing one.
+  const [usdPrices, setUsdPrices] = useState<MultiAssetPrices>({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await swrJson<{ prices: MultiAssetPrices }>("/api/market/asset-prices", {
+          ttlMs: 30_000,
+          swrMs: 120_000,
+          session: true,
+        });
+        if (!cancelled) setUsdPrices(data.prices ?? {});
+      } catch {
+        // USD is a display enhancement, not core data -- a failed fetch just
+        // means every USD figure stays hidden, native price still shows.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Real USD-equivalent for a wei-denominated native price, or null if this currency has no fetched price -- never fabricated. */
+  const toUsd = useCallback(
+    (weiStr: string | null, currency: string | null): number | null => {
+      if (!weiStr) return null;
+      const symbol = normalizeAssetSymbol(currency);
+      const usd = symbol ? usdPrices[symbol]?.usd : null;
+      if (usd == null) return null;
+      return (Number(weiStr) / 1e18) * usd;
+    },
+    [usdPrices]
+  );
+  const formatUsdCompact = (n: number): string => {
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+    if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+    return `$${n.toFixed(2)}`;
+  };
+
   const loadOwned = useCallback(async () => {
     if (!account || !collection?.contractAddress) {
       setOwnedTokenIds([]);
@@ -501,7 +544,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       try {
         setAcceptingOrderHash(offer.orderHash);
         setStatus("Confirm in wallet…");
-        if (chainSlug === "robinhood") {
+        if (isRobinhoodChainSlug(chainSlug)) {
           // Native path: same Seaport fulfillOrder RobinWood's own Offers
           // tab already uses, not the third-party-signer OpenSea flow below.
           const { acceptRobinhoodOfferNow } = await import("@/lib/market/multichain/trading/foreign-fulfill");
@@ -934,6 +977,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const saleEvents = activity.filter((e) => e.type === "sale" && e.priceWei);
   const volumeWei = saleEvents.length > 0 ? saleEvents.reduce((sum, e) => sum + BigInt(e.priceWei!), BigInt(0)).toString() : null;
   const highestSaleWei = saleEvents.length > 0 ? saleEvents.reduce((max, e) => (BigInt(e.priceWei!) > BigInt(max) ? e.priceWei! : max), saleEvents[0].priceWei!) : null;
+  const statCurrencySymbol = nativeCurrencySymbol(chainSlug, isSolana);
+  const statUsd = (weiStr: string | null): number | null => toUsd(weiStr, statCurrencySymbol);
 
   return (
     <div className="space-y-4 p-4">
@@ -950,19 +995,57 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-panel p-3 sm:grid-cols-4">
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Floor</p>
-          <p className="text-sm font-bold text-foreground tabular-nums">{floorWei ? `${formatTokenAmount(floorWei, 18, 4)} Ξ` : "—"}</p>
+          <p className="text-sm font-bold text-foreground tabular-nums">
+            {floorWei ? (
+              <>
+                {formatTokenAmount(floorWei, 18, 4)} {statCurrencySymbol}
+                {statUsd(floorWei) != null && <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(floorWei)!)}</span>}
+              </>
+            ) : (
+              "—"
+            )}
+          </p>
         </div>
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Best offer</p>
-          <p className="text-sm font-bold text-foreground tabular-nums">{bestOfferWei ? `${formatTokenAmount(bestOfferWei, 18, 4)} Ξ` : "—"}</p>
+          <p className="text-sm font-bold text-foreground tabular-nums">
+            {bestOfferWei ? (
+              <>
+                {formatTokenAmount(bestOfferWei, 18, 4)} {statCurrencySymbol}
+                {statUsd(bestOfferWei) != null && <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(bestOfferWei)!)}</span>}
+              </>
+            ) : (
+              "—"
+            )}
+          </p>
         </div>
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Volume</p>
-          <p className="text-sm font-bold text-foreground tabular-nums">{volumeWei ? `${formatTokenAmount(volumeWei, 18, 3)} Ξ` : "—"}</p>
+          <p className="text-sm font-bold text-foreground tabular-nums">
+            {volumeWei ? (
+              <>
+                {formatTokenAmount(volumeWei, 18, 3)} {statCurrencySymbol}
+                {statUsd(volumeWei) != null && <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(volumeWei)!)}</span>}
+              </>
+            ) : (
+              "—"
+            )}
+          </p>
         </div>
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Highest sale</p>
-          <p className="text-sm font-bold text-foreground tabular-nums">{highestSaleWei ? `${formatTokenAmount(highestSaleWei, 18, 4)} Ξ` : "—"}</p>
+          <p className="text-sm font-bold text-foreground tabular-nums">
+            {highestSaleWei ? (
+              <>
+                {formatTokenAmount(highestSaleWei, 18, 4)} {statCurrencySymbol}
+                {statUsd(highestSaleWei) != null && (
+                  <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(highestSaleWei)!)}</span>
+                )}
+              </>
+            ) : (
+              "—"
+            )}
+          </p>
         </div>
       </div>
 
@@ -1187,7 +1270,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               ) : (
                 <ForeignOfferForm
                   chainSlug={chainSlug}
-                  currencySymbol={chainSlug === "bnb-mainnet" ? "WBNB" : chainSlug === "avax-mainnet" ? "WAVAX" : "WETH"}
+                  currencySymbol={nativeCurrencySymbol(chainSlug, isSolana)}
                   account={account}
                   collection={collection}
                   listings={listings}
@@ -1224,7 +1307,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                           <p className="truncate text-sm font-bold text-foreground">{o.isWildcard ? `Any ${collection.name} token` : "Trait-scoped bid"}</p>
                           <p className="text-xs text-foreground/60">by {shortAddress(o.maker)}</p>
                         </div>
-                        <p className="text-sm font-extrabold tabular-nums text-emerald-300">{formatTokenAmount(o.priceWei, 18, 4)} Ξ</p>
+                        <p className="text-sm font-extrabold tabular-nums text-emerald-300">
+                          {formatTokenAmount(o.priceWei, 18, 4)} {statCurrencySymbol}
+                          {statUsd(o.priceWei) != null && <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(o.priceWei)!)}</span>}
+                        </p>
                       </li>
                     ))}
                   </ul>
@@ -1413,7 +1499,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 {myListings.map((l) => (
                   <li key={l.orderHash} className="flex items-center justify-between text-xs">
                     <span className="font-bold text-foreground">#{l.tokenId}</span>
-                    <span className="text-foreground/60 tabular-nums">{formatTokenAmount(l.priceWei, 18, 4)} Ξ</span>
+                    <span className="text-foreground/60 tabular-nums">
+                      {formatTokenAmount(l.priceWei, 18, 4)} {statCurrencySymbol}
+                      {statUsd(l.priceWei) != null && <span className="ml-1 text-[0.65rem] text-foreground/40">{formatUsdCompact(statUsd(l.priceWei)!)}</span>}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -1521,7 +1610,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         <ForeignOfferConfirm
           chainLabel={chainDisplayName(chainSlug)}
           tokenId={offerTarget.tokenId}
-          currencySymbol={isSolana ? "SOL" : chainSlug === "bnb-mainnet" ? "WBNB" : chainSlug === "avax-mainnet" ? "WAVAX" : "WETH"}
+          currencySymbol={nativeCurrencySymbol(chainSlug, isSolana)}
           nativeCurrency={isSolana}
           amountEth={offerAmountEth}
           onAmountChange={setOfferAmountEth}
