@@ -252,6 +252,8 @@ contract PlankCrashV2 is ReentrancyGuard, PullPayment {
     error CrashPointNotYetReached();
     error PastCrashPoint();
     error TargetUnreachable();
+    /// @dev MEDIUM-severity fix, 2026-08-18: entropyBlock's blockhash is publicly available but not yet reveal()'d on-chain -- see cashOut()'s own comment.
+    error AwaitingEntropyReveal();
 
     // Bundled into a struct rather than ~10 loose constructor params --
     // a real stack-too-deep compile error with this many immutables
@@ -388,9 +390,23 @@ contract PlankCrashV2 is ReentrancyGuard, PullPayment {
     /// cash out after the real crash but before anyone calls
     /// settleRound(), an unfair free win the ticker itself would never
     /// have shown as reachable.
+    ///
+    /// MEDIUM-severity fix, 2026-08-18: same real vulnerability class
+    /// presetCashOut() below was already fixed against, applied here too.
+    /// Once `entropyBlock` is mined, its blockhash is publicly readable by
+    /// anyone (eth_getBlockByNumber, any RPC) regardless of whether
+    /// revealEntropy() has been called on THIS contract yet. Gating only
+    /// on r.entropyRevealed left a window where a player who reads that
+    /// blockhash directly can compute the true crash point off-chain and
+    /// call cashOut() at exactly the last valid block for a deterministic,
+    /// risk-free near-maximum-multiplier cash-out. Fixed by blocking
+    /// cashOut() once the blockhash is available but not yet revealed
+    /// on-chain, forcing the cheap, permissionless revealEntropy() first
+    /// -- a liveness cost of one extra transaction, not a fund-safety one.
     function cashOut(uint256 roundId) external nonReentrant {
         Round storage r = rounds[roundId];
         if (r.phase != Phase.LIVE) revert BadPhase();
+        if (!r.entropyRevealed && block.number > r.entropyBlock) revert AwaitingEntropyReveal();
         if (stakeOf[roundId][msg.sender] == 0) revert NoBet();
         if (cashOutBlockOf[roundId][msg.sender] != 0) revert AlreadyCashedOut();
         uint256 elapsed = block.number - r.lockBlock;

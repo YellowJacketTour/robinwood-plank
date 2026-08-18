@@ -39,7 +39,7 @@ describe("Casino keeper — the loop runs itself", () => {
     ).deploy(await weth.getAddress(), await plank.getAddress(), ethers.parseEther("100"), ethers.parseEther("100000"));
     const oracle: any = await (
       await ethers.getContractFactory("PlankV2TwapOracle")
-    ).deploy(await pair.getAddress(), 60n, 240n);
+    ).deploy(await pair.getAddress(), 60n, 240n, 1n);
     const router: any = await (
       await ethers.getContractFactory("MockV2Router")
     ).deploy(await plank.getAddress(), 1000n);

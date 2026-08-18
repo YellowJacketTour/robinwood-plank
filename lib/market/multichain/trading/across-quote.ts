@@ -11,15 +11,22 @@
  * required (a newer /swap/approval endpoint exists that DOES want an API
  * key/integratorId; deliberately using the older, still-live, still-free
  * one instead, consistent with this whole effort's "no proprietary
- * middleman" mandate). This is NOT a trust dependency the way Relay's API
- * was: it is a price-oracle convenience only -- if it's ever wrong, stale,
- * or unreachable, the actual deposit still goes directly to the real,
- * audited SpokePool contract this app calls itself; nothing about
- * execution or custody runs through this endpoint. Cross-validated live:
- * the response's own spokePoolAddress field
- * (0x09aea4b2242abC8bb4BB78D537A67a245A7bEC64 for Base) matches the
+ * middleman" mandate). ONLY fee/outputAmount/timing fields are trusted
+ * from this response -- price-oracle convenience only, and worst case
+ * (wrong/stale) just means a bad quote the isAmountTooLow/outputAmount
+ * checks below catch. The response's OWN spokePoolAddress field is
+ * explicitly NEVER used as the real fund-transfer destination (a prior
+ * version of this file did fall back to it for chains outside the
+ * hardcoded map below -- a real, fixed CRITICAL bug: an unauthenticated
+ * HTTP response is not a safe source for a real ETH-transfer address, full
+ * stop, regardless of how well it cross-validated at the time it was
+ * checked). ACROSS_SPOKE_POOL below is the ONLY source of truth for that
+ * address, and a chain missing from it fails loudly rather than silently
+ * trusting the API. Cross-validated once, historically, as a sanity check
+ * (not as an ongoing trust basis): the response's spokePoolAddress field
+ * (0x09aea4b2242abC8bb4BB78D537A67a245A7bEC64 for Base) matched the
  * address independently pulled from across-protocol/contracts' GitHub
- * source in foreign-chain-registry.ts -- two independent sources agreeing.
+ * source in foreign-chain-registry.ts.
  *
  * CHAIN COVERAGE -- 5 of the 7 OpenSea-supported foreign EVM chains
  * -----------------------------------------------------------------------
@@ -43,6 +50,7 @@
  */
 import { fetchListingFulfillmentData } from "@/lib/market/multichain/trading/foreign-orders";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { findStablecoin } from "@/lib/market/multichain/trading/stablecoins";
 
 const ACROSS_API = "https://app.across.to/api";
 
@@ -102,13 +110,33 @@ export async function quoteCrossChainPurchase(input: {
   orderHash: string;
   fulfillerAddress: string; // the receiver contract, since it's the one calling buyNowFor
   recipient: string; // the REAL end buyer, decoded from the message on arrival
-  inputAmount: string; // what the buyer is willing to pay on the origin chain, in wei
+  inputAmount: string; // what the buyer is willing to pay on the origin chain, in the input token's own smallest unit
+  /**
+   * "USDC" | "USDT" to pay with a real stablecoin instead of the origin
+   * chain's wrapped-native token (see stablecoins.ts -- every address/
+   * decimals value there was live-verified, not assumed). Omit for the
+   * original wrapped-native behavior. The OUTPUT side always stays
+   * wrapped-native: every cross-chain NFT offer is native-denominated
+   * (see foreign-chain-registry.ts's own header), so only the buyer's
+   * PAYMENT currency varies here -- Across's suggested-fees endpoint
+   * already accepts distinct inputToken/outputToken and quotes the real
+   * swap-and-bridge route, or reports isAmountTooLow/no-route if this
+   * specific pair genuinely isn't supported (checked below, not assumed).
+   */
+  inputCurrency?: "USDC" | "USDT";
 }): Promise<{ deposit: AcrossDepositParams; orderPriceWei: string }> {
   const destChain = foreignChainByChainSlug(input.destinationChainSlug);
   if (!destChain) throw new Error(`across-quote: "${input.destinationChainSlug}" is not a supported foreign chain`);
   const destinationChainId = destChain.chainId;
 
-  const originToken = WRAPPED_NATIVE[input.originChainId];
+  let originToken: string | undefined = WRAPPED_NATIVE[input.originChainId];
+  if (input.inputCurrency) {
+    const stable = findStablecoin(input.originChainId, input.inputCurrency);
+    if (!stable) {
+      throw new Error(`across-quote: no verified ${input.inputCurrency} address for chain ${input.originChainId}`);
+    }
+    originToken = stable.address;
+  }
   const destToken = WRAPPED_NATIVE[destinationChainId];
   if (!originToken || !destToken) {
     throw new Error(`across-quote: no wrapped-native-token mapping for chain ${input.originChainId} or ${destinationChainId}`);
@@ -164,10 +192,30 @@ export async function quoteCrossChainPurchase(input: {
     [order.parameters, order.signature, [], "0x" + "0".repeat(64), orderPriceWei, input.recipient]
   );
 
+  // CRITICAL, fixed 2026-08-18: the buyer's real ETH `value` is sent
+  // directly to this address (see foreign-fulfill.ts's depositV3 call) --
+  // it must NEVER come from `fees.spokePoolAddress`, an unauthenticated
+  // field in the response of a keyless, unauthenticated HTTP API
+  // (app.across.to/api/suggested-fees). A prior version of this function
+  // fell back to that API-supplied address for any origin chain outside
+  // the hardcoded ACROSS_SPOKE_POOL map, meaning a compromised/MITM'd/
+  // buggy API response could redirect a real fund transfer -- a live
+  // theft vector this file's own header incorrectly claimed didn't exist
+  // ("this is NOT a trust dependency"). The ONLY source of truth for this
+  // address is the source-verified ACROSS_SPOKE_POOL map (see its own
+  // comment for how each entry was verified); an unsupported origin chain
+  // must fail loudly, never silently trust a network response for this.
+  const spokePoolAddress = ACROSS_SPOKE_POOL[input.originChainId];
+  if (!spokePoolAddress) {
+    throw new Error(
+      `across-quote: chain ${input.originChainId} has no verified Across SpokePool address -- refusing to trust the API's own spokePoolAddress field for a real fund transfer.`
+    );
+  }
+
   return {
     orderPriceWei,
     deposit: {
-      spokePoolAddress: ACROSS_SPOKE_POOL[input.originChainId] ?? fees.spokePoolAddress,
+      spokePoolAddress,
       inputToken: originToken,
       outputToken: destToken,
       inputAmount: input.inputAmount,

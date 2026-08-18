@@ -1,7 +1,7 @@
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import AppBackdrop from "@/components/AppBackdrop";
-import GlobalMarketHub from "@/components/market/GlobalMarketHub";
+import GlobalMultichainMarketView from "@/components/market/GlobalMultichainMarketView";
 import ComingSoonGate from "@/components/market/ComingSoonGate";
 import { MARKET_ENABLED } from "@/lib/constants";
 import { getContent } from "@/lib/content-store";
@@ -39,7 +39,7 @@ export default async function GlobalMarketPage() {
         className="flex-1 px-3 pb-10 pt-0 sm:px-5 sm:py-6 lg:py-10"
       >
         <div className={marketEnabled ? "mx-auto w-full max-w-[1440px]" : "site-shell"}>
-          {marketEnabled ? <GlobalMarketHub /> : <ComingSoonGate />}
+          {marketEnabled ? <GlobalMultichainMarketView /> : <ComingSoonGate />}
         </div>
       </main>
       <Footer />

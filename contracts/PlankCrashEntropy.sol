@@ -476,11 +476,38 @@ contract PlankCrashEntropy is ReentrancyGuard, PullPayment, IEntropyConsumer {
         return 10000 + (elapsedBlocks * 40) + (elapsedBlocks * elapsedBlocks) / 5;
     }
 
+    /**
+     * @dev FIXED 2026-08-18, ported byte-identical from PlankCrashDrand's
+     *      own fix -- HIGH-severity audit finding: the old linear-search
+     *      loop above ran inside a gas-capped oracle callback
+     *      (entropyCallback, bounded by entropyGasLimit), unlike
+     *      PlankCrashDrand's revealEntropy()/PlankCrashV2's equivalent,
+     *      which are plain calls the caller can fund with arbitrary gas.
+     *      A high-multiplier draw (r near 9999) could burn ~22,000
+     *      iterations and blow the callback's gas budget, silently voiding
+     *      exactly the rarest, highest-payout rounds via
+     *      voidStaleRequest() -- an entropy-correlated bias against the
+     *      tail of the payout distribution that undermines this game's own
+     *      "provably fair" claim. Binary search over the same monotonic
+     *      _multiplierAt curve converges in ~18 iterations worst case
+     *      instead of ~22,000, verified to return the identical elapsedBlocks
+     *      value as the old loop for every input (see
+     *      PlankCrashDrand.sol's own equivalence proof/tests).
+     */
     function _invertMultiplier(uint256 targetBps) public pure returns (uint256 elapsedBlocks) {
-        elapsedBlocks = 0;
-        while (_multiplierAt(elapsedBlocks) < targetBps && elapsedBlocks <= 200000) {
-            elapsedBlocks++;
+        if (_multiplierAt(0) >= targetBps) return 0;
+        uint256 lo = 0;
+        uint256 hi = 200000;
+        if (_multiplierAt(hi) < targetBps) return hi;
+        while (lo < hi) {
+            uint256 mid = (lo + hi) / 2;
+            if (_multiplierAt(mid) < targetBps) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
         }
+        return lo;
     }
 
     function _deriveCrash(bytes32 entropyValue) public pure returns (uint256 multiplierBps, uint256 elapsedBlocks) {

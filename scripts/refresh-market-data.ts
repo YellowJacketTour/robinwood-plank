@@ -77,14 +77,25 @@ const explicit = [
   "--multichain",
   "--discover-evm",
   "--own-ranking",
+  "--scaffold-rarity",
 ].filter((t) => args.has(t));
 
-/** Full runs include the expensive collection-wide rebuilds; incremental ones don't. */
+/**
+ * Full runs include the expensive collection-wide rebuilds; incremental
+ * ones don't. scaffold-rarity is FULL-ONLY on purpose: own-ranking's
+ * per-tick promotion is a handful of metadata lookups, but scaffolding a
+ * newly-registered collection means paginating its ENTIRE token set
+ * (up to 100 pages, see rarity-index-runner.ts) -- real work that doesn't
+ * belong on a 2-minute incremental cadence. Its own freshness-skip
+ * (scaffold-all-collections.ts's --freshDays default) keeps a full run
+ * cheap on every tick after the first anyway -- most collections are
+ * already fresh and get skipped in one cheap read.
+ */
 const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "own-ranking"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "own-ranking", "scaffold-rarity"]
       : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "own-ranking"]
 );
 
@@ -428,6 +439,20 @@ async function main(): Promise<void> {
         : `${r.chainSlug}: ${r.ranked} ranked, +${r.registered} new (${r.skippedNoMetadata} no-metadata)`
     );
     return parts.join("; ");
+  });
+
+  // Brings any collection own-ranking just registered (or any collection
+  // that's aged past its freshness window) up to full rarity/trait parity
+  // -- the "Marketplank feel" (tier badges, floors-by-rarity, trait
+  // filters, criteria bids) is otherwise stuck at zero for a collection
+  // until someone manually runs scripts/index-foreign-rarity.ts for it.
+  // Runs last so it benefits from this tick's own own-ranking promotions.
+  await step("scaffold-rarity", async () => {
+    const { scaffoldAllTrackedCollections } = await import("../lib/market/multichain/rarity-index-runner");
+    const result = await scaffoldAllTrackedCollections({
+      onProgress: (line) => console.log(`[refresh:scaffold-rarity] ${line}`),
+    });
+    return `${result.evmInScope} EVM tracked -> ${result.indexed} indexed, ${result.skippedFresh} fresh, ${result.failed} failed; ${result.solanaSkipped} Solana skipped`;
   });
 
   const failed = results.filter((r) => !r.ok);

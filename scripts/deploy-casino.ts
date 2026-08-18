@@ -131,9 +131,19 @@ async function main() {
   const BURN_MAX_SLIPPAGE_BPS = envBig("CASINO_BURN_MAX_SLIPPAGE_BPS", 300n); // 3%
   const TWAP_WINDOW = envBig("CASINO_TWAP_WINDOW_SECONDS", 1800n); // 30 min
   const TWAP_MAX_STALE = envBig("CASINO_TWAP_MAX_STALE_SECONDS", 7200n); // 2 h
+  // MEDIUM-severity fix, 2026-08-18: the deploy-time reserve floor
+  // PlankV2TwapOracle's constructor now enforces (see that contract's own
+  // header). This default (1 ETH-equivalent of each reserve) is a SANITY
+  // floor, not a real liquidity target -- the operator MUST override
+  // CASINO_TWAP_MIN_RESERVE_WEI with a value reflecting the REAL intended
+  // pool's actual depth before a real mainnet deploy, or this floor will
+  // silently accept a pool far too shallow for genuine sandwich resistance.
+  const TWAP_MIN_RESERVE_WEI = envBig("CASINO_TWAP_MIN_RESERVE_WEI", ethers.parseEther("1"));
 
   // ── 1. TWAP oracle over the canonical deep pair ────────────────────
-  const oracle = await (await ethers.getContractFactory("PlankV2TwapOracle")).deploy(V2_PAIR, TWAP_WINDOW, TWAP_MAX_STALE);
+  const oracle = await (
+    await ethers.getContractFactory("PlankV2TwapOracle")
+  ).deploy(V2_PAIR, TWAP_WINDOW, TWAP_MAX_STALE, TWAP_MIN_RESERVE_WEI);
   await oracle.waitForDeployment();
 
   // ── 2. Burn engine (no dependency cycle) ───────────────────────────

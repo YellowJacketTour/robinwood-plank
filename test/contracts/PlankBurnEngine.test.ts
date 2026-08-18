@@ -30,7 +30,7 @@ describe("PlankBurnEngine (Tier-2, oracle-floored)", () => {
     ).deploy(await weth.getAddress(), await plank.getAddress(), R_WETH, R_PLANK);
     const oracle: any = await (
       await ethers.getContractFactory("PlankV2TwapOracle")
-    ).deploy(await pair.getAddress(), WINDOW, MAX_STALE);
+    ).deploy(await pair.getAddress(), WINDOW, MAX_STALE, 1n);
     const router: any = await (
       await ethers.getContractFactory("MockV2Router")
     ).deploy(await plank.getAddress(), routerRate);

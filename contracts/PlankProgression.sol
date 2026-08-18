@@ -31,10 +31,19 @@ pragma solidity 0.8.24;
 /// exact pre-existing behavior -- see each contract's own use of it). When
 /// wired up, they call recordBet/recordFuelBurn/recordPowerboardClaim after
 /// their own state changes succeed, and PlankCrashDrand's placeBet() reads
-/// capFor/premiumBpsFor before accepting a bet. Nothing here can revert a
-/// caller's OWN core action if this contract misbehaves in a way that
-/// matters economically -- the record* calls are the last thing each
-/// caller does, after its own accounting is already final.
+/// capFor/premiumBpsFor before accepting a bet.
+///
+/// CORRECTED 2026-08-18: this comment previously claimed "nothing here can
+/// revert a caller's own core action... the record* calls are the last
+/// thing each caller does" -- that reasoning was wrong. Being the LAST
+/// statement in a function does not protect it from reverting the whole
+/// transaction; Solidity's default behavior unwinds everything on any
+/// revert, statement order notwithstanding. PlankFuelBooster.burnFuel()
+/// and PlankPowerboard's ticket-claim path now wrap their record* calls in
+/// try/catch specifically to make this guarantee real rather than assumed
+/// -- see those call sites' own comments. If you add a new caller of this
+/// contract's record* functions, wrap that call in try/catch too; do not
+/// rely on call-ordering alone.
 contract PlankProgression {
     error NotAuthorizedSource();
 

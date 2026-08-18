@@ -108,8 +108,17 @@ export async function GET(req: NextRequest) {
       return pa < pb ? -1 : pa > pb ? 1 : 0;
     });
 
+    // Polygon-specific OpenSea inconsistency, confirmed live 2026-08-18
+    // (see rarity-index-runner.ts's own comment): this endpoint's
+    // contracts[].chain returns "polygon" for the same chain the
+    // /chain/{chain}/contract/ path segment calls "matic" everywhere
+    // else. This route already had a fallback chain so it wasn't hard-
+    // broken for Polygon, but the alias makes the FIRST match correct
+    // instead of silently falling through.
+    const chainAliases: Record<string, string[]> = { matic: ["matic", "polygon"] };
+    const acceptableChainValues = chainAliases[chain.openSeaChain] ?? [chain.openSeaChain];
     const contractAddress =
-      collectionMeta?.contracts?.find((c) => c.chain === chain.openSeaChain)?.address ??
+      collectionMeta?.contracts?.find((c) => acceptableChainValues.includes(c.chain))?.address ??
       collectionMeta?.contracts?.[0]?.address ??
       orders[0]?.parameters.offer[0]?.token ??
       "";
@@ -121,11 +130,17 @@ export async function GET(req: NextRequest) {
 
     const artEntries = await Promise.all(
       distinctTokenIds.map(async (tokenId) => {
-        const nft = await openSeaJson<{ nft?: { name?: string; image_url?: string } }>(
-          `/chain/${chain.openSeaChain}/contract/${contractAddress}/nfts/${tokenId}`,
-          key
-        );
-        return [tokenId, { name: nft?.nft?.name ?? null, imageUrl: nft?.nft?.image_url ?? null }] as const;
+        const nft = await openSeaJson<{
+          nft?: { name?: string; image_url?: string; traits?: Array<{ trait_type: string; value: string }> };
+        }>(`/chain/${chain.openSeaChain}/contract/${contractAddress}/nfts/${tokenId}`, key);
+        return [
+          tokenId,
+          {
+            name: nft?.nft?.name ?? null,
+            imageUrl: nft?.nft?.image_url ?? null,
+            traits: (nft?.nft?.traits ?? []).map((t) => ({ traitType: t.trait_type, value: t.value })),
+          },
+        ] as const;
       })
     );
     const artByToken = new Map(artEntries);
@@ -146,6 +161,7 @@ export async function GET(req: NextRequest) {
         expiresAt: new Date(Number(order.parameters.endTime) * 1000).toISOString(),
         kind: "fixed",
         imageUrl: art?.imageUrl ?? undefined,
+        traits: art?.traits ?? undefined,
         venue: "opensea",
         externalUrl: `https://opensea.io/assets/${chain.openSeaChain}/${contractAddress}/${tokenId}`,
         foreignChainSlug: chainSlug,

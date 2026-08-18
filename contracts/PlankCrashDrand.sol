@@ -268,6 +268,8 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     error CrashPointNotYetReached();
     error PastCrashPoint();
     error TargetUnreachable();
+    /// @dev MEDIUM-severity fix, 2026-08-18: the target drand round is publicly determinable but not yet reveal()'d on-chain -- see cashOut()'s own comment.
+    error AwaitingEntropyReveal();
     error RandomnessNotYetAvailable();
     error ZeroBeacon();
     error RoundIntervalTooShort();
@@ -600,10 +602,14 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
     /// the bet via placeBetFor -- i.e. the bank the player deposited into,
     /// which enforces the player's own session-key authorization before
     /// calling this. No one else can force a player's early cash-out.
+    /// @dev Carries the same AwaitingEntropyReveal gate as cashOut() below -- see that function's own comment for the full rationale. A funder is exactly as capable of exploiting the pre-reveal information asymmetry as the player themself would be.
     function cashOutFor(uint256 roundId, address player) external nonReentrant {
         if (betFundedBy[roundId][player] != msg.sender) revert NotFunder();
         Round storage r = rounds[roundId];
         if (r.phase != Phase.LIVE) revert BadPhase();
+        if (!r.entropyRevealed && beacon.currentRoundAt(block.timestamp) >= r.targetDrandRound) {
+            revert AwaitingEntropyReveal();
+        }
         if (stakeOf[roundId][player] == 0) revert NoBet();
         if (cashOutBlockOf[roundId][player] != 0) revert AlreadyCashedOut();
         uint256 elapsed = block.number - r.lockBlock;
@@ -683,9 +689,33 @@ contract PlankCrashDrand is ReentrancyGuard, PullPayment {
         emit RoundLocked(id, r.lockBlock, r.targetDrandRound);
     }
 
+    /**
+     * @dev MEDIUM-severity fix, 2026-08-18. Same real vulnerability class
+     *      presetCashOut() below was already fixed against, applied here
+     *      too: once the target drand round's due time passes, its real
+     *      signature is publicly fetchable from any drand HTTP relay (or
+     *      independently computable) regardless of whether anyone has
+     *      called revealEntropy() on THIS contract yet. Gating only on
+     *      r.entropyRevealed (as this function did before) left a real
+     *      window where a player who fetches/verifies the round off-chain
+     *      can compute the true crash point locally and call cashOut() at
+     *      exactly the last valid block for a deterministic, risk-free
+     *      near-maximum-multiplier cash-out, while every other player is
+     *      still genuinely guessing -- a real information asymmetry that
+     *      transfers pool share from casual players to whoever runs this.
+     *      Fix: once the round is publicly due but not yet revealed
+     *      on-chain, cashOut() blocks (same as presetCashOut already did)
+     *      until someone calls the cheap, permissionless revealEntropy()
+     *      -- which, once the round is due, anyone (a keeper, or the
+     *      player themself) can call in the same block. This costs a
+     *      liveness window of at most "one more transaction," not funds.
+     */
     function cashOut(uint256 roundId) external nonReentrant {
         Round storage r = rounds[roundId];
         if (r.phase != Phase.LIVE) revert BadPhase();
+        if (!r.entropyRevealed && beacon.currentRoundAt(block.timestamp) >= r.targetDrandRound) {
+            revert AwaitingEntropyReveal();
+        }
         if (stakeOf[roundId][msg.sender] == 0) revert NoBet();
         if (cashOutBlockOf[roundId][msg.sender] != 0) revert AlreadyCashedOut();
         uint256 elapsed = block.number - r.lockBlock;

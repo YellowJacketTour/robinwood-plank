@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
-import { hasMultichainStore, listCollectionsWithSnapshots } from "@/lib/market/multichain/store";
+import { hasMultichainStore, listCollectionsWithSnapshots, getTopByActivity } from "@/lib/market/multichain/store";
+import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -44,6 +45,22 @@ export async function GET(req: Request) {
 
   try {
     const collections = await listCollectionsWithSnapshots();
+
+    // Real 7-day activity (real observed Transfer-log counts, see
+    // evm-log-scan.ts -- not a guessed/fabricated $ volume figure, which
+    // no free source actually provides, see rarity-index-runner.ts's own
+    // header on DeFiLlama's real limits) -- the volume half of the
+    // "volume + floor hybrid" default sort the hub uses. One query per
+    // distinct EVM chain represented, not per collection.
+    const chainSlugs = [...new Set(collections.map((c) => c.chainSlug))].filter((s) => foreignChainByChainSlug(s));
+    const activityByChain = await Promise.all(
+      chainSlugs.map(async (slug) => [slug, await getTopByActivity(slug, 7, 500).catch(() => [])] as const)
+    );
+    const activityByContract = new Map<string, number>();
+    for (const [chainSlug, rows] of activityByChain) {
+      for (const row of rows) activityByContract.set(`${chainSlug}:${row.contractAddress.toLowerCase()}`, row.totalTransfers);
+    }
+
     return NextResponse.json({
       count: collections.length,
       collections: collections.map((c) => ({
@@ -61,6 +78,24 @@ export async function GET(req: Request) {
         listedCount: c.listedCount,
         syncedAt: c.syncedAt,
         syncError: c.syncError,
+        // False for Solana today: the buy/sweep/send/offers/rarity pipeline
+        // built this session is Seaport, which Solana has no equivalent
+        // of. The UI must not offer the same "buy, sweep, and send"
+        // affordance on a row this is false for.
+        tradeable: Boolean(foreignChainByChainSlug(c.chainSlug)),
+        recentActivity: activityByContract.get(`${c.chainSlug}:${c.contractAddress.toLowerCase()}`) ?? 0,
+        creatorHandle: c.creatorHandle,
+        creatorAddress: c.creatorAddress,
+        creatorEns: c.creatorEns,
+        volume24hWei: c.volume24hWei,
+        sales24h: c.sales24h,
+        // Real, computed from this app's own prior observation (see
+        // updateCollectionMarketStats's header) -- OpenSea's stats
+        // endpoint has no floor-change field at all.
+        floorChangePct:
+          c.previousFloorPriceWei && c.floorPriceWei && BigInt(c.previousFloorPriceWei) > BigInt(0)
+            ? (Number(BigInt(c.floorPriceWei) - BigInt(c.previousFloorPriceWei)) / Number(BigInt(c.previousFloorPriceWei))) * 100
+            : null,
       })),
     });
   } catch (error) {

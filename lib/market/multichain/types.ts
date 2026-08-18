@@ -19,6 +19,11 @@ export type TrackedCollection = {
   imageUrl: string | null;
   externalUrl: string | null;
   isVaultBacked: boolean;
+  /** Real handle/wallet "whenever provided" -- OpenSea's creator_username field is null site-wide now (confirmed live); twitter_username and owner are the reliably-populated real fields this actually comes from. Never fabricated: both null when neither is available. */
+  creatorHandle: string | null;
+  creatorAddress: string | null;
+  /** Real ENS name for creatorAddress, "whenever publicly known" (lib/market/multichain/ens.ts) -- never fabricated. */
+  creatorEns: string | null;
 };
 
 /** What a sync writes back for one collection. */

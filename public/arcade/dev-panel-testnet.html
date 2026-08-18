@@ -204,7 +204,11 @@ const CHAIN_ID = 46630;
 // static HTML file is public and often cached/crawled, so it still
 // shouldn't hold a private key at rest. Nothing here persists the key
 // (no localStorage) -- it lives only in the `admin` variable for this tab.
-const provider = new ethers.JsonRpcProvider(RPC_URL, CHAIN_ID);
+// Wider batch window than ethers' ~10ms default -- same reasoning as
+// crash.html's own provider construction: merges same-poll-cycle calls
+// from independent widgets into fewer real HTTP requests against a
+// real-world rate limit.
+const provider = new ethers.JsonRpcProvider(RPC_URL, CHAIN_ID, { batchStallTime: 80, batchMaxCount: 40 });
 let admin = null;
 
 function connect() {

@@ -22,7 +22,7 @@
  */
 import { magicEdenSolanaAdapter } from "../lib/market/multichain/adapters/magiceden-solana";
 import { defillamaNftAdapter } from "../lib/market/multichain/adapters/defillama-nft";
-import { hasMultichainStore, upsertTrackedCollection } from "../lib/market/multichain/store";
+import { hasMultichainStore, upsertTrackedCollection, updateCollectionDisplay } from "../lib/market/multichain/store";
 import type { ChainAdapter, DiscoveredCollection } from "../lib/market/multichain/types";
 
 /**
@@ -72,8 +72,21 @@ async function main() {
 
     // Dedupe by normalized contract key, merging rank info when a
     // collection appears in both lists rather than keeping two rows.
+    // SKIP composite "address:startTokenId:endTokenId" ids -- DeFiLlama's
+    // real format for Art Blocks-style shared-contract sub-projects
+    // (confirmed live: e.g. Fidenza by Tyler Hobbs is
+    // "0xa7d8...:78000000:78999999" on the actual Art Blocks contract).
+    // Every downstream integration this app has (Alchemy metadata,
+    // OpenSea listings/offers, Seaport fulfillment) assumes contractAddress
+    // is a real standalone ERC-721 address -- a token-range id breaks all
+    // of them (confirmed: rarity-index-runner.ts's slug resolution already
+    // fails closed on these). Tracking it anyway just means a permanently
+    // broken row (no art, no trading), which is worse than not tracking it
+    // -- real sub-project support would mean real schema work (a token-id
+    // range column, filtered everywhere), not a half-fix here.
     const merged = new Map<string, DiscoveredCollection>();
     for (const entry of [...byVolume, ...byFloor]) {
+      if (entry.contractAddress.includes(":")) continue;
       const key = normalizeKey(target.chainSlug, entry.contractAddress);
       const existing = merged.get(key);
       if (!existing) {
@@ -96,6 +109,31 @@ async function main() {
         adapter: target.adapter.name,
         isVaultBacked: false,
       });
+      // Real name/image discoverTopCollections already fetched (e.g.
+      // Magic Eden's live ranked endpoint) was being thrown away here --
+      // upsertTrackedCollection only writes chain/address/adapter. Fixed:
+      // persist it immediately so a Solana row isn't stuck at "?" until
+      // some other pass happens to backfill it (nothing currently does
+      // for Solana -- EVM has rarity-index-runner.ts's OpenSea backfill,
+      // Solana has no equivalent pass yet).
+      //
+      // NEVER persist a known-dead image domain, though (confirmed live,
+      // repeatedly, this session: img.reservoir.tools no longer resolves
+      // at all -- Reservoir shut down in 2025). defillamaNftAdapter's own
+      // `image` field is sourced from that same dead CDN (see its header),
+      // so an eth-mainnet discovery pass here was silently clobbering the
+      // REAL OpenSea art rarity-index-runner.ts had just backfilled with
+      // DeFiLlama's dead one on every re-run -- caught live via a real
+      // browser regression (25 fresh img.reservoir.tools 404s right after
+      // this fix's first deploy).
+      const deadImageHosts = ["img.reservoir.tools"];
+      const isDeadImage = entry.imageUrl ? deadImageHosts.some((h) => entry.imageUrl!.includes(h)) : false;
+      if (entry.name || (entry.imageUrl && !isDeadImage)) {
+        await updateCollectionDisplay(target.chainSlug, entry.contractAddress, {
+          name: entry.name ?? null,
+          imageUrl: isDeadImage ? null : (entry.imageUrl ?? null),
+        });
+      }
       registered += 1;
     }
 

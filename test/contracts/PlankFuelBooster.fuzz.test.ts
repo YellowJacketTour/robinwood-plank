@@ -42,7 +42,7 @@ describe("PlankFuelBooster -- conservation + cap invariants under randomized bur
     ).deploy(await weth.getAddress(), await plank.getAddress(), ethers.parseEther("100"), ethers.parseEther("100000"));
     const oracle: any = await (
       await ethers.getContractFactory("PlankV2TwapOracle")
-    ).deploy(await pair.getAddress(), WINDOW, MAX_STALE);
+    ).deploy(await pair.getAddress(), WINDOW, MAX_STALE, 1n);
 
     const crash: any = await (
       await ethers.getContractFactory("PlankCrashDrand")

@@ -22,11 +22,11 @@ const VENUE_BADGE_CLASS: Record<ListingVenue | "marketplank", string> = {
   marketplank: "bg-gold-500/15 text-gold-300",
 };
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
-import { tierColor } from "@/lib/market/rarityClient";
+import { tierColor, tierGlow, tierAnimationClass, tierCardStyle } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { withImageWidth } from "@/lib/ipfs";
 import EthUsdValue from "@/components/market/EthUsdValue";
-import { chainDisplayName } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { chainDisplayName, chainBrandColor, chainGlyph } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 type Props = {
   listing: Listing;
@@ -76,11 +76,17 @@ export default function ListingCard({
   );
   return (
     <li
-      // Finalized mockup card: uniform quiet frame, rarity communicated by
-      // the tier pill alone; the card lifts on hover instead of glowing.
+      // Tier-tinted wash + border (tierCardStyle) and an escalating glow
+      // ring (tierGlow) on top of the quiet base frame -- the same
+      // whole-card treatment Gallery.tsx applies for RobinWood's own
+      // tokens, now shared by any card carrying real rarity data
+      // (RobinWood or a foreign collection indexed via
+      // scripts/index-foreign-rarity.ts). Common gets no glow -- the
+      // neutral baseline every other tier stands out against.
       className={`dense-card flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-line-strong ${
         isOffer ? "border-emerald-500/40" : ""
-      }`}
+      } ${rarity ? tierAnimationClass(rarity.tier) : ""}`}
+      style={rarity ? { ...tierCardStyle(rarity.tier), boxShadow: tierGlow(rarity.tier) } : undefined}
     >
       <div
         className={`relative aspect-square w-full bg-wood-900 ${
@@ -129,6 +135,18 @@ export default function ListingCard({
             title={`Rank #${rarity.rank} · ${rarity.percentile.toFixed(0)}th percentile`}
           >
             {rarity.tier}
+          </span>
+        )}
+        {listing.foreignChainSlug && (
+          // At-a-glance chain identification via that chain's real brand
+          // color -- opposite corner from the rarity badge so the two
+          // never collide.
+          <span
+            className="card-overlay absolute right-2 top-2 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[0.55rem] font-black text-white shadow"
+            style={{ backgroundColor: chainBrandColor(listing.foreignChainSlug) }}
+            title={chainDisplayName(listing.foreignChainSlug)}
+          >
+            {chainGlyph(listing.foreignChainSlug)}
           </span>
         )}
       </div>

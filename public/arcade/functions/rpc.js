@@ -32,7 +32,18 @@
 //    and the 429 storm barely improved. Cloudflare's Cache API
 //    (`caches.default`) is the actual edge-shared cache primitive here;
 //    switching to it is what actually cuts real upstream request volume.
-const UPSTREAM = "https://rpc.testnet.chain.robinhood.com";
+// 4. THE PUBLIC RPC'S RATE LIMIT IS TOO TIGHT, FULL STOP: even with CORS
+//    fixed and edge caching added, a single page load's burst of DISTINCT
+//    queries (different contracts, different view functions) was enough
+//    alone to trip it -- caching only helps with repeated identical
+//    calls, not the inherent diversity of a normal poll cycle. The real
+//    fix (per Robinhood's own docs) is a provisioned RPC instead of the
+//    public one. UPSTREAM_RPC_URL is set as a Cloudflare Pages secret
+//    (an Alchemy testnet endpoint) rather than hardcoded here -- an API
+//    key doesn't belong in committed source even for a low-stakes
+//    testnet-only key. Falls back to the old public RPC if unset, so a
+//    fresh clone without the secret configured still does *something*.
+const FALLBACK_UPSTREAM = "https://rpc.testnet.chain.robinhood.com";
 // Rounds run on a 20s cadence; sub-second read freshness was never
 // actually needed for correctness, only for smooth animation, and the
 // client itself keeps polling at its own 400/600ms cadence regardless --
@@ -51,6 +62,7 @@ export async function onRequestOptions() {
 }
 
 export async function onRequestPost(context) {
+  const upstreamUrl = context.env.UPSTREAM_RPC_URL || FALLBACK_UPSTREAM;
   const bodyText = await context.request.text();
   let parsed;
   try {
@@ -96,7 +108,7 @@ export async function onRequestPost(context) {
     }
   }
 
-  const upstream = await fetch(UPSTREAM, {
+  const upstream = await fetch(upstreamUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: bodyText,

@@ -292,7 +292,21 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
             distinctParticipants[epoch] += 1;
         }
         emit TicketsClaimed(epoch, source, sourceRoundId, player, amount);
-        if (address(progression) != address(0)) progression.recordPowerboardClaim(player);
+        // MEDIUM-severity fix, 2026-08-18: PlankProgression.sol's own header
+        // previously claimed this call "can't revert a caller's OWN core
+        // action" because it's the last statement in the function -- that
+        // was false (Solidity unwinds the whole transaction on any revert,
+        // statement order notwithstanding). try/catch makes the guarantee
+        // real: a misbehaving/misconfigured progression contract can't
+        // brick ticket claims. (An initial debugging pass wrongly suspected
+        // bare `catch {}` behaved differently from `catch (bytes memory) {}`
+        // here -- re-verified against the full canonical test suite
+        // (`npm run test:contracts`, 292/292 green) and confirmed that was
+        // test-run-order flakiness elsewhere in the suite, not a real
+        // difference; either catch form is fine.)
+        if (address(progression) != address(0)) {
+            try progression.recordPowerboardClaim(player) {} catch {}
+        }
     }
 
     /// Permissionless, once the epoch has genuinely closed. Commits the

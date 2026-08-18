@@ -1,16 +1,48 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import { withImageWidth } from "@/lib/ipfs";
 import ListingCard from "@/components/market/ListingCard";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import ForeignSweepConfirm from "@/components/market/ForeignSweepConfirm";
 import ForeignSendConfirm from "@/components/market/ForeignSendConfirm";
+import ForeignDetailsModal from "@/components/market/ForeignDetailsModal";
+import ForeignOfferConfirm from "@/components/market/ForeignOfferConfirm";
+import ForeignOfferForm from "@/components/market/ForeignOfferForm";
+import { normalizeRarityTier } from "@/lib/rarity";
+import { tierColor } from "@/lib/market/rarityClient";
+import type { RarityLookup } from "@/lib/market/rarityClient";
 import { useWallet } from "@/lib/wallet-context";
 import { connectWallet } from "@/lib/wallet";
+import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import type { SendFeeQuote } from "@/lib/market/send-fee";
 import type { BatchSendStatus } from "@/lib/market/transfer";
-import { chainDisplayName, FOREIGN_FEE_BPS } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { chainDisplayName, FOREIGN_FEE_BPS, foreignOfferCurrency } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { isCrossChainBuyable, venueLabel, type Listing, type MarketCollection } from "@/lib/market/types";
+import { formatTokenAmount, shortAddress } from "@/lib/trade";
+import MarketNav from "@/components/market/MarketNav";
+import { MarketTabRail, MarketTabPanel } from "@/components/market/MarketScaffold";
+import MarketBrowseLayout from "@/components/market/MarketBrowseLayout";
+import RarityFloorStrip from "@/components/market/RarityFloorStrip";
+import type { RarityTier } from "@/lib/rarity";
+import ForeignSwapComingSoon from "@/components/market/ForeignSwapComingSoon";
+import ForeignActivityFeed, { type ForeignActivityEvent } from "@/components/market/ForeignActivityFeed";
+import { MARKET_TABS } from "@/lib/market/navigation";
+import type { MarketTab } from "@/lib/market/types";
+
+type ForeignOffer = {
+  orderHash: string;
+  maker: string;
+  priceWei: string;
+  expiresAt: string;
+  acceptable: boolean;
+  isWildcard: boolean;
+  tokenId: string | null;
+  imageUrl: string | null;
+  name: string | null;
+};
+type MyListing = { orderHash: string; tokenId: string; priceWei: string; expiresAt: string };
 
 type Props = {
   chainSlug: string;
@@ -48,6 +80,16 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [searchQuery, setSearchQuery] = useState("");
   const [minPriceEth, setMinPriceEth] = useState("");
   const [maxPriceEth, setMaxPriceEth] = useState("");
+  // TRAIT FILTER -- one selected value per trait category, AND-combined
+  // (matches native's existing trait-criteria semantics, e.g.
+  // trait-criteria.ts's own AND rule). Empty string = "any value" for that
+  // category. Applied client-side to the already-loaded listings grid
+  // (each Listing already carries real .traits, see listings/route.ts) AND
+  // server-side for sweep (fetchForeignTraitFilteredListings), since a
+  // trait-filtered sweep must pull from the FULL collection, not just
+  // whatever's in the currently-loaded 40-listing page.
+  const [selectedTraits, setSelectedTraits] = useState<Record<string, string>>({});
+  const [activeTier, setActiveTier] = useState<RarityTier | "all">("all");
 
   const [buyTarget, setBuyTarget] = useState<Listing | null>(null);
   const [buyBusy, setBuyBusy] = useState(false);
@@ -61,6 +103,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // listings grid on purpose: an owned token is not necessarily listed for
   // sale, and a listed token is not necessarily owned by the viewer.
   const [ownedTokenIds, setOwnedTokenIds] = useState<string[]>([]);
+  const [ownedItems, setOwnedItems] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>>([]);
   const [ownedLoading, setOwnedLoading] = useState(false);
   const [selectedForSend, setSelectedForSend] = useState<Set<string>>(new Set());
   const [sendTarget, setSendTarget] = useState<string[] | null>(null); // token ids currently in the confirm modal
@@ -69,6 +112,45 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [sendFeeError, setSendFeeError] = useState<string | null>(null);
   const [sendBusy, setSendBusy] = useState(false);
   const [sendStatuses, setSendStatuses] = useState<Map<string, BatchSendStatus> | null>(null);
+
+  // OFFERS / ACTIVITY -- the tab-parity pieces of "full native marketplank
+  // experience for every collection on every chain." View-only for now:
+  // see app/api/market/multichain/offers/route.ts's header on why accepting
+  // an offer is a separate, not-yet-built signer flow (owner-as-fulfiller,
+  // requires prior Seaport conduit approval), distinct from buyNow.
+  const [offers, setOffers] = useState<ForeignOffer[]>([]);
+  const [offersLoading, setOffersLoading] = useState(true);
+  const [activity, setActivity] = useState<ForeignActivityEvent[]>([]);
+  const [activityLoading, setActivityLoading] = useState(true);
+
+  // MY LISTINGS -- own active listings in this collection. See
+  // my-listings/route.ts's header on why this filters the full
+  // active-listings set by offerer rather than a maker-scoped API call
+  // (OpenSea removed that endpoint).
+  const [myListings, setMyListings] = useState<MyListing[]>([]);
+  const [myListingsLoading, setMyListingsLoading] = useState(false);
+
+  const [tab, setTab] = useState<MarketTab>("buy-sell");
+
+  // RARITY -- reuses the SAME information-content algorithm/tier system as
+  // RobinWood's own collection (lib/rarity.ts + lib/rarity-generic.ts),
+  // pre-computed in the background (scripts/index-foreign-rarity.ts) since
+  // a live per-request compute would need every token in the collection.
+  // Empty map (indexed=false) is a real, expected state for a collection
+  // that hasn't been indexed yet -- cards render un-tiered, never a fake rank.
+  const [rarityMap, setRarityMap] = useState<Map<string, RarityLookup>>(new Map());
+
+  // DETAILS / MAKE OFFER -- real traits + collection-wide trait-frequency
+  // signal (see ForeignDetailsModal's header on why this isn't a numeric
+  // rank), and a genuine signed-Seaport-offer flow (foreign-offer.ts).
+  const [detailsTarget, setDetailsTarget] = useState<Listing | null>(null);
+  const [traitCounts, setTraitCounts] = useState<Record<string, Record<string, number>> | null>(null);
+  const [offerTarget, setOfferTarget] = useState<Listing | null>(null);
+  const [offerAmountEth, setOfferAmountEth] = useState("");
+  const [offerBusy, setOfferBusy] = useState(false);
+  const [offerError, setOfferError] = useState<string | null>(null);
+  const [acceptingOrderHash, setAcceptingOrderHash] = useState<string | null>(null);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
 
   const chainLabel = `${chainDisplayName(chainSlug)} via OpenSea`;
 
@@ -83,14 +165,18 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       // card fell back to an EMPTY image src. Real-browser loading caught
       // it: 120 console errors and an art-less grid. One source, no
       // cross-referencing by mismatched key.
-      const res = await fetch(
-        `/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=40`
-      );
-      if (!res.ok) throw new Error(String(res.status));
-      const data = (await res.json()) as {
+      // Listing state (price/availability) can change within seconds --
+      // short ttl so a background revalidation kicks in almost every time
+      // this collection is revisited, while still giving instant paint
+      // from cache on rapid re-renders/filter changes within this window.
+      const data = await swrJson<{
         collection: { slug: string; name: string; imageUrl: string | null; contractAddress: string };
         listings: Listing[];
-      };
+      }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=40`, {
+        ttlMs: 8_000,
+        swrMs: 45_000,
+        session: true,
+      });
       // MarketCollection carries Robinhood-Chain-specific bookkeeping
       // (feeBps/royaltyBps/royaltyRecipient) that has no meaning for a
       // foreign collection -- real royalty is whatever the real Seaport
@@ -119,6 +205,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   useEffect(() => {
     void load();
+    // "Always refreshing" -- periodically revalidate in the background so a
+    // listing that sold or got underbid elsewhere doesn't sit stale on
+    // screen just because the viewer never re-navigated. swrJson's own ttl
+    // (8s) means most of these calls are cheap no-op cache hits; this timer
+    // just guarantees the check happens even on a long-idle tab.
+    const id = setInterval(() => void load(), 20_000);
+    return () => clearInterval(id);
   }, [load]);
 
   const loadOwned = useCallback(async () => {
@@ -128,14 +221,21 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     }
     setOwnedLoading(true);
     try {
-      const res = await fetch(
-        `/api/market/multichain/owned?chainSlug=${chainSlug}&owner=${account}&contractAddress=${collection.contractAddress}`
+      // Owned-token membership changes only on a real transfer (send/buy),
+      // both of which explicitly invalidateSwr() below -- safe to hold a
+      // longer stale window here than listings without feeling out of date.
+      const data = await swrJson<{
+        tokenIds: string[];
+        items: Array<{ tokenId: string; name: string | null; imageUrl: string | null }>;
+      }>(
+        `/api/market/multichain/owned?chainSlug=${chainSlug}&owner=${account}&contractAddress=${collection.contractAddress}`,
+        { ttlMs: 20_000, swrMs: 120_000, session: true }
       );
-      if (!res.ok) throw new Error(String(res.status));
-      const data = (await res.json()) as { tokenIds: string[] };
       setOwnedTokenIds(data.tokenIds ?? []);
+      setOwnedItems(data.items ?? []);
     } catch {
       setOwnedTokenIds([]);
+      setOwnedItems([]);
     } finally {
       setOwnedLoading(false);
     }
@@ -144,6 +244,98 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   useEffect(() => {
     void loadOwned();
   }, [loadOwned]);
+
+  const loadOffers = useCallback(async () => {
+    try {
+      const data = await swrJson<{ offers: ForeignOffer[] }>(
+        `/api/market/multichain/offers?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=20`,
+        { ttlMs: 15_000, swrMs: 90_000, session: true }
+      );
+      setOffers(data.offers ?? []);
+    } catch {
+      setOffers([]);
+    } finally {
+      setOffersLoading(false);
+    }
+  }, [chainSlug, collectionSlug]);
+
+  useEffect(() => {
+    void loadOffers();
+  }, [loadOffers]);
+
+  const loadActivity = useCallback(async () => {
+    try {
+      // Sale/transfer history is inherently append-only for anything already
+      // recorded -- a long swr window is correct, the only "freshness" that
+      // matters is whether a NEW event has landed.
+      const data = await swrJson<{ events: ForeignActivityEvent[] }>(
+        `/api/market/multichain/activity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=25`,
+        { ttlMs: 30_000, swrMs: 300_000, session: true }
+      );
+      setActivity(data.events ?? []);
+    } catch {
+      setActivity([]);
+    } finally {
+      setActivityLoading(false);
+    }
+  }, [chainSlug, collectionSlug]);
+
+  useEffect(() => {
+    void loadActivity();
+  }, [loadActivity]);
+
+  const loadMyListings = useCallback(async () => {
+    if (!account) {
+      setMyListings([]);
+      return;
+    }
+    setMyListingsLoading(true);
+    try {
+      const data = await swrJson<{ listings: MyListing[] }>(
+        `/api/market/multichain/my-listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&maker=${account}`,
+        { ttlMs: 15_000, swrMs: 90_000, session: true }
+      );
+      setMyListings(data.listings ?? []);
+    } catch {
+      setMyListings([]);
+    } finally {
+      setMyListingsLoading(false);
+    }
+  }, [account, chainSlug, collectionSlug]);
+
+  useEffect(() => {
+    void loadMyListings();
+  }, [loadMyListings]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // isGood: never let a "not indexed yet" response lock out a real
+        // one for the full 30-minute swr window -- the exact stale-empty-
+        // poisons-cache failure mode swr-fetch.ts's own isGood guard exists
+        // for (see its header comment on the vault-58 bug). Indexing is a
+        // one-off background job (scripts/index-foreign-rarity.ts), so a
+        // collection can go from unindexed to indexed between two page
+        // loads within the same swr window.
+        const data = await swrJson<{ byTokenId: Record<string, unknown>; indexed: boolean }>(
+          `/api/market/multichain/rarity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`,
+          { ttlMs: 120_000, swrMs: 1_800_000, session: true, isGood: (d) => Boolean((d as { indexed?: boolean })?.indexed) }
+        ) as { byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number }> };
+        if (cancelled) return;
+        const map = new Map<string, RarityLookup>();
+        for (const [tokenId, v] of Object.entries(data.byTokenId ?? {})) {
+          map.set(tokenId, { ...v, tier: normalizeRarityTier(v.tier) });
+        }
+        setRarityMap(map);
+      } catch {
+        if (!cancelled) setRarityMap(new Map());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [chainSlug, collectionSlug]);
 
   const requireAccount = useCallback(async () => {
     if (account) return account;
@@ -155,6 +347,103 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       return null;
     }
   }, [account, adoptAccount]);
+
+  // Loaded eagerly (not just on Details-open) -- the trait FILTER bar below
+  // needs the real category/value list to populate its dropdowns before the
+  // viewer ever opens a single item's Details.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await swrJson<{ counts: Record<string, Record<string, number>> }>(
+          `/api/market/multichain/traits?collectionSlug=${encodeURIComponent(collectionSlug)}`,
+          { ttlMs: 300_000, swrMs: 3_600_000, session: true }
+        );
+        if (!cancelled) setTraitCounts(data.counts ?? {});
+      } catch {
+        if (!cancelled) setTraitCounts({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [collectionSlug]);
+
+  const openDetails = useCallback(
+    (tokenId: string) => {
+      const listing = listings.find((l) => l.tokenId === tokenId);
+      if (!listing) return;
+      setDetailsTarget(listing);
+    },
+    [listings]
+  );
+
+  const openOffer = useCallback(
+    async (listing: Listing) => {
+      setOfferError(null);
+      const who = await requireAccount();
+      if (!who) return;
+      setOfferAmountEth("");
+      setOfferTarget(listing);
+    },
+    [requireAccount]
+  );
+
+  const confirmOffer = useCallback(async () => {
+    if (!offerTarget || !account || !collection?.contractAddress) return;
+    setOfferError(null);
+    try {
+      setOfferBusy(true);
+      const { buildForeignOffer } = await import("@/lib/market/multichain/trading/foreign-offer");
+      const offerWei = BigInt(Math.round(Number(offerAmountEth) * 1e18));
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      await buildForeignOffer({
+        chainSlug,
+        collectionAddress: collection.contractAddress,
+        tokenId: offerTarget.tokenId,
+        offerWei,
+        expiresAt,
+        accountAddress: account,
+      });
+      setOfferTarget(null);
+      setStatus("Offer submitted.");
+      invalidateSwr("/api/market/multichain/offers");
+      await loadOffers();
+    } catch (e) {
+      console.error("Offer failed:", e);
+      setOfferError(e instanceof Error ? e.message : "Offer failed.");
+    } finally {
+      setOfferBusy(false);
+      setStatus(null);
+    }
+  }, [offerTarget, account, collection?.contractAddress, chainSlug, offerAmountEth, loadOffers]);
+
+  const handleAcceptOffer = useCallback(
+    async (offer: ForeignOffer) => {
+      setAcceptError(null);
+      const who = await requireAccount();
+      if (!who) return;
+      try {
+        setAcceptingOrderHash(offer.orderHash);
+        setStatus("Confirm in wallet…");
+        const { acceptForeignOffer } = await import("@/lib/market/multichain/trading/foreign-offer");
+        await acceptForeignOffer({ chainSlug, orderHash: offer.orderHash, accountAddress: who });
+        setStatus("Offer accepted.");
+        invalidateSwr("/api/market/multichain/offers");
+        invalidateSwr("/api/market/multichain/listings");
+        invalidateSwr("/api/market/multichain/owned");
+        await loadOffers();
+        await loadOwned();
+      } catch (e) {
+        console.error("Accept offer failed:", e);
+        setAcceptError(e instanceof Error ? e.message : "Accept failed.");
+      } finally {
+        setAcceptingOrderHash(null);
+        setStatus(null);
+      }
+    },
+    [chainSlug, requireAccount, loadOffers, loadOwned]
+  );
 
   const handleBuy = useCallback(
     async (listing: Listing) => {
@@ -180,7 +469,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       });
       setBuyTarget(null);
       setStatus("Purchase confirmed.");
+      invalidateSwr("/api/market/multichain/listings");
+      invalidateSwr("/api/market/multichain/owned");
       await load();
+      await loadOwned();
     } catch (e) {
       console.error("Cross-chain buy failed:", e);
       setError(e instanceof Error ? e.message : "Purchase failed.");
@@ -188,22 +480,58 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setBuyBusy(false);
       setStatus(null);
     }
-  }, [buyTarget, load]);
+  }, [buyTarget, load, loadOwned]);
+
+  // AND-combined active trait clauses, derived from selectedTraits --
+  // shared by the client-side grid filter and the server-side sweep call.
+  const traitClauses = useMemo(
+    () => Object.entries(selectedTraits).filter(([, value]) => value !== "").map(([traitType, value]) => ({ traitType, value })),
+    [selectedTraits]
+  );
+
+  const filteredListings = useMemo(() => {
+    const q = searchQuery.trim();
+    const min = minPriceEth.trim() ? Number(minPriceEth) : null;
+    const max = maxPriceEth.trim() ? Number(maxPriceEth) : null;
+    return listings.filter((l) => {
+      if (q && !l.tokenId.startsWith(q)) return false;
+      const priceEth = Number(l.priceWei) / 1e18;
+      if (min !== null && priceEth < min) return false;
+      if (max !== null && priceEth > max) return false;
+      if (traitClauses.length > 0) {
+        const has = (traitType: string, value: string) => (l.traits ?? []).some((t) => t.traitType === traitType && t.value === value);
+        if (!traitClauses.every((c) => has(c.traitType, c.value))) return false;
+      }
+      if (activeTier !== "all") {
+        const r = rarityMap.get(l.tokenId);
+        if (!r || r.tier !== activeTier) return false;
+      }
+      return true;
+    });
+  }, [listings, searchQuery, minPriceEth, maxPriceEth, traitClauses, activeTier, rarityMap]);
 
   const openSweepPreview = useCallback(async () => {
     setError(null);
     const who = await requireAccount();
     if (!who) return;
-    const cheapest = [...listings]
+    // Preview from the trait-filtered set when a filter is active, so what
+    // the confirm modal shows matches what the real sweep (below, via
+    // fetchForeignTraitFilteredListings) will actually pull.
+    const source = traitClauses.length > 0 ? filteredListings : listings;
+    const cheapest = [...source]
       .filter((l) => isCrossChainBuyable(l))
       .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1))
       .slice(0, sweepCount);
     if (cheapest.length === 0) {
-      setError("No cross-chain-buyable listings available to sweep right now.");
+      setError(
+        traitClauses.length > 0
+          ? "No cross-chain-buyable listings match the selected traits right now."
+          : "No cross-chain-buyable listings available to sweep right now."
+      );
       return;
     }
     setSweepPreview(cheapest);
-  }, [listings, sweepCount, requireAccount]);
+  }, [listings, filteredListings, traitClauses, sweepCount, requireAccount]);
 
   const confirmSweep = useCallback(async () => {
     if (!sweepPreview || sweepPreview.length === 0) return;
@@ -212,10 +540,18 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setSweepBusy(true);
       setStatus("Confirm in wallet…");
       const { sweepForeignListings } = await import("@/lib/market/multichain/trading/foreign-fulfill");
-      const result = await sweepForeignListings({ chainSlug, collectionSlug, count: sweepPreview.length });
+      const result = await sweepForeignListings({
+        chainSlug,
+        collectionSlug,
+        count: sweepPreview.length,
+        traits: traitClauses.length > 0 ? traitClauses : undefined,
+      });
       setSweepPreview(null);
       setStatus(`Swept ${result.attempted} item(s).`);
+      invalidateSwr("/api/market/multichain/listings");
+      invalidateSwr("/api/market/multichain/owned");
       await load();
+      await loadOwned();
     } catch (e) {
       console.error("Cross-chain sweep failed:", e);
       setError(e instanceof Error ? e.message : "Sweep failed.");
@@ -223,7 +559,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setSweepBusy(false);
       setStatus(null);
     }
-  }, [sweepPreview, chainSlug, collectionSlug, load]);
+  }, [sweepPreview, chainSlug, collectionSlug, load, loadOwned]);
 
   const toggleSendSelection = useCallback((tokenId: string) => {
     setSelectedForSend((prev) => {
@@ -277,6 +613,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setStatus("Sent.");
       setSendTarget(null);
       setSelectedForSend(new Set());
+      invalidateSwr("/api/market/multichain/owned");
       await loadOwned();
     } catch (e) {
       console.error("Send failed:", e);
@@ -287,18 +624,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     }
   }, [sendTarget, account, collection?.contractAddress, chainSlug, sendRecipient, loadOwned]);
 
-  const filteredListings = useMemo(() => {
-    const q = searchQuery.trim();
-    const min = minPriceEth.trim() ? Number(minPriceEth) : null;
-    const max = maxPriceEth.trim() ? Number(maxPriceEth) : null;
-    return listings.filter((l) => {
-      if (q && !l.tokenId.startsWith(q)) return false;
-      const priceEth = Number(l.priceWei) / 1e18;
-      if (min !== null && priceEth < min) return false;
-      if (max !== null && priceEth > max) return false;
-      return true;
-    });
-  }, [listings, searchQuery, minPriceEth, maxPriceEth]);
+  const tokenOffers = useMemo(() => offers.filter((o) => o.acceptable && o.tokenId), [offers]);
+  const collectionWideOffers = useMemo(() => offers.filter((o) => !o.acceptable), [offers]);
 
   if (loading) {
     return <p className="p-6 text-center text-foreground/50">Loading {chainDisplayName(chainSlug)} listings…</p>;
@@ -308,7 +635,19 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   }
 
   const buyableCount = listings.filter((l) => isCrossChainBuyable(l)).length;
-  const filtersActive = searchQuery.trim() !== "" || minPriceEth.trim() !== "" || maxPriceEth.trim() !== "";
+  const filtersActive = searchQuery.trim() !== "" || minPriceEth.trim() !== "" || maxPriceEth.trim() !== "" || traitClauses.length > 0 || activeTier !== "all";
+
+  // STAT BAR -- real numbers derived from data already loaded for this
+  // page (no new API surface): floor = cheapest active listing, best offer
+  // = top of the offers list, volume/highest sale = aggregated from the
+  // real sale events in the activity feed (bounded to whatever activity/
+  // route.ts returned, same honesty as everywhere else here -- this is
+  // "volume in the loaded window," not an all-time indexed total).
+  const floorWei = listings.length > 0 ? listings.reduce((min, l) => (BigInt(l.priceWei) < BigInt(min) ? l.priceWei : min), listings[0].priceWei) : null;
+  const bestOfferWei = offers.length > 0 ? offers[0].priceWei : null;
+  const saleEvents = activity.filter((e) => e.type === "sale" && e.priceWei);
+  const volumeWei = saleEvents.length > 0 ? saleEvents.reduce((sum, e) => sum + BigInt(e.priceWei!), BigInt(0)).toString() : null;
+  const highestSaleWei = saleEvents.length > 0 ? saleEvents.reduce((max, e) => (BigInt(e.priceWei!) > BigInt(max) ? e.priceWei! : max), saleEvents[0].priceWei!) : null;
 
   return (
     <div className="space-y-4 p-4">
@@ -316,97 +655,32 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         <div>
           <h2 className="font-display text-xl text-gold-300">{collection.name}</h2>
           <p className="text-xs text-foreground/50">
-            {filteredListings.length !== listings.length
-              ? `${filteredListings.length} of ${listings.length} listings`
-              : `${listings.length} listing${listings.length === 1 ? "" : "s"}`}{" "}
-            on {chainDisplayName(chainSlug)}
+            {listings.length} listing{listings.length === 1 ? "" : "s"} on {chainDisplayName(chainSlug)}
           </p>
         </div>
-        {buyableCount > 0 && (
-          <div className="flex items-center gap-2">
-            <select
-              value={sweepCount}
-              onChange={(e) => setSweepCount(Number(e.target.value))}
-              className="min-h-11 rounded-md border border-line bg-panel px-2 text-sm text-foreground"
-              aria-label="Sweep size"
-            >
-              {SWEEP_SIZE_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  Sweep {n}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => void openSweepPreview()}
-              className="min-h-11 rounded-md bg-gold-500 px-3 text-sm font-bold text-wood-950 hover:bg-gold-400"
-            >
-              Sweep floor
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* SMART SEARCH / FILTER -- instant, client-side over the loaded set. */}
-      <div className="flex flex-wrap items-end gap-2 rounded-lg border border-line bg-panel p-2.5">
-        <div className="min-w-[8rem] flex-1">
-          <label htmlFor="mc-search" className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
-            Token #
-          </label>
-          <input
-            id="mc-search"
-            type="text"
-            inputMode="numeric"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value.replace(/[^0-9]/g, ""))}
-            placeholder="Search #..."
-            className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground placeholder:text-foreground/30"
-          />
+      {/* STAT BAR -- real, same shape as the native page's floor/items/listed/best-offer/volume/highest-sale row. */}
+      <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-panel p-3 sm:grid-cols-4">
+        <div>
+          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Floor</p>
+          <p className="text-sm font-bold text-foreground tabular-nums">{floorWei ? `${formatTokenAmount(floorWei, 18, 4)} Ξ` : "—"}</p>
         </div>
-        <div className="w-24">
-          <label htmlFor="mc-min" className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
-            Min Ξ
-          </label>
-          <input
-            id="mc-min"
-            type="number"
-            step="0.001"
-            min="0"
-            value={minPriceEth}
-            onChange={(e) => setMinPriceEth(e.target.value)}
-            placeholder="0"
-            className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground placeholder:text-foreground/30"
-          />
+        <div>
+          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Best offer</p>
+          <p className="text-sm font-bold text-foreground tabular-nums">{bestOfferWei ? `${formatTokenAmount(bestOfferWei, 18, 4)} Ξ` : "—"}</p>
         </div>
-        <div className="w-24">
-          <label htmlFor="mc-max" className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
-            Max Ξ
-          </label>
-          <input
-            id="mc-max"
-            type="number"
-            step="0.001"
-            min="0"
-            value={maxPriceEth}
-            onChange={(e) => setMaxPriceEth(e.target.value)}
-            placeholder="∞"
-            className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground placeholder:text-foreground/30"
-          />
+        <div>
+          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Volume</p>
+          <p className="text-sm font-bold text-foreground tabular-nums">{volumeWei ? `${formatTokenAmount(volumeWei, 18, 3)} Ξ` : "—"}</p>
         </div>
-        {filtersActive && (
-          <button
-            type="button"
-            onClick={() => {
-              setSearchQuery("");
-              setMinPriceEth("");
-              setMaxPriceEth("");
-            }}
-            className="min-h-10 rounded-md border border-line px-3 text-xs font-bold text-foreground/60 hover:border-gold-400 hover:text-gold-300"
-          >
-            Clear
-          </button>
-        )}
+        <div>
+          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Highest sale</p>
+          <p className="text-sm font-bold text-foreground tabular-nums">{highestSaleWei ? `${formatTokenAmount(highestSaleWei, 18, 4)} Ξ` : "—"}</p>
+        </div>
       </div>
+
+      <MarketTabRail navigation={<MarketNav active={tab} onChange={setTab} tabs={MARKET_TABS} />} />
 
       {error && (
         <p role="alert" className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100">
@@ -414,67 +688,398 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </p>
       )}
 
-      {/* MY ITEMS / SEND -- only appears once a wallet is connected and owns something here. */}
-      {account && (ownedLoading || ownedTokenIds.length > 0) && (
-        <div className="space-y-2 rounded-lg border border-line bg-panel p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-xs font-black uppercase tracking-wide text-foreground/60">
-              Your items {ownedTokenIds.length > 0 ? `(${ownedTokenIds.length})` : ""}
-            </h3>
+      <MarketTabPanel id="buy-sell" active={tab === "buy-sell"}>
+        <MarketBrowseLayout
+          summary={`${filteredListings.length} ${filteredListings.length === 1 ? "item" : "items"} on ${chainDisplayName(chainSlug)}`}
+          lead={
+            rarityMap.size > 0 && listings.length > 0 ? (
+              <RarityFloorStrip listings={listings} rarity={rarityMap} activeTier={activeTier} onSelectTier={setActiveTier} />
+            ) : undefined
+          }
+          filters={
+            <div className="space-y-3">
+              <div>
+                <label htmlFor="mc-search" className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
+                  Token #
+                </label>
+                <input
+                  id="mc-search"
+                  type="text"
+                  inputMode="numeric"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value.replace(/[^0-9]/g, ""))}
+                  placeholder="Search #..."
+                  className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground placeholder:text-foreground/30"
+                />
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label htmlFor="mc-min" className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
+                    Min Ξ
+                  </label>
+                  <input
+                    id="mc-min"
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={minPriceEth}
+                    onChange={(e) => setMinPriceEth(e.target.value)}
+                    placeholder="0"
+                    className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground placeholder:text-foreground/30"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label htmlFor="mc-max" className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
+                    Max Ξ
+                  </label>
+                  <input
+                    id="mc-max"
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={maxPriceEth}
+                    onChange={(e) => setMaxPriceEth(e.target.value)}
+                    placeholder="∞"
+                    className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground placeholder:text-foreground/30"
+                  />
+                </div>
+              </div>
+
+              {/* TRAIT FILTER -- one dropdown per real trait category, AND-combined. Populated from the SAME collection-wide value counts the Details view's rarity % already uses. */}
+              {traitCounts &&
+                Object.entries(traitCounts)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([traitType, values]) => (
+                    <div key={traitType}>
+                      <label htmlFor={`mc-trait-${traitType}`} className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
+                        {traitType}
+                      </label>
+                      <select
+                        id={`mc-trait-${traitType}`}
+                        value={selectedTraits[traitType] ?? ""}
+                        onChange={(e) => setSelectedTraits((prev) => ({ ...prev, [traitType]: e.target.value }))}
+                        className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground"
+                      >
+                        <option value="">Any {traitType}</option>
+                        {Object.entries(values)
+                          .sort(([, ca], [, cb]) => ca - cb)
+                          .map(([value, count]) => (
+                            <option key={value} value={value}>
+                              {value} ({count})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  ))}
+
+              {filtersActive && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setMinPriceEth("");
+                    setMaxPriceEth("");
+                    setSelectedTraits({});
+                    setActiveTier("all");
+                  }}
+                  className="min-h-10 w-full rounded-md border border-line px-3 text-xs font-bold text-foreground/60 hover:border-gold-400 hover:text-gold-300"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          }
+          toolbar={
+            buyableCount > 0 && (
+              <>
+                <select
+                  value={sweepCount}
+                  onChange={(e) => setSweepCount(Number(e.target.value))}
+                  className="min-h-10 rounded-md border border-line bg-panel px-2 text-xs text-foreground"
+                  aria-label="Sweep size"
+                >
+                  {SWEEP_SIZE_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      Sweep {n}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void openSweepPreview()}
+                  className="min-h-10 shrink-0 rounded-lg border border-line-strong bg-gold-500 px-3 text-xs font-bold text-wood-950 transition hover:bg-gold-400"
+                >
+                  {traitClauses.length > 0 ? "Sweep by traits" : "Sweep floor"}
+                </button>
+              </>
+            )
+          }
+        >
+          {filteredListings.length === 0 ? (
+            <p className="p-6 text-center text-foreground/45">
+              {filtersActive ? "No listings match your search." : "No listings right now."}
+            </p>
+          ) : (
+            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              {filteredListings.map((listing) => (
+                <ListingCard
+                  key={listing.id}
+                  listing={listing}
+                  collection={collection}
+                  onBuy={(l) => void handleBuy(l)}
+                  onOffer={foreignOfferCurrency(chainSlug) ? (l) => void openOffer(l) : undefined}
+                  onSelect={(tokenId) => void openDetails(tokenId)}
+                  rarity={rarityMap.get(listing.tokenId)}
+                />
+              ))}
+            </ul>
+          )}
+        </MarketBrowseLayout>
+      </MarketTabPanel>
+
+      <MarketTabPanel id="swap" active={tab === "swap"}>
+        <ForeignSwapComingSoon collectionName={collection.name} />
+      </MarketTabPanel>
+
+      <MarketTabPanel id="offers" active={tab === "offers"}>
+        <div className="space-y-3">
+          {acceptError && (
+            <p role="alert" className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100">
+              {acceptError}
+            </p>
+          )}
+          {/* Same grid shape as native's Offers tab: sticky criteria-bid builder in a fixed left column, everything else in the flexible right column. */}
+          <div className="grid items-start gap-3 lg:grid-cols-[360px_minmax(0,1fr)]">
+            <div className="lg:sticky lg:top-[8.75rem]">
+              <ForeignOfferForm
+                chainSlug={chainSlug}
+                currencySymbol={chainSlug === "bnb-mainnet" ? "WBNB" : chainSlug === "avax-mainnet" ? "WAVAX" : "WETH"}
+                account={account}
+                collection={collection}
+                listings={listings}
+                onSubmitted={() => {
+                  invalidateSwr("/api/market/multichain/offers");
+                  void loadOffers();
+                }}
+                onConnect={() => void requireAccount()}
+              />
+            </div>
+            <div className="min-w-0 space-y-3">
+              <section aria-labelledby="mc-open-bids">
+                <div className="mb-2 flex items-end justify-between gap-3">
+                  <div>
+                    <h3 id="mc-open-bids" className="font-display text-xl text-gold-300">
+                      Open criteria bids
+                    </h3>
+                    <p className="text-xs text-foreground/55">Rarity, trait, and combo orders — view-only (see Offer form's own note on why).</p>
+                  </div>
+                  {collectionWideOffers.length > 0 && (
+                    <span className="rounded-full border border-line px-2 py-1 text-[0.65rem] text-gold-300">{collectionWideOffers.length} active</span>
+                  )}
+                </div>
+                {offersLoading ? (
+                  <p className="text-xs text-foreground/45">Loading offers…</p>
+                ) : collectionWideOffers.length === 0 ? (
+                  <p className="text-xs text-foreground/45">No open criteria bids right now.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {collectionWideOffers.map((o) => (
+                      <li key={o.orderHash} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-panel px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-bold text-foreground">{o.isWildcard ? `Any ${collection.name} token` : "Trait-scoped bid"}</p>
+                          <p className="text-xs text-foreground/60">by {shortAddress(o.maker)}</p>
+                        </div>
+                        <p className="text-sm font-extrabold tabular-nums text-emerald-300">{formatTokenAmount(o.priceWei, 18, 4)} Ξ</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section aria-labelledby="mc-single-token-offers">
+                <div className="mb-2">
+                  <h3 id="mc-single-token-offers" className="font-display text-xl text-gold-300">
+                    Single-token offers
+                  </h3>
+                  <p className="text-xs text-foreground/55">Offers tied to one exact token ID.</p>
+                </div>
+                {offersLoading ? (
+                  <p className="text-xs text-foreground/45">Loading offers…</p>
+                ) : tokenOffers.length === 0 ? (
+                  <p className="text-xs text-foreground/45">No single-token offers right now.</p>
+                ) : (
+                  <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                    {tokenOffers.map((o) => (
+                      <ListingCard
+                        key={o.orderHash}
+                        listing={{
+                          id: o.orderHash,
+                          collectionSlug,
+                          tokenId: o.tokenId!,
+                          maker: o.maker,
+                          priceWei: o.priceWei,
+                          expiresAt: o.expiresAt,
+                          kind: "fixed",
+                          imageUrl: o.imageUrl ?? undefined,
+                          venue: "opensea",
+                        }}
+                        collection={collection}
+                        variant="offer"
+                        buyLabel={acceptingOrderHash === o.orderHash ? "Confirm…" : "Accept"}
+                        canFill={acceptingOrderHash !== o.orderHash}
+                        onBuy={() => void handleAcceptOffer(o)}
+                        rarity={rarityMap.get(o.tokenId!)}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+          </div>
+        </div>
+      </MarketTabPanel>
+
+      <MarketTabPanel id="activity" active={tab === "activity"}>
+        <ForeignActivityFeed events={activity} loading={activityLoading} chainSlug={chainSlug} rarity={rarityMap} onSelectToken={(tokenId) => void openDetails(tokenId)} />
+      </MarketTabPanel>
+
+      <MarketTabPanel id="my-nfts" active={tab === "my-nfts"}>
+        {!account ? (
+          <p className="p-6 text-center text-foreground/45">Connect a wallet to see what you own in this collection.</p>
+        ) : (
+          // Bottom padding grows with the selection, same reason MyNfts.tsx's
+          // own comment gives: a sticky action bar over the grid's tail rows
+          // makes them unclickable otherwise -- confirmed live there, not
+          // a hypothetical.
+          <div className={`space-y-3 ${selectedForSend.size > 0 ? "pb-64 sm:pb-4" : "pb-4"}`}>
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h3 className="font-display text-xl text-gold-300">Your {collection.name}</h3>
+                <p className="text-xs text-foreground/55">
+                  {ownedTokenIds.length} owned · {selectedForSend.size} selected on {chainDisplayName(chainSlug)}
+                </p>
+              </div>
+            </div>
+            {ownedLoading ? (
+              <p className="text-xs text-foreground/45">Checking your wallet…</p>
+            ) : ownedTokenIds.length === 0 ? (
+              <p className="rounded-xl border border-line bg-panel px-4 py-8 text-center text-sm text-foreground/55">
+                You don't own any {collection.name} on {chainDisplayName(chainSlug)}.
+              </p>
+            ) : (
+              <ul className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2">
+                {ownedItems.map((item) => {
+                  const isSelected = selectedForSend.has(item.tokenId);
+                  const r = rarityMap.get(item.tokenId);
+                  return (
+                    <li
+                      key={item.tokenId}
+                      className={`dense-card relative flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-line-strong ${
+                        isSelected ? "ring-2 ring-gold-400" : ""
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openDetails(item.tokenId);
+                        }}
+                        aria-label={`View details for #${item.tokenId}`}
+                        className="absolute bottom-1.5 right-1.5 z-[3] flex h-6 w-6 items-center justify-center rounded-full bg-black/90 text-gold-300 transition hover:bg-black hover:text-gold-200"
+                      >
+                        i
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={isSelected}
+                        aria-label={`${isSelected ? "Deselect" : "Select"} #${item.tokenId}`}
+                        onClick={() => toggleSendSelection(item.tokenId)}
+                        className="relative block aspect-square w-full cursor-pointer bg-wood-900 outline-none transition focus-visible:ring-2 focus-visible:ring-gold-400/60"
+                      >
+                        <Image
+                          src={withImageWidth(item.imageUrl, 256) || collection.image}
+                          alt={`${collection.name} #${item.tokenId}`}
+                          fill
+                          sizes="(min-width: 1024px) 20vw, 50vw"
+                          className="object-cover"
+                          unoptimized={Boolean(item.imageUrl)}
+                        />
+                        {isSelected && (
+                          <span className="card-overlay absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-gold-500 text-wood-950">✓</span>
+                        )}
+                        {r && (
+                          <span
+                            className="tier-badge absolute left-1.5 top-1.5 rounded-full px-1.5 py-0.5 text-[0.55rem] font-bold uppercase tracking-wide"
+                            style={{ color: tierColor(r.tier) }}
+                            title={`Rank #${r.rank} · ${r.percentile.toFixed(0)}th percentile`}
+                          >
+                            {r.tier}
+                          </span>
+                        )}
+                      </button>
+                      <div className="flex flex-1 flex-col gap-0.5 p-2 leading-tight">
+                        <span className="truncate text-[0.6rem] font-bold text-foreground">{r?.name ?? item.name ?? `#${item.tokenId}`}</span>
+                        <span className="truncate text-[0.55rem] text-foreground/50">
+                          #{item.tokenId}
+                          {r ? ` · R${r.rank}` : ""}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
             {selectedForSend.size > 0 && (
-              <button
-                type="button"
-                onClick={() => void openSendConfirm([...selectedForSend])}
-                className="min-h-9 rounded-md bg-gold-500 px-3 text-xs font-bold text-wood-950 hover:bg-gold-400"
-              >
-                Send {selectedForSend.size} selected
-              </button>
+              <div className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-panel-strong p-3 backdrop-blur sm:sticky sm:rounded-xl sm:border">
+                <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
+                  <p className="text-sm font-bold text-foreground">
+                    {selectedForSend.size} selected on {chainDisplayName(chainSlug)}
+                  </p>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setSelectedForSend(new Set())} className="text-xs font-bold text-foreground/50 hover:text-gold-300">
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void openSendConfirm([...selectedForSend])}
+                      className="min-h-10 rounded-md bg-gold-500 px-4 text-xs font-bold text-wood-950 hover:bg-gold-400"
+                    >
+                      Send {selectedForSend.size}
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
-          {ownedLoading ? (
-            <p className="text-xs text-foreground/45">Checking your wallet…</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {ownedTokenIds.map((tokenId) => (
-                <div key={tokenId} className="flex items-center gap-1.5 rounded-md border border-line-strong bg-background px-2 py-1.5">
-                  <input
-                    type="checkbox"
-                    checked={selectedForSend.has(tokenId)}
-                    onChange={() => toggleSendSelection(tokenId)}
-                    aria-label={`Select #${tokenId} to send`}
-                    className="h-4 w-4"
-                  />
-                  <span className="text-xs font-bold text-foreground">#{tokenId}</span>
-                  <button
-                    type="button"
-                    onClick={() => void openSendConfirm([tokenId])}
-                    className="text-[0.6rem] font-bold text-gold-300 hover:text-gold-200"
-                  >
-                    Send
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+        )}
+      </MarketTabPanel>
 
-      {filteredListings.length === 0 ? (
-        <p className="p-6 text-center text-foreground/45">
-          {filtersActive ? "No listings match your search." : "No listings right now."}
-        </p>
-      ) : (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          {filteredListings.map((listing) => (
-            <ListingCard
-              key={listing.id}
-              listing={listing}
-              collection={collection}
-              onBuy={(l) => void handleBuy(l)}
-            />
-          ))}
-        </ul>
-      )}
+      <MarketTabPanel id="positions" active={tab === "positions"}>
+        {!account ? (
+          <p className="p-6 text-center text-foreground/45">Connect a wallet to see your active listings.</p>
+        ) : (
+          <div className="space-y-2 rounded-lg border border-line bg-panel p-3">
+            <h3 className="text-xs font-black uppercase tracking-wide text-foreground/60">
+              My listings {myListings.length > 0 ? `(${myListings.length})` : ""}
+            </h3>
+            {myListingsLoading ? (
+              <p className="text-xs text-foreground/45">Loading your listings…</p>
+            ) : myListings.length === 0 ? (
+              <p className="text-xs text-foreground/45">You have no active listings in {collection.name}.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {myListings.map((l) => (
+                  <li key={l.orderHash} className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-foreground">#{l.tokenId}</span>
+                    <span className="text-foreground/60 tabular-nums">{formatTokenAmount(l.priceWei, 18, 4)} Ξ</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </MarketTabPanel>
 
       {buyTarget && (
         <BuyConfirm
@@ -523,6 +1128,32 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           onCancel={() => {
             setError(null);
             setSendTarget(null);
+          }}
+        />
+      )}
+
+      {detailsTarget && (
+        <ForeignDetailsModal
+          listing={detailsTarget}
+          collectionName={collection.name}
+          traitCounts={traitCounts}
+          onClose={() => setDetailsTarget(null)}
+        />
+      )}
+
+      {offerTarget && (
+        <ForeignOfferConfirm
+          chainLabel={chainDisplayName(chainSlug)}
+          tokenId={offerTarget.tokenId}
+          currencySymbol={chainSlug === "bnb-mainnet" ? "WBNB" : chainSlug === "avax-mainnet" ? "WAVAX" : "WETH"}
+          amountEth={offerAmountEth}
+          onAmountChange={setOfferAmountEth}
+          busy={offerBusy || status !== null}
+          error={offerError}
+          onConfirm={confirmOffer}
+          onCancel={() => {
+            setOfferError(null);
+            setOfferTarget(null);
           }}
         />
       )}

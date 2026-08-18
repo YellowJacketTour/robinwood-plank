@@ -75,17 +75,44 @@ contract PlankV2TwapOracle {
     error StaleOracle();
     error UnknownToken();
     error NoReserves();
+    /// @dev MEDIUM-severity fix, 2026-08-18: constructor-time reserve floor undershot -- see the constructor's own comment.
+    error PairTooShallow(uint112 reserve0, uint112 reserve1, uint112 required);
 
-    constructor(address pair_, uint256 windowSize_, uint256 maxStaleness_) {
+    /**
+     * MEDIUM-severity fix, 2026-08-18: `pair_` was previously accepted on
+     * faith at construction -- nothing on-chain confirmed it was the real,
+     * deep, canonical pair rather than a thin or freshly-created one an
+     * attacker (or a deploy-script typo) could point this oracle at. A
+     * TWAP over a shallow pool is cheap to hold off-market for a full
+     * window, which defeats the entire sandwich-resistance argument this
+     * whole contract exists for (see the class header). This is a sanity
+     * FLOOR, not a business rule: it only rejects a pair that is obviously
+     * too thin to be the real, liquid market this oracle is meant to
+     * track, at the one moment (construction) this contract can enforce
+     * anything about the deploy at all. It does not (and cannot) prove
+     * `pair_` is the "official" pair in some governance sense -- that
+     * remains a deploy-process responsibility -- but it does close the
+     * "nobody checked reserves before wiring this up" gap with code, not
+     * just a comment.
+     */
+    uint112 public immutable minReserveEach;
+
+    constructor(address pair_, uint256 windowSize_, uint256 maxStaleness_, uint112 minReserveEach_) {
         if (pair_ == address(0)) revert BadConfig();
         if (windowSize_ < MIN_WINDOW) revert BadConfig();
         if (maxStaleness_ < windowSize_ || maxStaleness_ > windowSize_ * MAX_STALENESS_MULTIPLE) revert BadConfig();
+        if (minReserveEach_ == 0) revert BadConfig();
         IUniswapV2Pair p = IUniswapV2Pair(pair_);
+        (uint112 reserve0, uint112 reserve1, ) = p.getReserves();
+        if (reserve0 < minReserveEach_ || reserve1 < minReserveEach_) {
+            revert PairTooShallow(reserve0, reserve1, minReserveEach_);
+        }
         pair = p;
         token0 = p.token0();
         token1 = p.token1();
         windowSize = windowSize_;
         maxStaleness = maxStaleness_;
+        minReserveEach = minReserveEach_;
 
         // Prime the first observation from the pair's live accumulators.
         (uint256 p0, uint256 p1, uint32 ts) = _currentCumulativePrices();
@@ -100,7 +127,21 @@ contract PlankV2TwapOracle {
     /// elapsed since the last one, updates the time-averaged price. Anyone
     /// may call it; there is no privilege and no way to bias the result --
     /// the numbers come entirely from the pair's own accumulators.
+    ///
+    /// MEDIUM-severity fix, 2026-08-18: the constructor's minReserveEach
+    /// floor only ever proved the pool was deep AT DEPLOY TIME. A pool
+    /// that later gets drained (LPs exiting, or a legitimate but thin
+    /// market) would keep silently producing averages from this contract
+    /// even though it's no longer the liquid, manipulation-resistant
+    /// market the whole design assumes. Re-checking the SAME floor here
+    /// means a shallow pool fails closed (PairTooShallow, consult() then
+    /// reverts StaleOracle once past maxStaleness) rather than quietly
+    /// degrading into a spot-price-equivalent, sandwichable oracle.
     function update() external {
+        (uint112 reserve0, uint112 reserve1, ) = pair.getReserves();
+        if (reserve0 < minReserveEach || reserve1 < minReserveEach) {
+            revert PairTooShallow(reserve0, reserve1, minReserveEach);
+        }
         (uint256 p0, uint256 p1, uint32 ts) = _currentCumulativePrices();
         uint32 timeElapsed;
         unchecked {

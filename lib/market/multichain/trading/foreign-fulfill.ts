@@ -85,7 +85,14 @@ async function fetchFulfillmentData(input: { chainSlug: string; orderHash: strin
   return (await res.json()) as ForeignSeaportOrder;
 }
 
-async function fetchFloorListingSummaries(input: { chainSlug: string; collectionSlug: string; count: number }): Promise<ForeignSeaportOrder[]> {
+export type ForeignTraitClause = { traitType: string; value: string };
+
+async function fetchFloorListingSummaries(input: {
+  chainSlug: string;
+  collectionSlug: string;
+  count: number;
+  traits?: ForeignTraitClause[];
+}): Promise<ForeignSeaportOrder[]> {
   const res = await fetch("/api/market/multichain/floor-listings", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -196,6 +203,8 @@ export async function sweepForeignListings(input: {
   chainSlug: string;
   collectionSlug: string;
   count: number;
+  /** AND-combined, same semantics as fetchForeignTraitFilteredListings -- "sweep the N cheapest listings matching every clause." */
+  traits?: ForeignTraitClause[];
 }): Promise<ForeignSweepResult> {
   const { router, buyerAddress, feeBps } = await connectedRouter(input.chainSlug);
 
@@ -203,6 +212,7 @@ export async function sweepForeignListings(input: {
     chainSlug: input.chainSlug,
     collectionSlug: input.collectionSlug,
     count: input.count,
+    traits: input.traits,
   });
   if (summaries.length === 0) throw new Error("No listings available to sweep right now.");
 

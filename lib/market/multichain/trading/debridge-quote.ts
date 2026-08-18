@@ -35,6 +35,10 @@
  */
 import { fetchListingFulfillmentData } from "@/lib/market/multichain/trading/foreign-orders";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { findStablecoin } from "@/lib/market/multichain/trading/stablecoins";
+
+/** BNB Chain's chainId -- this file's origin chain is always 56 (see WRAPPED_NATIVE below and this file's own header on why: Across doesn't route BNB, deBridge does). */
+const BNB_CHAIN_ID = 56;
 
 const DEBRIDGE_API = "https://dln.debridge.finance/v1.0";
 
@@ -67,7 +71,9 @@ export async function quoteDeBridgeCrossChainPurchase(input: {
   destinationChainSlug: string;
   recipient: string;
   senderAddress: string;
-  inputAmountWei: string;
+  inputAmountWei: string; // in the input token's own smallest unit (wei for WBNB, or the stablecoin's own decimals -- see stablecoins.ts)
+  /** "USDC" | "USDT" to pay with a real, live-verified BNB Chain stablecoin instead of WBNB. Omit for the original wrapped-native behavior. */
+  inputCurrency?: "USDC" | "USDT";
 }): Promise<{ tx: DeBridgeDepositTx; orderPriceWei: string }> {
   const destChain = foreignChainByChainSlug(input.destinationChainSlug);
   if (!destChain) throw new Error(`debridge-quote: "${input.destinationChainSlug}" is not a supported foreign chain`);
@@ -109,9 +115,16 @@ export async function quoteDeBridgeCrossChainPurchase(input: {
     },
   };
 
+  let srcChainTokenIn = WRAPPED_NATIVE[BNB_CHAIN_ID];
+  if (input.inputCurrency) {
+    const stable = findStablecoin(BNB_CHAIN_ID, input.inputCurrency);
+    if (!stable) throw new Error(`debridge-quote: no verified ${input.inputCurrency} address for BNB Chain`);
+    srcChainTokenIn = stable.address;
+  }
+
   const params = new URLSearchParams({
-    srcChainId: "56",
-    srcChainTokenIn: WRAPPED_NATIVE[56],
+    srcChainId: String(BNB_CHAIN_ID),
+    srcChainTokenIn,
     srcChainTokenInAmount: input.inputAmountWei,
     dstChainId: String(destChain.chainId),
     dstChainTokenOut: destToken,

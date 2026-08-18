@@ -2535,7 +2535,19 @@ async function loadAvatarPicker() {
 
 async function connectToChain(rpcUrl, address, pk, label) {
   await loadAbi();
-  provider = new ethers.JsonRpcProvider(rpcUrl);
+  // On a real (non-local) RPC, this page's several independent poll timers
+  // (refresh() @400ms, the scoreboard/vault/fuel/powerboard/progression
+  // group @600ms) each fire their own handful of parallel calls -- ethers'
+  // default batching window (~10ms) is too short to merge calls issued by
+  // DIFFERENT timers, so even a free-tier provisioned RPC (confirmed
+  // against a real Alchemy testnet key, not just the old broken public
+  // one) still sees enough simultaneous distinct requests to 429. A wider
+  // batch window merges same-poll-cycle calls from different widgets into
+  // far fewer actual HTTP requests -- correctness-neutral (still one
+  // logical request per call, ethers un-batches the responses transparently),
+  // just less request volume against a real-world rate limit.
+  const providerOpts = REMOTE_DEPLOY ? { batchStallTime: 80, batchMaxCount: 40 } : undefined;
+  provider = new ethers.JsonRpcProvider(rpcUrl, undefined, providerOpts);
   signer = new ethers.Wallet(pk, provider);
   if (!ethers.isAddress(address)) throw new Error("Bad contract address");
   crash = new ethers.Contract(address, abi, signer);

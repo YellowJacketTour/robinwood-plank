@@ -108,6 +108,72 @@ export function chainDisplayName(chainSlug: string): string {
 }
 
 /**
+ * Each chain's real, public brand color (from that chain's own published
+ * brand kit -- Ethereum's ETH blue-purple, Polygon's purple, Base's blue,
+ * etc. -- not an invented palette). Used for at-a-glance chain
+ * identification on cards, distinct from the tier-rarity color system.
+ */
+const CHAIN_BRAND_COLOR: Record<string, string> = {
+  "eth-mainnet": "#627EEA",
+  "polygon-mainnet": "#8247E5",
+  "arb-mainnet": "#28A0F0",
+  "base-mainnet": "#0052FF",
+  "opt-mainnet": "#FF0420",
+  "bnb-mainnet": "#F0B90B",
+  "avax-mainnet": "#E84142",
+  "zksync-mainnet": "#8C8DFC",
+  "solana-mainnet": "#9945FF",
+};
+
+export function chainBrandColor(chainSlug: string): string {
+  return CHAIN_BRAND_COLOR[chainSlug] ?? "#58BDF0";
+}
+
+/** Short glyph for a compact colored chain badge -- avoids hotlinking third-party logo assets while staying instantly recognizable per chain. */
+const CHAIN_GLYPH: Record<string, string> = {
+  "eth-mainnet": "Ξ",
+  "polygon-mainnet": "P",
+  "arb-mainnet": "A",
+  "base-mainnet": "B",
+  "opt-mainnet": "O",
+  "bnb-mainnet": "BNB",
+  "avax-mainnet": "AVAX",
+  "zksync-mainnet": "ZK",
+  "solana-mainnet": "S",
+};
+
+export function chainGlyph(chainSlug: string): string {
+  return CHAIN_GLYPH[chainSlug] ?? chainSlug.slice(0, 2).toUpperCase();
+}
+
+/**
+ * Canonical WETH (or chain-native wrapped-gas-token) address per foreign
+ * chain -- Seaport cannot pull native ETH from an offerer at fulfillment
+ * time (same constraint lib/market/seaport.ts's own buildOffer documents
+ * for Robinhood Chain), so every cross-chain offer is denominated in this
+ * token. Each address was verified live 2026-08-18 with a real eth_call to
+ * symbol() against a public RPC for that exact chain (not copied from a
+ * list) -- Ethereum/Arbitrum/Polygon/Base/Optimism all returned "WETH",
+ * BNB Chain returned "WBNB", Avalanche returned "WAVAX". Base and
+ * Optimism share the literal address 0x4200...0006 because both are
+ * OP-stack chains with the same predeploy convention, confirmed
+ * independently for Base via a real OpenSea /offers/build response.
+ */
+const FOREIGN_OFFER_CURRENCY: Record<string, string> = {
+  "eth-mainnet": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  "polygon-mainnet": "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
+  "arb-mainnet": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+  "base-mainnet": "0x4200000000000000000000000000000000000006",
+  "opt-mainnet": "0x4200000000000000000000000000000000000006",
+  "bnb-mainnet": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+  "avax-mainnet": "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7",
+};
+
+export function foreignOfferCurrency(chainSlug: string): string | null {
+  return FOREIGN_OFFER_CURRENCY[chainSlug] ?? null;
+}
+
+/**
  * Both addresses are the SAME on every chain in FOREIGN_CHAINS (see header
  * comment) -- exported as constants, not a per-chain map, so a future chain
  * addition doesn't need to guess/re-verify an address that a deterministic

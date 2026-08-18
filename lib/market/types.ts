@@ -112,6 +112,16 @@ export type Listing = {
    * this specific listing is known to be safely re-fetchable that way.
    */
   foreignOrderHash?: string;
+  /**
+   * Real per-token traits, present only for a foreign listing (see
+   * app/api/market/multichain/listings/route.ts) -- resolved from the same
+   * OpenSea NFT-detail call already made for imageUrl, at no extra cost.
+   * Used by the Details view alongside foreignTraitCounts (fetched
+   * separately, collection-wide) to show a real "N% of the collection has
+   * this trait" signal -- NOT a full numeric rank, which would require
+   * fetching every token in the collection (see traits/route.ts's header).
+   */
+  traits?: Array<{ traitType: string; value: string }>;
 };
 
 /**

@@ -20,6 +20,9 @@ type CollectionRow = {
   image_url: string | null;
   external_url: string | null;
   is_vault_backed: boolean;
+  creator_handle: string | null;
+  creator_address: string | null;
+  creator_ens: string | null;
 };
 
 function rowToCollection(row: CollectionRow): TrackedCollection {
@@ -33,13 +36,16 @@ function rowToCollection(row: CollectionRow): TrackedCollection {
     imageUrl: row.image_url,
     externalUrl: row.external_url,
     isVaultBacked: row.is_vault_backed,
+    creatorHandle: row.creator_handle,
+    creatorAddress: row.creator_address,
+    creatorEns: row.creator_ens,
   };
 }
 
 /** Every collection registered for multichain sync. */
 export async function listTrackedCollections(): Promise<TrackedCollection[]> {
   const result = await postgresQuery<CollectionRow>(
-    `SELECT id, chain_slug, chain_id, contract_address, adapter, name, image_url, external_url, is_vault_backed
+    `SELECT id, chain_slug, chain_id, contract_address, adapter, name, image_url, external_url, is_vault_backed, creator_handle, creator_address
      FROM plank_multichain_collections
      ORDER BY chain_slug, contract_address`
   );
@@ -73,6 +79,71 @@ export async function upsertTrackedCollection(input: {
     ]
   );
   return result.rows[0].id;
+}
+
+/**
+ * Overwrite a collection's display name/image with a freshly-fetched real
+ * value, keyed by (chainSlug, contractAddress) rather than internal id --
+ * for rarity-index-runner.ts's real-OpenSea-art backfill. The COALESCE is
+ * only a null-guard for THIS call (never overwrite with an absent value),
+ * not a "keep the old one" guard -- callers only pass a real, freshly-
+ * fetched OpenSea value, so a dead img.reservoir.tools URL already stored
+ * always gets replaced, unlike writeSnapshot's own fill-if-empty COALESCE.
+ */
+export async function updateCollectionDisplay(
+  chainSlug: string,
+  contractAddress: string,
+  display: {
+    name: string | null;
+    imageUrl: string | null;
+    creatorHandle?: string | null;
+    creatorAddress?: string | null;
+    creatorEns?: string | null;
+  }
+): Promise<void> {
+  await postgresQuery(
+    `UPDATE plank_multichain_collections
+     SET name = COALESCE($3, name), image_url = COALESCE($4, image_url),
+         creator_handle = COALESCE($5, creator_handle), creator_address = COALESCE($6, creator_address),
+         creator_ens = COALESCE($7, creator_ens)
+     WHERE chain_slug = $1 AND contract_address = $2`,
+    [
+      chainSlug,
+      contractAddress.toLowerCase(),
+      display.name,
+      display.imageUrl,
+      display.creatorHandle ?? null,
+      display.creatorAddress ?? null,
+      display.creatorEns ?? null,
+    ]
+  );
+}
+
+/**
+ * Real 24h volume/sales (OpenSea /collections/{slug}/stats, confirmed
+ * live) plus a real floor % change computed from THIS app's own prior
+ * observation -- OpenSea's stats endpoint has no floor-change field at
+ * all, so previous_floor_price_wei is this app's own history, not a
+ * third-party figure repackaged as if it were.
+ */
+export async function updateCollectionMarketStats(
+  chainSlug: string,
+  contractAddress: string,
+  stats: { volume24hWei: string | null; sales24h: number | null; currentFloorPriceWei: string | null }
+): Promise<void> {
+  const collection = await postgresQuery<{ id: number }>(
+    `SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
+    [chainSlug, contractAddress.toLowerCase()]
+  );
+  const id = collection.rows[0]?.id;
+  if (!id) return;
+  await postgresQuery(
+    `UPDATE plank_multichain_snapshots
+     SET previous_floor_price_wei = COALESCE(floor_price_wei, previous_floor_price_wei),
+         volume_24h_wei = $2, sales_24h = $3
+     WHERE collection_id = $1`,
+    [id, stats.volume24hWei, stats.sales24h]
+  );
 }
 
 /** Write a fresh snapshot for a collection, and refresh its display fields. */
@@ -127,6 +198,9 @@ export type CollectionWithSnapshot = TrackedCollection & {
   listedCount: number | null;
   syncedAt: string | null;
   syncError: string | null;
+  volume24hWei: string | null;
+  sales24h: number | null;
+  previousFloorPriceWei: string | null;
 };
 
 /** Everything the read API needs in one query — collections joined to their latest snapshot. */
@@ -140,10 +214,15 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
       listed_count: number | null;
       synced_at: string | null;
       sync_error: string | null;
+      volume_24h_wei: string | null;
+      sales_24h: number | null;
+      previous_floor_price_wei: string | null;
     }
   >(
     `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url, c.is_vault_backed,
-            s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count, s.synced_at, s.sync_error
+            c.creator_handle, c.creator_address, c.creator_ens,
+            s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count, s.synced_at, s.sync_error,
+            s.volume_24h_wei, s.sales_24h, s.previous_floor_price_wei
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
      ORDER BY c.chain_slug, c.contract_address`
@@ -157,6 +236,9 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
     listedCount: row.listed_count,
     syncedAt: row.synced_at,
     syncError: row.sync_error,
+    volume24hWei: row.volume_24h_wei,
+    sales24h: row.sales_24h,
+    previousFloorPriceWei: row.previous_floor_price_wei,
   }));
 }
 

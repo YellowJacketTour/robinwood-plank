@@ -29,27 +29,46 @@ import {IMarketplankForeignFeeRouter} from "./interfaces/IMarketplankForeignFeeR
  * transfers tokens to this contract FIRST, then calls
  * handleV3AcrossMessage with no try/catch -- confirmed by reading that
  * function's actual body. That means a revert in this contract's handler
- * atomically undoes the ENTIRE fill, including the token transfer: nothing
- * is ever stranded here. A failed purchase is a clean no-op for that fill
- * attempt; the depositor's original funds remain safe on the origin chain
- * for Across's own normal retry/refund path. This is why this contract
- * reverts on any failure rather than implementing its own refund logic --
- * a hand-rolled "catch and refund to an address encoded in the message"
- * path would be NEW, untested complexity solving a problem Across's own
- * atomicity already solves for free.
+ * atomically undoes THIS FILL ATTEMPT, including the token transfer to
+ * this contract: nothing is stranded IN THIS CONTRACT.
  *
- * REAL DISCLOSED VULNERABILITY THIS DESIGN ACCOUNTS FOR
- * -----------------------------------------------------------
- * A real, publicly disclosed (Jan 2025) high-severity Across bug let a
- * malicious relayer exploit a self-relay early-return optimization to mark
- * a fill "complete" without tokens ever actually reaching the recipient,
- * then claim the relayer refund. Across's own fix removed that early
- * return entirely -- this contract does not depend on that specific code
- * path, but the LESSON generalizes: never trust that "handleV3AcrossMessage
- * was called" alone proves funds arrived. This contract additionally
- * verifies its own ETH balance is sufficient for the decoded purchase
- * BEFORE calling the router, rather than trusting the `amount` parameter
- * blindly.
+ * WHAT "SAFE" ACTUALLY MEANS FOR THE BUYER -- CORRECTED 2026-08-18
+ * -----------------------------------------------------------------------
+ * A prior version of this comment overstated this as "a clean no-op" for
+ * the buyer. It is not: this fill attempt reverting does NOT return the
+ * buyer's original deposit to them on the origin chain. Their funds are
+ * still real, still recoverable, and still governed by Across's own
+ * deposit lifecycle -- but recovery requires either another relayer
+ * successfully filling before `fillDeadline`, or, after that deadline
+ * passes, the depositor manually reclaiming their deposit via Across's own
+ * refund path (their UI or a direct SpokePool call). That is a real,
+ * potentially multi-hour-to-day wait, not an instant or automatic refund.
+ * Any UI built on this contract MUST surface that honestly (a pending/
+ * stuck-purchase state with a link to Across's own status page), not
+ * imply the purchase either completes or silently reverses. This is why
+ * this contract still reverts on any failure rather than implementing its
+ * own refund logic -- a hand-rolled "catch and refund to an address
+ * encoded in the message" path would be NEW, untested complexity, and
+ * Across's existing refund path is the correct place for that recovery to
+ * live -- but "correct place to recover" is not the same claim as
+ * "instant, painless no-op," and this file previously conflated the two.
+ *
+ * A CITED VULNERABILITY, FLAGGED FOR INDEPENDENT RE-VERIFICATION
+ * -----------------------------------------------------------------
+ * An earlier version of this comment cited a specific "publicly disclosed
+ * (Jan 2025) high-severity Across bug" involving a self-relay early-return
+ * optimization. That specific disclosure could NOT be independently
+ * re-confirmed during the 2026-08-18 audit pass -- it may be real, or it
+ * may be an inaccurate/fabricated detail from an earlier AI-assisted
+ * session. DO NOT cite it as fact (e.g. in an audit deck or disclosure)
+ * without first locating it in Across's own published security advisories
+ * or a reputable aggregator (e.g. their GitHub security tab, Immunefi, or
+ * a named audit firm's report). The GENERALIZABLE LESSON stands regardless
+ * of whether that specific incident is real, and is independent of it:
+ * never trust that "handleV3AcrossMessage was called" alone proves funds
+ * arrived. This contract verifies its own ETH balance is sufficient for
+ * the decoded purchase BEFORE calling the router, rather than trusting the
+ * `amount` parameter blindly.
  *
  * ACCESS CONTROL -- THE PRIMARY DEFENSE
  * ------------------------------------------
@@ -73,14 +92,36 @@ contract MarketplankAcrossReceiver is ReentrancyGuard {
     /// @notice wrappedNativeToken address for this chain -- Across delivers wrapped native (WETH) when the destination output token is native-denominated; see header on outputToken == wrappedNativeToken in SpokePool.sol. This contract unwraps it before paying the router (which expects ETH via msg.value).
     address public immutable wrappedNativeToken;
 
+    /**
+     * @notice HIGH-severity fix, 2026-08-18: residual dust that couldn't be
+     *         pushed to `recipient` (e.g. a smart-contract-wallet recipient
+     *         with no receive()/a strict fallback) used to revert the WHOLE
+     *         call via ResidualSweepFailed -- which, per this contract's own
+     *         atomicity, unwound the ALREADY-SUCCESSFUL Seaport purchase
+     *         over nothing but leftover-change plumbing. That is a real
+     *         self-inflicted DoS: the NFT purchase itself is by then
+     *         complete and correct, and dust-refund failure has nothing to
+     *         do with whether the purchase should stand. Failed pushes are
+     *         now credited here and pulled via withdrawRescuedFunds() --
+     *         the strictly safer pattern (OpenZeppelin's own PullPayment
+     *         rationale: a push can fail for reasons entirely outside this
+     *         contract's control; a pull can't hold the rest of the system
+     *         hostage to that).
+     */
+    mapping(address => uint256) public rescuableFunds;
+
     error NotSpokePool(address caller);
     error ZeroAddress();
     error InsufficientDeliveredAmount(uint256 required, uint256 delivered);
     error UnwrapFailed();
     error RouterCallFailed();
-    error ResidualSweepFailed(address recipient, uint256 residual);
+    error NothingToRescue();
+    error RescueSendFailed(address recipient, uint256 amount);
 
     event CrossChainPurchaseCompleted(address indexed recipient, uint256 amountDelivered);
+    /// @notice Emitted when a residual-ETH push fails and is credited for pull-based withdrawal instead of reverting the purchase.
+    event ResidualCredited(address indexed recipient, uint256 amount);
+    event ResidualWithdrawn(address indexed recipient, uint256 amount);
 
     constructor(address spokePool_, address router_, address wrappedNativeToken_) {
         if (spokePool_ == address(0) || router_ == address(0) || wrappedNativeToken_ == address(0)) {
@@ -202,18 +243,40 @@ contract MarketplankAcrossReceiver is ReentrancyGuard {
      * absorb an earlier buyer's stranded funds, mixing value between
      * unrelated users.
      *
-     * Reverting on a failed send is deliberate and consistent with this
-     * contract's fail-closed atomicity: per the header, a revert here
-     * unwinds the ENTIRE fill (including the bridge's token delivery), so
-     * a recipient that cannot accept ETH gets a cleanly reverted purchase
-     * rather than a completed purchase with silently abandoned change.
+     * FIXED 2026-08-18: a failed push used to revert this whole call,
+     * unwinding the already-successful purchase over nothing but change --
+     * see rescuableFunds's own header for the full rationale. A failed push
+     * is now credited for pull-based withdrawal instead; the purchase
+     * itself always stands once buyNowFor has succeeded.
      */
     function _sweepResidual(address recipient) private {
         uint256 residual = address(this).balance;
         if (residual > 0) {
             (bool sent, ) = recipient.call{value: residual}("");
-            if (!sent) revert ResidualSweepFailed(recipient, residual);
+            if (sent) {
+                return;
+            }
+            rescuableFunds[recipient] += residual;
+            emit ResidualCredited(recipient, residual);
         }
+    }
+
+    /**
+     * @notice Pulls any residual ETH this contract credited to msg.sender
+     *         after a failed direct push (see rescuableFunds). Anyone can
+     *         call this for themselves; funds only ever move to the
+     *         caller's own credited balance, and the credit is zeroed
+     *         BEFORE the external call (checks-effects-interactions),
+     *         consistent with every other value-moving function in this
+     *         codebase.
+     */
+    function withdrawRescuedFunds() external nonReentrant {
+        uint256 amount = rescuableFunds[msg.sender];
+        if (amount == 0) revert NothingToRescue();
+        rescuableFunds[msg.sender] = 0;
+        (bool sent, ) = msg.sender.call{value: amount}("");
+        if (!sent) revert RescueSendFailed(msg.sender, amount);
+        emit ResidualWithdrawn(msg.sender, amount);
     }
 
     /// @notice Accepts the unwrapped ETH from wrappedNativeToken's withdraw() call inside _unwrapNative, and nothing else meaningfully -- there is no other flow in this contract that sends it plain ETH.

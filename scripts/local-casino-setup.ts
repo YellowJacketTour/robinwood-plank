@@ -137,9 +137,13 @@ async function main() {
   await pair.waitForDeployment();
   const TWAP_WINDOW = 60n; // short locally so the keeper primes it fast
   const TWAP_MAX_STALE = 300n;
+  // Local mock pool is seeded with 100 WETH reserves above -- 1 ETH is a
+  // safe, well-under floor for local dev (see PlankV2TwapOracle's own
+  // constructor comment on why this floor exists at all).
+  const TWAP_MIN_RESERVE_WEI = ethers.parseEther("1");
   const oracle = await (
     await ethers.getContractFactory("PlankV2TwapOracle")
-  ).deploy(await pair.getAddress(), TWAP_WINDOW, TWAP_MAX_STALE);
+  ).deploy(await pair.getAddress(), TWAP_WINDOW, TWAP_MAX_STALE, TWAP_MIN_RESERVE_WEI);
   await oracle.waitForDeployment();
 
   const router = await (

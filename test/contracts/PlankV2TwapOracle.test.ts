@@ -26,7 +26,7 @@ describe("PlankV2TwapOracle", () => {
     ).deploy(await weth.getAddress(), await plank.getAddress(), rWeth, rPlank);
     const oracle: any = await (
       await ethers.getContractFactory("PlankV2TwapOracle")
-    ).deploy(await pair.getAddress(), WINDOW, MAX_STALE);
+    ).deploy(await pair.getAddress(), WINDOW, MAX_STALE, 1n);
     return { oracle, pair, weth, plank, deployer };
   }
 

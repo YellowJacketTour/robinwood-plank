@@ -23,10 +23,17 @@ import {IMarketplankForeignFeeRouter} from "./interfaces/IMarketplankForeignFeeR
  * REAL, VERIFIED FOUNDATIONS -- NOT ASSUMED FROM DOCS
  * -------------------------------------------------------
  * deBridge DLN: open source (github.com/debridge-finance/dln-contracts),
- * 30+ audits (Halborn, Zokyo, Ackee Blockchain per public reporting),
  * zero-TVL design (orders are filled by competing takers against the
  * maker's own funds, not a shared liquidity pool -- a different, arguably
- * safer risk profile than Across's pooled-liquidity model).
+ * safer risk profile than Across's pooled-liquidity model). The specific
+ * "30+ audits (Halborn, Zokyo, Ackee Blockchain)" claim that appeared in
+ * an earlier version of this comment could NOT be independently
+ * re-confirmed during the 2026-08-18 audit pass and has been removed --
+ * it may be accurate, but citing specific named auditors without a
+ * primary-source link is exactly the kind of unverified detail this
+ * codebase otherwise holds itself to a higher bar on. Before citing any
+ * audit history for deBridge (e.g. in disclosure material), pull it fresh
+ * from deBridge's own published audit reports, not from this comment.
  *
  * Confirmed live 2026-08-17 by reading the actual deployed contracts and
  * their real Solidity source (contracts/DLN/DlnDestination.sol,
@@ -46,10 +53,17 @@ import {IMarketplankForeignFeeRouter} from "./interfaces/IMarketplankForeignFeeR
  *   adapter.receiveCall -> adapter._execute -> our onERC20Received) --
  *   confirmed by grepping the actual fetched source files for try/catch
  *   and finding none. A revert in this contract's onERC20Received
- *   therefore atomically undoes the ENTIRE fill, including both token
+ *   therefore atomically undoes THIS FILL ATTEMPT, including both token
  *   transfers, exactly like MarketplankAcrossReceiver's equivalent
  *   property with Across's SpokePool. This is why this contract also
- *   simply reverts on any failure rather than implementing refund logic.
+ *   simply reverts on any failure rather than implementing refund logic --
+ *   but, exactly as corrected in MarketplankAcrossReceiver's own header,
+ *   this does NOT mean the buyer's original deposit is instantly or
+ *   automatically returned to them on the origin chain. Recovery runs
+ *   through deBridge's own order lifecycle (another taker fills, or the
+ *   maker/depositor cancels/reclaims per DLN's own order-cancellation
+ *   path) and is a real wait, not a silent no-op -- any UI built on this
+ *   contract must surface that honestly.
  * - The real, live, deterministic (same address on every EVM chain
  *   deBridge supports) DlnExternalCallAdapter address,
  *   0x61eF2E01e603AEb5Cd96F9EC9AE76cC6a68F6cf9, was read DIRECTLY from
@@ -70,15 +84,21 @@ contract MarketplankDeBridgeExecutor is ReentrancyGuard {
     /// @notice wrappedNativeToken for this chain -- same role as MarketplankAcrossReceiver's equivalent field.
     address public immutable wrappedNativeToken;
 
+    /// @notice HIGH-severity fix, 2026-08-18: identical rationale to MarketplankAcrossReceiver.rescuableFunds -- a failed residual push must never unwind an already-successful purchase. See that contract's own header for the full explanation.
+    mapping(address => uint256) public rescuableFunds;
+
     error NotExternalCallAdapter(address caller);
     error ZeroAddress();
     error WrongToken(address expected, address got);
     error InsufficientDeliveredAmount(uint256 required, uint256 delivered);
     error UnwrapFailed();
     error RouterCallFailed();
-    error ResidualSweepFailed(address recipient, uint256 residual);
+    error NothingToRescue();
+    error RescueSendFailed(address recipient, uint256 amount);
 
     event CrossChainPurchaseCompleted(address indexed recipient, uint256 amountDelivered);
+    event ResidualCredited(address indexed recipient, uint256 amount);
+    event ResidualWithdrawn(address indexed recipient, uint256 amount);
 
     constructor(address externalCallAdapter_, address router_, address wrappedNativeToken_) {
         if (externalCallAdapter_ == address(0) || router_ == address(0) || wrappedNativeToken_ == address(0)) {
@@ -168,16 +188,34 @@ contract MarketplankDeBridgeExecutor is ReentrancyGuard {
      * unused headroom to ITS msg.sender (this contract), and a cross-chain
      * deposit must always over-deliver to absorb the bridge's variable
      * fee, so without this sweep EVERY purchase permanently stranded its
-     * change here and later buyers would silently absorb it. Reverting on
-     * a failed send is deliberate: it unwinds the entire fill atomically
-     * rather than completing a purchase with abandoned change.
+     * change here and later buyers would silently absorb it.
+     *
+     * FIXED 2026-08-18: a failed push used to revert this whole call,
+     * unwinding an already-successful purchase over nothing but change --
+     * see rescuableFunds's own header. Now credited for pull-based
+     * withdrawal instead; the purchase always stands once buyNowFor
+     * succeeded.
      */
     function _sweepResidual(address recipient) private {
         uint256 residual = address(this).balance;
         if (residual > 0) {
             (bool sent, ) = recipient.call{value: residual}("");
-            if (!sent) revert ResidualSweepFailed(recipient, residual);
+            if (sent) {
+                return;
+            }
+            rescuableFunds[recipient] += residual;
+            emit ResidualCredited(recipient, residual);
         }
+    }
+
+    /// @notice Pulls any residual ETH credited to msg.sender after a failed direct push (see rescuableFunds). Checks-effects-interactions: credit zeroed before the external call.
+    function withdrawRescuedFunds() external nonReentrant {
+        uint256 amount = rescuableFunds[msg.sender];
+        if (amount == 0) revert NothingToRescue();
+        rescuableFunds[msg.sender] = 0;
+        (bool sent, ) = msg.sender.call{value: amount}("");
+        if (!sent) revert RescueSendFailed(msg.sender, amount);
+        emit ResidualWithdrawn(msg.sender, amount);
     }
 
     /// @notice Accepts the unwrapped ETH from wrappedNativeToken's withdraw() call inside _unwrapNative.

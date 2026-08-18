@@ -46,15 +46,24 @@ export async function GET(req: NextRequest) {
   const url = new URL(`https://${subdomain}.g.alchemy.com/nft/v3/${apiKey}/getNFTsForOwner`);
   url.searchParams.set("owner", owner);
   url.searchParams.append("contractAddresses[]", contractAddress);
-  url.searchParams.set("withMetadata", "false");
+  // withMetadata=true -- the "My NFTs" tab renders real card art (matching
+  // the native MyNfts.tsx grid), not just a bare list of token ids.
+  url.searchParams.set("withMetadata", "true");
 
   const res = await fetch(url.toString());
   if (!res.ok) {
     return NextResponse.json({ error: `Alchemy ${res.status}` }, { status: 502 });
   }
-  const data = (await res.json()) as { ownedNfts?: Array<{ tokenId: string }> };
+  const data = (await res.json()) as {
+    ownedNfts?: Array<{ tokenId: string; name?: string; image?: { cachedUrl?: string; originalUrl?: string } }>;
+  };
+  const items = (data.ownedNfts ?? []).map((n) => ({
+    tokenId: n.tokenId,
+    name: n.name ?? null,
+    imageUrl: n.image?.cachedUrl ?? n.image?.originalUrl ?? null,
+  }));
   return NextResponse.json(
-    { tokenIds: (data.ownedNfts ?? []).map((n) => n.tokenId) },
+    { tokenIds: items.map((i) => i.tokenId), items },
     { headers: { "Cache-Control": "no-store" } }
   );
 }

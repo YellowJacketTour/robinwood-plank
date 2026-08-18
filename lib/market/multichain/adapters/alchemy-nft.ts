@@ -89,8 +89,20 @@ async function fetchJson<T>(url: string): Promise<T> {
  * currently maps (ETH-denominated L1s/L2s); a non-18-decimal native token
  * would need its own conversion here, not a silent wrong answer.
  */
+/**
+ * Real, confirmed live 2026-08-18: a base-mainnet contract's Alchemy floor
+ * response decoded to 2.592e+29 "ETH" -- obviously corrupt upstream data
+ * (more ETH than will ever exist), not a real floor. Unguarded, that
+ * reached Postgres as literal scientific-notation text and failed the
+ * NUMERIC(78,0) column with "invalid input syntax for type bigint". 10
+ * million ETH-equivalent is comfortably above any real floor price this
+ * app will ever see (ETH's own total supply is ~120M) while still well
+ * below the corrupt value -- a sanity ceiling, not a business rule.
+ */
+const MAX_PLAUSIBLE_FLOOR_ETH = 10_000_000;
+
 function toWeiString(decimalAmount: number): string | null {
-  if (!Number.isFinite(decimalAmount) || decimalAmount <= 0) return null;
+  if (!Number.isFinite(decimalAmount) || decimalAmount <= 0 || decimalAmount > MAX_PLAUSIBLE_FLOOR_ETH) return null;
   // Avoid floating-point drift on the multiplication by working in
   // fixed-point: shift 18 decimals via string math on a scaled integer.
   const scaled = Math.round(decimalAmount * 1e9); // 9 of the 18 decimals now integral

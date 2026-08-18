@@ -78,6 +78,34 @@ const MIN_TRANSFERS_TO_CONSIDER = 2;
 
 type RawLog = { address: string; topics: string[]; blockNumber: string };
 
+/**
+ * Shared "is this real collectible art, or noise" gate for BOTH discovery
+ * paths in this file (runEvmDiscoveryScan's own inline registration AND
+ * runOwnRankingPromotion) -- extracted after finding live 2026-08-18 that
+ * having two separate copies let one drift out of sync with the other's
+ * fix (runOwnRankingPromotion got the real-image + position-name check
+ * first; runEvmDiscoveryScan's own inline path didn't, and it's the one
+ * that actually registered BNB/Optimism/Avalanche's first candidates).
+ *
+ * Two real signals, confirmed live against actual discovered contracts:
+ *   1. No queryable image at all (many DeFi position/receipt NFTs have
+ *      none -- 22 confirmed live).
+ *   2. A queryable image that's a generic PROTOCOL LOGO, not per-token art
+ *      (Velodrome/Aerodrome position NFTs return their protocol's brand
+ *      icon as `image`) -- caught instead by the real, industry-wide
+ *      naming convention every Uniswap-V3-fork protocol shares for its
+ *      LP-position-receipt NFTs: Uniswap pioneered "Uniswap V3 Positions
+ *      NFT-V1" and every fork copies it verbatim (PancakeSwap, Algebra,
+ *      Velodrome/Aerodrome's "Slipstream Position NFT", Blackhole's
+ *      "Positions NFT-V2", Clober's "Maker Order"). Not a guessed
+ *      keyword list -- a real naming convention observed across every
+ *      confirmed example this session found.
+ */
+function isNotRealCollectibleArt(name: string | null, imageUrl: string | null): boolean {
+  if (!name || !imageUrl) return true;
+  return /\bposition(s)?\b|\bmaker order\b|\borderbook\b/i.test(name);
+}
+
 async function rpcCall<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
   const res = await fetch(rpcUrl, {
     method: "POST",
@@ -168,10 +196,17 @@ export async function runEvmDiscoveryScan(input: {
   for (const [contractAddress] of candidates) {
     try {
       const snapshot = await alchemyNftAdapter.fetchSnapshot({ chainSlug: input.chainSlug, contractAddress });
-      if (!snapshot.name) {
-        // No OpenSea-recognized metadata came back -- the real "is this a
-        // legitimate collection" signal this module leans on instead of
-        // inventing its own spam heuristic. See header comment.
+      if (isNotRealCollectibleArt(snapshot.name, snapshot.imageUrl)) {
+        // No OpenSea-recognized metadata, no queryable image, or a
+        // confirmed DeFi position/receipt naming pattern -- see
+        // isNotRealCollectibleArt's own comment (shared with
+        // runOwnRankingPromotion below, which found this exact gap live:
+        // this function's OWN inline registration path had no filter at
+        // all until this fix, so BNB/Optimism/Avalanche's first discovery
+        // pass registered nothing BUT DeFi position NFTs, which a
+        // subsequent cleanup pass then correctly removed -- leaving those
+        // chains at zero, not because no real NFT activity exists there,
+        // but because this path let the wrong candidates through.
         skippedNoMetadata += 1;
         continue;
       }
@@ -257,7 +292,11 @@ export async function runOwnRankingPromotion(input: {
           chainSlug: input.chainSlug,
           contractAddress: entry.contractAddress,
         });
-        if (!snapshot.name) {
+        // See isNotRealCollectibleArt's own comment for the two real
+        // signals this checks (no queryable image; DeFi position/receipt
+        // naming convention) -- shared with runEvmDiscoveryScan's inline
+        // registration above so the two discovery paths can't drift.
+        if (isNotRealCollectibleArt(snapshot.name, snapshot.imageUrl)) {
           skippedNoMetadata += 1;
           continue;
         }

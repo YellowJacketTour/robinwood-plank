@@ -170,7 +170,20 @@ contract PlankFuelBooster is ReentrancyGuard {
         }
 
         emit FuelBurned(roundId, msg.sender, plankAmount, fairEth, boost);
-        if (address(progression) != address(0)) progression.recordFuelBurn(msg.sender);
+        // MEDIUM-severity fix, 2026-08-18: PlankProgression.sol's own header
+        // claims this call "can't revert a caller's OWN core action" because
+        // it's the last statement in the function -- that claim was false as
+        // written: Solidity's default unwind-on-revert doesn't care about
+        // statement order, only about whether the transaction as a whole
+        // succeeds. A misbehaving/misconfigured `progression` (wired once by
+        // the deployer via setProgression()) could brick every burnFuel()
+        // call by reverting here, unwinding the burn/boost that had already
+        // completed above. try/catch makes the documented guarantee real:
+        // progression bookkeeping can fail without taking the caller's real
+        // action down with it.
+        if (address(progression) != address(0)) {
+            try progression.recordFuelBurn(msg.sender) {} catch {}
+        }
     }
 
     /// UI helper: how much boost headroom is left for the round that is
