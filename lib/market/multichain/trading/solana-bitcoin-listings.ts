@@ -37,6 +37,7 @@ export function satsToPriceWei(sats: number | string | bigint): string {
 const UNISAT_API_BASE = "https://open-api.unisat.io/v3/market";
 
 export type SimpleListing = {
+  /** The real UniSat auctionId -- identifies THIS SPECIFIC LISTING (what create_bid_prepare/create_bid actually need), distinct from tokenId below (the inscription itself). Confirmed live 2026-08-19: create_bid_prepare rejects a request keyed by inscriptionId with "auctionId is required" -- the raw inscriptionId was never a valid listing identifier for UniSat's real current buy-flow endpoints. */
   id: string;
   tokenId: string;
   maker: string;
@@ -56,6 +57,7 @@ function requireUnisatApiKey(): string {
 }
 
 type UniSatAuctionEntry = {
+  auctionId: string;
   inscriptionId: string;
   address: string;
   price?: number;
@@ -104,7 +106,7 @@ export async function fetchUniSatListings(collectionId: string, limit: number): 
   const body = (await res.json()) as { data?: { list?: UniSatAuctionEntry[] } };
   const list = body.data?.list ?? [];
   return list.map((l) => ({
-    id: l.inscriptionId,
+    id: l.auctionId,
     tokenId: l.inscriptionId,
     maker: l.address,
     priceWei: satsToPriceWei(l.price ?? 0),

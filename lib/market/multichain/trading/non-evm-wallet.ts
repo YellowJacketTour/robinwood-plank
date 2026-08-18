@@ -48,6 +48,19 @@ type UniSatProvider = {
    * this app is working around.
    */
   sendInscription: (address: string, inscriptionId: string, options?: { feeRate?: number }) => Promise<{ txid: string }>;
+  /**
+   * REAL, DOCUMENTED method -- verified 2026-08-19 directly against
+   * UniSat's own source repo (github.com/unisat-wallet/unisat-dev-docs,
+   * wallet-api/api-docs/access-accounts.md), not docs.unisat.io (several
+   * paths there 404, same finding this file's other header comments
+   * already record): `unisat.getPublicKey()`, no params, returns the
+   * current account's real public key as a hex string. Required by
+   * UniSat's create_bid_prepare/create_bid endpoints (see
+   * unisat-ordinals-trade.ts's own header on the real, live-verified
+   * request schema) to construct a spendable PSBT input for this wallet
+   * -- never fabricated or derived any other way.
+   */
+  getPublicKey: () => Promise<string>;
 };
 
 type SolanaWindow = Window & { solana?: PhantomProvider; phantom?: { solana?: PhantomProvider } };

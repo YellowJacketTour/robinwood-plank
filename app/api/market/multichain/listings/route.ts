@@ -216,7 +216,12 @@ export async function GET(req: NextRequest) {
           venue: "unisat" as const,
           externalUrl: `https://unisat.io/inscription/${l.tokenId}`,
           foreignChainSlug: chainSlug,
-          foreignOrderHash: l.tokenId,
+          // The real UniSat auctionId (l.id), NOT the inscriptionId
+          // (l.tokenId) -- buyBitcoinListingNow needs this exact value to
+          // call create_bid_prepare/create_bid, see solana-bitcoin-listings.ts's
+          // own header on why the inscriptionId alone is not a valid
+          // listing identifier for UniSat's real current buy-flow API.
+          foreignOrderHash: l.id,
         }));
       return NextResponse.json(
         {

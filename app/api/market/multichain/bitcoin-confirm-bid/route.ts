@@ -14,13 +14,19 @@ export async function POST(req: NextRequest) {
   const limited = rateLimit(req, { key: "market-multichain-bitcoin-confirm", limit: 30, windowMs: 60_000 });
   if (limited) return limited;
 
-  const body = (await req.json().catch(() => null)) as { signedPsbtBase64?: string } | null;
-  if (!body?.signedPsbtBase64) {
-    return NextResponse.json({ error: "signedPsbtBase64 is required" }, { status: 400 });
+  const body = (await req.json().catch(() => null)) as
+    | { auctionId?: string; bidId?: string; signedPsbtBase64?: string }
+    | null;
+  if (!body?.auctionId || !body.bidId || !body.signedPsbtBase64) {
+    return NextResponse.json({ error: "auctionId, bidId, and signedPsbtBase64 are required" }, { status: 400 });
   }
 
   try {
-    const result = await confirmUniSatBid({ signedPsbtBase64: body.signedPsbtBase64 });
+    const result = await confirmUniSatBid({
+      auctionId: body.auctionId,
+      bidId: body.bidId,
+      signedPsbtBase64: body.signedPsbtBase64,
+    });
     return NextResponse.json({ txid: result.txid }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return publicError(error, "Failed to confirm the UniSat bid");

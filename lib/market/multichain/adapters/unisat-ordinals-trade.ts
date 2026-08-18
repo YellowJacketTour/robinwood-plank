@@ -56,7 +56,34 @@
  * against UniSat's own documented endpoints, not a wrapped npm package.
  */
 
-const UNISAT_API_BASE = "https://open-api.unisat.io/v3/market";
+/**
+ * TWO REAL BUGS FIXED HERE 2026-08-19, VERIFIED AGAINST THE CANONICAL
+ * SOURCE (github.com/unisat-wallet/unisat-dev-docs's real
+ * open-api/auto-generated/docs/collection-marketplace.md, not the
+ * search-snippet-derived assumption this file originally shipped with):
+ *
+ * 1. Every one of these five endpoints lives under
+ *    `/collection/auction/{name}`, not bare `/{name}` -- this module's
+ *    original paths (`/create_bid_prepare`, `/create_bid`, `/confirm_bid`,
+ *    `/create_put_on`, `/confirm_put_on`) were missing that segment
+ *    entirely and returned a real, confirmed HTTP 404 on every call
+ *    (`curl`-reproduced live: `POST .../v3/market/create_bid` ->
+ *    "404 page not found"; the correct
+ *    `.../v3/market/collection/auction/create_bid` returns a real 200).
+ *    `fetchUniSatListings` (solana-bitcoin-listings.ts) already used the
+ *    correct prefix for its one call -- this file's OWN endpoints never
+ *    did, and nothing before this fix had ever actually invoked them
+ *    against the live API to catch it.
+ * 2. Every real response is wrapped `{code, msg, data: {...}}` (confirmed
+ *    both by the docs' own Response schema for every endpoint below AND
+ *    live, e.g. `{"code":0,"msg":"ok","data":{"list":[...]}}`) -- this
+ *    helper used to return the raw parsed body as-if it WERE the payload,
+ *    so every caller was reading `undefined` off the wrong level. Now
+ *    unwraps `.data` and treats a non-zero `code` as a real business
+ *    error (UniSat returns HTTP 200 even for e.g. "Order not exist" --
+ *    `!res.ok` alone was never sufficient to catch a real failure here).
+ */
+const UNISAT_API_BASE = "https://open-api.unisat.io/v3/market/collection/auction";
 
 function requireApiKey(): string {
   const key = process.env.UNISAT_API_KEY;
@@ -79,7 +106,11 @@ async function unisatFetch<T>(path: string, body: Record<string, unknown>): Prom
     const text = await res.text().catch(() => "");
     throw new Error(`unisat-ordinals-trade: ${res.status} ${res.statusText} on ${path} -- ${text.slice(0, 200)}`);
   }
-  return (await res.json()) as T;
+  const envelope = (await res.json()) as { code: number; msg: string; data: T };
+  if (envelope.code !== 0) {
+    throw new Error(`unisat-ordinals-trade: ${path} returned code ${envelope.code} -- ${envelope.msg}`);
+  }
+  return envelope.data;
 }
 
 /** An unsigned PSBT (base64) plus exactly which input indexes the connected wallet must sign -- never the whole transaction, matching UniSat's real, verified create->sign->confirm flow. */
@@ -89,35 +120,95 @@ export type UniSatPsbtStep = {
   signIndexes: number[];
 };
 
-/** Step 1 of buying: get a fee/size estimate before committing to a bid. */
+/**
+ * The bid-specific variant -- confirm_bid needs auctionId+bidId ALONGSIDE
+ * the signed PSBT (confirmed live 2026-08-19: an empty confirm_bid body
+ * demands auctionId, then bidId, then psbtBid, in that order -- create_put_on's
+ * sibling confirm_put_on has no such requirement, so this is genuinely
+ * bid-specific, not a general PSBT-step shape). bidId is UniSat's own
+ * identifier for this SPECIFIC signed bid attempt, distinct from
+ * auctionId (the listing) -- both must be threaded through from
+ * createUniSatBid's response to confirmUniSatBid, never recomputed.
+ */
+export type UniSatBidStep = UniSatPsbtStep & {
+  auctionId: string;
+  bidId: string;
+};
+
+/**
+ * REQUEST SHAPE CORRECTED 2026-08-19, LIVE-VERIFIED AGAINST A REAL KEY
+ * ---------------------------------------------------------------------------
+ * The `{buyerAddress, inscriptionId, price}` body this module originally
+ * sent (written from docs before any real key existed to test against) is
+ * REJECTED by both create_bid_prepare and create_bid today -- confirmed via
+ * a real key, iterating through the API's own validation error messages
+ * one field at a time: `"auctionId" is required` (the raw inscriptionId is
+ * NOT a valid listing identifier -- it identifies the INSCRIPTION, not
+ * THIS SPECIFIC LISTING of it; see solana-bitcoin-listings.ts's own header
+ * for where the real auctionId comes from), then `"bidPrice" is required`
+ * (not `price`), then `"address" is required` (not `buyerAddress`), then
+ * `"pubkey" is required` -- a field neither endpoint's earlier-assumed
+ * shape had at all. Verified against a real live bitcoin-frogs auctionId:
+ * a request with every field present but a syntactically-valid-but-
+ * unowned dummy pubkey got PAST all schema validation to a real business-
+ * logic response (`{"code":-100,"msg":"Order not exist"}`), confirming
+ * `{address, auctionId, bidPrice, pubkey}` is the complete, correct shape
+ * for both endpoints.
+ */
+/** Step 1 of buying: get a fee/size estimate before committing to a bid. Field names mapped from the real, doc-confirmed response (`serverFee`/`txSize`), not the earlier-assumed `feeSats`/`sizeBytes` shape that never matched what the API actually returns. */
 export async function prepareUniSatBid(input: {
-  buyerAddress: string;
-  inscriptionId: string;
-  priceSats: string;
+  address: string;
+  /** The real UniSat auctionId (from SimpleListing.id / Listing.foreignOrderHash) -- NOT the inscriptionId. */
+  auctionId: string;
+  bidPriceSats: string;
+  /** The buyer's real Bitcoin public key (hex, compressed) -- required for UniSat to construct a spendable PSBT input for this address. Get it from the connected wallet (e.g. window.unisat.getPublicKey()), never fabricated. */
+  pubkey: string;
 }): Promise<{ feeSats: string; sizeBytes: number }> {
-  return unisatFetch("/create_bid_prepare", {
-    buyerAddress: input.buyerAddress,
-    inscriptionId: input.inscriptionId,
-    price: input.priceSats,
+  const data = await unisatFetch<{ serverFee: number; txSize: number }>("/create_bid_prepare", {
+    address: input.address,
+    auctionId: input.auctionId,
+    bidPrice: Number(input.bidPriceSats),
+    pubkey: input.pubkey,
   });
+  return { feeSats: String(data.serverFee), sizeBytes: data.txSize };
 }
 
-/** Step 2: builds the unsigned bid PSBT. The caller's wallet (Xverse/UniSat/Leather -- NOT an EVM-style wallet) must sign only `signIndexes` before step 3. */
+/**
+ * Step 2: builds the unsigned bid PSBT. The caller's wallet (Xverse/UniSat/
+ * Leather -- NOT an EVM-style wallet) must sign only `signIndexes` before
+ * step 3. The real response field names are `bidId`/`psbtBid`/
+ * `bidSignIndexes` (confirmed against the canonical docs -- create_bid's
+ * response schema is genuinely different from create_put_on's
+ * `psbt`/`signIndexes`, they are NOT the same field names reused across
+ * endpoints as originally assumed). Returns UniSatBidStep (not the plain
+ * UniSatPsbtStep) because confirm_bid needs auctionId+bidId ALONGSIDE the
+ * signed PSBT -- see that type's own header.
+ */
 export async function createUniSatBid(input: {
-  buyerAddress: string;
-  inscriptionId: string;
-  priceSats: string;
-}): Promise<UniSatPsbtStep> {
-  return unisatFetch("/create_bid", {
-    buyerAddress: input.buyerAddress,
-    inscriptionId: input.inscriptionId,
-    price: input.priceSats,
+  address: string;
+  auctionId: string;
+  bidPriceSats: string;
+  pubkey: string;
+}): Promise<UniSatBidStep> {
+  const data = await unisatFetch<{ bidId: string; psbtBid: string; bidSignIndexes: number[] }>("/create_bid", {
+    address: input.address,
+    auctionId: input.auctionId,
+    bidPrice: Number(input.bidPriceSats),
+    pubkey: input.pubkey,
   });
+  return { auctionId: input.auctionId, bidId: data.bidId, psbtBase64: data.psbtBid, signIndexes: data.bidSignIndexes };
 }
 
-/** Step 3: submits the wallet-signed PSBT and returns the real, broadcast Bitcoin txid. */
-export async function confirmUniSatBid(input: { signedPsbtBase64: string }): Promise<{ txid: string }> {
-  return unisatFetch("/confirm_bid", { psbt: input.signedPsbtBase64 });
+/**
+ * Step 3: submits the wallet-signed PSBT and returns the real, broadcast
+ * Bitcoin txid. REQUEST SHAPE LIVE-VERIFIED 2026-08-19: an empty body
+ * demands `auctionId`, then `bidId`, then `psbtBid` (in that exact order,
+ * via the API's own validation errors) -- NOT the `{psbt: ...}` shape
+ * originally assumed. auctionId/bidId must be the exact values
+ * createUniSatBid returned for this specific bid, never recomputed.
+ */
+export async function confirmUniSatBid(input: { auctionId: string; bidId: string; signedPsbtBase64: string }): Promise<{ txid: string }> {
+  return unisatFetch("/confirm_bid", { auctionId: input.auctionId, bidId: input.bidId, psbtBid: input.signedPsbtBase64 });
 }
 
 /**
@@ -128,12 +219,13 @@ export async function confirmUniSatBid(input: { signedPsbtBase64: string }): Pro
  * in magiceden-solana-trade.ts's buildMagicEdenSweep.
  */
 export async function prepareUniSatSweep(input: {
-  buyerAddress: string;
-  listings: Array<{ inscriptionId: string; priceSats: string }>;
+  address: string;
+  pubkey: string;
+  listings: Array<{ auctionId: string; bidPriceSats: string }>;
 }): Promise<UniSatPsbtStep[]> {
   return Promise.all(
     input.listings.map((listing) =>
-      createUniSatBid({ buyerAddress: input.buyerAddress, inscriptionId: listing.inscriptionId, priceSats: listing.priceSats })
+      createUniSatBid({ address: input.address, pubkey: input.pubkey, auctionId: listing.auctionId, bidPriceSats: listing.bidPriceSats })
     )
   );
 }

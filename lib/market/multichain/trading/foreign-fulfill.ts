@@ -241,27 +241,35 @@ async function buySolanaListingNow(input: { tokenMint: string; priceLamports: st
 /**
  * Buy one UniSat (Bitcoin Ordinals) listing right now, driving the real
  * create_bid -> wallet-sign -> confirm_bid flow (see unisat-ordinals-trade.ts's
- * header). `orderHash` carries the inscriptionId (an inscription has no
- * token id -- see that file's header on why). UniSat's signPsbt takes/
- * returns HEX (not base64, unlike Magic Eden) -- see non-evm-wallet.ts's
- * own header for this exact distinction.
+ * header). `orderHash` carries the real UniSat auctionId (see
+ * solana-bitcoin-listings.ts's own header -- the inscriptionId alone is
+ * NOT a valid listing identifier for UniSat's real current buy-flow API,
+ * confirmed live 2026-08-19). UniSat's signPsbt takes/returns HEX (not
+ * base64, unlike Magic Eden) -- see non-evm-wallet.ts's own header for
+ * this exact distinction.
  */
-async function buyBitcoinListingNow(input: { inscriptionId: string; priceSats: string }): Promise<ForeignBuyResult> {
+async function buyBitcoinListingNow(input: { auctionId: string; priceSats: string }): Promise<ForeignBuyResult> {
   const { connectUnisatWallet, getUnisatProvider } = await import("@/lib/market/multichain/trading/non-evm-wallet");
   const buyerAddress = await connectUnisatWallet();
   const provider = getUnisatProvider();
   if (!provider) throw new Error("UniSat wallet not found.");
+  const pubkey = await provider.getPublicKey();
 
   const createRes = await fetch("/api/market/multichain/bitcoin-buy-psbt", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ buyerAddress, inscriptionId: input.inscriptionId, priceSats: input.priceSats }),
+    body: JSON.stringify({ address: buyerAddress, auctionId: input.auctionId, bidPriceSats: input.priceSats, pubkey }),
   });
   if (!createRes.ok) {
     const body = await createRes.json().catch(() => ({}));
     throw new Error(body.error ?? `Failed to build the UniSat bid PSBT (${createRes.status})`);
   }
-  const { psbtBase64, signIndexes } = (await createRes.json()) as { psbtBase64: string; signIndexes: number[] };
+  const { psbtBase64, signIndexes, auctionId, bidId } = (await createRes.json()) as {
+    psbtBase64: string;
+    signIndexes: number[];
+    auctionId: string;
+    bidId: string;
+  };
 
   // UniSat's signPsbt wants hex, the create step returned base64 -- convert
   // via Buffer, never re-derive/guess the byte content.
@@ -272,10 +280,13 @@ async function buyBitcoinListingNow(input: { inscriptionId: string; priceSats: s
   });
   const signedPsbtBase64 = Buffer.from(signedPsbtHex, "hex").toString("base64");
 
+  // confirm_bid needs the EXACT auctionId/bidId this specific create_bid
+  // call returned -- see unisat-ordinals-trade.ts's confirmUniSatBid header
+  // on why (live-verified 2026-08-19: neither is optional or recomputable).
   const confirmRes = await fetch("/api/market/multichain/bitcoin-confirm-bid", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ signedPsbtBase64 }),
+    body: JSON.stringify({ auctionId, bidId, signedPsbtBase64 }),
   });
   if (!confirmRes.ok) {
     const body = await confirmRes.json().catch(() => ({}));
@@ -342,24 +353,25 @@ export async function sweepSolanaListingsNow(
  */
 export async function sweepBitcoinListingsNow(
   input: {
-    listings: Array<{ inscriptionId: string; priceSats: string }>;
+    /** auctionId is the real UniSat listing identifier (see buyBitcoinListingNow's own header) -- used as both the request field and the status-map key. */
+    listings: Array<{ auctionId: string; priceSats: string }>;
     onUpdate?: (statuses: Map<string, BatchSendStatus>) => void;
   }
 ): Promise<Map<string, BatchSendStatus>> {
   if (input.listings.length === 0) throw new Error("No listings to sweep.");
   const statuses = new Map<string, BatchSendStatus>(
-    input.listings.map((l) => [l.inscriptionId, { key: l.inscriptionId, state: "pending" }])
+    input.listings.map((l) => [l.auctionId, { key: l.auctionId, state: "pending" }])
   );
   input.onUpdate?.(new Map(statuses));
 
   for (const listing of input.listings) {
-    statuses.set(listing.inscriptionId, { key: listing.inscriptionId, state: "sending" });
+    statuses.set(listing.auctionId, { key: listing.auctionId, state: "sending" });
     input.onUpdate?.(new Map(statuses));
     try {
-      const result = await buyBitcoinListingNow({ inscriptionId: listing.inscriptionId, priceSats: listing.priceSats });
-      statuses.set(listing.inscriptionId, { key: listing.inscriptionId, state: "sent", txHash: result.txHash });
+      const result = await buyBitcoinListingNow({ auctionId: listing.auctionId, priceSats: listing.priceSats });
+      statuses.set(listing.auctionId, { key: listing.auctionId, state: "sent", txHash: result.txHash });
     } catch (error) {
-      statuses.set(listing.inscriptionId, { key: listing.inscriptionId, state: "failed", error: error instanceof Error ? error.message : "Buy failed." });
+      statuses.set(listing.auctionId, { key: listing.auctionId, state: "failed", error: error instanceof Error ? error.message : "Buy failed." });
     }
     input.onUpdate?.(new Map(statuses));
   }
@@ -641,7 +653,7 @@ export async function buyForeignListingNow(input: {
     // store priceWei as sats * 1e10 to land on the same 18dp-equivalent
     // magnitude every other chain's priceWei uses for display comparability.
     const sats = (BigInt(input.priceWei) / BigInt(10_000_000_000)).toString();
-    return buyBitcoinListingNow({ inscriptionId: input.orderHash, priceSats: sats });
+    return buyBitcoinListingNow({ auctionId: input.orderHash, priceSats: sats });
   }
 
   const { router, buyerAddress, feeBps } = await connectedRouter(input.chainSlug);

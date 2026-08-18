@@ -18,19 +18,22 @@ export async function POST(req: NextRequest) {
   const limited = rateLimit(req, { key: "market-multichain-bitcoin-buy", limit: 30, windowMs: 60_000 });
   if (limited) return limited;
 
-  const body = (await req.json().catch(() => null)) as { buyerAddress?: string; inscriptionId?: string; priceSats?: string } | null;
-  if (!body?.buyerAddress || !body.inscriptionId || !body.priceSats) {
-    return NextResponse.json({ error: "buyerAddress, inscriptionId, and priceSats are required" }, { status: 400 });
+  const body = (await req.json().catch(() => null)) as
+    | { address?: string; auctionId?: string; bidPriceSats?: string; pubkey?: string }
+    | null;
+  if (!body?.address || !body.auctionId || !body.bidPriceSats || !body.pubkey) {
+    return NextResponse.json({ error: "address, auctionId, bidPriceSats, and pubkey are required" }, { status: 400 });
   }
 
   try {
     const step = await createUniSatBid({
-      buyerAddress: body.buyerAddress,
-      inscriptionId: body.inscriptionId,
-      priceSats: body.priceSats,
+      address: body.address,
+      auctionId: body.auctionId,
+      bidPriceSats: body.bidPriceSats,
+      pubkey: body.pubkey,
     });
     return NextResponse.json(
-      { psbtBase64: step.psbtBase64, signIndexes: step.signIndexes },
+      { psbtBase64: step.psbtBase64, signIndexes: step.signIndexes, auctionId: step.auctionId, bidId: step.bidId },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {

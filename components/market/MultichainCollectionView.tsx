@@ -690,7 +690,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         // priceSats unscale: same 1e10 convention buyForeignListingNow's own Bitcoin branch uses.
         const { sweepBitcoinListingsNow } = await import("@/lib/market/multichain/trading/foreign-fulfill");
         const statuses = await sweepBitcoinListingsNow({
-          listings: sweepPreview.map((l) => ({ inscriptionId: l.foreignOrderHash ?? l.id, priceSats: (BigInt(l.priceWei) / BigInt(10_000_000_000)).toString() })),
+          listings: sweepPreview.map((l) => ({ auctionId: l.foreignOrderHash ?? l.id, priceSats: (BigInt(l.priceWei) / BigInt(10_000_000_000)).toString() })),
           onUpdate: setSweepStatuses,
         });
         const attempted = [...statuses.values()].filter((s) => s.state === "sent").length;
@@ -782,7 +782,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         } else if (isBitcoin) {
           const { sweepBitcoinListingsNow } = await import("@/lib/market/multichain/trading/foreign-fulfill");
           const statuses = await sweepBitcoinListingsNow({
-            listings: affordable.map((l) => ({ inscriptionId: l.foreignOrderHash ?? l.id, priceSats: (BigInt(l.priceWei) / BigInt(10_000_000_000)).toString() })),
+            listings: affordable.map((l) => ({ auctionId: l.foreignOrderHash ?? l.id, priceSats: (BigInt(l.priceWei) / BigInt(10_000_000_000)).toString() })),
             onUpdate: setCombinedStatuses,
           });
           sweptCount = [...statuses.values()].filter((s) => s.state === "sent").length;
