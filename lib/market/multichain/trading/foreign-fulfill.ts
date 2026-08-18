@@ -254,6 +254,105 @@ export async function sweepForeignListings(input: {
   return { txHash: tx.hash, attempted: freshOrders.length };
 }
 
+export type ForeignMultiCollectionSweepResult = {
+  txHash: string;
+  attempted: number;
+  /** Per-spec fill counts, in the same order specs were given -- lets the UI report "3/3 from Collection A, 2/2 from Collection B" instead of one opaque total. */
+  perCollection: Array<{ collectionSlug: string; requested: number; filled: number }>;
+};
+
+/**
+ * Real multi-collection sweep -- N cheapest listings across MULTIPLE
+ * collections on the SAME chain, filled in ONE transaction. This is the
+ * Blur/Gem-lineage capability the research explicitly flagged as real and
+ * adoptable ("multi-collection sweep-in-one-tx... mechanically
+ * straightforward given Seaport batch-fill is already built").
+ *
+ * VERIFIED, NOT ASSUMED: MarketplankForeignFeeRouter.sweepBuy's own
+ * on-chain logic (contracts/MarketplankForeignFeeRouter.sol) has NO
+ * same-collection assumption anywhere -- it loops over an array of
+ * AdvancedOrder and calls _attemptSweepItem per order, each order
+ * carrying its own token address internally via Seaport's own order
+ * parameters. Confirmed by reading the actual contract before writing
+ * this, not inferred from sweepForeignListings' single-collection shape
+ * (which was an ARTIFICIAL TypeScript-orchestration-layer limitation,
+ * not a real on-chain constraint) -- see this function's header for why
+ * true CROSS-CHAIN sweep in one tx is NOT possible (a router contract is
+ * deployed per chain; this is a real blockchain constraint, not a gap):
+ * only same-chain, cross-COLLECTION sweep is achievable in one
+ * transaction, which is exactly what Blur's own sweep does too.
+ */
+export async function sweepForeignListingsMultiCollection(input: {
+  chainSlug: string;
+  specs: Array<{ collectionSlug: string; count: number; traits?: ForeignTraitClause[] }>;
+}): Promise<ForeignMultiCollectionSweepResult> {
+  if (input.specs.length === 0) throw new Error("sweepForeignListingsMultiCollection: at least one collection is required.");
+  // MAX_SWEEP_ITEMS in MarketplankForeignFeeRouter.sol -- the contract
+  // itself enforces this and reverts with SweepTooLarge, but checking
+  // client-side avoids sending a transaction (and burning gas on the
+  // revert) that was always going to fail.
+  const MAX_SWEEP_ITEMS = 50;
+  const requestedTotal = input.specs.reduce((sum, s) => sum + s.count, 0);
+  if (requestedTotal > MAX_SWEEP_ITEMS) {
+    throw new Error(`Requested ${requestedTotal} items across ${input.specs.length} collections, but a single sweep is capped at ${MAX_SWEEP_ITEMS} items total.`);
+  }
+
+  const { router, buyerAddress, feeBps } = await connectedRouter(input.chainSlug);
+
+  // Fetch each collection's candidate listings in parallel -- independent
+  // reads, no shared state, same pattern the rest of this codebase uses
+  // for parallel-safe operations.
+  const perSpecSummaries = await Promise.all(
+    input.specs.map((spec) =>
+      fetchFloorListingSummaries({
+        chainSlug: input.chainSlug,
+        collectionSlug: spec.collectionSlug,
+        count: spec.count,
+        traits: spec.traits,
+      }).catch(() => [] as ForeignSeaportOrder[])
+    )
+  );
+
+  // Re-fetch FRESH fulfillment data for every candidate, same freshness
+  // requirement as the single-collection sweep -- tagged with which spec
+  // it came from so perCollection reporting stays accurate even when some
+  // items fail to re-fetch (already sold, expired).
+  const perCollectionFilled = input.specs.map((spec) => ({ collectionSlug: spec.collectionSlug, requested: spec.count, filled: 0 }));
+  const freshOrders: ForeignSeaportOrder[] = [];
+  for (let specIndex = 0; specIndex < input.specs.length; specIndex++) {
+    for (const summary of perSpecSummaries[specIndex]) {
+      try {
+        const fresh = await fetchFulfillmentData({
+          chainSlug: input.chainSlug,
+          orderHash: summary.orderHash,
+          fulfillerAddress: buyerAddress,
+        });
+        if (fresh.signature && fresh.signature !== "0x") {
+          freshOrders.push(fresh);
+          perCollectionFilled[specIndex].filled += 1;
+        }
+      } catch {
+        // Same as the single-collection sweep: one listing failing to
+        // re-fetch just drops it from the batch.
+      }
+    }
+  }
+  if (freshOrders.length === 0) throw new Error("None of the current listings across these collections could be freshly re-signed -- try again.");
+
+  const prices = freshOrders.map(considerationTotal);
+  const totalValue = prices.reduce((sum, price) => sum + price + (price * feeBps) / BigInt(10_000), BigInt(0));
+
+  const tx = await router.sweepBuy(
+    freshOrders.map((o) => ({ parameters: o.parameters, numerator: 1, denominator: 1, signature: o.signature, extraData: "0x" })),
+    freshOrders.map(() => []),
+    ZERO_HASH,
+    prices,
+    { value: totalValue }
+  );
+  await tx.wait();
+  return { txHash: tx.hash, attempted: freshOrders.length, perCollection: perCollectionFilled };
+}
+
 const SPOKE_POOL_ABI = [
   "function depositV3(address depositor,address recipient,address inputToken,address outputToken,uint256 inputAmount,uint256 outputAmount,uint256 destinationChainId,address exclusiveRelayer,uint32 quoteTimestamp,uint32 fillDeadline,uint32 exclusivityParameter,bytes calldata message) external payable",
 ];
