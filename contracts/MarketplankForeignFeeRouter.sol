@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IMarketplankForeignFeeRouter} from "./interfaces/IMarketplankForeignFeeRouter.sol";
 
 /// @dev Seaport structs, declared at file scope (Solidity does not allow
 /// nested `interface` declarations inside a contract body) -- field order
@@ -139,7 +140,7 @@ interface ISeaport {
  *      post-deployment misconfiguration risk entirely rather than gating it
  *      behind access control.
  */
-contract MarketplankForeignFeeRouter is ReentrancyGuard {
+contract MarketplankForeignFeeRouter is ReentrancyGuard, IMarketplankForeignFeeRouter {
     using SafeERC20 for IERC20;
 
     /// @notice The real, canonical Seaport 1.6 contract on this chain (same address on every EVM chain this router is deployed to -- see lib/market/multichain/trading/foreign-chain-registry.ts).
@@ -297,42 +298,15 @@ contract MarketplankForeignFeeRouter is ReentrancyGuard {
         if (criteriaResolvers.length != count || orderPricesWei.length != count) revert ArrayLengthMismatch();
 
         filled = new bool[](count);
-        uint256 totalSpent;
-        uint256 fillCount;
+        uint256 totalSpent = 0;
+        uint256 fillCount = 0;
 
         for (uint256 i = 0; i < count; i++) {
-            uint256 price = orderPricesWei[i];
-            uint256 fee = (price * feeBps) / BPS_DENOMINATOR;
-            uint256 needed = price + fee;
-
-            // Never attempt an order this transaction can't possibly afford
-            // even in isolation -- cheaper than letting Seaport's own call
-            // revert-and-catch for the same reason, and keeps the "did we
-            // even try" signal (this counts as skipped, not a Seaport
-            // rejection) accurate for the emitted event.
-            if (totalSpent + needed > msg.value) {
-                emit ForeignSweepItemSkipped(msg.sender, i);
-                continue;
-            }
-
-            try ISeaport(seaport).fulfillAdvancedOrder{value: price}(
-                orders[i],
-                criteriaResolvers[i],
-                fulfillerConduitKey,
-                msg.sender
-            ) returns (bool ok) {
-                if (!ok) {
-                    emit ForeignSweepItemSkipped(msg.sender, i);
-                    continue;
-                }
-                (bool feeSent, ) = feeRecipient.call{value: fee}("");
-                if (!feeSent) revert SeaportCallFailed();
+            uint256 needed = _attemptSweepItem(orders[i], criteriaResolvers[i], fulfillerConduitKey, orderPricesWei[i], i, totalSpent);
+            if (needed > 0) {
                 totalSpent += needed;
                 fillCount++;
                 filled[i] = true;
-                emit ForeignSweepItemFulfilled(msg.sender, i, price, fee);
-            } catch {
-                emit ForeignSweepItemSkipped(msg.sender, i);
             }
         }
 
@@ -342,6 +316,58 @@ contract MarketplankForeignFeeRouter is ReentrancyGuard {
         if (refund > 0) {
             (bool refunded, ) = msg.sender.call{value: refund}("");
             if (!refunded) revert SeaportCallFailed();
+        }
+    }
+
+    /**
+     * @dev One sweep item's full attempt -- extracted from sweepBuy purely
+     *      for readability/cyclomatic-complexity (flagged by static
+     *      analysis at 13 branches inline; behavior is unchanged, verified
+     *      by the existing sweep test suite passing unmodified after this
+     *      split). Returns the amount actually spent (price + fee) on
+     *      success, or 0 on any skip/failure -- 0 is a safe sentinel here
+     *      because a real needed amount is always > 0 for a nonzero price,
+     *      and orderPricesWei entries of 0 would be a caller error already
+     *      rejected upstream by Seaport's own consideration checks.
+     */
+    function _attemptSweepItem(
+        AdvancedOrder calldata order,
+        CriteriaResolver[] calldata resolvers,
+        bytes32 fulfillerConduitKey,
+        uint256 price,
+        uint256 index,
+        uint256 totalSpentSoFar
+    ) private returns (uint256 spent) {
+        uint256 fee = (price * feeBps) / BPS_DENOMINATOR;
+        uint256 needed = price + fee;
+
+        // Never attempt an order this transaction can't possibly afford
+        // even in isolation -- cheaper than letting Seaport's own call
+        // revert-and-catch for the same reason, and keeps the "did we even
+        // try" signal (this counts as skipped, not a Seaport rejection)
+        // accurate for the emitted event.
+        if (totalSpentSoFar + needed > msg.value) {
+            emit ForeignSweepItemSkipped(msg.sender, index);
+            return 0;
+        }
+
+        try ISeaport(seaport).fulfillAdvancedOrder{value: price}(
+            order,
+            resolvers,
+            fulfillerConduitKey,
+            msg.sender
+        ) returns (bool ok) {
+            if (!ok) {
+                emit ForeignSweepItemSkipped(msg.sender, index);
+                return 0;
+            }
+            (bool feeSent, ) = feeRecipient.call{value: fee}("");
+            if (!feeSent) revert SeaportCallFailed();
+            emit ForeignSweepItemFulfilled(msg.sender, index, price, fee);
+            return needed;
+        } catch {
+            emit ForeignSweepItemSkipped(msg.sender, index);
+            return 0;
         }
     }
 

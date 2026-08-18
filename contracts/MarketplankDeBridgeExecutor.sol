@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {AdvancedOrder, OrderParameters, CriteriaResolver} from "./MarketplankForeignFeeRouter.sol";
+import {IMarketplankForeignFeeRouter} from "./interfaces/IMarketplankForeignFeeRouter.sol";
 
 /**
  * @title MarketplankDeBridgeExecutor
@@ -59,16 +60,6 @@ import {AdvancedOrder, OrderParameters, CriteriaResolver} from "./MarketplankFor
  *   the primary access-control anchor below, same role SPOKE_POOL plays
  *   in MarketplankAcrossReceiver.
  */
-interface IMarketplankForeignFeeRouter {
-    function buyNowFor(
-        AdvancedOrder calldata order,
-        CriteriaResolver[] calldata criteriaResolvers,
-        bytes32 fulfillerConduitKey,
-        uint256 orderPriceWei,
-        address recipient
-    ) external payable;
-}
-
 contract MarketplankDeBridgeExecutor is ReentrancyGuard {
     /// @notice The real deBridge DlnExternalCallAdapter -- the ONLY address permitted to call onERC20Received. Read live from DlnDestination.externalCallAdapter() on the target chain before deployment, never guessed (see header).
     address public immutable externalCallAdapter;

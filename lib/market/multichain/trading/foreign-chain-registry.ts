@@ -26,8 +26,8 @@
  * all, only per-chain identity (chainId, RPC, and OpenSea's own chain slug
  * for pulling that chain's real orders).
  *
- * ZKSYNC IS DELIBERATELY EXCLUDED
- * ---------------------------------
+ * ZKSYNC IS DELIBERATELY EXCLUDED, ON PURPOSE, FOR NOW
+ * ---------------------------------------------------------
  * Confirmed live 2026-08-17: OpenSea's API returns
  * {"errors":["Unrecognized chain: zksync"]} for every slug spelling tried
  * (zksync, zksync-era, zksync_era). Seaport itself IS deployed there (see
@@ -36,6 +36,31 @@
  * resolving. It remains fully covered by the READ-ONLY multichain indexer
  * (lib/market/multichain/adapters/alchemy-nft.ts +
  * discovery/evm-log-scan.ts) -- only trading is affected.
+ *
+ * THE FUTURE-INCLUSION PATH -- WHY THIS IS SAFE TO ADD LATER
+ * -----------------------------------------------------------------
+ * None of MarketplankForeignFeeRouter.sol, MarketplankAcrossReceiver.sol,
+ * or MarketplankDeBridgeExecutor.sol contain ANY chain-specific logic --
+ * every chain identity (Seaport address, wrapped-native-token address,
+ * SpokePool/adapter address) is a constructor argument, not a hardcoded
+ * constant. Adding zkSync later, once/if a real order-sourcing path exists
+ * for it, is purely additive:
+ *   1. Add a FOREIGN_CHAINS entry here (chainId 324, openSeaChain once a
+ *      real one exists -- see evm-log-scan.ts's EVM_CHAIN_ID for the
+ *      already-confirmed chainId).
+ *   2. Deploy the SAME, already-audited-by-this-process contract source to
+ *      zkSync with zkSync-specific constructor args (zkSync Era uses its
+ *      own zksolc compiler toolchain, not vanilla solc -- the Solidity
+ *      SOURCE is unchanged, but it needs a real zkSync-specific compile +
+ *      deploy + verify pass of its own, not just an address added to a
+ *      registry).
+ *   3. Add the resulting real addresses to
+ *      FOREIGN_FEE_ROUTER_ADDRESS/FOREIGN_ACROSS_RECEIVER_ADDRESS/
+ *      FOREIGN_DEBRIDGE_EXECUTOR_ADDRESS below.
+ * Nothing about steps 1-3 requires touching, redeploying, or re-auditing
+ * any chain already live -- each chain's router/receiver/executor is an
+ * independent deployment of the same source, not a shared or upgradeable
+ * contract other chains depend on.
  */
 
 export type ForeignChainConfig = {

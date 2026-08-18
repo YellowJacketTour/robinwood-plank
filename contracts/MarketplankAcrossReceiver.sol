@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import {AdvancedOrder, OrderParameters, CriteriaResolver} from "./MarketplankForeignFeeRouter.sol";
+import {IMarketplankForeignFeeRouter} from "./interfaces/IMarketplankForeignFeeRouter.sol";
 
 /**
  * @title MarketplankAcrossReceiver
@@ -62,16 +63,6 @@ import {AdvancedOrder, OrderParameters, CriteriaResolver} from "./MarketplankFor
  * msg.sender MUST equal the real, immutable SPOKE_POOL address for this
  * chain -- checked FIRST, before any other logic.
  */
-interface IMarketplankForeignFeeRouter {
-    function buyNowFor(
-        AdvancedOrder calldata order,
-        CriteriaResolver[] calldata criteriaResolvers,
-        bytes32 fulfillerConduitKey,
-        uint256 orderPriceWei,
-        address recipient
-    ) external payable;
-}
-
 contract MarketplankAcrossReceiver is ReentrancyGuard {
     /// @notice The real, canonical Across SpokePool for THIS chain. Immutable -- verified live per-chain before deployment (see header), never guessed.
     address public immutable spokePool;
@@ -116,13 +107,13 @@ contract MarketplankAcrossReceiver is ReentrancyGuard {
      *         in this contract by design (not by cleanup logic).
      * @param tokenSent The token Across delivered -- expected to be wrappedNativeToken for this receiver (an ERC20-denominated version would need its own dedicated receiver, not this one).
      * @param amount The amount of tokenSent delivered.
-     * @param relayer The relayer who filled this deposit -- not used for authorization (msg.sender, the SpokePool address, is the only trust anchor), only available for event/debugging context.
+     * (The third parameter, the relayer who filled this deposit, is intentionally unnamed -- not used for authorization; msg.sender, the SpokePool address, is the only trust anchor.)
      * @param message ABI-encoded (OrderParameters parameters, bytes signature, CriteriaResolver[] criteriaResolvers, bytes32 fulfillerConduitKey, uint256 orderPriceWei, address recipient) -- built server-side by whatever quotes the Across deposit. numerator/denominator/extraData are NOT part of the message; they are fixed to 1/1/"0x" here (see below).
      */
     function handleV3AcrossMessage(
         address tokenSent,
         uint256 amount,
-        address relayer,
+        address /* relayer */,
         bytes memory message
     ) external nonReentrant {
         // THE PRIMARY DEFENSE. See header -- this is checked before any
@@ -192,8 +183,6 @@ contract MarketplankAcrossReceiver is ReentrancyGuard {
             // propagate is strictly better than a silent partial state.
             revert RouterCallFailed();
         }
-
-        relayer; // unused beyond documentation -- see param doc.
     }
 
     /// @notice Accepts the unwrapped ETH from wrappedNativeToken's withdraw() call inside _unwrapNative, and nothing else meaningfully -- there is no other flow in this contract that sends it plain ETH.
