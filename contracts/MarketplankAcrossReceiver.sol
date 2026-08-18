@@ -78,6 +78,7 @@ contract MarketplankAcrossReceiver is ReentrancyGuard {
     error InsufficientDeliveredAmount(uint256 required, uint256 delivered);
     error UnwrapFailed();
     error RouterCallFailed();
+    error ResidualSweepFailed(address recipient, uint256 residual);
 
     event CrossChainPurchaseCompleted(address indexed recipient, uint256 amountDelivered);
 
@@ -182,6 +183,36 @@ contract MarketplankAcrossReceiver is ReentrancyGuard {
             // too), so there is nothing to clean up -- letting the error
             // propagate is strictly better than a silent partial state.
             revert RouterCallFailed();
+        }
+
+        _sweepResidual(recipient);
+    }
+
+    /**
+     * @dev Returns any ETH still held after the purchase to the buyer.
+     *
+     * NOT an edge case -- this is the NORMAL path. The router refunds
+     * (msg.value - orderPrice - fee) to ITS msg.sender, which is THIS
+     * contract, and a cross-chain deposit must always over-deliver to
+     * absorb the bridge relayer's variable fee. Without this sweep every
+     * single cross-chain purchase permanently stranded its unused
+     * headroom here (confirmed by a real audit probe: 0.05 ETH left behind
+     * on a single otherwise-successful purchase), with no rescue path --
+     * and worse, a later buyer's `delivered` balance read would silently
+     * absorb an earlier buyer's stranded funds, mixing value between
+     * unrelated users.
+     *
+     * Reverting on a failed send is deliberate and consistent with this
+     * contract's fail-closed atomicity: per the header, a revert here
+     * unwinds the ENTIRE fill (including the bridge's token delivery), so
+     * a recipient that cannot accept ETH gets a cleanly reverted purchase
+     * rather than a completed purchase with silently abandoned change.
+     */
+    function _sweepResidual(address recipient) private {
+        uint256 residual = address(this).balance;
+        if (residual > 0) {
+            (bool sent, ) = recipient.call{value: residual}("");
+            if (!sent) revert ResidualSweepFailed(recipient, residual);
         }
     }
 

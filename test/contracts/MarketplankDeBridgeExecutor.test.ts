@@ -195,6 +195,30 @@ describe("MarketplankDeBridgeExecutor (REAL deployed Seaport bytecode + real WET
     expect(await ethers.provider.getBalance(await executor.getAddress())).to.equal(0n); // nothing left stranded
   });
 
+  it("REGRESSION (audit finding): over-delivery -- the NORMAL bridge case -- returns the unused headroom to the buyer, never strands it", async () => {
+    // Same audit finding as MarketplankAcrossReceiver's equivalent test --
+    // see that one's comment for the full rationale. A real deBridge order
+    // over-delivers to absorb the solver's fee, so unused headroom
+    // returning to the buyer (rather than locking in this contract) is the
+    // normal path, not an edge case.
+    const order = await signedListing(9n);
+    const fee = (PRICE_WEI * FEE_BPS) / 10_000n;
+    const headroom = ethers.parseEther("0.05");
+    const generous = PRICE_WEI + fee + headroom;
+    await deliverWeth(await executor.getAddress(), generous);
+    const payload = encodePayload(order, PRICE_WEI, endUserAddr);
+
+    const endUserBalBefore = await ethers.provider.getBalance(endUserAddr);
+
+    await executor
+      .connect(adapterStandIn)
+      .onERC20Received(ZERO_ORDER_ID, await weth9.getAddress(), generous, ZERO_ADDRESS, payload);
+
+    expect(await nft.ownerOf(TOKEN_ID)).to.equal(endUserAddr);
+    expect(await ethers.provider.getBalance(endUserAddr)).to.equal(endUserBalBefore + headroom);
+    expect(await ethers.provider.getBalance(await executor.getAddress())).to.equal(0n);
+  });
+
   it("PROOF: insufficient delivered amount reverts BEFORE calling the router -- NFT stays with the seller", async () => {
     const order = await signedListing(3n);
     const fee = (PRICE_WEI * FEE_BPS) / 10_000n;

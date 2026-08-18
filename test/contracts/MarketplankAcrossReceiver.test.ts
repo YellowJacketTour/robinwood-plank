@@ -184,6 +184,34 @@ describe("MarketplankAcrossReceiver (REAL deployed Seaport bytecode + real WETH9
     expect(await ethers.provider.getBalance(await receiver.getAddress())).to.equal(0n); // nothing left stranded
   });
 
+  it("REGRESSION (audit finding): over-delivery -- the NORMAL bridge case -- returns the unused headroom to the buyer, never strands it", async () => {
+    // A real Across deposit MUST over-deliver to absorb the relayer's
+    // variable fee, so this is the normal path, not an edge case. Before
+    // the residual sweep was added, an audit probe confirmed this left
+    // 0.05 ETH permanently locked in the receiver with no rescue path --
+    // and a later buyer's balance read would have silently absorbed it.
+    // Every pre-existing test delivered the EXACT amount, which is exactly
+    // why the bug was invisible until probed.
+    const order = await signedListing(7n);
+    const fee = (PRICE_WEI * FEE_BPS) / 10_000n;
+    const headroom = ethers.parseEther("0.05");
+    const generous = PRICE_WEI + fee + headroom;
+    await deliverWeth(await receiver.getAddress(), generous);
+    const message = encodeMessage(order, PRICE_WEI, endUserAddr);
+
+    const endUserBalBefore = await ethers.provider.getBalance(endUserAddr);
+
+    await receiver
+      .connect(spokePoolStandIn)
+      .handleV3AcrossMessage(await weth9.getAddress(), generous, await spokePoolStandIn.getAddress(), message);
+
+    expect(await nft.ownerOf(TOKEN_ID)).to.equal(endUserAddr);
+    // The buyer got the NFT *and* their unused headroom back.
+    expect(await ethers.provider.getBalance(endUserAddr)).to.equal(endUserBalBefore + headroom);
+    // And nothing is left behind for a later buyer to absorb.
+    expect(await ethers.provider.getBalance(await receiver.getAddress())).to.equal(0n);
+  });
+
   it("PROOF: insufficient delivered amount reverts BEFORE calling the router -- NFT stays with the seller", async () => {
     const order = await signedListing(3n);
     const fee = (PRICE_WEI * FEE_BPS) / 10_000n;

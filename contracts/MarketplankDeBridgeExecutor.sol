@@ -76,6 +76,7 @@ contract MarketplankDeBridgeExecutor is ReentrancyGuard {
     error InsufficientDeliveredAmount(uint256 required, uint256 delivered);
     error UnwrapFailed();
     error RouterCallFailed();
+    error ResidualSweepFailed(address recipient, uint256 residual);
 
     event CrossChainPurchaseCompleted(address indexed recipient, uint256 amountDelivered);
 
@@ -146,7 +147,6 @@ contract MarketplankDeBridgeExecutor is ReentrancyGuard {
             )
         {
             emit CrossChainPurchaseCompleted(recipient, delivered);
-            return (true, "");
         } catch {
             // Re-revert rather than return (false, ...): per header, a
             // revert here is SAFE (atomically undoes both token transfers
@@ -155,6 +155,28 @@ contract MarketplankDeBridgeExecutor is ReentrancyGuard {
             // requireSuccessfullExecution=true -- reverting is correct
             // regardless of that flag, not conditional on trusting it.
             revert RouterCallFailed();
+        }
+
+        _sweepResidual(recipient);
+        return (true, "");
+    }
+
+    /**
+     * @dev Returns any ETH still held after the purchase to the buyer.
+     * Identical rationale to MarketplankAcrossReceiver._sweepResidual --
+     * see that function's full comment. Short version: the router refunds
+     * unused headroom to ITS msg.sender (this contract), and a cross-chain
+     * deposit must always over-deliver to absorb the bridge's variable
+     * fee, so without this sweep EVERY purchase permanently stranded its
+     * change here and later buyers would silently absorb it. Reverting on
+     * a failed send is deliberate: it unwinds the entire fill atomically
+     * rather than completing a purchase with abandoned change.
+     */
+    function _sweepResidual(address recipient) private {
+        uint256 residual = address(this).balance;
+        if (residual > 0) {
+            (bool sent, ) = recipient.call{value: residual}("");
+            if (!sent) revert ResidualSweepFailed(recipient, residual);
         }
     }
 

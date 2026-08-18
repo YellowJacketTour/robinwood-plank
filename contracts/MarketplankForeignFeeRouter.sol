@@ -247,6 +247,19 @@ contract MarketplankForeignFeeRouter is ReentrancyGuard, IMarketplankForeignFeeR
         // forwarded here; if it is not, Seaport reverts and this whole
         // transaction reverts with it (nonReentrant + no state changes
         // before this call means a revert here leaves nothing to unwind).
+        //
+        // orderPriceWei MUST EQUAL the order's total consideration exactly.
+        // Under-declaring reverts inside Seaport (InsufficientNativeTokens
+        // Supplied). OVER-declaring ALSO reverts, and the mechanism is
+        // worth knowing: Seaport tries to return the excess native to its
+        // caller (this contract), this contract has no receive()/fallback()
+        // on purpose, so the return fails and Seaport surfaces
+        // NativeTokenTransferGenericFailure -- confirmed by a real audit
+        // probe against the actual Seaport 1.6 bytecode, not assumed. The
+        // absence of a payable fallback here is therefore load-bearing,
+        // not an oversight: it makes over-declaring fail closed instead of
+        // silently stranding the caller's excess in this contract. Do NOT
+        // add a receive() to this contract.
         bool fulfilled = ISeaport(seaport).fulfillAdvancedOrder{value: orderPriceWei}(
             order,
             criteriaResolvers,
