@@ -7,6 +7,9 @@
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  }
   body {
     margin: 0; padding: 24px; min-height: 100vh;
     background: #0b0d12; color: #e8ecf1;
@@ -26,22 +29,42 @@
   .horses { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
   .horse {
     border: 1px solid #232838; border-radius: 8px; padding: 10px; text-align: center; cursor: pointer;
-    background: #0e111a; transition: border-color .15s, background .15s;
+    background: #0e111a; transition: border-color .15s, background .15s, transform .15s;
   }
-  .horse:hover { border-color: #3462ff; }
+  .horse:hover { border-color: #3462ff; transform: translateY(-1px); }
   .horse.selected { border-color: #3462ff; background: #16223f; }
-  .horse.winner { border-color: #58e07c; background: #123a24; }
-  .horse .num { font-size: 20px; font-weight: 700; }
+  .horse.winner {
+    border-color: #58e07c; background: #123a24; box-shadow: 0 0 18px rgba(88,224,124,0.35);
+    animation: winner-pop .5s ease;
+  }
+  @keyframes winner-pop {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.06); }
+    100% { transform: scale(1); }
+  }
+  .horse .num { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .horse .pool { font-size: 11px; color: #8a93a6; margin-top: 4px; font-variant-numeric: tabular-nums; }
   label { display: block; font-size: 12px; color: #8a93a6; margin: 10px 0 4px; }
   input, button {
     width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid #2a3040;
     background: #0e111a; color: #e8ecf1; font-size: 13px;
   }
-  button { background: #3462ff; border: none; font-weight: 600; cursor: pointer; margin-top: 12px; }
+  input:focus-visible, button:focus-visible {
+    outline: 2px solid #6f8bff; outline-offset: 1px;
+  }
+  button { background: #3462ff; border: none; font-weight: 600; cursor: pointer; margin-top: 12px; transition: filter .15s, opacity .15s; }
   button.secondary { background: #1a1f2c; color: #cbd3e6; }
   button:disabled { opacity: .4; cursor: default; }
   button:hover:not(:disabled) { filter: brightness(1.1); }
+  /* Connecting / pending-tx state: a small spinning ring instead of just a
+     disabled button, toggled alongside existing textContent updates. */
+  button.pending { display: flex; align-items: center; justify-content: center; gap: 8px; opacity: .75; }
+  button.pending::before {
+    content: ""; width: 13px; height: 13px; border-radius: 50%;
+    border: 2px solid currentColor; border-top-color: transparent;
+    animation: derby-spin .7s linear infinite; flex: none;
+  }
+  @keyframes derby-spin { to { transform: rotate(360deg); } }
   .row { display: flex; gap: 8px; }
   .row > * { flex: 1; }
   .log {
@@ -49,8 +72,15 @@
     max-height: 220px; overflow-y: auto; background: #0e111a; border-radius: 8px; padding: 10px; margin-top: 14px;
   }
   .log div { padding: 2px 0; border-bottom: 1px solid #1a1f2c; }
+  .log .log-empty { color: #4d5567; font-style: italic; border-bottom: none; padding: 6px 0; }
   .kv { display: flex; justify-content: space-between; font-size: 12.5px; padding: 3px 0; }
-  .kv b { color: #cbd3e6; font-weight: 600; }
+  .kv b { color: #cbd3e6; font-weight: 600; font-variant-numeric: tabular-nums; }
+  /* Stake-level readouts (pool, winner) draw the eye first -- the numbers
+     that matter most to "did I win / how big is this" get more weight than
+     decorative chrome around them. */
+  .kv.hero { font-size: 15px; padding: 6px 0; }
+  .kv.hero b { color: #fff; font-size: 16px; }
+  .kv.hero#winnerRow b.won { color: #58e07c; }
 </style>
 </head>
 <body>
@@ -68,18 +98,18 @@
     </div>
     <div class="horses" id="horses"></div>
     <div class="kv"><span>Race</span><b id="raceId">—</b></div>
-    <div class="kv"><span>Pool</span><b id="pool">—</b></div>
+    <div class="kv hero"><span>Pool</span><b id="pool">—</b></div>
     <div class="kv"><span>Distributable</span><b id="distributable">—</b></div>
     <div class="kv"><span>Participants</span><b id="participants">—</b></div>
     <div class="kv"><span>Timing</span><b id="timing">—</b></div>
-    <div class="kv"><span>Winning horse</span><b id="winner">—</b></div>
+    <div class="kv hero" id="winnerRow"><span>Winning horse</span><b id="winner">—</b></div>
 
     <div class="row" style="margin-top:14px">
       <button id="lockBtn" class="secondary">Lock race</button>
       <button id="finishBtn" class="secondary">Finish race</button>
     </div>
 
-    <div class="log" id="log"></div>
+    <div class="log" id="log"><div class="log-empty">No activity yet — connect and place a bet to see it here.</div></div>
   </div>
 
   <div class="panel">
@@ -118,6 +148,8 @@ let pollTimer = null;
 
 const $ = (id) => document.getElementById(id);
 function log(msg) {
+  const empty = $("log").querySelector(".log-empty");
+  if (empty) empty.remove();
   const el = document.createElement("div");
   el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
   $("log").prepend(el);
@@ -146,6 +178,9 @@ async function loadAbi() {
 }
 
 $("connectBtn").addEventListener("click", async () => {
+  const btn = $("connectBtn");
+  const prevLabel = btn.textContent;
+  btn.disabled = true; btn.classList.add("pending"); btn.textContent = "Connecting…";
   try {
     await loadAbi();
     provider = new ethers.JsonRpcProvider($("rpc").value.trim());
@@ -158,6 +193,8 @@ $("connectBtn").addEventListener("click", async () => {
     startPolling();
   } catch (err) {
     log("Connect failed: " + err.message);
+  } finally {
+    btn.classList.remove("pending"); btn.disabled = false; btn.textContent = prevLabel;
   }
 });
 
@@ -194,6 +231,7 @@ async function refresh() {
       $("timing").textContent = "settled";
     }
     $("winner").textContent = Number(phase) >= 2 ? "#" + (Number(winningHorse) + 1) : "—";
+    $("winner").classList.toggle("won", Number(phase) >= 2);
 
     $("lockBtn").disabled = Number(phase) !== 0;
     $("finishBtn").disabled = Number(phase) !== 1;
@@ -219,7 +257,8 @@ function startPolling() {
   pollTimer = setInterval(refresh, 1500);
 }
 
-async function withErrors(fn) {
+async function withErrors(fn, btn) {
+  if (btn) btn.classList.add("pending");
   try {
     const tx = await fn();
     log("Sent " + tx.hash.slice(0, 10) + "…");
@@ -228,28 +267,30 @@ async function withErrors(fn) {
     refresh();
   } catch (err) {
     log("Reverted: " + (err.shortMessage || err.reason || err.message));
+  } finally {
+    if (btn) btn.classList.remove("pending");
   }
 }
 
 $("betBtn").addEventListener("click", () => {
   if (selectedHorse === null) return;
   const amount = $("betAmount").value.trim();
-  withErrors(() => derby.placeBet(selectedHorse, { value: ethers.parseEther(amount) }));
+  withErrors(() => derby.placeBet(selectedHorse, { value: ethers.parseEther(amount) }), $("betBtn"));
 });
-$("lockBtn").addEventListener("click", () => withErrors(() => derby.lockRace()));
+$("lockBtn").addEventListener("click", () => withErrors(() => derby.lockRace(), $("lockBtn")));
 $("finishBtn").addEventListener("click", async () => {
   const raceId = await derby.currentRaceId();
-  withErrors(() => derby.finishRace(raceId));
+  withErrors(() => derby.finishRace(raceId), $("finishBtn"));
 });
 $("registerBtn").addEventListener("click", async () => {
   const raceId = await derby.currentRaceId();
-  withErrors(() => derby.registerResult(raceId));
+  withErrors(() => derby.registerResult(raceId), $("registerBtn"));
 });
 $("claimBtn").addEventListener("click", async () => {
   const raceId = await derby.currentRaceId();
-  withErrors(() => derby.claim(raceId));
+  withErrors(() => derby.claim(raceId), $("claimBtn"));
 });
-$("withdrawBtn").addEventListener("click", () => withErrors(() => derby.withdrawPayments(signer.address)));
+$("withdrawBtn").addEventListener("click", () => withErrors(() => derby.withdrawPayments(signer.address), $("withdrawBtn")));
 </script>
 </body>
 </html>

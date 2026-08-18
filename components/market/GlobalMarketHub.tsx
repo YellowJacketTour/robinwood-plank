@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
@@ -71,13 +71,96 @@ function CollectionThumb({ src, alt, onFail }: { src: string | null; alt: string
       alt={alt}
       fill
       sizes="20vw"
-      className="object-cover"
+      className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04]"
       unoptimized
       onError={() => {
         setFailed(true);
         onFail?.();
       }}
     />
+  );
+}
+
+/**
+ * Pure presentational skeleton loaders -- shimmer/pulse placeholders shaped
+ * like the real hero, rankings table, and chain-pill row so the page never
+ * flashes "blank then pop". Uses only existing tokens (bg-panel, border-line,
+ * wood tones) plus Tailwind's built-in animate-pulse; no new dependency.
+ */
+function SkeletonBar({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded bg-foreground/10 ${className}`} />;
+}
+
+function GlobalMarketHubSkeleton() {
+  return (
+    <div className="space-y-4 p-4" aria-busy="true" aria-live="polite">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-2">
+          <SkeletonBar className="h-6 w-40" />
+          <SkeletonBar className="h-3 w-72 max-w-[70vw]" />
+        </div>
+        <SkeletonBar className="h-11 w-48 rounded-md" />
+      </div>
+
+      <div className="dense-card flex items-center gap-3 overflow-hidden border-line p-3">
+        <SkeletonBar className="h-14 w-14 shrink-0 rounded-md" />
+        <div className="min-w-0 flex-1 space-y-2">
+          <SkeletonBar className="h-4 w-20 rounded-full" />
+          <SkeletonBar className="h-5 w-56 max-w-full" />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <SkeletonBar className="h-3 w-52" />
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.4fr_1fr]">
+          <SkeletonBar className="min-h-[15rem] rounded-xl sm:min-h-[18rem]" />
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <SkeletonBar key={i} className="min-h-[6.5rem] rounded-lg" />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <SkeletonBar className="h-3 w-28" />
+        <div className="flex flex-wrap gap-1.5">
+          {Array.from({ length: 7 }).map((_, i) => (
+            <SkeletonBar key={i} className="h-9 w-24 rounded-full" />
+          ))}
+        </div>
+        <div className="overflow-hidden rounded-lg border border-line bg-panel">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 border-b border-line/60 px-3 py-2.5 last:border-0">
+              <SkeletonBar className="h-9 w-9 shrink-0 rounded" />
+              <SkeletonBar className="h-3.5 flex-1" />
+              <SkeletonBar className="h-3.5 w-16" />
+              <SkeletonBar className="hidden h-3.5 w-14 sm:block" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * On-brand empty state -- reuses PlankPlaceholder's wood-grain + gold plank
+ * mark instead of a bare line of text, for every conditional-empty-render
+ * (no collections, search yields nothing, chain filter yields nothing).
+ */
+function EmptyState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line bg-wood-900/40 px-6 py-12 text-center">
+      <svg viewBox="0 0 24 24" className="h-8 w-8 text-gold-400/50" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <rect x="2" y="9" width="20" height="6" rx="1" />
+        <line x1="2" y1="12" x2="22" y2="12" strokeOpacity="0.4" />
+        <circle cx="6" cy="10.5" r="0.5" fill="currentColor" stroke="none" />
+        <circle cx="18" cy="13.5" r="0.5" fill="currentColor" stroke="none" />
+      </svg>
+      <p className="text-sm font-bold text-foreground/70">{title}</p>
+      <p className="max-w-xs text-xs text-foreground/45">{body}</p>
+    </div>
   );
 }
 
@@ -479,10 +562,14 @@ export default function GlobalMarketHub() {
   };
 
   if (loading) {
-    return <p className="p-6 text-center text-foreground/50">Loading the global market…</p>;
+    return <GlobalMarketHubSkeleton />;
   }
   if (loadError) {
-    return <p className="p-6 text-center text-red-300">{loadError}</p>;
+    return (
+      <div className="p-6">
+        <EmptyState title="Couldn't reach the global market" body={loadError} />
+      </div>
+    );
   }
 
   const activeFilterCount = chainFilter.size + (onlyTradeable ? 1 : 0) + (onlyArt ? 1 : 0) + (onlyVerifiedCreator ? 1 : 0);
@@ -493,12 +580,12 @@ export default function GlobalMarketHub() {
         <p className="mb-1.5 text-[0.65rem] font-black uppercase tracking-wider text-foreground/40">Chains</p>
         <div className="space-y-1">
           {chains.map(([slug, count]) => (
-            <label key={slug} className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 text-sm hover:bg-foreground/5">
+            <label key={slug} className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 text-sm transition-colors hover:bg-foreground/5">
               <input
                 type="checkbox"
                 checked={chainFilter.has(slug)}
                 onChange={() => toggleChain(slug)}
-                className="h-4 w-4 shrink-0 accent-gold-400"
+                className="h-4 w-4 shrink-0 accent-gold-400 transition-transform"
               />
               <ChainIcon chainSlug={slug} size={16} className="shrink-0" />
               <span className="flex-1 truncate text-foreground/80">{chainDisplayName(slug)}</span>
@@ -510,15 +597,15 @@ export default function GlobalMarketHub() {
       <div>
         <p className="mb-1.5 text-[0.65rem] font-black uppercase tracking-wider text-foreground/40">Features</p>
         <div className="space-y-1">
-          <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 text-sm hover:bg-foreground/5">
+          <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 text-sm transition-colors hover:bg-foreground/5">
             <input type="checkbox" checked={onlyTradeable} onChange={(e) => setOnlyTradeable(e.target.checked)} className="h-4 w-4 accent-gold-400" />
             <span className="text-foreground/80">Buy / sweep / send enabled</span>
           </label>
-          <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 text-sm hover:bg-foreground/5">
+          <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 text-sm transition-colors hover:bg-foreground/5">
             <input type="checkbox" checked={onlyArt} onChange={(e) => setOnlyArt(e.target.checked)} className="h-4 w-4 accent-gold-400" />
             <span className="text-foreground/80">Has real artwork</span>
           </label>
-          <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 text-sm hover:bg-foreground/5">
+          <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 text-sm transition-colors hover:bg-foreground/5">
             <input
               type="checkbox"
               checked={onlyVerifiedCreator}
@@ -538,7 +625,7 @@ export default function GlobalMarketHub() {
             setOnlyArt(false);
             setOnlyVerifiedCreator(false);
           }}
-          className="min-h-9 w-full rounded-md border border-line px-3 text-xs font-bold text-foreground/60 hover:border-line-strong"
+          className="min-h-9 w-full rounded-md border border-line px-3 text-xs font-bold text-foreground/60 transition-colors hover:border-line-strong hover:text-foreground/80"
         >
           Clear filters ({activeFilterCount})
         </button>
@@ -579,9 +666,9 @@ export default function GlobalMarketHub() {
        */}
       <Link
         href="/market"
-        className="dense-card flex items-center gap-3 overflow-hidden border-gold-400/40 p-3 transition-[border-color] hover:border-gold-400"
+        className="dense-card group flex items-center gap-3 overflow-hidden border-gold-400/40 p-3 transition-[border-color,box-shadow] duration-200 hover:border-gold-400 hover:shadow-gold"
       >
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-wood-900 to-wood-800 text-2xl font-black text-gold-300">
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-wood-900 to-wood-800 text-2xl font-black text-gold-300 transition-transform duration-200 group-hover:scale-105">
           RW
         </div>
         <div className="min-w-0 flex-1">
@@ -636,7 +723,7 @@ export default function GlobalMarketHub() {
               return (
                 <Link
                   href={`/market/multichain/${hero.chainSlug}/${encodeURIComponent(hero.contractAddress)}`}
-                  className="dense-card group relative flex min-h-[15rem] flex-col justify-end overflow-hidden p-0 transition-[border-color] hover:border-gold-400/60 sm:min-h-[18rem]"
+                  className="dense-card group relative flex min-h-[15rem] flex-col justify-end overflow-hidden p-0 transition-[border-color,box-shadow] duration-200 hover:border-gold-400/60 hover:shadow-gold sm:min-h-[18rem]"
                 >
                   <div className="absolute inset-0">
                     <CollectionThumb
@@ -673,7 +760,7 @@ export default function GlobalMarketHub() {
                   <Link
                     key={key(c)}
                     href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
-                    className="group relative flex min-h-[6.5rem] flex-col justify-end overflow-hidden rounded-lg border border-line transition-[border-color] hover:border-gold-400/60"
+                    className="group relative flex min-h-[6.5rem] flex-col justify-end overflow-hidden rounded-lg border border-line transition-[border-color,box-shadow] duration-200 hover:border-gold-400/60 hover:shadow-gold"
                   >
                     <div className="absolute inset-0">
                       <CollectionThumb
@@ -730,7 +817,7 @@ export default function GlobalMarketHub() {
                   type="button"
                   onClick={() => toggleChain(slug)}
                   aria-pressed={active}
-                  className="flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-bold transition-colors"
+                  className="flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-bold transition-all duration-150 hover:-translate-y-0.5 active:translate-y-0"
                   style={
                     active
                       ? { borderColor: chainBrandColor(slug), backgroundColor: `${chainBrandColor(slug)}22`, color: chainBrandColor(slug) }
@@ -788,14 +875,18 @@ export default function GlobalMarketHub() {
                       ? (c.listedCount / c.totalSupply) * 100
                       : null;
                   return (
-                    <tr key={rowKey} className="border-b border-line/60 last:border-0 hover:bg-foreground/5">
+                    <tr
+                      key={rowKey}
+                      className="row-enter border-b border-line/60 transition-colors last:border-0 hover:bg-foreground/5"
+                      style={{ "--row-delay": `${Math.min(i, 12) * 20}ms` } as CSSProperties}
+                    >
                       <td className="px-2 py-2 text-center">
                         <button
                           type="button"
                           onClick={() => toggleWatchlist(rowKey)}
                           aria-pressed={watched}
                           aria-label={watched ? "Remove from watchlist" : "Add to watchlist"}
-                          className={`text-base leading-none ${watched ? "text-gold-300" : "text-foreground/25 hover:text-foreground/50"}`}
+                          className={`text-base leading-none transition-transform duration-150 hover:scale-125 active:scale-95 ${watched ? "text-gold-300" : "text-foreground/25 hover:text-foreground/50"}`}
                         >
                           {watched ? "★" : "☆"}
                         </button>
@@ -804,9 +895,9 @@ export default function GlobalMarketHub() {
                       <td className="px-2 py-2">
                         <Link
                           href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
-                          className="flex min-w-0 items-center gap-2"
+                          className="group flex min-w-0 items-center gap-2"
                         >
-                          <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded bg-wood-900">
+                          <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded bg-wood-900 transition-shadow duration-200 group-hover:shadow-gold">
                             <CollectionThumb
                               src={c.imageUrl}
                               alt={c.name ?? c.contractAddress}
@@ -874,10 +965,10 @@ export default function GlobalMarketHub() {
                 type="button"
                 onClick={() => setRankingsShowCount(n)}
                 aria-pressed={rankingsShowCount === n}
-                className={`min-h-8 rounded-md border px-2.5 font-bold ${
+                className={`min-h-8 rounded-md border px-2.5 font-bold transition-colors duration-150 ${
                   rankingsShowCount === n
                     ? "border-gold-400 bg-gold-400/15 text-gold-300"
-                    : "border-line text-foreground/50 hover:border-line-strong"
+                    : "border-line text-foreground/50 hover:border-line-strong hover:text-foreground/70"
                 }`}
               >
                 {n}
@@ -898,14 +989,15 @@ export default function GlobalMarketHub() {
         <div className="space-y-2">
           <p className="text-[0.65rem] font-black uppercase tracking-wider text-foreground/40">Biggest movers · 24h</p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
-            {biggestMovers.map((c) => {
+            {biggestMovers.map((c, i) => {
               const change = c.floorChangePct!;
               const up = change > 0;
               return (
                 <Link
                   key={key(c)}
                   href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
-                  className="rounded-lg border border-line bg-panel p-2 transition-[border-color] hover:border-gold-400/60"
+                  className="row-enter group rounded-lg border border-line bg-panel p-2 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-gold-400/60 hover:shadow-gold"
+                  style={{ "--row-delay": `${Math.min(i, 12) * 25}ms` } as CSSProperties}
                 >
                   <div className="relative mb-1.5 aspect-square w-full overflow-hidden rounded bg-wood-900">
                     <CollectionThumb
@@ -951,12 +1043,12 @@ export default function GlobalMarketHub() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search collection name…"
-          className="min-h-10 flex-1 min-w-[10rem] rounded-md border border-line bg-background px-3 text-sm text-foreground placeholder:text-foreground/30"
+          className="min-h-10 flex-1 min-w-[10rem] rounded-md border border-line bg-background px-3 text-sm text-foreground placeholder:text-foreground/30 transition-colors focus:border-gold-400/60"
         />
         <select
           value={sortMode}
           onChange={(e) => setSortMode(e.target.value as SortMode)}
-          className="min-h-10 rounded-md border border-line bg-background px-2 text-sm text-foreground"
+          className="min-h-10 rounded-md border border-line bg-background px-2 text-sm text-foreground transition-colors focus:border-gold-400/60"
           aria-label="Sort collections"
         >
           <option value="trending">Trending (graded)</option>
@@ -967,7 +1059,7 @@ export default function GlobalMarketHub() {
         <button
           type="button"
           onClick={() => setMobileFiltersOpen(true)}
-          className="min-h-10 rounded-md border border-line bg-background px-3 text-sm font-bold text-foreground/80 lg:hidden"
+          className="min-h-10 rounded-md border border-line bg-background px-3 text-sm font-bold text-foreground/80 transition-colors hover:border-line-strong lg:hidden"
         >
           Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
         </button>
@@ -978,14 +1070,21 @@ export default function GlobalMarketHub() {
 
         <div className="min-w-0 flex-1">
           {filtered.length === 0 ? (
-            <p className="p-6 text-center text-foreground/45">No collections match.</p>
+            <EmptyState
+              title="No collections match"
+              body={
+                search.trim()
+                  ? `Nothing tracked matches "${search.trim()}" with the current filters.`
+                  : "No tracked collections fit the current chain/feature filters — try clearing a few."
+              }
+            />
           ) : (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-              {filtered.map((c) => (
-                <li key={key(c)}>
+              {filtered.map((c, i) => (
+                <li key={key(c)} className="row-enter" style={{ "--row-delay": `${Math.min(i, 16) * 15}ms` } as CSSProperties}>
                   <Link
                     href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
-                    className="dense-card flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-line-strong"
+                    className="dense-card group flex flex-col overflow-hidden p-0 transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-line-strong hover:shadow-gold"
                   >
                     <div className="relative aspect-square w-full bg-wood-900">
                       <CollectionThumb

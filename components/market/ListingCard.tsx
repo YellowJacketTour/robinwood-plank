@@ -1,3 +1,4 @@
+import { useState } from "react";
 import Image from "next/image";
 import { ExternalLink } from "lucide-react";
 import {
@@ -68,6 +69,12 @@ export default function ListingCard({
   rarity,
 }: Props) {
   const isOffer = variant === "offer";
+  // Presentational only -- swaps a shimmer placeholder for the art once the
+  // real image paints, instead of the art popping in and shifting nothing
+  // (aspect-square already reserves the space) but reading as "loaded" a
+  // beat sooner than it did. Purely visual; no data this card reads depends
+  // on it.
+  const [imageLoaded, setImageLoaded] = useState(false);
   // This state is for listings for sale. Incoming offers have their own
   // acceptance validation and should not inherit a sale-card warning.
   const relistRequired = !isOffer && isMarketplankRelistRequired(listing);
@@ -85,7 +92,7 @@ export default function ListingCard({
       // (RobinWood or a foreign collection indexed via
       // scripts/index-foreign-rarity.ts). Common gets no glow -- the
       // neutral baseline every other tier stands out against.
-      className={`dense-card flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-line-strong ${
+      className={`dense-card hover-glow-gold flex flex-col overflow-hidden p-0 transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-line-strong ${
         isOffer ? "border-emerald-500/40" : ""
       } ${rarity ? tierAnimationClass(rarity.tier) : ""}`}
       style={rarity ? { ...tierCardStyle(rarity.tier), boxShadow: tierGlow(rarity.tier) } : undefined}
@@ -109,6 +116,13 @@ export default function ListingCard({
             : undefined
         }
       >
+        {/* Shimmer veil behind the art until it paints -- CSS-only,
+            no layout shift since the aspect-square parent already reserves
+            the space. Fades out via opacity once onLoad fires. */}
+        <div
+          aria-hidden="true"
+          className={`skeleton-shimmer img-loading-veil absolute inset-0 ${imageLoaded ? "opacity-0" : "opacity-100"}`}
+        />
         <Image
           // The token's own art, not the collection logo — a grid of identical
           // logos reads as broken. Falls back only if resolution failed.
@@ -116,8 +130,9 @@ export default function ListingCard({
           alt={`${collection.name} #${listing.tokenId}`}
           fill
           sizes="(min-width: 1024px) 20vw, 50vw"
-          className="object-cover"
+          className={`object-cover transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
           unoptimized={Boolean(listing.imageUrl)}
+          onLoad={() => setImageLoaded(true)}
         />
         {isFloor && (
           <span

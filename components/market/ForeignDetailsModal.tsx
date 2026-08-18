@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import { ShieldCheck, ShieldAlert, Loader2 } from "lucide-react";
 import type { Listing } from "@/lib/market/types";
 import { withImageWidth } from "@/lib/ipfs";
 import { formatTokenAmount } from "@/lib/trade";
@@ -90,10 +91,18 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
         {isSolana && verification !== "idle" && (
           <div className="rounded-lg border border-line bg-panel px-3 py-2">
             {verification === "loading" ? (
-              <p className="text-xs text-foreground/45">Checking on-chain…</p>
+              <p className="flex items-center gap-1.5 text-xs text-foreground/45">
+                <Loader2 size={13} strokeWidth={2.5} className="animate-spin motion-reduce:animate-none" aria-hidden />
+                Checking on-chain…
+              </p>
             ) : verification.verified ? (
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-foreground/60">
+                <span className="flex items-center gap-1.5 text-xs text-foreground/60">
+                  {verification.priceMatches ? (
+                    <ShieldCheck size={14} strokeWidth={2.5} className="success-pop text-emerald-300" aria-hidden />
+                  ) : (
+                    <ShieldAlert size={14} strokeWidth={2.5} className="text-red-300" aria-hidden />
+                  )}
                   {verification.priceMatches ? "On-chain verified" : "On-chain price mismatch"}
                 </span>
                 <span
@@ -106,7 +115,10 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
                 </span>
               </div>
             ) : (
-              <p className="text-xs text-foreground/45">{verification.reason}</p>
+              <p className="flex items-center gap-1.5 text-xs text-foreground/45">
+                <ShieldAlert size={13} strokeWidth={2.5} className="shrink-0 text-foreground/35" aria-hidden />
+                {verification.reason}
+              </p>
             )}
           </div>
         )}

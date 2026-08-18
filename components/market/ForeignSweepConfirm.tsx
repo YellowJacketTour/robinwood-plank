@@ -102,22 +102,22 @@ export default function ForeignSweepConfirm({
           })}
         </ul>
 
-        <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
+        <dl className="space-y-1.5 rounded-lg border border-line bg-panel px-3 py-2.5 text-xs">
           <div className="flex justify-between">
-            <dt className="text-foreground/60">
+            <dt className="text-foreground/55">
               {items.length} item{items.length === 1 ? "" : "s"}
             </dt>
-            <dd className="tabular-nums text-foreground">{collectionName}</dd>
+            <dd className="tabular-nums text-foreground/80">{collectionName}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-foreground/60">Marketplank fee (added)</dt>
-            <dd className="tabular-nums text-foreground">
+            <dt className="text-foreground/55">Marketplank fee (added)</dt>
+            <dd className="tabular-nums text-foreground/80">
               {(feeBps / 100).toFixed(2)}% · {formatTokenAmount(fee.toString(), 18, 4)} Ξ
             </dd>
           </div>
-          <div className="flex justify-between border-t border-line pt-1">
-            <dt className="font-bold text-foreground">You pay (up to)</dt>
-            <dd className="font-display tabular-nums text-gold-300">{formatTokenAmount(total.toString(), 18, 6)} Ξ</dd>
+          <div className="flex items-baseline justify-between border-t border-line-strong pt-1.5">
+            <dt className="text-sm font-bold text-foreground">You pay (up to)</dt>
+            <dd className="font-display text-base tabular-nums text-gold-300">{formatTokenAmount(total.toString(), 18, 6)} Ξ</dd>
           </div>
         </dl>
 
@@ -137,8 +137,9 @@ export default function ForeignSweepConfirm({
           type="button"
           disabled={busy}
           onClick={onConfirm}
-          className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
+          className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-70"
         >
+          {busy && <span className="spinner-gold" aria-hidden="true" />}
           {busy ? "Confirm in wallet…" : "Sweep"}
         </button>
       </div>

@@ -261,6 +261,21 @@
   .stage { position: relative; flex: 1; min-height: 0; }
   canvas#fx { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
+  /* "It's over" cue: a single quick red vignette flash on crash, distinct
+     from the green cash-out celebration -- pure CSS, triggered by adding
+     .flash to an inert overlay div at the same moment shakeAmount/particles
+     already fire for the crash (no new logic, just a class toggle). */
+  .crash-flash {
+    position: absolute; inset: 0; z-index: 23; pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(255,77,106,0) 40%, rgba(255,77,106,0.35) 100%);
+    opacity: 0;
+  }
+  .crash-flash.flash { animation: crash-flash-anim 0.6s ease-out; }
+  @keyframes crash-flash-anim {
+    0% { opacity: 0.9; }
+    100% { opacity: 0; }
+  }
+
   .center-readout {
     position: absolute; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center; pointer-events: none; text-align: center;
@@ -272,6 +287,18 @@
     transition: color .12s, transform .08s;
   }
   .mult.live { color: var(--win); text-shadow: 0 0 46px rgba(62,224,140,0.45); }
+  /* Risk-intensity glow: setMultReadout() stamps a data-risk tier (0-3) on
+     the readout as the live multiplier climbs, purely presentational (it
+     reads the already-computed display value, computes nothing new). Each
+     tier widens/quickens the glow so the readout visually "runs hotter"
+     the longer a player rides it, without any new game state. */
+  .mult.live[data-risk="1"] { text-shadow: 0 0 52px rgba(62,224,140,0.55); }
+  .mult.live[data-risk="2"] { text-shadow: 0 0 60px rgba(255,200,87,0.55); animation: risk-pulse 1.6s ease-in-out infinite; }
+  .mult.live[data-risk="3"] { text-shadow: 0 0 72px rgba(255,90,60,0.6); animation: risk-pulse 0.85s ease-in-out infinite; }
+  @keyframes risk-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.035); }
+  }
   .mult.crashed { color: var(--lose); text-shadow: 0 0 46px rgba(255,77,106,0.5); }
   /* FUELING: on the pad, charging on $PLANK toward 1.00x liftoff -- an amber
      "fuel" glow, distinct from the green flight and the red crash. */
@@ -418,6 +445,17 @@
     cursor: default; color: var(--ink-dim); background: var(--bg-2);
     box-shadow: none; border: 1px solid var(--line);
   }
+  /* Pending/in-flight tx state: a small spinning ring next to the label
+     instead of just a disabled, static button -- toggled alongside the
+     existing textContent assignments (PLACING BET…/CASHING OUT…/etc), no
+     new state introduced, just a visual companion to state already set. */
+  .primary-btn.pending { display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .primary-btn.pending::before {
+    content: ""; width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid currentColor; border-top-color: transparent; opacity: 0.55;
+    animation: btn-spin 0.7s linear infinite; flex: none;
+  }
+  @keyframes btn-spin { to { transform: rotate(360deg); } }
   .primary-btn.cashout {
     background: linear-gradient(135deg, var(--win-glow), var(--win));
     box-shadow: 0 8px 34px rgba(62,224,140,0.35);
@@ -463,6 +501,15 @@
   }
   .sheet .connect { background: var(--accent); color: #10131c; }
   .sheet .connect:disabled { background: var(--bg-1); color: var(--ink-dim); border: 1px solid var(--line); cursor: default; }
+  /* Connecting spinner: same ring treatment as the primary button's pending
+     state, scoped to sheet buttons so "Connecting…" reads as active work,
+     not a plain disabled button. */
+  .sheet button.pending { display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .sheet button.pending::before {
+    content: ""; width: 13px; height: 13px; border-radius: 50%;
+    border: 2px solid currentColor; border-top-color: transparent; opacity: 0.55;
+    animation: btn-spin 0.7s linear infinite; flex: none;
+  }
   .sheet .close { background: var(--bg-1); color: var(--ink-dim); border: 1px solid var(--line); }
   .conn-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-dim); margin-right: 6px; }
   .conn-dot.on { background: var(--win); box-shadow: 0 0 8px var(--win); }
@@ -640,6 +687,7 @@
 
   <div class="stage">
     <canvas id="fx"></canvas>
+    <div class="crash-flash" id="crashFlash"></div>
     <div class="center-readout">
       <div class="mult idle" id="multReadout">1<span class="x">.00x</span></div>
       <div class="substatus" id="substatus">CONNECT A WALLET TO PLAY</div>
@@ -2597,12 +2645,16 @@ async function connectToChain(rpcUrl, address, pk, label) {
 }
 
 $("connectBtn").addEventListener("click", async () => {
+  const btn = $("connectBtn");
+  const prevLabel = btn.textContent;
+  btn.disabled = true; btn.classList.add("pending"); btn.textContent = "Connecting…";
   try {
     const pk = selectedAccount ? selectedAccount.pk : $("pk").value.trim();
     const label = selectedAccount ? selectedAccount.name : "custom account";
     await connectToChain($("rpc").value.trim(), $("addr").value.trim(), pk, label);
   } catch (err) {
     toast("Connect failed: " + err.message);
+    btn.classList.remove("pending"); btn.disabled = false; btn.textContent = prevLabel;
   }
 });
 
@@ -2748,6 +2800,15 @@ function setMultReadout(xStr, cls) {
   el.className = "mult " + cls;
   const [whole, frac] = xStr.split(".");
   el.innerHTML = whole + '<span class="x">.' + (frac || "00") + "x</span>";
+  // Presentational-only risk tiering: reads the already-computed display
+  // value to pick a glow intensity tier while LIVE, nothing new is
+  // computed or decided here. Thresholds are display taste, not game logic.
+  if (cls === "live") {
+    const n = Number(xStr);
+    el.dataset.risk = n >= 5 ? "3" : n >= 2.5 ? "2" : n >= 1.5 ? "1" : "0";
+  } else {
+    delete el.dataset.risk;
+  }
 }
 
 let resultCardTimer = null;
@@ -3357,7 +3418,7 @@ async function doPlaceBet(viaButton) {
   // to confirm. This is the "instant response" 2026 crash-UX research
   // calls out as load-bearing for feeling in-control, not decorative.
   sfx.click(); haptic(15);
-  if (viaButton) { primaryBtn.disabled = true; primaryBtn.textContent = "PLACING BET…"; }
+  if (viaButton) { primaryBtn.disabled = true; primaryBtn.classList.add("pending"); primaryBtn.textContent = "PLACING BET…"; }
   try {
     // Bank mode: the browser session key bets from the pre-funded buffer --
     // no wallet popup. Otherwise the classic per-bet path.
@@ -3421,7 +3482,7 @@ async function doCashOut(viaButton) {
   // action in the whole game, per the same research, so it gets feedback
   // before a single await runs.
   sfx.click(); haptic(15);
-  if (viaButton) { primaryBtn.disabled = true; primaryBtn.textContent = "CASHING OUT…"; }
+  if (viaButton) { primaryBtn.disabled = true; primaryBtn.classList.add("pending"); primaryBtn.textContent = "CASHING OUT…"; }
   try {
     const roundId = await crash.currentRoundId();
     const liveBps = await crash.liveMultiplierBps(roundId);
@@ -3548,7 +3609,7 @@ function updatePrimaryButton(state, opts = {}) {
       chips.forEach((c) => (c.disabled = true));
       break;
     case "settling":
-      primaryBtn.className = "primary-btn"; primaryBtn.disabled = true;
+      primaryBtn.className = "primary-btn pending"; primaryBtn.disabled = true;
       primaryBtn.textContent = "SETTLING…";
       $("btnSub").textContent = opts.sub || "";
       chips.forEach((c) => (c.disabled = true));
@@ -3747,6 +3808,14 @@ async function refresh() {
         shakeAmount = prefersReducedMotion ? 0 : 1.4;
         spawnParticles(0xff4d6a, prefersReducedMotion ? 15 : 60, 3.5);
         sfx.crash(); haptic([50, 30, 80]);
+        // "It's over" visual cue, distinct from the win celebration --
+        // pure class toggle, auto-removed so it can re-fire next round.
+        const flashEl = $("crashFlash");
+        if (flashEl) {
+          flashEl.classList.remove("flash");
+          void flashEl.offsetWidth; // restart the animation if triggered twice
+          flashEl.classList.add("flash");
+        }
       }
       const xStr = bpsToXStr(round.crashMultiplierBps);
       // Snap the target to the real, final crash multiplier -- not

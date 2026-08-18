@@ -10,10 +10,31 @@ import { chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-r
  * letter/dot to an actual recognizable shape. Colored via
  * chainBrandColor() (each chain's real published brand color), transparent
  * background so it drops cleanly onto any card surface, light or dark.
+ *
+ * Renders as a plain inline vector mark -- no external image request, so
+ * there's no broken-image state to guard against. Strokes on the
+ * outline-based marks (Arbitrum's ring, Optimism's ring+ellipse, the
+ * Robinhood monogram frame) use vector-effect="non-scaling-stroke" so the
+ * line stays a crisp, visible weight at the 10px corner-badge call sites
+ * instead of thinning toward invisibility as the 24-unit viewBox scales
+ * down. Hover/lift treatment lives on each caller's own interactive wrapper
+ * (filter pill, filter row) -- this component stays a static mark so those
+ * transitions aren't duplicated here.
  */
 export default function ChainIcon({ chainSlug, size = 20, className = "" }: { chainSlug: string; size?: number; className?: string }) {
   const color = chainBrandColor(chainSlug);
-  const common = { width: size, height: size, viewBox: "0 0 24 24", className, "aria-hidden": true } as const;
+  const common = {
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    className,
+    "aria-hidden": true,
+    // Block + no-shrink so the mark stays pixel-crisp and doesn't get
+    // squeezed by flex siblings at the smaller call sites (10px thumbnail
+    // corner badges) -- callers that already pass "shrink-0" in className
+    // are unaffected, this just covers the ones that don't.
+    style: { display: "block", flexShrink: 0 },
+  } as const;
 
   switch (chainSlug) {
     case "eth-mainnet":
@@ -37,7 +58,7 @@ export default function ChainIcon({ chainSlug, size = 20, className = "" }: { ch
     case "arb-mainnet":
       return (
         <svg {...common}>
-          <circle cx="12" cy="12" r="10.5" fill="none" stroke={color} strokeWidth="1.6" />
+          <circle cx="12" cy="12" r="10.5" fill="none" stroke={color} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
           <path d="m8 15 3-8h1.4l3 8h-1.6l-.7-2h-2.8l-.7 2z" fill={color} />
           <path d="M10.6 11.6h2.8l-1.4-3.8z" fill="var(--color-panel, #1a1410)" />
         </svg>
@@ -52,8 +73,8 @@ export default function ChainIcon({ chainSlug, size = 20, className = "" }: { ch
     case "opt-mainnet":
       return (
         <svg {...common}>
-          <circle cx="12" cy="12" r="10.5" fill="none" stroke={color} strokeWidth="1.8" />
-          <ellipse cx="8.7" cy="12" rx="2.2" ry="3.2" fill="none" stroke={color} strokeWidth="1.5" />
+          <circle cx="12" cy="12" r="10.5" fill="none" stroke={color} strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
+          <ellipse cx="8.7" cy="12" rx="2.2" ry="3.2" fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
           <path d="M13.5 15.2 16.3 8.8h1.5l-2.8 6.4z" fill={color} />
         </svg>
       );
@@ -101,7 +122,7 @@ export default function ChainIcon({ chainSlug, size = 20, className = "" }: { ch
     case "robinhood":
       return (
         <svg {...common}>
-          <rect x="1.5" y="1.5" width="21" height="21" rx="5" fill="none" stroke={color} strokeWidth="1.8" />
+          <rect x="1.5" y="1.5" width="21" height="21" rx="5" fill="none" stroke={color} strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
           <text x="12" y="16" textAnchor="middle" fontSize="10" fontWeight="900" fill={color} fontFamily="inherit">
             RW
           </text>

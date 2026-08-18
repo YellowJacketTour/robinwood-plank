@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import { PackageOpen, Tag } from "lucide-react";
 import { withImageWidth } from "@/lib/ipfs";
+import { SkeletonCardGrid, SkeletonRows, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 import ListingCard from "@/components/market/ListingCard";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import ForeignSweepConfirm from "@/components/market/ForeignSweepConfirm";
@@ -957,7 +959,16 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const collectionWideOffers = useMemo(() => offers.filter((o) => !o.acceptable), [offers]);
 
   if (loading) {
-    return <p className="p-6 text-center text-foreground/50">Loading {chainDisplayName(chainSlug)} listings…</p>;
+    // Skeleton shaped like the real page (stat bar + card grid), not bare
+    // "Loading…" text -- a populated collection shouldn't flash empty/blank
+    // on every visit, same rationale as ListingSkeleton.tsx.
+    return (
+      <div className="space-y-4 p-4">
+        <SkeletonStatus>Loading {chainDisplayName(chainSlug)} listings</SkeletonStatus>
+        <SkeletonStats count={4} columns="grid-cols-2 sm:grid-cols-4" />
+        <SkeletonCardGrid columns="grid-cols-2 sm:grid-cols-3 lg:grid-cols-5" action />
+      </div>
+    );
   }
   if (loadError || !collection) {
     return <p className="p-6 text-center text-red-300">{loadError ?? "Collection not found."}</p>;
@@ -1215,9 +1226,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           }
         >
           {filteredListings.length === 0 ? (
-            <p className="p-6 text-center text-foreground/45">
-              {filtersActive ? "No listings match your search." : "No listings right now."}
-            </p>
+            <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line bg-panel-strong px-4 py-10 text-center">
+              <PackageOpen size={28} strokeWidth={1.75} className="text-gold-400/70" aria-hidden />
+              <p className="text-sm font-bold text-foreground/75">
+                {filtersActive ? "No listings match your search." : "No listings right now."}
+              </p>
+              <p className="text-xs text-foreground/45">
+                {filtersActive ? "Try widening your price range or clearing a filter." : "Check back soon, or watch this collection for the next drop."}
+              </p>
+            </div>
           ) : (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               {/* Solana gets single-token offers too, via Magic Eden's real
@@ -1296,9 +1313,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   )}
                 </div>
                 {offersLoading ? (
-                  <p className="text-xs text-foreground/45">Loading offers…</p>
+                  <SkeletonRows rows={3} columns={["w-24", "w-32", "w-16"]} />
                 ) : collectionWideOffers.length === 0 ? (
-                  <p className="text-xs text-foreground/45">No open criteria bids right now.</p>
+                  <div className="flex items-center gap-2 rounded-lg border border-dashed border-line bg-panel-strong px-4 py-6">
+                    <Tag size={18} strokeWidth={1.75} className="shrink-0 text-gold-400/60" aria-hidden />
+                    <p className="text-xs text-foreground/50">No open criteria bids right now.</p>
+                  </div>
                 ) : (
                   <ul className="space-y-2">
                     {collectionWideOffers.map((o) => (
@@ -1325,9 +1345,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   <p className="text-xs text-foreground/55">Offers tied to one exact token ID.</p>
                 </div>
                 {offersLoading ? (
-                  <p className="text-xs text-foreground/45">Loading offers…</p>
+                  <SkeletonCardGrid count={4} columns="grid-cols-2 sm:grid-cols-3 lg:grid-cols-4" action />
                 ) : tokenOffers.length === 0 ? (
-                  <p className="text-xs text-foreground/45">No single-token offers right now.</p>
+                  <div className="flex items-center gap-2 rounded-lg border border-dashed border-line bg-panel-strong px-4 py-6">
+                    <Tag size={18} strokeWidth={1.75} className="shrink-0 text-gold-400/60" aria-hidden />
+                    <p className="text-xs text-foreground/50">No single-token offers right now.</p>
+                  </div>
                 ) : (
                   <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                     {tokenOffers.map((o) => (
@@ -1382,11 +1405,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               </div>
             </div>
             {ownedLoading ? (
-              <p className="text-xs text-foreground/45">Checking your wallet…</p>
+              <SkeletonCardGrid count={6} columns="grid-cols-[repeat(auto-fill,minmax(140px,1fr))]" />
             ) : ownedTokenIds.length === 0 ? (
-              <p className="rounded-xl border border-line bg-panel px-4 py-8 text-center text-sm text-foreground/55">
-                You don't own any {collection.name} on {chainDisplayName(chainSlug)}.
-              </p>
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line bg-panel-strong px-4 py-10 text-center">
+                <PackageOpen size={28} strokeWidth={1.75} className="text-gold-400/70" aria-hidden />
+                <p className="text-sm font-bold text-foreground/75">
+                  You don't own any {collection.name} on {chainDisplayName(chainSlug)}.
+                </p>
+              </div>
             ) : (
               <ul className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2">
                 {ownedItems.map((item) => {
@@ -1491,9 +1517,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               My listings {myListings.length > 0 ? `(${myListings.length})` : ""}
             </h3>
             {myListingsLoading ? (
-              <p className="text-xs text-foreground/45">Loading your listings…</p>
+              <SkeletonRows rows={3} columns={["w-16", "w-24"]} />
             ) : myListings.length === 0 ? (
-              <p className="text-xs text-foreground/45">You have no active listings in {collection.name}.</p>
+              <div className="flex items-center gap-2 rounded-lg border border-dashed border-line bg-panel-strong px-3 py-5">
+                <Tag size={16} strokeWidth={1.75} className="shrink-0 text-gold-400/60" aria-hidden />
+                <p className="text-xs text-foreground/50">You have no active listings in {collection.name}.</p>
+              </div>
             ) : (
               <ul className="space-y-1.5">
                 {myListings.map((l) => (

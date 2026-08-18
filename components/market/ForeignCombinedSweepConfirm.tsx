@@ -117,14 +117,14 @@ export default function ForeignCombinedSweepConfirm({
         )}
 
         {affordable.length > 0 && (
-          <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
+          <dl className="space-y-1.5 rounded-lg border border-line bg-panel px-3 py-2.5 text-xs">
             <div className="flex justify-between">
-              <dt className="text-foreground/60">{collectionName}</dt>
-              <dd className="tabular-nums text-foreground">{affordable.length} to buy</dd>
+              <dt className="text-foreground/55">{collectionName}</dt>
+              <dd className="tabular-nums text-foreground/80">{affordable.length} to buy</dd>
             </div>
-            <div className="flex justify-between border-t border-line pt-1">
-              <dt className="font-bold text-foreground">You pay (up to)</dt>
-              <dd className="font-display tabular-nums text-gold-300">{formatTokenAmount(total.toString(), 18, 6)} Ξ</dd>
+            <div className="flex items-baseline justify-between border-t border-line-strong pt-1.5">
+              <dt className="text-sm font-bold text-foreground">You pay (up to)</dt>
+              <dd className="font-display text-base tabular-nums text-gold-300">{formatTokenAmount(total.toString(), 18, 6)} Ξ</dd>
             </div>
           </dl>
         )}
@@ -146,8 +146,9 @@ export default function ForeignCombinedSweepConfirm({
           type="button"
           disabled={busy}
           onClick={onConfirm}
-          className="min-h-12 w-full rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-50"
+          className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-gold-500 text-sm font-bold text-wood-950 transition hover:bg-gold-400 disabled:opacity-70"
         >
+          {busy && <span className="spinner-gold" aria-hidden="true" />}
           {busy ? "Confirm in wallet…" : "Buy + offer"}
         </button>
       </div>

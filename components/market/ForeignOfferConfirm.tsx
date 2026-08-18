@@ -94,8 +94,9 @@ export default function ForeignOfferConfirm({
           type="button"
           disabled={!amountValid || busy}
           onClick={onConfirm}
-          className="min-h-12 w-full rounded-lg bg-emerald-500 text-sm font-bold text-wood-950 transition hover:bg-emerald-400 disabled:opacity-50"
+          className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 text-sm font-bold text-wood-950 transition hover:bg-emerald-400 disabled:opacity-60"
         >
+          {busy && <span className="spinner-gold" aria-hidden="true" />}
           {busy ? "Confirm in wallet…" : "Make offer"}
         </button>
       </div>
