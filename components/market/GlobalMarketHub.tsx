@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { chainDisplayName, chainBrandColor, chainGlyph } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { swrJson } from "@/lib/market/swr-fetch";
+import ChainIcon from "@/components/market/ChainIcon";
+import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
 
 /**
  * Some collection images (any sourced from lib/market/multichain/adapters/
@@ -40,9 +42,26 @@ function PlankPlaceholder() {
   );
 }
 
+/**
+ * Confirmed live 2026-08-19: some upstream (Alchemy/OpenSea) metadata
+ * carries the LITERAL 4-character string "null" for an image field instead
+ * of a real null (see alchemy-nft.ts's cleanMetadataString for the
+ * verified source) -- a truthy string that sailed past a plain `!src`
+ * check and crashed Next's <Image> with "invalid src prop" the moment a
+ * user clicked into an affected collection. lib/ipfs.ts's withImageWidth
+ * now sanitizes this at the shared chokepoint other callers go through,
+ * but this component reads `imageUrl` directly (not via withImageWidth),
+ * so it needs its own guard.
+ */
+function isPoisonedImageSrc(src: string | null): boolean {
+  if (!src) return true;
+  const trimmed = src.trim().toLowerCase();
+  return trimmed === "" || trimmed === "null" || trimmed === "undefined";
+}
+
 function CollectionThumb({ src, alt, onFail }: { src: string | null; alt: string; onFail?: () => void }) {
   const [failed, setFailed] = useState(false);
-  if (!src || failed) {
+  if (!src || isPoisonedImageSrc(src) || failed) {
     return <PlankPlaceholder />;
   }
   return (
@@ -85,6 +104,9 @@ type TrackedCollection = {
   sales24h: number | null;
   /** Real floor % change from this app's own prior observation -- OpenSea has no such field. Null until at least two syncs have run. */
   floorChangePct: number | null;
+  /** Real, from the same source as floorPriceWei (Alchemy/Magic Eden snapshot) -- already returned by this route, just never surfaced on this page until now. */
+  totalSupply: number | null;
+  listedCount: number | null;
 };
 
 type SortMode = "trending" | "floor-desc" | "floor-asc" | "name";
@@ -134,16 +156,23 @@ function GradeBadge({ score }: { score: number }) {
   );
 }
 
+// Real, current chainSlug values only (verified against what
+// scripts/seed-multichain-collections.ts and discover-multichain-
+// collections.ts actually write to Postgres -- "matic-mainnet" and bare
+// "solana" were never real values, they were carried over from an earlier,
+// wrong assumption). Ordered per explicit direction: Bitcoin, Robinhood,
+// Solana, Base, Ethereum, BNB Chain first, then the remaining EVM chains.
 const ALL_CHAIN_SLUGS_ORDER = [
-  "eth-mainnet",
+  "bitcoin-mainnet",
+  "robinhood",
+  "solana-mainnet",
   "base-mainnet",
-  "matic-mainnet",
+  "eth-mainnet",
+  "bnb-mainnet",
   "polygon-mainnet",
   "arb-mainnet",
   "opt-mainnet",
-  "bnb-mainnet",
   "avax-mainnet",
-  "solana",
 ];
 
 /**
@@ -206,6 +235,50 @@ export default function GlobalMarketHub() {
   // Magic Eden) converge on, now weighted by real art/tradeability instead
   // of raw activity alone (see gradeScore's own header).
   const [sortMode, setSortMode] = useState<SortMode>("trending");
+  // Rankings-table row count -- Magic Eden's real "Show top: 10/25/50/100"
+  // control, live-checked 2026-08-19. Matters far more now than it would
+  // have before this session's discovery work: this app went from ~170 to
+  // 3,500+ tracked collections, so a fixed cutoff either buries most of
+  // them or floods the page -- a real control beats guessing one number.
+  const [rankingsShowCount, setRankingsShowCount] = useState(25);
+  // Per-collection watchlist star, Magic Eden's real pattern. Client-only
+  // (localStorage), no backend -- this app has no user-account system to
+  // attach a server-side watchlist to, and a real client-persisted one is
+  // honest about that rather than faking a synced feature.
+  // Deliberately hydrated in an effect, NOT a useState lazy initializer --
+  // this is a "use client" component Next still server-renders for the
+  // initial HTML. A lazy initializer would read localStorage during the
+  // CLIENT's hydration render itself, diverging from the empty server-
+  // rendered HTML and triggering a real React hydration mismatch (the
+  // star icons would flip from "reads as empty" to "reads as populated"
+  // between server and client output). The effect-based version below
+  // renders empty on both server AND the client's first hydration pass
+  // (matching, no mismatch), then updates post-hydration -- the standard,
+  // correct pattern for browser-only state. The "setState synchronously
+  // within an effect" lint rule is a false positive for exactly this
+  // mount-once, empty-deps-array case; it does not cascade.
+  const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("plank:market:watchlist-v1");
+      if (raw) setWatchlist(new Set(JSON.parse(raw) as string[]));
+    } catch {
+      // Corrupt/blocked storage -- start empty rather than throw.
+    }
+  }, []);
+  const toggleWatchlist = (k: string) => {
+    setWatchlist((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      try {
+        window.localStorage.setItem("plank:market:watchlist-v1", JSON.stringify([...next]));
+      } catch {
+        // Best-effort persistence only.
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -235,6 +308,46 @@ export default function GlobalMarketHub() {
       cancelled = true;
     };
   }, []);
+
+  // Real ETH/SOL/BTC USD prices -- one shared fetch for the whole hub
+  // (rankings table + Biggest Movers), same short-TTL swr pattern the
+  // collection index itself uses. usdPrices stays {} (not fabricated
+  // zeros) until this resolves, so every USD-dependent render checks for
+  // a real price before showing one.
+  const [usdPrices, setUsdPrices] = useState<MultiAssetPrices>({});
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await swrJson<{ prices: MultiAssetPrices }>("/api/market/asset-prices", {
+          ttlMs: 30_000,
+          swrMs: 120_000,
+          session: true,
+        });
+        if (!cancelled) setUsdPrices(data.prices ?? {});
+      } catch {
+        // USD is a display enhancement, not core data -- a failed fetch
+        // just means every USD figure stays hidden, native price still shows.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Real USD-equivalent for a wei-denominated native price, or null if this currency has no fetched price -- never fabricated. */
+  const toUsd = (weiStr: string | null, currency: string | null): number | null => {
+    if (!weiStr) return null;
+    const symbol = normalizeAssetSymbol(currency);
+    const usd = symbol ? usdPrices[symbol]?.usd : null;
+    if (usd == null) return null;
+    return (Number(weiStr) / 1e18) * usd;
+  };
+  const formatUsdCompact = (n: number): string => {
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+    if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+    return `$${n.toFixed(2)}`;
+  };
 
   const key = (c: TrackedCollection) => `${c.chainSlug}:${c.contractAddress}`;
   const hasArt = (c: TrackedCollection) => Boolean(c.imageUrl) && !deadArt.has(key(c));
@@ -316,24 +429,43 @@ export default function GlobalMarketHub() {
       .slice(0, 6);
   }, [collections, deadArt]);
 
-  // Per-chain "top collections, last 24h" strip: real gradeScore ranking,
-  // top 8 per chain, only chains with at least one tradeable+art row.
-  const perChainTop = useMemo(() => {
-    const byChain = new Map<string, TrackedCollection[]>();
-    for (const c of collections) {
-      if (!hasArt(c)) continue;
-      const arr = byChain.get(c.chainSlug) ?? [];
-      arr.push(c);
-      byChain.set(c.chainSlug, arr);
-    }
-    return [...byChain.entries()]
-      .map(([slug, rows]) => [slug, rows.sort((a, b) => gradeScore(b, true) - gradeScore(a, true)).slice(0, 8)] as const)
+  // A single ranked table across every chain, filterable by the SAME chain
+  // pills used everywhere else on this page (one filter concept, not two
+  // parallel ones) -- reverse-engineered from OpenSea's own real rankings
+  // page (opensea.io/collections, live-checked 2026-08-19): a dense table
+  // -- Collection / Floor / 24h Change / 24h Volume / 24h Sales -- not a
+  // card grid, with chain identity carried by a badge on each row rather
+  // than by segregating chains into separate side-by-side panels. That
+  // earlier per-chain-panel version read as a horizontal scroll strip on
+  // anything narrower than a very wide desktop and hid most chains off-
+  // screen -- the opposite of "insight at a glance." Every field below is
+  // real data this app already tracks (floorPriceWei/Currency,
+  // floorChangePct, volume24hWei, sales24h) -- no owners/supply column,
+  // unlike OpenSea's own table, because this app doesn't have that data
+  // and this codebase's own standing rule is never to fabricate a metric.
+  const rankings = useMemo(() => {
+    const rows = collections.filter((c) => hasArt(c) && (chainFilter.size === 0 || chainFilter.has(c.chainSlug)));
+    return rows
       .sort((a, b) => {
-        const ia = ALL_CHAIN_SLUGS_ORDER.indexOf(a[0]);
-        const ib = ALL_CHAIN_SLUGS_ORDER.indexOf(b[0]);
-        if (ia !== -1 && ib !== -1) return ia - ib;
-        return 0;
-      });
+        const g = gradeScore(b, true) - gradeScore(a, true);
+        if (g !== 0) return g;
+        const va = a.volume24hWei ? BigInt(a.volume24hWei) : BigInt(0);
+        const vb = b.volume24hWei ? BigInt(b.volume24hWei) : BigInt(0);
+        return vb > va ? 1 : vb < va ? -1 : 0;
+      })
+      .slice(0, rankingsShowCount);
+  }, [collections, deadArt, chainFilter, rankingsShowCount]);
+
+  // Biggest Movers -- Magic Eden's real secondary strip (live-checked
+  // 2026-08-19), sorted purely by |24h floor change|, not volume/grade.
+  // This surfaces a DIFFERENT real signal than the rankings table above
+  // (a thin collection can have a huge % swing without much volume behind
+  // it) -- distinct information, not a restatement of the same ranking.
+  // Requires floorChangePct to actually be present (at least two syncs
+  // observed) -- skipped, not zero-filled, for a collection that hasn't.
+  const biggestMovers = useMemo(() => {
+    const rows = collections.filter((c) => hasArt(c) && c.floorChangePct != null && c.floorChangePct !== 0);
+    return rows.sort((a, b) => Math.abs(b.floorChangePct!) - Math.abs(a.floorChangePct!)).slice(0, 8);
   }, [collections, deadArt]);
 
   const toggleChain = (slug: string) => {
@@ -367,10 +499,7 @@ export default function GlobalMarketHub() {
                 onChange={() => toggleChain(slug)}
                 className="h-4 w-4 shrink-0 accent-gold-400"
               />
-              <span
-                className="h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: chainBrandColor(slug) }}
-              />
+              <ChainIcon chainSlug={slug} size={16} className="shrink-0" />
               <span className="flex-1 truncate text-foreground/80">{chainDisplayName(slug)}</span>
               <span className="text-foreground/40">{count}</span>
             </label>
@@ -459,9 +588,39 @@ export default function GlobalMarketHub() {
             Home chain
           </span>
           <p className="truncate text-lg font-bold text-foreground">RobinWood ($PLANK) — Robinhood Chain</p>
-          <p className="text-xs text-foreground/50">This app's own native order book — full buy, sweep, offers, and rarity tools →</p>
+          <p className="text-xs text-foreground/50">This app&apos;s own native order book — full buy, sweep, offers, and rarity tools →</p>
         </div>
       </Link>
+
+      {/*
+       * Global Index -- the multi-collection $PLANK basket/vault design in
+       * docs/marketplank/SPEC-GLOBAL-INDEX-ULTIMATE-FORM.md. That spec's
+       * own status line is explicit and still governs: "nothing here
+       * authorizes building or deploying a contract... requires the same
+       * external-audit bar V3 received, and still requires the admin's
+       * explicit go-ahead to begin." This teaser is purely informational --
+       * same "coming soon" pattern as ForeignSwapComingSoon.tsx's
+       * per-collection vault placeholder (styled identically: same
+       * dense-card shell, same eyebrow-badge/heading/body rhythm), not a
+       * feature flag, not a route, not a contract reference. It exists so
+       * the hub is honest about what's coming without implying the gated
+       * work has started.
+       */}
+      <div className="dense-card flex items-center gap-3 overflow-hidden border-line p-3 opacity-90">
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-wood-900 to-wood-800 text-2xl font-black text-foreground/40">
+          GI
+        </div>
+        <div className="min-w-0 flex-1">
+          <span className="inline-flex items-center rounded-full bg-foreground/10 px-2 py-0.5 text-[0.6rem] font-black uppercase tracking-wider text-foreground/50">
+            Coming soon
+          </span>
+          <p className="truncate text-lg font-bold text-foreground/80">Global Index</p>
+          <p className="text-xs text-foreground/50">
+            A multi-collection $PLANK basket, pro-rata redeemable across tracked collections — in design, pending
+            external audit and go-ahead before any contract work begins.
+          </p>
+        </div>
+      </div>
 
       {topMovers.length > 0 && (
         <div className="space-y-2">
@@ -538,41 +697,249 @@ export default function GlobalMarketHub() {
         </div>
       )}
 
-      {perChainTop.length > 0 && (
+      {rankings.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[0.65rem] font-black uppercase tracking-wider text-foreground/40">Top collections by chain · 24h</p>
-          <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1">
-            {perChainTop.map(([slug, rows]) => (
-              <div key={slug} className="w-64 shrink-0 snap-start rounded-lg border border-line bg-panel p-2.5">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-black" style={{ color: chainBrandColor(slug) }}>
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: chainBrandColor(slug) }} />
-                  {chainDisplayName(slug)}
-                </p>
-                <div className="space-y-1.5">
-                  {rows.map((c) => (
-                    <Link
-                      key={key(c)}
-                      href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
-                      className="flex items-center gap-2 rounded px-1 py-1 hover:bg-foreground/5"
-                    >
-                      <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded bg-wood-900">
-                        <CollectionThumb
-                          src={c.imageUrl}
-                          alt={c.name ?? c.contractAddress}
-                          onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
-                        />
-                      </div>
-                      <span className="min-w-0 flex-1 truncate text-xs text-foreground/80">{c.name ?? c.contractAddress}</span>
-                      {c.floorPriceWei && (
-                        <span className="shrink-0 text-[0.65rem] text-foreground/50">
-                          {(Number(c.floorPriceWei) / 1e18).toFixed(3)}
-                        </span>
-                      )}
-                    </Link>
-                  ))}
-                </div>
-              </div>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-[0.65rem] font-black uppercase tracking-wider text-foreground/40">Rankings · 24h</p>
+            {chainFilter.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setChainFilter(new Set())}
+                className="text-[0.65rem] font-bold text-gold-300 hover:underline"
+              >
+                Clear chain filter
+              </button>
+            )}
+          </div>
+
+          {/*
+           * Chain pills, real logo + full name -- the primary way to narrow
+           * this table to one or more chains. Same chainFilter state the
+           * sidebar checkboxes and the full grid below already use, so
+           * picking a chain here also narrows everything else on the page
+           * (one filter concept, not two). Wraps naturally on mobile
+           * instead of hiding chains off-screen in a scroll strip.
+           */}
+          <div className="flex flex-wrap gap-1.5">
+            {chains.map(([slug, count]) => {
+              const active = chainFilter.has(slug);
+              return (
+                <button
+                  key={slug}
+                  type="button"
+                  onClick={() => toggleChain(slug)}
+                  aria-pressed={active}
+                  className="flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-bold transition-colors"
+                  style={
+                    active
+                      ? { borderColor: chainBrandColor(slug), backgroundColor: `${chainBrandColor(slug)}22`, color: chainBrandColor(slug) }
+                      : { borderColor: "var(--color-line)" }
+                  }
+                >
+                  <ChainIcon chainSlug={slug} size={15} className="shrink-0" />
+                  <span className={active ? "" : "text-foreground/70"}>{chainDisplayName(slug)}</span>
+                  <span className="text-foreground/40">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/*
+           * A dense ranked TABLE, not a card grid -- reverse-engineered from
+           * OpenSea's own real rankings page (Collection / Floor / 24h
+           * Change / 24h Volume / 24h Sales columns, live-checked
+           * 2026-08-19). Wide content scrolls inside its own container
+           * (overflow-x-auto) rather than ever widening the page itself.
+           * Less critical columns hide below `sm`/`md` so the table stays
+           * legible on a phone instead of shrinking every column into
+           * unreadable text -- Collection, Floor, and 24h Change (the three
+           * things worth a glance on any screen) always show.
+           */}
+          <div className="overflow-x-auto rounded-lg border border-line bg-panel">
+            <table className="w-full min-w-[36rem] border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-[0.6rem] font-black uppercase tracking-wider text-foreground/40">
+                  <th className="w-8 px-2 py-2" />
+                  <th className="w-10 px-1 py-2 text-right">#</th>
+                  <th className="px-2 py-2">Collection</th>
+                  <th className="px-2 py-2 text-right">Floor</th>
+                  <th className="px-2 py-2 text-right">24h Change</th>
+                  <th className="hidden px-2 py-2 text-right sm:table-cell">24h Volume</th>
+                  <th className="hidden px-2 py-2 text-right md:table-cell">24h Sales</th>
+                  <th className="hidden px-2 py-2 text-right lg:table-cell">Listed</th>
+                  <th className="w-9 px-2 py-2 text-right">Grade</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rankings.map((c, i) => {
+                  const change = c.floorChangePct;
+                  const changeColor = change == null ? "text-foreground/40" : change > 0 ? "text-emerald-400" : change < 0 ? "text-rose-400" : "text-foreground/40";
+                  // Directional arrow ALONGSIDE color, not instead of it --
+                  // Magic Eden's own table pairs both (live-checked
+                  // 2026-08-19); color alone is a weaker signal for anyone
+                  // with color-vision deficiency, and an arrow reads faster
+                  // than parsing a +/- sign at a glance.
+                  const changeArrow = change == null || change === 0 ? "" : change > 0 ? "▲ " : "▼ ";
+                  const rowKey = key(c);
+                  const watched = watchlist.has(rowKey);
+                  const listedPct =
+                    c.listedCount != null && c.totalSupply != null && c.totalSupply > 0
+                      ? (c.listedCount / c.totalSupply) * 100
+                      : null;
+                  return (
+                    <tr key={rowKey} className="border-b border-line/60 last:border-0 hover:bg-foreground/5">
+                      <td className="px-2 py-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => toggleWatchlist(rowKey)}
+                          aria-pressed={watched}
+                          aria-label={watched ? "Remove from watchlist" : "Add to watchlist"}
+                          className={`text-base leading-none ${watched ? "text-gold-300" : "text-foreground/25 hover:text-foreground/50"}`}
+                        >
+                          {watched ? "★" : "☆"}
+                        </button>
+                      </td>
+                      <td className="px-1 py-2 text-right text-xs text-foreground/40 tabular-nums">{i + 1}</td>
+                      <td className="px-2 py-2">
+                        <Link
+                          href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
+                          className="flex min-w-0 items-center gap-2"
+                        >
+                          <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded bg-wood-900">
+                            <CollectionThumb
+                              src={c.imageUrl}
+                              alt={c.name ?? c.contractAddress}
+                              onFail={() => setDeadArt((prev) => new Set(prev).add(rowKey))}
+                            />
+                            <span
+                              className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70"
+                              title={chainDisplayName(c.chainSlug)}
+                            >
+                              <ChainIcon chainSlug={c.chainSlug} size={10} />
+                            </span>
+                          </div>
+                          <span className="min-w-0 flex-1 truncate font-bold text-foreground/90">{c.name ?? c.contractAddress}</span>
+                          {/* Known-creator checkmark -- real signal (a real handle/ENS this app has observed), never OpenSea's own "verified" claim, which this app cannot honestly assert for an auto-discovered collection. */}
+                          {(c.creatorHandle || c.creatorEns) && (
+                            <span className="shrink-0 text-emerald-400" title={`Known creator: ${c.creatorHandle ?? c.creatorEns}`}>
+                              ✓
+                            </span>
+                          )}
+                        </Link>
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-foreground/80">
+                        {c.floorPriceWei ? (
+                          <>
+                            {(Number(c.floorPriceWei) / 1e18).toFixed(3)} {c.floorPriceCurrency ?? ""}
+                            {(() => {
+                              const usd = toUsd(c.floorPriceWei, c.floorPriceCurrency);
+                              return usd != null ? (
+                                <span className="ml-1 text-[0.65rem] text-foreground/40">{formatUsdCompact(usd)}</span>
+                              ) : null;
+                            })()}
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className={`whitespace-nowrap px-2 py-2 text-right tabular-nums font-bold ${changeColor}`}>
+                        {change != null ? `${changeArrow}${Math.abs(change).toFixed(1)}%` : "—"}
+                      </td>
+                      <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums text-foreground/60 sm:table-cell">
+                        {c.volume24hWei && c.volume24hWei !== "0" ? (Number(c.volume24hWei) / 1e18).toFixed(2) : "—"}
+                      </td>
+                      <td className="hidden px-2 py-2 text-right tabular-nums text-foreground/60 md:table-cell">
+                        {c.sales24h ?? "—"}
+                      </td>
+                      <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums text-foreground/60 lg:table-cell">
+                        {listedPct != null ? `${listedPct.toFixed(1)}% · ${c.listedCount}/${c.totalSupply}` : "—"}
+                      </td>
+                      <td className="px-2 py-2 text-right">
+                        <GradeBadge score={gradeScore(c, true)} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Real "Show top: N" control, Magic Eden's own pattern -- a fixed cutoff either buried most of 3,500+ tracked collections or flooded the page; this lets the reader choose. */}
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-foreground/40">Show top</span>
+            {[10, 25, 50, 100].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setRankingsShowCount(n)}
+                aria-pressed={rankingsShowCount === n}
+                className={`min-h-8 rounded-md border px-2.5 font-bold ${
+                  rankingsShowCount === n
+                    ? "border-gold-400 bg-gold-400/15 text-gold-300"
+                    : "border-line text-foreground/50 hover:border-line-strong"
+                }`}
+              >
+                {n}
+              </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/*
+       * Biggest Movers -- Magic Eden's real secondary strip (live-checked
+       * 2026-08-19), a DIFFERENT signal than the rankings table above: pure
+       * |24h floor change|, regardless of volume or overall grade. A thin
+       * collection can swing hard without much volume behind it -- worth
+       * surfacing on its own rather than only inside the bigger table.
+       */}
+      {biggestMovers.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[0.65rem] font-black uppercase tracking-wider text-foreground/40">Biggest movers · 24h</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8">
+            {biggestMovers.map((c) => {
+              const change = c.floorChangePct!;
+              const up = change > 0;
+              return (
+                <Link
+                  key={key(c)}
+                  href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
+                  className="rounded-lg border border-line bg-panel p-2 transition-[border-color] hover:border-gold-400/60"
+                >
+                  <div className="relative mb-1.5 aspect-square w-full overflow-hidden rounded bg-wood-900">
+                    <CollectionThumb
+                      src={c.imageUrl}
+                      alt={c.name ?? c.contractAddress}
+                      onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
+                    />
+                    <span
+                      className="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/70"
+                      title={chainDisplayName(c.chainSlug)}
+                    >
+                      <ChainIcon chainSlug={c.chainSlug} size={10} />
+                    </span>
+                  </div>
+                  <p className="truncate text-xs font-bold text-foreground/90">{c.name ?? c.contractAddress}</p>
+                  <p className="truncate text-[0.65rem] text-foreground/50">
+                    {c.floorPriceWei ? (
+                      <>
+                        {(Number(c.floorPriceWei) / 1e18).toFixed(3)} {c.floorPriceCurrency ?? ""}
+                        {(() => {
+                          const usd = toUsd(c.floorPriceWei, c.floorPriceCurrency);
+                          return usd != null ? ` · ${formatUsdCompact(usd)}` : "";
+                        })()}
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </p>
+                  <p className={`text-xs font-bold tabular-nums ${up ? "text-emerald-400" : "text-rose-400"}`}>
+                    {up ? "▲ " : "▼ "}
+                    {Math.abs(change).toFixed(1)}%
+                  </p>
+                </Link>
+              );
+            })}
           </div>
         </div>
       )}
@@ -625,13 +992,12 @@ export default function GlobalMarketHub() {
                         alt={c.name ?? c.contractAddress}
                         onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
                       />
-                      {/* Chain badge, always on the art -- at-a-glance chain identification per the real brand color, same corner-overlay pattern ListingCard uses for rarity tier badges. */}
+                      {/* Chain badge, always on the art -- at-a-glance chain identification via the real brand mark on a translucent disc (readable against any art), same corner-overlay pattern ListingCard uses for rarity tier badges. */}
                       <span
-                        className="card-overlay absolute left-1.5 top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[0.55rem] font-black text-white shadow"
-                        style={{ backgroundColor: chainBrandColor(c.chainSlug) }}
+                        className="card-overlay absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 shadow backdrop-blur-sm"
                         title={chainDisplayName(c.chainSlug)}
                       >
-                        {chainGlyph(c.chainSlug)}
+                        <ChainIcon chainSlug={c.chainSlug} size={15} />
                       </span>
                       {/* Visible composite grade, always -- gradeScore already drives the "Trending" sort; this makes that grading legible on the card itself instead of staying an invisible sort key. Only shown for a graded (art-present) row. */}
                       {hasArt(c) && (

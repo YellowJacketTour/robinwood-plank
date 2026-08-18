@@ -77,6 +77,8 @@ const explicit = [
   "--multichain",
   "--discover-evm",
   "--discover-robinhood",
+  "--discover-robinhood-opensea",
+  "--discover-opensea-bulk",
   "--own-ranking",
   "--scaffold-rarity",
 ].filter((t) => args.has(t));
@@ -96,8 +98,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-robinhood", "own-ranking", "scaffold-rarity"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-robinhood", "own-ranking"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -431,6 +433,43 @@ async function main(): Promise<void> {
     const { runRobinhoodChainDiscoveryScan } = await import("../lib/market/multichain/discovery/robinhood-chain-scan");
     const r = await runRobinhoodChainDiscoveryScan();
     return `blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidatesSeen} candidates, ${r.skippedNotArt} not-art)`;
+  });
+
+  // Bulk Robinhood-Chain discovery via OpenSea's own chain-wide
+  // /collections?chain=robinhood list -- verified live 2026-08-18 to return
+  // real Robinhood-Chain collections OpenSea already indexes, far faster
+  // than discover-robinhood's raw eth_getLogs scan (see
+  // opensea-robinhood-scan.ts's own header). Runs after the raw scan so
+  // both paths' "already tracked" checks see each other's just-registered
+  // rows within the same tick.
+  await step("discover-robinhood-opensea", async () => {
+    const { runOpenSeaRobinhoodDiscoveryScan } = await import(
+      "../lib/market/multichain/discovery/opensea-robinhood-scan"
+    );
+    const r = await runOpenSeaRobinhoodDiscoveryScan();
+    if (r.error) return `ERR(${r.error.slice(0, 80)})`;
+    return `${r.pagesScanned} pages, ${r.entriesSeen} seen, +${r.registered} new (${r.skippedNotArt} not-art, ${r.skippedNotErc721} not-erc721, ${r.skippedAlreadyTracked} already-tracked)`;
+  });
+
+  // Same technique, generalized to the 7 real foreign EVM chains --
+  // OpenSea's bulk /collections?chain={slug} list enumerates real contract
+  // addresses far faster than discover-evm's 10-block-per-tick scanner
+  // (which registered ~300 collections total across 8 chains after 85+
+  // ticks this session). See opensea-bulk-scan.ts's own header for why
+  // this is safe to use for discovery (not ranking) despite OpenSea's list
+  // having no floor/volume fields -- every candidate still gets verified
+  // through the SAME alchemyNftAdapter.fetchSnapshot + isNotRealCollectibleArt
+  // gate discover-evm already trusts.
+  await step("discover-opensea-bulk", async () => {
+    const { runAllOpenSeaBulkScans } = await import("../lib/market/multichain/discovery/opensea-bulk-scan");
+    const runs = await runAllOpenSeaBulkScans();
+    return runs
+      .map((r) =>
+        r.error
+          ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+          : `${r.chainSlug}: ${r.pagesScanned}p, +${r.registered} new (${r.entriesSeen} seen, ${r.skippedNotArt} not-art, ${r.skippedNoMetadata} no-meta, ${r.skippedAlreadyTracked} tracked)`
+      )
+      .join("; ");
   });
 
   // The reverse-engineered ranking source: Magic Eden's Reservoir-powered

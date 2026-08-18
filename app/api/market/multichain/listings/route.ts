@@ -29,10 +29,13 @@
  * calls, not one per listing.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { fetchForeignAllListings } from "@/lib/market/multichain/trading/foreign-orders";
+import { fetchForeignAllListings, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { getListings } from "@/lib/market/orders-store";
+import { getCollectionAsync } from "@/lib/market/collections-server";
 import { publicError, rateLimit } from "@/lib/security";
+import { isSolanaChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import type { Listing } from "@/lib/market/types";
 
 export const dynamic = "force-dynamic";
@@ -59,10 +62,175 @@ export async function GET(req: NextRequest) {
   const limitParam = Number(searchParams.get("limit") ?? "24");
   const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 50) : 24;
 
-  const chain = chainSlug ? foreignChainByChainSlug(chainSlug) : null;
   if (!chainSlug || !collectionSlug) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
+
+  // Robinhood Chain is deliberately absent from FOREIGN_CHAINS (see
+  // foreign-chain-registry.ts's own header) -- it's Marketplank's own home
+  // chain, not a foreign one, so its listings live in the native order
+  // book (lib/market/orders-store.ts), not OpenSea. Auto-discovered
+  // Robinhood-Chain collections (lib/market/multichain/discovery/
+  // robinhood-chain-scan.ts) still need to render in THIS shared
+  // MultichainCollectionView UI though (MarketView.tsx is hardcoded to
+  // one curated collection, see getCollectionAsync's own header), so this
+  // branch adapts the native Listing[] shape into the same response shape
+  // the rest of this route already returns for real foreign chains.
+  if (chainSlug === "robinhood") {
+    try {
+      const collection = await getCollectionAsync(collectionSlug);
+      if (!collection) {
+        return NextResponse.json({ error: "NOT_FOUND", message: "Unknown Robinhood-Chain collection." }, { status: 404 });
+      }
+      const native = await getListings(collectionSlug);
+      const listings: Listing[] = native.slice(0, limit).map(({ rawOrder: _rawOrder, ...listing }) => listing);
+      return NextResponse.json(
+        {
+          collection: {
+            slug: collection.slug,
+            name: collection.name,
+            imageUrl: collection.image ?? null,
+            contractAddress: collection.contractAddress,
+          },
+          listings,
+        },
+        { headers: { "Cache-Control": "no-store" } }
+      );
+    } catch (error) {
+      return publicError(error, "Failed to load Robinhood-Chain listings");
+    }
+  }
+
+  // SOLANA -- real, keyless Magic Eden listings. Confirmed live 2026-08-18:
+  // GET /v2/collections/{symbol}/listings needs no API key at all (unlike
+  // the buy_now/sell endpoints magiceden-solana-trade.ts guards behind
+  // MAGICEDEN_API_KEY), returning real tokenMint/seller/price rows with
+  // real per-token art and traits already embedded (no separate art-lookup
+  // fan-out needed the way the EVM/OpenSea branch below requires). `symbol`
+  // is Magic Eden's own collection slug -- the SAME value magiceden-solana.ts's
+  // discovery adapter already stores as `contractAddress` for every Solana
+  // row in GlobalMarketHub, so collectionSlug here is that identical string.
+  if (chainSlug && isSolanaChainSlug(chainSlug)) {
+    try {
+      const meLimit = Math.min(limit, 20); // ME's own documented cap for this endpoint
+      const res = await fetch(
+        `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/listings?limit=${meLimit}`,
+        { headers: { accept: "application/json" } }
+      );
+      if (!res.ok) {
+        return NextResponse.json({ error: `Magic Eden ${res.status}` }, { status: 502 });
+      }
+      type MeListing = {
+        tokenMint: string;
+        seller: string;
+        price: number;
+        expiry?: number;
+        token?: { name?: string; image?: string; collectionName?: string; attributes?: Array<{ trait_type: string; value: string }> };
+      };
+      const raw = (await res.json()) as MeListing[];
+      const listings: Listing[] = raw
+        .filter((l) => l.tokenMint && typeof l.price === "number")
+        .map((l) => {
+          // Same 1e18-equivalent scaling convention as
+          // magiceden-solana.ts's lamportsToScaledString -- keeps this row's
+          // priceWei comparable in MAGNITUDE with every EVM chain's wei
+          // figure for shared display code, while foreign-fulfill.ts's
+          // buySolanaListingNow un-scales it back to real lamports before
+          // ever calling Magic Eden's own buy_now endpoint (see that
+          // function's own comment).
+          const lamports = BigInt(Math.round(l.price * 1_000_000_000));
+          const priceWei = (lamports * BigInt(1_000_000_000)).toString();
+          return {
+            id: l.tokenMint,
+            collectionSlug,
+            tokenId: l.tokenMint,
+            maker: l.seller,
+            priceWei,
+            // ME's listings endpoint returns expiry -1 for "no expiry" --
+            // honest 1-year-out placeholder ONLY for the UI's "expires"
+            // display, never used to gate buyability (Magic Eden's own
+            // program is the actual source of truth at fulfillment time).
+            expiresAt:
+              l.expiry && l.expiry > 0 ? new Date(l.expiry * 1000).toISOString() : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+            kind: "fixed" as const,
+            imageUrl: l.token?.image ?? undefined,
+            traits: l.token?.attributes?.map((a) => ({ traitType: a.trait_type, value: a.value })) ?? undefined,
+            venue: "magiceden" as const,
+            externalUrl: `https://magiceden.io/item-details/${l.tokenMint}`,
+            foreignChainSlug: chainSlug,
+            foreignOrderHash: l.tokenMint,
+          };
+        })
+        .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1));
+
+      return NextResponse.json(
+        {
+          collection: {
+            slug: collectionSlug,
+            name: raw[0]?.token?.collectionName ?? collectionSlug,
+            imageUrl: null,
+            contractAddress: collectionSlug,
+          },
+          listings,
+        },
+        { headers: { "Cache-Control": "no-store" } }
+      );
+    } catch (error) {
+      return publicError(error, "Failed to load Solana listings");
+    }
+  }
+
+  // BITCOIN ORDINALS -- real UniSat Marketplace listings, key-gated.
+  // CORRECTED 2026-08-18: an earlier pass concluded no listing-query
+  // endpoint existed for UniSat's Marketplace API and always returned an
+  // empty grid here. Live-verified THIS pass (a real curl against
+  // open-api.unisat.io/v3/market/collection/auction/list) that the endpoint
+  // DOES exist -- it returned a real, specific "provide Authorization
+  // header with format `Bearer {token}`" error, the exact same
+  // Bearer-token-required shape unisat-ordinals-trade.ts's trade endpoints
+  // already document (see solana-bitcoin-listings.ts's own header for the
+  // full verification). So this now follows the SAME "fail closed on a
+  // missing key, otherwise fetch real data" posture the OpenSea/EVM branch
+  // below already uses, instead of claiming no source exists at all.
+  if (chainSlug && isBitcoinChainSlug(chainSlug)) {
+    if (!process.env.UNISAT_API_KEY) {
+      return NextResponse.json({ error: "UniSat API key is not configured on this deployment." }, { status: 503 });
+    }
+    try {
+      const { fetchUniSatListings } = await import("@/lib/market/multichain/trading/solana-bitcoin-listings");
+      const raw = await fetchUniSatListings(collectionSlug, Math.min(limit, 20));
+      const listings: Listing[] = raw
+        .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1))
+        .map((l) => ({
+          id: l.id,
+          collectionSlug,
+          tokenId: l.tokenId,
+          maker: l.maker,
+          priceWei: l.priceWei,
+          // UniSat Ordinals listings have no fixed expiry the way a Seaport
+          // order does -- same honest far-future display-only placeholder
+          // as the Solana branch above, never used to gate buyability.
+          expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+          kind: "fixed" as const,
+          imageUrl: l.imageUrl ?? undefined,
+          venue: "unisat" as const,
+          externalUrl: `https://unisat.io/inscription/${l.tokenId}`,
+          foreignChainSlug: chainSlug,
+          foreignOrderHash: l.tokenId,
+        }));
+      return NextResponse.json(
+        {
+          collection: { slug: collectionSlug, name: collectionSlug, imageUrl: null, contractAddress: collectionSlug },
+          listings,
+        },
+        { headers: { "Cache-Control": "no-store" } }
+      );
+    } catch (error) {
+      return publicError(error, "Failed to load Bitcoin Ordinals listings");
+    }
+  }
+
+  const chain = chainSlug ? foreignChainByChainSlug(chainSlug) : null;
   if (!chain) {
     return NextResponse.json({ error: `"${chainSlug}" is not a supported foreign chain` }, { status: 400 });
   }
@@ -73,10 +241,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "OpenSea API key is not configured on this deployment." }, { status: 503 });
     }
 
+    // Every card that links here (GlobalMarketHub.tsx) uses the CONTRACT
+    // ADDRESS as the URL's collectionSlug segment, but OpenSea's
+    // /listings and /collections endpoints need OpenSea's own slug (e.g.
+    // "basenames") -- see resolveOpenSeaCollectionSlug's own header for
+    // the real, live-confirmed silent-empty-page bug this fixes. A
+    // slug-shaped param (already resolved, e.g. from a search box) passes
+    // through unresolved.
+    const openSeaSlug = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug)
+      ? ((await resolveOpenSeaCollectionSlug(chain.openSeaChain, collectionSlug)) ?? collectionSlug)
+      : collectionSlug;
+
     const [rawOrders, collectionMeta] = await Promise.all([
-      fetchForeignAllListings({ chainSlug, collectionSlug, limit }),
+      fetchForeignAllListings({ chainSlug, collectionSlug: openSeaSlug, limit }),
       openSeaJson<{ name?: string; image_url?: string; contracts?: Array<{ address: string; chain: string }> }>(
-        `/collections/${encodeURIComponent(collectionSlug)}`,
+        `/collections/${encodeURIComponent(openSeaSlug)}`,
         key
       ),
     ]);

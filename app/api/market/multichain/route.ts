@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { publicError, rateLimit } from "@/lib/security";
 import { hasMultichainStore, listCollectionsWithSnapshots, getTopByActivity } from "@/lib/market/multichain/store";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -78,11 +79,17 @@ export async function GET(req: Request) {
         listedCount: c.listedCount,
         syncedAt: c.syncedAt,
         syncError: c.syncError,
-        // False for Solana today: the buy/sweep/send/offers/rarity pipeline
-        // built this session is Seaport, which Solana has no equivalent
-        // of. The UI must not offer the same "buy, sweep, and send"
-        // affordance on a row this is false for.
-        tradeable: Boolean(foreignChainByChainSlug(c.chainSlug)),
+        // TRUE for: the 7 real foreign EVM chains (Seaport buy/sweep/send/
+        // offers), Robinhood Chain itself (native order book -- see
+        // buyRobinhoodListingNow/acceptRobinhoodOfferNow in
+        // foreign-fulfill.ts, built and live-verified this session), and
+        // Solana (real Magic Eden buy via buySolanaListingNow). FALSE for
+        // Bitcoin Ordinals: buyBitcoinListingNow exists but is key-gated
+        // (UNISAT_API_KEY) and returns 503 without one -- the UI must not
+        // offer a "buy" affordance this deployment can't actually fulfill,
+        // matching this route's own honest-not-fabricated posture
+        // elsewhere (see floorChangePct below).
+        tradeable: Boolean(foreignChainByChainSlug(c.chainSlug)) || c.chainSlug === "robinhood" || isSolanaChainSlug(c.chainSlug),
         recentActivity: activityByContract.get(`${c.chainSlug}:${c.contractAddress.toLowerCase()}`) ?? 0,
         creatorHandle: c.creatorHandle,
         creatorAddress: c.creatorAddress,

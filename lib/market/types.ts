@@ -37,8 +37,17 @@ export type MarketCollection = {
 /**
  * Marketplaces other than ours that we surface listings from. Absence of a
  * venue on a Listing means Marketplank; every member here is display-only.
+ *
+ * "magiceden" (Solana) and "unisat" (Bitcoin Ordinals) added additively --
+ * see lib/market/multichain/adapters/magiceden-solana-trade.ts and
+ * unisat-ordinals-trade.ts for why these two are per-venue, instruction/PSBT
+ * based flows rather than a portable signed Seaport order like every "opensea"
+ * row here. isCrossChainBuyable() below treats both the same as "opensea" for
+ * Buy-affordance purposes (foreignChainSlug + foreignOrderHash present),
+ * while foreign-fulfill.ts's buySolanaListingNow/buyBitcoinListingNow branch
+ * on the venue to build the right kind of transaction.
  */
-export type ListingVenue = "opensea" | "pulp";
+export type ListingVenue = "opensea" | "pulp" | "magiceden" | "unisat";
 
 export type Listing = {
   id: string;
@@ -136,7 +145,11 @@ export type Listing = {
 export function isCrossChainBuyable(
   listing: Pick<Listing, "venue" | "foreignChainSlug" | "foreignOrderHash">
 ): boolean {
-  return listing.venue === "opensea" && Boolean(listing.foreignChainSlug) && Boolean(listing.foreignOrderHash);
+  return (
+    (listing.venue === "opensea" || listing.venue === "magiceden" || listing.venue === "unisat") &&
+    Boolean(listing.foreignChainSlug) &&
+    Boolean(listing.foreignOrderHash)
+  );
 }
 
 /**
@@ -157,6 +170,8 @@ export function isForeignListing(listing: Pick<Listing, "venue">): boolean {
 export const VENUE_LABELS: Record<ListingVenue, string> = {
   opensea: "OpenSea",
   pulp: "PulpMarket",
+  magiceden: "Magic Eden",
+  unisat: "UniSat",
 };
 
 export const MARKETPLANK_VENUE_LABEL = "Marketplank";

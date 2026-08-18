@@ -12,6 +12,16 @@ type Props = {
   error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
+  /**
+   * True only for the Solana branch (see MultichainCollectionView's
+   * confirmOffer) -- Magic Eden's /instructions/buy bid settles in native
+   * SOL/lamports straight from the connected wallet, not a wrapped ERC-20
+   * the way every EVM foreign chain's offer does (Seaport can't pull
+   * native gas-token balance, hence WETH/WBNB/WAVAX there). Swaps the
+   * descriptive copy so it doesn't claim an "approve a wrapped token" step
+   * that doesn't happen on Solana.
+   */
+  nativeCurrency?: boolean;
 };
 
 /**
@@ -33,6 +43,7 @@ export default function ForeignOfferConfirm({
   error,
   onConfirm,
   onCancel,
+  nativeCurrency,
 }: Props) {
   const [touched, setTouched] = useState(false);
   const amountValid = Number(amountEth) > 0;
@@ -49,7 +60,9 @@ export default function ForeignOfferConfirm({
 
         <p className="text-[0.65rem] font-bold text-[#58BDF0]">On {chainLabel}</p>
         <p className="text-[0.65rem] text-foreground/40">
-          Offers settle in {currencySymbol} (Seaport can't pull native gas-token balance) — your wallet needs a {currencySymbol} balance and will be prompted to approve it.
+          {nativeCurrency
+            ? `Offers settle in native ${currencySymbol} straight from your wallet balance — no wrapping or approval step.`
+            : `Offers settle in ${currencySymbol} (Seaport can't pull native gas-token balance) — your wallet needs a ${currencySymbol} balance and will be prompted to approve it.`}
         </p>
 
         <div className="space-y-1">

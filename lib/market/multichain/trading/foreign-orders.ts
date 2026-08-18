@@ -101,6 +101,38 @@ async function openSeaPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 /**
+ * Every foreign-chain collection PAGE this app links to is keyed by
+ * CONTRACT ADDRESS (see GlobalMarketHub.tsx's own card hrefs:
+ * `/market/multichain/${chainSlug}/${contractAddress}`, and the multichain
+ * index this hub reads, listCollectionsWithSnapshots(), which is keyed by
+ * (chainSlug, contractAddress) throughout). But every OpenSea v2 endpoint
+ * this module calls (`/listings/collection/{slug}/...`,
+ * `/offers/collection/{slug}`, `/collections/{slug}`) needs OpenSea's own
+ * human-readable collection SLUG (e.g. "basenames"), not an address --
+ * confirmed live: calling any of those with a raw `0x...` address returns
+ * an empty/absent result, not an error, so this silently rendered every
+ * foreign-chain collection detail page as blank (no art, no listings, name
+ * showing as the raw address) rather than failing loud. This resolver is
+ * the missing address -> slug step, using the one OpenSea endpoint that
+ * accepts an address: GET /chain/{chain}/contract/{address}. In-process
+ * cached (module-level Map, no TTL) since a contract's OpenSea slug is
+ * effectively immutable for the lifetime of one server process -- avoids
+ * re-resolving the same collection on every listings/offers/activity/
+ * my-listings request for it.
+ */
+const slugCache = new Map<string, string | null>();
+export async function resolveOpenSeaCollectionSlug(openSeaChain: string, contractAddress: string): Promise<string | null> {
+  const cacheKey = `${openSeaChain}:${contractAddress.toLowerCase()}`;
+  if (slugCache.has(cacheKey)) return slugCache.get(cacheKey)!;
+  const data = await openSeaFetch<{ collection?: string }>(
+    `/chain/${openSeaChain}/contract/${contractAddress}`
+  ).catch(() => null);
+  const slug = data?.collection ?? null;
+  slugCache.set(cacheKey, slug);
+  return slug;
+}
+
+/**
  * Seaport's own zoneHash sometimes comes back from OpenSea with one extra
  * byte of zero-padding (68 hex chars instead of a real bytes32's 64) --
  * confirmed live 2026-08-17 against real GRiBBiTS orders on Base. Normalize

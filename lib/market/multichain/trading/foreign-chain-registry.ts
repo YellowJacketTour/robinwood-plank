@@ -101,6 +101,20 @@ const CHAIN_DISPLAY_NAME: Record<string, string> = {
   "avax-mainnet": "Avalanche",
   "zksync-mainnet": "zkSync",
   "solana-mainnet": "Solana",
+  "bitcoin-mainnet": "Bitcoin (Ordinals)",
+  robinhood: "Robinhood Chain",
+  // "solana"/"bitcoin" (bare, no "-mainnet" suffix) kept as aliases only --
+  // an EARLIER pass claimed these were "the REAL chainSlug values" this
+  // codebase writes; that was wrong. non-evm-chains.ts's own header (and a
+  // live check of what scripts/seed-multichain-collections.ts and
+  // discover-multichain-collections.ts actually write to Postgres)
+  // confirmed the real, current values are "solana-mainnet" and
+  // "bitcoin-mainnet" -- matching every other chain's own "-mainnet"
+  // convention. These bare aliases stay only so an old link/bookmark using
+  // the earlier (wrong) slug still resolves to a real display name instead
+  // of falling back to the raw slug string.
+  solana: "Solana",
+  bitcoin: "Bitcoin (Ordinals)",
 };
 
 export function chainDisplayName(chainSlug: string): string {
@@ -123,6 +137,10 @@ const CHAIN_BRAND_COLOR: Record<string, string> = {
   "avax-mainnet": "#E84142",
   "zksync-mainnet": "#8C8DFC",
   "solana-mainnet": "#9945FF",
+  "bitcoin-mainnet": "#F7931A", // Bitcoin's real published brand orange.
+  robinhood: "#eec164", // This app's own gold token (--color-gold-400, app/globals.css) -- Robinhood Chain IS this app, not a third-party brand to source a color from.
+  solana: "#9945FF", // alias, see CHAIN_DISPLAY_NAME's header
+  bitcoin: "#F7931A", // alias, see CHAIN_DISPLAY_NAME's header
 };
 
 export function chainBrandColor(chainSlug: string): string {
@@ -140,6 +158,10 @@ const CHAIN_GLYPH: Record<string, string> = {
   "avax-mainnet": "AVAX",
   "zksync-mainnet": "ZK",
   "solana-mainnet": "S",
+  "bitcoin-mainnet": "₿",
+  robinhood: "RW",
+  solana: "S",
+  bitcoin: "₿",
 };
 
 export function chainGlyph(chainSlug: string): string {

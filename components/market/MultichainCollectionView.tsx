@@ -6,6 +6,7 @@ import { withImageWidth } from "@/lib/ipfs";
 import ListingCard from "@/components/market/ListingCard";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import ForeignSweepConfirm from "@/components/market/ForeignSweepConfirm";
+import ForeignCombinedSweepConfirm from "@/components/market/ForeignCombinedSweepConfirm";
 import ForeignSendConfirm from "@/components/market/ForeignSendConfirm";
 import ForeignDetailsModal from "@/components/market/ForeignDetailsModal";
 import ForeignOfferConfirm from "@/components/market/ForeignOfferConfirm";
@@ -19,6 +20,7 @@ import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import type { SendFeeQuote } from "@/lib/market/send-fee";
 import type { BatchSendStatus } from "@/lib/market/transfer";
 import { chainDisplayName, FOREIGN_FEE_BPS, foreignOfferCurrency } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { isSolanaChainSlug, isBitcoinChainSlug, isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { isCrossChainBuyable, venueLabel, type Listing, type MarketCollection } from "@/lib/market/types";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import MarketNav from "@/components/market/MarketNav";
@@ -50,6 +52,22 @@ type Props = {
 };
 
 const SWEEP_SIZE_OPTIONS = [3, 5, 10];
+/**
+ * Offer discount for the "buy what's affordable, offer for the rest"
+ * combined control -- 10% below each remainder item's own current listed
+ * price. Chosen (not floor price) because: (a) it needs no extra fetch --
+ * every remainder Listing already carries its own real priceWei, unlike
+ * floor which would need a separate floor-listings call per chain family;
+ * (b) it scales sensibly per-item (a 5 ETH item gets a meaningfully
+ * different offer than a 0.1 ETH item, where a single flat floor-based
+ * offer would not); (c) 10% is the same ballpark a rational floor-sweeper
+ * already bids below ask on real marketplaces, so this isn't an arbitrary
+ * number -- it is deliberately conservative enough to be a real, likely
+ * acceptable offer instead of an insultingly low lowball.
+ */
+const COMBINED_OFFER_DISCOUNT_BPS = 1000;
+/** Caps how many "offer the rest" wallet prompts one combined action can trigger -- an unbounded remainder could otherwise turn one click into dozens of signature prompts. */
+const COMBINED_REMAINDER_CAP = 5;
 
 /**
  * Browse + buy + sweep + send surface for ONE tracked multichain collection
@@ -65,7 +83,19 @@ const SWEEP_SIZE_OPTIONS = [3, 5, 10];
  * an item came from, so nothing here reimplements that logic.
  */
 export default function MultichainCollectionView({ chainSlug, collectionSlug }: Props) {
-  const { address: account, adoptAccount } = useWallet();
+  const { address: evmAccount, adoptAccount } = useWallet();
+  // NON-EVM WALLET STATE -- Solana (Phantom) and Bitcoin (UniSat) addresses
+  // live outside lib/wallet-context.tsx's EVM-only account, since that
+  // context is built entirely around ethers/BrowserProvider (see its own
+  // adoptAccount, which every EVM buy/send/offer flow here already uses).
+  // `account` below resolves to whichever is correct for this page's chain
+  // family -- every existing EVM read/callback keeps using the same
+  // `account` identifier it always has, now just chain-family-aware.
+  const isSolana = isSolanaChainSlug(chainSlug);
+  const isBitcoin = isBitcoinChainSlug(chainSlug);
+  const isNonEvm = isNonEvmChainSlug(chainSlug);
+  const [nonEvmAccount, setNonEvmAccount] = useState<string | null>(null);
+  const account = isNonEvm ? nonEvmAccount : evmAccount;
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,6 +142,24 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [sendFeeError, setSendFeeError] = useState<string | null>(null);
   const [sendBusy, setSendBusy] = useState(false);
   const [sendStatuses, setSendStatuses] = useState<Map<string, BatchSendStatus> | null>(null);
+
+  // NON-EVM SWEEP PROGRESS -- only populated by the Solana/Bitcoin sweep
+  // branches below (sweepSolanaListingsNow/sweepBitcoinListingsNow), which
+  // are genuinely N sequential signed transactions, not the EVM router's
+  // one atomic sweepBuy -- see foreign-fulfill.ts's own header on why.
+  const [sweepStatuses, setSweepStatuses] = useState<Map<string, BatchSendStatus> | null>(null);
+
+  // COMBINED SWEEP + OFFER -- additive control, separate from the plain
+  // sweep/offer state above (both of those keep working unmodified). Given
+  // a budget, splits the cheapest cross-chain-buyable listings into
+  // `affordable` (swept the same way the plain sweep button would) and
+  // `remainder` (the next COMBINED_REMAINDER_CAP listings just beyond
+  // budget, each offered COMBINED_OFFER_DISCOUNT_BPS below its own price).
+  const [combinedBudgetEth, setCombinedBudgetEth] = useState("");
+  const [combinedPreview, setCombinedPreview] = useState<{ affordable: Listing[]; remainder: Listing[] } | null>(null);
+  const [combinedBusy, setCombinedBusy] = useState(false);
+  const [combinedError, setCombinedError] = useState<string | null>(null);
+  const [combinedStatuses, setCombinedStatuses] = useState<Map<string, BatchSendStatus> | null>(null);
 
   // OFFERS / ACTIVITY -- the tab-parity pieces of "full native marketplank
   // experience for every collection on every chain." View-only for now:
@@ -340,13 +388,26 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const requireAccount = useCallback(async () => {
     if (account) return account;
     try {
+      if (isSolana) {
+        const { connectPhantomWallet } = await import("@/lib/market/multichain/trading/non-evm-wallet");
+        const addr = await connectPhantomWallet();
+        setNonEvmAccount(addr);
+        return addr;
+      }
+      if (isBitcoin) {
+        const { connectUnisatWallet } = await import("@/lib/market/multichain/trading/non-evm-wallet");
+        const addr = await connectUnisatWallet();
+        setNonEvmAccount(addr);
+        return addr;
+      }
       const addr = await connectWallet();
       adoptAccount(addr);
       return addr;
-    } catch {
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Wallet connection failed.");
       return null;
     }
-  }, [account, adoptAccount]);
+  }, [account, adoptAccount, isSolana, isBitcoin]);
 
   // Loaded eagerly (not just on Details-open) -- the trait FILTER bar below
   // needs the real category/value list to populate its dropdowns before the
@@ -390,21 +451,35 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   );
 
   const confirmOffer = useCallback(async () => {
-    if (!offerTarget || !account || !collection?.contractAddress) return;
+    if (!offerTarget || !account) return;
+    if (!isSolana && !collection?.contractAddress) return;
     setOfferError(null);
     try {
       setOfferBusy(true);
-      const { buildForeignOffer } = await import("@/lib/market/multichain/trading/foreign-offer");
       const offerWei = BigInt(Math.round(Number(offerAmountEth) * 1e18));
-      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-      await buildForeignOffer({
-        chainSlug,
-        collectionAddress: collection.contractAddress,
-        tokenId: offerTarget.tokenId,
-        offerWei,
-        expiresAt,
-        accountAddress: account,
-      });
+      if (isSolana) {
+        // offerTarget.tokenId IS the tokenMint for Solana rows (see
+        // listings/route.ts's "solana" branch: tokenId: l.tokenMint) --
+        // same identifier buySolanaListingNow already uses. priceLamports
+        // unscale: offerAmountEth is really "SOL amount" here (the input
+        // is generic, ForeignOfferConfirm just labels it SOL for this
+        // branch), so 1 SOL = 1e9 lamports directly -- NOT the 1e18-wei
+        // convention offerWei above uses for EVM currencies.
+        const priceLamports = BigInt(Math.round(Number(offerAmountEth) * 1_000_000_000)).toString();
+        const { placeSolanaOfferNow } = await import("@/lib/market/multichain/trading/foreign-fulfill");
+        await placeSolanaOfferNow({ tokenMint: offerTarget.tokenId, priceLamports });
+      } else {
+        const { buildForeignOffer } = await import("@/lib/market/multichain/trading/foreign-offer");
+        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        await buildForeignOffer({
+          chainSlug,
+          collectionAddress: collection!.contractAddress,
+          tokenId: offerTarget.tokenId,
+          offerWei,
+          expiresAt,
+          accountAddress: account,
+        });
+      }
       setOfferTarget(null);
       setStatus("Offer submitted.");
       invalidateSwr("/api/market/multichain/offers");
@@ -416,7 +491,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setOfferBusy(false);
       setStatus(null);
     }
-  }, [offerTarget, account, collection?.contractAddress, chainSlug, offerAmountEth, loadOffers]);
+  }, [offerTarget, account, collection, isSolana, chainSlug, offerAmountEth, loadOffers]);
 
   const handleAcceptOffer = useCallback(
     async (offer: ForeignOffer) => {
@@ -426,8 +501,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       try {
         setAcceptingOrderHash(offer.orderHash);
         setStatus("Confirm in wallet…");
-        const { acceptForeignOffer } = await import("@/lib/market/multichain/trading/foreign-offer");
-        await acceptForeignOffer({ chainSlug, orderHash: offer.orderHash, accountAddress: who });
+        if (chainSlug === "robinhood") {
+          // Native path: same Seaport fulfillOrder RobinWood's own Offers
+          // tab already uses, not the third-party-signer OpenSea flow below.
+          const { acceptRobinhoodOfferNow } = await import("@/lib/market/multichain/trading/foreign-fulfill");
+          await acceptRobinhoodOfferNow({ chainSlug, collectionSlug, orderHash: offer.orderHash });
+        } else {
+          const { acceptForeignOffer } = await import("@/lib/market/multichain/trading/foreign-offer");
+          await acceptForeignOffer({ chainSlug, orderHash: offer.orderHash, accountAddress: who });
+        }
         setStatus("Offer accepted.");
         invalidateSwr("/api/market/multichain/offers");
         invalidateSwr("/api/market/multichain/listings");
@@ -442,7 +524,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         setStatus(null);
       }
     },
-    [chainSlug, requireAccount, loadOffers, loadOwned]
+    [chainSlug, collectionSlug, requireAccount, loadOffers, loadOwned]
   );
 
   const handleBuy = useCallback(
@@ -466,6 +548,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       await buyForeignListingNow({
         chainSlug: buyTarget.foreignChainSlug!,
         orderHash: buyTarget.foreignOrderHash!,
+        collectionSlug,
+        // Only consumed by the Solana/Bitcoin branches (see
+        // foreign-fulfill.ts's own comment on why) -- harmless to always
+        // pass, the EVM/Robinhood branches never read it.
+        priceWei: buyTarget.priceWei,
       });
       setBuyTarget(null);
       setStatus("Purchase confirmed.");
@@ -536,18 +623,47 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const confirmSweep = useCallback(async () => {
     if (!sweepPreview || sweepPreview.length === 0) return;
     setError(null);
+    setSweepStatuses(null);
     try {
       setSweepBusy(true);
       setStatus("Confirm in wallet…");
-      const { sweepForeignListings } = await import("@/lib/market/multichain/trading/foreign-fulfill");
-      const result = await sweepForeignListings({
-        chainSlug,
-        collectionSlug,
-        count: sweepPreview.length,
-        traits: traitClauses.length > 0 ? traitClauses : undefined,
-      });
-      setSweepPreview(null);
-      setStatus(`Swept ${result.attempted} item(s).`);
+      if (isSolana) {
+        // priceLamports unscale: same 1e9 convention buyForeignListingNow's
+        // own Solana branch uses -- see that function's comment.
+        // sweepSolanaListingsBatched (not the older sequential
+        // sweepSolanaListingsNow) -- real single/minimum-signature batching
+        // via instruction extraction+recombination, with an internal
+        // per-item sequential fallback for anything it can't safely fold
+        // into a shared transaction (see foreign-fulfill.ts's header).
+        const { sweepSolanaListingsBatched } = await import("@/lib/market/multichain/trading/foreign-fulfill");
+        const statuses = await sweepSolanaListingsBatched({
+          listings: sweepPreview.map((l) => ({ tokenMint: l.foreignOrderHash ?? l.id, priceLamports: (BigInt(l.priceWei) / BigInt(1_000_000_000)).toString() })),
+          onUpdate: setSweepStatuses,
+        });
+        const attempted = [...statuses.values()].filter((s) => s.state === "sent").length;
+        setSweepPreview(null);
+        setStatus(`Swept ${attempted} of ${sweepPreview.length} item(s).`);
+      } else if (isBitcoin) {
+        // priceSats unscale: same 1e10 convention buyForeignListingNow's own Bitcoin branch uses.
+        const { sweepBitcoinListingsNow } = await import("@/lib/market/multichain/trading/foreign-fulfill");
+        const statuses = await sweepBitcoinListingsNow({
+          listings: sweepPreview.map((l) => ({ inscriptionId: l.foreignOrderHash ?? l.id, priceSats: (BigInt(l.priceWei) / BigInt(10_000_000_000)).toString() })),
+          onUpdate: setSweepStatuses,
+        });
+        const attempted = [...statuses.values()].filter((s) => s.state === "sent").length;
+        setSweepPreview(null);
+        setStatus(`Swept ${attempted} of ${sweepPreview.length} item(s).`);
+      } else {
+        const { sweepForeignListings } = await import("@/lib/market/multichain/trading/foreign-fulfill");
+        const result = await sweepForeignListings({
+          chainSlug,
+          collectionSlug,
+          count: sweepPreview.length,
+          traits: traitClauses.length > 0 ? traitClauses : undefined,
+        });
+        setSweepPreview(null);
+        setStatus(`Swept ${result.attempted} item(s).`);
+      }
       invalidateSwr("/api/market/multichain/listings");
       invalidateSwr("/api/market/multichain/owned");
       await load();
@@ -559,7 +675,145 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setSweepBusy(false);
       setStatus(null);
     }
-  }, [sweepPreview, chainSlug, collectionSlug, load, loadOwned]);
+  }, [sweepPreview, chainSlug, collectionSlug, isSolana, isBitcoin, traitClauses, load, loadOwned]);
+
+  const openCombinedPreview = useCallback(async () => {
+    setCombinedError(null);
+    const who = await requireAccount();
+    if (!who) return;
+    const budget = Number(combinedBudgetEth);
+    if (!(budget > 0)) {
+      setCombinedError("Enter a budget greater than 0.");
+      return;
+    }
+    const budgetWei = BigInt(Math.round(budget * 1e18));
+    const source = traitClauses.length > 0 ? filteredListings : listings;
+    const buyable = [...source].filter((l) => isCrossChainBuyable(l)).sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1));
+
+    const affordable: Listing[] = [];
+    let spent = BigInt(0);
+    for (const l of buyable) {
+      const price = BigInt(l.priceWei);
+      // No Marketplank fee on Solana/Bitcoin (same as the plain sweep/buy
+      // flows for those chains) -- see confirmSweep's own feeBps=0 note.
+      const fee = isNonEvm ? BigInt(0) : (price * BigInt(FOREIGN_FEE_BPS)) / BigInt(10_000);
+      const cost = price + fee;
+      if (spent + cost > budgetWei) break;
+      affordable.push(l);
+      spent += cost;
+    }
+    const remainder = buyable.slice(affordable.length, affordable.length + COMBINED_REMAINDER_CAP);
+
+    if (affordable.length === 0 && remainder.length === 0) {
+      setCombinedError(
+        traitClauses.length > 0
+          ? "No cross-chain-buyable listings match the selected traits right now."
+          : "No cross-chain-buyable listings available right now."
+      );
+      return;
+    }
+    setCombinedPreview({ affordable, remainder });
+  }, [combinedBudgetEth, listings, filteredListings, traitClauses, isNonEvm, requireAccount]);
+
+  const confirmCombined = useCallback(async () => {
+    if (!combinedPreview) return;
+    const { affordable, remainder } = combinedPreview;
+    setCombinedError(null);
+    setCombinedStatuses(null);
+    try {
+      setCombinedBusy(true);
+      setStatus("Confirm in wallet…");
+
+      // PART 1: sweep everything that fits the budget -- reuses the exact
+      // same per-chain-family sweep functions confirmSweep itself calls,
+      // just with the "affordable" subset instead of sweepPreview.
+      let sweptCount = 0;
+      if (affordable.length > 0) {
+        if (isSolana) {
+          const { sweepSolanaListingsBatched } = await import("@/lib/market/multichain/trading/foreign-fulfill");
+          const statuses = await sweepSolanaListingsBatched({
+            listings: affordable.map((l) => ({ tokenMint: l.foreignOrderHash ?? l.id, priceLamports: (BigInt(l.priceWei) / BigInt(1_000_000_000)).toString() })),
+            onUpdate: setCombinedStatuses,
+          });
+          sweptCount = [...statuses.values()].filter((s) => s.state === "sent").length;
+        } else if (isBitcoin) {
+          const { sweepBitcoinListingsNow } = await import("@/lib/market/multichain/trading/foreign-fulfill");
+          const statuses = await sweepBitcoinListingsNow({
+            listings: affordable.map((l) => ({ inscriptionId: l.foreignOrderHash ?? l.id, priceSats: (BigInt(l.priceWei) / BigInt(10_000_000_000)).toString() })),
+            onUpdate: setCombinedStatuses,
+          });
+          sweptCount = [...statuses.values()].filter((s) => s.state === "sent").length;
+        } else {
+          const { sweepForeignListings } = await import("@/lib/market/multichain/trading/foreign-fulfill");
+          const result = await sweepForeignListings({
+            chainSlug,
+            collectionSlug,
+            count: affordable.length,
+            traits: traitClauses.length > 0 ? traitClauses : undefined,
+          });
+          sweptCount = result.attempted;
+        }
+      }
+
+      // PART 2: offer for the rest, at COMBINED_OFFER_DISCOUNT_BPS below
+      // each item's own listed price -- Bitcoin has no offer-placement
+      // primitive at all (confirmed this session, see
+      // foreign-fulfill.ts's placeSolanaOfferNow header), so it degrades
+      // to sweep-only here rather than faking an offer.
+      let offeredCount = 0;
+      if (!isBitcoin) {
+        for (const listing of remainder) {
+          const offerPriceWei = (BigInt(listing.priceWei) * BigInt(10_000 - COMBINED_OFFER_DISCOUNT_BPS)) / BigInt(10_000);
+          try {
+            if (isSolana) {
+              const { placeSolanaOfferNow } = await import("@/lib/market/multichain/trading/foreign-fulfill");
+              await placeSolanaOfferNow({
+                tokenMint: listing.foreignOrderHash ?? listing.id,
+                priceLamports: (offerPriceWei / BigInt(1_000_000_000)).toString(),
+              });
+            } else if (collection?.contractAddress) {
+              const { buildForeignOffer } = await import("@/lib/market/multichain/trading/foreign-offer");
+              const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+              await buildForeignOffer({
+                chainSlug,
+                collectionAddress: collection.contractAddress,
+                tokenId: listing.tokenId,
+                offerWei: offerPriceWei,
+                expiresAt,
+                accountAddress: account!,
+              });
+            }
+            offeredCount += 1;
+          } catch (e) {
+            // Same "one item's failure doesn't sink the batch" discipline
+            // as every sweep function -- an offer that can't be placed
+            // (already sold, wallet rejection) just isn't counted, the
+            // rest of the remainder still gets tried.
+            console.error(`Combined offer failed for #${listing.tokenId}:`, e);
+          }
+        }
+      }
+
+      setCombinedPreview(null);
+      setStatus(
+        isBitcoin
+          ? `Bought ${sweptCount} item(s). Bitcoin has no offer path, so ${remainder.length} beyond budget were left alone.`
+          : `Bought ${sweptCount} item(s), offered on ${offeredCount} more.`
+      );
+      invalidateSwr("/api/market/multichain/listings");
+      invalidateSwr("/api/market/multichain/owned");
+      invalidateSwr("/api/market/multichain/offers");
+      await load();
+      await loadOwned();
+      await loadOffers();
+    } catch (e) {
+      console.error("Combined sweep+offer failed:", e);
+      setCombinedError(e instanceof Error ? e.message : "Buy + offer failed.");
+    } finally {
+      setCombinedBusy(false);
+      setStatus(null);
+    }
+  }, [combinedPreview, isSolana, isBitcoin, chainSlug, collectionSlug, collection, account, traitClauses, load, loadOwned, loadOffers]);
 
   const toggleSendSelection = useCallback((tokenId: string) => {
     setSelectedForSend((prev) => {
@@ -580,6 +834,19 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setSendFeeQuote(null);
       setSendFeeError(null);
       setSendStatuses(null);
+      if (isNonEvm) {
+        // No Marketplank fee on a Solana/Bitcoin send: SendFeeQuote's shape
+        // is gas-PRICE-denominated (EVM's own gwei-market concept), which
+        // has no equivalent on either chain (Solana's fee is a near-fixed
+        // ~5000 lamports/signature; sendInscription's own `feeRate` option
+        // already lets UniSat's wallet size the Bitcoin miner fee). A real
+        // zero quote, not a fabricated non-zero one -- ForeignSendConfirm's
+        // canConfirm gate just needs a non-null SendFeeQuote to enable the
+        // button, and its own copy ("Send fee (N items)") reads correctly
+        // as "0 Ξ" without implying a made-up cost.
+        setSendFeeQuote({ itemCount: tokenIds.length, gasPriceWei: BigInt(0), totalFeeWei: BigInt(0), averagePerItemWei: BigInt(0), equivalentSingleSendsFeeWei: BigInt(0) });
+        return;
+      }
       try {
         const { quoteForeignSendFee } = await import("@/lib/market/multichain/trading/foreign-transfer");
         const quote = await quoteForeignSendFee(chainSlug, tokenIds.length);
@@ -588,23 +855,42 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         setSendFeeError(e instanceof Error ? e.message : "Could not estimate the send fee.");
       }
     },
-    [chainSlug, requireAccount]
+    [chainSlug, isNonEvm, requireAccount]
   );
 
   const confirmSend = useCallback(async () => {
-    if (!sendTarget || !account || !collection?.contractAddress) return;
+    if (!sendTarget || !account) return;
+    if (!isNonEvm && !collection?.contractAddress) return;
     setError(null);
     try {
       setSendBusy(true);
       setStatus("Confirm in wallet…");
-      if (sendTarget.length === 1) {
+      if (isSolana) {
+        // sendTarget carries tokenMint (item.tokenId === t.mintAddress for
+        // every owned Solana row -- see owned/route.ts's "solana" branch).
+        if (sendTarget.length === 1) {
+          const { sendSolanaToken } = await import("@/lib/market/multichain/trading/solana-transfer");
+          await sendSolanaToken(account, sendTarget[0], sendRecipient);
+        } else {
+          const { sendSolanaTokenBatch } = await import("@/lib/market/multichain/trading/solana-transfer");
+          await sendSolanaTokenBatch(account, sendTarget, sendRecipient, (statuses) => setSendStatuses(statuses));
+        }
+      } else if (isBitcoin) {
+        if (sendTarget.length === 1) {
+          const { sendBitcoinInscription } = await import("@/lib/market/multichain/trading/bitcoin-transfer");
+          await sendBitcoinInscription(account, sendTarget[0], sendRecipient);
+        } else {
+          const { sendBitcoinInscriptionBatch } = await import("@/lib/market/multichain/trading/bitcoin-transfer");
+          await sendBitcoinInscriptionBatch(account, sendTarget, sendRecipient, (statuses) => setSendStatuses(statuses));
+        }
+      } else if (sendTarget.length === 1) {
         const { sendForeignNft } = await import("@/lib/market/multichain/trading/foreign-transfer");
-        await sendForeignNft(chainSlug, collection.contractAddress, sendTarget[0], sendRecipient, account);
+        await sendForeignNft(chainSlug, collection!.contractAddress, sendTarget[0], sendRecipient, account);
       } else {
         const { sendForeignNftBatch } = await import("@/lib/market/multichain/trading/foreign-transfer");
         await sendForeignNftBatch(
           chainSlug,
-          sendTarget.map((tokenId) => ({ chainSlug, collectionAddress: collection.contractAddress, tokenId })),
+          sendTarget.map((tokenId) => ({ chainSlug, collectionAddress: collection!.contractAddress, tokenId })),
           sendRecipient,
           account,
           (statuses) => setSendStatuses(statuses)
@@ -622,7 +908,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       setSendBusy(false);
       setStatus(null);
     }
-  }, [sendTarget, account, collection?.contractAddress, chainSlug, sendRecipient, loadOwned]);
+  }, [sendTarget, account, collection?.contractAddress, chainSlug, sendRecipient, isNonEvm, isSolana, isBitcoin, loadOwned]);
 
   const tokenOffers = useMemo(() => offers.filter((o) => o.acceptable && o.tokenId), [offers]);
   const collectionWideOffers = useMemo(() => offers.filter((o) => !o.acceptable), [offers]);
@@ -790,6 +1076,16 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             </div>
           }
           toolbar={
+            // Sweep is real for every chain family now. EVM keeps the
+            // single-transaction MarketplankForeignFeeRouter.sweepBuy path.
+            // Solana/Bitcoin have no batch-buy endpoint on either venue
+            // (re-verified live 2026-08-18 -- see magiceden-solana-trade.ts
+            // and unisat-ordinals-trade.ts's own "per-venue, per-listing, no
+            // native batch endpoint" headers), so sweepSolanaListingsNow/
+            // sweepBitcoinListingsNow do N genuinely sequential signed
+            // transactions instead -- real, honest, just not atomic the way
+            // the EVM router's single tx is (ForeignSweepConfirm's
+            // `sequential` prop makes that distinction visible, not hidden).
             buyableCount > 0 && (
               <>
                 <select
@@ -811,6 +1107,26 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 >
                   {traitClauses.length > 0 ? "Sweep by traits" : "Sweep floor"}
                 </button>
+                {/* Additive "buy what's affordable, offer for the rest"
+                    combined control -- a NEW third action alongside sweep
+                    and single-item offer, not a replacement for either. */}
+                <input
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  value={combinedBudgetEth}
+                  onChange={(e) => setCombinedBudgetEth(e.target.value)}
+                  placeholder="Budget Ξ"
+                  aria-label="Combined buy+offer budget"
+                  className="min-h-10 w-20 rounded-md border border-line bg-panel px-2 text-xs text-foreground placeholder:text-foreground/30"
+                />
+                <button
+                  type="button"
+                  onClick={() => void openCombinedPreview()}
+                  className="min-h-10 shrink-0 rounded-lg border border-line-strong bg-emerald-500 px-3 text-xs font-bold text-wood-950 transition hover:bg-emerald-400"
+                >
+                  Buy + offer rest
+                </button>
               </>
             )
           }
@@ -821,13 +1137,20 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             </p>
           ) : (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              {/* Solana gets single-token offers too, via Magic Eden's real
+                  /instructions/buy bid endpoint (placeSolanaOfferNow) --
+                  foreignOfferCurrency itself stays EVM-only (it resolves a
+                  WETH/WBNB/WAVAX address, which has no Solana meaning). No
+                  Bitcoin equivalent was found (see foreign-fulfill.ts's
+                  placeSolanaOfferNow header), so Bitcoin still gets no
+                  onOffer here. */}
               {filteredListings.map((listing) => (
                 <ListingCard
                   key={listing.id}
                   listing={listing}
                   collection={collection}
                   onBuy={(l) => void handleBuy(l)}
-                  onOffer={foreignOfferCurrency(chainSlug) ? (l) => void openOffer(l) : undefined}
+                  onOffer={foreignOfferCurrency(chainSlug) || isSolana ? (l) => void openOffer(l) : undefined}
                   onSelect={(tokenId) => void openDetails(tokenId)}
                   rarity={rarityMap.get(listing.tokenId)}
                 />
@@ -851,18 +1174,30 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           {/* Same grid shape as native's Offers tab: sticky criteria-bid builder in a fixed left column, everything else in the flexible right column. */}
           <div className="grid items-start gap-3 lg:grid-cols-[360px_minmax(0,1fr)]">
             <div className="lg:sticky lg:top-[8.75rem]">
-              <ForeignOfferForm
-                chainSlug={chainSlug}
-                currencySymbol={chainSlug === "bnb-mainnet" ? "WBNB" : chainSlug === "avax-mainnet" ? "WAVAX" : "WETH"}
-                account={account}
-                collection={collection}
-                listings={listings}
-                onSubmitted={() => {
-                  invalidateSwr("/api/market/multichain/offers");
-                  void loadOffers();
-                }}
-                onConnect={() => void requireAccount()}
-              />
+              {isNonEvm ? (
+                // No Seaport-equivalent offer/bid-placement flow is wired for
+                // either venue in this pass -- see offers/route.ts's own
+                // comment on why even VIEWING collection-wide bids isn't
+                // available yet for Solana/Bitcoin. Honest unavailable state,
+                // matching the same "Browse only" posture GlobalMarketHub.tsx
+                // already uses for tradeable:false Solana rows.
+                <p className="rounded-lg border border-line bg-panel p-3 text-xs text-foreground/55">
+                  Making offers isn't available for {chainDisplayName(chainSlug)} yet.
+                </p>
+              ) : (
+                <ForeignOfferForm
+                  chainSlug={chainSlug}
+                  currencySymbol={chainSlug === "bnb-mainnet" ? "WBNB" : chainSlug === "avax-mainnet" ? "WAVAX" : "WETH"}
+                  account={account}
+                  collection={collection}
+                  listings={listings}
+                  onSubmitted={() => {
+                    invalidateSwr("/api/market/multichain/offers");
+                    void loadOffers();
+                  }}
+                  onConnect={() => void requireAccount()}
+                />
+              )}
             </div>
             <div className="min-w-0 space-y-3">
               <section aria-labelledby="mc-open-bids">
@@ -993,6 +1328,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                         type="button"
                         aria-pressed={isSelected}
                         aria-label={`${isSelected ? "Deselect" : "Select"} #${item.tokenId}`}
+                        // Send is real for every chain family now: Solana
+                        // via solana-transfer.ts's plain SPL transfer, Bitcoin
+                        // via bitcoin-transfer.ts's window.unisat.sendInscription
+                        // (see that module's header for why it's safe -- the
+                        // wallet does UTXO selection itself, no hand-rolled
+                        // PSBT here).
                         onClick={() => toggleSendSelection(item.tokenId)}
                         className="relative block aspect-square w-full cursor-pointer bg-wood-900 outline-none transition focus-visible:ring-2 focus-visible:ring-gold-400/60"
                       >
@@ -1102,13 +1443,47 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           items={sweepPreview}
           collectionName={collection.name}
           chainLabel={chainLabel}
-          feeBps={FOREIGN_FEE_BPS}
+          // No Marketplank fee on a Solana/Bitcoin sweep -- each item is a
+          // raw per-venue buy (buySolanaListingNow/buyBitcoinListingNow),
+          // same as the single-item Buy flow already charges no added fee
+          // for these two venues.
+          feeBps={isNonEvm ? 0 : FOREIGN_FEE_BPS}
           busy={sweepBusy || status !== null}
           error={error}
+          statuses={isNonEvm ? sweepStatuses : null}
+          // Bitcoin is still genuinely N sequential PSBTs (no real combining
+          // path exists -- re-verified this session). Solana now runs
+          // through sweepSolanaListingsBatched, which is real
+          // single/minimum-signature batching, not sequential -- so this no
+          // longer overstates a one-prompt-per-item guarantee for Solana.
+          sequential={isBitcoin}
           onConfirm={confirmSweep}
           onCancel={() => {
             setError(null);
             setSweepPreview(null);
+            setSweepStatuses(null);
+          }}
+        />
+      )}
+
+      {combinedPreview && (
+        <ForeignCombinedSweepConfirm
+          affordable={combinedPreview.affordable}
+          remainder={combinedPreview.remainder}
+          collectionName={collection.name}
+          chainLabel={chainLabel}
+          feeBps={isNonEvm ? 0 : FOREIGN_FEE_BPS}
+          offerDiscountBps={COMBINED_OFFER_DISCOUNT_BPS}
+          offersUnavailable={isBitcoin}
+          busy={combinedBusy || status !== null}
+          error={combinedError}
+          statuses={isNonEvm ? combinedStatuses : null}
+          sequential={isBitcoin}
+          onConfirm={confirmCombined}
+          onCancel={() => {
+            setCombinedError(null);
+            setCombinedPreview(null);
+            setCombinedStatuses(null);
           }}
         />
       )}
@@ -1137,6 +1512,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           listing={detailsTarget}
           collectionName={collection.name}
           traitCounts={traitCounts}
+          isSolana={isSolana}
           onClose={() => setDetailsTarget(null)}
         />
       )}
@@ -1145,7 +1521,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         <ForeignOfferConfirm
           chainLabel={chainDisplayName(chainSlug)}
           tokenId={offerTarget.tokenId}
-          currencySymbol={chainSlug === "bnb-mainnet" ? "WBNB" : chainSlug === "avax-mainnet" ? "WAVAX" : "WETH"}
+          currencySymbol={isSolana ? "SOL" : chainSlug === "bnb-mainnet" ? "WBNB" : chainSlug === "avax-mainnet" ? "WAVAX" : "WETH"}
+          nativeCurrency={isSolana}
           amountEth={offerAmountEth}
           onAmountChange={setOfferAmountEth}
           busy={offerBusy || status !== null}

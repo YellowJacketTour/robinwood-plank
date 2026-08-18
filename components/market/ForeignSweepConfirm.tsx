@@ -3,6 +3,7 @@
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { BUY_GAS_RESERVE_ETH } from "@/lib/constants";
 import type { Listing } from "@/lib/market/types";
+import type { BatchSendStatus } from "@/lib/market/transfer";
 
 type Props = {
   items: Listing[];
@@ -13,6 +14,19 @@ type Props = {
   error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
+  /**
+   * Per-item progress, keyed by the same id used in each Listing's own
+   * `id`/`foreignOrderHash` (tokenMint/inscriptionId) -- ONLY populated by
+   * the Solana/Bitcoin sweep callers (sweepSolanaListingsNow/
+   * sweepBitcoinListingsNow), which are genuinely N sequential signed
+   * transactions rather than the EVM router's single atomic sweepBuy (see
+   * foreign-fulfill.ts's own header on why). Undefined for the EVM path --
+   * that one still resolves as a single all-or-nothing confirmation, so no
+   * per-item state exists to show.
+   */
+  statuses?: Map<string, BatchSendStatus> | null;
+  /** True when this sweep is N sequential signed transactions instead of one atomic on-chain call -- swaps the footer copy so the UX doesn't imply an atomicity guarantee that isn't real for Solana/Bitcoin. */
+  sequential?: boolean;
 };
 
 /**
@@ -33,6 +47,8 @@ export default function ForeignSweepConfirm({
   error,
   onConfirm,
   onCancel,
+  statuses,
+  sequential,
 }: Props) {
   const subtotal = items.reduce((sum, item) => sum + BigInt(item.priceWei), BigInt(0));
   const fee = (subtotal * BigInt(feeBps)) / BigInt(10_000);
@@ -61,17 +77,29 @@ export default function ForeignSweepConfirm({
         <p className="text-[0.65rem] font-bold text-[#58BDF0]">Settles on {chainLabel}</p>
 
         <ul className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-line bg-panel px-3 py-2 text-xs">
-          {items.map((item) => (
-            <li key={item.id} className="flex items-center justify-between gap-2">
-              <span className="truncate text-foreground">
-                #{item.tokenId}
-                <span className="ml-1.5 text-[0.6rem] text-foreground/45">{shortAddress(item.maker)}</span>
-              </span>
-              <span className="shrink-0 tabular-nums text-foreground">
-                {formatTokenAmount(item.priceWei, 18, 4)} Ξ
-              </span>
-            </li>
-          ))}
+          {items.map((item) => {
+            const itemStatus = statuses?.get(item.id);
+            return (
+              <li key={item.id} className="flex items-center justify-between gap-2">
+                <span className="truncate text-foreground">
+                  #{item.tokenId}
+                  <span className="ml-1.5 text-[0.6rem] text-foreground/45">{shortAddress(item.maker)}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  {itemStatus && (
+                    <span
+                      className={
+                        itemStatus.state === "sent" ? "text-emerald-400" : itemStatus.state === "failed" ? "text-red-300" : "text-foreground/50"
+                      }
+                    >
+                      {itemStatus.state}
+                    </span>
+                  )}
+                  <span className="tabular-nums text-foreground">{formatTokenAmount(item.priceWei, 18, 4)} Ξ</span>
+                </span>
+              </li>
+            );
+          })}
         </ul>
 
         <dl className="space-y-1 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
@@ -94,8 +122,9 @@ export default function ForeignSweepConfirm({
         </dl>
 
         <p className="text-center text-[0.6rem] text-foreground/40">
-          Every price re-verified against a fresh signed order immediately before sending. An item
-          sold mid-sweep is skipped, not charged. Plus network gas — keep ~{BUY_GAS_RESERVE_ETH} Ξ free.
+          {sequential
+            ? `Each item is its own signed transaction — you'll see ${items.length} wallet prompt${items.length === 1 ? "" : "s"} in a row. An item already sold when its turn comes is skipped, not charged.`
+            : <>Every price re-verified against a fresh signed order immediately before sending. An item sold mid-sweep is skipped, not charged. Plus network gas — keep ~{BUY_GAS_RESERVE_ETH} Ξ free.</>}
         </p>
 
         {error && (

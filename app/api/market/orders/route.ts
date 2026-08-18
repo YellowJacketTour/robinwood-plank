@@ -1,7 +1,7 @@
 import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
 import type { NormalisedForeignListing } from "@/lib/market/foreign-listings";
 import { ethCallFree } from "@/lib/market/fetch-rpc";
-import { getCollectionAsync } from "@/lib/market/collections";
+import { getCollectionAsync } from "@/lib/market/collections-server";
 import { resolveTokenImage } from "@/lib/market/token-image";
 import {
   countOrdersByMaker,

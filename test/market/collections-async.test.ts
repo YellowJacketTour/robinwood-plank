@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getCollectionAsync } from "../../lib/market/collections";
+import { getCollectionAsync } from "../../lib/market/collections-server";
 
 test("getCollectionAsync resolves a curated slug (robinwood) without touching the DB", async () => {
   const collection = await getCollectionAsync("robinwood");

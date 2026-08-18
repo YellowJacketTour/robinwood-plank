@@ -126,6 +126,35 @@ export async function buildMagicEdenBuyNow(input: {
 }
 
 /**
+ * Builds the unsigned BID (offer) instruction for a single token -- the
+ * "Make offer" counterpart to buildMagicEdenBuyNow. REAL, VERIFIED,
+ * SEPARATE ENDPOINT: /instructions/buy (NOT /instructions/buy_now),
+ * confirmed live via a dedicated research pass 2026-08-18
+ * (docs.magiceden.io/reference/get_instructions-buy, page title verbatim
+ * "Get instruction to buy (bid)") -- this places a standing bid on
+ * `tokenMint` at `priceLamports` that the current or a future owner can
+ * accept, distinct from buy_now's immediate-fill-of-an-existing-listing
+ * semantics. `expiry` defaults to 7 days per Magic Eden's own documented
+ * default when omitted/0, matching this app's other foreign-offer
+ * durations (ForeignOfferForm's own DURATIONS list) closely enough that no
+ * caller-supplied override is exposed yet -- can be added later without
+ * breaking this signature (an optional field, not a required one).
+ */
+export async function buildMagicEdenBid(input: {
+  buyerAddress: string;
+  tokenMint: string;
+  priceLamports: string;
+  priorityFeeMicroLamports?: number;
+}): Promise<MagicEdenTxInstruction> {
+  return meFetch<MagicEdenTxInstruction>("/instructions/buy", {
+    buyer: input.buyerAddress,
+    tokenMint: input.tokenMint,
+    price: input.priceLamports,
+    ...(input.priorityFeeMicroLamports ? { prioFeeMicroLamports: input.priorityFeeMicroLamports } : {}),
+  });
+}
+
+/**
  * Sweep: Magic Eden's API is per-listing, not a native batch endpoint
  * (unlike MarketplankForeignFeeRouter.sweepBuy's single on-chain
  * multi-item tx) -- this builds N independent buy_now transactions for

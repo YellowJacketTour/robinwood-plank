@@ -19,6 +19,8 @@ import {
 const VENUE_BADGE_CLASS: Record<ListingVenue | "marketplank", string> = {
   opensea: "bg-[#58BDF0]/15 text-[#58BDF0]",
   pulp: "bg-[#F0803C]/15 text-[#F0803C]",
+  magiceden: "bg-[#E42575]/15 text-[#E42575]",
+  unisat: "bg-[#F7931A]/15 text-[#F7931A]",
   marketplank: "bg-gold-500/15 text-gold-300",
 };
 import { formatTokenAmount, shortAddress } from "@/lib/trade";

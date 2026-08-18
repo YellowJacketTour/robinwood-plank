@@ -15,10 +15,13 @@
  * module (see foreign-orders.ts's own header on signature:null).
  */
 import { NextRequest, NextResponse } from "next/server";
-import { fetchForeignCollectionOffers } from "@/lib/market/multichain/trading/foreign-orders";
+import { fetchForeignCollectionOffers, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { getOffers } from "@/lib/market/orders-store";
+import { getCollectionAsync } from "@/lib/market/collections-server";
 import { publicError, rateLimit } from "@/lib/security";
+import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -40,13 +43,70 @@ export async function GET(req: NextRequest) {
   if (!chainSlug || !collectionSlug) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
+
+  // Robinhood Chain's own book, same reasoning as listings/route.ts's
+  // "robinhood" branch: no OpenSea equivalent exists for the home chain, so
+  // native offers (lib/market/orders-store.ts) are adapted into the SAME
+  // response shape this route returns for real foreign chains.
+  if (chainSlug === "robinhood") {
+    try {
+      const collection = await getCollectionAsync(collectionSlug);
+      if (!collection) {
+        return NextResponse.json({ error: "NOT_FOUND", message: "Unknown Robinhood-Chain collection." }, { status: 404 });
+      }
+      const native = await getOffers(collectionSlug);
+      const offers = native.slice(0, limit).map((o) => ({
+        orderHash: o.id,
+        maker: o.maker,
+        priceWei: o.priceWei,
+        expiresAt: o.expiresAt,
+        // Native offers are always directly acceptable by the owner (no
+        // foreign-orderbook provenance gap -- see the foreign branch's own
+        // comment on why criteria offers stay view-only there); a native
+        // offer either targets one token or is collection-wide, both fully
+        // fillable through the existing native accept-offer flow.
+        acceptable: true,
+        // Native's Offer type (lib/market/types.ts) has no wildcard/criteria
+        // concept distinct from "collection-wide" -- isWildcard has no real
+        // native equivalent, so this is always false rather than guessed.
+        isWildcard: false,
+        tokenId: o.tokenId ?? null,
+        contractAddress: collection.contractAddress,
+        imageUrl: o.imageUrl ?? null,
+        name: null,
+      }));
+      return NextResponse.json({ offers }, { headers: { "Cache-Control": "no-store" } });
+    } catch (error) {
+      return publicError(error, "Failed to load Robinhood-Chain offers");
+    }
+  }
+
+  // SOLANA / BITCOIN -- honest not-available state. Checked during this
+  // pass: Magic Eden's documented v2 API has a real per-token
+  // /tokens/{mint}/offers_received endpoint but no confirmed
+  // per-COLLECTION open-bids listing endpoint (the plausible
+  // /v2/collections/{symbol}/offers path returned a real 404, not a guess),
+  // and UniSat's Marketplace API only documents the bid-creation flow, not
+  // a browse-open-bids query. Rather than fabricate rows, this returns a
+  // real empty list -- Offers stays truthfully unavailable for these two
+  // chains until a real collection-wide bids source is found.
+  if (isNonEvmChainSlug(chainSlug)) {
+    return NextResponse.json({ offers: [] }, { headers: { "Cache-Control": "no-store" } });
+  }
+
   if (!foreignChainByChainSlug(chainSlug)) {
     return NextResponse.json({ error: `"${chainSlug}" is not a supported foreign chain` }, { status: 400 });
   }
 
   try {
     const chain = foreignChainByChainSlug(chainSlug)!;
-    const orders = await fetchForeignCollectionOffers({ chainSlug, collectionSlug, limit });
+    // See resolveOpenSeaCollectionSlug's header (foreign-orders.ts) --
+    // every card links here with a contract address, but OpenSea's
+    // /offers/collection/{slug} endpoint needs OpenSea's own slug.
+    const openSeaSlug = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug)
+      ? ((await resolveOpenSeaCollectionSlug(chain.openSeaChain, collectionSlug)) ?? collectionSlug)
+      : collectionSlug;
+    const orders = await fetchForeignCollectionOffers({ chainSlug, collectionSlug: openSeaSlug, limit });
     const rawOffers = orders
       .map((o) => {
         const bid = o.parameters.offer[0];

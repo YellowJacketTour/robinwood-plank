@@ -44,65 +44,18 @@ export function getCollection(slug: string): MarketCollection | undefined {
 }
 
 /**
- * "Stage B" resolution -- the async counterpart getCollection() itself
- * deliberately never became, so every EXISTING sync caller (royalty
- * annotation, etc.) keeps working unchanged. This is the new path: when
- * a slug isn't in the hand-curated MARKET_COLLECTIONS allowlist, check
- * whether it's a real, contract-address-shaped slug that
- * robinhood-chain-scan.ts's automated discovery has already vetted (real
- * ERC-721 interface, real per-token art -- see that file's own
- * isNotRealCollectibleArt gate) and registered into
- * plank_multichain_collections under chainSlug "robinhood".
- *
- * SECURITY NOTE, READ BEFORE EXTENDING: this is a real trust-boundary
- * change for app/api/market/orders/route.ts's BAD_COLLECTION gate --
- * before this function existed, ONLY a human-reviewed entry in
- * MARKET_COLLECTIONS could ever have a real signed order accepted by
- * that endpoint. Now, anything the automated Robinhood Chain scanner
- * discovers can too. This is the SAME trust bar the 7 foreign chains
- * already operate under (their own discovery is equally automated, no
- * human review gate) -- consistent, not a new lower bar, but worth
- * stating explicitly since this is the FIRST time that bar applies to
- * the home chain's own order-acceptance endpoint, not just a read-only
- * multichain index.
+ * getCollectionAsync (the "Stage B"/auto-discovered-collection resolver)
+ * moved to lib/market/collections-server.ts, guarded by `server-only`.
+ * READ THAT FILE'S HEADER before adding it back here: this file is
+ * imported by lib/wallet.ts, a Client Component dependency, and
+ * getCollectionAsync's dynamic import of multichain/store.ts (which
+ * reaches Postgres via the `pg` package) broke the ENTIRE app's client
+ * bundle ("Module not found: Can't resolve 'dns'") the moment it lived
+ * in this file, even behind a dynamic import -- Next/Turbopack still
+ * resolves a same-file dynamic import's target into the browser build
+ * graph. Any server-only code that reaches Postgres/multichain/store
+ * belongs in collections-server.ts, never here.
  */
-export async function getCollectionAsync(slug: string): Promise<MarketCollection | undefined> {
-  const curated = getCollection(slug);
-  if (curated) return curated;
-
-  if (!/^0x[0-9a-fA-F]{40}$/.test(slug)) return undefined;
-
-  const { listTrackedCollections } = await import("@/lib/market/multichain/store");
-  const all = await listTrackedCollections().catch(() => []);
-  const found = all.find(
-    (c) => c.chainSlug === "robinhood" && c.contractAddress.toLowerCase() === slug.toLowerCase()
-  );
-  if (!found) return undefined;
-
-  const { MARKET_DEFAULT_FEE_BPS } = await import("@/lib/constants");
-  return {
-    // The contract address itself is the slug for an auto-discovered
-    // collection -- there is no human-chosen friendly name to route by,
-    // and using the address keeps this collision-free by construction
-    // (unlike a discovered display NAME, which could plausibly collide
-    // with "robinwood" or a future curated slug).
-    slug: found.contractAddress,
-    name: found.name ?? found.contractAddress,
-    contractAddress: found.contractAddress,
-    tokenStandard: "ERC721",
-    image: found.imageUrl ?? "/images/plank-logo.webp",
-    trustBadges: [],
-    feeBps: MARKET_DEFAULT_FEE_BPS,
-    // Real EIP-2981 royaltyInfo() has not been queried on-chain for an
-    // auto-discovered collection -- 0/zero-address is the honest default
-    // (no royalty enforced) rather than guessing a rate. A future pass
-    // could query royaltyInfo() the same way art/name get resolved during
-    // discovery, but that's real new work, not a safe assumption to bake
-    // in here.
-    royaltyBps: 0,
-    royaltyRecipient: "0x0000000000000000000000000000000000000000",
-  };
-}
 
 /**
  * Every vault address linked from a collection entry (lowercased). Combined

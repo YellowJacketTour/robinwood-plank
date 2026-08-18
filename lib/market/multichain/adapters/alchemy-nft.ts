@@ -131,6 +131,28 @@ function pickLowestFloor(
     : { priceWei: null, currency: null, marketplace: null };
 }
 
+/**
+ * Alchemy's own openSeaMetadata pass-through carries a real, confirmed
+ * upstream data bug: some collections' imageUrl/externalUrl/twitterUsername
+ * fields come back as the LITERAL 4-character string "null" (and
+ * bannerImageUrl similarly) rather than a real JSON null -- verified live
+ * 2026-08-19 via a direct getContractMetadata call for a real registered
+ * Base collection (0x76c346...) that returned `"imageUrl": "null"`. This is
+ * dirty data OpenSea's own indexer is passing through, not a bug in this
+ * app's own code -- but it's exactly what broke Next's <Image> component
+ * ("invalid src prop") on the collection detail page, since a truthy
+ * 4-char string sails right past every `!imageUrl` falsy check this app
+ * had. Sanitized once, here, at the source, so every downstream reader
+ * (collection detail pages, the hub, the rankings table) never has to
+ * special-case this upstream quirk itself.
+ */
+function cleanMetadataString(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toLowerCase() === "null" || trimmed.toLowerCase() === "undefined") return null;
+  return trimmed;
+}
+
 export const alchemyNftAdapter: ChainAdapter = {
   name: "alchemy-nft",
   async fetchSnapshot({ chainSlug, contractAddress }): Promise<CollectionSnapshot> {
@@ -148,9 +170,9 @@ export const alchemyNftAdapter: ChainAdapter = {
     const totalSupply = metadata.totalSupply != null ? Number(metadata.totalSupply) : null;
 
     return {
-      name: metadata.openSeaMetadata?.collectionName ?? metadata.name ?? null,
-      imageUrl: metadata.openSeaMetadata?.imageUrl ?? null,
-      externalUrl: metadata.openSeaMetadata?.externalUrl ?? null,
+      name: cleanMetadataString(metadata.openSeaMetadata?.collectionName) ?? cleanMetadataString(metadata.name),
+      imageUrl: cleanMetadataString(metadata.openSeaMetadata?.imageUrl),
+      externalUrl: cleanMetadataString(metadata.openSeaMetadata?.externalUrl),
       floorPriceWei: floor.priceWei,
       floorPriceCurrency: floor.currency,
       floorPriceMarketplace: floor.marketplace,

@@ -78,8 +78,26 @@ export function resolveIpfsUrl(
  * through untouched. Full-res art in a ~200px grid cell was the single
  * biggest transfer cost on /market.
  */
+/**
+ * Real, confirmed upstream data bug (see alchemy-nft.ts's own
+ * cleanMetadataString for the live-verified source): some third-party NFT
+ * metadata carries the LITERAL 4-character string "null" instead of a real
+ * null for an image field. alchemy-nft.ts now sanitizes this at write time
+ * for newly-discovered collections, but this app already has real rows in
+ * Postgres from BEFORE that fix, and every OTHER image field this app
+ * reads (listing art, per-token art from OpenSea/Alchemy/Magic Eden
+ * responses) is a second real place the same poison can appear. Treated
+ * here, at the one shared "prepare a URL to hand to <Image>" chokepoint,
+ * so every caller's own `|| fallback` logic works correctly against it
+ * instead of every call site needing its own guard.
+ */
+function isPoisonedUrlString(url: string): boolean {
+  const trimmed = url.trim().toLowerCase();
+  return trimmed === "" || trimmed === "null" || trimmed === "undefined";
+}
+
 export function withImageWidth(url: string | null | undefined, width: number): string {
-  if (!url) return url ?? "";
+  if (!url || isPoisonedUrlString(url)) return "";
   if (!url.startsWith("/api/ipfs/image?")) return url;
   // cv is a cache generation: responses are cached immutable for a year, so
   // when a resize bug ships broken bytes (cv=2 busted the SharedArrayBuffer

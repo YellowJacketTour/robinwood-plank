@@ -63,7 +63,17 @@ function encodeCall(selector: string, argsHex = ""): string {
 async function readErc721Metadata(rpcUrl: string, contractAddress: string): Promise<{ name: string | null; symbol: string | null } | null> {
   try {
     const supportsErc721 = (await rpcCall<string>(rpcUrl, "eth_call", [
-      { to: contractAddress, data: encodeCall("0x01ffc9a7", ERC721_INTERFACE_ID.slice(2).padStart(64, "0")) },
+      // bytes4 is RIGHT-padded in ABI encoding (padEnd), not left-padded --
+      // this was a real, confirmed-live bug: the left-padded (padStart)
+      // version of this exact supportsInterface(0x80ac58cd) call reverted
+      // against a real Robinhood-Chain ERC-721 contract (curl-verified
+      // 2026-08-18 directly against https://rpc.mainnet.chain.robinhood.com),
+      // meaning THIS function had been rejecting every genuinely real
+      // ERC-721 candidate it ever checked -- readErc721Metadata always
+      // returned null, so runRobinhoodChainDiscoveryScan could only ever
+      // have registered zero collections via on-chain verification. Fixed
+      // here; discoverer opensea-robinhood-scan.ts carries the same fix.
+      { to: contractAddress, data: encodeCall("0x01ffc9a7", ERC721_INTERFACE_ID.slice(2).padEnd(64, "0")) },
       "latest",
     ])) as string;
     // A revert or a false (32-byte zero) response means "not ERC-721" -- both fail closed.

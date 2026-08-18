@@ -46,6 +46,12 @@ const LIB_DIR = path.resolve(import.meta.dirname, "../../lib");
  * defines it.
  */
 const KNOWN_BUILD_FROZEN: Record<string, string[]> = {
+  "market/multichain/trading/solana-transfer.ts": ["NEXT_PUBLIC_SOLANA_RPC_URL"],
+  // sweepSolanaListingsBatched needs its own Connection.getLatestBlockhash()
+  // to build the shared blockhash for a combined batch tx -- same
+  // client-side, build-time-inlined constant as solana-transfer.ts above,
+  // not a runtime kill switch (see that entry's own reasoning).
+  "market/multichain/trading/foreign-fulfill.ts": ["NEXT_PUBLIC_SOLANA_RPC_URL"],
   "constants.ts": [
     "NEXT_PUBLIC_DEV_LOCAL_CHAIN",
     "NEXT_PUBLIC_DEV_LOCAL_RPC",

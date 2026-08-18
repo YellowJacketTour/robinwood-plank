@@ -12,13 +12,42 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { getCollectionAsync } from "@/lib/market/collections-server";
+import { TRANSFER_TOPIC, rpcCall } from "@/lib/market/multichain/discovery/evm-log-scan";
+import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
 import { publicError, rateLimit } from "@/lib/security";
+import { isSolanaChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const OPENSEA = "https://api.opensea.io/api/v2";
+
+/**
+ * How far back a Robinhood-Chain activity read scans, in blocks. There is no
+ * permanent ledger for an arbitrary auto-discovered Robinhood-Chain
+ * collection the way readChainActivity() has for RobinWood itself
+ * (lib/market/chain-events.ts's own `contract` field comment: "Only
+ * RobinWood is indexed under source='nft' today") -- so this reads real,
+ * live Transfer logs directly from the chain instead, the same rpcCall/
+ * TRANSFER_TOPIC primitives robinhood-chain-scan.ts already uses for
+ * discovery. Bounded so one request can't fan out into an unbounded
+ * eth_getLogs scan.
+ */
+const ACTIVITY_SCAN_BLOCKS = 50_000;
+
+type RawTransferLog = {
+  address: string;
+  topics: string[];
+  transactionHash: string;
+  blockNumber: string;
+};
+
+function topicToAddress(topic: string): string {
+  return "0x" + topic.slice(-40);
+}
 
 type OpenSeaEvent = {
   event_type: "sale" | "transfer" | string;
@@ -45,6 +74,112 @@ export async function GET(req: NextRequest) {
   if (!chainSlug || !collectionSlug) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
+
+  // Robinhood Chain: no OpenSea events endpoint, and no permanent ledger for
+  // an arbitrary auto-discovered collection (see ACTIVITY_SCAN_BLOCKS's own
+  // comment) -- so this scans real raw Transfer logs directly. HONEST
+  // LIMITATION: there is no price oracle for these auto-discovered
+  // collections the way OpenSea's payment data supplies one for a real
+  // foreign chain, so every event here is reported as a plain "transfer"
+  // with priceWei: null rather than guessing which transfers were sales.
+  if (chainSlug === "robinhood") {
+    try {
+      const collection = await getCollectionAsync(collectionSlug);
+      if (!collection) {
+        return NextResponse.json({ error: "NOT_FOUND", message: "Unknown Robinhood-Chain collection." }, { status: 404 });
+      }
+      const rpcUrl = ROBINHOOD_RPC_URLS[0];
+      if (!rpcUrl) {
+        return NextResponse.json({ error: "Robinhood Chain RPC is not configured on this deployment." }, { status: 503 });
+      }
+      const latestHex = await rpcCall<string>(rpcUrl, "eth_blockNumber", []);
+      const latest = Number.parseInt(latestHex, 16);
+      const fromBlock = Math.max(0, latest - ACTIVITY_SCAN_BLOCKS);
+
+      const logs = await rpcCall<RawTransferLog[]>(rpcUrl, "eth_getLogs", [
+        {
+          address: collection.contractAddress,
+          fromBlock: "0x" + fromBlock.toString(16),
+          toBlock: "0x" + latest.toString(16),
+          topics: [TRANSFER_TOPIC],
+        },
+      ]);
+
+      const sorted = logs
+        .filter((l) => l.topics.length === 4) // ERC-20 Transfer shares the same topic0 with only 3 topics -- excluded, same filter evm-log-scan.ts uses.
+        .sort((a, b) => Number.parseInt(b.blockNumber, 16) - Number.parseInt(a.blockNumber, 16))
+        .slice(0, limit);
+
+      const events = sorted.map((log) => ({
+        type: "transfer" as const,
+        // Real block timestamps would need one eth_getBlockByNumber call per
+        // distinct block -- real work, deferred rather than faked; null is
+        // honest here, not a placeholder value.
+        timestamp: null,
+        transaction: log.transactionHash,
+        priceWei: null,
+        priceSymbol: null,
+        from: topicToAddress(log.topics[1]),
+        to: topicToAddress(log.topics[2]),
+        tokenId: BigInt(log.topics[3]).toString(),
+        tokenName: null,
+        imageUrl: null,
+      }));
+
+      return NextResponse.json({ events }, { headers: { "Cache-Control": "no-store" } });
+    } catch (error) {
+      return publicError(error, "Failed to load Robinhood-Chain activity");
+    }
+  }
+
+  // SOLANA -- real, keyless Magic Eden collection activities. Confirmed live
+  // 2026-08-18: GET /v2/collections/{symbol}/activities needs no API key,
+  // returning real buy/list/bid/delist events with real SOL prices. Mapped
+  // into the same shape the EVM/OpenSea branch below returns.
+  if (isSolanaChainSlug(chainSlug)) {
+    try {
+      type MeActivity = {
+        signature: string;
+        type: string;
+        blockTime?: number;
+        buyer?: string | null;
+        seller?: string | null;
+        price?: number | null;
+        tokenMint?: string | null;
+      };
+      const res = await fetch(
+        `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/activities?limit=${limit}`,
+        { headers: { accept: "application/json" } }
+      );
+      if (!res.ok) {
+        return NextResponse.json({ error: `Magic Eden ${res.status}` }, { status: 502 });
+      }
+      const raw = (await res.json()) as MeActivity[];
+      const events = raw.map((a) => ({
+        type: a.type === "buyNow" ? "sale" : a.type,
+        timestamp: a.blockTime ? new Date(a.blockTime * 1000).toISOString() : null,
+        transaction: a.signature,
+        priceWei: a.price != null ? (BigInt(Math.round(a.price * 1_000_000_000)) * BigInt(1_000_000_000)).toString() : null,
+        priceSymbol: a.price != null ? "SOL" : null,
+        from: a.seller ?? null,
+        to: a.buyer ?? null,
+        tokenId: a.tokenMint ?? null,
+        tokenName: null,
+        imageUrl: null,
+      }));
+      return NextResponse.json({ events }, { headers: { "Cache-Control": "no-store" } });
+    } catch (error) {
+      return publicError(error, "Failed to load Solana activity");
+    }
+  }
+
+  // BITCOIN ORDINALS -- same honest-empty posture as listings/route.ts's
+  // "bitcoin" branch: no keyless/documented activity-query endpoint was
+  // found for UniSat's Marketplace API during this research pass.
+  if (isBitcoinChainSlug(chainSlug)) {
+    return NextResponse.json({ events: [] }, { headers: { "Cache-Control": "no-store" } });
+  }
+
   if (!foreignChainByChainSlug(chainSlug)) {
     return NextResponse.json({ error: `"${chainSlug}" is not a supported foreign chain` }, { status: 400 });
   }
@@ -54,8 +189,15 @@ export async function GET(req: NextRequest) {
     if (!key) {
       return NextResponse.json({ error: "OpenSea API key is not configured on this deployment." }, { status: 503 });
     }
+    // See resolveOpenSeaCollectionSlug's header (foreign-orders.ts) --
+    // every card links here with a contract address, but OpenSea's
+    // /events/collection/{slug} endpoint needs OpenSea's own slug.
+    const chainForSlug = foreignChainByChainSlug(chainSlug)!;
+    const openSeaSlug = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug)
+      ? ((await resolveOpenSeaCollectionSlug(chainForSlug.openSeaChain, collectionSlug)) ?? collectionSlug)
+      : collectionSlug;
     const url =
-      `${OPENSEA}/events/collection/${encodeURIComponent(collectionSlug)}` +
+      `${OPENSEA}/events/collection/${encodeURIComponent(openSeaSlug)}` +
       `?event_type=sale&event_type=transfer&limit=${limit}`;
     const res = await fetch(url, { headers: { "x-api-key": key, accept: "application/json" } });
     if (!res.ok) {

@@ -24,6 +24,10 @@ import { FOREIGN_CHAINS, foreignChainByChainSlug } from "@/lib/market/multichain
 import { fetchForeignAllListings, fetchForeignCollectionOffers } from "@/lib/market/multichain/trading/foreign-orders";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { publicError, rateLimit } from "@/lib/security";
+import { resolveOwnedTokenIds } from "@/app/api/market/multichain/owned/route";
+import { ROBINHOOD_RPC_URLS } from "@/lib/mint-contract";
+import { listTrackedCollections } from "@/lib/market/multichain/store";
+import { getListings, getOffers } from "@/lib/market/orders-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -73,6 +77,88 @@ async function fetchOwnedAll(owner: string): Promise<OwnedItem[]> {
   return results.flat();
 }
 
+/**
+ * Robinhood-Chain counterpart of fetchOwnedAll -- the home chain has no
+ * Alchemy NFT-API coverage (it's a private L3, see owned/route.ts's own
+ * header), so ownership is resolved via the SAME raw-RPC path that route
+ * already built for the single-collection "My tokens" tab
+ * (resolveOwnedTokenIds, now exported from there rather than duplicated
+ * here). Run once per Robinhood-Chain collection this deployment tracks
+ * (plank_multichain_collections, via listTrackedCollections), bounded to
+ * MAX_COLLECTIONS same as the foreign fan-out -- a wallet touching many
+ * auto-discovered collections still can't blow up one request.
+ */
+async function fetchOwnedRobinhood(owner: string): Promise<{ owned: OwnedItem[]; truncated: boolean }> {
+  const rpcUrl = ROBINHOOD_RPC_URLS[0];
+  if (!rpcUrl) return { owned: [], truncated: false };
+
+  const tracked = await listTrackedCollections().catch(() => []);
+  const robinhoodCollections = tracked.filter((c) => c.chainSlug === "robinhood");
+  const truncated = robinhoodCollections.length > MAX_COLLECTIONS;
+  const bounded = robinhoodCollections.slice(0, MAX_COLLECTIONS);
+
+  const results = await Promise.all(
+    bounded.map(async (c): Promise<OwnedItem[]> => {
+      try {
+        const tokenIds = await resolveOwnedTokenIds(rpcUrl, c.contractAddress, owner);
+        return tokenIds.map((tokenId) => ({
+          chainSlug: "robinhood",
+          contractAddress: c.contractAddress,
+          collectionName: c.name,
+          tokenId,
+        }));
+      } catch {
+        return [];
+      }
+    })
+  );
+  return { owned: results.flat(), truncated };
+}
+
+/**
+ * Robinhood-Chain counterpart of the foreign myListings/offers fan-out.
+ * Native orders (lib/market/orders-store.ts) are keyed by collection slug,
+ * and for an auto-discovered collection that slug IS the contract address
+ * (see getCollectionAsync's own comment on why) -- so no extra slug
+ * resolution step is needed here the way the foreign branch needs OpenSea's
+ * contract->slug lookup. `getListings`/`getOffers` never throw (proven in
+ * test/market/multichain-robinhood-branch.test.ts), so no per-collection
+ * try/catch is needed either.
+ */
+async function fetchRobinhoodMakerActivity(
+  owner: string,
+  collections: Array<{ contractAddress: string; name: string | null }>
+): Promise<{
+  myListings: Array<{ chainSlug: string; collectionName: string | null; tokenId: string; priceWei: string }>;
+  offers: Array<{ chainSlug: string; collectionName: string | null; priceWei: string; maker: string }>;
+}> {
+  const perCollection = await Promise.all(
+    collections.map(async (c) => {
+      const [listings, collectionOffers] = await Promise.all([
+        getListings(c.contractAddress),
+        getOffers(c.contractAddress),
+      ]);
+      const mine = listings
+        .filter((l) => l.maker.toLowerCase() === owner.toLowerCase())
+        .map((l) => ({ chainSlug: "robinhood", collectionName: c.name, tokenId: l.tokenId, priceWei: l.priceWei }));
+      // Every offer on a collection the wallet holds tokens in -- same
+      // "offers on what you own" semantics the foreign branch already uses
+      // (collectionOffers isn't filtered by maker, myListings is).
+      const bids = collectionOffers.map((o) => ({
+        chainSlug: "robinhood",
+        collectionName: c.name,
+        priceWei: o.priceWei,
+        maker: o.maker,
+      }));
+      return { mine, bids };
+    })
+  );
+  return {
+    myListings: perCollection.flatMap((p) => p.mine),
+    offers: perCollection.flatMap((p) => p.bids),
+  };
+}
+
 export async function GET(req: NextRequest) {
   const limited = rateLimit(req, { key: "market-multichain-wallet-summary", limit: 15, windowMs: 60_000 });
   if (limited) return limited;
@@ -85,7 +171,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const key = await getOpenSeaApiKey();
-    const owned = await fetchOwnedAll(owner);
+    const [foreignOwned, robinhoodOwned] = await Promise.all([fetchOwnedAll(owner), fetchOwnedRobinhood(owner)]);
+    const owned = [...foreignOwned, ...robinhoodOwned.owned];
 
     const distinctCollections = new Map<string, { chainSlug: string; contractAddress: string; collectionName: string | null }>();
     for (const item of owned) {
@@ -96,8 +183,18 @@ export async function GET(req: NextRequest) {
       }
     }
     const collectionEntries = [...distinctCollections.values()];
-    const truncated = collectionEntries.length > MAX_COLLECTIONS;
+    const truncated = collectionEntries.length > MAX_COLLECTIONS || robinhoodOwned.truncated;
     const bounded = collectionEntries.slice(0, MAX_COLLECTIONS);
+    // Robinhood-Chain collections are bounded independently by
+    // fetchOwnedRobinhood itself (its own MAX_COLLECTIONS pass over
+    // listTrackedCollections) -- re-derive the maker-activity input from
+    // THAT same bounded set rather than `bounded` above, since `bounded`
+    // mixes both chains' entries under one shared cap and could otherwise
+    // starve Robinhood Chain out entirely on a wallet with many foreign
+    // holdings.
+    const robinhoodMakerCollections = [...distinctCollections.values()]
+      .filter((c) => c.chainSlug === "robinhood")
+      .map((c) => ({ contractAddress: c.contractAddress, name: c.collectionName }));
 
     let myListings: Array<{ chainSlug: string; collectionName: string | null; tokenId: string; priceWei: string }> = [];
     let offers: Array<{ chainSlug: string; collectionName: string | null; priceWei: string; maker: string }> = [];
@@ -146,8 +243,19 @@ export async function GET(req: NextRequest) {
         })
       );
       myListings = perCollection.flatMap((p) => p.mine);
-      offers = perCollection.flatMap((p) => p.bids).sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? 1 : -1));
+      offers = perCollection.flatMap((p) => p.bids);
     }
+
+    // Robinhood Chain never needs the OpenSea key gate the foreign branch
+    // above is wrapped in -- native orders come from our own store, not
+    // OpenSea -- so this runs unconditionally whenever the wallet holds any
+    // tracked Robinhood-Chain collection.
+    if (robinhoodMakerCollections.length > 0) {
+      const robinhood = await fetchRobinhoodMakerActivity(owner, robinhoodMakerCollections);
+      myListings = [...myListings, ...robinhood.myListings];
+      offers = [...offers, ...robinhood.offers];
+    }
+    offers = offers.sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? 1 : -1));
 
     return NextResponse.json(
       {
