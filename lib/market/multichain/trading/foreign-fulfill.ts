@@ -48,7 +48,11 @@
  */
 import { Contract, BrowserProvider } from "ethers";
 import { foreignChainByChainSlug, foreignFeeRouterAddress, foreignAcrossReceiverAddress, foreignDeBridgeExecutorAddress } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { findStablecoin } from "@/lib/market/multichain/trading/stablecoins";
 import { getEthereumProvider, ensureChain } from "@/lib/wallet";
+
+/** Minimal ERC20 surface needed to approve a stablecoin spend before a cross-chain deposit -- both SpokePool.depositV3 and deBridge's DLN order pull the input token via transferFrom, which requires this first. */
+const ERC20_APPROVE_ABI = ["function approve(address spender, uint256 amount) external returns (bool)"];
 
 /** Mirrors foreign-orders.ts's ForeignSeaportOrder shape -- redeclared here rather than imported, since importing that module's types would pull the whole (server-only) module along with them under some bundler configurations. */
 type ForeignSeaportOrderParameters = {
@@ -282,8 +286,24 @@ export async function buyCrossChainViaAcross(input: {
   originChainId: number;
   destinationChainSlug: string;
   orderHash: string;
-  /** What the buyer is willing to pay on the origin chain, in wei -- must exceed the order price by enough to cover Across's relayer fee; across-quote.ts's own check will reject an insufficient amount rather than silently under-quoting. */
+  /** What the buyer is willing to pay on the origin chain, in the input token's own smallest unit -- must exceed the order price by enough to cover Across's relayer fee; across-quote.ts's own check will reject an insufficient amount rather than silently under-quoting. */
   inputAmountWei: string;
+  /**
+   * "USDC" | "USDT" to pay with a real, live-verified stablecoin instead
+   * of the origin chain's wrapped-native token (see stablecoins.ts).
+   * REAL GAP FOUND AND FIXED, 2026-08-18: this parameter existed on
+   * across-quote.ts's own quoteCrossChainPurchase() and on the API route,
+   * but was never threaded through from here -- meaning the stablecoin
+   * payment path was unreachable from any real caller even though every
+   * layer beneath it was built and address-verified. Also fixed here: an
+   * ERC20 deposit needs the SpokePool to be pre-approved to pull
+   * `inputAmount` (standard transferFrom pattern) and must NOT attach a
+   * native `value` -- the original code always attached
+   * `{value: input.inputAmountWei}` unconditionally, which would have
+   * sent a stablecoin's raw integer amount as real ETH value the moment
+   * this path was ever actually reached.
+   */
+  inputCurrency?: "USDC" | "USDT";
 }): Promise<AcrossPurchaseResult> {
   const receiverAddress = foreignAcrossReceiverAddress(input.destinationChainSlug);
   if (!receiverAddress) {
@@ -316,6 +336,7 @@ export async function buyCrossChainViaAcross(input: {
       orderHash: input.orderHash,
       recipient: buyerAddress,
       inputAmount: input.inputAmountWei,
+      inputCurrency: input.inputCurrency,
     }),
   });
   if (!res.ok) {
@@ -323,6 +344,14 @@ export async function buyCrossChainViaAcross(input: {
     throw new Error(body.error ?? `Failed to build cross-chain quote (${res.status})`);
   }
   const { deposit } = (await res.json()) as { deposit: Record<string, unknown> };
+
+  if (input.inputCurrency) {
+    const stable = findStablecoin(input.originChainId, input.inputCurrency);
+    if (!stable) throw new Error(`foreign-fulfill: no verified ${input.inputCurrency} address for chain ${input.originChainId}`);
+    const token = new Contract(stable.address, ERC20_APPROVE_ABI, signer);
+    const approveTx = await token.approve(deposit.spokePoolAddress as string, deposit.inputAmount as string);
+    await approveTx.wait();
+  }
 
   const spokePool = new Contract(deposit.spokePoolAddress as string, SPOKE_POOL_ABI, signer);
   const tx = await spokePool.depositV3(
@@ -338,7 +367,11 @@ export async function buyCrossChainViaAcross(input: {
     deposit.fillDeadline,
     deposit.exclusivityParameter,
     deposit.message,
-    { value: input.inputAmountWei }
+    // Native `value` only when paying with the wrapped-native placeholder
+    // -- an ERC20/stablecoin deposit is pulled via transferFrom (the
+    // approve() above), attaching value there would be a real fund-safety
+    // bug (sending unintended native ETH on top of the ERC20 pull).
+    input.inputCurrency ? {} : { value: input.inputAmountWei }
   );
   await tx.wait();
   return { txHash: tx.hash };
@@ -363,6 +396,8 @@ export async function buyCrossChainViaDeBridge(input: {
   destinationChainSlug: string;
   orderHash: string;
   inputAmountWei: string;
+  /** "USDC" | "USDT" on BNB Chain -- see buyCrossChainViaAcross's identical parameter for the full writeup on why this was previously unreachable dead code. */
+  inputCurrency?: "USDC" | "USDT";
 }): Promise<AcrossPurchaseResult> {
   const executorAddress = foreignDeBridgeExecutorAddress(input.destinationChainSlug);
   if (!executorAddress) {
@@ -396,6 +431,7 @@ export async function buyCrossChainViaDeBridge(input: {
       recipient: senderAddress,
       senderAddress,
       inputAmountWei: input.inputAmountWei,
+      inputCurrency: input.inputCurrency,
     }),
   });
   if (!res.ok) {
@@ -403,6 +439,19 @@ export async function buyCrossChainViaDeBridge(input: {
     throw new Error(body.error ?? `Failed to build deBridge quote (${res.status})`);
   }
   const { tx } = (await res.json()) as { tx: { to: string; data: string; value: string } };
+
+  if (input.inputCurrency) {
+    const BNB_CHAIN_ID_FOR_STABLE = 56;
+    const stable = findStablecoin(BNB_CHAIN_ID_FOR_STABLE, input.inputCurrency);
+    if (!stable) throw new Error(`foreign-fulfill: no verified ${input.inputCurrency} address for BNB Chain`);
+    // Approve the exact contract deBridge's own API told us to call (tx.to,
+    // the "Crosschain Forwarder Proxy") -- the standard integration pattern
+    // for any aggregator that returns ready-to-send calldata: approve the
+    // spender you are about to invoke, not a guessed/hardcoded address.
+    const token = new Contract(stable.address, ERC20_APPROVE_ABI, signer);
+    const approveTx = await token.approve(tx.to, input.inputAmountWei);
+    await approveTx.wait();
+  }
 
   const txResponse = await signer.sendTransaction({ to: tx.to, data: tx.data, value: tx.value });
   await txResponse.wait();

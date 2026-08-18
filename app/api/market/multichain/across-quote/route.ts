@@ -27,6 +27,8 @@ export async function POST(req: NextRequest) {
       orderHash?: string;
       recipient?: string;
       inputAmount?: string;
+      /** "USDC" | "USDT" -- pay with a stablecoin instead of the origin chain's wrapped-native token. Omit for the original wrapped-native behavior. */
+      inputCurrency?: "USDC" | "USDT";
     };
     if (
       !body.originChainId ||
@@ -41,6 +43,9 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    if (body.inputCurrency && body.inputCurrency !== "USDC" && body.inputCurrency !== "USDT") {
+      return NextResponse.json({ error: 'inputCurrency must be "USDC" or "USDT" when provided' }, { status: 400 });
+    }
     const quote = await quoteCrossChainPurchase({
       originChainId: body.originChainId,
       destinationChainSlug: body.destinationChainSlug,
@@ -49,6 +54,7 @@ export async function POST(req: NextRequest) {
       fulfillerAddress: body.receiverAddress,
       recipient: body.recipient,
       inputAmount: body.inputAmount,
+      inputCurrency: body.inputCurrency,
     });
     return NextResponse.json(quote, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
