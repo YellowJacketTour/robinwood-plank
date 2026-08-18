@@ -68,6 +68,7 @@ contract PlankDerby is ReentrancyGuard, PullPayment {
     error TooLate();
     error AlreadyBet();
     error NoBet();
+    error ZeroAddress();
     error BadHorse();
     error AlreadyRegistered();
     error AlreadyClaimed();
@@ -86,6 +87,7 @@ contract PlankDerby is ReentrancyGuard, PullPayment {
         uint256 _maxStakePerWalletBps,
         address _treasury
     ) {
+        if (_treasury == address(0)) revert ZeroAddress();
         bettingDurationSeconds = _bettingDurationSeconds;
         revealDelayBlocks = _revealDelayBlocks;
         registrationWindowBlocks = _registrationWindowBlocks;

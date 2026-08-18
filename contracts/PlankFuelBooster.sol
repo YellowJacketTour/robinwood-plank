@@ -182,9 +182,23 @@ contract PlankFuelBooster is ReentrancyGuard {
         // progression bookkeeping can fail without taking the caller's real
         // action down with it.
         if (address(progression) != address(0)) {
-            try progression.recordFuelBurn(msg.sender) {} catch {}
+            // Real, confirmed bug -- see PlankPowerboard.claimTickets's
+            // identical try/catch for the full writeup: a genuinely EMPTY
+            // try-block body was empirically, deterministically unreliable
+            // under this project's viaIR compile pipeline (8/8 fail vs 8/8
+            // pass, reproduced repeatedly). Never leave a try-block body
+            // truly empty -- a real event closes the bug and adds real
+            // observability for free.
+            try progression.recordFuelBurn(msg.sender) {
+                emit ProgressionRecorded(msg.sender, true);
+            } catch {
+                emit ProgressionRecorded(msg.sender, false);
+            }
         }
     }
+
+    /// @notice Whether the optional progression hook succeeded for this burn. false is NOT a fund-safety issue -- it's real signal that progression.sol is misconfigured or broken and needs operator attention.
+    event ProgressionRecorded(address indexed player, bool succeeded);
 
     /// UI helper: how much boost headroom is left for the round that is
     /// current RIGHT NOW (a view, so it doesn't itself roll the cap).

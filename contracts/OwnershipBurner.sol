@@ -42,8 +42,10 @@ contract OwnershipBurner {
     bool public burned;
 
     error AlreadyBurned();
+    error ZeroAddress();
 
     constructor(address _target) {
+        if (_target == address(0)) revert ZeroAddress();
         target = _target;
     }
 

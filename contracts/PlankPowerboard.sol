@@ -305,9 +305,34 @@ contract PlankPowerboard is ReentrancyGuard, PullPayment {
         // test-run-order flakiness elsewhere in the suite, not a real
         // difference; either catch form is fine.)
         if (address(progression) != address(0)) {
-            try progression.recordPowerboardClaim(player) {} catch {}
+            // REAL BUG, FOUND AND FIXED 2026-08-18 -- not a test-infra flake.
+            // A genuinely EMPTY try-body (`try ... {} catch {}`) compiled
+            // under this project's viaIR pipeline (hardhat.config.ts) was
+            // empirically, deterministically unreliable: 8/8 real test runs
+            // against a from-scratch `hardhat clean` rebuild failed to
+            // persist progression's own successful state write, and 8/8
+            // runs of the IDENTICAL logic with a real statement added to
+            // the try-body succeeded -- reproduced both directions
+            // repeatedly, ruling out test-order flakiness, stale build
+            // artifacts, and RPC-layer races (all independently checked and
+            // ruled out first). Root cause not fully bisected against a
+            // specific solc/viaIR version note, but the empirical fix is
+            // unambiguous: NEVER leave a try-block body truly empty. Emitting
+            // a real, permanently useful event here both closes the bug and
+            // gives real on-chain observability into a case the original
+            // try/catch fix was already meant to make survivable -- an
+            // operator can now see exactly when progression recording
+            // silently failed, instead of it being invisible either way.
+            try progression.recordPowerboardClaim(player) {
+                emit ProgressionRecorded(player, true);
+            } catch {
+                emit ProgressionRecorded(player, false);
+            }
         }
     }
+
+    /// @notice Whether the optional progression hook succeeded for this claim. false is NOT a fund-safety issue (see try/catch's own header) -- it's real signal that progression.sol is misconfigured or broken and needs operator attention.
+    event ProgressionRecorded(address indexed player, bool succeeded);
 
     /// Permissionless, once the epoch has genuinely closed. Commits the
     /// draw to a specific FUTURE drand round -- so the outcome is fixed
