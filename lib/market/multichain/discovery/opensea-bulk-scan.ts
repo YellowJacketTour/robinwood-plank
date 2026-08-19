@@ -210,10 +210,11 @@ export async function runOpenSeaBulkScan(
   return result;
 }
 
-/** Runs runOpenSeaBulkScan for every real registered foreign EVM chain, sequentially (same rate-limit discipline runAllEvmDiscoveryScans already uses). */
+/** Runs runOpenSeaBulkScan for every real registered foreign EVM chain WITH an OpenSea integration, sequentially (same rate-limit discipline runAllEvmDiscoveryScans already uses). Chains with no OpenSea orderbook (zkSync today, openSeaChain: null) are skipped entirely -- this scan IS the OpenSea-sourced discovery path, nothing to run there. */
 export async function runAllOpenSeaBulkScans(input: { maxPages?: number } = {}): Promise<OpenSeaBulkScanResult[]> {
   const results: OpenSeaBulkScanResult[] = [];
   for (const chain of FOREIGN_CHAINS) {
+    if (!chain.openSeaChain) continue;
     results.push(
       await runOpenSeaBulkScan({
         chainSlug: chain.chainSlug,

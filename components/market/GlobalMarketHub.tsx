@@ -257,6 +257,7 @@ const ALL_CHAIN_SLUGS_ORDER = [
   "arb-mainnet",
   "opt-mainnet",
   "avax-mainnet",
+  "zksync-mainnet",
 ];
 
 /**

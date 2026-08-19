@@ -26,41 +26,40 @@
  * all, only per-chain identity (chainId, RPC, and OpenSea's own chain slug
  * for pulling that chain's real orders).
  *
- * ZKSYNC IS DELIBERATELY EXCLUDED, ON PURPOSE, FOR NOW
+ * ZKSYNC: NATIVE TRADING YES, OPENSEA ORDERBOOK NO
  * ---------------------------------------------------------
  * Confirmed live 2026-08-17: OpenSea's API returns
  * {"errors":["Unrecognized chain: zksync"]} for every slug spelling tried
- * (zksync, zksync-era, zksync_era). Seaport itself IS deployed there (see
- * above), but there is no confirmed free/real order-sourcing path for it,
- * so it is excluded here rather than silently included with no orders ever
- * resolving. It remains fully covered by the READ-ONLY multichain indexer
- * (lib/market/multichain/adapters/alchemy-nft.ts +
- * discovery/evm-log-scan.ts) -- only trading is affected.
+ * (zksync, zksync-era, zksync_era) -- there is still no confirmed free/real
+ * OpenSea order-sourcing path for it. That USED to mean zkSync was excluded
+ * from this whole registry, blocking Marketplank's OWN native listings too
+ * even though native trading never touches OpenSea's API at all -- it's
+ * this app's own signed Seaport orders, stored and served without any
+ * third party. Flagged live 2026-08-19 ("as inclusive as possible unifying
+ * our project scope"): that was an unnecessary coupling, not a real
+ * requirement. Fixed by making `openSeaChain` nullable (see the type's own
+ * doc comment) -- zkSync now has a real FOREIGN_CHAINS entry with
+ * openSeaChain: null, native listings/offers/bundles work there exactly
+ * like every other foreign chain, and every OpenSea-orderbook consumer of
+ * this registry (foreign-orders.ts, foreign-offer.ts, the multichain
+ * listings/offers/activity/my-listings/wallet-summary API routes,
+ * opensea-bulk-scan.ts, rarity-index-runner.ts) treats a null
+ * openSeaChain as "skip OpenSea for this chain" and degrades to an
+ * empty/native-only result rather than calling OpenSea with a chain slug
+ * it has already confirmed it doesn't recognize.
  *
- * THE FUTURE-INCLUSION PATH -- WHY THIS IS SAFE TO ADD LATER
+ * THE CROSS-CHAIN ROUTER PATH -- STILL FUTURE WORK, UNCHANGED BY THIS
  * -----------------------------------------------------------------
  * None of MarketplankForeignFeeRouter.sol, MarketplankAcrossReceiver.sol,
  * or MarketplankDeBridgeExecutor.sol contain ANY chain-specific logic --
  * every chain identity (Seaport address, wrapped-native-token address,
  * SpokePool/adapter address) is a constructor argument, not a hardcoded
- * constant. Adding zkSync later, once/if a real order-sourcing path exists
- * for it, is purely additive:
- *   1. Add a FOREIGN_CHAINS entry here (chainId 324, openSeaChain once a
- *      real one exists -- see evm-log-scan.ts's EVM_CHAIN_ID for the
- *      already-confirmed chainId).
- *   2. Deploy the SAME, already-audited-by-this-process contract source to
- *      zkSync with zkSync-specific constructor args (zkSync Era uses its
- *      own zksolc compiler toolchain, not vanilla solc -- the Solidity
- *      SOURCE is unchanged, but it needs a real zkSync-specific compile +
- *      deploy + verify pass of its own, not just an address added to a
- *      registry).
- *   3. Add the resulting real addresses to
- *      FOREIGN_FEE_ROUTER_ADDRESS/FOREIGN_ACROSS_RECEIVER_ADDRESS/
- *      FOREIGN_DEBRIDGE_EXECUTOR_ADDRESS below.
- * Nothing about steps 1-3 requires touching, redeploying, or re-auditing
- * any chain already live -- each chain's router/receiver/executor is an
- * independent deployment of the same source, not a shared or upgradeable
- * contract other chains depend on.
+ * constant. None of them are deployed to zkSync yet (every
+ * FOREIGN_FEE_ROUTER_ADDRESS/etc. entry for it is null below, same as
+ * every other chain -- these contracts are undeployed everywhere, out of
+ * scope for this pass), and doing so needs a real zkSync-specific compile
+ * (zksolc, not vanilla solc) + deploy + verify pass of its own, not just an
+ * address added to a registry.
  */
 
 import { ALCHEMY_NETWORK_SUBDOMAIN, apiKey } from "@/lib/market/multichain/adapters/alchemy-nft";
@@ -69,8 +68,18 @@ export type ForeignChainConfig = {
   /** Matches lib/market/multichain's chainSlug convention (e.g. alchemy-nft.ts). */
   chainSlug: string;
   chainId: number;
-  /** OpenSea's own chain identifier for this chain -- confirmed live, NOT always the obvious name (Polygon is "matic", BNB Chain is "bsc"). */
-  openSeaChain: string;
+  /**
+   * OpenSea's own chain identifier for this chain -- confirmed live, NOT
+   * always the obvious name (Polygon is "matic", BNB Chain is "bsc").
+   * NULL for a chain with no confirmed OpenSea order-sourcing path (zkSync
+   * today -- see its own FOREIGN_CHAINS entry). Every call site that reads
+   * this field MUST treat null as "skip OpenSea for this chain, real
+   * orders just don't come from there" and degrade to an empty/partial
+   * result, never throw -- Marketplank's OWN native listings (this app's
+   * signed Seaport orders, stored and served without OpenSea at all) are
+   * unaffected either way, since that pathway never reads this field.
+   */
+  openSeaChain: string | null;
   /** Real native gas-token symbol -- NOT "ETH" for every chain (Polygon's is POL/MATIC, BNB Chain's is BNB, Avalanche's is AVAX). Used for wallet_addEthereumChain's nativeCurrency field. */
   nativeCurrencySymbol: string;
   /** Real block explorer origin, for wallet_addEthereumChain's blockExplorerUrls. */
@@ -89,7 +98,15 @@ export const FOREIGN_CHAINS: ForeignChainConfig[] = [
   { chainSlug: "opt-mainnet", chainId: 10, openSeaChain: "optimism", nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://optimistic.etherscan.io" },
   { chainSlug: "bnb-mainnet", chainId: 56, openSeaChain: "bsc", nativeCurrencySymbol: "BNB", blockExplorerUrl: "https://bscscan.com" },
   { chainSlug: "avax-mainnet", chainId: 43114, openSeaChain: "avalanche", nativeCurrencySymbol: "AVAX", blockExplorerUrl: "https://snowtrace.io" },
-  // zksync-mainnet deliberately omitted -- see header comment.
+  // zkSync Era -- native trading only (openSeaChain: null), see this
+  // file's own header ("ZKSYNC IS DELIBERATELY EXCLUDED" section, now
+  // superseded: it's included for Marketplank-native listings, which never
+  // read openSeaChain, while every OpenSea-orderbook consumer of this
+  // registry treats null as "no orders from there" and degrades cleanly).
+  // Confirmed live 2026-08-19: real Seaport bytecode + name() returning
+  // "Seaport" at the canonical address on chainId 324 via Alchemy's
+  // zksync-mainnet RPC (already in ALCHEMY_NETWORK_SUBDOMAIN).
+  { chainSlug: "zksync-mainnet", chainId: 324, openSeaChain: null, nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://explorer.zksync.io" },
 ];
 
 export function foreignChainByChainSlug(chainSlug: string): ForeignChainConfig | null {
@@ -212,6 +229,8 @@ const FOREIGN_OFFER_CURRENCY: Record<string, string> = {
   "opt-mainnet": "0x4200000000000000000000000000000000000006",
   "bnb-mainnet": "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
   "avax-mainnet": "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7",
+  // Confirmed live 2026-08-19 via eth_call name() -> "Wrapped Ether".
+  "zksync-mainnet": "0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91",
 };
 
 export function foreignOfferCurrency(chainSlug: string): string | null {

@@ -268,9 +268,15 @@ export async function GET(req: NextRequest) {
     // the real, live-confirmed silent-empty-page bug this fixes. A
     // slug-shaped param (already resolved, e.g. from a search box) passes
     // through unresolved.
-    const openSeaSlug = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug)
-      ? ((await resolveOpenSeaCollectionSlug(chain.openSeaChain, collectionSlug)) ?? collectionSlug)
-      : collectionSlug;
+    // No OpenSea orderbook for this chain (zkSync today) -- there's no
+    // OpenSea slug to resolve; fetchForeignAllListings below already
+    // returns [] for this case, so the rest of this route degrades
+    // naturally (empty orders, collection metadata falls back to the raw
+    // address) rather than needing a separate early return here.
+    const openSeaSlug =
+      chain.openSeaChain && /^0x[0-9a-fA-F]{40}$/.test(collectionSlug)
+        ? ((await resolveOpenSeaCollectionSlug(chain.openSeaChain, collectionSlug)) ?? collectionSlug)
+        : collectionSlug;
 
     const [rawOrders, collectionMeta] = await Promise.all([
       fetchForeignAllListings({ chainSlug, collectionSlug: openSeaSlug, limit }),
@@ -315,7 +321,7 @@ export async function GET(req: NextRequest) {
     // broken for Polygon, but the alias makes the FIRST match correct
     // instead of silently falling through.
     const chainAliases: Record<string, string[]> = { matic: ["matic", "polygon"] };
-    const acceptableChainValues = chainAliases[chain.openSeaChain] ?? [chain.openSeaChain];
+    const acceptableChainValues = chain.openSeaChain ? (chainAliases[chain.openSeaChain] ?? [chain.openSeaChain]) : [];
     const contractAddress =
       collectionMeta?.contracts?.find((c) => acceptableChainValues.includes(c.chain))?.address ??
       collectionMeta?.contracts?.[0]?.address ??

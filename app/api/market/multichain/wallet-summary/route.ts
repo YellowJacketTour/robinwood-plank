@@ -205,6 +205,10 @@ export async function GET(req: NextRequest) {
         bounded.map(async (c) => {
           if (!foreignChainByChainSlug(c.chainSlug)) return null;
           const chain = foreignChainByChainSlug(c.chainSlug)!;
+          // No OpenSea orderbook for this chain (zkSync today) -- would
+          // otherwise silently degrade to a doomed `/chain/null/contract/...`
+          // request; skip explicitly instead of wasting the round trip.
+          if (!chain.openSeaChain) return null;
           try {
             const res = await fetch(`${OPENSEA}/chain/${chain.openSeaChain}/contract/${c.contractAddress}`, {
               headers: { "x-api-key": key, accept: "application/json" },

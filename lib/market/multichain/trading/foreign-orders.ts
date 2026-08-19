@@ -176,6 +176,13 @@ export async function fetchListingFulfillmentData(input: {
   if (!chain) {
     throw new Error(`foreign-orders: "${input.chainSlug}" is not in FOREIGN_CHAINS (see foreign-chain-registry.ts)`);
   }
+  // A null openSeaChain (zkSync today) means OpenSea has no orders for this
+  // chain at all, so an order hash claiming to be fulfillable here can only
+  // be a caller bug upstream -- fail loudly rather than call OpenSea with
+  // a chain slug it has already confirmed it doesn't recognize.
+  if (!chain.openSeaChain) {
+    throw new Error(`foreign-orders: "${input.chainSlug}" has no OpenSea orderbook -- cannot fulfill an OpenSea order hash on this chain.`);
+  }
   const result = await openSeaPost<{
     fulfillment_data: {
       orders: Array<{ parameters: SeaportOrderParameters; signature: string }>;
@@ -209,6 +216,11 @@ export async function fetchBestForeignListing(input: {
   if (!chain) {
     throw new Error(`foreign-orders: "${input.chainSlug}" is not in FOREIGN_CHAINS (see foreign-chain-registry.ts)`);
   }
+  // No OpenSea orderbook for this chain (zkSync today) -- "no listings from
+  // there" is the correct, expected answer, not an error. Marketplank's own
+  // native listings (a completely separate pathway, see native-orders/
+  // route.ts) are unaffected.
+  if (!chain.openSeaChain) return null;
   const result = await openSeaFetch<{
     listings: Array<{
       order_hash: string;
@@ -276,6 +288,10 @@ async function listingsRequest(chainSlug: string, collectionSlug: string, extraP
   if (!chain) {
     throw new Error(`foreign-orders: "${chainSlug}" is not in FOREIGN_CHAINS (see foreign-chain-registry.ts)`);
   }
+  // Covers fetchForeignFloorListings and fetchForeignTraitFilteredListings
+  // too, both of which route through this function -- same "no OpenSea
+  // orderbook here" degrade as fetchBestForeignListing above.
+  if (!chain.openSeaChain) return [];
   const result = await openSeaFetch<{
     listings: Array<{
       order_hash: string;
@@ -331,6 +347,7 @@ export async function fetchForeignAllListings(input: {
   if (!chain) {
     throw new Error(`foreign-orders: "${input.chainSlug}" is not in FOREIGN_CHAINS (see foreign-chain-registry.ts)`);
   }
+  if (!chain.openSeaChain) return [];
   const result = await openSeaFetch<{
     listings: Array<{
       order_hash: string;
@@ -363,6 +380,7 @@ export async function fetchForeignCollectionOffers(input: {
   if (!chain) {
     throw new Error(`foreign-orders: "${input.chainSlug}" is not in FOREIGN_CHAINS (see foreign-chain-registry.ts)`);
   }
+  if (!chain.openSeaChain) return [];
   const result = await openSeaFetch<{
     offers: Array<{
       order_hash: string;
@@ -395,6 +413,7 @@ export async function fetchForeignTraitOffers(input: {
   if (!chain) {
     throw new Error(`foreign-orders: "${input.chainSlug}" is not in FOREIGN_CHAINS (see foreign-chain-registry.ts)`);
   }
+  if (!chain.openSeaChain) return [];
   const result = await openSeaFetch<{
     offers: Array<{
       order_hash: string;

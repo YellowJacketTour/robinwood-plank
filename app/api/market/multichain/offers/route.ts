@@ -112,9 +112,12 @@ export async function GET(req: NextRequest) {
     // See resolveOpenSeaCollectionSlug's header (foreign-orders.ts) --
     // every card links here with a contract address, but OpenSea's
     // /offers/collection/{slug} endpoint needs OpenSea's own slug.
-    const openSeaSlug = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug)
-      ? ((await resolveOpenSeaCollectionSlug(chain.openSeaChain, collectionSlug)) ?? collectionSlug)
-      : collectionSlug;
+    // No OpenSea orderbook for this chain (zkSync today) -- fetchForeignCollectionOffers
+    // already returns [] for that case, so this just skips the pointless slug resolve.
+    const openSeaSlug =
+      chain.openSeaChain && /^0x[0-9a-fA-F]{40}$/.test(collectionSlug)
+        ? ((await resolveOpenSeaCollectionSlug(chain.openSeaChain, collectionSlug)) ?? collectionSlug)
+        : collectionSlug;
     const orders = await fetchForeignCollectionOffers({ chainSlug, collectionSlug: openSeaSlug, limit });
     const rawOffers = orders
       .map((o) => {

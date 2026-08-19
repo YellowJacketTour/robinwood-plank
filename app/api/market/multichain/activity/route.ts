@@ -205,6 +205,13 @@ export async function GET(req: NextRequest) {
     // every card links here with a contract address, but OpenSea's
     // /events/collection/{slug} endpoint needs OpenSea's own slug.
     const chainForSlug = foreignChainByChainSlug(chainSlug)!;
+    // No OpenSea orderbook for this chain (zkSync today) -- there is no
+    // OpenSea activity to fetch, so an empty feed is the correct, expected
+    // answer, not an error. Marketplank's own native-order activity is a
+    // separate concern this route was never wired to anyway.
+    if (!chainForSlug.openSeaChain) {
+      return NextResponse.json({ events: [] }, { headers: { "Cache-Control": "no-store" } });
+    }
     const openSeaSlug = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug)
       ? ((await resolveOpenSeaCollectionSlug(chainForSlug.openSeaChain, collectionSlug)) ?? collectionSlug)
       : collectionSlug;

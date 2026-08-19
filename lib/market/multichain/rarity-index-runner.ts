@@ -27,6 +27,13 @@ export type IndexRunResult = {
 export async function indexForeignCollectionRarity(chainSlug: string, collectionSlug: string): Promise<IndexRunResult> {
   const chain = foreignChainByChainSlug(chainSlug);
   if (!chain) throw new Error(`"${chainSlug}" is not in FOREIGN_CHAINS.`);
+  // This whole runner scrapes OpenSea's own metadata/rarity -- meaningless
+  // for a chain with no OpenSea integration (zkSync today). Callers must
+  // filter these out before reaching here; see scaffoldAllTrackedCollections's
+  // own openSeaChain filter below.
+  if (!chain.openSeaChain) {
+    throw new Error(`"${chainSlug}" has no OpenSea orderbook -- rarity indexing needs an OpenSea collection slug.`);
+  }
   const key = await getOpenSeaApiKey();
   if (!key) throw new Error("No OpenSea API key available.");
 
@@ -164,6 +171,8 @@ export type ScaffoldAllResult = {
   totalTracked: number;
   evmInScope: number;
   solanaSkipped: number;
+  /** EVM chains this app trades on natively but with no OpenSea integration to scrape (zkSync today) -- distinct from solanaSkipped, which is non-EVM entirely. */
+  noOpenSeaSkipped: number;
   indexed: number;
   skippedFresh: number;
   failed: number;
@@ -196,11 +205,22 @@ export async function scaffoldAllTrackedCollections(opts?: {
 
   const all = await listTrackedCollections();
   const solana = all.filter((c) => !foreignChainByChainSlug(c.chainSlug));
-  const evm = all.filter((c) => foreignChainByChainSlug(c.chainSlug)).slice(0, limit);
+  // Also excludes chains with no OpenSea integration (zkSync today,
+  // openSeaChain: null) -- this entire runner is OpenSea metadata/rarity
+  // scraping, meaningless without an OpenSea collection slug to resolve.
+  // Logged as its own count, not folded into `solana`, since it's a real,
+  // distinct reason: these ARE EVM chains this app trades on natively,
+  // just not through OpenSea's orderbook.
+  const evm = all.filter((c) => foreignChainByChainSlug(c.chainSlug)?.openSeaChain).slice(0, limit);
+  const noOpenSeaChain = all.filter((c) => foreignChainByChainSlug(c.chainSlug) && !foreignChainByChainSlug(c.chainSlug)?.openSeaChain);
 
   let indexed = 0;
   let skippedFresh = 0;
   let failed = 0;
+  let skippedNoOpenSea = noOpenSeaChain.length;
+  for (const c of noOpenSeaChain) {
+    log(`SKIP ${c.chainSlug}:${c.contractAddress} -- no OpenSea orderbook for this chain`);
+  }
 
   for (const c of evm) {
     const slug = await resolveOpenSeaSlug(c.chainSlug, c.contractAddress, key).catch(() => null);
@@ -233,5 +253,13 @@ export async function scaffoldAllTrackedCollections(opts?: {
     await sleep(delayMs);
   }
 
-  return { totalTracked: all.length, evmInScope: evm.length, solanaSkipped: solana.length, indexed, skippedFresh, failed };
+  return {
+    totalTracked: all.length,
+    evmInScope: evm.length,
+    solanaSkipped: solana.length,
+    noOpenSeaSkipped: skippedNoOpenSea,
+    indexed,
+    skippedFresh,
+    failed,
+  };
 }

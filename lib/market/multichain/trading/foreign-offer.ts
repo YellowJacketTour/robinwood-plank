@@ -94,6 +94,16 @@ export async function buildForeignOffer(input: {
   if (input.tokenId && input.criteriaTokenIds) {
     throw new Error("An offer cannot be both single-token and trait-scoped.");
   }
+  // This function submits to OpenSea's own orderbook specifically -- fail
+  // BEFORE signing anything for a chain with no OpenSea integration
+  // (zkSync today), rather than build and sign an order that can never be
+  // submitted anywhere. Marketplank's own native offers (a separate
+  // pathway, lib/market/multichain/trading/native-fulfill.ts) work on this
+  // chain regardless.
+  const openSeaChain = foreignChainByChainSlug(input.chainSlug)?.openSeaChain;
+  if (!openSeaChain) {
+    throw new Error(`foreign-offer: "${input.chainSlug}" has no OpenSea orderbook -- use a native offer instead.`);
+  }
   const currency = foreignOfferCurrency(input.chainSlug);
   if (!currency) {
     throw new Error(`foreign-offer: no offer currency configured for "${input.chainSlug}".`);

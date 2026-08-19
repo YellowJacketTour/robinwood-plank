@@ -31,6 +31,12 @@ export async function POST(req: NextRequest) {
     if (!chain) {
       return NextResponse.json({ error: `"${body.chainSlug}" is not a supported foreign chain` }, { status: 400 });
     }
+    // No OpenSea orderbook for this chain (zkSync today) -- an order hash
+    // claiming to be fulfillable here can only be a caller bug, since no
+    // OpenSea order could ever legitimately reference this chain.
+    if (!chain.openSeaChain) {
+      return NextResponse.json({ error: `"${body.chainSlug}" has no OpenSea orderbook.` }, { status: 400 });
+    }
 
     const key = await getOpenSeaApiKey();
     if (!key) {
