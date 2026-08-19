@@ -77,6 +77,7 @@ const explicit = [
   "--multichain",
   "--discover-evm",
   "--discover-hypersync",
+  "--discover-hypersync-backfill",
   "--discover-robinhood",
   "--discover-robinhood-opensea",
   "--discover-opensea-bulk",
@@ -99,8 +100,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -440,6 +441,35 @@ async function main(): Promise<void> {
         ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
         : `${r.chainSlug}: blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidates} candidates, ${r.skippedNoMetadata} no-metadata, ${r.logsScanned} logs)`
     );
+    return parts.join("; ");
+  });
+
+  // Historical backfill -- see runHypersyncBackfillScan's own header for
+  // why this is a genuinely separate function from discover-hypersync
+  // above, not just "run it with different bounds": forward discovery can
+  // never reach anything before the moment it first started, so this
+  // covers [0, that starting point) instead, genesis-forward, gap-free by
+  // construction. Runs on every incremental tick (cheap once a chain
+  // reports done: true -- one no-op read per tick after that), not just
+  // --full, so real backfill progress accumulates continuously.
+  await step("discover-hypersync-backfill", async () => {
+    const { runHypersyncBackfillScan } = await import("../lib/market/multichain/discovery/hypersync-evm-scan");
+    const { EVM_CHAIN_ID } = await import("../lib/market/multichain/discovery/evm-log-scan");
+    const parts: string[] = [];
+    for (const chainSlug of Object.keys(EVM_CHAIN_ID)) {
+      try {
+        const r = await runHypersyncBackfillScan({ chainSlug });
+        parts.push(
+          r.error
+            ? `${chainSlug}: ERR(${r.error.slice(0, 60)})`
+            : r.done
+              ? `${chainSlug}: DONE (full history covered)`
+              : `${chainSlug}: blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidates} candidates, ${r.skippedNoMetadata} no-metadata, ${r.logsScanned} logs)`
+        );
+      } catch (error) {
+        parts.push(`${chainSlug}: ERR(${(error instanceof Error ? error.message : String(error)).slice(0, 60)})`);
+      }
+    }
     return parts.join("; ");
   });
 

@@ -191,6 +191,134 @@ export async function runHypersyncDiscoveryScan(input: {
   return { chainSlug: input.chainSlug, fromBlock, toBlock: lastBlockSeen - 1, logsScanned, candidates: candidates.length, registered, skippedNoMetadata };
 }
 
+/**
+ * Historical backfill -- walks the range runHypersyncDiscoveryScan will
+ * NEVER reach: [0, whatever block forward discovery first started from).
+ *
+ * Real gap this closes: runHypersyncDiscoveryScan's cursor starts at
+ * `height - CHUNK_BLOCKS` on its very first call and only ever moves
+ * forward from there -- it catches new activity but can never reach
+ * anything that happened before the moment discovery was first turned on.
+ * Flagged live 2026-08-20 ("discover absolutely everything") -- only a
+ * real walk through history can satisfy that.
+ *
+ * GENESIS-FORWARD BY DESIGN, NOT TIP-BACKWARD -- this is the one real
+ * correctness fix over an earlier draft of this function: a tip-backward
+ * walk with a fixed CHUNK_BLOCKS window and a hard per-call log cap can
+ * silently create a GAP (claim a whole window "covered" when the log cap
+ * cut the actual scan off partway through it, since HyperSync has no
+ * reverse mode for a bounded client.get() call -- confirmed against the
+ * real installed client's own index.d.ts; StreamConfig.reverse only
+ * applies to the streaming API, not this one-shot call). Scanning forward
+ * from a known-scanned floor and letting the query's own `maxNumLogs`
+ * report back exactly how far it got (`nextBlock`) has no such failure
+ * mode: whatever it returns IS what was covered, by construction, same
+ * invariant runHypersyncDiscoveryScan's own cursor already relies on.
+ *
+ * Own cursor, own key ("${chainSlug}:backfill" in the same cursor table,
+ * no migration needed). `done: true` once the scan reaches the forward
+ * scanner's own starting point -- that chain's full history is covered
+ * either by this function (below it) or the forward one (at and above
+ * it). Callers should stop invoking this for a chain once done.
+ */
+export async function runHypersyncBackfillScan(input: {
+  chainSlug: string;
+}): Promise<DiscoveryScanResult & { done: boolean }> {
+  const chainId = EVM_CHAIN_ID[input.chainSlug];
+  const backfillKey = `${input.chainSlug}:backfill`;
+  if (!chainId) {
+    return {
+      chainSlug: input.chainSlug,
+      fromBlock: 0,
+      toBlock: 0,
+      logsScanned: 0,
+      candidates: 0,
+      registered: 0,
+      skippedNoMetadata: 0,
+      done: false,
+      error: `hypersync-evm-scan: no chainId mapping for "${input.chainSlug}"`,
+    };
+  }
+
+  const apiToken = requireApiToken();
+  const client = new HypersyncClient({ url: hypersyncUrl(chainId), apiToken });
+
+  // The ceiling this function is responsible for: wherever forward
+  // discovery first started (never changes once set, since the forward
+  // scanner's own cursor moves past it immediately on its first run).
+  const forwardCursor = await readCursor(input.chainSlug);
+  const height = await client.getHeight();
+  const ceiling = forwardCursor ?? Math.max(0, height - CHUNK_BLOCKS);
+
+  // How far genesis-forward this function has already scanned. Starts at 0.
+  const scannedUpTo = (await readCursor(backfillKey)) ?? 0;
+
+  if (scannedUpTo >= ceiling) {
+    return { chainSlug: input.chainSlug, fromBlock: scannedUpTo, toBlock: ceiling, logsScanned: 0, candidates: 0, registered: 0, skippedNoMetadata: 0, done: true };
+  }
+
+  const tally = new Map<string, number>();
+  let logsScanned = 0;
+  let query: Query = {
+    fromBlock: scannedUpTo,
+    toBlock: ceiling,
+    logs: [{ topics: [[TRANSFER_TOPIC]] }],
+    fieldSelection: { log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "BlockNumber"] },
+    maxNumLogs: MAX_LOGS_PER_RUN,
+  };
+
+  let nextBlock = scannedUpTo;
+  while (logsScanned < MAX_LOGS_PER_RUN) {
+    const res = await client.get(query);
+    for (const log of res.data.logs) {
+      if (!log.address || log.topics.length !== 4) continue;
+      const key = log.address.toLowerCase();
+      tally.set(key, (tally.get(key) ?? 0) + 1);
+      logsScanned += 1;
+    }
+    nextBlock = res.nextBlock;
+    if (nextBlock >= ceiling || logsScanned >= MAX_LOGS_PER_RUN) break;
+    query = { ...query, fromBlock: nextBlock };
+  }
+
+  await recordActivity(input.chainSlug, tally);
+
+  const candidates = [...tally.entries()].filter(([, count]) => count >= MIN_TRANSFERS_TO_CONSIDER);
+
+  let registered = 0;
+  let skippedNoMetadata = 0;
+  try {
+    const snapshots = await fetchSnapshotsBatch(
+      input.chainSlug,
+      candidates.map(([contractAddress]) => contractAddress)
+    );
+    for (const [contractAddress] of candidates) {
+      const snapshot = snapshots.get(contractAddress.toLowerCase());
+      if (!snapshot || isNotRealCollectibleArt(snapshot.name, snapshot.imageUrl)) {
+        skippedNoMetadata += 1;
+        continue;
+      }
+      await upsertTrackedCollection({
+        chainSlug: input.chainSlug,
+        chainId: EVM_CHAIN_ID[input.chainSlug] ?? null,
+        contractAddress,
+        adapter: alchemyNftAdapter.name,
+        isVaultBacked: false,
+      });
+      registered += 1;
+    }
+  } catch {
+    skippedNoMetadata += candidates.length;
+  }
+
+  // nextBlock is exactly what HyperSync itself reports as covered -- no
+  // gap possible, unlike a precomputed window claimed complete regardless
+  // of whether the scan actually reached its far edge.
+  await writeCursor(backfillKey, nextBlock);
+  const done = nextBlock >= ceiling;
+  return { chainSlug: input.chainSlug, fromBlock: scannedUpTo, toBlock: nextBlock, logsScanned, candidates: candidates.length, registered, skippedNoMetadata, done };
+}
+
 /** Runs the HyperSync scan across every chain evm-log-scan.ts covers,
  * skipping (not throwing on) any chain HyperSync doesn't index -- same
  * fail-soft-per-chain posture runAllOpenSeaBulkScans already uses. */
