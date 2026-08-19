@@ -398,6 +398,28 @@ export const SEAPORT_VERSION = "1.6";
 export const MARKET_DEFAULT_FEE_BPS = 50; // 0.5%
 
 /**
+ * Marketplank's own fee on a NATIVE listing/offer created directly on a
+ * foreign EVM chain (baked into the order's own consideration array at
+ * listing time via seaport.ts's feesFor(), the same mechanism Robinhood
+ * Chain's own listings already use) -- NOT the same knob as
+ * MARKET_DEFAULT_FEE_BPS above, which stays 50/0.5% for Robinhood-chain
+ * collections with no explicit override. Set to undercut OpenSea's ~2.5%
+ * protocol fee, which is otherwise baked into every third-party listing
+ * this app displays/fulfills on those same chains and cannot be reduced
+ * (it's embedded in the seller's own signed order).
+ *
+ * NOTE: lib/market/multichain/trading/foreign-chain-registry.ts's
+ * FOREIGN_FEE_BPS is ALSO 180 -- a different mechanism entirely, a
+ * UI-display estimate for MarketplankForeignFeeRouter.sol's constructor
+ * argument (an undeployed, unrelated contract that would skim a fee at
+ * fulfillment time on top of a THIRD-PARTY OpenSea order). Do not import or
+ * alias one from the other -- they encode the same business decision (half
+ * of OpenSea's ~2.5%) independently for two unrelated fee-charging
+ * mechanisms, and must be free to diverge later without any coupling.
+ */
+export const MARKETPLANK_NATIVE_LISTING_FEE_BPS = 180; // 1.8%
+
+/**
  * Marketplank's dedicated treasury wallet — separate from SITE_FEE.recipient
  * (the Trade section's Uniswap integrator fee wallet). Every marketplace fee
  * and vault fee accrues here. Set 2026-07-27; keep this the single source of

@@ -21,7 +21,7 @@ import type { ChainAdapter, CollectionSnapshot } from "@/lib/market/multichain/t
  * needs a new line when Alchemy adds NFT API support for another chain --
  * everything else in this adapter is chain-agnostic.
  */
-const ALCHEMY_NETWORK_SUBDOMAIN: Record<string, string> = {
+export const ALCHEMY_NETWORK_SUBDOMAIN: Record<string, string> = {
   "eth-mainnet": "eth-mainnet",
   "polygon-mainnet": "polygon-mainnet",
   "arb-mainnet": "arb-mainnet",
@@ -35,7 +35,8 @@ const ALCHEMY_NETWORK_SUBDOMAIN: Record<string, string> = {
   "zksync-mainnet": "zksync-mainnet",
 };
 
-function apiKey(): string {
+/** Exported so other chain-aware callers (e.g. foreign-chain-registry.ts's foreignRpcUrls) can build an Alchemy URL for a different product path without duplicating the demo-key fallback. */
+export function apiKey(): string {
   return process.env.ALCHEMY_API_KEY?.trim() || "demo";
 }
 

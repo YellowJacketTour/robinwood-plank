@@ -63,6 +63,8 @@
  * contract other chains depend on.
  */
 
+import { ALCHEMY_NETWORK_SUBDOMAIN, apiKey } from "@/lib/market/multichain/adapters/alchemy-nft";
+
 export type ForeignChainConfig = {
   /** Matches lib/market/multichain's chainSlug convention (e.g. alchemy-nft.ts). */
   chainSlug: string;
@@ -210,6 +212,25 @@ const FOREIGN_OFFER_CURRENCY: Record<string, string> = {
 
 export function foreignOfferCurrency(chainSlug: string): string | null {
   return FOREIGN_OFFER_CURRENCY[chainSlug] ?? null;
+}
+
+/**
+ * A real JSON-RPC endpoint for a foreign chain -- for the Marketplank-native
+ * listing feature's on-chain ownership check (ethCallForeignFree in
+ * lib/market/fetch-rpc.ts), which needs to read against the RIGHT chain,
+ * not Robinhood Chain's own RPC. Reuses alchemy-nft.ts's ALCHEMY_NETWORK_SUBDOMAIN
+ * map and apiKey() helper rather than maintaining a second, independently-drifting
+ * subdomain list -- same host, but Alchemy's raw JSON-RPC product path
+ * (/v2/) instead of that adapter's NFT API path (/nft/v3/). Throws (fails
+ * closed) for a chainSlug Alchemy doesn't support, same posture as
+ * baseUrl() in that adapter.
+ */
+export function foreignRpcUrls(chainSlug: string): string[] {
+  const subdomain = ALCHEMY_NETWORK_SUBDOMAIN[chainSlug];
+  if (!subdomain) {
+    throw new Error(`foreign-chain-registry: no Alchemy RPC mapping for chainSlug "${chainSlug}"`);
+  }
+  return [`https://${subdomain}.g.alchemy.com/v2/${apiKey()}`];
 }
 
 /**
