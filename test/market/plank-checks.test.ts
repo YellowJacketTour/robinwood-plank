@@ -7,6 +7,7 @@ import {
   lpHoldPoints,
   memePoints,
   POINT_WEIGHTS,
+  rankTierFromPoints,
   redeemPoints,
   referralPoints,
   salePoints,
@@ -142,4 +143,41 @@ test("verifyWalletLinkProof rejects a malformed wallet address", async () => {
 
 test("ADDITIONAL_WALLET_FEE_WEI is exactly 0.01 ETH", () => {
   assert.equal(ADDITIONAL_WALLET_FEE_WEI, BigInt("10000000000000000"));
+});
+
+// --- social rank tier -------------------------------------------------------
+
+test("rankTierFromPoints starts at Sapling for zero/negative/invalid points", () => {
+  assert.equal(rankTierFromPoints(0).tier, "Sapling");
+  assert.equal(rankTierFromPoints(-100).tier, "Sapling");
+  assert.equal(rankTierFromPoints(Number.NaN).tier, "Sapling");
+  assert.equal(rankTierFromPoints(-100).points, 0);
+});
+
+test("rankTierFromPoints climbs the ladder at real thresholds", () => {
+  assert.equal(rankTierFromPoints(999).tier, "Sapling");
+  assert.equal(rankTierFromPoints(1_000).tier, "Stick");
+  assert.equal(rankTierFromPoints(4_999).tier, "Stick");
+  assert.equal(rankTierFromPoints(5_000).tier, "Board");
+  assert.equal(rankTierFromPoints(19_999).tier, "Board");
+  assert.equal(rankTierFromPoints(20_000).tier, "Plank");
+  assert.equal(rankTierFromPoints(99_999).tier, "Plank");
+  assert.equal(rankTierFromPoints(100_000).tier, "Big Beam");
+  assert.equal(rankTierFromPoints(499_999).tier, "Big Beam");
+  assert.equal(rankTierFromPoints(500_000).tier, "Wooden Whale");
+  assert.equal(rankTierFromPoints(50_000_000).tier, "Wooden Whale");
+});
+
+test("rankTierFromPoints reports the real gap to the next tier", () => {
+  const mid = rankTierFromPoints(1_500);
+  assert.equal(mid.tier, "Stick");
+  assert.equal(mid.nextTier, "Board");
+  assert.equal(mid.pointsToNextTier, 5_000 - 1_500);
+});
+
+test("rankTierFromPoints reports no next tier at the top", () => {
+  const top = rankTierFromPoints(1_000_000);
+  assert.equal(top.tier, "Wooden Whale");
+  assert.equal(top.nextTier, null);
+  assert.equal(top.pointsToNextTier, null);
 });

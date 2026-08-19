@@ -317,7 +317,43 @@ async function writeFills(
         r.fill.priceWei,
       ]
     );
-    written += result.rowCount ?? 0;
+    const isNew = (result.rowCount ?? 0) > 0;
+    written += isNew ? 1 : 0;
+
+    // Award real "sale" points -- see lib/plank-checks.ts's PointCategory
+    // and its own "TRUSTED-CALLER-ONLY BOUNDARY" doc comment: this IS a
+    // safe caller because the points here are derived from a REAL,
+    // confirmed on-chain OrderFulfilled log this function just decoded --
+    // never client-supplied. Only for genuinely NEW rows (isNew), so a
+    // re-run over an already-indexed window never double-awards (belt and
+    // suspenders on top of recordPointEvent's own (source_tx_hash,
+    // category, wallet) idempotency). marketplankAttributed is always
+    // false here -- this scan watches EVERY Seaport fill on a chain, not
+    // only ones that came through this app's own native order tables;
+    // cross-referencing order_hash against market_orders/
+    // market_bundle_listings/market_swap_listings to earn the full
+    // attributed rate is real, valuable future work, not silently skipped
+    // -- see this file's own header on the indexer's stated scope.
+    if (isNew && r.fill.priceWei && r.fill.priceWei !== "0") {
+      try {
+        const { salePoints, recordPointEvent } = await import("@/lib/plank-checks");
+        const points = salePoints(BigInt(r.fill.priceWei), false);
+        if (points > 0) {
+          await recordPointEvent({
+            wallet: r.fill.buyer,
+            category: "sale",
+            points,
+            sourceTxHash: r.txHash,
+            metadata: { chainSlug: r.chainSlug, nftContract: r.fill.nftContract, tokenId: r.fill.tokenId },
+            earnedAt: new Date(),
+          });
+        }
+      } catch {
+        // Points are a vanity layer on top of the real fill record, which
+        // is already durably written above -- a points-award failure must
+        // never make the indexer itself look like it failed.
+      }
+    }
   }
   return written;
 }

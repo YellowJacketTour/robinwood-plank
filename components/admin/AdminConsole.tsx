@@ -12,6 +12,7 @@ import FinanceSection from "./sections/FinanceSection";
 import AnalyticsSection from "./sections/AnalyticsSection";
 import CollectionsSection from "./sections/CollectionsSection";
 import FlagsSection from "./sections/FlagsSection";
+import PointsSection from "./sections/PointsSection";
 
 /**
  * /admin — the RobinWood management console shell.
@@ -32,6 +33,7 @@ type SectionId =
   | "content"
   | "collections"
   | "flags"
+  | "points"
   | "finance"
   | "analytics"
   | "system";
@@ -47,6 +49,7 @@ const SECTIONS: {
   { id: "content", label: "Content", component: ContentSection },
   { id: "collections", label: "Collections", component: CollectionsSection },
   { id: "flags", label: "Flags", component: FlagsSection },
+  { id: "points", label: "Points", component: PointsSection },
   { id: "finance", label: "Finance", component: FinanceSection },
   { id: "analytics", label: "Analytics", component: AnalyticsSection },
   { id: "system", label: "System", component: SystemSection },
