@@ -7,7 +7,6 @@ import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/tradi
 import { swrJson } from "@/lib/market/swr-fetch";
 import ChainIcon from "@/components/market/ChainIcon";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
-import { ROBINHOOD_CHAIN_SLUG } from "@/lib/market/multichain/trading/non-evm-chains";
 
 /**
  * Some collection images (any sourced from lib/market/multichain/adapters/
@@ -240,26 +239,6 @@ function GradeBadge({ score }: { score: number }) {
   );
 }
 
-// Real, current chainSlug values only (verified against what
-// scripts/seed-multichain-collections.ts and discover-multichain-
-// collections.ts actually write to Postgres -- "matic-mainnet" and bare
-// "solana" were never real values, they were carried over from an earlier,
-// wrong assumption). Ordered per explicit direction: Bitcoin, Robinhood,
-// Solana, Base, Ethereum, BNB Chain first, then the remaining EVM chains.
-const ALL_CHAIN_SLUGS_ORDER = [
-  "bitcoin-mainnet",
-  ROBINHOOD_CHAIN_SLUG,
-  "solana-mainnet",
-  "base-mainnet",
-  "eth-mainnet",
-  "bnb-mainnet",
-  "polygon-mainnet",
-  "arb-mainnet",
-  "opt-mainnet",
-  "avax-mainnet",
-  "zksync-mainnet",
-];
-
 /**
  * The "global market world" hub -- every collection this app tracks
  * outside Marketplank's own single RobinWood plank collection, browsable
@@ -472,15 +451,18 @@ export default function GlobalMarketHub() {
   const key = (c: TrackedCollection) => `${c.chainSlug}:${c.contractAddress}`;
   const hasArt = (c: TrackedCollection) => Boolean(c.imageUrl) && !deadArt.has(key(c));
 
+  // Sorted strictly by real popularity (tracked-collection count), most to
+  // least -- flagged live 2026-08-20 ("stack the chains better and by
+  // popularity"). ALL_CHAIN_SLUGS_ORDER used to override this with a fixed
+  // canonical list, which is why Bitcoin (60) and Robinhood (358) sat ahead
+  // of Polygon (819) and Arbitrum (488) -- backwards from what the numbers
+  // actually say. No fallback tiebreak needed beyond count: a real tie
+  // (same count) falls back to slug order for a stable sort, not a fixed
+  // pin.
   const chains = useMemo(() => {
     const seen = new Map<string, number>();
     for (const c of collections) seen.set(c.chainSlug, (seen.get(c.chainSlug) ?? 0) + 1);
-    return [...seen.entries()].sort((a, b) => {
-      const ia = ALL_CHAIN_SLUGS_ORDER.indexOf(a[0]);
-      const ib = ALL_CHAIN_SLUGS_ORDER.indexOf(b[0]);
-      if (ia !== -1 && ib !== -1) return ia - ib;
-      return b[1] - a[1];
-    });
+    return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [collections]);
 
   const filtered = useMemo(() => {
