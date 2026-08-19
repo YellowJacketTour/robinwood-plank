@@ -1,18 +1,27 @@
 /**
  * Real active offers (bids) for ONE collection on a foreign chain -- the
- * Offers-tab equivalent for the multichain surface, powered by
- * fetchForeignCollectionOffers (lib/market/multichain/trading/foreign-orders.ts),
- * which was already built and live-verified against real GRiBBiTS data but
- * never wired to a route/UI until now.
+ * Offers-tab equivalent for the multichain surface. Two real sources,
+ * merged, each tagged with a real `native` flag:
  *
- * VIEW-ONLY. Accepting an offer means the NFT OWNER becomes the Seaport
- * fulfiller of the bidder's order -- a materially different signer flow
- * from buyNow (the owner must have already approved Seaport's conduit for
- * the collection, and Seaport pulls the NFT FROM them while paying them the
- * bid). That flow hasn't been built or live-fork-verified yet, so this
- * route and its UI only surface what offers exist -- same "don't claim more
- * than what's been proven live" discipline as everywhere else in this
- * module (see foreign-orders.ts's own header on signature:null).
+ * - OpenSea-sourced offers (fetchForeignCollectionOffers,
+ *   lib/market/multichain/trading/foreign-orders.ts) -- VIEW-ONLY except
+ *   for a plain single-token bid (`acceptable: true`). Accepting a
+ *   CRITERIA OpenSea offer would need the original token-id set its
+ *   Merkle root committed to, which this app has no provenance for (a
+ *   foreign order sourced live from OpenSea's own book carries no such
+ *   history) -- there is no safe way to reconstruct an arbitrary root's
+ *   membership after the fact, so those stay view-only
+ *   (`acceptable: false`).
+ * - Marketplank-native offers (lib/market/orders-store.ts, via
+ *   app/api/market/multichain/native-orders/route.ts) -- always
+ *   `acceptable: true`, single-token AND criteria alike, since a native
+ *   criteria offer's real token-id set IS stored alongside the order at
+ *   creation time (Offer.criteriaTokenIds) and independently re-verified
+ *   server-side at write time (see foreign-rarity-store.ts's
+ *   getVerifiedForeignCriteriaTokenIds) -- real provenance the OpenSea
+ *   case above lacks. Fulfillable via
+ *   lib/market/multichain/trading/native-fulfill.ts's
+ *   fulfillMarketplankNativeOrder(..., "offer").
  */
 import { NextRequest, NextResponse } from "next/server";
 import { fetchForeignCollectionOffers, resolveOpenSeaCollectionSlug } from "@/lib/market/multichain/trading/foreign-orders";
@@ -167,13 +176,45 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const offers = rawOffers.map((o) => ({
+    const openSeaOffers = rawOffers.map((o) => ({
       ...o,
+      native: false,
       imageUrl: o.tokenId ? artByToken.get(o.tokenId)?.imageUrl ?? null : null,
       name: o.tokenId ? artByToken.get(o.tokenId)?.name ?? null : null,
     }));
 
-    return NextResponse.json({ offers }, { headers: { "Cache-Control": "no-store" } });
+    // MARKETPLANK-NATIVE offers on this foreign chain -- a real gap this
+    // route previously had no coverage for at all (same class of bug fixed
+    // for listings in my-listings/route.ts). `acceptable: true` -- unlike
+    // an OpenSea-sourced criteria offer (whose token-id set can't be
+    // safely reconstructed after the fact, see the comment above), a
+    // native criteria offer's real token-id set is stored alongside the
+    // order at creation time (Offer.criteriaTokenIds), so it IS directly
+    // fulfillable via native-fulfill.ts.
+    const nativeCollectionSlug = `${chainSlug}:${collectionSlug.toLowerCase()}`;
+    const nativeOffers = await getOffers(nativeCollectionSlug, chainSlug);
+    const mappedNative = nativeOffers.map((o) => ({
+      orderHash: o.id,
+      maker: o.maker,
+      priceWei: o.priceWei,
+      expiresAt: o.expiresAt,
+      acceptable: true,
+      isWildcard: false,
+      tokenId: o.tokenId ?? null,
+      contractAddress: collectionSlug,
+      native: true,
+      imageUrl: o.imageUrl ?? null,
+      name: null,
+      // Present only for a criteria (trait/rarity) native offer -- the real
+      // token-id set this offer's signed Merkle root committed to at
+      // creation time, re-verified server-side (see this route's own
+      // header). Needed client-side to compute the accepting seller's
+      // fulfillment proof via assertAcceptableTraitOffer.
+      criteriaTokenIds: o.criteriaTokenIds ?? null,
+      traits: o.traits ?? null,
+    }));
+
+    return NextResponse.json({ offers: [...mappedNative, ...openSeaOffers] }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return publicError(error, "Failed to load multichain offers");
   }

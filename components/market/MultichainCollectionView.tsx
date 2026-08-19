@@ -14,6 +14,7 @@ import ForeignDetailsModal from "@/components/market/ForeignDetailsModal";
 import ForeignOfferConfirm from "@/components/market/ForeignOfferConfirm";
 import ForeignOfferForm from "@/components/market/ForeignOfferForm";
 import NativeForeignListForm from "@/components/market/NativeForeignListForm";
+import NativeForeignOfferForm from "@/components/market/NativeForeignOfferForm";
 import { normalizeRarityTier } from "@/lib/rarity";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
@@ -23,6 +24,7 @@ import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import type { SendFeeQuote } from "@/lib/market/send-fee";
 import type { BatchSendStatus } from "@/lib/market/transfer";
 import { chainDisplayName, FOREIGN_FEE_BPS, foreignOfferCurrency, nativeCurrencySymbol } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { MARKETPLANK_NATIVE_LISTING_FEE_BPS } from "@/lib/constants";
 import { isSolanaChainSlug, isBitcoinChainSlug, isNonEvmChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
 import { isCrossChainBuyable, venueLabel, type Listing, type MarketCollection } from "@/lib/market/types";
@@ -47,6 +49,10 @@ type ForeignOffer = {
   tokenId: string | null;
   imageUrl: string | null;
   name: string | null;
+  /** True for a Marketplank-native offer (app/api/market/multichain/native-orders/route.ts) -- false/absent for an OpenSea-sourced row. */
+  native?: boolean;
+  /** Native criteria offers only -- see offers/route.ts's own header. */
+  criteriaTokenIds?: string[] | null;
 };
 type MyListing = { orderHash: string; tokenId: string; priceWei: string; expiresAt: string; native?: boolean };
 
@@ -195,6 +201,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const tabs = isForeignEvm ? [...MARKET_TABS, { id: "sell" as const, label: "Sell" }] : MARKET_TABS;
   /** One-click relist target, set by the "Relist" button in My Listings -- consumed once by NativeForeignListForm then cleared. */
   const [relistPreset, setRelistPreset] = useState<{ tokenId: string; priceWei: string } | null>(null);
+  /** Which criteria-bid form to show on a foreign EVM chain's Offers tab -- defaults to Marketplank's own lower-fee direct path. */
+  const [bidVenue, setBidVenue] = useState<"native" | "opensea">("native");
 
   // RARITY -- reuses the SAME information-content algorithm/tier system as
   // RobinWood's own collection (lib/rarity.ts + lib/rarity-generic.ts),
@@ -572,6 +580,56 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           // tab already uses, not the third-party-signer OpenSea flow below.
           const { acceptRobinhoodOfferNow } = await import("@/lib/market/multichain/trading/foreign-fulfill");
           await acceptRobinhoodOfferNow({ chainSlug, collectionSlug, orderHash: offer.orderHash });
+        } else if (offer.native) {
+          // Marketplank-native offer on a foreign EVM chain -- direct
+          // Seaport fulfillment, not the router-based acceptForeignOffer
+          // path below (that one is for THIRD-PARTY OpenSea offers only).
+          const { fulfillMarketplankNativeOrder } = await import("@/lib/market/multichain/trading/native-fulfill");
+          if (offer.tokenId) {
+            // Plain single-token offer -- no criteria proof needed.
+            await fulfillMarketplankNativeOrder(chainSlug, offer.orderHash, "offer");
+          } else if (offer.criteriaTokenIds && offer.criteriaTokenIds.length > 0) {
+            // TRAIT-criteria offer -- same real cross-check MarketView.tsx's
+            // own handleAcceptTraitOffer/confirmAcceptTraitOffer already
+            // proved for Robinhood Chain, just chain-parameterized. Picks
+            // the first qualifying owned token automatically (a full
+            // seller-facing picker is a real, bounded future enhancement,
+            // not built in this pass).
+            const owned = new Set(ownedTokenIds.map((id) => BigInt(id).toString()));
+            const snapshot = new Set(offer.criteriaTokenIds.map((id) => BigInt(id).toString()));
+            const qualifying = [...owned].filter((id) => snapshot.has(id)).sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
+            if (qualifying.length === 0) {
+              throw new Error("None of your owned items qualify for this trait offer.");
+            }
+            const chosenTokenId = qualifying[0];
+            const rawOrderRes = await fetch(`/api/market/native-order?id=${encodeURIComponent(offer.orderHash)}&kind=offer`);
+            if (!rawOrderRes.ok) throw new Error("This offer is no longer available.");
+            const { rawOrder } = (await rawOrderRes.json()) as { rawOrder: unknown };
+            const { validateOfferOrder } = await import("@/lib/market/order-validation");
+            const { assertAcceptableTraitOffer } = await import("@/lib/market/seaport");
+            const nativeCollection: MarketCollection = {
+              slug: collection?.slug ?? `${chainSlug}:${collectionSlug}`,
+              name: collection?.name ?? collectionSlug,
+              contractAddress: collectionSlug,
+              tokenStandard: "ERC721",
+              image: collection?.image ?? "",
+              trustBadges: [],
+              feeBps: MARKETPLANK_NATIVE_LISTING_FEE_BPS,
+              royaltyBps: 0,
+              royaltyRecipient: "0x0000000000000000000000000000000000000000",
+            };
+            const derived = validateOfferOrder(rawOrder, nativeCollection, foreignOfferCurrency(chainSlug) ?? "", {
+              criteriaTokenIds: offer.criteriaTokenIds,
+            });
+            const criteria = assertAcceptableTraitOffer(
+              { priceWei: offer.priceWei, criteriaTokenIds: offer.criteriaTokenIds },
+              derived,
+              chosenTokenId
+            );
+            await fulfillMarketplankNativeOrder(chainSlug, offer.orderHash, "offer", [criteria]);
+          } else {
+            throw new Error("This offer is missing its token snapshot and cannot be accepted.");
+          }
         } else {
           const { acceptForeignOffer } = await import("@/lib/market/multichain/trading/foreign-offer");
           await acceptForeignOffer({ chainSlug, orderHash: offer.orderHash, accountAddress: who });
@@ -1316,18 +1374,58 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   Making offers isn't available for {chainDisplayName(chainSlug)} yet.
                 </p>
               ) : (
-                <ForeignOfferForm
-                  chainSlug={chainSlug}
-                  currencySymbol={nativeCurrencySymbol(chainSlug, isSolana)}
-                  account={account}
-                  collection={collection}
-                  listings={listings}
-                  onSubmitted={() => {
-                    invalidateSwr("/api/market/multichain/offers");
-                    void loadOffers();
-                  }}
-                  onConnect={() => void requireAccount()}
-                />
+                <div className="space-y-2">
+                  {isForeignEvm && (
+                    <div className="flex gap-1.5" role="radiogroup" aria-label="Bid venue">
+                      {(
+                        [
+                          { id: "native" as const, label: "Marketplank (direct)" },
+                          { id: "opensea" as const, label: "OpenSea" },
+                        ] as const
+                      ).map((v) => (
+                        <button
+                          key={v.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={bidVenue === v.id}
+                          onClick={() => setBidVenue(v.id)}
+                          className={`min-h-9 flex-1 rounded-md border px-2.5 text-xs font-bold transition ${
+                            bidVenue === v.id ? "border-gold-400 bg-gold-500/15 text-gold-300" : "border-line text-foreground/60 hover:border-gold-400"
+                          }`}
+                        >
+                          {v.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {isForeignEvm && bidVenue === "native" ? (
+                    <NativeForeignOfferForm
+                      chainSlug={chainSlug}
+                      currencySymbol={nativeCurrencySymbol(chainSlug, isSolana)}
+                      account={account}
+                      collection={collection}
+                      listings={listings}
+                      onSubmitted={() => {
+                        invalidateSwr("/api/market/multichain/offers");
+                        void loadOffers();
+                      }}
+                      onConnect={() => void requireAccount()}
+                    />
+                  ) : (
+                    <ForeignOfferForm
+                      chainSlug={chainSlug}
+                      currencySymbol={nativeCurrencySymbol(chainSlug, isSolana)}
+                      account={account}
+                      collection={collection}
+                      listings={listings}
+                      onSubmitted={() => {
+                        invalidateSwr("/api/market/multichain/offers");
+                        void loadOffers();
+                      }}
+                      onConnect={() => void requireAccount()}
+                    />
+                  )}
+                </div>
               )}
             </div>
             <div className="min-w-0 space-y-3">
@@ -1337,7 +1435,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                     <h3 id="mc-open-bids" className="font-display text-xl text-gold-300">
                       Open criteria bids
                     </h3>
-                    <p className="text-xs text-foreground/55">Rarity, trait, and combo orders — view-only (see Offer form's own note on why).</p>
+                    <p className="text-xs text-foreground/55">
+                      Rarity, trait, and combo orders. Marketplank-native bids are acceptable directly if you own a
+                      qualifying item; OpenSea-sourced ones stay view-only (see Offer form's own note on why).
+                    </p>
                   </div>
                   {collectionWideOffers.length > 0 && (
                     <span className="rounded-full border border-line px-2 py-1 text-[0.65rem] text-gold-300">{collectionWideOffers.length} active</span>
@@ -1352,23 +1453,43 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   </div>
                 ) : (
                   <ul className="space-y-2">
-                    {collectionWideOffers.map((o) => (
-                      <li key={o.orderHash} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-panel px-3 py-2">
-                        <div className="min-w-0">
-                          <p
-                            className="truncate text-sm font-bold text-foreground"
-                            title={o.isWildcard ? `Any ${collection.name} token` : "Trait-scoped bid"}
-                          >
-                            {o.isWildcard ? `Any ${collection.name} token` : "Trait-scoped bid"}
-                          </p>
-                          <p className="text-xs text-foreground/60">by {shortAddress(o.maker)}</p>
-                        </div>
-                        <p className="whitespace-nowrap text-sm font-extrabold tabular-nums text-emerald-300">
-                          {formatTokenAmount(o.priceWei, 18, 4)} {statCurrencySymbol}
-                          {statUsd(o.priceWei) != null && <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(o.priceWei)!)}</span>}
-                        </p>
-                      </li>
-                    ))}
+                    {collectionWideOffers.map((o) => {
+                      const canAcceptHere =
+                        o.native &&
+                        !o.tokenId &&
+                        Boolean(o.criteriaTokenIds?.length) &&
+                        ownedTokenIds.some((id) => o.criteriaTokenIds!.map((c) => BigInt(c).toString()).includes(BigInt(id).toString()));
+                      return (
+                        <li key={o.orderHash} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-panel px-3 py-2">
+                          <div className="min-w-0">
+                            <p
+                              className="truncate text-sm font-bold text-foreground"
+                              title={o.isWildcard ? `Any ${collection.name} token` : "Trait-scoped bid"}
+                            >
+                              {o.isWildcard ? `Any ${collection.name} token` : "Trait-scoped bid"}
+                              {o.native && <span className="ml-1.5 rounded-full border border-gold-400/40 px-1.5 py-0.5 text-[0.55rem] font-black uppercase text-gold-300">Marketplank</span>}
+                            </p>
+                            <p className="text-xs text-foreground/60">by {shortAddress(o.maker)}</p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <p className="whitespace-nowrap text-sm font-extrabold tabular-nums text-emerald-300">
+                              {formatTokenAmount(o.priceWei, 18, 4)} {statCurrencySymbol}
+                              {statUsd(o.priceWei) != null && <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(o.priceWei)!)}</span>}
+                            </p>
+                            {canAcceptHere && (
+                              <button
+                                type="button"
+                                disabled={acceptingOrderHash === o.orderHash}
+                                onClick={() => void handleAcceptOffer(o)}
+                                className="min-h-8 rounded-md bg-gold-500 px-2.5 text-xs font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50"
+                              >
+                                {acceptingOrderHash === o.orderHash ? "Confirm…" : "Accept"}
+                              </button>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </section>
@@ -1401,7 +1522,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                           expiresAt: o.expiresAt,
                           kind: "fixed",
                           imageUrl: o.imageUrl ?? undefined,
-                          venue: "opensea",
+                          // Absence of venue means "ours" (see Listing.venue's
+                          // own doc comment) -- a native offer isn't an
+                          // OpenSea order and must not be badged as one.
+                          ...(o.native ? {} : { venue: "opensea" as const }),
                         }}
                         collection={collection}
                         variant="offer"

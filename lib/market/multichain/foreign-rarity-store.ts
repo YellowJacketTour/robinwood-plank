@@ -5,6 +5,7 @@
  */
 import { hasPostgresConfig, postgresQuery, postgresPool } from "@/lib/postgres";
 import type { GenericRaritySnapshot } from "@/lib/rarity-generic";
+import { resolveCriteriaTokenIds, type CriteriaClause } from "@/lib/market/trait-criteria";
 
 export function hasForeignRarityStore(): boolean {
   return hasPostgresConfig();
@@ -50,6 +51,41 @@ export async function getForeignTraitIndex(
   const row = result.rows[0];
   if (!row) return { traitIndex: null, sampleSize: 0, indexedAt: null };
   return { traitIndex: row.trait_index, sampleSize: row.sample_size, indexedAt: row.indexed_at };
+}
+
+/**
+ * Server-side, fail-closed re-derivation of a criteria clause's real
+ * token-id set for a FOREIGN collection -- the foreign-chain counterpart
+ * to lib/market/trait-index.ts's getVerifiedCriteriaTokenIds, which reads
+ * Robinhood Chain's own trait index only. Used by
+ * app/api/market/multichain/native-orders/route.ts to independently
+ * re-verify a client-submitted criteria offer's token-id set from the
+ * SAME real, background-indexed trait data ForeignOfferForm's picker UI
+ * is built from -- never trusts client-supplied token ids directly, same
+ * discipline as every other order-validation path in this app. Returns
+ * null (fail closed) when the index isn't built/complete yet or the
+ * clauses resolve to zero matching tokens -- a criteria offer against an
+ * unindexed or non-matching collection is rejected, never silently
+ * accepted with a fabricated set.
+ */
+export async function getVerifiedForeignCriteriaTokenIds(
+  chainSlug: string,
+  collectionSlug: string,
+  clauses: readonly CriteriaClause[]
+): Promise<{ tokenIds: string[] } | null> {
+  if (clauses.length === 0) return null;
+  const [{ traitIndex }, rarityMap] = await Promise.all([
+    getForeignTraitIndex(chainSlug, collectionSlug),
+    getForeignRarity(chainSlug, collectionSlug),
+  ]);
+  if (!traitIndex) return null;
+  let rankings: Record<string, number> | null = null;
+  if (clauses.some((c) => c.kind === "rank")) {
+    rankings = {};
+    for (const [tokenId, r] of rarityMap) rankings[tokenId] = r.rank;
+  }
+  const tokenIds = resolveCriteriaTokenIds(traitIndex, clauses, rankings);
+  return tokenIds.length > 0 ? { tokenIds } : null;
 }
 
 /** Full replace for one collection -- rarity is a snapshot ("current best estimate from the last full index"), not an append-only history, so a re-index supersedes the prior run entirely rather than merging with it. */

@@ -13,6 +13,7 @@
  * Robinhood Chain, just a different `chain` argument.
  */
 import { fulfillOrder, type FulfillableOrder, type SeaportChain } from "@/lib/market/seaport";
+import type { InputCriteria } from "@opensea/seaport-js/lib/types";
 import {
   FOREIGN_SEAPORT_ADDRESS,
   chainDisplayName,
@@ -43,7 +44,9 @@ function seaportChainFor(chainSlug: string): SeaportChain {
 export async function fulfillMarketplankNativeOrder(
   chainSlug: string,
   orderId: string,
-  kind: "listing" | "offer"
+  kind: "listing" | "offer",
+  /** TRAIT-criteria offers only -- the concrete token id + Merkle proof from assertAcceptableTraitOffer (lib/market/seaport.ts). Never construct ad hoc. */
+  considerationCriteria?: InputCriteria[]
 ): Promise<{ order: unknown | null; txHashes: string[] }> {
   const res = await fetch(`/api/market/native-order?id=${encodeURIComponent(orderId)}&kind=${kind}`);
   if (!res.ok) {
@@ -59,5 +62,5 @@ export async function fulfillMarketplankNativeOrder(
   const accountAddress = accounts[0];
   if (!accountAddress) throw new Error("No connected account.");
 
-  return fulfillOrder(rawOrder, accountAddress, undefined, seaportChainFor(chainSlug));
+  return fulfillOrder(rawOrder, accountAddress, considerationCriteria, seaportChainFor(chainSlug));
 }

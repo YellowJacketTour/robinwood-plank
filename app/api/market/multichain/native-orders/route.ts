@@ -42,6 +42,8 @@ import {
 } from "@/lib/market/order-validation";
 import { FOREIGN_SEAPORT_ADDRESS, foreignChainByChainSlug, foreignOfferCurrency } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getTrackedCollection } from "@/lib/market/multichain/store";
+import { getVerifiedForeignCriteriaTokenIds } from "@/lib/market/multichain/foreign-rarity-store";
+import { parseCriteriaFromBody, clausesToTraitLabels } from "@/lib/market/trait-criteria";
 import type { Listing, MarketCollection, Offer } from "@/lib/market/types";
 import { publicError, publicJson, rateLimit, readJsonBody } from "@/lib/security";
 
@@ -60,6 +62,11 @@ type PostBody = {
   kind?: unknown;
   contractAddress?: unknown;
   rawOrder?: unknown;
+  /** CRITERIA OFFER: labels only -- token-id snapshot is re-resolved from THIS route's own verified foreign trait index, never trusted from the client. Same shape/precedence as /api/market/orders' own body. */
+  trait?: unknown;
+  traits?: unknown;
+  rarityTier?: unknown;
+  criteria?: unknown;
 };
 
 /** Confirms the maker actually holds the token they're trying to list, on THIS chain. */
@@ -161,12 +168,49 @@ export async function POST(req: Request) {
       royaltyRecipient: "0x0000000000000000000000000000000000000000",
     };
 
+    // ── CRITERIA OFFER: resolve labels against THIS route's own verified
+    // foreign trait index (foreign-rarity-store.ts) -- snapshot never comes
+    // from the client, matching /api/market/orders' identical discipline.
+    let traitLabels: Array<{ traitType: string; value: string }> | null = null;
+    let traitTokenIds: string[] | null = null;
+    const hasCriteriaInput =
+      body.trait !== undefined || body.traits !== undefined || body.rarityTier !== undefined || body.criteria !== undefined;
+    if (hasCriteriaInput) {
+      if (kind !== "offer") {
+        return publicJson({ error: "BAD_ORDER", message: "Only offers can target criteria." }, 400);
+      }
+      const parsed = parseCriteriaFromBody({ trait: body.trait, traits: body.traits, rarityTier: body.rarityTier, criteria: body.criteria });
+      if (parsed.error) {
+        return publicJson({ error: "BAD_TRAIT", message: parsed.error }, 400);
+      }
+      if (parsed.clauses.length === 0) {
+        return publicJson({ error: "BAD_TRAIT", message: "Add at least one trait or rarity clause." }, 400);
+      }
+      const verifiedCriteria = await getVerifiedForeignCriteriaTokenIds(chainSlug, contractAddress, parsed.clauses);
+      if (!verifiedCriteria) {
+        return publicJson(
+          {
+            error: "TRAIT_UNAVAILABLE",
+            message: "Those criteria aren't available for bidding yet (empty match, unknown trait, or this collection's trait index isn't built yet).",
+          },
+          503
+        );
+      }
+      traitTokenIds = verifiedCriteria.tokenIds;
+      traitLabels = clausesToTraitLabels(parsed.clauses);
+    }
+
     let derived;
     try {
       derived =
         kind === "listing"
           ? validateListingOrder(body.rawOrder, collection)
-          : validateOfferOrder(body.rawOrder, collection, foreignOfferCurrency(chainSlug) ?? "");
+          : validateOfferOrder(
+              body.rawOrder,
+              collection,
+              foreignOfferCurrency(chainSlug) ?? "",
+              traitTokenIds ? { criteriaTokenIds: traitTokenIds } : undefined
+            );
     } catch (err) {
       if (err instanceof OrderValidationError) {
         return publicJson({ error: "BAD_ORDER", message: err.message }, 400);
@@ -224,17 +268,22 @@ export async function POST(req: Request) {
       return publicJson({ listing });
     }
 
-    if (!derived.tokenId) {
-      // Collection-wide/criteria offers are out of scope for this route's
-      // first cut, same as /api/market/orders' own current stance on
-      // wildcard-root offers -- a single-token offer is the only shape
-      // validateOfferOrder can confirm here without a trait index for this
-      // foreign collection, which doesn't exist yet.
-      return publicJson({ error: "BAD_ORDER", message: "Only single-token offers are supported for now." }, 400);
+    if (!derived.tokenId && !derived.criteriaRoot) {
+      // Collection-wide ("any") offers stay disabled -- same wildcard-
+      // root stance /api/market/orders already takes (never proven
+      // fillable, see buildOffer's own header). A criteria (trait/rarity)
+      // offer IS supported -- it lands here with a real criteriaRoot from
+      // validateOfferOrder above, not a bare tokenId.
+      return publicJson({ error: "BAD_ORDER", message: "Bid on a specific token or a trait/rarity instead." }, 400);
+    }
+    // A criteria-labelled request whose signed order is NOT a criteria
+    // order (or vice versa) must not be stored under a mismatched label.
+    if (traitLabels && !derived.criteriaRoot) {
+      return publicJson({ error: "BAD_ORDER", message: "Trait bid is not a criteria order." }, 400);
     }
 
     const offer: Offer = {
-      id: `native-offer-${chainSlug}-${contractAddress}-${derived.maker}-${derived.tokenId}-${Date.now()}`,
+      id: `native-offer-${chainSlug}-${contractAddress}-${derived.maker}-${derived.tokenId ?? (traitLabels ? "trait" : "any")}-${Date.now()}`,
       collectionSlug: slug,
       chainSlug,
       tokenId: derived.tokenId,
@@ -242,6 +291,7 @@ export async function POST(req: Request) {
       priceWei: derived.priceWei,
       expiresAt: derived.expiresAt,
       royaltyEnforced: true,
+      ...(traitLabels && traitTokenIds ? { traits: traitLabels, criteriaTokenIds: traitTokenIds } : {}),
     };
     await putOffer(offer, body.rawOrder);
     return publicJson({ offer });
