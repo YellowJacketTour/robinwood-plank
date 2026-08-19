@@ -30,7 +30,23 @@ type Props = {
   ownedLoading: boolean;
   onListed: () => void;
   onConnect: () => void;
+  /**
+   * The collection's real current floor, computed by the parent from the
+   * SAME live listings array the Buy&Sell tab already fetches (see
+   * MultichainCollectionView.tsx's own floorWei) -- never re-derived here,
+   * so this can never drift from what a buyer actually sees as the floor.
+   * Null when there are no active listings to derive a floor from yet.
+   */
+  floorWei: string | null;
 };
+
+/** Real presets real bulk listers actually use (per this session's research pass: "list at floor ±X%" is the standard pricing pattern on every real competitor). */
+const FLOOR_PRESETS = [
+  { label: "Floor", pct: 0 },
+  { label: "Floor -5%", pct: -5 },
+  { label: "Floor +5%", pct: 5 },
+  { label: "Floor +10%", pct: 10 },
+];
 
 const DURATIONS = [
   { label: "1 day", days: 1 },
@@ -75,6 +91,7 @@ export default function NativeForeignListForm({
   ownedLoading,
   onListed,
   onConnect,
+  floorWei,
 }: Props) {
   const [selected, setSelected] = useState<Map<string, SelectedItem>>(new Map());
   const [mode, setMode] = useState<PricingMode>("same");
@@ -410,18 +427,48 @@ export default function NativeForeignListForm({
           </div>
 
           {mode === "same" ? (
-            <label className="block">
-              <span className="text-[0.65rem] font-bold uppercase tracking-wider text-foreground/50">Price per item ({currencySymbol})</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="0.0"
-                value={samePrice}
-                disabled={busy}
-                onChange={(e) => setSamePrice(e.target.value.replace(/[^0-9.]/g, ""))}
-                className="mt-1 min-h-11 w-full rounded-lg border border-line bg-panel px-2.5 text-foreground outline-none focus:border-gold-400"
-              />
-            </label>
+            <div className="space-y-1.5">
+              {floorWei && (
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Price relative to floor">
+                  {FLOOR_PRESETS.map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        // pct as an integer bps offset avoids float drift on
+                        // a real wei-precision amount -- same fixed-point
+                        // discipline this session's adapters use elsewhere
+                        // (e.g. alchemy-nft.ts's toWeiString).
+                        const bps = 10_000 + preset.pct * 100;
+                        const priced = (BigInt(floorWei) * BigInt(bps)) / 10_000n;
+                        setSamePrice(formatTokenAmount(priced.toString(), 18, 6));
+                      }}
+                      className="min-h-8 rounded-md border border-line-strong px-2.5 text-[0.65rem] font-bold text-gold-300 transition hover:border-gold-400 disabled:opacity-40"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <label className="block">
+                <span className="text-[0.65rem] font-bold uppercase tracking-wider text-foreground/50">Price per item ({currencySymbol})</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0.0"
+                  value={samePrice}
+                  disabled={busy}
+                  onChange={(e) => setSamePrice(e.target.value.replace(/[^0-9.]/g, ""))}
+                  className="mt-1 min-h-11 w-full rounded-lg border border-line bg-panel px-2.5 text-foreground outline-none focus:border-gold-400"
+                />
+              </label>
+              {floorWei && (
+                <p className="text-[0.6rem] text-foreground/45">
+                  Current floor: {formatTokenAmount(floorWei, 18, 5)} {currencySymbol}
+                </p>
+              )}
+            </div>
           ) : (
             <ul className="space-y-1.5">
               {selectedItems.map((item) => {

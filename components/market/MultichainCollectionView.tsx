@@ -1559,6 +1559,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               ownedLoading={ownedLoading}
               onListed={() => void loadOwned()}
               onConnect={() => void requireAccount()}
+              floorWei={floorWei}
             />
           )}
         </MarketTabPanel>
