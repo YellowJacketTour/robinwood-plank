@@ -99,33 +99,61 @@ function satsToScaledString(sats: number): string | null {
   return (BigInt(Math.round(sats)) * BigInt(10_000_000_000)).toString();
 }
 
+/**
+ * discoverTopCollections gets called once per metric ("volume" then
+ * "floorPrice") by discover-multichain-collections.ts, and -- per this
+ * file's header -- both calls hit the exact same real API pages in the
+ * exact same order, since the endpoint has no sort parameter at all. A
+ * tiny in-process cache keyed by (timeType, limit) means the second call
+ * replays the first's already-fetched pages instead of doubling real,
+ * metered API cost for identical data. Module-level and unbounded on
+ * purpose: this adapter's process (the discovery/sync script) runs once
+ * and exits, so there is no unbounded-growth risk to guard against.
+ */
+const discoveryCache = new Map<string, Promise<DiscoveredCollection[]>>();
+
+async function fetchTopCollections(limit: number): Promise<DiscoveredCollection[]> {
+  const out: DiscoveredCollection[] = [];
+  let start = 0;
+  while (out.length < limit) {
+    const page = Math.min(PAGE_SIZE, limit - out.length);
+    const data = await unisatFetch<{ list: UniSatCollectionEntry[]; total: number }>("/collection_statistic_list", {
+      start,
+      limit: page,
+      filter: { timeType: "24h" },
+    });
+    for (const entry of data.list) {
+      out.push({
+        contractAddress: entry.collectionId,
+        name: entry.name ?? null,
+        imageUrl: resolveIconUrl(entry.icon),
+        // No independent volume/floor ranking from this endpoint -- see
+        // header. Both metrics get the same real API-returned order.
+        volumeRank: out.length + 1,
+        floorPriceRank: out.length + 1,
+      });
+    }
+    start += page;
+    if (data.list.length < page || start >= data.total) break;
+  }
+  return out;
+}
+
 export const unisatCollectionsAdapter: ChainAdapter = {
   name: "unisat-collections",
   async discoverTopCollections({ limit }): Promise<DiscoveredCollection[]> {
-    const out: DiscoveredCollection[] = [];
-    let start = 0;
-    while (out.length < limit) {
-      const page = Math.min(PAGE_SIZE, limit - out.length);
-      const data = await unisatFetch<{ list: UniSatCollectionEntry[]; total: number }>("/collection_statistic_list", {
-        start,
-        limit: page,
-        filter: { timeType: "24h" },
-      });
-      for (const entry of data.list) {
-        out.push({
-          contractAddress: entry.collectionId,
-          name: entry.name ?? null,
-          imageUrl: resolveIconUrl(entry.icon),
-          // No independent volume/floor ranking from this endpoint -- see
-          // header. Both metrics get the same real API-returned order.
-          volumeRank: out.length + 1,
-          floorPriceRank: out.length + 1,
-        });
-      }
-      start += page;
-      if (data.list.length < page || start >= data.total) break;
+    const key = `24h:${limit}`;
+    let pending = discoveryCache.get(key);
+    if (!pending) {
+      pending = fetchTopCollections(limit);
+      discoveryCache.set(key, pending);
     }
-    return out;
+    try {
+      return await pending;
+    } catch (error) {
+      discoveryCache.delete(key); // don't poison the cache with a failed run -- let the next call retry live
+      throw error;
+    }
   },
   async fetchSnapshot({ contractAddress: collectionId }): Promise<CollectionSnapshot> {
     const entry = await unisatFetch<UniSatCollectionEntry>("/collection_statistic", { collectionId });
