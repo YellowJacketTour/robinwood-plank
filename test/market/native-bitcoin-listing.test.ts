@@ -266,11 +266,66 @@ test("native-bitcoin-listing: a payment UTXO the safety filter rejects is never 
         buyerDummyUtxo: dummyUtxo,
         buyerPaymentUtxoCandidates: [rejectedUtxo],
         feeRateSatPerVb: 5,
-        // Simulates the real safety gate excluding a UTXO (e.g. it holds
-        // an inscription/rune) even though it has plenty of value.
-        safetyFilter: async () => [],
+        // Simulates the real safety gate excluding the PAYMENT candidate
+        // specifically (e.g. it holds an inscription/rune) even though it
+        // has plenty of value -- the dummy passes, so this isolates the
+        // "not enough proven-safe funds" path from the dummy-rejection
+        // path covered by the next test.
+        safetyFilter: async (_address, candidates) =>
+          candidates.filter((c) => c.txid === dummyUtxo.txid && c.vout === dummyUtxo.vout),
       }),
     /insufficient proven-safe buyer UTXOs/
+  );
+});
+
+test("native-bitcoin-listing: a dummy UTXO the safety filter rejects is never used as padding, even if a payment UTXO would otherwise cover everything", async () => {
+  // Audit finding, 2026-08-19: the dummy input used to bypass the safety
+  // gate entirely -- it's typically the smallest UTXO in a wallet, exactly
+  // the size class a real inscription's own UTXO lives in. This proves the
+  // gate now covers it: reject ONLY the dummy, with a payment UTXO large
+  // enough to cover the whole trade, and confirm the function still
+  // refuses rather than silently using the rejected UTXO as padding.
+  const sellerKey = ECPair.makeRandom({ network });
+  const seller = p2trAddressAndScript(sellerKey);
+  const inscriptionUtxo: Utxo = {
+    txid: "4".repeat(64),
+    vout: 0,
+    valueSats: 10_000,
+    scriptPubKeyHex: seller.script.toString("hex"),
+  };
+  const priceSats = 100_000;
+  const { psbtBase64: unsignedListingPsbt } = buildSellerListingPsbt({
+    sellerAddress: seller.address,
+    sellerInternalPubkeyHex: Buffer.from(sellerKey.publicKey).toString("hex"),
+    inscriptionUtxo,
+    priceSats,
+  });
+  const listingPsbt = bitcoin.Psbt.fromBase64(unsignedListingPsbt, { network });
+  listingPsbt.signTaprootInput(0, tweakSigner(sellerKey), undefined, [
+    bitcoin.Transaction.SIGHASH_SINGLE | bitcoin.Transaction.SIGHASH_ANYONECANPAY,
+  ]);
+
+  const buyerKey = ECPair.makeRandom({ network });
+  const buyer = p2trAddressAndScript(buyerKey);
+  const rejectedDummyUtxo: Utxo = { txid: "5".repeat(64), vout: 0, valueSats: 600, scriptPubKeyHex: buyer.script.toString("hex") };
+  const plentyOfPaymentUtxo: Utxo = { txid: "6".repeat(64), vout: 0, valueSats: 500_000, scriptPubKeyHex: buyer.script.toString("hex") };
+
+  await assert.rejects(
+    () =>
+      buildFulfillmentPsbt({
+        listingSellerPsbtBase64: listingPsbt.toBase64(),
+        sellerInscriptionUtxoValueSats: inscriptionUtxo.valueSats,
+        buyerAddress: buyer.address,
+        buyerInternalPubkeyHex: Buffer.from(buyerKey.publicKey).toString("hex"),
+        buyerReceivingAddress: buyer.address,
+        buyerChangeAddress: buyer.address,
+        buyerDummyUtxo: rejectedDummyUtxo,
+        buyerPaymentUtxoCandidates: [plentyOfPaymentUtxo],
+        feeRateSatPerVb: 5,
+        safetyFilter: async (_address, candidates) =>
+          candidates.filter((c) => c.txid === plentyOfPaymentUtxo.txid && c.vout === plentyOfPaymentUtxo.vout),
+      }),
+    /dummy UTXO did not pass the inscription\/Rune safety check/
   );
 });
 

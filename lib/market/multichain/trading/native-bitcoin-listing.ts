@@ -347,11 +347,28 @@ export async function buildFulfillmentPsbt(input: {
   // Fail-closed UTXO screening -- protects the BUYER, not just Marketplank:
   // a naive "pick enough sats" selection over wallet-reported UTXOs could
   // spend an inscription/rune the buyer didn't mean to as plain payment.
+  //
+  // THE DUMMY UTXO GOES THROUGH THIS EXACT SAME GATE (audit finding,
+  // 2026-08-19) -- it did not before. A dummy is typically the SMALLEST
+  // UTXO in a wallet (~600 sats), which is precisely the size class real
+  // inscription UTXOs live in (546-1000 sats); a caller sourcing "smallest
+  // UTXO >= 600 sats" from a plain chain indexer with no inscription/Rune
+  // awareness (exactly what a naive frontend integration would do) could
+  // hand this function someone's actual inscription as the "dummy" input,
+  // which then gets silently merged into the receiving output alongside
+  // the purchased one -- this is the documented msigner/OrdinalsBot
+  // padding-UTXO burn class, arriving through the one leg this gate used
+  // to skip.
   const safeCandidates = await runSafetyFilter(
     input.buyerAddress,
-    input.buyerPaymentUtxoCandidates.map((u): BitcoinUtxoRef => ({ txid: u.txid, vout: u.vout }))
+    [input.buyerDummyUtxo, ...input.buyerPaymentUtxoCandidates].map((u): BitcoinUtxoRef => ({ txid: u.txid, vout: u.vout }))
   );
   const safeSet = new Set(safeCandidates.map((u) => `${u.txid}:${u.vout}`));
+  if (!safeSet.has(`${input.buyerDummyUtxo.txid}:${input.buyerDummyUtxo.vout}`)) {
+    throw new Error(
+      "native-bitcoin-listing: the buyer's dummy UTXO did not pass the inscription/Rune safety check -- refusing to use it as padding. Choose a different UTXO, or create a fresh one with a plain wallet-to-self send."
+    );
+  }
   const provenSafeUtxos = input.buyerPaymentUtxoCandidates.filter((u) => safeSet.has(`${u.txid}:${u.vout}`));
 
   const feeSats = Math.ceil((seller.output.valueSats * MARKETPLANK_NATIVE_BITCOIN_FEE_BPS) / 10_000);

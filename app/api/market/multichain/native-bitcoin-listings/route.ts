@@ -65,7 +65,23 @@ export async function GET(req: Request) {
     const listings = seller
       ? await getNativeBitcoinListingsBySeller(seller)
       : await getActiveNativeBitcoinListings(limit);
-    return publicJson({ listings });
+
+    // NEVER return sellerPsbtBase64 here (audit finding, 2026-08-19). It's
+    // a fully-signed SIGHASH_SINGLE|ANYONECANPAY leg -- that signature only
+    // commits to its OWN input and its OWN output, so anyone who has these
+    // raw bytes can assemble their own fulfillment transaction that OMITS
+    // Marketplank's fee output and broadcast it directly to a public relay,
+    // completely bypassing the fee-stripping check already hardened into
+    // POST .../broadcast. Publishing it here was strictly worse than the
+    // known "BRC-20 pinning/snipping" attack class documented against
+    // UniSat/Magic Eden/OKX/Gate.io (arXiv 2501.11942, 2410.11295), which
+    // only requires observing a PSBT in the wild -- this handed it out on
+    // an unauthenticated GET with zero effort. No caller needs this field
+    // from this route: the fulfillment route reads it directly from
+    // Postgres via getNativeBitcoinListingById, never through this GET.
+    const publicListings = listings.map(({ sellerPsbtBase64: _sellerPsbtBase64, ...publicFields }) => publicFields);
+
+    return publicJson({ listings: publicListings });
   } catch (err) {
     return publicError(err, "Failed to load native Bitcoin listings.");
   }

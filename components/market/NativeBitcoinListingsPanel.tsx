@@ -243,8 +243,22 @@ export default function NativeBitcoinListingsPanel() {
 
         // Same dummy/payment split logic proven live this session: smallest
         // UTXO near the dummy target as input 0, largest remaining as payment.
+        //
+        // NO `?? sorted[0]` FALLBACK (audit finding, 2026-08-19): that
+        // fallback would reach for the single smallest UTXO in the wallet
+        // with no floor at all -- exactly the size class (546-1000 sats) a
+        // real inscription's own UTXO lives in. The real safety net is now
+        // server-side (buildFulfillmentPsbt screens the dummy through the
+        // same fail-closed inscription/Rune gate as every payment
+        // candidate), but there's no reason to let the client pick a
+        // UTXO the server is a priori more likely to reject.
         const sorted = [...utxos].sort((a, b) => a.valueSats - b.valueSats);
-        const dummyCandidate = sorted.find((u) => u.valueSats >= DUMMY_UTXO_TARGET_SATS) ?? sorted[0];
+        const dummyCandidate = sorted.find((u) => u.valueSats >= DUMMY_UTXO_TARGET_SATS);
+        if (!dummyCandidate) {
+          throw new Error(
+            `No UTXO of at least ${DUMMY_UTXO_TARGET_SATS} sats found to use as the dummy input -- send yourself a small plain payment first to create one.`
+          );
+        }
         const remaining = utxos.filter((u) => !(u.txid === dummyCandidate.txid && u.vout === dummyCandidate.vout));
         const paymentCandidates = remaining.sort((a, b) => b.valueSats - a.valueSats);
         if (paymentCandidates.length === 0) throw new Error("Need at least two separate UTXOs (one for the dummy input, one for payment).");
