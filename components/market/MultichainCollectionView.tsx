@@ -58,6 +58,17 @@ type ForeignOffer = {
 };
 type MyListing = { orderHash: string; tokenId: string; priceWei: string; expiresAt: string; native?: boolean };
 
+/** Mirrors swap-orders-store.ts's SwapListing (minus the raw order, which never leaves the server). */
+type SwapItem = { contractAddress: string; tokenId: string };
+type SwapRow = {
+  id: string;
+  maker: string;
+  offerItems: SwapItem[];
+  considerationItems: SwapItem[];
+  considerationNativeWei: string;
+  expiresAt: string;
+};
+
 type Props = {
   chainSlug: string;
   collectionSlug: string;
@@ -207,6 +218,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [bidVenue, setBidVenue] = useState<"native" | "opensea">("native");
   /** Native BUNDLE listings for this collection+chain (roadmap item #7) -- see lib/market/bundle-orders-store.ts. */
   const [bundles, setBundles] = useState<Array<{ id: string; maker: string; tokenIds: string[]; priceWei: string; expiresAt: string }>>([]);
+  const [swaps, setSwaps] = useState<SwapRow[]>([]);
+  const [swapsLoading, setSwapsLoading] = useState(false);
+  const [swapAccepting, setSwapAccepting] = useState<string | null>(null);
+  const [swapError, setSwapError] = useState<string | null>(null);
   const [bundlesLoading, setBundlesLoading] = useState(false);
   const [bundleBuying, setBundleBuying] = useState<string | null>(null);
   const [bundleError, setBundleError] = useState<string | null>(null);
@@ -374,6 +389,35 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     void loadOwned();
   }, [loadOwned]);
 
+  // SWAPS. Loaded per-chain, NOT per-collection (unlike bundles): a swap's
+  // offer and consideration items can each span multiple contracts, so
+  // "the collection this swap belongs to" isn't a well-defined value --
+  // see swap-orders-store.ts's getSwapListings for the same reasoning on
+  // the storage side. Filtered client-side to swaps that actually touch
+  // the collection being viewed, so the section stays relevant to the page.
+  const loadSwaps = useCallback(async () => {
+    if (!isForeignEvm) {
+      setSwaps([]);
+      return;
+    }
+    setSwapsLoading(true);
+    try {
+      const data = await swrJson<{ swaps: SwapRow[] }>(
+        `/api/market/multichain/native-swap-orders?chainSlug=${chainSlug}`,
+        { ttlMs: 15_000, swrMs: 60_000, session: true }
+      );
+      setSwaps(data.swaps ?? []);
+    } catch {
+      setSwaps([]);
+    } finally {
+      setSwapsLoading(false);
+    }
+  }, [isForeignEvm, chainSlug]);
+
+  useEffect(() => {
+    void loadSwaps();
+  }, [loadSwaps]);
+
   const loadBundles = useCallback(async () => {
     if (!isForeignEvm || !collection?.contractAddress) {
       setBundles([]);
@@ -512,6 +556,44 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       return null;
     }
   }, [account, adoptAccount, isSolana, isBitcoin]);
+
+  /**
+   * Accept a swap: deliver the items its maker asked for (plus any ETH
+   * top-up and the marketplace fee) and receive what they offered, in one
+   * Seaport fulfillment. Reuses fulfillMarketplankNativeSwapOrder, which
+   * goes through the same fulfillOrder path every other native order type
+   * already uses -- the caller needs the counterparty items approved, which
+   * Seaport's own approval step in that flow handles.
+   */
+  /** Swaps whose offer OR consideration touches the collection being viewed. */
+  const relevantSwaps = useMemo(() => {
+    const contract = collection?.contractAddress?.toLowerCase();
+    if (!contract) return [];
+    return swaps.filter((s) =>
+      [...s.offerItems, ...s.considerationItems].some((i) => i.contractAddress.toLowerCase() === contract)
+    );
+  }, [swaps, collection?.contractAddress]);
+
+  const confirmAcceptSwap = useCallback(
+    async (swapId: string) => {
+      setSwapError(null);
+      const who = await requireAccount();
+      if (!who) return;
+      try {
+        setSwapAccepting(swapId);
+        const { fulfillMarketplankNativeSwapOrder } = await import("@/lib/market/multichain/trading/native-fulfill");
+        await fulfillMarketplankNativeSwapOrder(chainSlug, swapId);
+        await loadSwaps();
+        await loadOwned();
+      } catch (e) {
+        console.error("Swap accept failed:", e);
+        setSwapError(e instanceof Error ? e.message : "Swap failed.");
+      } finally {
+        setSwapAccepting(null);
+      }
+    },
+    [chainSlug, requireAccount, loadSwaps, loadOwned]
+  );
 
   const confirmBuyBundle = useCallback(
     async (bundleId: string) => {
@@ -1403,6 +1485,58 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           )}
         </MarketBrowseLayout>
 
+        {/* Open swaps touching this collection -- see loadSwaps on why the
+            fetch is per-chain and the filter is client-side. */}
+        {isForeignEvm && !swapsLoading && relevantSwaps.length > 0 && (
+          <div className="mt-6 space-y-2">
+            <h3 className="font-display text-xl text-gold-300">Open swaps</h3>
+            <p className="text-xs text-foreground/55">
+              Trade your items directly for theirs. One signature, settled atomically.
+            </p>
+            {swapError && (
+              <p className="text-center text-xs text-red-300" role="alert">
+                {swapError}
+              </p>
+            )}
+            <ul className="space-y-2">
+              {relevantSwaps.map((s) => {
+                const isMine = account?.toLowerCase() === s.maker.toLowerCase();
+                const topUp = BigInt(s.considerationNativeWei || "0");
+                return (
+                  <li key={s.id} className="rounded-lg border border-line bg-panel p-3">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                      <span className="text-foreground/80">
+                        <span className="font-bold text-gold-300">Gives</span>{" "}
+                        {s.offerItems.map((i) => `#${i.tokenId}`).join(", ")}
+                      </span>
+                      <span className="text-foreground/40">→</span>
+                      <span className="text-foreground/80">
+                        <span className="font-bold text-gold-300">Wants</span>{" "}
+                        {s.considerationItems.map((i) => `#${i.tokenId}`).join(", ")}
+                        {topUp > 0n && ` + ${formatTokenAmount(topUp.toString(), 18, 4)} ${statCurrencySymbol}`}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <span className="truncate text-[0.65rem] text-foreground/40">
+                        by {s.maker.slice(0, 6)}…{s.maker.slice(-4)}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={isMine || swapAccepting === s.id}
+                        onClick={() => void confirmAcceptSwap(s.id)}
+                        title={isMine ? "This is your own swap" : undefined}
+                        className="min-h-9 shrink-0 rounded-md bg-gold-500 px-3 text-xs font-bold text-wood-950 transition hover:bg-gold-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {swapAccepting === s.id ? "Confirming…" : isMine ? "Your swap" : "Accept swap"}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
         {isForeignEvm && bundles.length > 0 && (
           <div className="mt-6 space-y-2">
             <h3 className="font-display text-xl text-gold-300">Bundles for sale</h3>
@@ -1812,7 +1946,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 account={account}
                 collection={collection}
                 ownedItems={ownedItems}
-                onListed={() => void loadOwned()}
+                onListed={() => {
+                  void loadOwned();
+                  void loadSwaps();
+                }}
                 onConnect={() => void requireAccount()}
               />
             </div>
