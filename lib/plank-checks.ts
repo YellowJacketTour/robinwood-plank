@@ -35,7 +35,14 @@ export type PointCategory =
   | "sale"
   | "referral"
   | "meme"
-  | "volume_bounty";
+  | "volume_bounty"
+  // Marketplace points/social-rank -- see docs/marketplank/SPEC-PLANK-CHECKS-AND-INDEX.md
+  // §1.3 (the existing "sale" category already covers marketplace buying;
+  // this is the operator-facing manual grant path noted as the "least
+  // text, most trust" pattern for the one caller with no independent
+  // on-chain verification behind it -- see recordManualGrant's own header
+  // and app/api/admin/points/route.ts).
+  | "admin_grant";
 
 /**
  * Published, adjustable weights — one unit of "real revenue" (wei) or
@@ -54,6 +61,10 @@ export const POINT_WEIGHTS: Record<PointCategory, bigint> = {
   // Tier 2 — free/low-barrier participation.
   meme: BigInt(100),
   volume_bounty: BigInt(20_000), // points per ETH of the brought-in collection's ongoing fee revenue
+  // Not wei-converted via weiToPoints (an admin grant specifies a raw point
+  // amount directly, no on-chain value behind it) -- present only so
+  // PointCategory's Record stays exhaustively typed. See recordManualGrant.
+  admin_grant: BigInt(0),
 };
 
 /** Sales not confirmed as a Marketplank-attributed fill earn a reduced rate —
@@ -94,6 +105,30 @@ export function referralPoints(feeWeiPaid: bigint): number {
 
 export function volumeBountyPoints(collectionFeeRevenueWei: bigint): number {
   return weiToPoints(collectionFeeRevenueWei, POINT_WEIGHTS.volume_bounty);
+}
+
+/**
+ * Points for a marketplace fill, scored on the fee that PROVABLY REACHED
+ * this app's treasury in that fill -- not on the sale price.
+ *
+ * This is the anti-farming design (audit findings H2/H3, 2026-08-19).
+ * Scoring sale price let anyone wash-trade with themselves at gas cost, or
+ * invent a price in a token they minted, for unlimited points. Scoring
+ * received fee makes every point cost its earner real money paid to us, so
+ * abuse is bounded by arithmetic rather than by detection heuristics --
+ * the one mitigation the research consistently found actually holds up.
+ *
+ * The rate is deliberately generous relative to the other categories: a
+ * fee is only ~1.8% of a sale, so at the plain `sale` weight a real
+ * purchase would score ~50x less than before. MARKETPLACE_FEE_POINT_WEIGHT
+ * restores roughly the previous points-per-real-purchase while keeping the
+ * farming cost intact -- a wash trader still pays full freight for every
+ * point.
+ */
+export const MARKETPLACE_FEE_POINT_WEIGHT = BigInt(1_000_000); // points per ETH of fee actually received
+
+export function marketplaceFeePoints(feeWeiReceived: bigint): number {
+  return weiToPoints(feeWeiReceived, MARKETPLACE_FEE_POINT_WEIGHT);
 }
 
 /**
@@ -363,4 +398,112 @@ export async function getLeaderboard(opts?: {
     vanityName: row.vanity_name,
     totalPoints: Number(row.total_points),
   }));
+}
+
+/**
+ * One wallet's real point total -- same profile-join getLeaderboard uses
+ * (a wallet's rank reflects its WHOLE linked profile, not just that one
+ * address, consistent with how the leaderboard itself already groups).
+ * Zero for an unlinked/unknown wallet, never an error -- "no points yet"
+ * is a normal state, not a failure.
+ */
+export async function getPointTotalForWallet(wallet: string): Promise<number> {
+  const address = wallet.trim().toLowerCase();
+  if (!HEX_ADDRESS.test(address)) return 0;
+  const result = await postgresQuery<{ total_points: string | null }>(
+    `SELECT SUM(e.points)::numeric AS total_points
+     FROM plank_checks_events e
+     JOIN plank_checks_wallets w ON w.wallet_address = e.wallet_address
+     JOIN plank_checks_profiles p ON p.profile_id = w.profile_id
+     WHERE p.profile_id = (
+       SELECT profile_id FROM plank_checks_wallets WHERE wallet_address = $1
+     )`,
+    [address]
+  );
+  const total = result.rows[0]?.total_points;
+  return total ? Number(total) : 0;
+}
+
+// --- social rank tier -----------------------------------------------------
+//
+// A visible tier label over a wallet's real Plank Checks point total --
+// flagged by the owner as wanting "a points and ranking system purely
+// social rank earned thru economic energy like we do with gamble games."
+// Named/spirited after PlankProgression.sol's own rank ladder (the
+// gambling module's on-chain Sapling->Wooden Whale tiers), but this is a
+// DIFFERENT, UI-only derivation -- PlankProgression's ranks unlock real
+// contract-level privileges (bet cap, fee discount) from on-chain wagering
+// stats; this is a vanity display over Plank Checks' off-chain point
+// ledger, same "vanity only, for now" posture the whole module already
+// has (SPEC-PLANK-CHECKS-AND-INDEX.md §1.1). No privilege is gated by this
+// -- see that spec's §1.7 for what a REAL future graduation into
+// privilege-gating would require (a funded rewards pool, explicit owner
+// sign-off), neither of which exists yet.
+export type SocialRankTier = "Sapling" | "Stick" | "Board" | "Plank" | "Big Beam" | "Wooden Whale";
+
+/** Thresholds are real, adjustable constants (same "named, adjustable parameter" rule POINT_WEIGHTS follows) -- not derived from any formula, chosen to spread across a realistic point range given the weights above (e.g. a single ~0.05 ETH marketplace sale already earns ~1,000 points at the sale rate). */
+const RANK_TIER_THRESHOLDS: [SocialRankTier, number][] = [
+  ["Wooden Whale", 500_000],
+  ["Big Beam", 100_000],
+  ["Plank", 20_000],
+  ["Board", 5_000],
+  ["Stick", 1_000],
+  ["Sapling", 0],
+];
+
+export type RankTierResult = {
+  tier: SocialRankTier;
+  points: number;
+  /** Points still needed to reach the next tier, or null at the top. */
+  pointsToNextTier: number | null;
+  nextTier: SocialRankTier | null;
+};
+
+export function rankTierFromPoints(points: number): RankTierResult {
+  const safePoints = Number.isFinite(points) && points > 0 ? points : 0;
+  for (let i = 0; i < RANK_TIER_THRESHOLDS.length; i++) {
+    const [tier, threshold] = RANK_TIER_THRESHOLDS[i];
+    if (safePoints >= threshold) {
+      const next = i > 0 ? RANK_TIER_THRESHOLDS[i - 1] : null;
+      return {
+        tier,
+        points: safePoints,
+        pointsToNextTier: next ? next[1] - safePoints : null,
+        nextTier: next ? next[0] : null,
+      };
+    }
+  }
+  // Unreachable -- the last threshold is 0 and safePoints >= 0 always, but
+  // TypeScript can't see that, and a real fallback beats a non-null
+  // assertion on an array index.
+  return { tier: "Sapling", points: safePoints, pointsToNextTier: RANK_TIER_THRESHOLDS[4][1], nextTier: "Stick" };
+}
+
+/**
+ * The ONE legitimate manual-grant path -- see PointCategory's own "admin_grant"
+ * doc comment. Distinct from recordPointEvent's blanket trusted-caller
+ * warning: this function IS a safe caller of it, because the trust boundary
+ * here is real admin authentication (verifyAdminProof, checked by the
+ * caller route BEFORE this runs), not client-supplied data taken on faith.
+ * Every grant is tagged with who granted it and why -- the one category in
+ * this whole ledger with no independent on-chain verification behind it,
+ * so the audit trail has to carry that weight instead (same "least text,
+ * most trust" transparency posture the spec requires elsewhere).
+ */
+export async function recordManualGrant(opts: {
+  wallet: string;
+  points: number;
+  grantedBy: string;
+  reason: string;
+}): Promise<void> {
+  if (!Number.isFinite(opts.points) || opts.points <= 0) {
+    throw new Error("Grant points must be a positive finite number.");
+  }
+  await recordPointEvent({
+    wallet: opts.wallet,
+    category: "admin_grant",
+    points: Math.round(opts.points),
+    metadata: { grantedBy: opts.grantedBy.toLowerCase(), reason: opts.reason },
+    earnedAt: new Date(),
+  });
 }

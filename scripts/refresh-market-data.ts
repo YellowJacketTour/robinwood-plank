@@ -74,15 +74,32 @@ const explicit = [
   "--token-registry",
   "--owners",
   "--events",
+  "--multichain",
+  "--discover-evm",
+  "--discover-robinhood",
+  "--discover-robinhood-opensea",
+  "--discover-opensea-bulk",
+  "--own-ranking",
+  "--scaffold-rarity",
 ].filter((t) => args.has(t));
 
-/** Full runs include the expensive collection-wide rebuilds; incremental ones don't. */
+/**
+ * Full runs include the expensive collection-wide rebuilds; incremental
+ * ones don't. scaffold-rarity is FULL-ONLY on purpose: own-ranking's
+ * per-tick promotion is a handful of metadata lookups, but scaffolding a
+ * newly-registered collection means paginating its ENTIRE token set
+ * (up to 100 pages, see rarity-index-runner.ts) -- real work that doesn't
+ * belong on a 2-minute incremental cadence. Its own freshness-skip
+ * (scaffold-all-collections.ts's --freshDays default) keeps a full run
+ * cheap on every tick after the first anyway -- most collections are
+ * already fresh and get skipped in one cheap read.
+ */
 const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -373,6 +390,138 @@ async function main(): Promise<void> {
     const { getCollectionIndex } = await import("../lib/market/collection-index");
     const index = await getCollectionIndex();
     return `${index.count}/${index.totalSupply} tokens`;
+  });
+
+  // Multi-chain collection index — completely independent of every step
+  // above (different tables, different upstream APIs, no Robinhood-chain
+  // dependency), so a failure here never blocks or is blocked by the rest
+  // of this run. See lib/market/multichain/ for the adapter architecture.
+  await step("multichain", async () => {
+    const { runMultichainSync } = await import("../lib/market/multichain/sync");
+    const run = await runMultichainSync();
+    return (
+      `${run.synced} synced, ${run.failed} failed, ${run.skipped} skipped` +
+      (run.errors.length > 0
+        ? ` — ${run.errors.slice(0, 5).map((e) => `${e.chainSlug}:${e.contractAddress.slice(0, 10)} (${e.error.slice(0, 60)})`).join("; ")}`
+        : "")
+    );
+  });
+
+  // Free, always-scanning EVM collection discovery -- watches raw chain
+  // activity instead of asking a ranking API (none exists for free as of
+  // 2026-08-17; see lib/market/multichain/discovery/evm-log-scan.ts's
+  // header). Runs AFTER multichain on purpose: any collection this
+  // discovers gets its first snapshot written immediately, so the very
+  // next --multichain tick has nothing new to catch up on.
+  await step("discover-evm", async () => {
+    const { runAllEvmDiscoveryScans } = await import("../lib/market/multichain/discovery/evm-log-scan");
+    const runs = await runAllEvmDiscoveryScans();
+    const parts = runs.map((r) =>
+      r.error
+        ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+        : `${r.chainSlug}: blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidates} candidates, ${r.skippedNoMetadata} no-metadata)`
+    );
+    return parts.join("; ");
+  });
+
+  // "Stage B" for the HOME chain itself -- see robinhood-chain-scan.ts's
+  // own header for why this can't reuse discover-evm's Alchemy-metadata
+  // validation (Robinhood Chain is a private Orbit L3 Alchemy doesn't
+  // list). Runs the same conservative CHUNK_BLOCKS window every tick,
+  // same cadence as every other discovery step.
+  await step("discover-robinhood", async () => {
+    const { runRobinhoodChainDiscoveryScan } = await import("../lib/market/multichain/discovery/robinhood-chain-scan");
+    const r = await runRobinhoodChainDiscoveryScan();
+    return `blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidatesSeen} candidates, ${r.skippedNotArt} not-art)`;
+  });
+
+  // Bulk Robinhood-Chain discovery via OpenSea's own chain-wide
+  // /collections?chain=robinhood list -- verified live 2026-08-18 to return
+  // real Robinhood-Chain collections OpenSea already indexes, far faster
+  // than discover-robinhood's raw eth_getLogs scan (see
+  // opensea-robinhood-scan.ts's own header). Runs after the raw scan so
+  // both paths' "already tracked" checks see each other's just-registered
+  // rows within the same tick.
+  await step("discover-robinhood-opensea", async () => {
+    const { runOpenSeaRobinhoodDiscoveryScan } = await import(
+      "../lib/market/multichain/discovery/opensea-robinhood-scan"
+    );
+    const r = await runOpenSeaRobinhoodDiscoveryScan();
+    if (r.error) return `ERR(${r.error.slice(0, 80)})`;
+    return `${r.pagesScanned} pages, ${r.entriesSeen} seen, +${r.registered} new (${r.skippedNotArt} not-art, ${r.skippedNotErc721} not-erc721, ${r.skippedAlreadyTracked} already-tracked)`;
+  });
+
+  // Same technique, generalized to the 7 real foreign EVM chains --
+  // OpenSea's bulk /collections?chain={slug} list enumerates real contract
+  // addresses far faster than discover-evm's 10-block-per-tick scanner
+  // (which registered ~300 collections total across 8 chains after 85+
+  // ticks this session). See opensea-bulk-scan.ts's own header for why
+  // this is safe to use for discovery (not ranking) despite OpenSea's list
+  // having no floor/volume fields -- every candidate still gets verified
+  // through the SAME alchemyNftAdapter.fetchSnapshot + isNotRealCollectibleArt
+  // gate discover-evm already trusts.
+  await step("discover-opensea-bulk", async () => {
+    const { runAllOpenSeaBulkScans } = await import("../lib/market/multichain/discovery/opensea-bulk-scan");
+    const runs = await runAllOpenSeaBulkScans();
+    return runs
+      .map((r) =>
+        r.error
+          ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+          : `${r.chainSlug}: ${r.pagesScanned}p, +${r.registered} new (${r.entriesSeen} seen, ${r.skippedNotArt} not-art, ${r.skippedNoMetadata} no-meta, ${r.skippedAlreadyTracked} tracked)`
+      )
+      .join("; ");
+  });
+
+  // Self-hosted, on-chain Seaport OrderFulfilled fill index -- see
+  // migration 023_seaport_fill_index.sql and lib/market/multichain/
+  // seaport-fill-indexer.ts's own headers. Same backfill-and-live-sync-
+  // are-the-same-call property as the "events" step above (cursor per
+  // chain, forward-only from first run rather than a historical backfill
+  // -- documented scope decision, not a gap).
+  await step("seaport-fills", async () => {
+    const { scanAllChainsForFills } = await import("../lib/market/multichain/seaport-fill-indexer");
+    const runs = await scanAllChainsForFills();
+    return runs
+      .map((r) =>
+        r.error
+          ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+          : `${r.chainSlug}: ${r.fromBlock}-${r.toBlock} +${r.fillsWritten}/${r.logsScanned}`
+      )
+      .join("; ");
+  });
+
+  // The reverse-engineered ranking source: Magic Eden's Reservoir-powered
+  // v4 EVM API (the one real candidate for a free cross-EVM ranking
+  // endpoint) has been confirmed live 2026-08-17, multiple retests, as
+  // "503 no healthy upstream" -- a genuine outage, not a missing feature.
+  // Rather than block on it, this reads back what discover-evm's per-tick
+  // scans have been accumulating into plank_multichain_activity_stats
+  // (migration 015) all along: our OWN observed top-by-transfer-volume
+  // ranking, built for free from data already collected. Runs last so it
+  // benefits from this tick's own discover-evm activity write.
+  await step("own-ranking", async () => {
+    const { runAllOwnRankingPromotions } = await import("../lib/market/multichain/discovery/evm-log-scan");
+    const runs = await runAllOwnRankingPromotions();
+    const parts = runs.map((r) =>
+      r.error
+        ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+        : `${r.chainSlug}: ${r.ranked} ranked, +${r.registered} new (${r.skippedNoMetadata} no-metadata)`
+    );
+    return parts.join("; ");
+  });
+
+  // Brings any collection own-ranking just registered (or any collection
+  // that's aged past its freshness window) up to full rarity/trait parity
+  // -- the "Marketplank feel" (tier badges, floors-by-rarity, trait
+  // filters, criteria bids) is otherwise stuck at zero for a collection
+  // until someone manually runs scripts/index-foreign-rarity.ts for it.
+  // Runs last so it benefits from this tick's own own-ranking promotions.
+  await step("scaffold-rarity", async () => {
+    const { scaffoldAllTrackedCollections } = await import("../lib/market/multichain/rarity-index-runner");
+    const result = await scaffoldAllTrackedCollections({
+      onProgress: (line) => console.log(`[refresh:scaffold-rarity] ${line}`),
+    });
+    return `${result.evmInScope} EVM tracked -> ${result.indexed} indexed, ${result.skippedFresh} fresh, ${result.failed} failed; ${result.solanaSkipped} Solana skipped`;
   });
 
   const failed = results.filter((r) => !r.ok);

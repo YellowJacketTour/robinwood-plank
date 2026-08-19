@@ -11,6 +11,7 @@ import {
 } from "@/lib/server/rpc-urls";
 import { recordRpc } from "@/lib/market/rpc-meter";
 import { peekRpcCache, putRpcCache, withRpcCache } from "@/lib/market/rpc-cache";
+import { foreignRpcUrls } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 type RpcResult<T> = { result?: T; error?: { message?: string; code?: number } };
 
@@ -196,6 +197,78 @@ export async function ethCallFree(to: string, data: string): Promise<string> {
       }
     }
     throw new Error(`Free eth_call failed: ${errors.slice(-2).join(" | ")}`);
+  });
+}
+
+/**
+ * eth_call over a FOREIGN chain's free/keyed RPC (foreignRpcUrls), still
+ * cached and coalesced -- the chain-parameterized sibling of ethCallFree
+ * above, for the Marketplank-native foreign-chain listing feature's
+ * on-chain ownership check (a native listing must confirm the seller
+ * actually owns the token on the chain THEY'RE listing on, not Robinhood
+ * Chain). Deliberately a NEW function rather than adding a chainSlug
+ * parameter to ethCallFree/ethCall/rpcCall: those also serve Robinhood-chain
+ * vault reads that must never accidentally be pointed at the wrong chain by
+ * a missed/defaulted parameter -- see this file's own header on why
+ * vaultRpcUrls() stays hardcoded to SERVER_RPC_URLS.
+ */
+export async function ethCallForeignFree(chainSlug: string, to: string, data: string): Promise<string> {
+  // The real JSON-RPC wire params (sent to postRpc) MUST stay the clean
+  // [{to,data}, "latest"] shape -- injecting chainSlug there would leak into
+  // the actual eth_call request body. chainSlug is folded into the CACHE
+  // key only (cacheParams), via method: "eth_call" so cacheTtlMs's switch
+  // still matches its real "eth_call" case (LATEST_MS) instead of silently
+  // falling through to the unknown-method default of 0 (no caching at all)
+  // the way a synthetic method name like "eth_call:base-mainnet" would.
+  const wireParams = [{ to, data }, "latest"];
+  const cacheParams = [{ to, data, chainSlug }, "latest"];
+  return withRpcCache("eth_call", cacheParams, async () => {
+    const errors: string[] = [];
+    for (const url of availableUrls(foreignRpcUrls(chainSlug))) {
+      try {
+        const data_ = await postRpc(url, "eth_call", wireParams, 8_000);
+        if (data_.error) {
+          errors.push(data_.error.message || "RPC error");
+          continue;
+        }
+        return data_.result as string;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    throw new Error(`Foreign eth_call (${chainSlug}) failed: ${errors.slice(-2).join(" | ")}`);
+  });
+}
+
+/**
+ * eth_getCode over a FOREIGN chain -- ethCallForeignFree's sibling, needed
+ * for lib/market/signature.ts's Rpc interface (its EIP-1271 contract-wallet
+ * check calls .getCode() to decide whether to do an ecrecover or an
+ * eth_call). Same cross-chain cache-collision fix as ethCallForeignFree:
+ * chainSlug rides in the cache-key params only, never the real wire request
+ * (an address existing as a contract on one chain but an EOA on another is
+ * a real, plausible collision this must not conflate -- getting this wrong
+ * for a SIGNATURE VERIFICATION read is a real security bug, not just a
+ * staleness one).
+ */
+export async function ethGetCodeForeignFree(chainSlug: string, address: string): Promise<string> {
+  const wireParams = [address, "latest"];
+  const cacheParams = [address, "latest", chainSlug];
+  return withRpcCache("eth_getCode", cacheParams, async () => {
+    const errors: string[] = [];
+    for (const url of availableUrls(foreignRpcUrls(chainSlug))) {
+      try {
+        const data_ = await postRpc(url, "eth_getCode", wireParams, 8_000);
+        if (data_.error) {
+          errors.push(data_.error.message || "RPC error");
+          continue;
+        }
+        return data_.result as string;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    throw new Error(`Foreign eth_getCode (${chainSlug}) failed: ${errors.slice(-2).join(" | ")}`);
   });
 }
 

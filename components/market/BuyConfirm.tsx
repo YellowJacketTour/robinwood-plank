@@ -20,6 +20,17 @@ type Props = {
   error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
+  /**
+   * Present only for a cross-chain purchase (see isCrossChainBuyable in
+   * lib/market/types.ts). Overrides the fee row: collection.feeBps governs
+   * OUR OWN book's included fee, which has nothing to do with a foreign
+   * order fulfilled through MarketplankForeignFeeRouter, whose fee is a
+   * fixed rate ADDED on top of the order price rather than baked into it.
+   * Also states which chain the trade actually settles on, since this
+   * modal otherwise gives no hint the purchase isn't on the same chain the
+   * wallet is currently connected to.
+   */
+  crossChain?: { chainLabel: string; feeBps: number };
 };
 
 /**
@@ -38,7 +49,14 @@ export default function BuyConfirm({
   error,
   onConfirm,
   onCancel,
+  crossChain,
 }: Props) {
+  const crossChainFeeWei = crossChain
+    ? (BigInt(verifiedPriceWei) * BigInt(crossChain.feeBps)) / BigInt(10_000)
+    : BigInt(0);
+  const totalPayWei = crossChain
+    ? (BigInt(verifiedPriceWei) + crossChainFeeWei).toString()
+    : verifiedPriceWei;
   // Ask the proxy for a thumbnail tier, and skip Next's optimizer, exactly as
   // ListingCard/ItemDetail/MyNfts do. `/api/ipfs/image?…` is a route, not a
   // static asset: routing it through /_next/image returns 400 ("url" parameter
@@ -86,6 +104,11 @@ export default function BuyConfirm({
             <p className="truncate text-[0.65rem] text-foreground/45">
               from {shortAddress(listing.maker)}
             </p>
+            {crossChain && (
+              <p className="truncate text-[0.65rem] font-bold text-[#58BDF0]">
+                Settles on {crossChain.chainLabel}
+              </p>
+            )}
           </div>
         </div>
 
@@ -98,18 +121,22 @@ export default function BuyConfirm({
             </dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-foreground/60">Marketplace fee</dt>
+            <dt className="text-foreground/60">
+              {crossChain ? "Marketplank fee (added)" : "Marketplace fee"}
+            </dt>
             <dd className="tabular-nums text-foreground">
-              {collection.feeBps > 0
-                ? `${(collection.feeBps / 100).toFixed(2)}% (included)`
-                : "None"}
+              {crossChain
+                ? `${(crossChain.feeBps / 100).toFixed(2)}% · ${formatTokenAmount(crossChainFeeWei.toString(), 18, 6)} Ξ`
+                : collection.feeBps > 0
+                  ? `${(collection.feeBps / 100).toFixed(2)}% (included)`
+                  : "None"}
             </dd>
           </div>
           <div className="flex justify-between border-t border-line pt-1">
             <dt className="font-bold text-foreground">You pay</dt>
             <dd className="text-right font-display tabular-nums text-gold-300">
-              <span className="block">{formatTokenAmount(verifiedPriceWei, 18, 6)} Ξ</span>
-              <EthUsdValue wei={verifiedPriceWei} className="block font-sans text-xs text-foreground/55" />
+              <span className="block">{formatTokenAmount(totalPayWei, 18, 6)} Ξ</span>
+              <EthUsdValue wei={totalPayWei} className="block font-sans text-xs text-foreground/55" />
             </dd>
           </div>
         </dl>

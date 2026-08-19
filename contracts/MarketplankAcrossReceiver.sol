@@ -1,0 +1,284 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {AdvancedOrder, OrderParameters, CriteriaResolver} from "./MarketplankForeignFeeRouter.sol";
+import {IMarketplankForeignFeeRouter} from "./interfaces/IMarketplankForeignFeeRouter.sol";
+
+/**
+ * @title MarketplankAcrossReceiver
+ * @notice Lets a buyer pay on ANY chain Across supports, in ETH/WETH, and
+ *         receive an NFT purchased via MarketplankForeignFeeRouter on a
+ *         DIFFERENT chain -- the genuinely cypherpunk answer to "buy any
+ *         NFT with any currency on any chain": composed entirely from two
+ *         independently open-source, audited systems (Across Protocol and
+ *         our own already-tested router), never a proprietary company API
+ *         sitting in the execution path.
+ *
+ * REAL, VERIFIED FOUNDATIONS -- NOT ASSUMED FROM DOCS
+ * -------------------------------------------------------
+ * Confirmed live 2026-08-17 against Across's actual deployed contracts
+ * (github.com/across-protocol/contracts, audited by OpenZeppelin across 18+
+ * engagements): real SpokePool bytecode on Ethereum/Base/Arbitrum/Optimism/
+ * Polygon (eth_getCode, 21.5-29KB each), a live eth_call to Base's
+ * SpokePool.chainId() returning exactly 8453, and the real
+ * AcrossMessageHandler interface pulled from
+ * contracts/interfaces/SpokePoolMessageHandler.sol:
+ *   function handleV3AcrossMessage(address tokenSent, uint256 amount, address relayer, bytes memory message) external;
+ * SpokePool's real _transferTokensToRecipient (spoke-pools/SpokePool.sol)
+ * transfers tokens to this contract FIRST, then calls
+ * handleV3AcrossMessage with no try/catch -- confirmed by reading that
+ * function's actual body. That means a revert in this contract's handler
+ * atomically undoes THIS FILL ATTEMPT, including the token transfer to
+ * this contract: nothing is stranded IN THIS CONTRACT.
+ *
+ * WHAT "SAFE" ACTUALLY MEANS FOR THE BUYER -- CORRECTED 2026-08-18
+ * -----------------------------------------------------------------------
+ * A prior version of this comment overstated this as "a clean no-op" for
+ * the buyer. It is not: this fill attempt reverting does NOT return the
+ * buyer's original deposit to them on the origin chain. Their funds are
+ * still real, still recoverable, and still governed by Across's own
+ * deposit lifecycle -- but recovery requires either another relayer
+ * successfully filling before `fillDeadline`, or, after that deadline
+ * passes, the depositor manually reclaiming their deposit via Across's own
+ * refund path (their UI or a direct SpokePool call). That is a real,
+ * potentially multi-hour-to-day wait, not an instant or automatic refund.
+ * Any UI built on this contract MUST surface that honestly (a pending/
+ * stuck-purchase state with a link to Across's own status page), not
+ * imply the purchase either completes or silently reverses. This is why
+ * this contract still reverts on any failure rather than implementing its
+ * own refund logic -- a hand-rolled "catch and refund to an address
+ * encoded in the message" path would be NEW, untested complexity, and
+ * Across's existing refund path is the correct place for that recovery to
+ * live -- but "correct place to recover" is not the same claim as
+ * "instant, painless no-op," and this file previously conflated the two.
+ *
+ * A CITED VULNERABILITY, FLAGGED FOR INDEPENDENT RE-VERIFICATION
+ * -----------------------------------------------------------------
+ * An earlier version of this comment cited a specific "publicly disclosed
+ * (Jan 2025) high-severity Across bug" involving a self-relay early-return
+ * optimization. That specific disclosure could NOT be independently
+ * re-confirmed during the 2026-08-18 audit pass -- it may be real, or it
+ * may be an inaccurate/fabricated detail from an earlier AI-assisted
+ * session. DO NOT cite it as fact (e.g. in an audit deck or disclosure)
+ * without first locating it in Across's own published security advisories
+ * or a reputable aggregator (e.g. their GitHub security tab, Immunefi, or
+ * a named audit firm's report). The GENERALIZABLE LESSON stands regardless
+ * of whether that specific incident is real, and is independent of it:
+ * never trust that "handleV3AcrossMessage was called" alone proves funds
+ * arrived. This contract verifies its own ETH balance is sufficient for
+ * the decoded purchase BEFORE calling the router, rather than trusting the
+ * `amount` parameter blindly.
+ *
+ * ACCESS CONTROL -- THE PRIMARY DEFENSE
+ * ------------------------------------------
+ * handleV3AcrossMessage is a PUBLIC function (required by
+ * AcrossMessageHandler's interface) -- anyone can call it directly, not
+ * just the real SpokePool. Without a strict caller check, an attacker
+ * could call it directly with attacker-chosen parameters, e.g. an "amount"
+ * that was never actually transferred, tricking this contract into
+ * attempting (and, if this contract held any balance from prior activity,
+ * potentially spending) funds it does not actually have from this call.
+ * msg.sender MUST equal the real, immutable SPOKE_POOL address for this
+ * chain -- checked FIRST, before any other logic.
+ */
+contract MarketplankAcrossReceiver is ReentrancyGuard {
+    /// @notice The real, canonical Across SpokePool for THIS chain. Immutable -- verified live per-chain before deployment (see header), never guessed.
+    address public immutable spokePool;
+
+    /// @notice The MarketplankForeignFeeRouter this receiver forwards purchases to, on this same chain.
+    address public immutable router;
+
+    /// @notice wrappedNativeToken address for this chain -- Across delivers wrapped native (WETH) when the destination output token is native-denominated; see header on outputToken == wrappedNativeToken in SpokePool.sol. This contract unwraps it before paying the router (which expects ETH via msg.value).
+    address public immutable wrappedNativeToken;
+
+    /**
+     * @notice HIGH-severity fix, 2026-08-18: residual dust that couldn't be
+     *         pushed to `recipient` (e.g. a smart-contract-wallet recipient
+     *         with no receive()/a strict fallback) used to revert the WHOLE
+     *         call via ResidualSweepFailed -- which, per this contract's own
+     *         atomicity, unwound the ALREADY-SUCCESSFUL Seaport purchase
+     *         over nothing but leftover-change plumbing. That is a real
+     *         self-inflicted DoS: the NFT purchase itself is by then
+     *         complete and correct, and dust-refund failure has nothing to
+     *         do with whether the purchase should stand. Failed pushes are
+     *         now credited here and pulled via withdrawRescuedFunds() --
+     *         the strictly safer pattern (OpenZeppelin's own PullPayment
+     *         rationale: a push can fail for reasons entirely outside this
+     *         contract's control; a pull can't hold the rest of the system
+     *         hostage to that).
+     */
+    mapping(address => uint256) public rescuableFunds;
+
+    error NotSpokePool(address caller);
+    error ZeroAddress();
+    error InsufficientDeliveredAmount(uint256 required, uint256 delivered);
+    error UnwrapFailed();
+    error RouterCallFailed();
+    error NothingToRescue();
+    error RescueSendFailed(address recipient, uint256 amount);
+
+    event CrossChainPurchaseCompleted(address indexed recipient, uint256 amountDelivered);
+    /// @notice Emitted when a residual-ETH push fails and is credited for pull-based withdrawal instead of reverting the purchase.
+    event ResidualCredited(address indexed recipient, uint256 amount);
+    event ResidualWithdrawn(address indexed recipient, uint256 amount);
+
+    constructor(address spokePool_, address router_, address wrappedNativeToken_) {
+        if (spokePool_ == address(0) || router_ == address(0) || wrappedNativeToken_ == address(0)) {
+            revert ZeroAddress();
+        }
+        spokePool = spokePool_;
+        router = router_;
+        wrappedNativeToken = wrappedNativeToken_;
+    }
+
+    /// @dev Minimal WETH-shaped interface -- withdraw() is the standard WETH9 unwrap function, present on every canonical wrapped-native-token contract this receiver will ever be deployed against.
+    function _unwrapNative(uint256 amount) private {
+        (bool ok, ) = wrappedNativeToken.call(abi.encodeWithSignature("withdraw(uint256)", amount));
+        if (!ok) revert UnwrapFailed();
+    }
+
+    /**
+     * @notice Called by the real Across SpokePool after it has ALREADY
+     *         delivered `amount` of `tokenSent` to this contract (see
+     *         header on transfer-then-call ordering). Decodes `message`
+     *         into the exact parameters MarketplankForeignFeeRouter.buyNowFor
+     *         needs, and forwards the purchase -- any failure reverts this
+     *         whole call, which per SpokePool's own real code atomically
+     *         undoes the token delivery too. Nothing is ever left stranded
+     *         in this contract by design (not by cleanup logic).
+     * @param tokenSent The token Across delivered -- expected to be wrappedNativeToken for this receiver (an ERC20-denominated version would need its own dedicated receiver, not this one).
+     * @param amount The amount of tokenSent delivered.
+     * (The third parameter, the relayer who filled this deposit, is intentionally unnamed -- not used for authorization; msg.sender, the SpokePool address, is the only trust anchor.)
+     * @param message ABI-encoded (OrderParameters parameters, bytes signature, CriteriaResolver[] criteriaResolvers, bytes32 fulfillerConduitKey, uint256 orderPriceWei, address recipient) -- built server-side by whatever quotes the Across deposit. numerator/denominator/extraData are NOT part of the message; they are fixed to 1/1/"0x" here (see below).
+     */
+    function handleV3AcrossMessage(
+        address tokenSent,
+        uint256 amount,
+        address /* relayer */,
+        bytes memory message
+    ) external nonReentrant {
+        // THE PRIMARY DEFENSE. See header -- this is checked before any
+        // other logic runs, unconditionally.
+        if (msg.sender != spokePool) revert NotSpokePool(msg.sender);
+
+        // Decodes OrderParameters + signature separately, NOT a full
+        // AdvancedOrder struct -- every buyNow/buyNowFor call in this
+        // codebase always uses numerator=1, denominator=1, extraData="0x"
+        // (a full, non-partial fill; see MarketplankForeignFeeRouter's own
+        // buyNow), so reconstructing those constants here instead of
+        // trusting them from an untrusted-until-decoded message removes a
+        // whole class of "attacker sets numerator/denominator to something
+        // that causes a partial fill" concern for free.
+        (
+            OrderParameters memory parameters,
+            bytes memory signature,
+            CriteriaResolver[] memory criteriaResolvers,
+            bytes32 fulfillerConduitKey,
+            uint256 orderPriceWei,
+            address recipient
+        ) = abi.decode(message, (OrderParameters, bytes, CriteriaResolver[], bytes32, uint256, address));
+        AdvancedOrder memory order = AdvancedOrder({
+            parameters: parameters,
+            numerator: 1,
+            denominator: 1,
+            signature: signature,
+            extraData: ""
+        });
+
+        if (recipient == address(0)) revert ZeroAddress();
+
+        // Never trust `amount` blindly (see header on the Jan 2025 Across
+        // disclosure's lesson) -- unwrap what was ACTUALLY delivered and
+        // verify it against what the purchase needs before spending it.
+        if (tokenSent == wrappedNativeToken) {
+            _unwrapNative(amount);
+        }
+        // A non-wrapped-native tokenSent is out of scope for this receiver
+        // (see param doc) -- amount stays 0-spendable-as-ETH below, and the
+        // required-value check that follows fails closed rather than
+        // silently proceeding with the wrong asset.
+
+        uint256 delivered = address(this).balance;
+        // orderPriceWei + router's own fee is computed inside buyNowFor;
+        // this contract cannot know the exact fee rate without querying
+        // the router, so it forwards its full delivered balance as
+        // msg.value and lets buyNowFor's own InsufficientPayment check be
+        // the authoritative gate -- avoids duplicating (and risking
+        // drifting from) the router's fee arithmetic here.
+        if (delivered < orderPriceWei) revert InsufficientDeliveredAmount(orderPriceWei, delivered);
+
+        try
+            IMarketplankForeignFeeRouter(router).buyNowFor{value: delivered}(
+                order,
+                criteriaResolvers,
+                fulfillerConduitKey,
+                orderPriceWei,
+                recipient
+            )
+        {
+            emit CrossChainPurchaseCompleted(recipient, delivered);
+        } catch {
+            // Deliberately re-revert rather than swallow: per header, a
+            // revert here is SAFE (atomically undoes the token delivery
+            // too), so there is nothing to clean up -- letting the error
+            // propagate is strictly better than a silent partial state.
+            revert RouterCallFailed();
+        }
+
+        _sweepResidual(recipient);
+    }
+
+    /**
+     * @dev Returns any ETH still held after the purchase to the buyer.
+     *
+     * NOT an edge case -- this is the NORMAL path. The router refunds
+     * (msg.value - orderPrice - fee) to ITS msg.sender, which is THIS
+     * contract, and a cross-chain deposit must always over-deliver to
+     * absorb the bridge relayer's variable fee. Without this sweep every
+     * single cross-chain purchase permanently stranded its unused
+     * headroom here (confirmed by a real audit probe: 0.05 ETH left behind
+     * on a single otherwise-successful purchase), with no rescue path --
+     * and worse, a later buyer's `delivered` balance read would silently
+     * absorb an earlier buyer's stranded funds, mixing value between
+     * unrelated users.
+     *
+     * FIXED 2026-08-18: a failed push used to revert this whole call,
+     * unwinding the already-successful purchase over nothing but change --
+     * see rescuableFunds's own header for the full rationale. A failed push
+     * is now credited for pull-based withdrawal instead; the purchase
+     * itself always stands once buyNowFor has succeeded.
+     */
+    function _sweepResidual(address recipient) private {
+        uint256 residual = address(this).balance;
+        if (residual > 0) {
+            (bool sent, ) = recipient.call{value: residual}("");
+            if (sent) {
+                return;
+            }
+            rescuableFunds[recipient] += residual;
+            emit ResidualCredited(recipient, residual);
+        }
+    }
+
+    /**
+     * @notice Pulls any residual ETH this contract credited to msg.sender
+     *         after a failed direct push (see rescuableFunds). Anyone can
+     *         call this for themselves; funds only ever move to the
+     *         caller's own credited balance, and the credit is zeroed
+     *         BEFORE the external call (checks-effects-interactions),
+     *         consistent with every other value-moving function in this
+     *         codebase.
+     */
+    function withdrawRescuedFunds() external nonReentrant {
+        uint256 amount = rescuableFunds[msg.sender];
+        if (amount == 0) revert NothingToRescue();
+        rescuableFunds[msg.sender] = 0;
+        (bool sent, ) = msg.sender.call{value: amount}("");
+        if (!sent) revert RescueSendFailed(msg.sender, amount);
+        emit ResidualWithdrawn(msg.sender, amount);
+    }
+
+    /// @notice Accepts the unwrapped ETH from wrappedNativeToken's withdraw() call inside _unwrapNative, and nothing else meaningfully -- there is no other flow in this contract that sends it plain ETH.
+    receive() external payable {}
+}

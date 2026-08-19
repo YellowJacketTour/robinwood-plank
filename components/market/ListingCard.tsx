@@ -1,6 +1,8 @@
+import { useState } from "react";
 import Image from "next/image";
 import { ExternalLink } from "lucide-react";
 import {
+  isCrossChainBuyable,
   isForeignListing,
   isMarketplankRelistRequired,
   MARKETPLANK_RELIST_MESSAGE,
@@ -18,13 +20,16 @@ import {
 const VENUE_BADGE_CLASS: Record<ListingVenue | "marketplank", string> = {
   opensea: "bg-[#58BDF0]/15 text-[#58BDF0]",
   pulp: "bg-[#F0803C]/15 text-[#F0803C]",
+  magiceden: "bg-[#E42575]/15 text-[#E42575]",
+  unisat: "bg-[#F7931A]/15 text-[#F7931A]",
   marketplank: "bg-gold-500/15 text-gold-300",
 };
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
-import { tierColor } from "@/lib/market/rarityClient";
+import { tierColor, tierGlow, tierAnimationClass, tierCardStyle } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { withImageWidth } from "@/lib/ipfs";
 import EthUsdValue from "@/components/market/EthUsdValue";
+import { chainDisplayName, chainBrandColor, chainGlyph } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 type Props = {
   listing: Listing;
@@ -64,6 +69,12 @@ export default function ListingCard({
   rarity,
 }: Props) {
   const isOffer = variant === "offer";
+  // Presentational only -- swaps a shimmer placeholder for the art once the
+  // real image paints, instead of the art popping in and shifting nothing
+  // (aspect-square already reserves the space) but reading as "loaded" a
+  // beat sooner than it did. Purely visual; no data this card reads depends
+  // on it.
+  const [imageLoaded, setImageLoaded] = useState(false);
   // This state is for listings for sale. Incoming offers have their own
   // acceptance validation and should not inherit a sale-card warning.
   const relistRequired = !isOffer && isMarketplankRelistRequired(listing);
@@ -74,11 +85,17 @@ export default function ListingCard({
   );
   return (
     <li
-      // Finalized mockup card: uniform quiet frame, rarity communicated by
-      // the tier pill alone; the card lifts on hover instead of glowing.
-      className={`dense-card flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-line-strong ${
+      // Tier-tinted wash + border (tierCardStyle) and an escalating glow
+      // ring (tierGlow) on top of the quiet base frame -- the same
+      // whole-card treatment Gallery.tsx applies for RobinWood's own
+      // tokens, now shared by any card carrying real rarity data
+      // (RobinWood or a foreign collection indexed via
+      // scripts/index-foreign-rarity.ts). Common gets no glow -- the
+      // neutral baseline every other tier stands out against.
+      className={`dense-card hover-glow-gold flex flex-col overflow-hidden p-0 transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-line-strong ${
         isOffer ? "border-emerald-500/40" : ""
-      }`}
+      } ${rarity ? tierAnimationClass(rarity.tier) : ""}`}
+      style={rarity ? { ...tierCardStyle(rarity.tier), boxShadow: tierGlow(rarity.tier) } : undefined}
     >
       <div
         className={`relative aspect-square w-full bg-wood-900 ${
@@ -99,6 +116,13 @@ export default function ListingCard({
             : undefined
         }
       >
+        {/* Shimmer veil behind the art until it paints -- CSS-only,
+            no layout shift since the aspect-square parent already reserves
+            the space. Fades out via opacity once onLoad fires. */}
+        <div
+          aria-hidden="true"
+          className={`skeleton-shimmer img-loading-veil absolute inset-0 ${imageLoaded ? "opacity-0" : "opacity-100"}`}
+        />
         <Image
           // The token's own art, not the collection logo — a grid of identical
           // logos reads as broken. Falls back only if resolution failed.
@@ -106,8 +130,9 @@ export default function ListingCard({
           alt={`${collection.name} #${listing.tokenId}`}
           fill
           sizes="(min-width: 1024px) 20vw, 50vw"
-          className="object-cover"
+          className={`object-cover transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
           unoptimized={Boolean(listing.imageUrl)}
+          onLoad={() => setImageLoaded(true)}
         />
         {isFloor && (
           <span
@@ -129,13 +154,28 @@ export default function ListingCard({
             {rarity.tier}
           </span>
         )}
+        {listing.foreignChainSlug && (
+          // At-a-glance chain identification via that chain's real brand
+          // color -- opposite corner from the rarity badge so the two
+          // never collide.
+          <span
+            className="card-overlay absolute right-2 top-2 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[0.55rem] font-black text-white shadow"
+            style={{ backgroundColor: chainBrandColor(listing.foreignChainSlug) }}
+            title={chainDisplayName(listing.foreignChainSlug)}
+          >
+            {chainGlyph(listing.foreignChainSlug)}
+          </span>
+        )}
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-2.5 sm:p-3">
         {trustLabels.length > 0 && (
           <p className="sr-only">Collection trust: {trustLabels.join(", ")}</p>
         )}
         <div className="min-w-0 leading-tight">
-          <p className="truncate text-xs font-bold text-foreground sm:text-sm">
+          <p
+            className="truncate text-xs font-bold text-foreground sm:text-sm"
+            title={listing.tokenId ? (rarity?.name ?? `#${listing.tokenId}`) : "Any plank"}
+          >
             {listing.tokenId ? (rarity?.name ?? `#${listing.tokenId}`) : "Any plank"}
           </p>
           {listing.tokenId && (
@@ -162,19 +202,21 @@ export default function ListingCard({
             </p>
             <EthUsdValue wei={listing.priceWei} className="block text-[0.62rem] tabular-nums text-foreground/50" />
           </div>
-          {isForeignListing(listing) ? (
+          {isForeignListing(listing) && !isCrossChainBuyable(listing) ? (
             /**
-             * Foreign listing: link out, never a Buy button. OpenSea's order
-             * routes through a conduit we do not control and PulpMarket's API
-             * exposes no signature at all, so a Buy here would be us promising
-             * a fill we cannot guarantee — the exact failure that made stale
-             * listings revert for buyers. A different label, a different
-             * colour and an outbound arrow mean nobody clicks expecting one
-             * flow and lands in another.
+             * Foreign listing with no genuine fulfillment path: link out,
+             * never a Buy button. PulpMarket's API exposes no signature at
+             * all, and a Robinhood-Chain-native OpenSea row routes through a
+             * conduit our own order-validation deliberately fails closed on
+             * — a Buy here would be us promising a fill we cannot guarantee,
+             * the exact failure that made stale listings revert for buyers.
+             * A different label, a different colour and an outbound arrow
+             * mean nobody clicks expecting one flow and lands in another.
              *
-             * Keyed on isForeignListing, never on one venue literal: a
-             * comparison against "opensea" would drop every other foreign
-             * venue into the Buy branch below.
+             * Keyed on isForeignListing && !isCrossChainBuyable, never on one
+             * venue literal: a comparison against "opensea" would drop every
+             * other foreign venue (or a legitimately buyable cross-chain
+             * OpenSea row) into the wrong branch.
              */
             <a
               href={listing.externalUrl}
@@ -204,7 +246,20 @@ export default function ListingCard({
               type="button"
               disabled={!canFill}
               onClick={() => onBuy?.(listing)}
-              title={canFill ? undefined : "You don't own a plank this bid can take."}
+              title={
+                !canFill
+                  ? "You don't own a plank this bid can take."
+                  : isCrossChainBuyable(listing)
+                    ? // Fee stated in THIS trade's own terms, not a blanket
+                      // number — surface-contracts.md's fee rule ("never
+                      // present one fee model as if it applied to all of
+                      // them") extended from vault copy to this cross-chain
+                      // path, since the foreign fee (1.8%, MarketplankForeignFeeRouter)
+                      // is genuinely different from the native Marketplank
+                      // fee model this same button uses elsewhere.
+                      `Settles on ${chainDisplayName(listing.foreignChainSlug!)} via ${venueLabel(listing)}. A 1.8% Marketplank fee is added on top of the listed price.`
+                    : undefined
+              }
               className={`min-h-11 rounded-md px-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-100 sm:px-3 sm:text-sm ${
                 isOffer
                   ? "min-w-16 bg-emerald-500 text-wood-950 hover:bg-emerald-400 sm:min-w-[4.25rem]"
@@ -221,6 +276,11 @@ export default function ListingCard({
            * OpenSea would make "unmarked" mean "ours" — an inference, and
            * inferences fail for anyone landing mid-scroll. Explicit costs a
            * little more ink and removes the ambiguity entirely.
+           *
+           * A cross-chain-buyable row adds the chain name too ("OpenSea ·
+           * Base") — venue alone would leave a real Buy button next to a
+           * price with no indication it settles on a different chain than
+           * the one the wallet is currently connected to.
            */
           <span
             className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[0.55rem] font-black uppercase tracking-wider ${
@@ -228,6 +288,7 @@ export default function ListingCard({
             }`}
           >
             {venueLabel(listing)}
+            {listing.foreignChainSlug ? ` · ${chainDisplayName(listing.foreignChainSlug)}` : ""}
           </span>
         )}
         <div className="flex items-center justify-between gap-2">

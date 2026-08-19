@@ -1,7 +1,7 @@
 import { MARKET_OFFER_CURRENCY } from "@/lib/constants";
 import type { NormalisedForeignListing } from "@/lib/market/foreign-listings";
 import { ethCallFree } from "@/lib/market/fetch-rpc";
-import { getCollection } from "@/lib/market/collections";
+import { getCollectionAsync } from "@/lib/market/collections-server";
 import { resolveTokenImage } from "@/lib/market/token-image";
 import {
   countOrdersByMaker,
@@ -71,20 +71,28 @@ type PostBody = {
   criteria?: unknown;
 };
 
-function annotateRoyaltyEnforcement<T extends {
+async function annotateRoyaltyEnforcement<T extends {
   collectionSlug: string;
   rawOrder: unknown;
   royaltyEnforced?: boolean;
-}>(items: T[]): T[] {
-  return items.map((item) => {
-    const collection = getCollection(item.collectionSlug);
-    return {
-      ...item,
-      royaltyEnforced:
-        item.royaltyEnforced === true ||
-        Boolean(collection && hasConfiguredRoyaltyConsideration(item.rawOrder, collection)),
-    };
-  });
+}>(items: T[]): Promise<T[]> {
+  return Promise.all(
+    items.map(async (item) => {
+      // getCollectionAsync, not the sync getCollection -- so a listing on
+      // an auto-discovered Robinhood Chain collection (see
+      // lib/market/collections.ts's own header) gets the same real
+      // royalty-consideration check every curated collection already
+      // gets, rather than silently skipping it because the slug isn't in
+      // the hand-curated allowlist.
+      const collection = await getCollectionAsync(item.collectionSlug);
+      return {
+        ...item,
+        royaltyEnforced:
+          item.royaltyEnforced === true ||
+          Boolean(collection && hasConfiguredRoyaltyConsideration(item.rawOrder, collection)),
+      };
+    })
+  );
 }
 
 export async function GET(req: Request) {
@@ -108,8 +116,15 @@ async function handleGet(req: Request) {
   const collectionSlug = searchParams.get("collection") ?? undefined;
   const kind = searchParams.get("kind") === "offer" ? "offer" : "listing";
 
+  // chainSlug explicitly "robinhood" -- this route is the Robinhood-Chain-
+  // only order book. Now that market_orders also carries Marketplank-native
+  // foreign-chain rows (see app/api/market/multichain/native-orders/route.ts),
+  // omitting this would silently include those too if a foreign collection's
+  // slug ever collided with a Robinhood one.
   const items =
-    kind === "offer" ? await getOffers(collectionSlug) : await getListings(collectionSlug);
+    kind === "offer"
+      ? await getOffers(collectionSlug, "robinhood")
+      : await getListings(collectionSlug, "robinhood");
   // Drop orders that are dead on-chain (cancelled / filled / counter-advanced /
   // seller no longer holds or approves the token) so users never click a
   // listing that is guaranteed to revert. Cached server-side; unknown-liveness
@@ -133,7 +148,7 @@ async function handleGet(req: Request) {
 
   // Listings only. Offers stay ours alone — a foreign offer is not something a
   // holder can accept from here, so surfacing one would be a dead end.
-  const annotatedLive = annotateRoyaltyEnforcement(live as Array<{
+  const annotatedLive = await annotateRoyaltyEnforcement(live as Array<{
     collectionSlug: string;
     rawOrder: unknown;
     royaltyEnforced?: boolean;
@@ -403,7 +418,12 @@ export async function POST(req: Request) {
     }
 
     const slug = typeof body.collectionSlug === "string" ? body.collectionSlug : "";
-    const collection = getCollection(slug);
+    // getCollectionAsync, not the sync getCollection -- lets a real,
+    // auto-discovered Robinhood Chain collection (see
+    // lib/market/collections.ts's own security note on this trust-
+    // boundary change) accept real signed orders here too, not just the
+    // hand-curated MARKET_COLLECTIONS allowlist.
+    const collection = await getCollectionAsync(slug);
     if (!collection) {
       return publicJson(
         { error: "BAD_COLLECTION", message: "Unknown or unlisted collection." },

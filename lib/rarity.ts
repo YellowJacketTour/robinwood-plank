@@ -298,7 +298,7 @@ export function pickCanonicalTraits(
   return out;
 }
 
-function informationContent(frequency: number): number {
+export function informationContent(frequency: number): number {
   if (frequency <= 0) return 0;
   // bits
   return -Math.log2(frequency);

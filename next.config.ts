@@ -192,6 +192,20 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // Precomputed by scripts/refresh-market-data.ts --multichain on the
+      // existing cron (lib/market/multichain/sync.ts), never live-fetched
+      // per request -- a 2-minute browser/CDN cache costs nothing and keeps
+      // this endpoint from ever becoming a per-visitor hit against Postgres,
+      // let alone the underlying rate-limited third-party NFT APIs.
+      {
+        source: "/api/market/multichain",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=120, s-maxage=300, stale-while-revalidate=600",
+          },
+        ],
+      },
       {
         source: "/api/ipfs/image",
         headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],

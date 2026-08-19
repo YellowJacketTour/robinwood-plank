@@ -1,4 +1,4 @@
-import { MARKET_FEE_RECIPIENT, NATIVE_TOKEN_ADDRESS } from "@/lib/constants";
+import { MARKET_FEE_RECIPIENT, MARKETPLANK_SWAP_FEE_BPS, MARKETPLANK_SWAP_FLAT_FEE_WEI, NATIVE_TOKEN_ADDRESS } from "@/lib/constants";
 import { computeCriteriaRoot, CriteriaError } from "@/lib/market/criteria";
 import type { MarketCollection } from "@/lib/market/types";
 
@@ -345,6 +345,105 @@ export function validateListingOrder(
   };
 }
 
+/** Same shape as DerivedOrder but for a multi-item bundle listing. */
+export type DerivedBundleOrder = {
+  maker: string;
+  tokenIds: string[];
+  priceWei: string;
+  expiresAt: string;
+  currency: string;
+};
+
+/**
+ * Validate a BUNDLE LISTING: offers 2+ NFTs, ALL from the SAME `collection`
+ * (cross-collection bundles are a genuinely different, unaudited model --
+ * out of scope here, see NativeBundleListForm.tsx's own header), for one
+ * combined native-ETH price. A deliberately SEPARATE function from
+ * validateListingOrder above rather than a modified version of it --
+ * that function is the single most audited security boundary in this
+ * app (see this file's own header) and is shared by the Robinhood-chain
+ * native path too; changing its `offer.length !== 1` invariant to support
+ * a second, riskier shape would widen what EVERY caller of it accepts,
+ * not just bundle listings. New function, not a wider one -- same
+ * discipline this whole feature has used throughout (ethCallForeignFree
+ * alongside ethCallFree, sendForeignTransaction alongside sendTransaction,
+ * etc.).
+ */
+export function validateBundleListingOrder(
+  rawOrder: unknown,
+  collection: MarketCollection,
+  maxItems: number
+): DerivedBundleOrder {
+  const order = assertShape(rawOrder);
+  const p = order.parameters;
+
+  if (collection.tokenStandard !== "ERC721") {
+    fail("Only ERC-721 collections are tradable on Marketplank for now.");
+  }
+  const royalty = collectionRoyalty(collection);
+
+  if (p.offer.length < 2) {
+    fail("A bundle must offer at least two NFTs -- list a single item instead.");
+  }
+  if (p.offer.length > maxItems) {
+    fail(`A bundle may offer at most ${maxItems} NFTs.`);
+  }
+
+  const tokenIds: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < p.offer.length; i++) {
+    const offered = p.offer[i];
+    if (toItemType(offered.itemType) !== ITEM_ERC721) {
+      fail(`Bundle item ${i} must be an ERC-721 token.`);
+    }
+    if (!sameAddress(offered.token, collection.contractAddress)) {
+      fail(`Bundle item ${i} is for a different contract than the collection it claims.`);
+    }
+    if (fixedAmount(offered, `offer[${i}]`) !== BigInt(1)) {
+      fail(`Bundle item ${i} must offer exactly one token.`);
+    }
+    const tokenId = toBig(offered.identifierOrCriteria, `offer[${i}].identifier`).toString();
+    if (seen.has(tokenId)) fail(`Bundle lists token #${tokenId} more than once.`);
+    seen.add(tokenId);
+    tokenIds.push(tokenId);
+  }
+
+  // Same consideration accounting as a single-item listing: every payment
+  // item must be native ETH, summed for the total, fee/royalty legs
+  // identified by recipient -- unchanged logic, just reused for a bundle.
+  let total = BigInt(0);
+  let feePaid = BigInt(0);
+  let royaltyPaid = BigInt(0);
+  for (let i = 0; i < p.consideration.length; i++) {
+    const item = p.consideration[i];
+    if (toItemType(item.itemType) !== ITEM_NATIVE) {
+      fail("Bundle listings must be priced in ETH.");
+    }
+    if (!sameAddress(item.token, NATIVE_TOKEN_ADDRESS)) {
+      fail("Bundle payment token is not native ETH.");
+    }
+    if (!isAddressLike(item.recipient)) {
+      fail("Bundle has a payment with no valid recipient.");
+    }
+    const amount = fixedAmount(item, `consideration[${i}]`);
+    total += amount;
+    if (sameAddress(item.recipient, MARKET_FEE_RECIPIENT)) feePaid += amount;
+    if (royalty && sameAddress(item.recipient, royalty.recipient)) royaltyPaid += amount;
+  }
+  if (total <= BigInt(0)) fail("Bundle price must be greater than zero.");
+
+  assertFeeHonored(total, feePaid, collection);
+  assertRoyaltyHonored(total, royaltyPaid, royalty);
+
+  return {
+    maker: p.offerer.toLowerCase(),
+    tokenIds,
+    priceWei: total.toString(),
+    expiresAt: endTimeToIso(p),
+    currency: NATIVE_TOKEN_ADDRESS,
+  };
+}
+
 /**
  * Validate an OFFER: offers an ERC-20 (Seaport forbids native ETH as an offer
  * item), asks for an NFT from `collection` — a specific id, or any id when
@@ -575,4 +674,181 @@ function assertRoyaltyHonored(
   if (royaltyPaid > expected + tolerance) {
     fail("Order overpays the collection's creator royalty.");
   }
+}
+
+/**
+ * Validate a SWAP/OTC order -- roadmap item: "nft for nft trades... otc nft
+ * and coin trades for any asset combination." A real, distinct trade shape
+ * from every other validator in this file: BOTH offer and consideration
+ * sides carry 1+ ERC-721 items (from any contract(s) -- unlike
+ * validateBundleListingOrder, a swap is not scoped to one collection),
+ * with an optional native-ETH top-up on the CONSIDERATION side only. This
+ * is what makes it a swap rather than a listing (NFT for pure ETH, already
+ * validateListingOrder's job) or an offer (pure ETH for NFT, already
+ * validateOfferOrder's job) -- if either side has zero NFTs, this function
+ * refuses it and points the caller at the right validator instead.
+ *
+ * WHY THE ETH TOP-UP IS CONSIDERATION-ONLY -- A REAL PROTOCOL CONSTRAINT,
+ * NOT A DESIGN CHOICE
+ * ---------------------------------------------------------------------------
+ * Confirmed live via a real fork fulfillment attempt: native ETH cannot be
+ * a Seaport OFFER item at all. There is no allowance mechanism for ETH the
+ * way there is for ERC-20/ERC-721 (Seaport "pulls" offer items from the
+ * offerer at fulfillment time via approve/transferFrom; ETH has no
+ * equivalent -- it can only ever be SENT by whoever calls fulfillOrder,
+ * i.e. the taker, as msg.value). This is exactly why every other "pay
+ * money" flow in this app that needs to come FROM an offerer (buildOffer,
+ * foreignOfferCurrency) uses WETH, an ERC-20, never native ETH. A future
+ * "maker also pays WETH" variant is possible following that same pattern,
+ * but is out of scope here -- v1 only supports the side that works
+ * natively: the taker (fulfiller) can top up with ETH, the maker cannot.
+ *
+ * FEE MODEL: MARKETPLANK_SWAP_FEE_BPS (1.8%, same rate as every other
+ * native fee) applies to considerationNativeWei when present. A pure
+ * barter swap with no ETH at all has no monetary total a percentage could
+ * apply to, so it pays MARKETPLANK_SWAP_FLAT_FEE_WEI instead -- the
+ * feature is never revenue-free regardless of trade shape, matching this
+ * app's own established stance (MARKETPLANK_NATIVE_LISTING_FEE_BPS's own
+ * header).
+ *
+ * ROYALTY: none charged, same documented simplification every other
+ * native foreign-chain order in this app already takes (no real per-chain
+ * EIP-2981 data exists for arbitrary collections Marketplank doesn't
+ * curate) -- and doubly true here, since a swap can span MULTIPLE
+ * collections at once, each with a potentially different royalty
+ * recipient/rate this app has no reliable way to resolve for both sides
+ * simultaneously.
+ *
+ * CRITERIA (any-NFT-from-collection-X) SWAPS: explicitly out of scope for
+ * v1, same caution buildOffer's own header already applies elsewhere
+ * ("wildcard root-0 form was never proven fillable") -- every item on
+ * both sides here is a SPECIFIC, named token, not a Merkle-committed set.
+ */
+export type DerivedSwapOrder = {
+  maker: string;
+  offerItems: { contractAddress: string; tokenId: string }[];
+  considerationItems: { contractAddress: string; tokenId: string }[];
+  /** ETH top-up that reaches the MAKER. Display this as "what the maker receives" -- NOT as what a fulfiller pays (see fulfillerTotalNativeWei). */
+  considerationNativeWei: string;
+  /**
+   * The REAL total native ETH a fulfiller must send: the maker's top-up
+   * PLUS the marketplace fee leg. Added after an audit finding (2026-08-19):
+   * validateListingOrder's own `priceWei` is the GROSS taker-paid total
+   * (fee included), so a swap-fulfill UI that rendered
+   * considerationNativeWei as "you pay" would understate the real cost by
+   * exactly the fee -- the same shown-vs-executed divergence class this
+   * whole module exists to prevent, even though bounded here to a
+   * deterministic ~1.8%. Any fulfiller-facing surface MUST use this field,
+   * never considerationNativeWei.
+   */
+  fulfillerTotalNativeWei: string;
+  expiresAt: string;
+};
+
+export function validateSwapOrder(rawOrder: unknown, maxItemsPerSide = 10): DerivedSwapOrder {
+  const order = assertShape(rawOrder);
+  const p = order.parameters;
+
+  const offerItems: { contractAddress: string; tokenId: string }[] = [];
+  const seenOffer = new Set<string>();
+  for (let i = 0; i < p.offer.length; i++) {
+    const item = p.offer[i];
+    const itemType = toItemType(item.itemType);
+    // No native-ETH branch here -- see this function's own header on why
+    // an OFFER item can never be native ETH under Seaport itself, not
+    // just under this app's rules.
+    if (itemType !== ITEM_ERC721) {
+      fail(`Swap offer item ${i} must be an ERC-721 token.`);
+    }
+    // Address-shape check (audit 2026-08-19, L2): sibling validators get
+    // this for free by matching token against collection.contractAddress;
+    // a swap has no single collection to match against, so assert shape
+    // explicitly rather than storing/displaying a malformed address that
+    // only reveals itself as a revert at fill time.
+    if (!isAddressLike(item.token)) fail(`Swap offer item ${i} has an invalid token address.`);
+    if (fixedAmount(item, `offer[${i}]`) !== BigInt(1)) {
+      fail(`Swap offer item ${i} must offer exactly one token.`);
+    }
+    const tokenId = toBig(item.identifierOrCriteria, `offer[${i}].identifier`).toString();
+    const key = `${item.token.toLowerCase()}:${tokenId}`;
+    if (seenOffer.has(key)) fail("Swap offers the same token more than once.");
+    seenOffer.add(key);
+    offerItems.push({ contractAddress: item.token.toLowerCase(), tokenId });
+  }
+  if (offerItems.length === 0) {
+    fail("A swap must offer at least one NFT -- use a plain offer for a pure-ETH bid.");
+  }
+  if (offerItems.length > maxItemsPerSide) {
+    fail(`A swap may offer at most ${maxItemsPerSide} NFTs.`);
+  }
+
+  const considerationItems: { contractAddress: string; tokenId: string }[] = [];
+  let considerationNativeToMaker = BigInt(0);
+  let feePaid = BigInt(0);
+  const seenConsideration = new Set<string>();
+  for (let i = 0; i < p.consideration.length; i++) {
+    const item = p.consideration[i];
+    const itemType = toItemType(item.itemType);
+    if (!isAddressLike(item.recipient)) fail(`Swap consideration item ${i} has no valid recipient.`);
+    if (itemType === ITEM_NATIVE) {
+      // Belt-and-suspenders parity with validateListingOrder (audit
+      // 2026-08-19, L3): Seaport transfers a native item by itemType and
+      // ignores its token field, but the baseline validator asserts this
+      // anyway and divergence between the two is exactly how drift starts.
+      if (!sameAddress(item.token, NATIVE_TOKEN_ADDRESS)) {
+        fail(`Swap consideration item ${i} claims native ETH but names another token.`);
+      }
+      const amount = fixedAmount(item, `consideration[${i}]`);
+      if (sameAddress(item.recipient, MARKET_FEE_RECIPIENT)) {
+        feePaid += amount;
+      } else if (sameAddress(item.recipient, p.offerer)) {
+        considerationNativeToMaker += amount;
+      } else {
+        fail(`Swap consideration item ${i} pays an unrecognized recipient.`);
+      }
+      continue;
+    }
+    if (itemType !== ITEM_ERC721) {
+      fail(`Swap consideration item ${i} must be an ERC-721 token or native ETH.`);
+    }
+    if (!isAddressLike(item.token)) fail(`Swap consideration item ${i} has an invalid token address.`);
+    if (fixedAmount(item, `consideration[${i}]`) !== BigInt(1)) {
+      fail(`Swap consideration item ${i} must ask for exactly one token.`);
+    }
+    if (!sameAddress(item.recipient, p.offerer)) {
+      fail(`Swap consideration item ${i} (an NFT) must be delivered to the swap's own maker.`);
+    }
+    const tokenId = toBig(item.identifierOrCriteria, `consideration[${i}].identifier`).toString();
+    const key = `${item.token.toLowerCase()}:${tokenId}`;
+    if (seenConsideration.has(key)) fail("Swap asks for the same token more than once.");
+    seenConsideration.add(key);
+    considerationItems.push({ contractAddress: item.token.toLowerCase(), tokenId });
+  }
+  if (considerationItems.length === 0) {
+    fail("A swap must ask for at least one NFT in return -- use a plain listing for a pure-ETH sale.");
+  }
+  if (considerationItems.length > maxItemsPerSide) {
+    fail(`A swap may ask for at most ${maxItemsPerSide} NFTs in return.`);
+  }
+
+  if (considerationNativeToMaker > BigInt(0)) {
+    const expected = (considerationNativeToMaker * BigInt(MARKETPLANK_SWAP_FEE_BPS)) / BigInt(10_000);
+    const tolerance = expected / BigInt(100) + BigInt(1); // 1% + 1 wei, same tolerance every other fee check uses
+    if (feePaid + tolerance < expected) fail("Swap does not pay the marketplace fee.");
+    if (feePaid > expected + tolerance) fail("Swap overpays the marketplace fee.");
+  } else {
+    const flatFee = BigInt(MARKETPLANK_SWAP_FLAT_FEE_WEI);
+    if (feePaid < flatFee) {
+      fail("A pure NFT-for-NFT swap (no ETH top-up) must pay the flat marketplace fee.");
+    }
+  }
+
+  return {
+    maker: p.offerer.toLowerCase(),
+    offerItems,
+    considerationItems,
+    considerationNativeWei: considerationNativeToMaker.toString(),
+    fulfillerTotalNativeWei: (considerationNativeToMaker + feePaid).toString(),
+    expiresAt: endTimeToIso(p),
+  };
 }

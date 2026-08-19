@@ -10,10 +10,17 @@ type Props = {
   counts?: Partial<Record<MarketTab, number>>;
   /** Hover intent: pre-mount a tab's panel before the click lands. */
   onPrewarm?: (tab: MarketTab) => void;
+  /**
+   * Defaults to the native MARKET_TABS. The multichain surface reuses this
+   * exact same component (same styling, keyboard nav, scroll-into-view
+   * behavior) with the identical six tab ids/labels -- structural parity
+   * with the native rail is the point, not a lookalike reimplementation.
+   */
+  tabs?: ReadonlyArray<{ id: MarketTab; label: string }>;
 };
 
 /** Horizontal on desktop, horizontal-scroll strip on mobile — no wrap, no second row. */
-export default function MarketNav({ active, onChange, counts, onPrewarm }: Props) {
+export default function MarketNav({ active, onChange, counts, onPrewarm, tabs = MARKET_TABS }: Props) {
   const activeRef = useRef<HTMLButtonElement>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const tabListRef = useRef<HTMLDivElement>(null);
@@ -47,12 +54,12 @@ export default function MarketNav({ active, onChange, counts, onPrewarm }: Props
 
   const moveFocus = (index: number, key: string) => {
     let next = index;
-    if (key === "ArrowRight") next = (index + 1) % MARKET_TABS.length;
-    else if (key === "ArrowLeft") next = (index - 1 + MARKET_TABS.length) % MARKET_TABS.length;
+    if (key === "ArrowRight") next = (index + 1) % tabs.length;
+    else if (key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
     else if (key === "Home") next = 0;
-    else if (key === "End") next = MARKET_TABS.length - 1;
+    else if (key === "End") next = tabs.length - 1;
     else return;
-    const tab = MARKET_TABS[next];
+    const tab = tabs[next];
     if (!tab) return;
     onChange(tab.id);
     const nextTab = tabRefs.current[next];
@@ -67,7 +74,7 @@ export default function MarketNav({ active, onChange, counts, onPrewarm }: Props
       role="tablist"
       aria-label="Marketplace sections"
     >
-      {MARKET_TABS.map((t, index) => (
+      {tabs.map((t, index) => (
         <button
           key={t.id}
           ref={(node) => {

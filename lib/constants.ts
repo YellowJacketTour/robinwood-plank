@@ -398,12 +398,149 @@ export const SEAPORT_VERSION = "1.6";
 export const MARKET_DEFAULT_FEE_BPS = 50; // 0.5%
 
 /**
+ * Marketplank's own fee on a NATIVE listing/offer created directly on a
+ * foreign EVM chain (baked into the order's own consideration array at
+ * listing time via seaport.ts's feesFor(), the same mechanism Robinhood
+ * Chain's own listings already use) -- NOT the same knob as
+ * MARKET_DEFAULT_FEE_BPS above, which stays 50/0.5% for Robinhood-chain
+ * collections with no explicit override. Set to undercut OpenSea's ~2.5%
+ * protocol fee, which is otherwise baked into every third-party listing
+ * this app displays/fulfills on those same chains and cannot be reduced
+ * (it's embedded in the seller's own signed order).
+ *
+ * NOTE: lib/market/multichain/trading/foreign-chain-registry.ts's
+ * FOREIGN_FEE_BPS is ALSO 180 -- a different mechanism entirely, a
+ * UI-display estimate for MarketplankForeignFeeRouter.sol's constructor
+ * argument (an undeployed, unrelated contract that would skim a fee at
+ * fulfillment time on top of a THIRD-PARTY OpenSea order). Do not import or
+ * alias one from the other -- they encode the same business decision (half
+ * of OpenSea's ~2.5%) independently for two unrelated fee-charging
+ * mechanisms, and must be free to diverge later without any coupling.
+ */
+export const MARKETPLANK_NATIVE_LISTING_FEE_BPS = 180; // 1.8%
+
+/**
+ * Swap/OTC listings (NFT-for-NFT, NFT+coin, any combination -- see
+ * lib/market/order-validation.ts's validateSwapOrder). Same 1.8% as
+ * MARKETPLANK_NATIVE_LISTING_FEE_BPS, applied to whichever side of the
+ * trade carries a native-ETH amount (there is always at least one,
+ * enforced by the flat-fee fallback below for a pure barter swap with
+ * neither side including ETH). Kept as its own constant, not aliased --
+ * same reasoning as every other fee constant in this file: free to diverge
+ * later without coupling two unrelated decisions.
+ */
+export const MARKETPLANK_SWAP_FEE_BPS = 180; // 1.8%
+
+/**
+ * A pure barter swap (no ETH on either side) has no monetary total a
+ * percentage fee could apply to -- this flat wei amount is charged instead,
+ * as a required consideration item to MARKET_FEE_RECIPIENT, so the feature
+ * is never revenue-free regardless of trade shape. Set low enough not to
+ * block a genuine 1-for-1 collectible swap between two real collections
+ * (roughly $1-2 in ETH at typical prices -- reviewed, not derived from a
+ * live price feed, since this is a flat anti-zero-revenue floor, not a
+ * market-priced fee).
+ */
+export const MARKETPLANK_SWAP_FLAT_FEE_WEI = "500000000000000"; // 0.0005 ETH
+
+/**
+ * The fee on fulfilling a THIRD-PARTY (OpenSea) listing on a foreign EVM
+ * chain -- via Seaport's own native fulfiller-side "tip" mechanism
+ * (additionalRecipients on fulfillBasicOrder, confirmed live against the
+ * real contract ABI, deployed identically on every chain this app
+ * trades on -- no MarketplankForeignFeeRouter deployment needed at all).
+ *
+ * NON-OPTIONAL BY CONSTRUCTION, NOT BY POLICY
+ * ------------------------------------------------------------------
+ * This app's own frontend builds the ONE fulfillment transaction the
+ * wallet is asked to sign, and the tip is part of that same transaction's
+ * calldata -- there is no separate signature, no toggle, no alternate
+ * "skip the fee" path this UI exposes. Seaport's contract itself verifies
+ * msg.value covers the listing price PLUS every additional recipient or
+ * the whole call reverts, so it is enforced atomically by the protocol,
+ * not merely requested. See lib/market/multichain/trading/foreign-fulfill.ts's
+ * buyForeignListingNow/sweepForeignListings for where this is applied --
+ * NEVER to this app's own native orders (those already carry their fee in
+ * the order's own signed consideration; adding a tip on top would double-
+ * charge).
+ *
+ * REPLACES THE UNDEPLOYED ROUTER, FIXING A REAL BROKEN FEATURE
+ * ------------------------------------------------------------------
+ * Before this, buyForeignListingNow/sweepForeignListings/
+ * sweepForeignListingsMultiCollection all called connectedRouter(), which
+ * THREW on every foreign chain (MarketplankForeignFeeRouter was never
+ * deployed) -- third-party listing purchases on any foreign EVM chain
+ * were completely non-functional, not merely fee-free. This fixes the
+ * feature and earns revenue on it, without deploying anything.
+ */
+export const MARKETPLANK_FOREIGN_FILL_TIP_BPS = 180; // 1.8%, matching this app's other native fee rates
+
+/**
  * Marketplank's dedicated treasury wallet — separate from SITE_FEE.recipient
  * (the Trade section's Uniswap integrator fee wallet). Every marketplace fee
  * and vault fee accrues here. Set 2026-07-27; keep this the single source of
  * truth for the address rather than hard-coding it elsewhere.
  */
 export const MARKET_FEE_RECIPIENT = "0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8";
+
+/**
+ * Marketplank's own fee on creating a foreign-EVM OFFER/bid (audit
+ * finding, 2026-08-19) -- the one EVM order-creation path that was
+ * revenue-free. foreign-offer.ts's own header used to say plainly that
+ * nothing charged a fee here because "that would only apply if we
+ * controlled the accept-side fulfillment, which we don't." That reasoning
+ * was wrong: it conflated fulfillment CONTROL with fee CAPTURE. A bid is
+ * offer=[WETH amount], consideration=[NFT item]; adding a second
+ * consideration item in the SAME WETH token, paid to MARKET_FEE_RECIPIENT,
+ * is baked into the order's own signed parameters by seaport-js's
+ * createOrder -- Seaport's matching then delivers (offerWei - feeWei) to
+ * whoever fulfills, same mechanism the native listing/offer path on
+ * Robinhood Chain already uses, no different handling needed on the
+ * accept side (acceptForeignOffer just fulfills the order as signed).
+ *
+ * Same 1.8% as every other Marketplank-native fee rate; kept as its own
+ * constant rather than aliased, same reasoning as every fee constant in
+ * this file.
+ */
+export const MARKETPLANK_FOREIGN_OFFER_FEE_BPS = 180; // 1.8%
+
+/**
+ * Marketplank's dedicated Solana treasury wallet -- separate curve, separate
+ * key material from MARKET_FEE_RECIPIENT (secp256k1/EVM) and
+ * BITCOIN_FEE_RECIPIENT below (Bitcoin's own address encoding); an EVM
+ * address cannot receive SOL, this is not an oversight to "unify" later.
+ * Set 2026-08-19, owner-supplied. Wired as `buyerReferral` on Magic Eden's
+ * buy_now/buy (bid) instruction calls (magiceden-solana-trade.ts) -- the
+ * one fee-capture mechanism their API documents for a third-party
+ * integrator, verified live via docs.magiceden.io/reference/
+ * get_instructions-buy-now 2026-08-19. NOT YET LIVE-TESTED against a real
+ * API key that the referral field actually pays out as expected -- same
+ * honest boundary magiceden-solana-trade.ts's own header already draws
+ * between "documented" and "proven end-to-end."
+ */
+export const SOLANA_FEE_RECIPIENT = "DhMGRPntHPjZk292dsBL5K9DoSmpxDbjzbNNUr87W792";
+
+/**
+ * Marketplank's dedicated Bitcoin treasury wallet -- Taproot (P2TR,
+ * bc1p...), owner-supplied 2026-08-19. Taproot chosen deliberately, not by
+ * default: Ordinals/BRC-20/Runes inscription data lives in Taproot
+ * script-path spends by protocol design, so a Legacy or plain SegWit
+ * address literally cannot hold what this treasury needs to hold, and
+ * Taproot multisig (MuSig2/FROST) is the only Bitcoin multisig scheme that
+ * doesn't visibly out itself on-chain.
+ *
+ * NO FEE MECHANISM WIRED TO THIS YET. UniSat's documented
+ * create_bid/create_bid_prepare flow (unisat-ordinals-trade.ts) has no
+ * publicly documented affiliate/referral field the way Magic Eden's
+ * buyerReferral does -- confirmed by checking their real dev docs, not
+ * assumed absent. Until either UniSat exposes one or a Marketplank-native
+ * Bitcoin PSBT listing engine is built (see
+ * bitcoin-utxo-safety.ts's own header for why that's the recommended
+ * path), this address has nowhere to actually receive a marketplace fee
+ * from -- it exists now so it's ready the moment either path ships,
+ * and so nothing points at a placeholder later.
+ */
+export const BITCOIN_FEE_RECIPIENT = "bc1pyd3ptdtpgq6l5wu0suxqt4lcqhhwclzfmkz6xyjuvyacqq03ra0sdwc3pm";
 
 /**
  * WETH on Robinhood Chain — the currency all offers/bids are denominated in.

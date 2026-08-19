@@ -69,6 +69,31 @@ export function saveContentDoc(
   );
 }
 
+/**
+ * Manual marketplace-points grant -- the one legitimate manual write path
+ * into the Plank Checks ledger (see lib/plank-checks.ts's "admin_grant"
+ * category doc comment). The signed payload names the exact wallet,
+ * points, and reason, so a captured signature can't be replayed to grant
+ * a different amount or to a different wallet.
+ */
+export function grantPoints(
+  wallet: string,
+  points: number,
+  reason: string,
+  address: string
+): Promise<SaveOutcome> {
+  const payloadJson = JSON.stringify({ wallet: wallet.toLowerCase(), points, reason });
+  return signedRequest(
+    "/api/admin/points",
+    "POST",
+    "points-grant",
+    payloadJson,
+    (auth) => JSON.stringify({ wallet, points, reason, auth }),
+    address,
+    "application/json"
+  );
+}
+
 export type XImportOutcome =
   | {
       ok: true;
