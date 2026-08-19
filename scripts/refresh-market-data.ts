@@ -472,6 +472,24 @@ async function main(): Promise<void> {
       .join("; ");
   });
 
+  // Self-hosted, on-chain Seaport OrderFulfilled fill index -- see
+  // migration 023_seaport_fill_index.sql and lib/market/multichain/
+  // seaport-fill-indexer.ts's own headers. Same backfill-and-live-sync-
+  // are-the-same-call property as the "events" step above (cursor per
+  // chain, forward-only from first run rather than a historical backfill
+  // -- documented scope decision, not a gap).
+  await step("seaport-fills", async () => {
+    const { scanAllChainsForFills } = await import("../lib/market/multichain/seaport-fill-indexer");
+    const runs = await scanAllChainsForFills();
+    return runs
+      .map((r) =>
+        r.error
+          ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+          : `${r.chainSlug}: ${r.fromBlock}-${r.toBlock} +${r.fillsWritten}/${r.logsScanned}`
+      )
+      .join("; ");
+  });
+
   // The reverse-engineered ranking source: Magic Eden's Reservoir-powered
   // v4 EVM API (the one real candidate for a free cross-EVM ranking
   // endpoint) has been confirmed live 2026-08-17, multiple retests, as
