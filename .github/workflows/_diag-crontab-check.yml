@@ -1,7 +1,9 @@
 name: "diag: check production crontab (read-only)"
 
 on:
-  workflow_dispatch: {}
+  push:
+    branches:
+      - feat/marketplank-multichain-index
 
 jobs:
   check:
