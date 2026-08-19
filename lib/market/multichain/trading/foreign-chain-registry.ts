@@ -219,6 +219,24 @@ export function foreignOfferCurrency(chainSlug: string): string | null {
 }
 
 /**
+ * DEV-ONLY: when NEXT_PUBLIC_FOREIGN_DEV_RPC_OVERRIDE is set, EVERY foreign
+ * chain's RPC resolves to this one URL instead of real Alchemy -- for
+ * pointing the whole native-listing feature at a LOCAL FORK (npx hardhat
+ * node --fork <real RPC> --chain-id <real chainId> --port <port>) for
+ * completely free, unlimited local testing. The fork's own --chain-id MUST
+ * still equal the REAL chain's id (e.g. 8453 for Base) -- Seaport
+ * recomputes its EIP-712 domain from block.chainid, so a mismatched fork
+ * chainId makes every real signature fail InvalidSigner() even though the
+ * order and signature are both genuinely valid (confirmed live this
+ * session's own fork-proof script). This is why the override changes ONLY
+ * the RPC host, unlike Robinhood Chain's own NEXT_PUBLIC_DEV_LOCAL_CHAIN in
+ * lib/constants.ts, which also swaps the chainId to 31337 -- that pattern
+ * would break signature verification here. Same env var read on client and
+ * server (NEXT_PUBLIC_ prefix reaches both); unset in production.
+ */
+const FOREIGN_DEV_RPC_OVERRIDE = process.env.NEXT_PUBLIC_FOREIGN_DEV_RPC_OVERRIDE?.trim();
+
+/**
  * A real JSON-RPC endpoint for a foreign chain -- for the Marketplank-native
  * listing feature's on-chain ownership check (ethCallForeignFree in
  * lib/market/fetch-rpc.ts), which needs to read against the RIGHT chain,
@@ -230,6 +248,7 @@ export function foreignOfferCurrency(chainSlug: string): string | null {
  * baseUrl() in that adapter.
  */
 export function foreignRpcUrls(chainSlug: string): string[] {
+  if (FOREIGN_DEV_RPC_OVERRIDE) return [FOREIGN_DEV_RPC_OVERRIDE];
   const subdomain = ALCHEMY_NETWORK_SUBDOMAIN[chainSlug];
   if (!subdomain) {
     throw new Error(`foreign-chain-registry: no Alchemy RPC mapping for chainSlug "${chainSlug}"`);

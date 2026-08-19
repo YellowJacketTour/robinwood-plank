@@ -325,6 +325,23 @@ export default function GlobalMarketHub() {
   // 3,500+ tracked collections, so a fixed cutoff either buries most of
   // them or floods the page -- a real control beats guessing one number.
   const [rankingsShowCount, setRankingsShowCount] = useState(25);
+  // The full filterable/browsable grid below the rankings table has no
+  // natural cutoff of its own -- unlike rankings (capped at 100 max) it's
+  // meant to hold every tracked collection matching the current filters,
+  // which with this app's real 3,500+ (and growing) index means the grid
+  // was mounting the ENTIRE filtered set as live DOM at once. Confirmed
+  // live 2026-08-19 via a real browser check: 6,318 <li> cards mounted
+  // simultaneously produced a body 796,000px tall and crashed a full-page
+  // screenshot outright (Skia bitmap-alloc assert on h:550301) -- this
+  // wasn't a subjective "feels big" complaint, it was thousands of image-
+  // bearing card nodes genuinely alive in the DOM, which is also the
+  // direct cause of the "laggy" complaint (that many nodes cost real
+  // layout/paint/GC time). Paginated client-side rendering, same "Show
+  // top N" pattern rankings already uses, reset to the first page whenever
+  // the active filter set changes so a new filter never silently shows a
+  // stale scroll position deep into a different result set.
+  const GRID_PAGE_SIZE = 60;
+  const [gridVisibleCount, setGridVisibleCount] = useState(GRID_PAGE_SIZE);
   // Per-collection watchlist star, Magic Eden's real pattern. Client-only
   // (localStorage), no backend -- this app has no user-account system to
   // attach a server-side watchlist to, and a real client-persisted one is
@@ -398,6 +415,35 @@ export default function GlobalMarketHub() {
   // collection index itself uses. usdPrices stays {} (not fabricated
   // zeros) until this resolves, so every USD-dependent render checks for
   // a real price before showing one.
+  // Home-chain card art -- flagged live 2026-08-19: the "RW" letter box read
+  // as a placeholder, not the real collection. Rank-1 (rarest) real
+  // RobinWood plank, not a random/first token: reuses lib/rarity.ts's
+  // already-computed topRarest (see /api/market/rarity's new topRarest
+  // field), then resolves that ONE token's real image via the same
+  // /api/market/token route every item view already uses -- never a second,
+  // parallel image-resolution path. Falls back to the RW letters if either
+  // fetch fails; never blocks the card on this being real.
+  const [rarestPlankImage, setRarestPlankImage] = useState<{ tokenId: string; image: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rarity = await swrJson<{ topRarest?: number[] }>("/api/market/rarity", { ttlMs: 300_000, swrMs: 1_800_000, session: true });
+        const tokenId = rarity.topRarest?.[0];
+        if (tokenId == null) return;
+        const res = await fetch(`/api/market/token?tokenId=${tokenId}`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { image?: string | null };
+        if (!cancelled && data.image) setRarestPlankImage({ tokenId: String(tokenId), image: data.image });
+      } catch {
+        // Art is a nice-to-have on this card -- letters fallback covers a failure.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const [usdPrices, setUsdPrices] = useState<MultiAssetPrices>({});
   useEffect(() => {
     let cancelled = false;
@@ -495,6 +541,10 @@ export default function GlobalMarketHub() {
     }
     return sorted;
   }, [collections, chainFilter, search, sortMode, onlyTradeable, onlyArt, onlyVerifiedCreator, deadArt]);
+
+  useEffect(() => {
+    setGridVisibleCount(GRID_PAGE_SIZE);
+  }, [chainFilter, search, sortMode, onlyTradeable, onlyArt, onlyVerifiedCreator]);
 
   // Top movers: real gradeScore-ranked rows with both real art and a real
   // order book, highest 24h volume as the tiebreak -- never a curated/paid
@@ -637,22 +687,22 @@ export default function GlobalMarketHub() {
 
   return (
     <div className="space-y-4 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="font-display text-xl text-gold-300">Global Market</h2>
-          <p className="text-xs text-foreground/50">
-            {collections.length} collection{collections.length === 1 ? "" : "s"} tracked across{" "}
-            {chains.length} chain{chains.length === 1 ? "" : "s"} — real listings, buy, sweep, and send on every
-            EVM one ({collections.filter((c) => c.tradeable).length} of {collections.length}; Solana rows are
-            browse-only for now, see the badge on each card).
-          </p>
-        </div>
-        <Link
-          href="/market"
-          className="min-h-11 flex items-center rounded-md border border-gold-400/50 px-3 text-sm font-bold text-gold-300 hover:border-gold-400"
-        >
-          ← Home: RobinWood Planks
-        </Link>
+      {/*
+       * Deliberately no "← Home" link up here anymore -- it duplicated the
+       * "Home chain" card immediately below (both went to /market), just
+       * stacked directly on top of each other. Flagged live 2026-08-19
+       * ("this looks or feels redundant"). The card is the more
+       * informative, more prominent version of the same action, so it's
+       * now the ONLY way back to /market from this header area.
+       */}
+      <div>
+        <h2 className="font-display text-xl text-gold-300">Global Market</h2>
+        <p className="text-xs text-foreground/50">
+          {collections.length} collection{collections.length === 1 ? "" : "s"} tracked across{" "}
+          {chains.length} chain{chains.length === 1 ? "" : "s"} — real listings, buy, sweep, and send on every
+          EVM one ({collections.filter((c) => c.tradeable).length} of {collections.length}; Solana rows are
+          browse-only for now, see the badge on each card).
+        </p>
       </div>
 
       {/*
@@ -670,8 +720,20 @@ export default function GlobalMarketHub() {
         href="/market"
         className="dense-card group flex items-center gap-3 overflow-hidden border-gold-400/40 p-3 transition-[border-color,box-shadow] duration-200 hover:border-gold-400 hover:shadow-gold"
       >
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-wood-900 to-wood-800 text-2xl font-black text-gold-300 transition-transform duration-200 group-hover:scale-105">
-          RW
+        <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-gradient-to-br from-wood-900 to-wood-800 text-2xl font-black text-gold-300 transition-transform duration-200 group-hover:scale-105">
+          {rarestPlankImage ? (
+            <>
+              <Image src={rarestPlankImage.image} alt="" fill sizes="56px" className="object-cover" unoptimized />
+              <span
+                className="card-overlay absolute bottom-0 left-0 right-0 bg-black/70 py-0.5 text-center text-[0.5rem] font-black uppercase tracking-wider text-gold-300"
+                title={`Rarest RobinWood plank on record — #${rarestPlankImage.tokenId}`}
+              >
+                #1 rarest
+              </span>
+            </>
+          ) : (
+            "RW"
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <span className="inline-flex items-center rounded-full bg-gold-400/15 px-2 py-0.5 text-[0.6rem] font-black uppercase tracking-wider text-gold-300">
@@ -697,8 +759,30 @@ export default function GlobalMarketHub() {
        * work has started.
        */}
       <div className="dense-card flex items-center gap-3 overflow-hidden border-line p-3 opacity-90">
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-wood-900 to-wood-800 text-2xl font-black text-foreground/40">
-          GI
+        {/*
+         * Concept art, not a letterform placeholder: a locked vault holding
+         * several different-colored plank bands, i.e. "many collections'
+         * value, one basket, not open yet" -- the actual mechanic
+         * (multi-collection $PLANK basket, gated pending external audit)
+         * rather than a generic icon. The diagonal ribbon is a real
+         * "coming soon" stamp on the artwork itself, on top of (not instead
+         * of) the existing text badge below.
+         */}
+        <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-gradient-to-br from-wood-900 to-wood-800">
+          <svg viewBox="0 0 56 56" className="h-full w-full" aria-hidden="true">
+            <rect x="10" y="14" width="36" height="9" rx="1.5" fill="#7a4d26" />
+            <rect x="10" y="24" width="36" height="9" rx="1.5" fill="#24693f" />
+            <rect x="10" y="34" width="36" height="9" rx="1.5" fill="#af761d" />
+            <rect x="9" y="13" width="38" height="31" rx="2.5" fill="none" stroke="#e9b43f" strokeOpacity="0.55" strokeWidth="1.5" />
+            <g transform="translate(28 28)">
+              <circle r="8" fill="#120a05" fillOpacity="0.85" stroke="#f8d98a" strokeWidth="1.2" />
+              <rect x="-3.5" y="-1" width="7" height="5.5" rx="1" fill="#f8d98a" />
+              <path d="M-2.2 -1 v-2.2 a2.2 2.2 0 0 1 4.4 0 v2.2" fill="none" stroke="#f8d98a" strokeWidth="1.2" />
+            </g>
+          </svg>
+          <span className="card-overlay absolute -right-5 top-2 w-24 rotate-45 bg-gold-500 py-0.5 text-center text-[0.45rem] font-black uppercase tracking-widest text-wood-950 shadow">
+            Soon
+          </span>
         </div>
         <div className="min-w-0 flex-1">
           <span className="inline-flex items-center rounded-full bg-foreground/10 px-2 py-0.5 text-[0.6rem] font-black uppercase tracking-wider text-foreground/50">
@@ -1090,7 +1174,7 @@ export default function GlobalMarketHub() {
             />
           ) : (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-              {filtered.map((c, i) => (
+              {filtered.slice(0, gridVisibleCount).map((c, i) => (
                 <li key={key(c)} className="row-enter" style={{ "--row-delay": `${Math.min(i, 16) * 15}ms` } as CSSProperties}>
                   <Link
                     href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
@@ -1171,6 +1255,20 @@ export default function GlobalMarketHub() {
                 </li>
               ))}
             </ul>
+          )}
+          {filtered.length > gridVisibleCount && (
+            <div className="mt-3 flex flex-col items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setGridVisibleCount((n) => n + GRID_PAGE_SIZE)}
+                className="min-h-11 rounded-md border border-line bg-panel px-5 text-sm font-bold text-foreground/80 transition-colors hover:border-gold-400/60 hover:text-gold-300"
+              >
+                Show more ({filtered.length - gridVisibleCount} left)
+              </button>
+              <p className="text-[0.65rem] text-foreground/40">
+                Showing {Math.min(gridVisibleCount, filtered.length)} of {filtered.length}
+              </p>
+            </div>
           )}
         </div>
       </div>

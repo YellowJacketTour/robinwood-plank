@@ -1,10 +1,52 @@
 @import "tailwindcss";
 
 :root {
-  --background: #14100b;
-  --foreground: #fff2cf;
   --font-display: var(--font-stencil);
   --font-sans: var(--font-body);
+
+  /*
+   * Site-wide accent theme -- one adjustable hue/saturation pair plus four
+   * lightness stops, driving --color-gold-300..600 below via hsl(). These
+   * defaults are the ORIGINAL literal gold hex values re-expressed as HSL
+   * (verified: #af761d/#e9b43f/#eec164/#f8d98a all sit at hue ~40,
+   * sat ~75-82% -- picking one shared hue/sat pair and varying only
+   * lightness reproduces all four almost exactly), so a page with no saved
+   * preference renders byte-for-byte the same gold the app always has.
+   * ThemeAccentPicker.tsx (nav) overwrites these four vars on
+   * documentElement at runtime for one-tap retheming; a blocking bootstrap
+   * script in app/layout.tsx applies any saved choice before first paint so
+   * there's no flash back to gold on load.
+   */
+  --accent-h: 40;
+  --accent-s: 78%;
+  --accent-l-600: 41%;
+  --accent-l-500: 59%;
+  --accent-l-400: 66%;
+  --accent-l-300: 77%;
+
+  /*
+   * "Totality" base tones -- flagged live 2026-08-19 ("we need themes for
+   * the totality such as the base brown and everything"): a preset was
+   * only re-tinting the gold trim, not the dark wood/background world
+   * underneath it, so switching to Forest Canopy still sat on the exact
+   * same brown page. --base-h/-s are pure hue/sat derivatives of the
+   * accent (a fixed -20deg hue offset, ~0.55x the saturation) -- the same
+   * relationship the ORIGINAL literal gold (hue ~40) already had to the
+   * original literal wood-950 (hue ~20, far less saturated): a wood tone
+   * reads as "the same material, in shadow" next to its trim color, not an
+   * unrelated color. Reusing that one real relationship for every preset
+   * is what makes Cedar Wood, Forest Canopy, Tang Citrus, and Wizard
+   * Violet each feel like one coherent material world instead of a
+   * recolored accent on an unchanged brown room. Lightness stops below
+   * stay FIXED per surface (unlike the accent's) -- these are near-black
+   * page/panel surfaces at every hue, so varying only hue/sat keeps every
+   * theme exactly as dark and exactly as readable as the app has always
+   * been; nothing here can accidentally wash a surface out.
+   */
+  --base-h: calc(var(--accent-h) - 20);
+  --base-s: calc(var(--accent-s) * 0.55);
+  --background: hsl(var(--base-h) calc(var(--base-s) * 0.65) 6%);
+  --foreground: #fff2cf;
 }
 
 @theme inline {
@@ -23,20 +65,33 @@
   /* Canonical palette — DESIGN.md is the single source of truth.
      (The market mockup's :root hexes were drift; the module's --market-*
      vars alias these.) */
-  --color-wood-950: #1b120a;
-  --color-wood-900: #2a1a0f;
-  --color-wood-850: #302013;
-  --color-wood-800: #3d2513;
-  --color-wood-700: #5c3a1e;
-  --color-wood-600: #7a4d26;
+  /* hsl(base-h, base-s, FIXED lightness) -- see --base-h/-s's own header on
+     :root above. Lightness stops (8/12/14/16/24/32%) are the original
+     literal wood hex values' own lightness, unchanged -- only hue/sat
+     move with the active theme. */
+  --color-wood-950: hsl(var(--base-h) var(--base-s) 8%);
+  --color-wood-900: hsl(var(--base-h) var(--base-s) 12%);
+  --color-wood-850: hsl(var(--base-h) var(--base-s) 14%);
+  --color-wood-800: hsl(var(--base-h) var(--base-s) 16%);
+  --color-wood-700: hsl(var(--base-h) var(--base-s) 24%);
+  --color-wood-600: hsl(var(--base-h) var(--base-s) 32%);
   --color-forest-900: #0d1f16;
   --color-forest-800: #123322;
   --color-forest-700: #1a4a30;
   --color-forest-600: #24693f;
-  --color-gold-600: #af761d;
-  --color-gold-500: #e9b43f;
-  --color-gold-400: #eec164;
-  --color-gold-300: #f8d98a;
+  /* Driven by the --accent- custom properties defined on :root above, not
+     literal hex -- this is what makes ThemeAccentPicker's one-tap retheming
+     reach every "gold" bg/text/border utility class sitewide (buttons,
+     badges, active nav pills, focus rings, price/accent text) with zero
+     per-component changes: Tailwind's plain (non-inline) @theme block
+     emits a rule setting color to var(--color-gold-400), and
+     --color-gold-400 itself cascades from --accent-h/-s/-l-400, so
+     overwriting those four vars on documentElement retints every consumer
+     at once, same as changing four CSS custom properties always would. */
+  --color-gold-600: hsl(var(--accent-h) var(--accent-s) var(--accent-l-600));
+  --color-gold-500: hsl(var(--accent-h) var(--accent-s) var(--accent-l-500));
+  --color-gold-400: hsl(var(--accent-h) var(--accent-s) var(--accent-l-400));
+  --color-gold-300: hsl(var(--accent-h) var(--accent-s) var(--accent-l-300));
 
   /* Semantic surface tokens (DESIGN.md components + mockup structure):
      border-line / border-line-strong / bg-panel / bg-panel-soft /
@@ -44,14 +99,22 @@
      nothing outside the market surface consumes them yet. */
   --color-cream: #fff2cf;
   --color-cream-muted: #c9b58a;
-  --color-line: rgba(233, 180, 63, 0.24);
-  --color-line-strong: rgba(233, 180, 63, 0.5);
-  --color-panel: rgba(28, 16, 8, 0.94);
-  --color-panel-soft: rgba(41, 26, 15, 0.88);
-  --color-panel-strong: rgba(17, 10, 5, 0.97);
+  /* Also accent-derived (was a literal rgba(233,180,63,...) = the gold-500
+     hex restated) so every border-line/border-line-strong consumer retints
+     along with gold-*, not just buttons/badges. */
+  --color-line: hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 24%);
+  --color-line-strong: hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 50%);
+  /* Base-derived (were literal rgba(28,16,8/41,26,15/17,10,5,...) -- all
+     three sit at the same ~base-h/-s this theme already uses, just three
+     more near-black lightness stops) so every panel/card/table surface --
+     the majority of the app's actual screen area -- moves with the theme
+     too, not just wood-*. */
+  --color-panel: hsl(var(--base-h) var(--base-s) 7% / 94%);
+  --color-panel-soft: hsl(var(--base-h) var(--base-s) 11% / 88%);
+  --color-panel-strong: hsl(var(--base-h) var(--base-s) 4% / 97%);
 
   --shadow-panel: 0 18px 60px rgba(0, 0, 0, 0.34);
-  --shadow-gold: 0 0 0 1px rgba(239, 196, 99, 0.14), 0 10px 32px rgba(0, 0, 0, 0.38);
+  --shadow-gold: 0 0 0 1px hsl(var(--accent-h) var(--accent-s) var(--accent-l-400) / 14%), 0 10px 32px rgba(0, 0, 0, 0.38);
 }
 
 * {
@@ -67,7 +130,11 @@
    strange; this restores the approved treatment. See PlankBackground.tsx
    (now a no-op — this is pure CSS, no JS sizing needed). */
 body {
-  background-color: #14100b;
+  /* Was a literal #14100b -- restating the token instead of using it meant
+     the page's own background never moved with the theme even after
+     --background itself became theme-derived above. Fixed as part of the
+     same "totality" pass. */
+  background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-body), Arial, Helvetica, sans-serif;
   /* Solid page field. The plank-head masthead illustration is rendered by the
@@ -166,11 +233,14 @@ body :where(.bg-gold-500, .bg-gold-400):not([data-market-shell] *) {
    pitch. Originated on the footer; now a shared treatment for large brand
    surfaces (footer, market shell, mockup panels). Deliberately quiet but
    visible — never behind dense data text. */
+/* Theme pass 2026-08-19: was a literal rgba(233,180,63,...) -- the exact
+   gold-500 hex restated as a 5%-alpha line -- so the grain stayed gold on
+   every theme. Now accent-derived, same alpha. */
 .wood-grain-surface {
   background-image: repeating-linear-gradient(
     92deg,
-    rgba(233, 180, 63, 0.05) 0,
-    rgba(233, 180, 63, 0.05) 1px,
+    hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 5%) 0,
+    hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 5%) 1px,
     transparent 1px,
     transparent 11px
   );
@@ -179,19 +249,29 @@ body :where(.bg-gold-500, .bg-gold-400):not([data-market-shell] *) {
 /* Also reused, unchanged, by components/AppBackdrop.tsx as the shared quiet
    backdrop for dense app pages (Trade/Market/Gallery) — see that file for
    why. Keep this the single source of truth for that texture; don't fork a
-   second copy of the gradient recipe elsewhere. */
+   second copy of the gradient recipe elsewhere.
+   Theme pass 2026-08-19: the flat base color and the diagonal gradient's
+   three stops were all literal (near-black) wood hex -- now --base-h/-s
+   derived, same lightness stops the literals had, so the footer (this
+   app's largest single always-visible surface below the fold) moves with
+   the theme instead of staying the original brown forever. */
 .site-footer-surface {
-  background-color: #160e08;
+  background-color: hsl(var(--base-h) var(--base-s) 5%);
   background-image:
     linear-gradient(180deg, rgba(10, 6, 3, 0.18), rgba(10, 6, 3, 0.62)),
     repeating-linear-gradient(
       92deg,
-      rgba(233, 180, 63, 0.05) 0,
-      rgba(233, 180, 63, 0.05) 1px,
+      hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 5%) 0,
+      hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 5%) 1px,
       transparent 1px,
       transparent 11px
     ),
-    linear-gradient(120deg, #24160c, #171008 62%, #100b07);
+    linear-gradient(
+      120deg,
+      hsl(var(--base-h) var(--base-s) 10%),
+      hsl(var(--base-h) var(--base-s) 7%) 62%,
+      hsl(var(--base-h) var(--base-s) 4%)
+    );
 }
 
 .wood-frame {
@@ -387,17 +467,26 @@ input {
   }
 }
 
-/* Compact card used across trade / boards / mint strips */
+/* Compact card used across trade / boards / mint strips -- the single
+   most-reused surface class in the app. Theme pass 2026-08-19: border/bg
+   were both literal (near-identical to --color-line and --color-panel's
+   own OLD literals) -- now the actual tokens, so this card always matches
+   whatever bg-panel/border-line renders elsewhere on the same theme
+   instead of drifting from them under anything but default gold. */
 .dense-card {
   border-radius: 0.75rem;
-  border: 1px solid rgba(217, 164, 65, 0.28);
-  background: rgba(42, 26, 15, 0.92);
+  border: 1px solid var(--color-line);
+  background: var(--color-panel);
 }
 
-/* Wooden ledger — Good Wood / Bad Boards */
+/* Wooden ledger — Good Wood / Bad Boards. Theme pass 2026-08-19: border and
+   both gradient stops were literal wood/gold hex -- now token/accent
+   derived (the three gradient stops are the exact wood-700/800/900
+   formulas, restated inline since a background-image gradient can't
+   reference a shorthand utility class). */
 .wood-ledger {
   border-radius: 0.5rem;
-  border: 2px solid #c4922e;
+  border: 2px solid hsl(var(--accent-h) var(--accent-s) 52%);
   box-shadow:
     inset 0 0 0 1px rgba(40, 18, 6, 0.5),
     0 8px 22px -12px rgba(0, 0, 0, 0.8);
@@ -409,7 +498,12 @@ input {
       transparent 1px,
       transparent 8px
     ),
-    linear-gradient(165deg, #5c3a1e 0%, #3d2513 50%, #2a1a0f 100%);
+    linear-gradient(
+      165deg,
+      hsl(var(--base-h) var(--base-s) 24%) 0%,
+      hsl(var(--base-h) var(--base-s) 16%) 50%,
+      hsl(var(--base-h) var(--base-s) 12%) 100%
+    );
 }
 
 .wood-ledger-ruled {
@@ -417,8 +511,8 @@ input {
     0deg,
     transparent 0,
     transparent 1.4rem,
-    rgba(217, 164, 65, 0.1) 1.4rem,
-    rgba(217, 164, 65, 0.1) calc(1.4rem + 1px)
+    hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 10%) 1.4rem,
+    hsl(var(--accent-h) var(--accent-s) var(--accent-l-500) / 10%) calc(1.4rem + 1px)
   );
 }
 
@@ -768,7 +862,9 @@ body .nft-modal .nft-modal-body {
    class (or Tailwind bg-wood-950/90 / bg-wood-900/90) on any panel that
    shows wallet, amount, or address content. */
 .data-module {
-  background-color: rgba(18, 10, 4, 0.92);
+  /* Theme pass 2026-08-19: was literal; now base-derived, matching
+     --color-panel-strong's own lightness stop. */
+  background-color: hsl(var(--base-h) var(--base-s) 4% / 92%);
 }
 
 /* Same root cause as .tier-badge above, generalized: ANY overlay badge/

@@ -52,6 +52,16 @@ const KNOWN_BUILD_FROZEN: Record<string, string[]> = {
   // client-side, build-time-inlined constant as solana-transfer.ts above,
   // not a runtime kill switch (see that entry's own reasoning).
   "market/multichain/trading/foreign-fulfill.ts": ["NEXT_PUBLIC_SOLANA_RPC_URL"],
+  // Dev-only local-fork override for foreignRpcUrls() -- same build-frozen,
+  // not-a-runtime-kill-switch reasoning as NEXT_PUBLIC_DEV_LOCAL_RPC below:
+  // when unset (every real deploy), foreignRpcUrls() falls straight through
+  // to the real per-chain Alchemy URL, so this can never gate a production
+  // code path on or off. It only exists so a local Hardhat fork of a
+  // foreign chain (e.g. Base) can stand in for the real RPC during dev
+  // testing of native foreign-chain listings, without touching the chainId
+  // Seaport's EIP-712 domain depends on (see the export's own header in
+  // foreign-chain-registry.ts).
+  "market/multichain/trading/foreign-chain-registry.ts": ["NEXT_PUBLIC_FOREIGN_DEV_RPC_OVERRIDE"],
   "constants.ts": [
     "NEXT_PUBLIC_DEV_LOCAL_CHAIN",
     "NEXT_PUBLIC_DEV_LOCAL_RPC",
