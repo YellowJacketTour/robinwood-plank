@@ -484,6 +484,27 @@ export const MARKETPLANK_FOREIGN_FILL_TIP_BPS = 180; // 1.8%, matching this app'
 export const MARKET_FEE_RECIPIENT = "0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8";
 
 /**
+ * Marketplank's own fee on creating a foreign-EVM OFFER/bid (audit
+ * finding, 2026-08-19) -- the one EVM order-creation path that was
+ * revenue-free. foreign-offer.ts's own header used to say plainly that
+ * nothing charged a fee here because "that would only apply if we
+ * controlled the accept-side fulfillment, which we don't." That reasoning
+ * was wrong: it conflated fulfillment CONTROL with fee CAPTURE. A bid is
+ * offer=[WETH amount], consideration=[NFT item]; adding a second
+ * consideration item in the SAME WETH token, paid to MARKET_FEE_RECIPIENT,
+ * is baked into the order's own signed parameters by seaport-js's
+ * createOrder -- Seaport's matching then delivers (offerWei - feeWei) to
+ * whoever fulfills, same mechanism the native listing/offer path on
+ * Robinhood Chain already uses, no different handling needed on the
+ * accept side (acceptForeignOffer just fulfills the order as signed).
+ *
+ * Same 1.8% as every other Marketplank-native fee rate; kept as its own
+ * constant rather than aliased, same reasoning as every fee constant in
+ * this file.
+ */
+export const MARKETPLANK_FOREIGN_OFFER_FEE_BPS = 180; // 1.8%
+
+/**
  * WETH on Robinhood Chain — the currency all offers/bids are denominated in.
  *
  * Seaport cannot pull native ETH from an offerer at fulfillment time, so a bid

@@ -12,10 +12,17 @@
  * NO ROUTER INVOLVEMENT: unlike buyNow/sweepBuy, creating an offer never
  * touches MarketplankForeignFeeRouter -- an offer is just a standard
  * signed Seaport order posted to OpenSea's real orderbook so any seller
- * (not only ones who found this app) can see and accept it. Nothing here
- * charges a marketplace fee on offer creation; that would only apply if
- * we controlled the accept-side fulfillment, which we don't yet (see
- * offers/route.ts's header on why accept isn't built).
+ * (not only ones who found this app) can see and accept it.
+ *
+ * MARKETPLANK_FOREIGN_OFFER_FEE_BPS IS CAPTURED HERE (audit finding fix,
+ * 2026-08-19; a prior version of this comment said offer creation earned
+ * nothing -- that was wrong). The fee is a second WETH consideration item,
+ * same token as the offer amount, paid to MARKET_FEE_RECIPIENT and baked
+ * into the order's own signed parameters -- NOT dependent on controlling
+ * accept-side fulfillment. Seaport's own matching delivers
+ * (offerWei - feeWei) to whoever fulfills; acceptForeignOffer below needs
+ * no special handling, it fulfills the order exactly as signed, same as
+ * any listing that carries its fee in its own consideration array.
  *
  * Real endpoints verified live 2026-08-18:
  *   - POST /v2/offers/build (OpenSea) returns the real partial Seaport
@@ -38,6 +45,7 @@ import {
 } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getEthereumProvider, ensureChain } from "@/lib/wallet";
 import { normalizeTokenIds } from "@/lib/market/criteria";
+import { MARKET_FEE_RECIPIENT, MARKETPLANK_FOREIGN_OFFER_FEE_BPS } from "@/lib/constants";
 
 type SeaportTransactionMethods = { buildTransaction: () => Promise<{ to?: string; data?: string; value?: bigint }> };
 type SeaportAction = { type: string; transactionMethods?: SeaportTransactionMethods; createOrder?: () => Promise<unknown> };
@@ -138,10 +146,19 @@ export async function buildForeignOffer(input: {
   const { seaport } = await connectedSeaport(input.chainSlug);
   const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
 
+  // Marketplank's fee on this offer, via seaport-js's own `fees` param --
+  // same mechanism lib/market/seaport.ts's buildListing/buildOffer already
+  // use for Robinhood-chain orders, not a hand-built consideration item.
+  // seaport-js resolves this into a WETH/WBNB/WAVAX consideration item
+  // (the offer's own currency) paid to MARKET_FEE_RECIPIENT, baked into
+  // the order's own signed parameters -- Seaport's matching then delivers
+  // (offerWei - feeWei) to whoever fulfills. See
+  // MARKETPLANK_FOREIGN_OFFER_FEE_BPS's own comment in lib/constants.ts.
   const { actions } = await seaport.createOrder(
     {
       offer: [{ amount: input.offerWei.toString(), token: currency }],
       consideration: [considerationItem],
+      fees: [{ recipient: MARKET_FEE_RECIPIENT, basisPoints: MARKETPLANK_FOREIGN_OFFER_FEE_BPS }],
       endTime,
     },
     input.accountAddress,
