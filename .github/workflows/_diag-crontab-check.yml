@@ -1,0 +1,45 @@
+name: "diag: check production crontab (read-only)"
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH setup
+        shell: bash
+        env:
+          INMOTION_SSH_KEY: ${{ secrets.INMOTION_SSH_KEY }}
+          INMOTION_HOST_KEY: ${{ secrets.INMOTION_HOST_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$INMOTION_SSH_KEY" > "$HOME/.ssh/inmotion"
+          printf '%s\n' "$INMOTION_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/inmotion" "$HOME/.ssh/known_hosts"
+
+      - name: List crontab and recent refresh log (read-only)
+        shell: bash
+        env:
+          INMOTION_USER: ${{ secrets.INMOTION_USER }}
+          INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
+          INMOTION_PORT: ${{ secrets.INMOTION_PORT }}
+        run: |
+          set -euo pipefail
+          port="${INMOTION_PORT:-2222}"
+          ssh -i "$HOME/.ssh/inmotion" -p "$port" \
+            "${INMOTION_USER}@${INMOTION_HOST}" \
+            bash -s -- <<'REMOTE'
+          echo "=== crontab -l ==="
+          crontab -l 2>&1 || echo "(no crontab or not accessible)"
+          echo ""
+          echo "=== market-refresh.log tail (last 40 lines) ==="
+          find / -maxdepth 6 -name "market-refresh.log" -readable 2>/dev/null | while read -r f; do
+            echo "--- $f ---"
+            tail -n 40 "$f" 2>&1 || true
+          done
+          echo ""
+          echo "=== lock file mtimes (proves last run time) ==="
+          find / -maxdepth 6 -name "market-refresh*.lock" -readable 2>/dev/null -exec ls -la {} \;
+          REMOTE
