@@ -10,6 +10,7 @@ import {
 } from "@/lib/constants";
 import { MARKET_COLLECTIONS } from "@/lib/market/collections";
 import { getPreferredWalletProvider, isWalletConnectActive } from "@/lib/wallet-connect";
+import { FOREIGN_SEAPORT_ADDRESS, foreignOfferCurrency } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 export type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
@@ -635,6 +636,37 @@ export function assertSafeSwapDestination(to: string, kind: string) {
 }
 
 /**
+ * assertSafeSwapDestination's foreign-chain sibling, for the Marketplank-
+ * native listing feature. NOT the same allowlist as MARKET_DESTINATIONS
+ * above -- that Set is a build-time constant of Robinhood-chain-only
+ * addresses (curated MARKET_COLLECTIONS, Robinhood's own Seaport/WETH), so
+ * a foreign collection's contract address would never be in it even though
+ * the transaction itself is entirely legitimate.
+ *
+ * Preserves the same security property (an explicit, small, contextually-
+ * justified allowlist -- never an open "any address goes"): the only
+ * destinations permitted for one foreign-chain market transaction are
+ * Seaport's canonical address (same on every chain), that chain's real
+ * offer currency (if this send is offer-related), and the ONE collection
+ * contract address the caller explicitly names for THIS listing/buy/
+ * approval -- passed in per-call by the caller, never read from a static,
+ * open-ended list, since foreign collections number in the thousands and
+ * are not curated the way MARKET_COLLECTIONS is.
+ */
+export function assertSafeForeignMarketDestination(to: string, chainSlug: string, contractAddress: string): void {
+  const lower = to.toLowerCase();
+  const allowed = new Set([FOREIGN_SEAPORT_ADDRESS.toLowerCase(), contractAddress.toLowerCase()]);
+  const offerCurrency = foreignOfferCurrency(chainSlug);
+  if (offerCurrency) allowed.add(offerCurrency.toLowerCase());
+  if (!allowed.has(lower)) {
+    throw new Error(
+      `Blocked unsafe foreign-chain marketplace target. Transactions for this listing only go to Seaport, ` +
+        `this chain's offer currency, or the collection contract "${contractAddress}" itself.`
+    );
+  }
+}
+
+/**
  * Build + send a tx with RH-chain-aware gas.
  *
  * CRITICAL:
@@ -768,6 +800,133 @@ export async function sendTransaction(tx: SendTxOpts): Promise<string> {
     }
   }
   throw new Error(humanizeTxError(lastMsg, kind));
+}
+
+export type SendForeignTxOpts = {
+  to: string;
+  from: string;
+  data: string;
+  value?: string;
+  chainSlug: string;
+  chainId: number;
+  chainName: string;
+  nativeCurrencySymbol: string;
+  rpcUrl: string;
+  blockExplorerUrl: string;
+  /** The ONE collection contract this transaction is for -- see assertSafeForeignMarketDestination. */
+  contractAddress: string;
+};
+
+/**
+ * sendTransaction's foreign-chain sibling, for the Marketplank-native
+ * listing feature (buildListing/buildOffer/fulfillOrder's approval and
+ * fulfillment broadcasts on a foreign EVM chain). Deliberately a SEPARATE
+ * function, not a chainSlug parameter added to sendTransaction: that
+ * function's `ensureRobinhoodChain()` + `isRobinhoodChainId` + the
+ * build-time MARKET_DESTINATIONS allowlist are all Robinhood-chain-specific
+ * by design (this app "never bridges to Ethereum" for its EXISTING flows,
+ * an intentional security property this function must not weaken) -- a
+ * missed/defaulted chain parameter on the original function would be a real
+ * way to accidentally widen what it accepts. Same gas-resolution/simulate/
+ * retry logic as sendTransaction, parameterized by the target chain instead
+ * of hardcoded to it.
+ */
+export async function sendForeignTransaction(tx: SendForeignTxOpts): Promise<string> {
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+
+  await ensureChain({
+    chainId: tx.chainId,
+    name: tx.chainName,
+    nativeCurrencySymbol: tx.nativeCurrencySymbol,
+    rpcUrl: tx.rpcUrl,
+    blockExplorerUrl: tx.blockExplorerUrl,
+  });
+  const chainId = await getChainId();
+  if (chainId !== tx.chainId) {
+    throw new Error(`Wrong network (chain ${chainId}). Switch to ${tx.chainName} (${tx.chainId}).`);
+  }
+
+  assertSafeForeignMarketDestination(tx.to, tx.chainSlug, tx.contractAddress);
+
+  const base: Record<string, string> = {
+    to: tx.to,
+    from: tx.from,
+    data: tx.data,
+  };
+  if (tx.value !== undefined && tx.value !== null && tx.value !== "") {
+    const v = parseQuantity(tx.value);
+    if (v !== null && v > BigInt(0)) {
+      base.value = `0x${v.toString(16)}`;
+    } else if (
+      typeof tx.value === "string" &&
+      tx.value.startsWith("0x") &&
+      tx.value !== "0x" &&
+      tx.value !== "0x0"
+    ) {
+      base.value = tx.value;
+    }
+  }
+
+  // Same hard-fail-before-broadcast discipline as sendTransaction: simulate
+  // first, never send a tx that will revert. Market sends (listing
+  // approvals, fulfillment) always simulate here -- there is no bare
+  // "approve" fast path the way sendTransaction has, since a foreign
+  // approval is exactly as consequential as any other foreign market send.
+  const sim = await simulateTransaction({
+    to: base.to,
+    from: base.from,
+    data: base.data,
+    value: base.value,
+  });
+  if (!sim.ok) {
+    throw new Error(`${sim.message} — no tx was sent (your ETH is still in the wallet except prior gas).`);
+  }
+  let gasLimit = (sim.gasEstimate * BigInt(180)) / BigInt(100);
+  if (gasLimit < MIN_APPROVE_GAS) gasLimit = MIN_APPROVE_GAS;
+  if (gasLimit > BigInt(12_000_000)) gasLimit = BigInt(12_000_000);
+
+  const fees = await mergeFeeFields(provider, null, null, null);
+
+  // Re-assert chain immediately before broadcast (TOCTOU: user can switch
+  // networks after simulation).
+  const chainIdAgain = await getChainId();
+  if (chainIdAgain !== tx.chainId) {
+    throw new Error(`Wrong network (chain ${chainIdAgain}). Switch back to ${tx.chainName} before confirming.`);
+  }
+
+  const gasHex = `0x${gasLimit.toString(16)}`;
+  const attempts: Record<string, string>[] = [
+    { ...base, gas: gasHex, gasLimit: gasHex, ...fees },
+    { ...base, gas: gasHex, ...fees },
+  ];
+
+  let lastMsg = "Transaction rejected.";
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      return (await provider.request({
+        method: "eth_sendTransaction",
+        params: [attempts[i]],
+      })) as string;
+    } catch (err) {
+      const msg =
+        (err as { message?: string; shortMessage?: string })?.shortMessage ||
+        (err as { message?: string })?.message ||
+        "Transaction rejected.";
+      lastMsg = msg;
+      if (/user rejected|denied|4001/i.test(msg)) {
+        throw new Error("Transaction cancelled in wallet.");
+      }
+      if (
+        /TRANSFER_FAILED|insufficient funds|exceeds balance|allowance|TRANSFER_FROM|execution reverted|STF|Too little received|Too much requested|INSUFFICIENT/i.test(
+          msg
+        )
+      ) {
+        throw new Error(humanizeTxError(msg, "market"));
+      }
+    }
+  }
+  throw new Error(humanizeTxError(lastMsg, "market"));
 }
 
 function humanizeTxError(msg: string, kind: string): string {

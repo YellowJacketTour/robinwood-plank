@@ -28,11 +28,14 @@ import {
 } from "@/lib/market/royalty";
 import type { Eip1193Provider } from "@/lib/wallet";
 import {
+  ensureChain,
   ensureRobinhoodChain,
   getEthereumProvider,
+  sendForeignTransaction,
   sendTransaction,
   waitForTransaction,
 } from "@/lib/wallet";
+import { FOREIGN_SEAPORT_ADDRESS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 /**
  * Marketplace fee for one order, as a Seaport `fees` entry. `feeBps` comes
@@ -220,10 +223,51 @@ export function wrapProviderWithApprovalSpoof(
  * fills pass one entry; sweepFloor may pass several, one per order). Every
  * other call, including the eventual broadcast, is completely unaffected.
  */
+/**
+ * Describes a target chain for the Marketplank-native foreign-chain listing
+ * feature. Every seaport.ts function below that touches a chain takes this
+ * as an OPTIONAL parameter, defaulting to Robinhood Chain when omitted --
+ * every existing call site (all Robinhood-chain-only today) needs zero
+ * changes. seaportAddress is expected to be FOREIGN_SEAPORT_ADDRESS
+ * (foreign-chain-registry.ts), which this file's own startup assertion
+ * (below) confirms matches Robinhood's SEAPORT_ADDRESS exactly -- the whole
+ * "no new contract deployment needed" premise rests on that equality being
+ * checked, not silently assumed.
+ */
+export type SeaportChain = {
+  chainSlug: string;
+  chainId: number;
+  chainName: string;
+  nativeCurrencySymbol: string;
+  rpcUrl: string;
+  blockExplorerUrl: string;
+  seaportAddress: string;
+};
+
+if (FOREIGN_SEAPORT_ADDRESS.toLowerCase() !== SEAPORT_ADDRESS.toLowerCase()) {
+  throw new Error(
+    "seaport.ts: FOREIGN_SEAPORT_ADDRESS no longer matches Robinhood Chain's SEAPORT_ADDRESS -- " +
+      "the Marketplank-native foreign-chain listing feature assumes these are the same canonical " +
+      "Seaport deployment on every chain. Re-verify live via eth_getCode on every FOREIGN_CHAINS " +
+      "entry before touching this assertion."
+  );
+}
+
 export async function getSeaport(
-  approvalSpoofs?: ApprovalSpoof | ApprovalSpoof[]
+  approvalSpoofs?: ApprovalSpoof | ApprovalSpoof[],
+  chain?: SeaportChain
 ): Promise<Seaport> {
-  await ensureRobinhoodChain();
+  if (chain) {
+    await ensureChain({
+      chainId: chain.chainId,
+      name: chain.chainName,
+      nativeCurrencySymbol: chain.nativeCurrencySymbol,
+      rpcUrl: chain.rpcUrl,
+      blockExplorerUrl: chain.blockExplorerUrl,
+    });
+  } else {
+    await ensureRobinhoodChain();
+  }
   const injected = getEthereumProvider();
   if (!injected) throw new Error("No wallet found.");
   const spoofs = approvalSpoofs
@@ -235,8 +279,8 @@ export async function getSeaport(
     spoofs.length > 0 ? wrapProviderWithApprovalSpoof(injected, spoofs) : injected;
 
   const provider = new BrowserProvider(effectiveProvider, {
-    chainId: CHAIN.id,
-    name: CHAIN.name,
+    chainId: chain ? chain.chainId : CHAIN.id,
+    name: chain ? chain.chainName : CHAIN.name,
   });
   const signer = await provider.getSigner();
   // seaport-js ships its own ethers type declarations; TS sees the ESM vs
@@ -244,7 +288,7 @@ export async function getSeaport(
   // different types (dual-package-hazard on the private class fields).
   // Runtime object is identical — cast is safe.
   return new Seaport(signer as unknown as ConstructorParameters<typeof Seaport>[0], {
-    overrides: { contractAddress: SEAPORT_ADDRESS },
+    overrides: { contractAddress: chain ? chain.seaportAddress : SEAPORT_ADDRESS },
   });
 }
 
@@ -271,8 +315,14 @@ type SeaportAction = {
  */
 async function executeActionsViaWallet(
   actions: SeaportAction[],
-  accountAddress: string
+  accountAddress: string,
+  chain?: SeaportChain,
+  /** The ONE collection contract this whole action sequence is for -- required when chain is given, see sendForeignTransaction/assertSafeForeignMarketDestination. */
+  contractAddress?: string
 ): Promise<{ order: unknown | null; txHashes: string[] }> {
+  if (chain && !contractAddress) {
+    throw new Error("executeActionsViaWallet: contractAddress is required for a foreign-chain action sequence.");
+  }
   const txHashes: string[] = [];
   let order: unknown | null = null;
 
@@ -289,13 +339,28 @@ async function executeActionsViaWallet(
     if (!tx.to || !tx.data) {
       throw new Error(`Seaport action "${action.type}" built an incomplete transaction.`);
     }
-    const hash = await sendTransaction({
-      to: tx.to,
-      from: accountAddress,
-      data: tx.data,
-      value: tx.value !== undefined && tx.value !== null ? tx.value.toString() : undefined,
-      kind: "market",
-    });
+    const value = tx.value !== undefined && tx.value !== null ? tx.value.toString() : undefined;
+    const hash = chain
+      ? await sendForeignTransaction({
+          to: tx.to,
+          from: accountAddress,
+          data: tx.data,
+          value,
+          chainSlug: chain.chainSlug,
+          chainId: chain.chainId,
+          chainName: chain.chainName,
+          nativeCurrencySymbol: chain.nativeCurrencySymbol,
+          rpcUrl: chain.rpcUrl,
+          blockExplorerUrl: chain.blockExplorerUrl,
+          contractAddress: contractAddress!,
+        })
+      : await sendTransaction({
+          to: tx.to,
+          from: accountAddress,
+          data: tx.data,
+          value,
+          kind: "market",
+        });
     await waitForTransaction(hash, { label: action.type === "approval" ? "Approval" : "Order" });
     txHashes.push(hash);
   }
@@ -327,8 +392,8 @@ export type ListInput = {
  * the approval is consumed by the transfer, leaving nothing dangling if the
  * user cancels at the signature prompt.
  */
-export async function buildListing(accountAddress: string, input: ListInput) {
-  const seaport = await getSeaport();
+export async function buildListing(accountAddress: string, input: ListInput, chain?: SeaportChain) {
+  const seaport = await getSeaport(undefined, chain);
   const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
   const royalty = await royaltyFeeFor(
     input.offerTokenAddress,
@@ -360,7 +425,12 @@ export async function buildListing(accountAddress: string, input: ListInput) {
     /* exactApproval */ true
   );
 
-  const { order } = await executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress);
+  const { order } = await executeActionsViaWallet(
+    actions as unknown as SeaportAction[],
+    accountAddress,
+    chain,
+    input.offerTokenAddress
+  );
   if (!order) throw new Error("Listing was not signed.");
   return order;
 }
@@ -386,6 +456,8 @@ export type OfferInput = {
   /** EIP-2981 royalty config expected for this collection. */
   royaltyBps: number;
   royaltyRecipient: string;
+  /** Foreign-chain offers only — falls back to MARKET_OFFER_CURRENCY (Robinhood Chain's WETH) when omitted. Source from foreignOfferCurrency(chainSlug) for a foreign chain. */
+  offerCurrency?: string;
 };
 
 /**
@@ -408,7 +480,7 @@ export type OfferInput = {
  * exactApproval=true bounds the WETH allowance to this bid's amount instead
  * of the previous unlimited (2^256-1) approve.
  */
-export async function buildOffer(accountAddress: string, input: OfferInput) {
+export async function buildOffer(accountAddress: string, input: OfferInput, chain?: SeaportChain) {
   if (input.considerationTokenId && input.criteriaTokenIds) {
     throw new Error("An offer cannot be both single-token and trait-scoped.");
   }
@@ -440,7 +512,7 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
       "Collection-wide offers are temporarily disabled — bid on a specific token or a trait instead."
     );
   }
-  const seaport = await getSeaport();
+  const seaport = await getSeaport(undefined, chain);
   const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
   const royaltyTokenId = input.considerationTokenId ?? input.criteriaTokenIds?.[0];
   if (input.royaltyBps > 0 && !royaltyTokenId) {
@@ -460,7 +532,7 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
       offer: [
         {
           amount: input.offerWei,
-          token: MARKET_OFFER_CURRENCY,
+          token: input.offerCurrency ?? MARKET_OFFER_CURRENCY,
         },
       ],
       consideration: [considerationItem],
@@ -471,7 +543,12 @@ export async function buildOffer(accountAddress: string, input: OfferInput) {
     /* exactApproval */ true
   );
 
-  const { order } = await executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress);
+  const { order } = await executeActionsViaWallet(
+    actions as unknown as SeaportAction[],
+    accountAddress,
+    chain,
+    input.considerationTokenAddress
+  );
   if (!order) throw new Error("Offer was not signed.");
   return order;
 }
@@ -605,6 +682,28 @@ export async function computeApprovalSpoof(
  * eth_call simulation and the eventual send in executeActionsViaWallet — is
  * completely unaffected by the spoof and still runs against reality.
  */
+/**
+ * The ERC-721 collection contract an order actually moves -- checks the
+ * offer side first (fulfilling a listing: seller offered the NFT), then the
+ * consideration side (fulfilling an offer: bidder's consideration is the
+ * NFT), same scan order computeApprovalSpoof above already uses. Needed for
+ * a foreign-chain fulfillment's destination allowlist (see
+ * assertSafeForeignMarketDestination) -- Robinhood-chain fulfillment
+ * doesn't need this (its allowlist is the build-time MARKET_DESTINATIONS
+ * set, unrelated to which specific order is being fulfilled).
+ */
+function erc721ContractOf(order: FulfillableOrder): string | null {
+  const params = order.parameters;
+  const offerNft = params.offer.find(
+    (item) => Number(item.itemType) === ItemType.ERC721 || Number(item.itemType) === ItemType.ERC721_WITH_CRITERIA
+  );
+  if (offerNft) return offerNft.token;
+  const considerationNft = params.consideration.find(
+    (item) => Number(item.itemType) === ItemType.ERC721 || Number(item.itemType) === ItemType.ERC721_WITH_CRITERIA
+  );
+  return considerationNft?.token ?? null;
+}
+
 export async function fulfillOrder(
   order: FulfillableOrder,
   accountAddress: string,
@@ -614,10 +713,11 @@ export async function fulfillOrder(
    * into the CriteriaResolver array of fulfillAdvancedOrder. Callers must
    * obtain it from assertAcceptableTraitOffer — never construct it ad hoc.
    */
-  considerationCriteria?: InputCriteria[]
+  considerationCriteria?: InputCriteria[],
+  chain?: SeaportChain
 ) {
   const approvalSpoof = await computeApprovalSpoof(order, accountAddress, considerationCriteria);
-  const seaport = await getSeaport(approvalSpoof ?? undefined);
+  const seaport = await getSeaport(approvalSpoof ?? undefined, chain);
   const { actions } = await seaport.fulfillOrder({
     order,
     accountAddress,
@@ -626,6 +726,13 @@ export async function fulfillOrder(
     // allowance, not 2^256-1.
     exactApproval: true,
   });
+  if (chain) {
+    const contractAddress = erc721ContractOf(order);
+    if (!contractAddress) {
+      throw new Error("fulfillOrder: could not determine this order's collection contract for the foreign-chain allowlist.");
+    }
+    return executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress, chain, contractAddress);
+  }
   return executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress);
 }
 
