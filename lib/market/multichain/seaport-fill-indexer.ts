@@ -32,6 +32,7 @@
  * which collection/token/price it was for.
  */
 import { Interface } from "ethers";
+import { MARKET_FEE_RECIPIENT } from "@/lib/constants";
 import { postgresQuery } from "@/lib/postgres";
 import { confirmedHead, planScan } from "@/lib/market/chain-indexer";
 import { logScanBudget } from "@/lib/market/rpc-budget";
@@ -87,6 +88,9 @@ const ITEM_ERC20 = 1;
 
 type SpentItem = { itemType: bigint; token: string; identifier: bigint; amount: bigint };
 
+/** ReceivedItem (consideration) additionally carries a recipient; SpentItem (offer) does not. */
+type ReceivedItem = SpentItem & { recipient: string };
+
 export type DecodedFill = {
   orderHash: string;
   seller: string;
@@ -95,20 +99,53 @@ export type DecodedFill = {
   tokenId: string | null;
   currencyToken: string | null;
   priceWei: string | null;
+  /**
+   * Native/ERC-20 value that provably reached MARKET_FEE_RECIPIENT in this
+   * exact fill, in the same currency as priceWei. This -- not priceWei --
+   * is what points are awarded on (see writeFills). Zero for any fill this
+   * app earned nothing from.
+   */
+  marketplaceFeeWei: string;
+  /** How the shape was interpreted, for diagnosis; "unknown" fills still index but never score. */
+  shape: "listing" | "bid" | "swap" | "unknown";
 };
 
 /**
- * Pure decode -- no I/O, unit-tested against a real ABI-encoded log built
+ * Pure decode -- no I/O, unit-tested against real ABI-encoded logs built
  * with this same Interface (see test/market/seaport-fill-indexer.test.ts).
- * Finds the first NFT-shaped item and the first money-shaped item across
- * offer then consideration -- correct for every real order this app's own
- * validators (validateListingOrder/validateOfferOrder/
- * validateBundleListingOrder/validateSwapOrder) can produce, all of which
- * have exactly one NFT-vs-money split per side. A genuinely exotic
- * third-party order (e.g. a multi-NFT-for-multi-NFT swap with no money
- * leg at all) still indexes correctly for ownership/activity purposes --
- * nft_contract/token_id are still populated -- it just has a null price,
- * which the schema already allows for exactly this reason.
+ *
+ * REWRITTEN 2026-08-19 after audit finding H4. The first version took the
+ * FIRST NFT-shaped item and FIRST money-shaped item across
+ * offer-concatenated-with-consideration. That was defensible for orders
+ * this app produces, but this indexer watches EVERY Seaport fill on 8
+ * chains -- overwhelmingly orders written by strangers. A crafted order
+ * could put a decoy cheap money item first (with the real payment split
+ * across later items) or a different collection's NFT first, and the
+ * indexed row would misrepresent the trade -- poisoning floor/volume
+ * analytics and, before the points rework below, minting points off a
+ * fabricated price.
+ *
+ * The rewrite is side-aware and total-aware:
+ *
+ *  1. SHAPE. Seaport's semantics are directional: the offerer gives the
+ *     offer array and receives the consideration array. NFTs in `offer`
+ *     with money in `consideration` is a LISTING (seller offers the NFT).
+ *     Money in `offer` with NFTs in `consideration` is a BID (bidder offers
+ *     the money). NFTs on BOTH sides is a SWAP. Deciding this first is what
+ *     makes "which item is the traded asset" a derivation rather than a
+ *     guess.
+ *
+ *  2. PRICE. Sums EVERY money item on the paying side that shares the
+ *     dominant currency, instead of trusting one item. Seaport splits a
+ *     real payment across seller + marketplace fee + creator royalty
+ *     legs routinely, so the first item is typically the seller's cut
+ *     alone -- the old code systematically UNDER-reported real prices as
+ *     well as being spoofable. Mixed-currency orders keep only the
+ *     dominant currency's total and are never silently added together.
+ *
+ *  3. FEE. Consideration items paid to MARKET_FEE_RECIPIENT are summed
+ *     separately -- the real, on-chain "what did this app actually earn"
+ *     figure that now drives points.
  */
 export function decodeOrderFulfilled(topics: string[], data: string): DecodedFill | null {
   let parsed;
@@ -120,20 +157,106 @@ export function decodeOrderFulfilled(topics: string[], data: string): DecodedFil
   if (!parsed || parsed.name !== "OrderFulfilled") return null;
 
   const offer = parsed.args.offer as SpentItem[];
-  const consideration = parsed.args.consideration as SpentItem[];
-  const allItems = [...offer, ...consideration];
+  const consideration = parsed.args.consideration as ReceivedItem[];
 
-  const nftItem = allItems.find((i) => Number(i.itemType) === ITEM_ERC721 || Number(i.itemType) === ITEM_ERC1155);
-  const moneyItem = allItems.find((i) => Number(i.itemType) === ITEM_NATIVE || Number(i.itemType) === ITEM_ERC20);
+  const isNft = (i: { itemType: bigint }) =>
+    Number(i.itemType) === ITEM_ERC721 || Number(i.itemType) === ITEM_ERC1155;
+  const isMoney = (i: { itemType: bigint }) =>
+    Number(i.itemType) === ITEM_NATIVE || Number(i.itemType) === ITEM_ERC20;
+  /** Native items have no meaningful token address; normalize them to null so native and ERC-20 totals can never be conflated. */
+  const currencyOf = (i: { itemType: bigint; token: string }) =>
+    Number(i.itemType) === ITEM_ERC20 ? i.token.toLowerCase() : null;
+
+  const offerNfts = offer.filter(isNft);
+  const considerationNfts = consideration.filter(isNft);
+
+  let shape: DecodedFill["shape"];
+  if (offerNfts.length > 0 && considerationNfts.length > 0) shape = "swap";
+  else if (offerNfts.length > 0) shape = "listing";
+  else if (considerationNfts.length > 0) shape = "bid";
+  else shape = "unknown";
+
+  // The traded asset comes from the side that is DEFINED to hold it for
+  // this shape -- never "whichever side happened to list one first".
+  // For a swap, the offerer's own side is the canonical subject of the
+  // fill (that is the asset leaving the offerer, mirroring how a listing
+  // is recorded).
+  // Guarded indexing, NOT `arr[0]`: these arrays come from ethers' Result
+  // proxy, which throws RangeError("out of result range") on an
+  // out-of-bounds index instead of returning undefined. A money-only fill
+  // (shape "unknown") has no NFT on either side and would otherwise crash
+  // the whole scan window -- caught by this file's own test.
+  const subjectNftSide = shape === "bid" ? considerationNfts : offerNfts;
+  const subjectNft = subjectNftSide.length > 0 ? subjectNftSide[0] : null;
+
+  // The paying side: for a listing the buyer pays via consideration; for a
+  // bid the bidder's money is in the offer array.
+  const payingItems: { itemType: bigint; token: string; amount: bigint }[] =
+    shape === "bid" ? offer.filter(isMoney) : consideration.filter(isMoney);
+
+  // Pick the price currency by PRESENCE, never by magnitude.
+  //
+  // A first version chose "the currency with the largest summed amount",
+  // which its own test immediately broke: raw amounts across different
+  // tokens are not comparable, so an attacker minting 1e21 of a worthless
+  // ERC-20 trivially out-weighs a real 1e6-wei native payment and makes
+  // their token "dominant". Native is therefore preferred whenever any
+  // native leg exists (nobody can mint it), and only otherwise does the
+  // largest ERC-20 total stand in -- purely as a display/volume figure,
+  // never as a basis for scoring (see the fee rule below).
+  const totalsByCurrency = new Map<string | null, bigint>();
+  for (const item of payingItems) {
+    const key = currencyOf(item);
+    totalsByCurrency.set(key, (totalsByCurrency.get(key) ?? BigInt(0)) + item.amount);
+  }
+  let priceCurrency: string | null = null;
+  let priceTotal = BigInt(0);
+  if (totalsByCurrency.has(null)) {
+    priceCurrency = null;
+    priceTotal = totalsByCurrency.get(null)!;
+  } else {
+    for (const [currency, total] of totalsByCurrency) {
+      if (total > priceTotal) {
+        priceTotal = total;
+        priceCurrency = currency;
+      }
+    }
+  }
+
+  // WHAT ACTUALLY REACHED THIS APP -- NATIVE LEGS ONLY.
+  //
+  // This drives points (see writeFills), so it has to be unforgeable, and
+  // the strict rule is also the exactly-correct one: every fee this app
+  // charges is denominated in the chain's NATIVE token -- the native
+  // listing/bundle/swap fees (NATIVE_TOKEN_ADDRESS in
+  // order-validation.ts) and the third-party fill tip (foreignFillTip)
+  // alike. So "count only native fee legs" is not a heuristic or a
+  // conservative approximation; it matches how we bill, exactly, while
+  // making the H3 attack impossible by construction: an attacker cannot
+  // mint the gas token, and a "fee" routed to us in a token they created
+  // is correctly worth zero points because it is worth zero.
+  //
+  // If a real ERC-20-denominated fee is ever charged, this must gain an
+  // explicit per-chain allowlist of verified currencies (WETH/USDC/USDT)
+  // -- never a magnitude comparison.
+  let marketplaceFee = BigInt(0);
+  for (const item of consideration) {
+    if (Number(item.itemType) !== ITEM_NATIVE) continue;
+    if (item.recipient && item.recipient.toLowerCase() === MARKET_FEE_RECIPIENT.toLowerCase()) {
+      marketplaceFee += item.amount;
+    }
+  }
 
   return {
     orderHash: parsed.args.orderHash as string,
     seller: (parsed.args.offerer as string).toLowerCase(),
     buyer: (parsed.args.recipient as string).toLowerCase(),
-    nftContract: nftItem ? nftItem.token.toLowerCase() : null,
-    tokenId: nftItem ? nftItem.identifier.toString() : null,
-    currencyToken: moneyItem && Number(moneyItem.itemType) === ITEM_ERC20 ? moneyItem.token.toLowerCase() : null,
-    priceWei: moneyItem ? moneyItem.amount.toString() : null,
+    nftContract: subjectNft ? subjectNft.token.toLowerCase() : null,
+    tokenId: subjectNft ? subjectNft.identifier.toString() : null,
+    currencyToken: priceCurrency,
+    priceWei: payingItems.length > 0 ? priceTotal.toString() : null,
+    marketplaceFeeWei: marketplaceFee.toString(),
+    shape,
   };
 }
 
@@ -300,8 +423,8 @@ async function writeFills(
   for (const r of deduped) {
     const result = await postgresQuery(
       `INSERT INTO plank_seaport_fills
-         (chain_slug, tx_hash, log_index, block_number, order_hash, seller, buyer, nft_contract, token_id, currency_token, price_wei)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, $11::numeric)
+         (chain_slug, tx_hash, log_index, block_number, order_hash, seller, buyer, nft_contract, token_id, currency_token, price_wei, marketplace_fee_wei, shape)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, $11::numeric, $12::numeric, $13)
        ON CONFLICT (chain_slug, tx_hash, log_index) DO NOTHING`,
       [
         r.chainSlug,
@@ -315,36 +438,64 @@ async function writeFills(
         r.fill.tokenId,
         r.fill.currencyToken,
         r.fill.priceWei,
+        r.fill.marketplaceFeeWei,
+        r.fill.shape,
       ]
     );
     const isNew = (result.rowCount ?? 0) > 0;
     written += isNew ? 1 : 0;
 
-    // Award real "sale" points -- see lib/plank-checks.ts's PointCategory
-    // and its own "TRUSTED-CALLER-ONLY BOUNDARY" doc comment: this IS a
-    // safe caller because the points here are derived from a REAL,
-    // confirmed on-chain OrderFulfilled log this function just decoded --
-    // never client-supplied. Only for genuinely NEW rows (isNew), so a
-    // re-run over an already-indexed window never double-awards (belt and
-    // suspenders on top of recordPointEvent's own (source_tx_hash,
-    // category, wallet) idempotency). marketplankAttributed is always
-    // false here -- this scan watches EVERY Seaport fill on a chain, not
-    // only ones that came through this app's own native order tables;
-    // cross-referencing order_hash against market_orders/
-    // market_bundle_listings/market_swap_listings to earn the full
-    // attributed rate is real, valuable future work, not silently skipped
-    // -- see this file's own header on the indexer's stated scope.
-    if (isNew && r.fill.priceWei && r.fill.priceWei !== "0") {
+    // POINTS ARE AWARDED ON FEE ACTUALLY RECEIVED, NOT ON SALE PRICE
+    // ------------------------------------------------------------------
+    // Rewritten 2026-08-19 after audit findings H2/H3, on the owner's own
+    // direction ("points... attributed to the $ value that actually
+    // reaches the marketplace itself"). The previous version scored
+    // `salePoints(priceWei)` for the buyer of ANY observed fill, which was
+    // freely farmable two ways:
+    //   H2 -- self-wash trading: sign a listing from wallet A, fill from
+    //         wallet B (both yours), directly against Seaport. The ETH
+    //         round-trips to yourself, so the only cost is gas (cents on
+    //         an L2) and the points are unbounded.
+    //   H3 -- fabricated currency: mint a worthless ERC-20, "sell" your
+    //         own NFT for 1,000,000 of it, self-fill. No real value moves
+    //         at all, yet priceWei was astronomical.
+    //
+    // Scoring the marketplace fee closes BOTH structurally rather than by
+    // detection heuristics (which are adversarial and eventually lose):
+    // every point now costs its earner real, irreversible money paid to
+    // this app, so farming is capped by arithmetic instead of by us
+    // out-guessing the farmer. A wash trade earns points only in exact
+    // proportion to what it paid us -- at which point it is simply a
+    // customer. And decodeOrderFulfilled only counts fee legs denominated
+    // in the fill's DOMINANT currency, so an attacker cannot "pay" the fee
+    // in a token they minted.
+    //
+    // Awarded to the BUYER (the fulfiller, who actually parts with the
+    // money), only for genuinely NEW rows, so a re-scanned window never
+    // double-credits -- belt and suspenders over recordPointEvent's own
+    // (source_tx_hash, category, wallet) idempotency.
+    //
+    // NOTE the deliberate remaining gap: fees paid to OTHER marketplaces
+    // earn nothing here, which is correct -- this app is scoring its own
+    // revenue, not third-party revenue.
+    if (isNew && r.fill.marketplaceFeeWei !== "0") {
       try {
-        const { salePoints, recordPointEvent } = await import("@/lib/plank-checks");
-        const points = salePoints(BigInt(r.fill.priceWei), false);
+        const { marketplaceFeePoints, recordPointEvent } = await import("@/lib/plank-checks");
+        const points = marketplaceFeePoints(BigInt(r.fill.marketplaceFeeWei));
         if (points > 0) {
           await recordPointEvent({
             wallet: r.fill.buyer,
             category: "sale",
             points,
             sourceTxHash: r.txHash,
-            metadata: { chainSlug: r.chainSlug, nftContract: r.fill.nftContract, tokenId: r.fill.tokenId },
+            metadata: {
+              chainSlug: r.chainSlug,
+              nftContract: r.fill.nftContract,
+              tokenId: r.fill.tokenId,
+              shape: r.fill.shape,
+              feeWei: r.fill.marketplaceFeeWei,
+              currencyToken: r.fill.currencyToken,
+            },
             earnedAt: new Date(),
           });
         }

@@ -108,6 +108,30 @@ export function volumeBountyPoints(collectionFeeRevenueWei: bigint): number {
 }
 
 /**
+ * Points for a marketplace fill, scored on the fee that PROVABLY REACHED
+ * this app's treasury in that fill -- not on the sale price.
+ *
+ * This is the anti-farming design (audit findings H2/H3, 2026-08-19).
+ * Scoring sale price let anyone wash-trade with themselves at gas cost, or
+ * invent a price in a token they minted, for unlimited points. Scoring
+ * received fee makes every point cost its earner real money paid to us, so
+ * abuse is bounded by arithmetic rather than by detection heuristics --
+ * the one mitigation the research consistently found actually holds up.
+ *
+ * The rate is deliberately generous relative to the other categories: a
+ * fee is only ~1.8% of a sale, so at the plain `sale` weight a real
+ * purchase would score ~50x less than before. MARKETPLACE_FEE_POINT_WEIGHT
+ * restores roughly the previous points-per-real-purchase while keeping the
+ * farming cost intact -- a wash trader still pays full freight for every
+ * point.
+ */
+export const MARKETPLACE_FEE_POINT_WEIGHT = BigInt(1_000_000); // points per ETH of fee actually received
+
+export function marketplaceFeePoints(feeWeiReceived: bigint): number {
+  return weiToPoints(feeWeiReceived, MARKETPLACE_FEE_POINT_WEIGHT);
+}
+
+/**
  * Time-integrated LP scoring: points = lpValueWei * hoursHeld * weight,
  * scaled down to a sane magnitude. Deliberately NOT a flat per-deposit
  * score — see the spec's anti-flash-farming rationale. Called incrementally
