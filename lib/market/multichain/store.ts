@@ -53,6 +53,26 @@ export async function listTrackedCollections(): Promise<TrackedCollection[]> {
 }
 
 /**
+ * One tracked collection by its real key -- targeted single-row lookup,
+ * same reasoning as getCollectionSupplyStats below (avoid
+ * listTrackedCollections' full 6000+-row scan when the caller only needs
+ * one). Used by the Marketplank-native foreign-chain listing route to
+ * confirm a collection is real/tracked before accepting a signed order
+ * against it.
+ */
+export async function getTrackedCollection(chainSlug: string, contractAddress: string): Promise<TrackedCollection | null> {
+  const result = await postgresQuery<CollectionRow>(
+    `SELECT id, chain_slug, chain_id, contract_address, adapter, name, image_url, external_url, is_vault_backed, creator_handle, creator_address
+     FROM plank_multichain_collections
+     WHERE chain_slug = $1 AND contract_address = $2
+     LIMIT 1`,
+    [chainSlug, contractAddress]
+  );
+  const row = result.rows[0];
+  return row ? rowToCollection(row) : null;
+}
+
+/**
  * Register a collection for sync, or update its adapter/vault-backed flag if
  * it already exists. Idempotent by (chain_slug, contract_address) — safe to
  * call from a seed script on every deploy without duplicating rows.

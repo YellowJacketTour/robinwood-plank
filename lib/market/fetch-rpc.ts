@@ -240,6 +240,38 @@ export async function ethCallForeignFree(chainSlug: string, to: string, data: st
   });
 }
 
+/**
+ * eth_getCode over a FOREIGN chain -- ethCallForeignFree's sibling, needed
+ * for lib/market/signature.ts's Rpc interface (its EIP-1271 contract-wallet
+ * check calls .getCode() to decide whether to do an ecrecover or an
+ * eth_call). Same cross-chain cache-collision fix as ethCallForeignFree:
+ * chainSlug rides in the cache-key params only, never the real wire request
+ * (an address existing as a contract on one chain but an EOA on another is
+ * a real, plausible collision this must not conflate -- getting this wrong
+ * for a SIGNATURE VERIFICATION read is a real security bug, not just a
+ * staleness one).
+ */
+export async function ethGetCodeForeignFree(chainSlug: string, address: string): Promise<string> {
+  const wireParams = [address, "latest"];
+  const cacheParams = [address, "latest", chainSlug];
+  return withRpcCache("eth_getCode", cacheParams, async () => {
+    const errors: string[] = [];
+    for (const url of availableUrls(foreignRpcUrls(chainSlug))) {
+      try {
+        const data_ = await postRpc(url, "eth_getCode", wireParams, 8_000);
+        if (data_.error) {
+          errors.push(data_.error.message || "RPC error");
+          continue;
+        }
+        return data_.result as string;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    throw new Error(`Foreign eth_getCode (${chainSlug}) failed: ${errors.slice(-2).join(" | ")}`);
+  });
+}
+
 /** Batch several eth_calls in one HTTP round-trip (less rate-limit pressure). */
 export async function ethCallMany(
   calls: Array<{ to: string; data: string }>,

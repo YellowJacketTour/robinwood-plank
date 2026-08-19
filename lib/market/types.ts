@@ -52,6 +52,18 @@ export type ListingVenue = "opensea" | "pulp" | "magiceden" | "unisat";
 export type Listing = {
   id: string;
   collectionSlug: string;
+  /**
+   * Which chain THIS Marketplank-native order lives on -- "robinhood" (or
+   * absent, same default the DB column carries) unless this is a
+   * Marketplank-native listing on one of the foreign EVM chains (see
+   * lib/market/multichain/trading/foreign-chain-registry.ts). Completely
+   * different from foreignChainSlug below: this field describes OUR OWN
+   * order (venue stays undefined, "ours" per that field's own doc comment),
+   * whereas foreignChainSlug marks a THIRD-PARTY (OpenSea/etc.) order. Never
+   * conflate the two -- isCrossChainBuyable/isForeignListing's "venue
+   * absent means ours" logic depends on them staying separate.
+   */
+  chainSlug?: string;
   tokenId: string;
   /** Wallet that placed this order — the seller for a listing. */
   maker: string;
@@ -206,6 +218,8 @@ export const MARKETPLANK_RELIST_MESSAGE =
 export type Offer = {
   id: string;
   collectionSlug: string;
+  /** Same field, same meaning, as Listing.chainSlug above. */
+  chainSlug?: string;
   /** Absent for collection-wide offers. */
   tokenId?: string;
   /** Present when the offer targets a set of traits rather than one token or the whole collection. */

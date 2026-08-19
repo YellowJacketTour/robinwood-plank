@@ -71,6 +71,10 @@ export type ForeignChainConfig = {
   chainId: number;
   /** OpenSea's own chain identifier for this chain -- confirmed live, NOT always the obvious name (Polygon is "matic", BNB Chain is "bsc"). */
   openSeaChain: string;
+  /** Real native gas-token symbol -- NOT "ETH" for every chain (Polygon's is POL/MATIC, BNB Chain's is BNB, Avalanche's is AVAX). Used for wallet_addEthereumChain's nativeCurrency field. */
+  nativeCurrencySymbol: string;
+  /** Real block explorer origin, for wallet_addEthereumChain's blockExplorerUrls. */
+  blockExplorerUrl: string;
 };
 
 /**
@@ -78,13 +82,13 @@ export type ForeignChainConfig = {
  * lib/market/seaport.ts + lib/constants.ts, unaffected by this file.
  */
 export const FOREIGN_CHAINS: ForeignChainConfig[] = [
-  { chainSlug: "eth-mainnet", chainId: 1, openSeaChain: "ethereum" },
-  { chainSlug: "polygon-mainnet", chainId: 137, openSeaChain: "matic" },
-  { chainSlug: "arb-mainnet", chainId: 42161, openSeaChain: "arbitrum" },
-  { chainSlug: "base-mainnet", chainId: 8453, openSeaChain: "base" },
-  { chainSlug: "opt-mainnet", chainId: 10, openSeaChain: "optimism" },
-  { chainSlug: "bnb-mainnet", chainId: 56, openSeaChain: "bsc" },
-  { chainSlug: "avax-mainnet", chainId: 43114, openSeaChain: "avalanche" },
+  { chainSlug: "eth-mainnet", chainId: 1, openSeaChain: "ethereum", nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://etherscan.io" },
+  { chainSlug: "polygon-mainnet", chainId: 137, openSeaChain: "matic", nativeCurrencySymbol: "POL", blockExplorerUrl: "https://polygonscan.com" },
+  { chainSlug: "arb-mainnet", chainId: 42161, openSeaChain: "arbitrum", nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://arbiscan.io" },
+  { chainSlug: "base-mainnet", chainId: 8453, openSeaChain: "base", nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://basescan.org" },
+  { chainSlug: "opt-mainnet", chainId: 10, openSeaChain: "optimism", nativeCurrencySymbol: "ETH", blockExplorerUrl: "https://optimistic.etherscan.io" },
+  { chainSlug: "bnb-mainnet", chainId: 56, openSeaChain: "bsc", nativeCurrencySymbol: "BNB", blockExplorerUrl: "https://bscscan.com" },
+  { chainSlug: "avax-mainnet", chainId: 43114, openSeaChain: "avalanche", nativeCurrencySymbol: "AVAX", blockExplorerUrl: "https://snowtrace.io" },
   // zksync-mainnet deliberately omitted -- see header comment.
 ];
 

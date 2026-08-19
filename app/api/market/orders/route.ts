@@ -116,8 +116,15 @@ async function handleGet(req: Request) {
   const collectionSlug = searchParams.get("collection") ?? undefined;
   const kind = searchParams.get("kind") === "offer" ? "offer" : "listing";
 
+  // chainSlug explicitly "robinhood" -- this route is the Robinhood-Chain-
+  // only order book. Now that market_orders also carries Marketplank-native
+  // foreign-chain rows (see app/api/market/multichain/native-orders/route.ts),
+  // omitting this would silently include those too if a foreign collection's
+  // slug ever collided with a Robinhood one.
   const items =
-    kind === "offer" ? await getOffers(collectionSlug) : await getListings(collectionSlug);
+    kind === "offer"
+      ? await getOffers(collectionSlug, "robinhood")
+      : await getListings(collectionSlug, "robinhood");
   // Drop orders that are dead on-chain (cancelled / filled / counter-advanced /
   // seller no longer holds or approves the token) so users never click a
   // listing that is guaranteed to revert. Cached server-side; unknown-liveness

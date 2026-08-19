@@ -162,13 +162,17 @@ function normItem(it: unknown, withRecipient: boolean): Record<string, string> {
  * Build the OrderComponents value and compute the EIP-712 digest exactly as
  * Seaport would. Returns null if the order is structurally unusable.
  */
-export function orderDigest(params: Params): { digest: string; counter: bigint } | null {
+export function orderDigest(
+  params: Params,
+  chainId: number = CHAIN.id,
+  verifyingContract: string = SEAPORT_ADDRESS
+): { digest: string; counter: bigint } | null {
   try {
     const domain = {
       name: "Seaport",
       version: "1.6",
-      chainId: CHAIN.id,
-      verifyingContract: SEAPORT_ADDRESS,
+      chainId,
+      verifyingContract,
     };
     const counter = BigInt(String(params.counter ?? 0));
     const value = {
@@ -289,7 +293,9 @@ export function defaultRpc(): Rpc {
  */
 export async function verifyOrderSignature(
   rawOrder: unknown,
-  rpc: Rpc = defaultRpc()
+  rpc: Rpc = defaultRpc(),
+  /** For a foreign-chain order: {chainId, seaportAddress} of the chain it was actually signed for. Omit for Robinhood Chain (the default). */
+  chain?: { chainId: number; seaportAddress: string }
 ): Promise<VerifyResult> {
   const order = rawOrder as { parameters?: Params; signature?: unknown } | null;
   const p = order?.parameters;
@@ -307,7 +313,8 @@ export async function verifyOrderSignature(
     return { ok: false, reason: "Signature is not valid hex." };
   }
 
-  const d = orderDigest(p);
+  const seaportAddress = chain?.seaportAddress ?? SEAPORT_ADDRESS;
+  const d = orderDigest(p, chain?.chainId ?? CHAIN.id, seaportAddress);
   if (!d) return { ok: false, reason: "Order could not be digested." };
 
   // --- Determine EOA vs contract wallet. RPC failure => fail closed. ---
@@ -363,7 +370,7 @@ export async function verifyOrderSignature(
   // --- Counter check. A stale-counter order is dead; RPC failure => reject. ---
   let counterResult: string;
   try {
-    counterResult = await rpc.call(SEAPORT_ADDRESS, IFACE.encodeFunctionData("getCounter", [offerer]));
+    counterResult = await rpc.call(seaportAddress, IFACE.encodeFunctionData("getCounter", [offerer]));
   } catch {
     return { ok: false, reason: "Could not confirm order counter (RPC unavailable).", transient: true };
   }
