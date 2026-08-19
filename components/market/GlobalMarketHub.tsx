@@ -933,13 +933,31 @@ export default function GlobalMarketHub() {
            * legible on a phone instead of shrinking every column into
            * unreadable text -- Collection, Floor, and 24h Change (the three
            * things worth a glance on any screen) always show.
+           *
+           * DATA TYPOGRAPHY (design-direction preview, 2026-08-19): every
+           * numeric column below now sets font-mono on top of the existing
+           * tabular-nums -- tabular-nums alone keeps digit WIDTHS aligned in
+           * a proportional font, monospace additionally locks every GLYPH
+           * (currency symbols, the % sign, arrows, the decimal point) onto
+           * one fixed grid, which is what actually lets a scanning eye track
+           * a column instead of re-parsing each row. Same pattern every real
+           * trading terminal (Axiom, Photon, Blur, Tensor) uses for exactly
+           * this reason. Nothing else about this table changed -- same
+           * columns, same responsive hide/show, same data, same links.
            */}
+          <div className="flex items-center justify-between px-1 pb-1.5">
+            <span className="text-[0.6rem] font-black uppercase tracking-wider text-foreground/35">Live rankings</span>
+            <span className="inline-flex items-center gap-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-wider text-emerald-400">
+              <span className="live-pulse-dot h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
+              Live
+            </span>
+          </div>
           <div className="overflow-x-auto rounded-lg border border-line bg-panel">
             <table className="w-full min-w-[36rem] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-[0.6rem] font-black uppercase tracking-wider text-foreground/40">
                   <th className="w-8 px-2 py-2" />
-                  <th className="w-10 px-1 py-2 text-right">#</th>
+                  <th className="w-10 px-1 py-2 text-right font-mono">#</th>
                   <th className="px-2 py-2">Collection</th>
                   <th className="px-2 py-2 text-right">Floor</th>
                   <th className="px-2 py-2 text-right">24h Change</th>
@@ -982,7 +1000,7 @@ export default function GlobalMarketHub() {
                           {watched ? "★" : "☆"}
                         </button>
                       </td>
-                      <td className="px-1 py-2 text-right text-xs text-foreground/40 tabular-nums">{i + 1}</td>
+                      <td className="px-1 py-2 text-right text-xs text-foreground/40 tabular-nums font-mono">{i + 1}</td>
                       <td className="px-2 py-2">
                         <Link
                           href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
@@ -1012,7 +1030,7 @@ export default function GlobalMarketHub() {
                           )}
                         </Link>
                       </td>
-                      <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums text-foreground/80">
+                      <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/80">
                         {c.floorPriceWei ? (
                           <>
                             {(Number(c.floorPriceWei) / 1e18).toFixed(3)} {c.floorPriceCurrency ?? ""}
@@ -1027,16 +1045,16 @@ export default function GlobalMarketHub() {
                           "—"
                         )}
                       </td>
-                      <td className={`whitespace-nowrap px-2 py-2 text-right tabular-nums font-bold ${changeColor}`}>
+                      <td className={`whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono font-bold ${changeColor}`}>
                         {change != null ? `${changeArrow}${Math.abs(change).toFixed(1)}%` : "—"}
                       </td>
-                      <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums text-foreground/60 sm:table-cell">
+                      <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 sm:table-cell">
                         {c.volume24hWei && c.volume24hWei !== "0" ? (Number(c.volume24hWei) / 1e18).toFixed(2) : "—"}
                       </td>
-                      <td className="hidden px-2 py-2 text-right tabular-nums text-foreground/60 md:table-cell">
+                      <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/60 md:table-cell">
                         {c.sales24h ?? "—"}
                       </td>
-                      <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums text-foreground/60 lg:table-cell">
+                      <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 lg:table-cell">
                         {listedPct != null ? `${listedPct.toFixed(1)}% · ${c.listedCount}/${c.totalSupply}` : "—"}
                       </td>
                       <td className="px-2 py-2 text-right">
