@@ -48,7 +48,7 @@ import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft"
 export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
 /** Mirrors alchemy-nft.ts's ALCHEMY_NETWORK_SUBDOMAIN chainSlug set. */
-const EVM_CHAIN_ID: Record<string, number> = {
+export const EVM_CHAIN_ID: Record<string, number> = {
   "eth-mainnet": 1,
   "polygon-mainnet": 137,
   "arb-mainnet": 42161,
@@ -74,7 +74,7 @@ const CHUNK_BLOCKS = 10;
  * a popularity bar -- real ranking (if any) happens downstream once a
  * candidate is actually registered and its own floor/volume gets synced.
  */
-const MIN_TRANSFERS_TO_CONSIDER = 2;
+export const MIN_TRANSFERS_TO_CONSIDER = 2;
 
 type RawLog = { address: string; topics: string[]; blockNumber: string };
 

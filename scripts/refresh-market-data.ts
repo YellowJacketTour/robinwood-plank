@@ -76,6 +76,7 @@ const explicit = [
   "--events",
   "--multichain",
   "--discover-evm",
+  "--discover-hypersync",
   "--discover-robinhood",
   "--discover-robinhood-opensea",
   "--discover-opensea-bulk",
@@ -98,8 +99,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -420,6 +421,24 @@ async function main(): Promise<void> {
       r.error
         ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
         : `${r.chainSlug}: blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidates} candidates, ${r.skippedNoMetadata} no-metadata)`
+    );
+    return parts.join("; ");
+  });
+
+  // The fast path -- see lib/market/multichain/discovery/hypersync-evm-scan.ts's
+  // own header. Same candidate logic and cursor table as discover-evm above,
+  // just up to ~2000x faster per real Envio benchmarks, so real forward
+  // progress toward full chain history is actually achievable instead of
+  // permanently bottlenecked at 10 blocks/tick. No-ops with a clear error
+  // (not a crash) when ENVIO_API_TOKEN isn't set -- this is additive, not a
+  // replacement for discover-evm, which keeps running either way.
+  await step("discover-hypersync", async () => {
+    const { runAllHypersyncDiscoveryScans } = await import("../lib/market/multichain/discovery/hypersync-evm-scan");
+    const runs = await runAllHypersyncDiscoveryScans();
+    const parts = runs.map((r) =>
+      r.error
+        ? `${r.chainSlug}: ERR(${r.error.slice(0, 60)})`
+        : `${r.chainSlug}: blocks ${r.fromBlock}-${r.toBlock}, +${r.registered} new (${r.candidates} candidates, ${r.skippedNoMetadata} no-metadata, ${r.logsScanned} logs)`
     );
     return parts.join("; ");
   });
