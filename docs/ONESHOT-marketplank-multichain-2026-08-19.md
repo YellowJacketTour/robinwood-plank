@@ -179,9 +179,20 @@ phantom verification failures. `npx next dev -p 3800` binds directly via `node.e
 polygon 437 · robinhood 358 · base 272 · arbitrum 167 · bnb 119 · ethereum 88 ·
 solana 83 · bitcoin 60 · optimism 33 · **avalanche 0**.
 
-> **Avalanche gap:** the bulk scan saw 300 candidates and rejected 293 as "not-art" and
-> 7 as "no-metadata," registering zero. Worth investigating whether the
-> `isNotRealCollectibleArt` filter is miscalibrated for Avalanche.
+> **Avalanche gap — investigated and CLOSED, not a bug.** Live-verified 2026-08-20: pulled
+> raw OpenSea `chain=avalanche` collection-list entries and Alchemy `avax-mainnet`
+> `fetchSnapshot` results directly (not through the scanner) for 20 real candidates. Both
+> sources independently return `name: null, image_url: null` — OpenSea's own `name` field
+> for these entries is literally the lowercase contract address, meaning OpenSea itself has
+> never curated them. `isNotRealCollectibleArt` is correctly rejecting genuinely uncurated
+> contracts, not misfiring on real art. The `openSeaChain: "avalanche"` slug in
+> `foreign-chain-registry.ts` is also confirmed correct (matches the working chains'
+> pattern). Conclusion: Avalanche's real gap is thin upstream metadata coverage from both
+> OpenSea and Alchemy for that chain, not a filter miscalibration — nothing to fix here
+> without a third data source. Per-chain counts have moved since this doc was written:
+> re-run `--discover-opensea-bulk` to see current totals (spot-checked 2026-08-20: polygon
+> 610, base 381, bnb 270, arb 227, eth 214, robinhood 358, solana 83, bitcoin 60, opt 33,
+> **avax still 0**).
 
 ### Populating data — use the built orchestrator, don't hand-roll
 `scripts/refresh-market-data.ts` already orchestrates ~20 steps. Do **not** write new
@@ -323,7 +334,9 @@ deploy/inmotion/postgres/migrations/   26 migrations (001–026)
 2. **Solana write-path proof** — needs `MAGICEDEN_API_KEY`. Until a real Phantom signature
    settles a real Solana buy on-chain, Solana is *not* proven, regardless of tests.
 3. **Design decision** — get a yes/no on `design/trenches-density-preview`; extend or drop.
-4. **Avalanche discovery gap** — 0 of 300 candidates registered; check the art filter.
+4. ~~Avalanche discovery gap~~ — **closed 2026-08-20**: confirmed real (both OpenSea and
+   Alchemy have zero metadata for Avalanche contracts), not a filter bug. No action
+   possible without a third metadata source for that chain.
 5. **Mainnet readiness** — decide deliberately whether `NATIVE_BITCOIN_MAINNET_ENABLED`
    flips, and whether the undeployed router/bridge contracts are wanted at all (foreign
    fulfillment already works without them).
