@@ -28,6 +28,16 @@ export type NativeBitcoinListing = {
   sellerPsbtBase64: string;
   status: NativeBitcoinListingStatus;
   createdAt: string;
+  /**
+   * Set only once status is "sold" -- the real broadcast transaction id
+   * (audit finding, 2026-08-19: the migration's own schema already stored
+   * this, via markNativeBitcoinListingSold, but it was never exposed here,
+   * so confirming a real purchase meant manually hunting the transaction
+   * down on a block explorer instead of reading it from this app's own
+   * response).
+   */
+  soldTxid: string | null;
+  soldAt: string | null;
 };
 
 type ListingRow = {
@@ -41,6 +51,8 @@ type ListingRow = {
   seller_psbt_base64: string;
   status: NativeBitcoinListingStatus;
   created_at: string;
+  sold_txid: string | null;
+  sold_at: string | null;
 };
 
 function rowToListing(row: ListingRow): NativeBitcoinListing {
@@ -55,6 +67,8 @@ function rowToListing(row: ListingRow): NativeBitcoinListing {
     sellerPsbtBase64: row.seller_psbt_base64,
     status: row.status,
     createdAt: row.created_at,
+    soldTxid: row.sold_txid,
+    soldAt: row.sold_at,
   };
 }
 
