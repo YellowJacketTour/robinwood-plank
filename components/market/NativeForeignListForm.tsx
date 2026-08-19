@@ -252,6 +252,9 @@ export default function NativeForeignListForm({
           against Seaport, the same canonical contract those marketplaces use. Select as many items as you want to
           list at once -- each is still its own independently cancellable signed order (one wallet prompt per item).
         </p>
+        <p className="mt-1 text-[0.6rem] text-foreground/40">
+          {feePct}% is fixed and baked into every order at signing -- it can't change on you after you've listed.
+        </p>
       </div>
 
       {ownedLoading ? (
@@ -351,7 +354,13 @@ export default function NativeForeignListForm({
                       {totalNetWei !== null ? formatTokenAmount(totalNetWei.toString(), 18, 5) : "—"} {currencySymbol}
                     </dd>
                   </div>
-                  <div className="col-span-2 rounded-lg border border-line bg-wood-950 px-3 py-2">
+                  <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
+                    <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Creator royalty</dt>
+                    <dd className="mt-1 text-xs font-bold text-foreground">
+                      0% -- not yet supported for this collection
+                    </dd>
+                  </div>
+                  <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
                     <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Chain</dt>
                     <dd className="mt-1 text-xs font-bold text-foreground">{chainDisplayName(chainSlug)} · Seaport 1.6 · {days} days</dd>
                   </div>
