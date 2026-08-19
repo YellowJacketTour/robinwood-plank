@@ -41,7 +41,38 @@ export default function ThemeAccentPicker() {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<AccentTheme>(DEFAULT_ACCENT);
   const popRef = useRef<HTMLDivElement>(null);
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null);
   const { address, isConnected } = useWallet();
+
+  // Fixed (viewport-relative), not absolute -- fixed 2026-08-19: the panel
+  // used to be `absolute right-0`, positioned relative to the trigger
+  // button's own wrapper. That works fine in the desktop nav row, but in
+  // the mobile menu (Nav.tsx) the button lives inside a container with
+  // `overflow-y-auto` -- and per a real CSS spec rule, setting overflow-y
+  // to anything other than "visible" forces overflow-x to compute as
+  // "auto" too if it was left at its default "visible", even though
+  // nothing set overflow-x explicitly. That silently clips/scroll-boxes
+  // the absolutely-positioned popup instead of letting it float over the
+  // page, which is exactly what "doesn't format on screen properly on
+  // mobile" describes. `position: fixed` is computed relative to the
+  // viewport regardless of an ancestor's overflow, so this measures the
+  // trigger button's own real screen position on open and renders the
+  // panel there instead, with its own width clamped against the actual
+  // viewport so it can never run off either edge on a narrow phone.
+  useEffect(() => {
+    if (!open || !popRef.current) {
+      setPanelPos(null);
+      return;
+    }
+    const rect = popRef.current.getBoundingClientRect();
+    const panelWidth = 256; // matches the panel's own w-64
+    const margin = 12;
+    const left = Math.min(
+      Math.max(margin, rect.right - panelWidth),
+      Math.max(margin, window.innerWidth - panelWidth - margin)
+    );
+    setPanelPos({ top: rect.bottom + 8, left });
+  }, [open]);
 
   useEffect(() => {
     const saved = loadSavedAccent();
@@ -111,11 +142,24 @@ export default function ThemeAccentPicker() {
     const onEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
+    // The panel is now `fixed` (positioned from a one-time measurement on
+    // open, see the effect above) rather than `absolute` inside whatever
+    // ancestor scrolls -- so if the mobile menu's own scroll container (or
+    // the page, or an orientation change) moves, the panel would otherwise
+    // stay frozen at its old coordinates and visually detach from the
+    // trigger button. Closing on scroll/resize is simpler and more honest
+    // than re-measuring continuously, and matches how most dropdown/
+    // popover libraries handle this same tradeoff.
+    const onReflow = () => setOpen(false);
     document.addEventListener("mousedown", onOutside);
     document.addEventListener("keydown", onEscape);
+    window.addEventListener("scroll", onReflow, { capture: true, passive: true });
+    window.addEventListener("resize", onReflow);
     return () => {
       document.removeEventListener("mousedown", onOutside);
       document.removeEventListener("keydown", onEscape);
+      window.removeEventListener("scroll", onReflow, { capture: true });
+      window.removeEventListener("resize", onReflow);
     };
   }, [open]);
 
@@ -160,11 +204,12 @@ export default function ThemeAccentPicker() {
         />
       </button>
 
-      {open && (
+      {open && panelPos && (
         <div
           role="dialog"
           aria-label="Site color theme"
-          className="dense-card absolute right-0 top-full z-[70] mt-2 w-64 space-y-3 border-line p-3 shadow-panel"
+          className="dense-card fixed z-[70] w-64 space-y-3 border-line p-3 shadow-panel"
+          style={{ top: panelPos.top, left: panelPos.left }}
         >
           <p className="text-[0.65rem] font-black uppercase tracking-wider text-foreground/40">Color theme</p>
           <div className="grid grid-cols-5 gap-2">
