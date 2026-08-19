@@ -12,6 +12,7 @@ import ArtServiceWorker from "@/components/ArtServiceWorker";
 import VersionUpdatePrompt from "@/components/VersionUpdatePrompt";
 import { rootMetadata } from "@/lib/seo";
 import { WalletProvider } from "@/lib/wallet-context";
+import { ACCENT_BOOTSTRAP_SCRIPT } from "@/lib/theme-accent";
 
 const stencil = Uncial_Antiqua({
   variable: "--font-stencil",
@@ -41,7 +42,26 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${stencil.variable} ${body.variable} h-full antialiased`}>
+    <html
+      lang="en"
+      className={`${stencil.variable} ${body.variable} h-full antialiased`}
+      // The accent-theme bootstrap script below intentionally sets a
+      // `style` attribute on this element before hydration (same pattern
+      // every dark-mode bootstrap script uses) -- React correctly notices
+      // the SSR HTML had no such attribute and would otherwise warn "won't
+      // be patched up" on every load. suppressHydrationWarning here is the
+      // standard, narrow fix for exactly this one intentionally-divergent
+      // attribute; it does not silence any other hydration mismatch.
+      suppressHydrationWarning
+    >
+      <head>
+        {/* Applies any saved accent theme (ThemeAccentPicker) before first
+            paint -- same reasoning as any dark-mode bootstrap script, just
+            for the site's one custom accent hue instead of a light/dark
+            class. Without this, a returning visitor with a saved non-gold
+            theme would see a flash of default gold on every load. */}
+        <script dangerouslySetInnerHTML={{ __html: ACCENT_BOOTSTRAP_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col">
         <WalletProvider>
           {/* WoodAmp owns the site's single audio element; it lives here in
