@@ -56,12 +56,34 @@ type Listing = {
 type UnisatProvider = {
   requestAccounts: () => Promise<string[]>;
   getPublicKey: () => Promise<string>;
-  signPsbt: (psbtHex: string, options?: { autoFinalized?: boolean; toSignInputs?: Array<{ index: number }> }) => Promise<string>;
+  signPsbt: (psbtHex: string, options?: { autoFinalized?: boolean; toSignInputs?: Array<{ index: number; address: string; sighashTypes?: number[] }> }) => Promise<string>;
 };
 
 function getUnisat(): UnisatProvider | null {
   if (typeof window === "undefined") return null;
   return (window as unknown as { unisat?: UnisatProvider }).unisat ?? null;
+}
+
+/**
+ * Real error messages were getting swallowed into a generic fallback
+ * (found live, 2026-08-19): wallet-injected providers (UniSat included)
+ * commonly reject with a plain `{ code, message }` object, NOT a real
+ * `Error` instance -- `e instanceof Error` is false for those, so every
+ * catch block here was silently discarding the actual reason (a user
+ * rejection, an unsupported sighash, whatever UniSat actually said) and
+ * showing "Failed to..." with no way to diagnose it without opening
+ * DevTools. This pulls a usable message out of either shape.
+ */
+function errorMessage(e: unknown, fallback: string): string {
+  if (e instanceof Error && e.message) return e.message;
+  if (e && typeof e === "object") {
+    const withMessage = e as { message?: unknown; error?: unknown; code?: unknown };
+    if (typeof withMessage.message === "string" && withMessage.message) return withMessage.message;
+    if (typeof withMessage.error === "string" && withMessage.error) return withMessage.error;
+    if (withMessage.code !== undefined) return `${fallback} (code: ${String(withMessage.code)})`;
+  }
+  if (typeof e === "string" && e) return e;
+  return fallback;
 }
 
 async function fetchAddressUtxos(address: string): Promise<Array<{ txid: string; vout: number; valueSats: number }>> {
@@ -106,7 +128,7 @@ export default function NativeBitcoinListingsPanel() {
       if (!res.ok) throw new Error(body.error ?? "Failed to load listings.");
       setListings(body.listings ?? []);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : "Failed to load listings.");
+      setActionError(errorMessage(e, "Failed to load listings."));
     } finally {
       setListingsLoading(false);
     }
@@ -131,7 +153,7 @@ export default function NativeBitcoinListingsPanel() {
       setAddress(addr);
       setPubkeyHex(pk);
     } catch (e) {
-      setConnectError(e instanceof Error ? e.message : "Failed to connect UniSat.");
+      setConnectError(errorMessage(e, "Failed to connect UniSat."));
     } finally {
       setConnecting(false);
     }
@@ -174,7 +196,14 @@ export default function NativeBitcoinListingsPanel() {
       const psbtHex = Buffer.from(built.psbtBase64, "base64").toString("hex");
       const signedPsbtHex = await provider.signPsbt(psbtHex, {
         autoFinalized: false,
-        toSignInputs: [{ index: built.inputIndexToSign ?? 0 }],
+        // UniSat's real signPsbt requires each toSignInputs entry to carry
+        // its own address (or publicKey) -- found live, 2026-08-19, from the
+        // real extension itself: "no address or public key in toSignInput".
+        // It ALSO refuses a non-default sighash (SIGHASH_SINGLE|ANYONECANPAY,
+        // 0x83 = 131 -- this listing leg's whole reason for existing, see
+        // native-bitcoin-listing.ts) unless explicitly whitelisted per input
+        // -- found live in the same pass: "Sighash type is not allowed."
+        toSignInputs: [{ index: built.inputIndexToSign ?? 0, address, sighashTypes: [131] }],
       });
       const signedPsbtBase64 = Buffer.from(signedPsbtHex, "hex").toString("base64");
 
@@ -193,7 +222,7 @@ export default function NativeBitcoinListingsPanel() {
       setSellPriceSats("");
       await loadListings();
     } catch (e) {
-      setSellError(e instanceof Error ? e.message : "Failed to create the listing.");
+      setSellError(errorMessage(e, "Failed to create the listing."));
     } finally {
       setSelling(false);
     }
@@ -255,7 +284,7 @@ export default function NativeBitcoinListingsPanel() {
         const psbtHex = Buffer.from(fulfilled.psbtBase64, "base64").toString("hex");
         const signedPsbtHex = await provider.signPsbt(psbtHex, {
           autoFinalized: false,
-          toSignInputs: (fulfilled.inputIndexesForBuyerToSign ?? []).map((index) => ({ index })),
+          toSignInputs: (fulfilled.inputIndexesForBuyerToSign ?? []).map((index) => ({ index, address })),
         });
         const signedFulfillmentPsbtBase64 = Buffer.from(signedPsbtHex, "hex").toString("base64");
 
@@ -272,7 +301,7 @@ export default function NativeBitcoinListingsPanel() {
         setLastTxid(broadcastBody.txid);
         await loadListings();
       } catch (e) {
-        setActionError(e instanceof Error ? e.message : "Purchase failed.");
+        setActionError(errorMessage(e, "Purchase failed."));
       } finally {
         setActionBusyId(null);
       }
