@@ -243,6 +243,29 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
 }
 
 /**
+ * One collection's real listed-count and total-supply, for the collection
+ * detail page's stat bar -- a targeted single-row lookup rather than
+ * listCollectionsWithSnapshots()'s full 4000+-row table scan, since the
+ * caller only ever needs one (chainSlug, contractAddress) pair at a time.
+ */
+export async function getCollectionSupplyStats(
+  chainSlug: string,
+  contractAddress: string
+): Promise<{ listedCount: number | null; totalSupply: number | null } | null> {
+  const result = await postgresQuery<{ total_supply: string | null; listed_count: number | null }>(
+    `SELECT s.total_supply, s.listed_count
+     FROM plank_multichain_collections c
+     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+     WHERE c.chain_slug = $1 AND c.contract_address = $2
+     LIMIT 1`,
+    [chainSlug, contractAddress]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return { totalSupply: row.total_supply == null ? null : Number(row.total_supply), listedCount: row.listed_count };
+}
+
+/**
  * Accumulates one scan window's per-contract Transfer tally into
  * plank_multichain_activity_stats (migration 015) -- the self-hosted
  * replacement for a third-party EVM ranking API. Called for EVERY contract

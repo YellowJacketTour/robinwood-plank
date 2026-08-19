@@ -101,6 +101,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const account = isNonEvm ? nonEvmAccount : evmAccount;
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
+  /** Real listed-count/total-supply from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. */
+  const [supplyStats, setSupplyStats] = useState<{ listedCount: number | null; totalSupply: number | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -221,7 +223,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       // this collection is revisited, while still giving instant paint
       // from cache on rapid re-renders/filter changes within this window.
       const data = await swrJson<{
-        collection: { slug: string; name: string; imageUrl: string | null; contractAddress: string };
+        collection: {
+          slug: string;
+          name: string;
+          imageUrl: string | null;
+          contractAddress: string;
+          listedCount: number | null;
+          totalSupply: number | null;
+        };
         listings: Listing[];
       }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=40`, {
         ttlMs: 8_000,
@@ -246,6 +255,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         royaltyBps: 0,
         royaltyRecipient: "0x0000000000000000000000000000000000000000",
       });
+      setSupplyStats({ listedCount: data.collection.listedCount, totalSupply: data.collection.totalSupply });
       setListings(data.listings ?? []);
     } catch {
       setLoadError("Could not load this collection's listings right now.");
@@ -1005,7 +1015,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       </div>
 
       {/* STAT BAR -- real, same shape as the native page's floor/items/listed/best-offer/volume/highest-sale row. */}
-      <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-panel p-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-panel p-3 sm:grid-cols-5">
+        <div>
+          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Listed / supply</p>
+          <p className="truncate text-sm font-bold text-foreground tabular-nums" title={supplyStats?.totalSupply != null ? `${supplyStats.listedCount ?? "—"} of ${supplyStats.totalSupply} tokens listed for sale` : undefined}>
+            {supplyStats?.listedCount != null ? supplyStats.listedCount.toLocaleString() : "—"}
+            {" / "}
+            {supplyStats?.totalSupply != null ? supplyStats.totalSupply.toLocaleString() : "—"}
+          </p>
+        </div>
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Floor</p>
           <p className="truncate text-sm font-bold text-foreground tabular-nums">

@@ -33,6 +33,7 @@ import { fetchForeignAllListings, resolveOpenSeaCollectionSlug } from "@/lib/mar
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { getListings } from "@/lib/market/orders-store";
+import { getCollectionSupplyStats } from "@/lib/market/multichain/store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
 import { publicError, rateLimit } from "@/lib/security";
 import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
@@ -84,6 +85,7 @@ export async function GET(req: NextRequest) {
       }
       const native = await getListings(collectionSlug);
       const listings: Listing[] = native.slice(0, limit).map(({ rawOrder: _rawOrder, ...listing }) => listing);
+      const supply = await getCollectionSupplyStats(chainSlug, collection.contractAddress).catch(() => null);
       return NextResponse.json(
         {
           collection: {
@@ -91,6 +93,8 @@ export async function GET(req: NextRequest) {
             name: collection.name,
             imageUrl: collection.image ?? null,
             contractAddress: collection.contractAddress,
+            listedCount: supply?.listedCount ?? null,
+            totalSupply: supply?.totalSupply ?? null,
           },
           listings,
         },
@@ -163,6 +167,7 @@ export async function GET(req: NextRequest) {
         })
         .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1));
 
+      const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
       return NextResponse.json(
         {
           collection: {
@@ -170,6 +175,8 @@ export async function GET(req: NextRequest) {
             name: raw[0]?.token?.collectionName ?? collectionSlug,
             imageUrl: null,
             contractAddress: collectionSlug,
+            listedCount: supply?.listedCount ?? null,
+            totalSupply: supply?.totalSupply ?? null,
           },
           listings,
         },
@@ -223,9 +230,17 @@ export async function GET(req: NextRequest) {
           // listing identifier for UniSat's real current buy-flow API.
           foreignOrderHash: l.id,
         }));
+      const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
       return NextResponse.json(
         {
-          collection: { slug: collectionSlug, name: collectionSlug, imageUrl: null, contractAddress: collectionSlug },
+          collection: {
+            slug: collectionSlug,
+            name: collectionSlug,
+            imageUrl: null,
+            contractAddress: collectionSlug,
+            listedCount: supply?.listedCount ?? null,
+            totalSupply: supply?.totalSupply ?? null,
+          },
           listings,
         },
         { headers: { "Cache-Control": "no-store" } }
@@ -353,6 +368,7 @@ export async function GET(req: NextRequest) {
       };
     });
 
+    const supply = await getCollectionSupplyStats(chainSlug, contractAddress.toLowerCase()).catch(() => null);
     return NextResponse.json(
       {
         collection: {
@@ -360,6 +376,8 @@ export async function GET(req: NextRequest) {
           name: collectionMeta?.name ?? collectionSlug,
           imageUrl: collectionMeta?.image_url ?? null,
           contractAddress,
+          listedCount: supply?.listedCount ?? null,
+          totalSupply: supply?.totalSupply ?? null,
         },
         listings,
       },
