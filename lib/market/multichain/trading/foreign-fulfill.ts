@@ -128,9 +128,104 @@ async function fetchFloorListingSummaries(input: {
   return listings;
 }
 
-/** Requires the FRESH order's own zoneHash, not stray/padded copies -- fetchListingFulfillmentData already normalizes this once, so no caller needs to. */
+/**
+ * Requires the FRESH order's own zoneHash, not stray/padded copies --
+ * fetchListingFulfillmentData already normalizes this once, so no caller
+ * needs to.
+ *
+ * REJECTS ESCALATING (DUTCH/ASCENDING-AUCTION) AMOUNTS -- audit finding
+ * H1, 2026-08-19. This used to sum `startAmount` blindly. For an ASCENDING
+ * order (endAmount > startAmount) Seaport charges the current interpolated
+ * amount, which exceeds the startAmount-based figure this function
+ * computed -- so the app's own price math (and the tip derived from it)
+ * understated what the buyer would actually be debited. That is precisely
+ * why order-validation.ts's `fixedAmount` refuses such items for native
+ * orders ("a fixed price on screen would be a lie if the order
+ * escalated"); the third-party path now enforces the same rule instead of
+ * being the one place it was missing.
+ */
 function considerationTotal(order: ForeignSeaportOrder): bigint {
-  return order.parameters.consideration.reduce((sum, item) => sum + BigInt(item.startAmount), BigInt(0));
+  return order.parameters.consideration.reduce((sum, item) => {
+    if (BigInt(item.startAmount) !== BigInt(item.endAmount)) {
+      throw new Error(
+        "This listing uses an escalating (auction) price, which Marketplank does not fulfill -- the price shown could not be guaranteed at fill time."
+      );
+    }
+    return sum + BigInt(item.startAmount);
+  }, BigInt(0));
+}
+
+/** Shared ceiling for BOTH sweep paths (audit finding M1 -- the single-collection sweep previously had none). */
+const MAX_SWEEP_ITEMS = 50;
+
+/**
+ * THE MISSING SECURITY BOUNDARY -- audit finding C1, 2026-08-19.
+ *
+ * Every other buy path in this app re-derives what it is about to fulfill
+ * from the SIGNED order and refuses to proceed if that disagrees with what
+ * the user was shown: the Robinhood-chain branch below calls
+ * validateListingOrder (order-validation.ts -- "the single most important
+ * security boundary in Marketplank"), and the native foreign path goes
+ * through the same validators server-side. The third-party (OpenSea) EVM
+ * path had NO such check: it took whatever order the remote fulfillment-data
+ * endpoint returned and handed it straight to Seaport.
+ *
+ * That was survivable only while the whole path was dead (it threw on an
+ * undeployed router). Making it actually work -- which the router removal
+ * did -- made an unvalidated path LIVE, so the guard has to exist now.
+ *
+ * Deliberately NOT a full re-implementation of validateListingOrder: this
+ * is a third-party order we did not create, so its fee/royalty structure is
+ * legitimately none of our business. What MUST hold is only that the user
+ * gets the asset they clicked at the price they were shown:
+ *   1. the order really offers an ERC-721/1155 from the expected contract
+ *      (and the expected token id when the caller knows it), and
+ *   2. the total the fulfiller pays matches the displayed price.
+ * Fails closed on anything else.
+ */
+function assertForeignOrderMatchesExpectation(
+  order: ForeignSeaportOrder,
+  expected: { contractAddress?: string; tokenId?: string; priceWei?: string }
+): void {
+  const ERC721 = 2;
+  const ERC1155 = 3;
+  const offeredNfts = order.parameters.offer.filter(
+    (item) => Number(item.itemType) === ERC721 || Number(item.itemType) === ERC1155
+  );
+  if (offeredNfts.length === 0) {
+    throw new Error("This listing does not actually offer an NFT -- refusing to fulfill it.");
+  }
+
+  if (expected.contractAddress) {
+    const wanted = expected.contractAddress.toLowerCase();
+    if (!offeredNfts.some((item) => item.token.toLowerCase() === wanted)) {
+      throw new Error(
+        "This listing is for a different collection than the one shown. Refusing to fulfill it -- reload and try again."
+      );
+    }
+  }
+  if (expected.tokenId) {
+    if (!offeredNfts.some((item) => BigInt(item.identifierOrCriteria).toString() === expected.tokenId)) {
+      throw new Error(
+        "This listing is for a different token than the one shown. Refusing to fulfill it -- reload and try again."
+      );
+    }
+  }
+
+  if (expected.priceWei) {
+    // considerationTotal already rejects escalating amounts (H1), so this
+    // compares two genuinely fixed numbers. A small tolerance absorbs the
+    // legitimate rounding OpenSea's own summary-vs-fulfillment figures can
+    // differ by; anything beyond that is a real mismatch, not rounding.
+    const actual = considerationTotal(order);
+    const shown = BigInt(expected.priceWei);
+    const tolerance = shown / BigInt(100) + BigInt(1); // 1% + 1 wei, same tolerance the fee checks use
+    if (actual > shown + tolerance) {
+      throw new Error(
+        `This listing now costs more than the price shown (${actual.toString()} wei vs ${shown.toString()} wei). Refusing to fulfill it -- reload for the current price.`
+      );
+    }
+  }
 }
 
 /**
@@ -147,12 +242,19 @@ async function connectedForeignAccount(chainSlug: string): Promise<{ chainId: nu
   const injected = getEthereumProvider();
   if (!injected) throw new Error("No wallet found.");
 
+  // Real RPC + explorer from the registry, not a hand-built
+  // `${chainSlug}.g.alchemy.com/v2/demo` string (audit finding M4): that
+  // URL is both a wrong subdomain for several slugs AND the shared "demo"
+  // key, so if the wallet did not already know this chain, ensureChain
+  // could persist a broken network entry -- mid-purchase, which is the
+  // worst possible moment to hand someone an unreliable RPC.
+  const { chainDisplayName, foreignRpcUrls } = await import("@/lib/market/multichain/trading/foreign-chain-registry");
   await ensureChain({
     chainId: chain.chainId,
-    name: chainSlug,
+    name: chainDisplayName(chainSlug),
     nativeCurrencySymbol: chain.nativeCurrencySymbol,
-    rpcUrl: `https://${chainSlug}.g.alchemy.com/v2/demo`,
-    blockExplorerUrl: "",
+    rpcUrl: foreignRpcUrls(chainSlug)[0],
+    blockExplorerUrl: chain.blockExplorerUrl,
   });
 
   const browserProvider = new BrowserProvider(injected, { chainId: chain.chainId, name: chainSlug });
@@ -185,8 +287,34 @@ async function seaportChainFor(chainSlug: string): Promise<SeaportChain> {
  * why it needed no contract deployment, and what it fixes" reasoning.
  * Zero price -> zero tip (never a negative/NaN amount).
  */
-function foreignFillTip(priceWei: bigint): TipInputItem[] {
+function foreignFillTip(priceWei: bigint, order?: ForeignSeaportOrder): TipInputItem[] {
   if (priceWei <= BigInt(0)) return [];
+
+  // NEVER LET FEE CAPTURE BREAK A USER'S PURCHASE -- verified against the
+  // real Seaport source (seaport-core), 2026-08-19:
+  //
+  //  * CONTRACT orders (type 4) enforce STRICT EQUALITY between
+  //    consideration.length and totalOriginalConsiderationItems
+  //    (OrderValidator._getGeneratedOrder), so ANY tip reverts the fill
+  //    outright.
+  //  * RESTRICTED orders (types 2/3) hand the zone the full consideration
+  //    array WITH tips appended (ConsiderationEncoder._encodeValidateOrder),
+  //    and the zone may reject the extension at its own discretion --
+  //    OpenSea's own docs recommend exactly that as the defence against
+  //    unwanted consideration extensions, so a tip there is a coin flip
+  //    that costs the buyer their purchase when it loses.
+  //
+  // Empirically, every real OpenSea listing sampled across Ethereum, Base
+  // and Polygon on 2026-08-19 was orderType 0 (FULL_OPEN) with a zero
+  // zone, so the revenue actually forgone here is expected to be ~nil --
+  // but a royalty-enforced collection behind OpenSea's SignedZone is a
+  // real, documented case, and losing our 1.8% on it is strictly better
+  // than a buyer's "Buy" button reverting.
+  const ORDER_TYPE_FULL_OPEN = 0;
+  const ORDER_TYPE_PARTIAL_OPEN = 1;
+  const orderType = order ? Number(order.parameters.orderType) : ORDER_TYPE_FULL_OPEN;
+  if (orderType !== ORDER_TYPE_FULL_OPEN && orderType !== ORDER_TYPE_PARTIAL_OPEN) return [];
+
   const tipWei = (priceWei * BigInt(MARKETPLANK_FOREIGN_FILL_TIP_BPS)) / BigInt(10_000);
   if (tipWei <= BigInt(0)) return [];
   return [{ token: NATIVE_TOKEN_ADDRESS, amount: tipWei.toString(), recipient: MARKET_FEE_RECIPIENT }];
@@ -651,8 +779,12 @@ export async function buyForeignListingNow(input: {
   orderHash: string;
   /** Required for the Robinhood-Chain branch only (see buyRobinhoodListingNow) -- foreign chains resolve collection identity from the order/OpenSea response itself. */
   collectionSlug?: string;
-  /** Required for the Solana/Bitcoin branches only (see below) -- lamports/sats price, since neither venue can re-derive price from just the identifier the way a fresh Seaport re-sign does for the EVM path. */
+  /** Required for the Solana/Bitcoin branches; ALSO used by the EVM branch to assert the freshly-fetched order doesn't cost more than the price the user was shown (see assertForeignOrderMatchesExpectation). */
   priceWei?: string;
+  /** The collection contract the user believes they're buying from -- asserted against the signed order on the EVM path. Omit only if genuinely unknown. */
+  expectedContractAddress?: string;
+  /** The token id the user believes they're buying -- asserted against the signed order on the EVM path. */
+  expectedTokenId?: string;
 }): Promise<ForeignBuyResult> {
   if (input.chainSlug === "robinhood") {
     if (!input.collectionSlug) throw new Error("buyForeignListingNow: collectionSlug is required for Robinhood Chain purchases.");
@@ -709,6 +841,15 @@ export async function buyForeignListingNow(input: {
     throw new Error("This listing has no fulfillable signature right now (it may rely on on-chain validation that hasn't happened, or has since sold). Try again in a moment.");
   }
 
+  // THE GUARD (audit finding C1). Never fulfill a third-party order without
+  // first checking it is the asset, and the price, the user was actually
+  // shown -- see assertForeignOrderMatchesExpectation's own header.
+  assertForeignOrderMatchesExpectation(order, {
+    contractAddress: input.expectedContractAddress,
+    tokenId: input.expectedTokenId,
+    priceWei: input.priceWei,
+  });
+
   const price = considerationTotal(order);
   const { fulfillOrder } = await import("@/lib/market/seaport");
   const chain = await seaportChainFor(input.chainSlug);
@@ -717,7 +858,7 @@ export async function buyForeignListingNow(input: {
     buyerAddress,
     undefined,
     chain,
-    foreignFillTip(price)
+    foreignFillTip(price, order)
   );
   const txHash = result.txHashes[result.txHashes.length - 1];
   if (!txHash) throw new Error("Purchase did not produce a transaction hash.");
@@ -739,10 +880,19 @@ export async function sweepForeignListings(input: {
   count: number;
   /** AND-combined, same semantics as fetchForeignTraitFilteredListings -- "sweep the N cheapest listings matching every clause." */
   traits?: ForeignTraitClause[];
+  /** Hard ceiling on total native spend (price + tips) for the whole batch -- see the cap check below. */
+  maxTotalSpendWei?: string;
 }): Promise<ForeignSweepResult> {
   // Same real fix as buyForeignListingNow: router.sweepBuy always threw
   // (undeployed router). Now batch-fulfills directly against Seaport,
   // each order carrying its own tip -- see fulfillOrdersBatch.
+  //
+  // Item cap (audit finding M1): only the multi-collection sweep enforced
+  // one, so this path could batch an unbounded number of fills behind a
+  // single wallet confirmation.
+  if (input.count > MAX_SWEEP_ITEMS) {
+    throw new Error(`A single sweep is capped at ${MAX_SWEEP_ITEMS} items.`);
+  }
   const { buyerAddress } = await connectedForeignAccount(input.chainSlug);
 
   const summaries = await fetchFloorListingSummaries({
@@ -776,7 +926,7 @@ export async function sweepForeignListings(input: {
   const result = await fulfillOrdersBatch(
     freshOrders.map((o) => ({
       order: o as unknown as Parameters<typeof fulfillOrdersBatch>[0][number]["order"],
-      tips: foreignFillTip(considerationTotal(o)),
+      tips: foreignFillTip(considerationTotal(o), o),
     })),
     buyerAddress,
     chain
@@ -820,7 +970,6 @@ export async function sweepForeignListingsMultiCollection(input: {
   if (input.specs.length === 0) throw new Error("sweepForeignListingsMultiCollection: at least one collection is required.");
   // A real, still-relevant client-side ceiling -- keeps a single sweep
   // request bounded regardless of fulfillment mechanism.
-  const MAX_SWEEP_ITEMS = 50;
   const requestedTotal = input.specs.reduce((sum, s) => sum + s.count, 0);
   if (requestedTotal > MAX_SWEEP_ITEMS) {
     throw new Error(`Requested ${requestedTotal} items across ${input.specs.length} collections, but a single sweep is capped at ${MAX_SWEEP_ITEMS} items total.`);
@@ -874,7 +1023,7 @@ export async function sweepForeignListingsMultiCollection(input: {
   const result = await fulfillOrdersBatch(
     freshOrders.map((o) => ({
       order: o as unknown as Parameters<typeof fulfillOrdersBatch>[0][number]["order"],
-      tips: foreignFillTip(considerationTotal(o)),
+      tips: foreignFillTip(considerationTotal(o), o),
     })),
     buyerAddress,
     chain

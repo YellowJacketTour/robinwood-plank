@@ -600,6 +600,55 @@ test("a valid swap with an ETH top-up (percentage fee) derives correctly", () =>
   assert.equal(derived.considerationNativeWei, topUp);
 });
 
+/**
+ * Audit finding M1 (2026-08-19): considerationNativeWei is what the MAKER
+ * receives; a fulfiller-facing surface that rendered it as "you pay" would
+ * understate the real cost by exactly the fee. fulfillerTotalNativeWei is
+ * the number any such surface must use.
+ */
+test("fulfillerTotalNativeWei is fee-INCLUSIVE, unlike considerationNativeWei", () => {
+  const topUp = "10000000000000000"; // 0.01 ETH to the maker
+  const fee = "180000000000000"; // 1.8% to the treasury
+  const derived = validateSwapOrder(
+    swapOrder({
+      consideration: [
+        { itemType: 2, token: CONTRACT_B, identifierOrCriteria: "2", startAmount: "1", endAmount: "1", recipient: SELLER },
+        { itemType: 0, token: NATIVE, identifierOrCriteria: "0", startAmount: topUp, endAmount: topUp, recipient: SELLER },
+        { itemType: 0, token: NATIVE, identifierOrCriteria: "0", startAmount: fee, endAmount: fee, recipient: FEE_RECIPIENT_SWAP },
+      ],
+    })
+  );
+  assert.equal(derived.considerationNativeWei, topUp, "maker's take excludes the fee");
+  assert.equal(
+    derived.fulfillerTotalNativeWei,
+    (BigInt(topUp) + BigInt(fee)).toString(),
+    "fulfiller's real payable includes the fee"
+  );
+});
+
+test("a pure-barter swap's fulfiller total is exactly the flat fee", () => {
+  const derived = validateSwapOrder(swapOrder());
+  assert.equal(derived.considerationNativeWei, "0");
+  assert.equal(derived.fulfillerTotalNativeWei, "500000000000000"); // MARKETPLANK_SWAP_FLAT_FEE_WEI
+});
+
+test("rejects a swap offer item with a malformed token address", () => {
+  const bad = swapOrder({
+    offer: [{ itemType: 2, token: "0xnot-an-address", identifierOrCriteria: "1", startAmount: "1", endAmount: "1" }],
+  });
+  assert.throws(() => validateSwapOrder(bad), OrderValidationError);
+});
+
+test("rejects a native consideration item that names a non-native token", () => {
+  const bad = swapOrder({
+    consideration: [
+      { itemType: 2, token: CONTRACT_B, identifierOrCriteria: "2", startAmount: "1", endAmount: "1", recipient: SELLER },
+      { itemType: 0, token: WETH, identifierOrCriteria: "0", startAmount: "500000000000000", endAmount: "500000000000000", recipient: FEE_RECIPIENT_SWAP },
+    ],
+  });
+  assert.throws(() => validateSwapOrder(bad), OrderValidationError);
+});
+
 test("rejects an offer item that is native ETH -- Seaport itself cannot pull ETH from an offerer", () => {
   const withEthOffer = swapOrder({
     offer: [

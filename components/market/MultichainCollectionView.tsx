@@ -724,10 +724,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         chainSlug: buyTarget.foreignChainSlug!,
         orderHash: buyTarget.foreignOrderHash!,
         collectionSlug,
-        // Only consumed by the Solana/Bitcoin branches (see
-        // foreign-fulfill.ts's own comment on why) -- harmless to always
-        // pass, the EVM/Robinhood branches never read it.
+        // Consumed by the Solana/Bitcoin branches as the price to submit,
+        // AND by the EVM branch as the price the freshly-fetched signed
+        // order is asserted against (audit finding C1 -- a third-party
+        // order must never be fulfilled without checking it matches what
+        // the user was shown).
         priceWei: buyTarget.priceWei,
+        expectedContractAddress: collection?.contractAddress,
+        expectedTokenId: buyTarget.tokenId,
       });
       setBuyTarget(null);
       setStatus("Purchase confirmed.");

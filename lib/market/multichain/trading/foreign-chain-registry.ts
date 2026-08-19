@@ -297,13 +297,32 @@ export const FOREIGN_CONDUIT_CONTROLLER_ADDRESS = "0x00000000F9490004C11Cef243f5
  * scripts/verify-foreign-fee-router-fork.ts for the live-fork proof this
  * was verified against instead).
  *
- * A chain with a null address here MUST NOT be offered a Buy/Sweep
- * affordance -- see isCrossChainBuyable() in lib/market/types.ts and
- * foreign-fulfill.ts's own guard, which both fail closed (View-only,
- * exactly the pre-existing behavior) rather than attempt a call against an
- * address that doesn't exist. Fill in a real address here ONLY after a
- * real deployment + verification on that specific chain -- never guess or
- * pre-populate one.
+ * NO LONGER USED BY BUY/SWEEP AS OF 2026-08-19 -- AND THE OLD SAFETY CLAIM
+ * HERE WAS FACTUALLY WRONG
+ * -------------------------------------------------------------------------
+ * This block used to assert that "a chain with a null address here MUST NOT
+ * be offered a Buy/Sweep affordance -- see isCrossChainBuyable() ... which
+ * fail[s] closed (View-only)". That was NOT true: isCrossChainBuyable()
+ * (lib/market/types.ts) only ever checked venue + foreignChainSlug +
+ * foreignOrderHash and never consulted this map at all. The real
+ * consequence, confirmed by reading the call sites (ListingCard.tsx,
+ * BuyConfirm.tsx, MultichainCollectionView.tsx): users WERE shown a Buy
+ * button on third-party foreign-chain listings, and clicking it always hit
+ * requireRouter()'s hard "not yet deployed" throw. A genuinely broken,
+ * user-facing feature, papered over by a comment claiming a guard that did
+ * not exist.
+ *
+ * Fixed by removing the router from that path entirely: buy/sweep now
+ * fulfill directly against Seaport's own canonical deployment (present on
+ * every chain) with a fulfiller-side tip for the marketplace fee -- see
+ * foreign-fulfill.ts's header and MARKETPLANK_FOREIGN_FILL_TIP_BPS in
+ * lib/constants.ts. Nothing reads this map anymore.
+ *
+ * Kept (rather than deleted) because the contract source still exists and a
+ * future deployment could still want it -- e.g. to capture a fee
+ * cryptographically on-chain rather than via a client-supplied tip. If that
+ * ever happens, fill in a real address ONLY after a real deployment +
+ * verification on that specific chain; never guess or pre-populate one.
  */
 export const FOREIGN_FEE_ROUTER_ADDRESS: Record<string, string | null> = {
   "eth-mainnet": null,
@@ -330,8 +349,10 @@ export function foreignFeeRouterAddress(chainSlug: string): string | null {
  * "avax-mainnet" is DELIBERATELY ABSENT, not an oversight: confirmed live
  * 2026-08-17 that Across Protocol has no Avalanche deployment at all (see
  * across-quote.ts's header). Avalanche keeps full direct buy-now/sweep
- * support via MarketplankForeignFeeRouter (FOREIGN_FEE_ROUTER_ADDRESS
- * above, unaffected) -- only the pay-from-any-chain Across path can never
+ * support -- that path fulfills straight against Seaport now (see
+ * FOREIGN_FEE_ROUTER_ADDRESS's own header on why the router is no longer
+ * involved) and needs no deployment on any chain, so it is unaffected by
+ * Across's absence. Only the pay-from-any-chain Across path can never
  * exist there until Across itself deploys one. "bnb-mainnet" IS present:
  * Across's BNB Chain deployment (a Universal_SpokePool) was verified live
  * the same way as every other chain here.

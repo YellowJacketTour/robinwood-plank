@@ -728,7 +728,20 @@ export type DerivedSwapOrder = {
   maker: string;
   offerItems: { contractAddress: string; tokenId: string }[];
   considerationItems: { contractAddress: string; tokenId: string }[];
+  /** ETH top-up that reaches the MAKER. Display this as "what the maker receives" -- NOT as what a fulfiller pays (see fulfillerTotalNativeWei). */
   considerationNativeWei: string;
+  /**
+   * The REAL total native ETH a fulfiller must send: the maker's top-up
+   * PLUS the marketplace fee leg. Added after an audit finding (2026-08-19):
+   * validateListingOrder's own `priceWei` is the GROSS taker-paid total
+   * (fee included), so a swap-fulfill UI that rendered
+   * considerationNativeWei as "you pay" would understate the real cost by
+   * exactly the fee -- the same shown-vs-executed divergence class this
+   * whole module exists to prevent, even though bounded here to a
+   * deterministic ~1.8%. Any fulfiller-facing surface MUST use this field,
+   * never considerationNativeWei.
+   */
+  fulfillerTotalNativeWei: string;
   expiresAt: string;
 };
 
@@ -747,6 +760,12 @@ export function validateSwapOrder(rawOrder: unknown, maxItemsPerSide = 10): Deri
     if (itemType !== ITEM_ERC721) {
       fail(`Swap offer item ${i} must be an ERC-721 token.`);
     }
+    // Address-shape check (audit 2026-08-19, L2): sibling validators get
+    // this for free by matching token against collection.contractAddress;
+    // a swap has no single collection to match against, so assert shape
+    // explicitly rather than storing/displaying a malformed address that
+    // only reveals itself as a revert at fill time.
+    if (!isAddressLike(item.token)) fail(`Swap offer item ${i} has an invalid token address.`);
     if (fixedAmount(item, `offer[${i}]`) !== BigInt(1)) {
       fail(`Swap offer item ${i} must offer exactly one token.`);
     }
@@ -772,6 +791,13 @@ export function validateSwapOrder(rawOrder: unknown, maxItemsPerSide = 10): Deri
     const itemType = toItemType(item.itemType);
     if (!isAddressLike(item.recipient)) fail(`Swap consideration item ${i} has no valid recipient.`);
     if (itemType === ITEM_NATIVE) {
+      // Belt-and-suspenders parity with validateListingOrder (audit
+      // 2026-08-19, L3): Seaport transfers a native item by itemType and
+      // ignores its token field, but the baseline validator asserts this
+      // anyway and divergence between the two is exactly how drift starts.
+      if (!sameAddress(item.token, NATIVE_TOKEN_ADDRESS)) {
+        fail(`Swap consideration item ${i} claims native ETH but names another token.`);
+      }
       const amount = fixedAmount(item, `consideration[${i}]`);
       if (sameAddress(item.recipient, MARKET_FEE_RECIPIENT)) {
         feePaid += amount;
@@ -785,6 +811,7 @@ export function validateSwapOrder(rawOrder: unknown, maxItemsPerSide = 10): Deri
     if (itemType !== ITEM_ERC721) {
       fail(`Swap consideration item ${i} must be an ERC-721 token or native ETH.`);
     }
+    if (!isAddressLike(item.token)) fail(`Swap consideration item ${i} has an invalid token address.`);
     if (fixedAmount(item, `consideration[${i}]`) !== BigInt(1)) {
       fail(`Swap consideration item ${i} must ask for exactly one token.`);
     }
@@ -821,6 +848,7 @@ export function validateSwapOrder(rawOrder: unknown, maxItemsPerSide = 10): Deri
     offerItems,
     considerationItems,
     considerationNativeWei: considerationNativeToMaker.toString(),
+    fulfillerTotalNativeWei: (considerationNativeToMaker + feePaid).toString(),
     expiresAt: endTimeToIso(p),
   };
 }
