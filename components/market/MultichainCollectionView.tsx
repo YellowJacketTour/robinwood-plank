@@ -48,7 +48,7 @@ type ForeignOffer = {
   imageUrl: string | null;
   name: string | null;
 };
-type MyListing = { orderHash: string; tokenId: string; priceWei: string; expiresAt: string };
+type MyListing = { orderHash: string; tokenId: string; priceWei: string; expiresAt: string; native?: boolean };
 
 type Props = {
   chainSlug: string;
@@ -193,6 +193,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // session's plan doc -- Phase 1 is EVM only).
   const isForeignEvm = !isNonEvm && !isRobinhoodChainSlug(chainSlug);
   const tabs = isForeignEvm ? [...MARKET_TABS, { id: "sell" as const, label: "Sell" }] : MARKET_TABS;
+  /** One-click relist target, set by the "Relist" button in My Listings -- consumed once by NativeForeignListForm then cleared. */
+  const [relistPreset, setRelistPreset] = useState<{ tokenId: string; priceWei: string } | null>(null);
 
   // RARITY -- reuses the SAME information-content algorithm/tier system as
   // RobinWood's own collection (lib/rarity.ts + lib/rarity-generic.ts),
@@ -1560,6 +1562,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               onListed={() => void loadOwned()}
               onConnect={() => void requireAccount()}
               floorWei={floorWei}
+              relistPreset={relistPreset}
+              onRelistConsumed={() => setRelistPreset(null)}
             />
           )}
         </MarketTabPanel>
@@ -1585,9 +1589,32 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 {myListings.map((l) => (
                   <li key={l.orderHash} className="flex items-center justify-between gap-2 text-xs">
                     <span className="shrink-0 font-bold text-foreground">#{l.tokenId}</span>
-                    <span className="whitespace-nowrap text-foreground/60 tabular-nums">
-                      {formatTokenAmount(l.priceWei, 18, 4)} {statCurrencySymbol}
-                      {statUsd(l.priceWei) != null && <span className="ml-1 text-[0.65rem] text-foreground/40">{formatUsdCompact(statUsd(l.priceWei)!)}</span>}
+                    <span className="flex items-center gap-2">
+                      <span className="whitespace-nowrap text-foreground/60 tabular-nums">
+                        {formatTokenAmount(l.priceWei, 18, 4)} {statCurrencySymbol}
+                        {statUsd(l.priceWei) != null && <span className="ml-1 text-[0.65rem] text-foreground/40">{formatUsdCompact(statUsd(l.priceWei)!)}</span>}
+                      </span>
+                      {/* Relist: only for Marketplank-native listings on a
+                          foreign EVM chain -- a foreign-venue (OpenSea) row
+                          isn't ours to relist, same reasoning
+                          isMarketplankRelistRequired's own doc comment
+                          gives for the native Robinhood-chain path. Jumps to
+                          the Sell tab with this item + its current price
+                          pre-filled so the seller can adjust and re-sign in
+                          one click, rather than re-entering everything by
+                          hand. */}
+                      {l.native && isForeignEvm && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRelistPreset({ tokenId: l.tokenId, priceWei: l.priceWei });
+                            setTab("sell");
+                          }}
+                          className="min-h-7 shrink-0 rounded-md border border-line-strong px-2 text-[0.6rem] font-bold text-gold-300 transition hover:border-gold-400"
+                        >
+                          Relist
+                        </button>
+                      )}
                     </span>
                   </li>
                 ))}

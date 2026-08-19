@@ -87,9 +87,32 @@ export async function GET(req: NextRequest) {
           tokenId: item?.identifierOrCriteria ?? "",
           priceWei,
           expiresAt: new Date(Number(o.parameters.endTime) * 1000).toISOString(),
+          native: false,
         };
       });
-    return NextResponse.json({ listings: mine }, { headers: { "Cache-Control": "no-store" } });
+
+    // MARKETPLANK-NATIVE listings on this foreign chain -- a real gap this
+    // route previously had no coverage for at all (it only ever queried
+    // OpenSea's own orderbook, so a seller's own native listing was
+    // invisible in their own "My Listings" tab). Keyed by the SAME
+    // synthetic `${chainSlug}:${contractAddress}` slug
+    // app/api/market/multichain/native-orders/route.ts writes under --
+    // `collectionSlug` here IS the raw contract address for a foreign EVM
+    // chain (every card links here with the contract address, not an
+    // OpenSea slug -- see the comment above).
+    const nativeCollectionSlug = `${chainSlug}:${collectionSlug.toLowerCase()}`;
+    const nativeListings = await getListings(nativeCollectionSlug, chainSlug);
+    const mineNative = nativeListings
+      .filter((l) => l.maker.toLowerCase() === maker)
+      .map((l) => ({
+        orderHash: l.id,
+        tokenId: l.tokenId,
+        priceWei: l.priceWei,
+        expiresAt: l.expiresAt,
+        native: true,
+      }));
+
+    return NextResponse.json({ listings: [...mineNative, ...mine] }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return publicError(error, "Failed to load your multichain listings");
   }

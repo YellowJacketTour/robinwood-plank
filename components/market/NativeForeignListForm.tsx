@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, X } from "lucide-react";
 import { parseTokenAmount, formatTokenAmount } from "@/lib/trade";
 import { MARKETPLANK_NATIVE_LISTING_FEE_BPS } from "@/lib/constants";
@@ -38,6 +38,10 @@ type Props = {
    * Null when there are no active listings to derive a floor from yet.
    */
   floorWei: string | null;
+  /** Set by My Listings' "Relist" button -- pre-selects this item and its
+   * current price, one time, then the parent clears it via onRelistConsumed. */
+  relistPreset: { tokenId: string; priceWei: string } | null;
+  onRelistConsumed: () => void;
 };
 
 /** Real presets real bulk listers actually use (per this session's research pass: "list at floor ±X%" is the standard pricing pattern on every real competitor). */
@@ -92,6 +96,8 @@ export default function NativeForeignListForm({
   onListed,
   onConnect,
   floorWei,
+  relistPreset,
+  onRelistConsumed,
 }: Props) {
   const [selected, setSelected] = useState<Map<string, SelectedItem>>(new Map());
   const [mode, setMode] = useState<PricingMode>("same");
@@ -102,6 +108,18 @@ export default function NativeForeignListForm({
   const [reviewOpen, setReviewOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<BulkItemStatus[] | null>(null);
+
+  // One-click relist: pre-select the item + pre-fill its current price,
+  // once, the moment a preset arrives -- then tell the parent to clear it
+  // so switching away and back to this tab doesn't keep re-applying it.
+  useEffect(() => {
+    if (!relistPreset) return;
+    setSelected(new Map([[`${collection.slug}:${relistPreset.tokenId}`, { collection, tokenId: relistPreset.tokenId }]]));
+    setMode("same");
+    setSamePrice(formatTokenAmount(relistPreset.priceWei, 18, 6));
+    onRelistConsumed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- collection/onRelistConsumed are stable for the lifetime this effect cares about; only relistPreset should re-trigger it.
+  }, [relistPreset]);
 
   const feePct = MARKETPLANK_NATIVE_LISTING_FEE_BPS / 100;
   const selectedItems = useMemo(() => Array.from(selected.values()), [selected]);
