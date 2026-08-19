@@ -79,6 +79,7 @@ const explicit = [
   "--discover-hypersync",
   "--discover-hypersync-backfill",
   "--discover-bitcoin-collections",
+  "--discover-solana-collections",
   "--discover-robinhood",
   "--discover-robinhood-opensea",
   "--discover-opensea-bulk",
@@ -101,8 +102,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -488,6 +489,21 @@ async function main(): Promise<void> {
     return r.error
       ? `ERR(${r.error.slice(0, 60)})`
       : `start ${r.start}/${r.total}, ${r.pagesWalked} pages, +${r.registered} new (${r.skippedHiddenOrEmpty} hidden/empty)${r.done ? " — DONE, full catalog walked" : ""}`;
+  });
+
+  // Exhaustive Solana collection discovery via Helius DAS -- see
+  // helius-collection-scan.ts's own header for the real, live-verified
+  // scope: covers Metaplex's newer Core standard exhaustively, NOT legacy
+  // (V1_NFT) collections, which stay on magiceden-solana.ts's ranked list
+  // (no clean collection-identity signal exists for those in a broad
+  // search, same class of problem already declined for Bitcoin's raw
+  // inscription walk rather than force a fragile heuristic).
+  await step("discover-solana-collections", async () => {
+    const { runHeliusCollectionScan } = await import("../lib/market/multichain/discovery/helius-collection-scan");
+    const r = await runHeliusCollectionScan({ maxPages: full ? 20 : 5 });
+    return r.error
+      ? `ERR(${r.error.slice(0, 60)})`
+      : `${r.pagesWalked} pages, +${r.registered} new${r.done ? " — DONE, full MplCore catalog walked" : ""}`;
   });
 
   // "Stage B" for the HOME chain itself -- see robinhood-chain-scan.ts's

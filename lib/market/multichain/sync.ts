@@ -9,6 +9,7 @@ import { magicEdenSolanaAdapter } from "@/lib/market/multichain/adapters/magiced
 import { defillamaNftAdapter } from "@/lib/market/multichain/adapters/defillama-nft";
 import { unisatCollectionsAdapter } from "@/lib/market/multichain/adapters/unisat-collections";
 import { robinhoodNativeAdapter } from "@/lib/market/multichain/adapters/robinhood-native";
+import { heliusSolanaAdapter } from "@/lib/market/multichain/adapters/helius-solana";
 import {
   hasMultichainStore,
   listTrackedCollections,
@@ -23,6 +24,7 @@ const ADAPTERS: Record<string, ChainAdapter> = {
   [defillamaNftAdapter.name]: defillamaNftAdapter,
   [unisatCollectionsAdapter.name]: unisatCollectionsAdapter,
   [robinhoodNativeAdapter.name]: robinhoodNativeAdapter,
+  [heliusSolanaAdapter.name]: heliusSolanaAdapter,
 };
 
 /**
