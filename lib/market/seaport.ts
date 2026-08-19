@@ -6,6 +6,8 @@ import {
   CHAIN,
   MARKET_FEE_RECIPIENT,
   MARKET_OFFER_CURRENCY,
+  MARKETPLANK_SWAP_FEE_BPS,
+  MARKETPLANK_SWAP_FLAT_FEE_WEI,
   NATIVE_TOKEN_ADDRESS,
   SEAPORT_ADDRESS,
 } from "@/lib/constants";
@@ -317,10 +319,10 @@ async function executeActionsViaWallet(
   actions: SeaportAction[],
   accountAddress: string,
   chain?: SeaportChain,
-  /** The ONE collection contract this whole action sequence is for -- required when chain is given, see sendForeignTransaction/assertSafeForeignMarketDestination. */
-  contractAddress?: string
+  /** The collection contract(s) this whole action sequence is for -- required when chain is given, see sendForeignTransaction/assertSafeForeignMarketDestination (a swap passes an array spanning multiple contracts; every other order type passes one). */
+  contractAddress?: string | string[]
 ): Promise<{ order: unknown | null; txHashes: string[] }> {
-  if (chain && !contractAddress) {
+  if (chain && (!contractAddress || (Array.isArray(contractAddress) && contractAddress.length === 0))) {
     throw new Error("executeActionsViaWallet: contractAddress is required for a foreign-chain action sequence.");
   }
   const txHashes: string[] = [];
@@ -489,6 +491,83 @@ export async function buildBundleListing(accountAddress: string, input: BundleLi
     input.contractAddress
   );
   if (!order) throw new Error("Bundle listing was not signed.");
+  return order;
+}
+
+export type SwapItemInput = { contractAddress: string; tokenId: string };
+
+export type SwapOrderInput = {
+  /** What the maker is giving away -- 1+ specific owned NFTs, any contract(s). NFTs only -- see validateSwapOrder's own header on why a maker can never top up with native ETH (Seaport itself has no allowance mechanism for ETH; only a WETH/ERC-20 top-up on THIS side would be possible, and that's out of scope for v1). */
+  offerItems: SwapItemInput[];
+  /** What the maker wants back -- 1+ specific NFTs, any contract(s). */
+  considerationItems: SwapItemInput[];
+  /** Optional native-ETH top-up the maker wants back, on top of considerationItems -- paid by whoever fulfills, which is the only direction native ETH can actually move in a Seaport order. Default "0". */
+  considerationNativeWei?: string;
+  expiresAt: string;
+};
+
+/**
+ * Builds and signs a SWAP/OTC order -- see validateSwapOrder's own header
+ * for the full shape/fee-model reasoning this mirrors exactly (this
+ * function and that validator MUST stay in lock-step: whatever this
+ * constructs is exactly what that function must accept, or a maker's own
+ * signed order would be rejected by their own relay).
+ *
+ * Built manually (not via the `fees` convenience option buildListing/
+ * buildBundleListing use) because that option computes a percentage fee
+ * FROM the consideration total -- meaningless for a pure NFT-for-NFT swap
+ * with zero ETH, which instead needs a flat fee item added directly. Both
+ * cases are handled here as one explicit consideration item, never
+ * Seaport's automatic fee-scaling.
+ */
+export async function buildSwapOrder(accountAddress: string, input: SwapOrderInput, chain?: SeaportChain) {
+  const seaport = await getSeaport(undefined, chain);
+  const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
+
+  const considerationNativeWei = BigInt(input.considerationNativeWei ?? "0");
+  const feeWei =
+    considerationNativeWei > BigInt(0)
+      ? (considerationNativeWei * BigInt(MARKETPLANK_SWAP_FEE_BPS)) / BigInt(10_000)
+      : BigInt(MARKETPLANK_SWAP_FLAT_FEE_WEI);
+
+  const offer = input.offerItems.map((item) => ({
+    itemType: ItemType.ERC721 as const,
+    token: item.contractAddress,
+    identifier: item.tokenId,
+  }));
+
+  const consideration = [
+    ...input.considerationItems.map((item) => ({
+      itemType: ItemType.ERC721 as const,
+      token: item.contractAddress,
+      identifier: item.tokenId,
+      recipient: accountAddress,
+    })),
+    ...(considerationNativeWei > BigInt(0)
+      ? [{ token: NATIVE_TOKEN_ADDRESS, amount: considerationNativeWei.toString(), recipient: accountAddress }]
+      : []),
+    // Fee item -- always present, either as the percentage share of a real
+    // monetary leg or the flat anti-zero-revenue floor. See constants.ts's
+    // MARKETPLANK_SWAP_FEE_BPS/MARKETPLANK_SWAP_FLAT_FEE_WEI headers.
+    { token: NATIVE_TOKEN_ADDRESS, amount: feeWei.toString(), recipient: MARKET_FEE_RECIPIENT },
+  ];
+
+  const { actions } = await seaport.createOrder(
+    { offer, consideration, endTime },
+    accountAddress,
+    /* exactApproval */ true
+  );
+
+  const contractAddresses = [
+    ...new Set([...input.offerItems, ...input.considerationItems].map((i) => i.contractAddress.toLowerCase())),
+  ];
+  const { order } = await executeActionsViaWallet(
+    actions as unknown as SeaportAction[],
+    accountAddress,
+    chain,
+    contractAddresses
+  );
+  if (!order) throw new Error("Swap was not signed.");
   return order;
 }
 
@@ -749,16 +828,24 @@ export async function computeApprovalSpoof(
  * doesn't need this (its allowlist is the build-time MARKET_DESTINATIONS
  * set, unrelated to which specific order is being fulfilled).
  */
-function erc721ContractOf(order: FulfillableOrder): string | null {
+/**
+ * Every DISTINCT ERC-721 contract across BOTH offer and consideration --
+ * erc721ContractOf's generalization for a SWAP order (see
+ * validateSwapOrder), which can span multiple contracts on either side.
+ * For every other order type (listing, offer, bundle -- all single-
+ * collection) this returns the same one-element result erc721ContractOf
+ * would, so using this everywhere in fulfillOrder is a safe, behavior-
+ * preserving generalization, not a special case to branch on.
+ */
+function erc721ContractsOf(order: FulfillableOrder): string[] {
   const params = order.parameters;
-  const offerNft = params.offer.find(
-    (item) => Number(item.itemType) === ItemType.ERC721 || Number(item.itemType) === ItemType.ERC721_WITH_CRITERIA
-  );
-  if (offerNft) return offerNft.token;
-  const considerationNft = params.consideration.find(
-    (item) => Number(item.itemType) === ItemType.ERC721 || Number(item.itemType) === ItemType.ERC721_WITH_CRITERIA
-  );
-  return considerationNft?.token ?? null;
+  const contracts = new Set<string>();
+  for (const item of [...params.offer, ...params.consideration]) {
+    if (Number(item.itemType) === ItemType.ERC721 || Number(item.itemType) === ItemType.ERC721_WITH_CRITERIA) {
+      contracts.add(item.token.toLowerCase());
+    }
+  }
+  return [...contracts];
 }
 
 export async function fulfillOrder(
@@ -784,11 +871,11 @@ export async function fulfillOrder(
     exactApproval: true,
   });
   if (chain) {
-    const contractAddress = erc721ContractOf(order);
-    if (!contractAddress) {
-      throw new Error("fulfillOrder: could not determine this order's collection contract for the foreign-chain allowlist.");
+    const contractAddresses = erc721ContractsOf(order);
+    if (contractAddresses.length === 0) {
+      throw new Error("fulfillOrder: could not determine this order's collection contract(s) for the foreign-chain allowlist.");
     }
-    return executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress, chain, contractAddress);
+    return executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress, chain, contractAddresses);
   }
   return executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress);
 }

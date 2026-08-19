@@ -5,6 +5,7 @@ import {
   OrderValidationError,
   validateListingOrder,
   validateOfferOrder,
+  validateSwapOrder,
 } from "../../lib/market/order-validation";
 import type { MarketCollection } from "../../lib/market/types";
 
@@ -527,4 +528,167 @@ test("rejects a bid that would deliver the NFT to someone other than the bidder"
     signature: "0xdeadbeef",
   };
   assert.throws(() => validateOfferOrder(rerouted, freeCollection, WETH), OrderValidationError);
+});
+
+/**
+ * validateSwapOrder -- NFT-for-NFT / OTC trades across arbitrary contracts.
+ * See lib/market/order-validation.ts's own header for the full design
+ * (why the ETH top-up can only ever be a CONSIDERATION item, never an
+ * OFFER item -- a real Seaport protocol constraint, confirmed live via a
+ * real fork fulfillment this session, not a guess).
+ */
+const CONTRACT_A = NFT;
+const CONTRACT_B = "0x1a94a617190ec548ebf13bcd3c351bb902f5c9af";
+const FEE_RECIPIENT_SWAP = TREASURY;
+
+function swapOrder(overrides: {
+  offer?: unknown[];
+  consideration?: unknown[];
+  offerer?: string;
+} = {}) {
+  return {
+    parameters: {
+      offerer: overrides.offerer ?? SELLER,
+      offer: overrides.offer ?? [
+        { itemType: 2, token: CONTRACT_A, identifierOrCriteria: "1", startAmount: "1", endAmount: "1" },
+      ],
+      consideration: overrides.consideration ?? [
+        {
+          itemType: 2,
+          token: CONTRACT_B,
+          identifierOrCriteria: "2",
+          startAmount: "1",
+          endAmount: "1",
+          recipient: overrides.offerer ?? SELLER,
+        },
+        {
+          itemType: 0,
+          token: NATIVE,
+          identifierOrCriteria: "0",
+          startAmount: "500000000000000",
+          endAmount: "500000000000000",
+          recipient: FEE_RECIPIENT_SWAP,
+        },
+      ],
+      startTime: "0",
+      endTime: String(futureEnd),
+    },
+    signature: "0xdeadbeef",
+  };
+}
+
+test("a valid pure-barter swap (flat fee, no ETH top-up) derives correctly", () => {
+  const derived = validateSwapOrder(swapOrder());
+  assert.equal(derived.maker, SELLER.toLowerCase());
+  assert.deepEqual(derived.offerItems, [{ contractAddress: CONTRACT_A.toLowerCase(), tokenId: "1" }]);
+  assert.deepEqual(derived.considerationItems, [{ contractAddress: CONTRACT_B.toLowerCase(), tokenId: "2" }]);
+  assert.equal(derived.considerationNativeWei, "0");
+});
+
+test("a valid swap with an ETH top-up (percentage fee) derives correctly", () => {
+  const topUp = "10000000000000000"; // 0.01 ETH
+  const fee = "180000000000000"; // 1.8%
+  const derived = validateSwapOrder(
+    swapOrder({
+      consideration: [
+        { itemType: 2, token: CONTRACT_B, identifierOrCriteria: "2", startAmount: "1", endAmount: "1", recipient: SELLER },
+        { itemType: 0, token: NATIVE, identifierOrCriteria: "0", startAmount: topUp, endAmount: topUp, recipient: SELLER },
+        { itemType: 0, token: NATIVE, identifierOrCriteria: "0", startAmount: fee, endAmount: fee, recipient: FEE_RECIPIENT_SWAP },
+      ],
+    })
+  );
+  assert.equal(derived.considerationNativeWei, topUp);
+});
+
+test("rejects an offer item that is native ETH -- Seaport itself cannot pull ETH from an offerer", () => {
+  const withEthOffer = swapOrder({
+    offer: [
+      { itemType: 2, token: CONTRACT_A, identifierOrCriteria: "1", startAmount: "1", endAmount: "1" },
+      { itemType: 0, token: NATIVE, identifierOrCriteria: "0", startAmount: "1000000000000000", endAmount: "1000000000000000" },
+    ],
+  });
+  assert.throws(() => validateSwapOrder(withEthOffer), OrderValidationError);
+});
+
+test("rejects a swap offering nothing (empty offer)", () => {
+  assert.throws(() => validateSwapOrder(swapOrder({ offer: [] })), OrderValidationError);
+});
+
+test("rejects a swap asking for nothing (no NFT in consideration)", () => {
+  const noNftBack = swapOrder({
+    consideration: [
+      { itemType: 0, token: NATIVE, identifierOrCriteria: "0", startAmount: "500000000000000", endAmount: "500000000000000", recipient: FEE_RECIPIENT_SWAP },
+    ],
+  });
+  assert.throws(() => validateSwapOrder(noNftBack), OrderValidationError);
+});
+
+test("rejects underpaying the flat fee on a pure-barter swap", () => {
+  const underpaid = swapOrder({
+    consideration: [
+      { itemType: 2, token: CONTRACT_B, identifierOrCriteria: "2", startAmount: "1", endAmount: "1", recipient: SELLER },
+      { itemType: 0, token: NATIVE, identifierOrCriteria: "0", startAmount: "1", endAmount: "1", recipient: FEE_RECIPIENT_SWAP },
+    ],
+  });
+  assert.throws(() => validateSwapOrder(underpaid), OrderValidationError);
+});
+
+test("rejects underpaying the percentage fee when an ETH top-up is present", () => {
+  const topUp = "10000000000000000";
+  const underpaidFee = swapOrder({
+    consideration: [
+      { itemType: 2, token: CONTRACT_B, identifierOrCriteria: "2", startAmount: "1", endAmount: "1", recipient: SELLER },
+      { itemType: 0, token: NATIVE, identifierOrCriteria: "0", startAmount: topUp, endAmount: topUp, recipient: SELLER },
+      { itemType: 0, token: NATIVE, identifierOrCriteria: "0", startAmount: "1", endAmount: "1", recipient: FEE_RECIPIENT_SWAP },
+    ],
+  });
+  assert.throws(() => validateSwapOrder(underpaidFee), OrderValidationError);
+});
+
+test("rejects a consideration NFT routed to someone other than the maker", () => {
+  const rerouted = swapOrder({
+    consideration: [
+      { itemType: 2, token: CONTRACT_B, identifierOrCriteria: "2", startAmount: "1", endAmount: "1", recipient: ATTACKER },
+      { itemType: 0, token: NATIVE, identifierOrCriteria: "0", startAmount: "500000000000000", endAmount: "500000000000000", recipient: FEE_RECIPIENT_SWAP },
+    ],
+  });
+  assert.throws(() => validateSwapOrder(rerouted), OrderValidationError);
+});
+
+test("rejects a native consideration item paid to an unrecognized address", () => {
+  const wrongRecipient = swapOrder({
+    consideration: [
+      { itemType: 2, token: CONTRACT_B, identifierOrCriteria: "2", startAmount: "1", endAmount: "1", recipient: SELLER },
+      { itemType: 0, token: NATIVE, identifierOrCriteria: "0", startAmount: "500000000000000", endAmount: "500000000000000", recipient: ATTACKER },
+    ],
+  });
+  assert.throws(() => validateSwapOrder(wrongRecipient), OrderValidationError);
+});
+
+test("rejects offering the same token twice", () => {
+  const dup = swapOrder({
+    offer: [
+      { itemType: 2, token: CONTRACT_A, identifierOrCriteria: "1", startAmount: "1", endAmount: "1" },
+      { itemType: 2, token: CONTRACT_A, identifierOrCriteria: "1", startAmount: "1", endAmount: "1" },
+    ],
+  });
+  assert.throws(() => validateSwapOrder(dup), OrderValidationError);
+});
+
+test("rejects more items per side than the caller's own cap", () => {
+  assert.throws(() => validateSwapOrder(swapOrder(), 0), OrderValidationError);
+});
+
+test("accepts offer/consideration items spanning multiple distinct contracts", () => {
+  const CONTRACT_C = "0x2222222222222222222222222222222222222299";
+  const multi = swapOrder({
+    offer: [
+      { itemType: 2, token: CONTRACT_A, identifierOrCriteria: "1", startAmount: "1", endAmount: "1" },
+      { itemType: 2, token: CONTRACT_C, identifierOrCriteria: "9", startAmount: "1", endAmount: "1" },
+    ],
+  });
+  const derived = validateSwapOrder(multi);
+  assert.equal(derived.offerItems.length, 2);
+  const contracts = new Set(derived.offerItems.map((i) => i.contractAddress));
+  assert.equal(contracts.size, 2);
 });

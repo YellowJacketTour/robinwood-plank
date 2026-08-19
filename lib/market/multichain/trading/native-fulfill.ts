@@ -93,3 +93,33 @@ export async function fulfillMarketplankNativeBundleOrder(
 
   return fulfillOrder(rawOrder, accountAddress, undefined, seaportChainFor(chainSlug));
 }
+
+/**
+ * Fulfills a Marketplank-native SWAP/OTC listing. Reuses fulfillOrder
+ * UNCHANGED, same reasoning as the bundle fulfillment above -- Seaport's
+ * fulfillOrder doesn't care how many offer/consideration items an order
+ * has or how many distinct contracts they span; seaport.ts's own
+ * erc721ContractsOf (see fulfillOrder's own implementation) already
+ * derives the FULL set of contracts a swap touches for the foreign-chain
+ * destination allowlist, so no swap-specific branching is needed here.
+ */
+export async function fulfillMarketplankNativeSwapOrder(
+  chainSlug: string,
+  swapId: string
+): Promise<{ order: unknown | null; txHashes: string[] }> {
+  const res = await fetch(`/api/market/native-swap-order?id=${encodeURIComponent(swapId)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.message || `Could not load swap ${swapId}.`);
+  }
+  const { rawOrder } = (await res.json()) as { rawOrder: FulfillableOrder };
+
+  const { getEthereumProvider } = await import("@/lib/wallet");
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+  const accounts = (await provider.request({ method: "eth_requestAccounts" })) as string[];
+  const accountAddress = accounts[0];
+  if (!accountAddress) throw new Error("No connected account.");
+
+  return fulfillOrder(rawOrder, accountAddress, undefined, seaportChainFor(chainSlug));
+}

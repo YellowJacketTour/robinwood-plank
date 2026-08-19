@@ -16,6 +16,7 @@ import ForeignOfferForm from "@/components/market/ForeignOfferForm";
 import NativeForeignListForm from "@/components/market/NativeForeignListForm";
 import NativeForeignOfferForm from "@/components/market/NativeForeignOfferForm";
 import NativeBundleListForm from "@/components/market/NativeBundleListForm";
+import NativeSwapForm from "@/components/market/NativeSwapForm";
 import { normalizeRarityTier } from "@/lib/rarity";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
@@ -1796,6 +1797,18 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   void loadOwned();
                   void loadBundles();
                 }}
+                onConnect={() => void requireAccount()}
+              />
+            </div>
+          )}
+          {collection && !ownedLoading && ownedItems.length >= 1 && (
+            <div className="mt-4">
+              <NativeSwapForm
+                chainSlug={chainSlug}
+                account={account}
+                collection={collection}
+                ownedItems={ownedItems}
+                onListed={() => void loadOwned()}
                 onConnect={() => void requireAccount()}
               />
             </div>

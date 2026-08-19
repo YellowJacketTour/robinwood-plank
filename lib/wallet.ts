@@ -653,15 +653,34 @@ export function assertSafeSwapDestination(to: string, kind: string) {
  * open-ended list, since foreign collections number in the thousands and
  * are not curated the way MARKET_COLLECTIONS is.
  */
-export function assertSafeForeignMarketDestination(to: string, chainSlug: string, contractAddress: string): void {
+export function assertSafeForeignMarketDestination(
+  to: string,
+  chainSlug: string,
+  /**
+   * The collection contract(s) this action sequence is for. A single
+   * string for every existing single-collection flow (listing, offer,
+   * same-collection bundle); an array for a SWAP, which can span multiple
+   * distinct NFT contracts on both its offer and consideration sides (see
+   * lib/market/order-validation.ts's validateSwapOrder) -- each needs its
+   * own approval transaction reaching that SPECIFIC contract, not just
+   * "the one collection." Still an explicit, closed allowlist either way;
+   * widening to accept a set does not loosen what gets through, it only
+   * lets the set legitimately contain more than one real address.
+   */
+  contractAddress: string | string[]
+): void {
   const lower = to.toLowerCase();
-  const allowed = new Set([FOREIGN_SEAPORT_ADDRESS.toLowerCase(), contractAddress.toLowerCase()]);
+  const contractAddresses = Array.isArray(contractAddress) ? contractAddress : [contractAddress];
+  const allowed = new Set([
+    FOREIGN_SEAPORT_ADDRESS.toLowerCase(),
+    ...contractAddresses.map((a) => a.toLowerCase()),
+  ]);
   const offerCurrency = foreignOfferCurrency(chainSlug);
   if (offerCurrency) allowed.add(offerCurrency.toLowerCase());
   if (!allowed.has(lower)) {
     throw new Error(
       `Blocked unsafe foreign-chain marketplace target. Transactions for this listing only go to Seaport, ` +
-        `this chain's offer currency, or the collection contract "${contractAddress}" itself.`
+        `this chain's offer currency, or the collection contract(s) "${contractAddresses.join(", ")}" themselves.`
     );
   }
 }
@@ -813,8 +832,8 @@ export type SendForeignTxOpts = {
   nativeCurrencySymbol: string;
   rpcUrl: string;
   blockExplorerUrl: string;
-  /** The ONE collection contract this transaction is for -- see assertSafeForeignMarketDestination. */
-  contractAddress: string;
+  /** The collection contract(s) this transaction is for -- see assertSafeForeignMarketDestination's own doc comment on the single-vs-array distinction. */
+  contractAddress: string | string[];
 };
 
 /**

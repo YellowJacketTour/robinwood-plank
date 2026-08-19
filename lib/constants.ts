@@ -420,6 +420,30 @@ export const MARKET_DEFAULT_FEE_BPS = 50; // 0.5%
 export const MARKETPLANK_NATIVE_LISTING_FEE_BPS = 180; // 1.8%
 
 /**
+ * Swap/OTC listings (NFT-for-NFT, NFT+coin, any combination -- see
+ * lib/market/order-validation.ts's validateSwapOrder). Same 1.8% as
+ * MARKETPLANK_NATIVE_LISTING_FEE_BPS, applied to whichever side of the
+ * trade carries a native-ETH amount (there is always at least one,
+ * enforced by the flat-fee fallback below for a pure barter swap with
+ * neither side including ETH). Kept as its own constant, not aliased --
+ * same reasoning as every other fee constant in this file: free to diverge
+ * later without coupling two unrelated decisions.
+ */
+export const MARKETPLANK_SWAP_FEE_BPS = 180; // 1.8%
+
+/**
+ * A pure barter swap (no ETH on either side) has no monetary total a
+ * percentage fee could apply to -- this flat wei amount is charged instead,
+ * as a required consideration item to MARKET_FEE_RECIPIENT, so the feature
+ * is never revenue-free regardless of trade shape. Set low enough not to
+ * block a genuine 1-for-1 collectible swap between two real collections
+ * (roughly $1-2 in ETH at typical prices -- reviewed, not derived from a
+ * live price feed, since this is a flat anti-zero-revenue floor, not a
+ * market-priced fee).
+ */
+export const MARKETPLANK_SWAP_FLAT_FEE_WEI = "500000000000000"; // 0.0005 ETH
+
+/**
  * Marketplank's dedicated treasury wallet — separate from SITE_FEE.recipient
  * (the Trade section's Uniswap integrator fee wallet). Every marketplace fee
  * and vault fee accrues here. Set 2026-07-27; keep this the single source of
