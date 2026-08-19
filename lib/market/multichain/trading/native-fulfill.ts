@@ -64,3 +64,32 @@ export async function fulfillMarketplankNativeOrder(
 
   return fulfillOrder(rawOrder, accountAddress, considerationCriteria, seaportChainFor(chainSlug));
 }
+
+/**
+ * Fulfills a Marketplank-native BUNDLE listing (roadmap item #7). Reuses
+ * fulfillOrder UNCHANGED -- Seaport's own fulfillOrder doesn't care how
+ * many offer items one order has, so a 2-item bundle and a 10-item one are
+ * fulfilled by the exact same call a single-item listing already uses.
+ * Only the raw-order source route differs (bundles live in their own
+ * table, see lib/market/bundle-orders-store.ts).
+ */
+export async function fulfillMarketplankNativeBundleOrder(
+  chainSlug: string,
+  bundleId: string
+): Promise<{ order: unknown | null; txHashes: string[] }> {
+  const res = await fetch(`/api/market/native-bundle-order?id=${encodeURIComponent(bundleId)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.message || `Could not load bundle ${bundleId}.`);
+  }
+  const { rawOrder } = (await res.json()) as { rawOrder: FulfillableOrder };
+
+  const { getEthereumProvider } = await import("@/lib/wallet");
+  const provider = getEthereumProvider();
+  if (!provider) throw new Error("No wallet found.");
+  const accounts = (await provider.request({ method: "eth_requestAccounts" })) as string[];
+  const accountAddress = accounts[0];
+  if (!accountAddress) throw new Error("No connected account.");
+
+  return fulfillOrder(rawOrder, accountAddress, undefined, seaportChainFor(chainSlug));
+}

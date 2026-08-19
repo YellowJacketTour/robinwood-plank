@@ -15,6 +15,7 @@ import ForeignOfferConfirm from "@/components/market/ForeignOfferConfirm";
 import ForeignOfferForm from "@/components/market/ForeignOfferForm";
 import NativeForeignListForm from "@/components/market/NativeForeignListForm";
 import NativeForeignOfferForm from "@/components/market/NativeForeignOfferForm";
+import NativeBundleListForm from "@/components/market/NativeBundleListForm";
 import { normalizeRarityTier } from "@/lib/rarity";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
@@ -203,6 +204,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [relistPreset, setRelistPreset] = useState<{ tokenId: string; priceWei: string } | null>(null);
   /** Which criteria-bid form to show on a foreign EVM chain's Offers tab -- defaults to Marketplank's own lower-fee direct path. */
   const [bidVenue, setBidVenue] = useState<"native" | "opensea">("native");
+  /** Native BUNDLE listings for this collection+chain (roadmap item #7) -- see lib/market/bundle-orders-store.ts. */
+  const [bundles, setBundles] = useState<Array<{ id: string; maker: string; tokenIds: string[]; priceWei: string; expiresAt: string }>>([]);
+  const [bundlesLoading, setBundlesLoading] = useState(false);
+  const [bundleBuying, setBundleBuying] = useState<string | null>(null);
+  const [bundleError, setBundleError] = useState<string | null>(null);
 
   // RARITY -- reuses the SAME information-content algorithm/tier system as
   // RobinWood's own collection (lib/rarity.ts + lib/rarity-generic.ts),
@@ -367,6 +373,29 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     void loadOwned();
   }, [loadOwned]);
 
+  const loadBundles = useCallback(async () => {
+    if (!isForeignEvm || !collection?.contractAddress) {
+      setBundles([]);
+      return;
+    }
+    setBundlesLoading(true);
+    try {
+      const data = await swrJson<{ bundles: Array<{ id: string; maker: string; tokenIds: string[]; priceWei: string; expiresAt: string }> }>(
+        `/api/market/multichain/native-bundle-orders?chainSlug=${chainSlug}&contractAddress=${collection.contractAddress}`,
+        { ttlMs: 15_000, swrMs: 60_000, session: true }
+      );
+      setBundles(data.bundles ?? []);
+    } catch {
+      setBundles([]);
+    } finally {
+      setBundlesLoading(false);
+    }
+  }, [isForeignEvm, chainSlug, collection?.contractAddress]);
+
+  useEffect(() => {
+    void loadBundles();
+  }, [loadBundles]);
+
   const loadOffers = useCallback(async () => {
     try {
       const data = await swrJson<{ offers: ForeignOffer[] }>(
@@ -482,6 +511,27 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       return null;
     }
   }, [account, adoptAccount, isSolana, isBitcoin]);
+
+  const confirmBuyBundle = useCallback(
+    async (bundleId: string) => {
+      setBundleError(null);
+      const who = await requireAccount();
+      if (!who) return;
+      try {
+        setBundleBuying(bundleId);
+        const { fulfillMarketplankNativeBundleOrder } = await import("@/lib/market/multichain/trading/native-fulfill");
+        await fulfillMarketplankNativeBundleOrder(chainSlug, bundleId);
+        await loadBundles();
+        await loadOwned();
+      } catch (e) {
+        console.error("Bundle buy failed:", e);
+        setBundleError(e instanceof Error ? e.message : "Bundle purchase failed.");
+      } finally {
+        setBundleBuying(null);
+      }
+    },
+    [chainSlug, requireAccount, loadBundles, loadOwned]
+  );
 
   // Loaded eagerly (not just on Details-open) -- the trait FILTER bar below
   // needs the real category/value list to populate its dropdowns before the
@@ -1347,6 +1397,50 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             </ul>
           )}
         </MarketBrowseLayout>
+
+        {isForeignEvm && bundles.length > 0 && (
+          <div className="mt-6 space-y-2">
+            <h3 className="font-display text-xl text-gold-300">Bundles for sale</h3>
+            <p className="text-xs text-foreground/55">Multiple items, one price, one transaction -- direct with Marketplank.</p>
+            {bundleError && (
+              <p role="alert" className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100">
+                {bundleError}
+              </p>
+            )}
+            {bundlesLoading ? (
+              <SkeletonRows rows={2} columns={["w-32", "w-24", "w-16"]} />
+            ) : (
+              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {bundles.map((b) => (
+                  <li key={b.id} className="dense-card space-y-2 p-3">
+                    <p className="text-sm font-bold text-foreground">{b.tokenIds.length} items</p>
+                    <p className="truncate text-xs text-foreground/55" title={b.tokenIds.map((id) => `#${id}`).join(", ")}>
+                      {b.tokenIds.slice(0, 6).map((id) => `#${id}`).join(", ")}
+                      {b.tokenIds.length > 6 ? `, +${b.tokenIds.length - 6} more` : ""}
+                    </p>
+                    <p className="text-sm font-extrabold tabular-nums text-emerald-300">
+                      {formatTokenAmount(b.priceWei, 18, 4)} {statCurrencySymbol}
+                      {statUsd(b.priceWei) != null && <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(b.priceWei)!)}</span>}
+                    </p>
+                    <p className="text-[0.65rem] text-foreground/50">by {shortAddress(b.maker)}</p>
+                    <button
+                      type="button"
+                      disabled={bundleBuying === b.id || b.maker.toLowerCase() === account?.toLowerCase()}
+                      onClick={() => void confirmBuyBundle(b.id)}
+                      className="min-h-9 w-full rounded-md bg-gold-500 text-xs font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-50"
+                    >
+                      {bundleBuying === b.id
+                        ? "Confirm…"
+                        : b.maker.toLowerCase() === account?.toLowerCase()
+                          ? "Your bundle"
+                          : "Buy bundle"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </MarketTabPanel>
 
       <MarketTabPanel id="swap" active={tab === "swap"}>
@@ -1689,6 +1783,22 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               relistPreset={relistPreset}
               onRelistConsumed={() => setRelistPreset(null)}
             />
+          )}
+          {collection && !ownedLoading && ownedItems.length >= 2 && (
+            <div className="mt-4">
+              <NativeBundleListForm
+                chainSlug={chainSlug}
+                currencySymbol={statCurrencySymbol}
+                account={account}
+                collection={collection}
+                ownedItems={ownedItems}
+                onListed={() => {
+                  void loadOwned();
+                  void loadBundles();
+                }}
+                onConnect={() => void requireAccount()}
+              />
+            </div>
           )}
         </MarketTabPanel>
       )}

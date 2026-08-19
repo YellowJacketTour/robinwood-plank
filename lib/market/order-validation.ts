@@ -345,6 +345,105 @@ export function validateListingOrder(
   };
 }
 
+/** Same shape as DerivedOrder but for a multi-item bundle listing. */
+export type DerivedBundleOrder = {
+  maker: string;
+  tokenIds: string[];
+  priceWei: string;
+  expiresAt: string;
+  currency: string;
+};
+
+/**
+ * Validate a BUNDLE LISTING: offers 2+ NFTs, ALL from the SAME `collection`
+ * (cross-collection bundles are a genuinely different, unaudited model --
+ * out of scope here, see NativeBundleListForm.tsx's own header), for one
+ * combined native-ETH price. A deliberately SEPARATE function from
+ * validateListingOrder above rather than a modified version of it --
+ * that function is the single most audited security boundary in this
+ * app (see this file's own header) and is shared by the Robinhood-chain
+ * native path too; changing its `offer.length !== 1` invariant to support
+ * a second, riskier shape would widen what EVERY caller of it accepts,
+ * not just bundle listings. New function, not a wider one -- same
+ * discipline this whole feature has used throughout (ethCallForeignFree
+ * alongside ethCallFree, sendForeignTransaction alongside sendTransaction,
+ * etc.).
+ */
+export function validateBundleListingOrder(
+  rawOrder: unknown,
+  collection: MarketCollection,
+  maxItems: number
+): DerivedBundleOrder {
+  const order = assertShape(rawOrder);
+  const p = order.parameters;
+
+  if (collection.tokenStandard !== "ERC721") {
+    fail("Only ERC-721 collections are tradable on Marketplank for now.");
+  }
+  const royalty = collectionRoyalty(collection);
+
+  if (p.offer.length < 2) {
+    fail("A bundle must offer at least two NFTs -- list a single item instead.");
+  }
+  if (p.offer.length > maxItems) {
+    fail(`A bundle may offer at most ${maxItems} NFTs.`);
+  }
+
+  const tokenIds: string[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < p.offer.length; i++) {
+    const offered = p.offer[i];
+    if (toItemType(offered.itemType) !== ITEM_ERC721) {
+      fail(`Bundle item ${i} must be an ERC-721 token.`);
+    }
+    if (!sameAddress(offered.token, collection.contractAddress)) {
+      fail(`Bundle item ${i} is for a different contract than the collection it claims.`);
+    }
+    if (fixedAmount(offered, `offer[${i}]`) !== BigInt(1)) {
+      fail(`Bundle item ${i} must offer exactly one token.`);
+    }
+    const tokenId = toBig(offered.identifierOrCriteria, `offer[${i}].identifier`).toString();
+    if (seen.has(tokenId)) fail(`Bundle lists token #${tokenId} more than once.`);
+    seen.add(tokenId);
+    tokenIds.push(tokenId);
+  }
+
+  // Same consideration accounting as a single-item listing: every payment
+  // item must be native ETH, summed for the total, fee/royalty legs
+  // identified by recipient -- unchanged logic, just reused for a bundle.
+  let total = BigInt(0);
+  let feePaid = BigInt(0);
+  let royaltyPaid = BigInt(0);
+  for (let i = 0; i < p.consideration.length; i++) {
+    const item = p.consideration[i];
+    if (toItemType(item.itemType) !== ITEM_NATIVE) {
+      fail("Bundle listings must be priced in ETH.");
+    }
+    if (!sameAddress(item.token, NATIVE_TOKEN_ADDRESS)) {
+      fail("Bundle payment token is not native ETH.");
+    }
+    if (!isAddressLike(item.recipient)) {
+      fail("Bundle has a payment with no valid recipient.");
+    }
+    const amount = fixedAmount(item, `consideration[${i}]`);
+    total += amount;
+    if (sameAddress(item.recipient, MARKET_FEE_RECIPIENT)) feePaid += amount;
+    if (royalty && sameAddress(item.recipient, royalty.recipient)) royaltyPaid += amount;
+  }
+  if (total <= BigInt(0)) fail("Bundle price must be greater than zero.");
+
+  assertFeeHonored(total, feePaid, collection);
+  assertRoyaltyHonored(total, royaltyPaid, royalty);
+
+  return {
+    maker: p.offerer.toLowerCase(),
+    tokenIds,
+    priceWei: total.toString(),
+    expiresAt: endTimeToIso(p),
+    currency: NATIVE_TOKEN_ADDRESS,
+  };
+}
+
 /**
  * Validate an OFFER: offers an ERC-20 (Seaport forbids native ETH as an offer
  * item), asks for an NFT from `collection` — a specific id, or any id when

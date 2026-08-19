@@ -435,6 +435,63 @@ export async function buildListing(accountAddress: string, input: ListInput, cha
   return order;
 }
 
+export type BundleListInput = {
+  /** Same collection contract for every item -- see NativeBundleListForm.tsx's own header on why cross-collection bundles are out of scope. */
+  contractAddress: string;
+  offerTokenIds: string[];
+  /** Combined gross buyer payment for the whole bundle. */
+  considerationWei: string;
+  expiresAt: string;
+  feeBps: number;
+};
+
+/**
+ * Builds and signs a BUNDLE listing -- one Seaport order offering 2+
+ * ERC-721 items for a single combined native-ETH price. Deliberately no
+ * royalty parameter (unlike buildListing above): this is only ever called
+ * for a foreign-chain native bundle in this feature's current scope, where
+ * royalty is already 0 (see app/api/market/multichain/native-orders/route.ts's
+ * own header on why -- no real per-chain EIP-2981 data exists yet for a
+ * collection Marketplank doesn't curate). A per-item royalty read across a
+ * multi-token bundle would also be a materially different, unaudited model
+ * from royaltyFeeFor's single-token EIP-2981 probe -- not silently
+ * approximated here.
+ */
+export async function buildBundleListing(accountAddress: string, input: BundleListInput, chain?: SeaportChain) {
+  const seaport = await getSeaport(undefined, chain);
+  const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
+
+  const { actions } = await seaport.createOrder(
+    {
+      offer: input.offerTokenIds.map((tokenId) => ({
+        itemType: ItemType.ERC721,
+        token: input.contractAddress,
+        identifier: tokenId,
+      })),
+      consideration: [
+        {
+          amount: input.considerationWei,
+          token: NATIVE_TOKEN_ADDRESS,
+          recipient: accountAddress,
+        },
+      ],
+      fees: feesFor(input.feeBps),
+      endTime,
+    },
+    accountAddress,
+    /* exactApproval */ true
+  );
+
+  const { order } = await executeActionsViaWallet(
+    actions as unknown as SeaportAction[],
+    accountAddress,
+    chain,
+    input.contractAddress
+  );
+  if (!order) throw new Error("Bundle listing was not signed.");
+  return order;
+}
+
 export type OfferInput = {
   offerWei: string;
   considerationTokenAddress: string;
