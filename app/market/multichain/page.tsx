@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import AppBackdrop from "@/components/AppBackdrop";
@@ -8,6 +9,7 @@ import { getContent } from "@/lib/content-store";
 import type { FlagsDoc } from "@/lib/content-docs";
 import { createPageMetadata } from "@/lib/seo";
 import type { Metadata } from "next";
+import { verifyPreviewCookieValue, MARKET_PREVIEW_COOKIE_NAME } from "@/lib/market-preview-auth";
 
 /**
  * The "global market world" -- every tracked collection across every
@@ -26,7 +28,11 @@ export const metadata: Metadata = createPageMetadata({
 
 export default async function GlobalMarketPage() {
   const flags = (await getContent("flags").catch(() => null)) as FlagsDoc | null;
-  const marketEnabled = flags && flags.marketEnabled !== null ? flags.marketEnabled : MARKET_ENABLED;
+  const siteWideEnabled = flags && flags.marketEnabled !== null ? flags.marketEnabled : MARKET_ENABLED;
+  // Admin-only preview bypass -- see app/market/page.tsx's identical comment
+  // and lib/market-preview-auth.ts's own header.
+  const previewCookie = (await cookies()).get(MARKET_PREVIEW_COOKIE_NAME)?.value;
+  const marketEnabled = siteWideEnabled || verifyPreviewCookieValue(previewCookie);
 
   return (
     <>

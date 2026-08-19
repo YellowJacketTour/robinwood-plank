@@ -10,6 +10,7 @@ import { signMessage } from "@/lib/wallet";
 const BACKFILL_ACTION = "backfill-events";
 const REPAIR_ACTION = "repair-activity";
 const REPAIR_INCIDENT_FROM_BLOCK = 27_935_949;
+const MARKET_PREVIEW_ACTION = "market-preview";
 
 /**
  * System section — the expanded operational picture: durable storage, chain
@@ -66,11 +67,27 @@ type RepairState =
   | { kind: "ok"; message: string }
   | { kind: "error"; message: string };
 
+type PreviewState =
+  | { kind: "idle" }
+  | { kind: "signing" }
+  | { kind: "ok" }
+  | { kind: "off" }
+  | { kind: "error"; message: string };
+
 export default function SystemSection({ address }: { address: string | null }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [failed, setFailed] = useState(false);
   const [backfill, setBackfill] = useState<BackfillState>({ kind: "idle" });
   const [repair, setRepair] = useState<RepairState>({ kind: "idle" });
+  const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
+  const [previewConfigured, setPreviewConfigured] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch("/api/admin/market-preview")
+      .then((r) => r.json())
+      .then((d: { configured?: boolean }) => setPreviewConfigured(d.configured === true))
+      .catch(() => setPreviewConfigured(false));
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -188,6 +205,42 @@ export default function SystemSection({ address }: { address: string | null }) {
     }
   }, [address]);
 
+  const enablePreview = useCallback(async () => {
+    if (!address) return;
+    try {
+      setPreview({ kind: "signing" });
+      const timestamp = Date.now();
+      const signature = await signMessage(
+        address,
+        adminMessage(MARKET_PREVIEW_ACTION, timestamp, adminPayloadHash("{}"))
+      );
+      const res = await fetch("/api/admin/market-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auth: { address, timestamp, signature } }),
+      });
+      const data = (await res.json()) as { ok?: boolean; message?: string };
+      if (!res.ok || !data.ok) {
+        setPreview({ kind: "error", message: data.message || "Could not enable preview." });
+        return;
+      }
+      setPreview({ kind: "ok" });
+    } catch (err) {
+      setPreview({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Could not enable preview.",
+      });
+    }
+  }, [address]);
+
+  const disablePreview = useCallback(async () => {
+    try {
+      await fetch("/api/admin/market-preview", { method: "DELETE" });
+    } finally {
+      setPreview({ kind: "off" });
+    }
+  }, []);
+
   const relayer = status?.relayer;
 
   return (
@@ -266,6 +319,45 @@ export default function SystemSection({ address }: { address: string | null }) {
             <p className={`mt-2 ${NOTE_OK}`}>{repair.message}</p>
           ) : repair.kind === "error" ? (
             <p className={`mt-2 ${NOTE_ERR}`}>{repair.message}</p>
+          ) : null}
+        </div>
+
+        <div className="mt-4 rounded-md bg-panel-strong p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className={LABEL}>Market preview (admin-only)</p>
+              <p className="mt-1 text-sm text-cream-muted">
+                Browse the real /market and /market/multichain pages as this admin
+                wallet even while the market kill-switch is off for every other
+                visitor — a 24h cookie, not a site-wide flag flip. Never a
+                mutation path; this only bypasses the ComingSoonGate render.
+                {previewConfigured === false && (
+                  <span className="mt-1 block text-amber-400">
+                    Not available on this deploy — PLANK_ADMIN_PREVIEW_SECRET isn&apos;t set.
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                className={BUTTON_PRIMARY}
+                disabled={!address || previewConfigured !== true || preview.kind === "signing"}
+                onClick={() => void enablePreview()}
+              >
+                {preview.kind === "signing" ? "Sign to confirm…" : "Enable preview"}
+              </button>
+              <button type="button" className={BUTTON_SECONDARY} onClick={() => void disablePreview()}>
+                Disable
+              </button>
+            </div>
+          </div>
+          {preview.kind === "ok" ? (
+            <p className={`mt-2 ${NOTE_OK}`}>Preview enabled for 24h — reload /market or /market/multichain.</p>
+          ) : preview.kind === "off" ? (
+            <p className="mt-2 text-sm text-cream-muted">Preview disabled.</p>
+          ) : preview.kind === "error" ? (
+            <p className={`mt-2 ${NOTE_ERR}`}>{preview.message}</p>
           ) : null}
         </div>
 
