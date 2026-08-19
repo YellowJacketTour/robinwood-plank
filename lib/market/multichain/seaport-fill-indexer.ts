@@ -86,6 +86,57 @@ const ITEM_ERC1155 = 3;
 const ITEM_NATIVE = 0;
 const ITEM_ERC20 = 1;
 
+/**
+ * Per-chain reorg confirmation depth, in THAT CHAIN'S OWN BLOCKS (audit
+ * finding M3, 2026-08-19).
+ *
+ * This previously used a flat 12 for all 8 chains. Twelve is the
+ * chain-agnostic folk convention and is wrong in both directions here: far
+ * too shallow for Ethereum (where finality is ~2 epochs, not 12 blocks)
+ * and needlessly deep for Avalanche (single-block deterministic finality).
+ * It matters more than a data-quality nit now that points are scored on
+ * fills -- points awarded on a block that later reorgs out are minted from
+ * nothing, so this is a financial control, not just an accuracy one.
+ *
+ * Values target each chain's REAL settlement characteristic, using that
+ * chain's own block time:
+ *   eth-mainnet     12s blocks; 64 blocks ~= 2 epochs ~= true finality.
+ *   polygon-mainnet ~2s blocks; deeper than Circle's aggressive 2-3,
+ *                   because Polygon PoS has historically produced
+ *                   genuinely deep reorgs.
+ *   base / opt      OP Stack, 2s blocks; sequencer output stays reorgable
+ *                   until it derives from L1, so this targets ~10 min.
+ *   arb-mainnet     ~0.25s blocks; sequencer soft-confirms near-instantly.
+ *   bnb-mainnet     BEP-126 fast finality is ~2 blocks; 30 is generous.
+ *   avax-mainnet    Snowman: sub-second deterministic finality, no reorgs
+ *                   by design; 5 is already belt-and-braces.
+ *   zksync-mainnet  soft-confirms instantly.
+ *
+ * HONEST LIMITATION, stated rather than implied: for Arbitrum and zkSync
+ * these depths protect against sequencer-level reversion only. True
+ * finality on both requires L1 inclusion/proof submission (~30 min for
+ * Arbitrum's force-inclusion window; ~3 hours for a zkSync batch to execute
+ * on L1). Waiting that long would make the index uselessly stale, so the
+ * tradeoff taken is: index promptly and accept that a deep L1-level
+ * reversion on those two could leave a stale row. The genuinely correct
+ * long-term fix is to read each chain's `finalized` block tag rather than
+ * counting blocks -- a real improvement, deliberately named here rather
+ * than silently skipped.
+ */
+const CONFIRMATION_DEPTH_BY_CHAIN: Record<string, number> = {
+  "eth-mainnet": 64,
+  "polygon-mainnet": 128,
+  "arb-mainnet": 240,
+  "base-mainnet": 300,
+  "opt-mainnet": 300,
+  "bnb-mainnet": 30,
+  "avax-mainnet": 5,
+  "zksync-mainnet": 100,
+};
+
+/** Conservative fallback for a chain absent from the table -- deeper than any entry, so a newly-added chain fails safe (stale) rather than unsafe (reorgable). */
+const DEFAULT_CONFIRMATION_DEPTH = 300;
+
 type SpentItem = { itemType: bigint; token: string; identifier: bigint; amount: bigint };
 
 /** ReceivedItem (consideration) additionally carries a recipient; SpentItem (offer) does not. */
@@ -301,28 +352,19 @@ export async function scanChainForFills(
   opts?: {
     /**
      * Blocks to hold back from the head before a fill is safe to write
-     * permanently -- see chain-indexer.ts's own CONFIRMATION_DEPTH_BLOCKS
-     * for the underlying reasoning (append-only ledger, a written-then-
-     * reorged-out row is wrong forever). That constant is tuned for
-     * Robinhood Chain specifically (~600 blocks ~= 1 minute on a fast L2);
-     * reusing it verbatim here would apply an L2-specific number to
-     * Ethereum mainnet and every other foreign chain, which is wrong in
-     * BOTH directions (too shallow for mainnet's real reorg risk, needlessly
-     * deep for an equally-fast L2 like Base/Optimism/Arbitrum). Defaults to
-     * 12 -- the long-standing, chain-agnostic "wait ~12 confirmations"
-     * convention -- as an honestly-conservative default rather than a
-     * precisely per-chain-tuned table (a real future improvement, not
-     * silently skipped: per-chain block times are already known via
-     * FOREIGN_CHAINS if this is ever worth tuning further). Test-only
-     * callers may override this to prove the scan/decode mechanism against
-     * a single-node fork with no reorg risk at all.
+     * permanently. Defaults to this chain's own entry in
+     * CONFIRMATION_DEPTH_BY_CHAIN (see that table for the per-chain
+     * reasoning and its honest limitations). Test-only callers may
+     * override to prove the scan/decode mechanism against a single-node
+     * fork with no reorg risk at all.
      */
     confirmationDepth?: number;
   }
 ): Promise<FillScanResult> {
   const headHex = await rpcCall<string>(rpcUrl, "eth_blockNumber", []);
   const head = Number.parseInt(headHex, 16);
-  const confirmationDepth = opts?.confirmationDepth ?? 12;
+  const confirmationDepth =
+    opts?.confirmationDepth ?? CONFIRMATION_DEPTH_BY_CHAIN[chainSlug] ?? DEFAULT_CONFIRMATION_DEPTH;
 
   const lastIndexedBlock = await readCursor(chainSlug);
   // No historical backfill target -- bootstraps from just-below-head on

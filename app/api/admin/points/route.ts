@@ -7,6 +7,7 @@
  * before anything is written, not client-supplied data taken on faith).
  */
 import { verifyAdminProof, type AdminProof } from "@/lib/admin-auth";
+import { consumeAdminProof } from "@/lib/admin-proof-nonce";
 import { logAdminAction } from "@/lib/admin-log";
 import { recordManualGrant } from "@/lib/plank-checks";
 import { publicError, publicJson, rateLimit, readJsonBody } from "@/lib/security";
@@ -70,6 +71,20 @@ export async function POST(req: Request) {
                 : "Could not verify admin signature.",
         },
         status
+      );
+    }
+
+    // SINGLE-USE (audit finding M2). verifyAdminProof is stateless, so a
+    // captured-but-valid request could otherwise be replayed for the full
+    // 5-minute window, minting the grant again each time -- and this
+    // ledger's own (source_tx_hash, ...) dedup index does not apply to
+    // admin_grant rows, which carry no tx hash. Consumed BEFORE the grant,
+    // and fails closed.
+    const fresh = await consumeAdminProof("points-grant", verdict.address, (auth as AdminProof).signature);
+    if (!fresh) {
+      return publicJson(
+        { error: "REPLAY", message: "This request was already submitted — sign a new one." },
+        409
       );
     }
 
