@@ -13,6 +13,7 @@ import ForeignSendConfirm from "@/components/market/ForeignSendConfirm";
 import ForeignDetailsModal from "@/components/market/ForeignDetailsModal";
 import ForeignOfferConfirm from "@/components/market/ForeignOfferConfirm";
 import ForeignOfferForm from "@/components/market/ForeignOfferForm";
+import NativeForeignListForm from "@/components/market/NativeForeignListForm";
 import { normalizeRarityTier } from "@/lib/rarity";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
@@ -184,6 +185,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [myListingsLoading, setMyListingsLoading] = useState(false);
 
   const [tab, setTab] = useState<MarketTab>("buy-sell");
+
+  // "sell" (Marketplank-native listing, see NativeForeignListForm.tsx) is
+  // additive to MARKET_TABS -- shown only for foreign EVM chains. Robinhood
+  // Chain already has its own native listing flow (MyInventory.tsx);
+  // Solana/Bitcoin native listing is a separate, later phase (see this
+  // session's plan doc -- Phase 1 is EVM only).
+  const isForeignEvm = !isNonEvm && !isRobinhoodChainSlug(chainSlug);
+  const tabs = isForeignEvm ? [...MARKET_TABS, { id: "sell" as const, label: "Sell" }] : MARKET_TABS;
 
   // RARITY -- reuses the SAME information-content algorithm/tier system as
   // RobinWood's own collection (lib/rarity.ts + lib/rarity-generic.ts),
@@ -1080,7 +1089,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </div>
       </div>
 
-      <MarketTabRail navigation={<MarketNav active={tab} onChange={setTab} tabs={MARKET_TABS} />} />
+      <MarketTabRail navigation={<MarketNav active={tab} onChange={setTab} tabs={tabs} />} />
 
       {error && (
         <p role="alert" className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100">
@@ -1537,6 +1546,23 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           </div>
         )}
       </MarketTabPanel>
+
+      {isForeignEvm && (
+        <MarketTabPanel id="sell" active={tab === "sell"}>
+          {collection && (
+            <NativeForeignListForm
+              chainSlug={chainSlug}
+              currencySymbol={statCurrencySymbol}
+              account={account}
+              collection={collection}
+              ownedItems={ownedItems}
+              ownedLoading={ownedLoading}
+              onListed={() => void loadOwned()}
+              onConnect={() => void requireAccount()}
+            />
+          )}
+        </MarketTabPanel>
+      )}
 
       <MarketTabPanel id="positions" active={tab === "positions"}>
         {!account ? (

@@ -1,6 +1,15 @@
 /** Shared shapes for Marketplank. See docs/marketplank/SPEC.md. */
 
-export type MarketTab = "buy-sell" | "offers" | "activity" | "swap" | "my-nfts" | "positions";
+/**
+ * "sell" is a MultichainCollectionView.tsx-only addition (Marketplank-native
+ * listing on a foreign EVM chain) -- NOT added to lib/market/navigation.ts's
+ * shared MARKET_TABS array, which stays the canonical set every OTHER
+ * page (including Robinhood Chain's own native marketplace) uses
+ * unmodified. MultichainCollectionView.tsx builds its own local tabs array
+ * that conditionally appends "sell", so this new literal is additive to the
+ * type only.
+ */
+export type MarketTab = "buy-sell" | "offers" | "activity" | "swap" | "my-nfts" | "positions" | "sell";
 
 export type CollectionTrustBadge = "lp-burned" | "ownership-renounced" | "verified";
 
