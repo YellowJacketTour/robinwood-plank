@@ -70,6 +70,8 @@
  * and its documented shape" and "proved it works end-to-end."
  */
 
+import { SOLANA_FEE_RECIPIENT } from "@/lib/constants";
+
 const ME_API_BASE = "https://api-mainnet.magiceden.dev/v2";
 
 function requireApiKey(): string {
@@ -121,6 +123,11 @@ export async function buildMagicEdenBuyNow(input: {
     buyer: input.buyerAddress,
     tokenMint: input.tokenMint,
     price: input.priceLamports,
+    // Marketplank's Solana fee capture (audit finding fix, 2026-08-19) --
+    // Magic Eden's own documented `buyerReferral` field, paid from their
+    // Auction House fee, not a second fee layer on top of the trade price.
+    // See SOLANA_FEE_RECIPIENT's own comment in lib/constants.ts.
+    buyerReferral: SOLANA_FEE_RECIPIENT,
     ...(input.priorityFeeMicroLamports ? { prioFeeMicroLamports: input.priorityFeeMicroLamports } : {}),
   });
 }
@@ -150,6 +157,7 @@ export async function buildMagicEdenBid(input: {
     buyer: input.buyerAddress,
     tokenMint: input.tokenMint,
     price: input.priceLamports,
+    buyerReferral: SOLANA_FEE_RECIPIENT,
     ...(input.priorityFeeMicroLamports ? { prioFeeMicroLamports: input.priorityFeeMicroLamports } : {}),
   });
 }

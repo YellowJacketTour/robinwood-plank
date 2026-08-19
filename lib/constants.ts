@@ -505,6 +505,44 @@ export const MARKET_FEE_RECIPIENT = "0xcdb7ca36d35fa16d15fda859a46f1d72d979e9d8"
 export const MARKETPLANK_FOREIGN_OFFER_FEE_BPS = 180; // 1.8%
 
 /**
+ * Marketplank's dedicated Solana treasury wallet -- separate curve, separate
+ * key material from MARKET_FEE_RECIPIENT (secp256k1/EVM) and
+ * BITCOIN_FEE_RECIPIENT below (Bitcoin's own address encoding); an EVM
+ * address cannot receive SOL, this is not an oversight to "unify" later.
+ * Set 2026-08-19, owner-supplied. Wired as `buyerReferral` on Magic Eden's
+ * buy_now/buy (bid) instruction calls (magiceden-solana-trade.ts) -- the
+ * one fee-capture mechanism their API documents for a third-party
+ * integrator, verified live via docs.magiceden.io/reference/
+ * get_instructions-buy-now 2026-08-19. NOT YET LIVE-TESTED against a real
+ * API key that the referral field actually pays out as expected -- same
+ * honest boundary magiceden-solana-trade.ts's own header already draws
+ * between "documented" and "proven end-to-end."
+ */
+export const SOLANA_FEE_RECIPIENT = "DhMGRPntHPjZk292dsBL5K9DoSmpxDbjzbNNUr87W792";
+
+/**
+ * Marketplank's dedicated Bitcoin treasury wallet -- Taproot (P2TR,
+ * bc1p...), owner-supplied 2026-08-19. Taproot chosen deliberately, not by
+ * default: Ordinals/BRC-20/Runes inscription data lives in Taproot
+ * script-path spends by protocol design, so a Legacy or plain SegWit
+ * address literally cannot hold what this treasury needs to hold, and
+ * Taproot multisig (MuSig2/FROST) is the only Bitcoin multisig scheme that
+ * doesn't visibly out itself on-chain.
+ *
+ * NO FEE MECHANISM WIRED TO THIS YET. UniSat's documented
+ * create_bid/create_bid_prepare flow (unisat-ordinals-trade.ts) has no
+ * publicly documented affiliate/referral field the way Magic Eden's
+ * buyerReferral does -- confirmed by checking their real dev docs, not
+ * assumed absent. Until either UniSat exposes one or a Marketplank-native
+ * Bitcoin PSBT listing engine is built (see
+ * bitcoin-utxo-safety.ts's own header for why that's the recommended
+ * path), this address has nowhere to actually receive a marketplace fee
+ * from -- it exists now so it's ready the moment either path ships,
+ * and so nothing points at a placeholder later.
+ */
+export const BITCOIN_FEE_RECIPIENT = "bc1pyd3ptdtpgq6l5wu0suxqt4lcqhhwclzfmkz6xyjuvyacqq03ra0sdwc3pm";
+
+/**
  * WETH on Robinhood Chain — the currency all offers/bids are denominated in.
  *
  * Seaport cannot pull native ETH from an offerer at fulfillment time, so a bid
