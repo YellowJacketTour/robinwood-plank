@@ -48,21 +48,59 @@ export default function ThemeAccentPicker() {
     if (saved) setTheme(saved);
   }, []);
 
-  // Auto-load per-wallet theme on connect -- flagged live 2026-08-19. Runs
-  // whenever the connected address changes (covers connect, disconnect,
-  // AND switching accounts in the wallet extension mid-session, since
-  // useWallet's address tracks the live provider state, not just the
-  // initial connect). A wallet with no saved theme of its own falls
-  // through to whatever's already showing (the generic/no-wallet
-  // fallback) rather than forcing default gold on every never-before-seen
-  // address.
+  // Auto-load per-wallet theme on connect -- flagged live 2026-08-19, then
+  // extended the same day to real cross-device/cross-browser sync
+  // ("stays their last wallet connected style for next wallet connect
+  // session any device any browser?"). Runs whenever the connected address
+  // changes (covers connect, disconnect, AND switching accounts mid-
+  // session, since useWallet's address tracks the live provider state).
+  //
+  // Two-step, server-authoritative: apply the local per-address cache
+  // FIRST (instant, no flash, works offline) if one exists, then fetch the
+  // server's copy -- migration 013_wallet_theme_prefs.sql -- which is the
+  // real cross-device source of truth and wins if it differs (e.g. this is
+  // a browser that has never seen this wallet before, or the wallet's
+  // theme was changed from a different device). If the server has nothing
+  // yet but this browser DOES have a local pick for this address, push it
+  // up so it starts syncing from here on -- a one-time migration of
+  // whatever was already chosen locally, not a silent overwrite of a real
+  // server value.
   useEffect(() => {
     if (!isConnected || !address) return;
-    const perAddress = loadSavedAccentForAddress(address);
-    if (perAddress) {
-      setTheme(perAddress);
-      applyAccentTheme(perAddress);
+    let cancelled = false;
+
+    const localTheme = loadSavedAccentForAddress(address);
+    if (localTheme) {
+      setTheme(localTheme);
+      applyAccentTheme(localTheme);
     }
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/wallet-theme?wallet=${encodeURIComponent(address)}`);
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { theme?: AccentTheme | null };
+        if (cancelled) return;
+        if (data.theme) {
+          setTheme(data.theme);
+          applyAccentTheme(data.theme);
+          saveAccentForAddress(address, data.theme);
+        } else if (localTheme) {
+          void fetch("/api/wallet-theme", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet: address, theme: localTheme }),
+          });
+        }
+      } catch {
+        // Offline/unreachable -- the local per-address cache applied above
+        // already covers this session; sync just doesn't happen this time.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [address, isConnected]);
 
   useEffect(() => {
@@ -86,12 +124,22 @@ export default function ThemeAccentPicker() {
     applyAccentTheme(next);
     // Always update the generic fallback (what the bootstrap script applies
     // before any wallet state is known) -- AND, if a wallet is connected,
-    // also save it against that specific address so reconnecting THAT
-    // wallet later (even on a different device/browser profile that shares
-    // no localStorage, once synced, or simply next visit) restores it
-    // instead of whatever the device's generic fallback happens to be.
+    // the local per-address cache (instant re-apply next time this same
+    // browser sees this wallet, even offline) PLUS the server record
+    // (migration 013) so a DIFFERENT browser/device connecting the same
+    // wallet picks this up too. The server write is fire-and-forget: the
+    // UI already reflects the change instantly via applyAccentTheme above,
+    // and a failed sync just means this pick stays local-only until the
+    // next successful one -- never blocks or reverts what's on screen.
     saveAccent(next);
-    if (isConnected && address) saveAccentForAddress(address, next);
+    if (isConnected && address) {
+      saveAccentForAddress(address, next);
+      void fetch("/api/wallet-theme", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: address, theme: next }),
+      });
+    }
   };
 
   return (
