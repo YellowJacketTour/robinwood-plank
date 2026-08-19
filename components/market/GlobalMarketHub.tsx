@@ -859,32 +859,56 @@ export default function GlobalMarketHub() {
           </div>
 
           {/*
-           * Chain pills, real logo + full name -- the primary way to narrow
-           * this table to one or more chains. Same chainFilter state the
-           * sidebar checkboxes and the full grid below already use, so
-           * picking a chain here also narrows everything else on the page
-           * (one filter concept, not two). Wraps naturally on mobile
-           * instead of hiding chains off-screen in a scroll strip.
+           * Chain badges -- the primary way to narrow this table to one or
+           * more chains. Same chainFilter state the sidebar checkboxes and
+           * the full grid below already use (one filter concept, not two).
+           * Deliberately NOT a soft rounded pill: flagged live 2026-08-20
+           * ("sexier, more intentional and avante garde than the trenches
+           * simple setup") -- asymmetric clipped corner (one cut edge, not
+           * four rounded ones), a full-bleed top accent bar in the chain's
+           * own real brand color (chainBrandColor, same source ChainIcon
+           * already uses -- never a second, invented palette), and an
+           * active state that FLIPS to a solid color block (dark text on
+           * the chain's own hue) rather than a translucent tint, so
+           * selection reads as a committed choice, not a hover ghost. The
+           * count sits in its own monospace corner chip like a ticket
+           * stub number, not inline text.
            */}
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-2">
             {chains.map(([slug, count]) => {
               const active = chainFilter.has(slug);
+              const brand = chainBrandColor(slug);
               return (
                 <button
                   key={slug}
                   type="button"
                   onClick={() => toggleChain(slug)}
                   aria-pressed={active}
-                  className="flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-bold transition-all duration-150 hover:-translate-y-0.5 active:translate-y-0"
-                  style={
-                    active
-                      ? { borderColor: chainBrandColor(slug), backgroundColor: `${chainBrandColor(slug)}22`, color: chainBrandColor(slug) }
-                      : { borderColor: "var(--color-line)" }
-                  }
+                  className="group relative flex min-h-10 items-center gap-2 border px-3.5 pl-4 text-xs font-black uppercase tracking-wide transition-all duration-150 hover:-translate-y-0.5 active:translate-y-0"
+                  style={{
+                    clipPath: "polygon(0 0, 100% 0, 100% 100%, 10px 100%, 0 calc(100% - 10px))",
+                    borderColor: active ? brand : "var(--color-line)",
+                    backgroundColor: active ? brand : "transparent",
+                    color: active ? "#0c0906" : "var(--color-foreground)",
+                  }}
                 >
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-x-0 top-0 h-[3px] transition-opacity"
+                    style={{ backgroundColor: brand, opacity: active ? 0 : 0.85 }}
+                  />
                   <ChainIcon chainSlug={slug} size={15} className="shrink-0" />
-                  <span className={`whitespace-nowrap ${active ? "" : "text-foreground/70"}`}>{chainDisplayName(slug)}</span>
-                  <span className="shrink-0 whitespace-nowrap text-foreground/40">{count}</span>
+                  <span className={`whitespace-nowrap ${active ? "" : "text-foreground/80"}`}>{chainDisplayName(slug)}</span>
+                  <span
+                    className="shrink-0 whitespace-nowrap rounded-sm px-1 font-mono text-[0.65rem] font-bold"
+                    style={{
+                      backgroundColor: active ? "#0c090633" : "var(--color-panel-strong)",
+                      color: active ? "#0c0906" : "var(--color-foreground)",
+                      opacity: active ? 0.85 : 0.55,
+                    }}
+                  >
+                    {count}
+                  </span>
                 </button>
               );
             })}
