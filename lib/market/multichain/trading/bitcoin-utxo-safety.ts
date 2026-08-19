@@ -56,15 +56,44 @@
  * over-cautious false exclusion costs nothing but a slightly smaller
  * spendable set; a false inclusion could burn a real, valuable asset. There
  * is no "assume safe on error" branch anywhere in this module.
+ *
+ * NETWORK-AWARE BASE URL, LIVE-VERIFIED 2026-08-19 -- ONE REAL DOCS BUG
+ * FOUND ALONG THE WAY
+ * ---------------------------------------------------------------------------
+ * UniSat's own docs (docs.unisat.io/developer-support/open-api-documentation)
+ * state the testnet base is `open-api-testnet.unisat.io` -- confirmed LIVE
+ * that this is wrong for a Testnet4-scoped key: it returned
+ * `{"code":-2003,"msg":"quota unavailable"}` even with a real Bearer token,
+ * and separately responds successfully with NO auth at all serving
+ * Testnet3 data (chain height ~5.12M, a different, older network).
+ * The real, working Testnet4 base -- confirmed live, `{"code":0,...,
+ * "chain":"test","blocks":149163}` matching Testnet4's actual height, and
+ * DIFFERENT results with vs. without the Bearer key -- is
+ * `open-api-testnet4.unisat.io`, found via the UniSat Developer Center's
+ * own dashboard (Bitcoin > Testnet4), not their docs prose.
+ *
+ * Reads the SAME env var native-bitcoin-listing.ts's own bitcoinNetwork()
+ * does (NATIVE_BITCOIN_MAINNET_ENABLED), duplicated locally rather than
+ * imported from there -- that module imports filterProvenSafeUtxos FROM
+ * this one, so importing bitcoinNetwork back would create a circular
+ * module dependency. A few lines of duplication is the safer trade
+ * against an ESM circular-import load-order bug.
  */
+function isMainnetActive(): boolean {
+  return process.env.NATIVE_BITCOIN_MAINNET_ENABLED === "true";
+}
 
-const INDEXER_BASE = "https://open-api.unisat.io";
+function indexerBase(): string {
+  return isMainnetActive() ? "https://open-api.unisat.io" : "https://open-api-testnet4.unisat.io";
+}
 
 function requireApiKey(): string {
-  const key = process.env.UNISAT_API_KEY;
+  const isMainnet = isMainnetActive();
+  const key = isMainnet ? process.env.UNISAT_API_KEY : (process.env.UNISAT_TESTNET_API_KEY ?? process.env.UNISAT_API_KEY);
   if (!key) {
+    const envVar = isMainnet ? "UNISAT_API_KEY" : "UNISAT_TESTNET_API_KEY";
     throw new Error(
-      "bitcoin-utxo-safety: UNISAT_API_KEY is not configured -- UniSat's Indexer API requires a real Bearer token. Sign up at docs.unisat.io/developer-support/how-to-acquire-a-unisat-api-key before this path can be used."
+      `bitcoin-utxo-safety: ${envVar} is not configured -- UniSat's Indexer API requires a real Bearer token, and mainnet/testnet4 keys are separate (see the UniSat Developer Center dashboard's own Bitcoin > Mainnet/Testnet4 split). Sign up at docs.unisat.io/developer-support/how-to-acquire-a-unisat-api-key before this path can be used.`
     );
   }
   return key;
@@ -72,7 +101,7 @@ function requireApiKey(): string {
 
 async function indexerGet<T>(path: string): Promise<T> {
   const key = requireApiKey();
-  const res = await fetch(`${INDEXER_BASE}${path}`, {
+  const res = await fetch(`${indexerBase()}${path}`, {
     headers: { accept: "application/json", authorization: `Bearer ${key}` },
   });
   if (!res.ok) {
