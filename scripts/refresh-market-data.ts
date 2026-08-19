@@ -78,6 +78,7 @@ const explicit = [
   "--discover-evm",
   "--discover-hypersync",
   "--discover-hypersync-backfill",
+  "--discover-bitcoin-collections",
   "--discover-robinhood",
   "--discover-robinhood-opensea",
   "--discover-opensea-bulk",
@@ -100,8 +101,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -471,6 +472,22 @@ async function main(): Promise<void> {
       }
     }
     return parts.join("; ");
+  });
+
+  // Exhaustive Bitcoin Ordinals collection discovery -- see
+  // unisat-collection-list-scan.ts's own header for why this is the real
+  // answer (UniSat's own complete collection registry, ~2,625 real
+  // collections total, not the 500M+-event parent-child provenance walk
+  // that would otherwise be needed on a chain with no ERC-721-style
+  // contract concept). Bounded per tick (maxPages) same as every other
+  // discovery step; resumable via its own cursor, reports done: true once
+  // the real, reported total has been fully walked.
+  await step("discover-bitcoin-collections", async () => {
+    const { runUnisatCollectionListScan } = await import("../lib/market/multichain/discovery/unisat-collection-list-scan");
+    const r = await runUnisatCollectionListScan({ maxPages: full ? 30 : 10 });
+    return r.error
+      ? `ERR(${r.error.slice(0, 60)})`
+      : `start ${r.start}/${r.total}, ${r.pagesWalked} pages, +${r.registered} new (${r.skippedHiddenOrEmpty} hidden/empty)${r.done ? " — DONE, full catalog walked" : ""}`;
   });
 
   // "Stage B" for the HOME chain itself -- see robinhood-chain-scan.ts's
