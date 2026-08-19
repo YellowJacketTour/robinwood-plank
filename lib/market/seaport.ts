@@ -1,6 +1,6 @@
 import { Seaport } from "@opensea/seaport-js";
 import { ItemType } from "@opensea/seaport-js/lib/constants";
-import type { Fee, InputCriteria } from "@opensea/seaport-js/lib/types";
+import type { Fee, InputCriteria, TipInputItem } from "@opensea/seaport-js/lib/types";
 import { BrowserProvider, Interface } from "ethers";
 import {
   CHAIN,
@@ -858,7 +858,22 @@ export async function fulfillOrder(
    * obtain it from assertAcceptableTraitOffer — never construct it ad hoc.
    */
   considerationCriteria?: InputCriteria[],
-  chain?: SeaportChain
+  chain?: SeaportChain,
+  /**
+   * Seaport's own native fulfiller-side fee mechanism -- an ADDITIONAL
+   * consideration item the FULFILLER (not the order's signer) supplies at
+   * fulfillment time, verified and paid out atomically by Seaport itself
+   * (contract-level `additionalRecipients` on fulfillBasicOrder, confirmed
+   * live against the real ABI this session -- not an SDK convenience with
+   * no protocol backing). ONLY ever passed by foreign-fulfill.ts's
+   * third-party-order buy/sweep paths -- NEVER by this app's own native
+   * listing/offer/bundle/swap fulfillment, which already has its fee
+   * baked into the order's own signed consideration and would double-
+   * charge if a tip were added on top. Omitted (undefined) is the correct,
+   * safe default for every native-order caller; do not add a default tip
+   * here.
+   */
+  tips?: TipInputItem[]
 ) {
   const approvalSpoof = await computeApprovalSpoof(order, accountAddress, considerationCriteria);
   const seaport = await getSeaport(approvalSpoof ?? undefined, chain);
@@ -866,6 +881,7 @@ export async function fulfillOrder(
     order,
     accountAddress,
     ...(considerationCriteria ? { considerationCriteria } : {}),
+    ...(tips && tips.length > 0 ? { tips } : {}),
     // ERC-721: single-token approve, not setApprovalForAll; ERC-20: bounded
     // allowance, not 2^256-1.
     exactApproval: true,
@@ -878,6 +894,43 @@ export async function fulfillOrder(
     return executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress, chain, contractAddresses);
   }
   return executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress);
+}
+
+/**
+ * Fulfills MULTIPLE independent orders in one transaction, each with its
+ * own optional tip -- the batch counterpart to fulfillOrder, built for
+ * foreign-fulfill.ts's sweep functions (single-collection and
+ * cross-collection). Reuses seaport-js's own fulfillOrders (the SAME
+ * fulfillOrderDetails[].tips mechanism fulfillOrder uses for a single
+ * order, confirmed live against the real ABI, just per-order here) rather
+ * than the previous MarketplankForeignFeeRouter.sweepBuy path, which
+ * never had a deployment to call.
+ */
+export async function fulfillOrdersBatch(
+  orders: { order: FulfillableOrder; tips?: TipInputItem[] }[],
+  accountAddress: string,
+  chain?: SeaportChain
+): Promise<{ txHashes: string[] }> {
+  if (orders.length === 0) throw new Error("fulfillOrdersBatch: at least one order is required.");
+  const seaport = await getSeaport(undefined, chain);
+  const { actions } = await seaport.fulfillOrders({
+    fulfillOrderDetails: orders.map((o) => ({
+      order: o.order,
+      ...(o.tips && o.tips.length > 0 ? { tips: o.tips } : {}),
+    })),
+    accountAddress,
+  });
+
+  if (chain) {
+    const contractAddresses = [...new Set(orders.flatMap((o) => erc721ContractsOf(o.order)))];
+    if (contractAddresses.length === 0) {
+      throw new Error("fulfillOrdersBatch: could not determine any order's collection contract(s) for the foreign-chain allowlist.");
+    }
+    const result = await executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress, chain, contractAddresses);
+    return { txHashes: result.txHashes };
+  }
+  const result = await executeActionsViaWallet(actions as unknown as SeaportAction[], accountAddress);
+  return { txHashes: result.txHashes };
 }
 
 /**

@@ -444,6 +444,38 @@ export const MARKETPLANK_SWAP_FEE_BPS = 180; // 1.8%
 export const MARKETPLANK_SWAP_FLAT_FEE_WEI = "500000000000000"; // 0.0005 ETH
 
 /**
+ * The fee on fulfilling a THIRD-PARTY (OpenSea) listing on a foreign EVM
+ * chain -- via Seaport's own native fulfiller-side "tip" mechanism
+ * (additionalRecipients on fulfillBasicOrder, confirmed live against the
+ * real contract ABI, deployed identically on every chain this app
+ * trades on -- no MarketplankForeignFeeRouter deployment needed at all).
+ *
+ * NON-OPTIONAL BY CONSTRUCTION, NOT BY POLICY
+ * ------------------------------------------------------------------
+ * This app's own frontend builds the ONE fulfillment transaction the
+ * wallet is asked to sign, and the tip is part of that same transaction's
+ * calldata -- there is no separate signature, no toggle, no alternate
+ * "skip the fee" path this UI exposes. Seaport's contract itself verifies
+ * msg.value covers the listing price PLUS every additional recipient or
+ * the whole call reverts, so it is enforced atomically by the protocol,
+ * not merely requested. See lib/market/multichain/trading/foreign-fulfill.ts's
+ * buyForeignListingNow/sweepForeignListings for where this is applied --
+ * NEVER to this app's own native orders (those already carry their fee in
+ * the order's own signed consideration; adding a tip on top would double-
+ * charge).
+ *
+ * REPLACES THE UNDEPLOYED ROUTER, FIXING A REAL BROKEN FEATURE
+ * ------------------------------------------------------------------
+ * Before this, buyForeignListingNow/sweepForeignListings/
+ * sweepForeignListingsMultiCollection all called connectedRouter(), which
+ * THREW on every foreign chain (MarketplankForeignFeeRouter was never
+ * deployed) -- third-party listing purchases on any foreign EVM chain
+ * were completely non-functional, not merely fee-free. This fixes the
+ * feature and earns revenue on it, without deploying anything.
+ */
+export const MARKETPLANK_FOREIGN_FILL_TIP_BPS = 180; // 1.8%, matching this app's other native fee rates
+
+/**
  * Marketplank's dedicated treasury wallet — separate from SITE_FEE.recipient
  * (the Trade section's Uniswap integrator fee wallet). Every marketplace fee
  * and vault fee accrues here. Set 2026-07-27; keep this the single source of

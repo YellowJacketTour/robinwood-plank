@@ -1,7 +1,20 @@
 /**
  * Client-side wallet execution for foreign-chain trades -- the part
- * foreign-orders.ts (server-side order fetching) and
- * MarketplankForeignFeeRouter.sol (the contract) were both built for.
+ * foreign-orders.ts (server-side order fetching) was built for.
+ *
+ * BUY/SWEEP REWIRED OFF MarketplankForeignFeeRouter.sol, 2026-08-19
+ * ---------------------------------------------------------------------------
+ * buyForeignListingNow/sweepForeignListings/sweepForeignListingsMultiCollection
+ * used to call that router contract, which was never deployed on any
+ * chain -- every call threw (requireRouter's own error said so), meaning
+ * buying or sweeping a THIRD-PARTY (OpenSea) listing on any foreign EVM
+ * chain was completely non-functional. Fixed by fulfilling directly
+ * against Seaport's own canonical contract (already deployed everywhere)
+ * using its native fulfiller-side "tip" mechanism for the marketplace fee
+ * -- see MARKETPLANK_FOREIGN_FILL_TIP_BPS's header in lib/constants.ts.
+ * No contract deployment needed at all. The router contract source and
+ * its (still-null) per-chain addresses remain in foreign-chain-registry.ts
+ * for potential future use; nothing in this file depends on them anymore.
  *
  * DELIBERATELY CALLS OUR OWN API ROUTES, NEVER foreign-orders.ts DIRECTLY
  * ---------------------------------------------------------------------------
@@ -47,8 +60,11 @@
  * in the first place (see lib/market/types.ts's Listing.venue doc).
  */
 import { Contract, BrowserProvider } from "ethers";
-import { foreignChainByChainSlug, foreignFeeRouterAddress, foreignAcrossReceiverAddress, foreignDeBridgeExecutorAddress } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import type { TipInputItem } from "@opensea/seaport-js/lib/types";
+import { MARKET_FEE_RECIPIENT, MARKETPLANK_FOREIGN_FILL_TIP_BPS, NATIVE_TOKEN_ADDRESS } from "@/lib/constants";
+import { foreignChainByChainSlug, foreignAcrossReceiverAddress, foreignDeBridgeExecutorAddress } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { findStablecoin } from "@/lib/market/multichain/trading/stablecoins";
+import type { SeaportChain } from "@/lib/market/seaport";
 import { getEthereumProvider, ensureChain } from "@/lib/wallet";
 import { isSolanaChainSlug, isBitcoinChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import type { BatchSendStatus } from "@/lib/market/transfer";
@@ -112,51 +128,68 @@ async function fetchFloorListingSummaries(input: {
   return listings;
 }
 
-const ROUTER_ABI = [
-  "function feeBps() view returns (uint256)",
-  "function buyNow((( address offerer,address zone,(uint8 itemType,address token,uint256 identifierOrCriteria,uint256 startAmount,uint256 endAmount)[] offer,(uint8 itemType,address token,uint256 identifierOrCriteria,uint256 startAmount,uint256 endAmount,address recipient)[] consideration,uint8 orderType,uint256 startTime,uint256 endTime,bytes32 zoneHash,uint256 salt,bytes32 conduitKey,uint256 totalOriginalConsiderationItems) parameters,uint120 numerator,uint120 denominator,bytes signature,bytes extraData) order,(uint256 orderIndex,uint8 side,uint256 index,uint256 identifier,bytes32[] criteriaProof)[] criteriaResolvers,bytes32 fulfillerConduitKey,uint256 orderPriceWei) payable",
-  "function sweepBuy((( address offerer,address zone,(uint8 itemType,address token,uint256 identifierOrCriteria,uint256 startAmount,uint256 endAmount)[] offer,(uint8 itemType,address token,uint256 identifierOrCriteria,uint256 startAmount,uint256 endAmount,address recipient)[] consideration,uint8 orderType,uint256 startTime,uint256 endTime,bytes32 zoneHash,uint256 salt,bytes32 conduitKey,uint256 totalOriginalConsiderationItems) parameters,uint120 numerator,uint120 denominator,bytes signature,bytes extraData)[] orders,(uint256 orderIndex,uint8 side,uint256 index,uint256 identifier,bytes32[] criteriaProof)[][] criteriaResolvers,bytes32 fulfillerConduitKey,uint256[] orderPricesWei) payable returns (bool[] filled)",
-];
-
-const ZERO_HASH = "0x" + "0".repeat(64);
-
 /** Requires the FRESH order's own zoneHash, not stray/padded copies -- fetchListingFulfillmentData already normalizes this once, so no caller needs to. */
 function considerationTotal(order: ForeignSeaportOrder): bigint {
   return order.parameters.consideration.reduce((sum, item) => sum + BigInt(item.startAmount), BigInt(0));
 }
 
-function requireRouter(chainSlug: string): { chainId: number; routerAddress: string } {
+/**
+ * Connects the wallet to the target foreign chain and returns its address
+ * -- no router contract involved. Replaces connectedRouter (removed
+ * 2026-08-19, see buyForeignListingNow's own header on why): every real
+ * caller now fulfills directly against Seaport itself, using its native
+ * fulfiller-side "tip" mechanism for the marketplace fee instead of a
+ * router contract that was never deployed.
+ */
+async function connectedForeignAccount(chainSlug: string): Promise<{ chainId: number; buyerAddress: string }> {
   const chain = foreignChainByChainSlug(chainSlug);
   if (!chain) throw new Error(`foreign-fulfill: "${chainSlug}" is not a supported foreign chain.`);
-  const routerAddress = foreignFeeRouterAddress(chainSlug);
-  if (!routerAddress) {
-    throw new Error(
-      `foreign-fulfill: MarketplankForeignFeeRouter is not yet deployed on ${chain.chainSlug} -- ` +
-        "this chain's cross-chain Buy/Sweep is intentionally unavailable until that happens."
-    );
-  }
-  return { chainId: chain.chainId, routerAddress };
-}
-
-async function connectedRouter(chainSlug: string): Promise<{ router: Contract; buyerAddress: string; feeBps: bigint }> {
-  const { chainId, routerAddress } = requireRouter(chainSlug);
   const injected = getEthereumProvider();
   if (!injected) throw new Error("No wallet found.");
 
   await ensureChain({
-    chainId,
+    chainId: chain.chainId,
     name: chainSlug,
-    nativeCurrencySymbol: "ETH",
+    nativeCurrencySymbol: chain.nativeCurrencySymbol,
     rpcUrl: `https://${chainSlug}.g.alchemy.com/v2/demo`,
     blockExplorerUrl: "",
   });
 
-  const browserProvider = new BrowserProvider(injected, { chainId, name: chainSlug });
+  const browserProvider = new BrowserProvider(injected, { chainId: chain.chainId, name: chainSlug });
   const signer = await browserProvider.getSigner();
   const buyerAddress = await signer.getAddress();
-  const router = new Contract(routerAddress, ROUTER_ABI, signer);
-  const feeBps: bigint = await router.feeBps();
-  return { router, buyerAddress, feeBps };
+  return { chainId: chain.chainId, buyerAddress };
+}
+
+/** Builds the SeaportChain descriptor every direct fulfillOrder/fulfillOrders call needs -- same fields native-fulfill.ts's seaportChainFor already assembles for the native-order path, duplicated locally rather than imported to keep this client module's dependency surface unchanged (see this file's own header on why it never imports server-touching modules). */
+async function seaportChainFor(chainSlug: string): Promise<SeaportChain> {
+  const chain = foreignChainByChainSlug(chainSlug);
+  if (!chain) throw new Error(`foreign-fulfill: "${chainSlug}" is not a supported foreign chain.`);
+  const { chainDisplayName, foreignRpcUrls, FOREIGN_SEAPORT_ADDRESS } = await import(
+    "@/lib/market/multichain/trading/foreign-chain-registry"
+  );
+  return {
+    chainSlug,
+    chainId: chain.chainId,
+    chainName: chainDisplayName(chainSlug),
+    nativeCurrencySymbol: chain.nativeCurrencySymbol,
+    rpcUrl: foreignRpcUrls(chainSlug)[0],
+    blockExplorerUrl: chain.blockExplorerUrl,
+    seaportAddress: FOREIGN_SEAPORT_ADDRESS,
+  };
+}
+
+/**
+ * Seaport's own native fulfiller-side tip -- see MARKETPLANK_FOREIGN_FILL_TIP_BPS's
+ * own header (lib/constants.ts) for the full "why this is non-optional,
+ * why it needed no contract deployment, and what it fixes" reasoning.
+ * Zero price -> zero tip (never a negative/NaN amount).
+ */
+function foreignFillTip(priceWei: bigint): TipInputItem[] {
+  if (priceWei <= BigInt(0)) return [];
+  const tipWei = (priceWei * BigInt(MARKETPLANK_FOREIGN_FILL_TIP_BPS)) / BigInt(10_000);
+  if (tipWei <= BigInt(0)) return [];
+  return [{ token: NATIVE_TOKEN_ADDRESS, amount: tipWei.toString(), recipient: MARKET_FEE_RECIPIENT }];
 }
 
 export type ForeignBuyResult = { txHash: string };
@@ -627,9 +660,8 @@ export async function buyForeignListingNow(input: {
   }
 
   // ADDITIVE: Solana (Magic Eden) and Bitcoin Ordinals (UniSat) branches --
-  // neither has a Seaport order or a MarketplankForeignFeeRouter deployment
-  // (see connectedRouter below, which is EVM-only), so both dispatch to
-  // their own per-venue buy function instead. `orderHash` carries whatever
+  // neither has a Seaport order at all, so both dispatch to their own
+  // per-venue buy function instead. `orderHash` carries whatever
   // opaque per-listing identifier the "solana"/"bitcoin" listings/route.ts
   // branch put in Listing.id/foreignOrderHash: tokenMint for Solana,
   // inscriptionId for Bitcoin (see listings/route.ts's own comment on this).
@@ -656,7 +688,17 @@ export async function buyForeignListingNow(input: {
     return buyBitcoinListingNow({ auctionId: input.orderHash, priceSats: sats });
   }
 
-  const { router, buyerAddress, feeBps } = await connectedRouter(input.chainSlug);
+  // REAL FIX, 2026-08-19: this used to call connectedRouter() ->
+  // MarketplankForeignFeeRouter, which was never deployed on any chain --
+  // buying a third-party listing on any foreign EVM chain was completely
+  // non-functional, not merely fee-free (requireRouter always threw). Now
+  // fulfills directly against Seaport's own canonical contract (already
+  // deployed everywhere, no deployment needed), using its native
+  // fulfiller-side "tip" mechanism for the marketplace fee -- see
+  // MARKETPLANK_FOREIGN_FILL_TIP_BPS's own header (lib/constants.ts) for
+  // why this is enforced atomically, non-optionally, in the exact same
+  // transaction as the purchase itself.
+  const { buyerAddress } = await connectedForeignAccount(input.chainSlug);
 
   const order = await fetchFulfillmentData({
     chainSlug: input.chainSlug,
@@ -668,18 +710,18 @@ export async function buyForeignListingNow(input: {
   }
 
   const price = considerationTotal(order);
-  const fee = (price * feeBps) / BigInt(10_000);
-  const value = price + fee;
-
-  const tx = await router.buyNow(
-    { parameters: order.parameters, numerator: 1, denominator: 1, signature: order.signature, extraData: "0x" },
-    [],
-    ZERO_HASH,
-    price,
-    { value }
+  const { fulfillOrder } = await import("@/lib/market/seaport");
+  const chain = await seaportChainFor(input.chainSlug);
+  const result = await fulfillOrder(
+    order as unknown as Parameters<typeof fulfillOrder>[0],
+    buyerAddress,
+    undefined,
+    chain,
+    foreignFillTip(price)
   );
-  await tx.wait();
-  return { txHash: tx.hash };
+  const txHash = result.txHashes[result.txHashes.length - 1];
+  if (!txHash) throw new Error("Purchase did not produce a transaction hash.");
+  return { txHash };
 }
 
 export type ForeignSweepResult = { txHash: string; attempted: number };
@@ -698,7 +740,10 @@ export async function sweepForeignListings(input: {
   /** AND-combined, same semantics as fetchForeignTraitFilteredListings -- "sweep the N cheapest listings matching every clause." */
   traits?: ForeignTraitClause[];
 }): Promise<ForeignSweepResult> {
-  const { router, buyerAddress, feeBps } = await connectedRouter(input.chainSlug);
+  // Same real fix as buyForeignListingNow: router.sweepBuy always threw
+  // (undeployed router). Now batch-fulfills directly against Seaport,
+  // each order carrying its own tip -- see fulfillOrdersBatch.
+  const { buyerAddress } = await connectedForeignAccount(input.chainSlug);
 
   const summaries = await fetchFloorListingSummaries({
     chainSlug: input.chainSlug,
@@ -719,27 +764,26 @@ export async function sweepForeignListings(input: {
       if (fresh.signature && fresh.signature !== "0x") freshOrders.push(fresh);
     } catch {
       // One listing failing to re-fetch (already sold, expired) just drops
-      // it from the batch -- sweepBuy's own per-order try/catch handles the
-      // remaining race window between fetch and mined block.
+      // it from the batch -- the remaining race window between fetch and
+      // mined block is Seaport's own per-order fulfillment concern, not
+      // this batching layer's.
     }
   }
   if (freshOrders.length === 0) throw new Error("None of the current listings could be freshly re-signed -- try again.");
 
-  const prices = freshOrders.map(considerationTotal);
-  const totalValue = prices.reduce(
-    (sum, price) => sum + price + (price * feeBps) / BigInt(10_000),
-    BigInt(0)
+  const { fulfillOrdersBatch } = await import("@/lib/market/seaport");
+  const chain = await seaportChainFor(input.chainSlug);
+  const result = await fulfillOrdersBatch(
+    freshOrders.map((o) => ({
+      order: o as unknown as Parameters<typeof fulfillOrdersBatch>[0][number]["order"],
+      tips: foreignFillTip(considerationTotal(o)),
+    })),
+    buyerAddress,
+    chain
   );
-
-  const tx = await router.sweepBuy(
-    freshOrders.map((o) => ({ parameters: o.parameters, numerator: 1, denominator: 1, signature: o.signature, extraData: "0x" })),
-    freshOrders.map(() => []),
-    ZERO_HASH,
-    prices,
-    { value: totalValue }
-  );
-  await tx.wait();
-  return { txHash: tx.hash, attempted: freshOrders.length };
+  const txHash = result.txHashes[result.txHashes.length - 1];
+  if (!txHash) throw new Error("Sweep did not produce a transaction hash.");
+  return { txHash, attempted: freshOrders.length };
 }
 
 export type ForeignMultiCollectionSweepResult = {
@@ -756,36 +800,34 @@ export type ForeignMultiCollectionSweepResult = {
  * adoptable ("multi-collection sweep-in-one-tx... mechanically
  * straightforward given Seaport batch-fill is already built").
  *
- * VERIFIED, NOT ASSUMED: MarketplankForeignFeeRouter.sweepBuy's own
- * on-chain logic (contracts/MarketplankForeignFeeRouter.sol) has NO
- * same-collection assumption anywhere -- it loops over an array of
- * AdvancedOrder and calls _attemptSweepItem per order, each order
- * carrying its own token address internally via Seaport's own order
- * parameters. Confirmed by reading the actual contract before writing
- * this, not inferred from sweepForeignListings' single-collection shape
- * (which was an ARTIFICIAL TypeScript-orchestration-layer limitation,
- * not a real on-chain constraint) -- see this function's header for why
- * true CROSS-CHAIN sweep in one tx is NOT possible (a router contract is
- * deployed per chain; this is a real blockchain constraint, not a gap):
- * only same-chain, cross-COLLECTION sweep is achievable in one
- * transaction, which is exactly what Blur's own sweep does too.
+ * REWIRED 2026-08-19 OFF THE UNDEPLOYED ROUTER: previously called
+ * MarketplankForeignFeeRouter.sweepBuy, which had no same-collection
+ * assumption (each AdvancedOrder carries its own token internally) but
+ * was never actually deployed anywhere, so this always threw. Now calls
+ * fulfillOrdersBatch (lib/market/seaport.ts) directly against Seaport
+ * itself -- same "each order carries its own collection, no
+ * cross-collection constraint" property, since that's inherent to
+ * Seaport's own batch fulfillment, not something the router added. True
+ * CROSS-CHAIN sweep in one tx is still not possible (a real blockchain
+ * constraint -- Seaport itself only exists per-chain): only same-chain,
+ * cross-collection sweep is achievable in one transaction, which is
+ * exactly what Blur's own sweep does too.
  */
 export async function sweepForeignListingsMultiCollection(input: {
   chainSlug: string;
   specs: Array<{ collectionSlug: string; count: number; traits?: ForeignTraitClause[] }>;
 }): Promise<ForeignMultiCollectionSweepResult> {
   if (input.specs.length === 0) throw new Error("sweepForeignListingsMultiCollection: at least one collection is required.");
-  // MAX_SWEEP_ITEMS in MarketplankForeignFeeRouter.sol -- the contract
-  // itself enforces this and reverts with SweepTooLarge, but checking
-  // client-side avoids sending a transaction (and burning gas on the
-  // revert) that was always going to fail.
+  // A real, still-relevant client-side ceiling -- keeps a single sweep
+  // request bounded regardless of fulfillment mechanism.
   const MAX_SWEEP_ITEMS = 50;
   const requestedTotal = input.specs.reduce((sum, s) => sum + s.count, 0);
   if (requestedTotal > MAX_SWEEP_ITEMS) {
     throw new Error(`Requested ${requestedTotal} items across ${input.specs.length} collections, but a single sweep is capped at ${MAX_SWEEP_ITEMS} items total.`);
   }
 
-  const { router, buyerAddress, feeBps } = await connectedRouter(input.chainSlug);
+  // Same real fix as buyForeignListingNow/sweepForeignListings.
+  const { buyerAddress } = await connectedForeignAccount(input.chainSlug);
 
   // Fetch each collection's candidate listings in parallel -- independent
   // reads, no shared state, same pattern the rest of this codebase uses
@@ -827,18 +869,19 @@ export async function sweepForeignListingsMultiCollection(input: {
   }
   if (freshOrders.length === 0) throw new Error("None of the current listings across these collections could be freshly re-signed -- try again.");
 
-  const prices = freshOrders.map(considerationTotal);
-  const totalValue = prices.reduce((sum, price) => sum + price + (price * feeBps) / BigInt(10_000), BigInt(0));
-
-  const tx = await router.sweepBuy(
-    freshOrders.map((o) => ({ parameters: o.parameters, numerator: 1, denominator: 1, signature: o.signature, extraData: "0x" })),
-    freshOrders.map(() => []),
-    ZERO_HASH,
-    prices,
-    { value: totalValue }
+  const { fulfillOrdersBatch } = await import("@/lib/market/seaport");
+  const chain = await seaportChainFor(input.chainSlug);
+  const result = await fulfillOrdersBatch(
+    freshOrders.map((o) => ({
+      order: o as unknown as Parameters<typeof fulfillOrdersBatch>[0][number]["order"],
+      tips: foreignFillTip(considerationTotal(o)),
+    })),
+    buyerAddress,
+    chain
   );
-  await tx.wait();
-  return { txHash: tx.hash, attempted: freshOrders.length, perCollection: perCollectionFilled };
+  const txHash = result.txHashes[result.txHashes.length - 1];
+  if (!txHash) throw new Error("Sweep did not produce a transaction hash.");
+  return { txHash, attempted: freshOrders.length, perCollection: perCollectionFilled };
 }
 
 const SPOKE_POOL_ABI = [
