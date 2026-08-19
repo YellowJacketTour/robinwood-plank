@@ -13,8 +13,21 @@ import { replaceForeignRarity, getForeignTraitIndex, type ForeignTraitIndex } fr
 import { listTrackedCollections } from "@/lib/market/multichain/store";
 
 const PAGE_SIZE = 200;
-/** Hard ceiling so a misconfigured run can't paginate forever against a huge or misidentified contract. */
-const MAX_PAGES = 100;
+/**
+ * Hard ceiling so a misconfigured run can't paginate forever against a
+ * huge or misidentified contract.
+ *
+ * RAISED 2026-08-19 from 100 (20,000 tokens) to 2,500 (500,000 tokens).
+ * The old ceiling silently truncated every collection larger than 20k --
+ * which is not an edge case: Art Blocks, ENS names, Pudgy-scale and most
+ * open-edition/1155 collections all exceed it, so their rarity and trait
+ * index were built from a partial token set and every rank derived from
+ * it was wrong for the tail. It was at least reported honestly (the
+ * `partial` flag), but "reported partial" is still partial, and the goal
+ * here is full coverage. 500k comfortably covers every real NFT
+ * collection while still bounding a runaway/misidentified contract.
+ */
+const MAX_PAGES = 2_500;
 
 export type IndexRunResult = {
   chainSlug: string;
