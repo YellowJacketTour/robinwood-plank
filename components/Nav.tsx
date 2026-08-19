@@ -11,6 +11,7 @@ import {
   WoodAmpMenuRow,
   WoodAmpRailChip,
 } from "@/components/woodamp/WoodAmpChip";
+import ThemeAccentPicker from "@/components/ThemeAccentPicker";
 
 function navHref(href: string, pathname: string) {
   if (href.startsWith("#") && pathname !== "/") {
@@ -342,6 +343,7 @@ export default function Nav() {
             </ul>
 
             <WoodAmpRailChip />
+            <ThemeAccentPicker />
             <ConnectWalletAction />
           </div>
 
@@ -392,6 +394,7 @@ export default function Nav() {
             className="fixed inset-x-0 top-[58px] z-50 max-h-[calc(100dvh-58px)] overflow-y-auto border-y border-gold-500/25 bg-wood-950 px-4 pb-5 shadow-2xl lg:hidden"
           >
             <div className="mt-4 flex items-center justify-end gap-3">
+              <ThemeAccentPicker />
               <ConnectWalletAction onNavigate={() => closeMenu()} />
             </div>
             <WoodAmpMenuRow onOpen={() => closeMenu()} />
