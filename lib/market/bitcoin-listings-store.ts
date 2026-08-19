@@ -58,6 +58,18 @@ function rowToListing(row: ListingRow): NativeBitcoinListing {
   };
 }
 
+/**
+ * Returns false (not an error) if a listing for this exact id is already
+ * ACTIVE -- the caller should report a conflict rather than silently
+ * overwrite a live listing. The id is deterministic
+ * (`native-btc-${sellerAddress}-${utxoTxid}-${utxoVout}`), so a seller who
+ * cancels and re-lists the same inscription reuses the same id; the
+ * conditional ON CONFLICT lets that succeed (only when the prior row is
+ * NOT active) instead of hitting a hard primary-key violation, which is
+ * what a plain INSERT would do on every re-list (audit finding,
+ * 2026-08-19 -- this used to be a plain INSERT with no conflict handling
+ * at all).
+ */
 export async function putNativeBitcoinListing(input: {
   id: string;
   sellerAddress: string;
@@ -67,11 +79,21 @@ export async function putNativeBitcoinListing(input: {
   utxoValueSats: number;
   priceSats: number;
   sellerPsbtBase64: string;
-}): Promise<void> {
-  await postgresQuery(
+}): Promise<boolean> {
+  const result = await postgresQuery(
     `INSERT INTO market_native_bitcoin_listings
        (id, seller_address, inscription_id, utxo_txid, utxo_vout, utxo_value_sats, price_sats, seller_psbt_base64, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
+     ON CONFLICT (id) DO UPDATE SET
+       inscription_id = EXCLUDED.inscription_id,
+       utxo_value_sats = EXCLUDED.utxo_value_sats,
+       price_sats = EXCLUDED.price_sats,
+       seller_psbt_base64 = EXCLUDED.seller_psbt_base64,
+       status = 'active',
+       updated_at = NOW(),
+       sold_at = NULL,
+       sold_txid = NULL
+     WHERE market_native_bitcoin_listings.status != 'active'`,
     [
       input.id,
       input.sellerAddress,
@@ -83,6 +105,7 @@ export async function putNativeBitcoinListing(input: {
       input.sellerPsbtBase64,
     ]
   );
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function getActiveNativeBitcoinListings(limit = 200): Promise<NativeBitcoinListing[]> {

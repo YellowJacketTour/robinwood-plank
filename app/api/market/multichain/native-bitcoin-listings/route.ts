@@ -7,6 +7,24 @@
  * storing -- never trusts the client's claimed price/utxo, always re-derives
  * them from the PSBT itself. See 026_native_bitcoin_listings.sql and
  * native-bitcoin-listing.ts's own headers for the protocol this serves.
+ *
+ * REAL SIGNATURE VERIFICATION, NOT JUST "IS A FIELD PRESENT" (audit
+ * finding, 2026-08-19)
+ * ---------------------------------------------------------------------------
+ * A previous version of this route only checked that `tapKeySig` was
+ * non-empty -- never that it actually verified against the claimed
+ * witnessUtxo. A PSBT is just a container: anyone can hand-build one with
+ * a junk 64-byte signature, ANY input outpoint, and ANY output script.
+ * Since sellerAddress/utxoTxid/utxoVout are all derived from those
+ * attacker-chosen bytes, and the row id is deterministic
+ * (`native-btc-${sellerAddress}-${utxoTxid}-${utxoVout}`), an attacker
+ * could squat a victim's real inscription UTXO -- pre-registering that id
+ * and permanently blocking the genuine owner from ever listing it -- or
+ * flood the public book with fake listings for inscriptions they don't
+ * own. Fixed here with a real BIP-341 Schnorr signature check via
+ * bitcoinjs-lib's own `validateSignaturesOfInput`, plus an explicit
+ * sighash-type check (must be exactly SIGHASH_SINGLE|ANYONECANPAY -- the
+ * one shape this protocol's fulfillment side depends on).
  */
 import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
@@ -81,11 +99,29 @@ export async function POST(req: Request) {
       return publicJson({ error: "BAD_SHAPE", message: "Listing PSBT must have exactly one input and one output." }, 400);
     }
     const inputData = psbt.data.inputs[0];
-    if (!inputData.tapKeySig && !inputData.partialSig) {
-      return publicJson({ error: "UNSIGNED", message: "Listing PSBT's input is not signed." }, 400);
+    if (!inputData.tapKeySig) {
+      return publicJson({ error: "UNSIGNED", message: "Listing PSBT's input is not signed with a taproot key-path signature." }, 400);
     }
     if (!inputData.witnessUtxo) {
       return publicJson({ error: "BAD_SHAPE", message: "Listing PSBT is missing its witness UTXO." }, 400);
+    }
+    const requiredSighash = bitcoin.Transaction.SIGHASH_SINGLE | bitcoin.Transaction.SIGHASH_ANYONECANPAY;
+    if (inputData.sighashType !== requiredSighash) {
+      return publicJson(
+        { error: "BAD_SIGHASH", message: "Listing input must be signed with SIGHASH_SINGLE|ANYONECANPAY." },
+        400
+      );
+    }
+    let sigValid = false;
+    try {
+      sigValid = psbt.validateSignaturesOfInput(0, (pubkey, msghash, signature) =>
+        ecc.verifySchnorr(msghash, pubkey, signature)
+      );
+    } catch {
+      sigValid = false;
+    }
+    if (!sigValid) {
+      return publicJson({ error: "BAD_SIGNATURE", message: "Listing PSBT's signature does not verify against its own witness UTXO." }, 400);
     }
 
     const rawInput = psbt.txInputs[0];
@@ -118,7 +154,7 @@ export async function POST(req: Request) {
     }
 
     const id = `native-btc-${sellerAddress}-${utxoTxid}-${utxoVout}`;
-    await putNativeBitcoinListing({
+    const created = await putNativeBitcoinListing({
       id,
       sellerAddress,
       inscriptionId,
@@ -128,6 +164,9 @@ export async function POST(req: Request) {
       priceSats,
       sellerPsbtBase64,
     });
+    if (!created) {
+      return publicJson({ error: "ALREADY_ACTIVE", message: "This inscription already has an active listing." }, 409);
+    }
 
     return publicJson({
       listing: { id, sellerAddress, inscriptionId, utxoTxid, utxoVout, utxoValueSats, priceSats, status: "active" },

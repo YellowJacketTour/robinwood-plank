@@ -187,7 +187,13 @@ export function bitcoinNetwork(): bitcoin.networks.Network {
  * a fresh address, never derive it from the mainnet key" guidance as
  * BITCOIN_FEE_RECIPIENT itself).
  */
-function feeRecipientAddress(): string {
+/**
+ * Exported (audit finding, 2026-08-19) so the broadcast route can verify
+ * a submitted transaction actually pays the fee to the right address
+ * before relaying it -- see that route's own header on why this check is
+ * required, not optional.
+ */
+export function feeRecipientAddress(): string {
   if (bitcoinNetwork() === bitcoin.networks.bitcoin) {
     return BITCOIN_FEE_RECIPIENT;
   }

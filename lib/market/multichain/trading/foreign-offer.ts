@@ -71,7 +71,7 @@ async function connectedSeaport(chainSlug: string) {
 }
 
 /** Sequences seaport-js actions exactly like lib/market/seaport.ts's own executeActionsViaWallet, minus the market-tx allowlist (that's Robinhood-Chain-specific) -- WETH approval sends go through the wallet's normal path here. */
-async function executeActions(actions: SeaportAction[]): Promise<unknown | null> {
+async function executeActions(actions: SeaportAction[], signer: Awaited<ReturnType<typeof connectedSeaport>>["signer"]): Promise<unknown | null> {
   let order: unknown | null = null;
   for (const action of actions) {
     if (action.type === "create" && action.createOrder) {
@@ -85,6 +85,17 @@ async function executeActions(actions: SeaportAction[]): Promise<unknown | null>
     // machinery is Robinhood-Chain-specific) -- the wallet's own
     // simulation/confirmation UI is the safety net here, same as every
     // other raw signer.sendTransaction call in this multichain module.
+    //
+    // MUST ACTUALLY SEND AND CONFIRM THIS (bug fix, 2026-08-19): this loop
+    // previously built the approval transaction and discarded it without
+    // ever calling sendTransaction -- a first-time offerer (WETH allowance
+    // not yet granted to Seaport's conduit) would sign and submit a real
+    // offer that could never be fulfilled, with no error surfaced. Waiting
+    // for one confirmation before the next action matters here specifically
+    // because the very next action is "create" (the signature request),
+    // which must see the allowance already on-chain.
+    const sent = await signer.sendTransaction(tx);
+    await sent.wait(1);
   }
   return order;
 }
@@ -143,7 +154,7 @@ export async function buildForeignOffer(input: {
     throw new Error("Provide either a tokenId or a non-empty criteriaTokenIds set.");
   }
 
-  const { seaport } = await connectedSeaport(input.chainSlug);
+  const { seaport, signer } = await connectedSeaport(input.chainSlug);
   const endTime = Math.floor(new Date(input.expiresAt).getTime() / 1000).toString();
 
   // Marketplank's fee on this offer, via seaport-js's own `fees` param --
@@ -165,7 +176,7 @@ export async function buildForeignOffer(input: {
     /* exactApproval */ true
   );
 
-  const order = (await executeActions(actions as unknown as SeaportAction[])) as
+  const order = (await executeActions(actions as unknown as SeaportAction[], signer)) as
     | { parameters: unknown; signature: string }
     | null;
   if (!order) throw new Error("Offer was not signed.");
@@ -224,11 +235,11 @@ export async function acceptForeignOffer(input: {
   }
   const { parameters, signature } = (await fulfillRes.json()) as { parameters: unknown; signature: string };
 
-  const { seaport } = await connectedSeaport(input.chainSlug);
+  const { seaport, signer } = await connectedSeaport(input.chainSlug);
   const { actions } = await seaport.fulfillOrder({
     order: { parameters, signature } as Parameters<Seaport["fulfillOrder"]>[0]["order"],
     accountAddress: input.accountAddress,
     exactApproval: true,
   });
-  await executeActions(actions as unknown as SeaportAction[]);
+  await executeActions(actions as unknown as SeaportAction[], signer);
 }
