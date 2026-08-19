@@ -79,7 +79,7 @@ jobs:
   green-gate:
     # No deploy of any kind unless the operator has armed the gate.
     if: vars.V3_DEPLOY_ENABLED == 'true'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
@@ -96,7 +96,7 @@ jobs:
     if: >-
       vars.V3_DEPLOY_ENABLED == 'true' &&
       (inputs.network == 'robinhood-testnet' || inputs.confirmation == 'DEPLOY_V3_MAINNET')
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     # A GitHub Environment lets you require a human reviewer before the mainnet
     # deploy job runs — configure required reviewers on 'v3-mainnet' for a second
     # pair of eyes. Testnet uses its own, ungated environment.

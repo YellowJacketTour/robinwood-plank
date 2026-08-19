@@ -19,7 +19,7 @@ on:
 
 jobs:
   doctor:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     environment: inmotion-staging
     env:
       INMOTION_HOST: ${{ secrets.INMOTION_HOST }}
