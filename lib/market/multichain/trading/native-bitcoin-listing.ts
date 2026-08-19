@@ -124,6 +124,33 @@ bitcoin.initEccLib(ecc);
 export const MARKETPLANK_NATIVE_BITCOIN_FEE_BPS = 180;
 
 /**
+ * Bitcoin Core's mempool policy rejects ANY transaction containing a dust
+ * output unless the whole transaction pays zero fee -- 546 sats is Core's
+ * own standard dust threshold for a P2WPKH-class output (real, current
+ * value, not an approximation). Found live, 2026-08-19: a real testnet4
+ * listing at 15,000 sats produced a 270-sat fee output (1.8% of 15,000,
+ * correctly computed) that Core's own node rejected outright --
+ * `sendrawtransaction RPC error: {"code":-26,"message":"dust, tx with
+ * dust output must be 0-fee"}`. The bytes were correct; the transaction
+ * was simply unbroadcastable. See MINIMUM_LISTING_PRICE_SATS below for
+ * the fix that stops this from ever being created in the first place.
+ */
+const BITCOIN_DUST_THRESHOLD_SATS = 546;
+
+/**
+ * The smallest listing price whose MARKETPLANK_NATIVE_BITCOIN_FEE_BPS fee
+ * output clears BITCOIN_DUST_THRESHOLD_SATS -- ceil(546 * 10000 / 180).
+ * Enforced at LISTING time (buildSellerListingPsbt), not only at
+ * fulfillment time, so a listing that can never be successfully bought is
+ * never created in the first place -- discovering this only when a buyer
+ * tries to fulfill it (as the live testnet4 run above did) is much worse
+ * UX than refusing the listing up front.
+ */
+export const MINIMUM_LISTING_PRICE_SATS = Math.ceil(
+  (BITCOIN_DUST_THRESHOLD_SATS * 10_000) / MARKETPLANK_NATIVE_BITCOIN_FEE_BPS
+);
+
+/**
  * Only ever "testnet" (the default) or "regtest" until a real, verified
  * mainnet-shaped purchase has completed on testnet -- see this file's own
  * header. NATIVE_BITCOIN_NETWORK=regtest is for exactly one purpose: a
@@ -222,6 +249,11 @@ export function buildSellerListingPsbt(input: {
   priceSats: number;
 }): { psbtBase64: string; inputIndexToSign: 0 } {
   if (input.priceSats <= 0) throw new Error("native-bitcoin-listing: priceSats must be positive.");
+  if (input.priceSats < MINIMUM_LISTING_PRICE_SATS) {
+    throw new Error(
+      `native-bitcoin-listing: priceSats must be at least ${MINIMUM_LISTING_PRICE_SATS} sats -- below that, the ${MARKETPLANK_NATIVE_BITCOIN_FEE_BPS}bps Marketplank fee output would be dust (under ${BITCOIN_DUST_THRESHOLD_SATS} sats) and every Bitcoin node would reject the resulting fulfillment transaction outright.`
+    );
+  }
   const network = bitcoinNetwork();
   const psbt = new bitcoin.Psbt({ network });
 
@@ -317,6 +349,17 @@ export async function buildFulfillmentPsbt(input: {
   const provenSafeUtxos = input.buyerPaymentUtxoCandidates.filter((u) => safeSet.has(`${u.txid}:${u.vout}`));
 
   const feeSats = Math.ceil((seller.output.valueSats * MARKETPLANK_NATIVE_BITCOIN_FEE_BPS) / 10_000);
+  // Belt-and-suspenders: buildSellerListingPsbt already refuses to create
+  // a listing priced below MINIMUM_LISTING_PRICE_SATS, but this function
+  // trusts whatever signed listing PSBT it's handed (a listing created
+  // before this guard existed, or via any path that bypasses
+  // buildSellerListingPsbt, could still reach here) -- never build a
+  // transaction Bitcoin's own mempool policy will reject.
+  if (feeSats < BITCOIN_DUST_THRESHOLD_SATS) {
+    throw new Error(
+      `native-bitcoin-listing: this listing's price yields a ${feeSats}-sat Marketplank fee output, below Bitcoin's ${BITCOIN_DUST_THRESHOLD_SATS}-sat dust threshold -- every node would reject the resulting transaction. This listing was created below MINIMUM_LISTING_PRICE_SATS and cannot be fulfilled; it should be cancelled.`
+    );
+  }
 
   const psbt = new bitcoin.Psbt({ network });
 

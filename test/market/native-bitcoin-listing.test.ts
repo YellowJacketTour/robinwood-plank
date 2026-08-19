@@ -7,6 +7,7 @@ import {
   buildSellerListingPsbt,
   buildFulfillmentPsbt,
   MARKETPLANK_NATIVE_BITCOIN_FEE_BPS,
+  MINIMUM_LISTING_PRICE_SATS,
   type Utxo,
 } from "../../lib/market/multichain/trading/native-bitcoin-listing";
 // No import of BITCOIN_FEE_RECIPIENT (lib/constants.ts) -- it's a real
@@ -270,5 +271,45 @@ test("native-bitcoin-listing: a payment UTXO the safety filter rejects is never 
         safetyFilter: async () => [],
       }),
     /insufficient proven-safe buyer UTXOs/
+  );
+});
+
+test("native-bitcoin-listing: refuses to create a listing whose fee would be dust", () => {
+  const sellerKey = ECPair.makeRandom({ network });
+  const seller = p2trAddressAndScript(sellerKey);
+  const inscriptionUtxo: Utxo = {
+    txid: "4".repeat(64),
+    vout: 0,
+    valueSats: 10_000,
+    scriptPubKeyHex: seller.script.toString("hex"),
+  };
+  // Reproduces a REAL live finding, 2026-08-19: a 15,000-sat testnet4
+  // listing produced a 270-sat fee output (1.8% of 15,000) that a real
+  // Bitcoin Core node rejected as dust ("dust, tx with dust output must
+  // be 0-fee") -- the bytes were correct, the transaction just could
+  // never broadcast. MINIMUM_LISTING_PRICE_SATS must refuse this up front.
+  assert.throws(
+    () =>
+      buildSellerListingPsbt({
+        sellerAddress: seller.address,
+        sellerInternalPubkeyHex: Buffer.from(sellerKey.publicKey).toString("hex"),
+        inscriptionUtxo,
+        priceSats: 15_000,
+      }),
+    /MINIMUM_LISTING_PRICE_SATS|priceSats must be at least/
+  );
+
+  // The threshold itself: MINIMUM_LISTING_PRICE_SATS's own fee must clear
+  // dust, and one sat below it must not.
+  const feeAtMinimum = Math.ceil((MINIMUM_LISTING_PRICE_SATS * MARKETPLANK_NATIVE_BITCOIN_FEE_BPS) / 10_000);
+  assert.ok(feeAtMinimum >= 546, "fee at the minimum listing price must clear the 546-sat dust threshold");
+
+  assert.doesNotThrow(() =>
+    buildSellerListingPsbt({
+      sellerAddress: seller.address,
+      sellerInternalPubkeyHex: Buffer.from(sellerKey.publicKey).toString("hex"),
+      inscriptionUtxo,
+      priceSats: MINIMUM_LISTING_PRICE_SATS,
+    })
   );
 });
