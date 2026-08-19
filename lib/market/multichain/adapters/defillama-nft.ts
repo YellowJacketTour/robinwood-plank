@@ -79,6 +79,22 @@ function toWeiString(decimalAmount: number | null): string | null {
   return (BigInt(scaled) * BigInt(1_000_000_000)).toString();
 }
 
+/**
+ * Same real bug class fixed in alchemy-nft.ts's MAX_PLAUSIBLE_TOTAL_SUPPLY
+ * (confirmed live 2026-08-19 on arb-mainnet contracts via the sibling
+ * adapter): `total_supply` is a Postgres BIGINT column, and an unsanitized
+ * huge/malformed supply value either overflows it or serializes to
+ * scientific-notation text BIGINT's parser rejects outright, failing the
+ * whole snapshot write. DeFiLlama's own data has not been observed doing
+ * this, but the write path is identical, so the same ceiling applies here
+ * defensively rather than waiting to hit the same outage from this source.
+ */
+const MAX_PLAUSIBLE_TOTAL_SUPPLY = 100_000_000;
+
+function sanitizeTotalSupply(value: number | null): number | null {
+  return value != null && Number.isFinite(value) && value > 0 && value <= MAX_PLAUSIBLE_TOTAL_SUPPLY ? value : null;
+}
+
 export const defillamaNftAdapter: ChainAdapter = {
   name: "defillama-nft",
   async fetchSnapshot({ contractAddress }): Promise<CollectionSnapshot> {
@@ -94,7 +110,7 @@ export const defillamaNftAdapter: ChainAdapter = {
       floorPriceWei: toWeiString(match.floorPrice),
       floorPriceCurrency: match.floorPrice != null ? "ETH" : null,
       floorPriceMarketplace: match.floorPrice != null ? "defillama" : null,
-      totalSupply: match.totalSupply,
+      totalSupply: sanitizeTotalSupply(match.totalSupply),
       listedCount: match.onSaleCount,
     };
   },

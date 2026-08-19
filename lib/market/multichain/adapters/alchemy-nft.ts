@@ -101,6 +101,24 @@ async function fetchJson<T>(url: string): Promise<T> {
  */
 const MAX_PLAUSIBLE_FLOOR_ETH = 10_000_000;
 
+/**
+ * Same class of bug as MAX_PLAUSIBLE_FLOOR_ETH above, confirmed live
+ * 2026-08-19 on real arb-mainnet contracts: `metadata.totalSupply` is a
+ * string Alchemy passes through from whatever the contract's own
+ * totalSupply() (or an indexer artifact) reports, with no sanity bound --
+ * seen returning "1e+24", a 6.8e7-magnitude float artifact, and
+ * 10000000000000000000 (1e19). `total_supply` is a Postgres BIGINT column
+ * (max ~9.22e18), and Number(hugeString).toString() serializes to
+ * scientific-notation text ("1e+24") once magnitude crosses 1e21, which
+ * BIGINT's input parser rejects outright regardless of magnitude -- both
+ * failure modes hit the same real INSERT and blocked the sync entirely for
+ * every affected contract, not just clamped one bad value. No real NFT
+ * collection has anywhere near this many tokens (the largest legitimate
+ * collections this app tracks run in the tens of thousands), so this is a
+ * sanity ceiling on a corrupt/malicious contract, not a business rule.
+ */
+const MAX_PLAUSIBLE_TOTAL_SUPPLY = 100_000_000;
+
 function toWeiString(decimalAmount: number): string | null {
   if (!Number.isFinite(decimalAmount) || decimalAmount <= 0 || decimalAmount > MAX_PLAUSIBLE_FLOOR_ETH) return null;
   // Avoid floating-point drift on the multiplication by working in
@@ -176,7 +194,10 @@ export const alchemyNftAdapter: ChainAdapter = {
       floorPriceWei: floor.priceWei,
       floorPriceCurrency: floor.currency,
       floorPriceMarketplace: floor.marketplace,
-      totalSupply: Number.isFinite(totalSupply) ? totalSupply : null,
+      totalSupply:
+        Number.isFinite(totalSupply) && totalSupply! > 0 && totalSupply! <= MAX_PLAUSIBLE_TOTAL_SUPPLY
+          ? totalSupply
+          : null,
       // Alchemy's NFT API does not expose a live listed-count in these two
       // calls -- left null rather than guessed. A future adapter revision
       // could add getNFTsForContract pagination totals if this matters.

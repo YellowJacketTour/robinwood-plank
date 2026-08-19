@@ -7,6 +7,7 @@
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
 import { magicEdenSolanaAdapter } from "@/lib/market/multichain/adapters/magiceden-solana";
 import { defillamaNftAdapter } from "@/lib/market/multichain/adapters/defillama-nft";
+import { unisatCollectionsAdapter } from "@/lib/market/multichain/adapters/unisat-collections";
 import {
   hasMultichainStore,
   listTrackedCollections,
@@ -19,6 +20,7 @@ const ADAPTERS: Record<string, ChainAdapter> = {
   [alchemyNftAdapter.name]: alchemyNftAdapter,
   [magicEdenSolanaAdapter.name]: magicEdenSolanaAdapter,
   [defillamaNftAdapter.name]: defillamaNftAdapter,
+  [unisatCollectionsAdapter.name]: unisatCollectionsAdapter,
 };
 
 /**
@@ -36,6 +38,11 @@ const ADAPTERS: Record<string, ChainAdapter> = {
  */
 const ADAPTER_MIN_INTERVAL_MS: Record<string, number> = {
   [magicEdenSolanaAdapter.name]: 400,
+  // No documented rate limit found for UniSat's authenticated open-api
+  // (checked the real docs repo -- nothing published). Paced anyway as a
+  // precaution since this hits a keyed, presumably tiered API, unlike
+  // Magic Eden's confirmed 180/min where the number above is measured.
+  [unisatCollectionsAdapter.name]: 500,
 };
 
 const lastCallAt = new Map<string, number>();

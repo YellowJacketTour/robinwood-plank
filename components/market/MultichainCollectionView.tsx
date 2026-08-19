@@ -994,8 +994,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   return (
     <div className="space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="font-display text-xl text-gold-300">{collection.name}</h2>
+        <div className="min-w-0">
+          <h2 className="truncate font-display text-xl text-gold-300" title={collection.name}>
+            {collection.name}
+          </h2>
           <p className="text-xs text-foreground/50">
             {listings.length} listing{listings.length === 1 ? "" : "s"} on {chainDisplayName(chainSlug)}
           </p>
@@ -1006,7 +1008,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-panel p-3 sm:grid-cols-4">
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Floor</p>
-          <p className="text-sm font-bold text-foreground tabular-nums">
+          <p className="truncate text-sm font-bold text-foreground tabular-nums">
             {floorWei ? (
               <>
                 {formatTokenAmount(floorWei, 18, 4)} {statCurrencySymbol}
@@ -1019,7 +1021,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </div>
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Best offer</p>
-          <p className="text-sm font-bold text-foreground tabular-nums">
+          <p className="truncate text-sm font-bold text-foreground tabular-nums">
             {bestOfferWei ? (
               <>
                 {formatTokenAmount(bestOfferWei, 18, 4)} {statCurrencySymbol}
@@ -1032,7 +1034,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </div>
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Volume</p>
-          <p className="text-sm font-bold text-foreground tabular-nums">
+          <p className="truncate text-sm font-bold text-foreground tabular-nums">
             {volumeWei ? (
               <>
                 {formatTokenAmount(volumeWei, 18, 3)} {statCurrencySymbol}
@@ -1045,7 +1047,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </div>
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Highest sale</p>
-          <p className="text-sm font-bold text-foreground tabular-nums">
+          <p className="truncate text-sm font-bold text-foreground tabular-nums">
             {highestSaleWei ? (
               <>
                 {formatTokenAmount(highestSaleWei, 18, 4)} {statCurrencySymbol}
@@ -1324,10 +1326,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                     {collectionWideOffers.map((o) => (
                       <li key={o.orderHash} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-panel px-3 py-2">
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-bold text-foreground">{o.isWildcard ? `Any ${collection.name} token` : "Trait-scoped bid"}</p>
+                          <p
+                            className="truncate text-sm font-bold text-foreground"
+                            title={o.isWildcard ? `Any ${collection.name} token` : "Trait-scoped bid"}
+                          >
+                            {o.isWildcard ? `Any ${collection.name} token` : "Trait-scoped bid"}
+                          </p>
                           <p className="text-xs text-foreground/60">by {shortAddress(o.maker)}</p>
                         </div>
-                        <p className="text-sm font-extrabold tabular-nums text-emerald-300">
+                        <p className="whitespace-nowrap text-sm font-extrabold tabular-nums text-emerald-300">
                           {formatTokenAmount(o.priceWei, 18, 4)} {statCurrencySymbol}
                           {statUsd(o.priceWei) != null && <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(o.priceWei)!)}</span>}
                         </p>
@@ -1471,7 +1478,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                         )}
                       </button>
                       <div className="flex flex-1 flex-col gap-0.5 p-2 leading-tight">
-                        <span className="truncate text-[0.6rem] font-bold text-foreground">{r?.name ?? item.name ?? `#${item.tokenId}`}</span>
+                        <span
+                          className="truncate text-[0.6rem] font-bold text-foreground"
+                          title={r?.name ?? item.name ?? `#${item.tokenId}`}
+                        >
+                          {r?.name ?? item.name ?? `#${item.tokenId}`}
+                        </span>
                         <span className="truncate text-[0.55rem] text-foreground/50">
                           #{item.tokenId}
                           {r ? ` · R${r.rank}` : ""}
@@ -1526,9 +1538,9 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             ) : (
               <ul className="space-y-1.5">
                 {myListings.map((l) => (
-                  <li key={l.orderHash} className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-foreground">#{l.tokenId}</span>
-                    <span className="text-foreground/60 tabular-nums">
+                  <li key={l.orderHash} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="shrink-0 font-bold text-foreground">#{l.tokenId}</span>
+                    <span className="whitespace-nowrap text-foreground/60 tabular-nums">
                       {formatTokenAmount(l.priceWei, 18, 4)} {statCurrencySymbol}
                       {statUsd(l.priceWei) != null && <span className="ml-1 text-[0.65rem] text-foreground/40">{formatUsdCompact(statUsd(l.priceWei)!)}</span>}
                     </span>

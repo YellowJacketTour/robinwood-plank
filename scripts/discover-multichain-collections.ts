@@ -21,6 +21,7 @@
  * contractAddress within a chain.
  */
 import { magicEdenSolanaAdapter } from "../lib/market/multichain/adapters/magiceden-solana";
+import { unisatCollectionsAdapter } from "../lib/market/multichain/adapters/unisat-collections";
 import { defillamaNftAdapter } from "../lib/market/multichain/adapters/defillama-nft";
 import { hasMultichainStore, upsertTrackedCollection, updateCollectionDisplay } from "../lib/market/multichain/store";
 import type { ChainAdapter, DiscoveredCollection } from "../lib/market/multichain/types";
@@ -40,6 +41,7 @@ import type { ChainAdapter, DiscoveredCollection } from "../lib/market/multichai
 const DISCOVERY_TARGETS: Array<{ chainSlug: string; chainId: number | null; adapter: ChainAdapter }> = [
   { chainSlug: "eth-mainnet", chainId: 1, adapter: defillamaNftAdapter },
   { chainSlug: "solana-mainnet", chainId: null, adapter: magicEdenSolanaAdapter },
+  { chainSlug: "bitcoin-mainnet", chainId: null, adapter: unisatCollectionsAdapter },
 ];
 
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));

@@ -588,8 +588,10 @@ export default function GlobalMarketHub() {
                 className="h-4 w-4 shrink-0 accent-gold-400 transition-transform"
               />
               <ChainIcon chainSlug={slug} size={16} className="shrink-0" />
-              <span className="flex-1 truncate text-foreground/80">{chainDisplayName(slug)}</span>
-              <span className="text-foreground/40">{count}</span>
+              <span className="min-w-0 flex-1 truncate text-foreground/80" title={chainDisplayName(slug)}>
+                {chainDisplayName(slug)}
+              </span>
+              <span className="shrink-0 whitespace-nowrap text-foreground/40">{count}</span>
             </label>
           ))}
         </div>
@@ -740,7 +742,9 @@ export default function GlobalMarketHub() {
                       </span>
                       <GradeBadge score={score} />
                     </div>
-                    <p className="truncate text-2xl font-bold text-white drop-shadow">{hero.name ?? hero.contractAddress}</p>
+                    <p className="truncate text-2xl font-bold text-white drop-shadow" title={hero.name ?? hero.contractAddress}>
+                      {hero.name ?? hero.contractAddress}
+                    </p>
                     <p className="text-sm text-white/75">
                       <span style={{ color: chainBrandColor(hero.chainSlug) }}>{chainDisplayName(hero.chainSlug)}</span>
                       {" · "}Vol {(Number(hero.volume24hWei) / 1e18).toFixed(3)} {hero.floorPriceCurrency ?? "ETH"}
@@ -772,7 +776,9 @@ export default function GlobalMarketHub() {
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
                     <div className="relative space-y-0.5 p-2">
                       <GradeBadge score={score} />
-                      <p className="truncate text-xs font-bold text-white">{c.name ?? c.contractAddress}</p>
+                      <p className="truncate text-xs font-bold text-white" title={c.name ?? c.contractAddress}>
+                        {c.name ?? c.contractAddress}
+                      </p>
                       <p className="truncate text-[0.65rem] text-white/70">
                         {(Number(c.volume24hWei) / 1e18).toFixed(2)} {c.floorPriceCurrency ?? "ETH"} · 24h
                       </p>
@@ -825,8 +831,8 @@ export default function GlobalMarketHub() {
                   }
                 >
                   <ChainIcon chainSlug={slug} size={15} className="shrink-0" />
-                  <span className={active ? "" : "text-foreground/70"}>{chainDisplayName(slug)}</span>
-                  <span className="text-foreground/40">{count}</span>
+                  <span className={`whitespace-nowrap ${active ? "" : "text-foreground/70"}`}>{chainDisplayName(slug)}</span>
+                  <span className="shrink-0 whitespace-nowrap text-foreground/40">{count}</span>
                 </button>
               );
             })}
@@ -910,7 +916,9 @@ export default function GlobalMarketHub() {
                               <ChainIcon chainSlug={c.chainSlug} size={10} />
                             </span>
                           </div>
-                          <span className="min-w-0 flex-1 truncate font-bold text-foreground/90">{c.name ?? c.contractAddress}</span>
+                          <span className="min-w-0 flex-1 truncate font-bold text-foreground/90" title={c.name ?? c.contractAddress}>
+                            {c.name ?? c.contractAddress}
+                          </span>
                           {/* Known-creator checkmark -- real signal (a real handle/ENS this app has observed), never OpenSea's own "verified" claim, which this app cannot honestly assert for an auto-discovered collection. */}
                           {(c.creatorHandle || c.creatorEns) && (
                             <span className="shrink-0 text-emerald-400" title={`Known creator: ${c.creatorHandle ?? c.creatorEns}`}>
@@ -1012,7 +1020,9 @@ export default function GlobalMarketHub() {
                       <ChainIcon chainSlug={c.chainSlug} size={10} />
                     </span>
                   </div>
-                  <p className="truncate text-xs font-bold text-foreground/90">{c.name ?? c.contractAddress}</p>
+                  <p className="truncate text-xs font-bold text-foreground/90" title={c.name ?? c.contractAddress}>
+                    {c.name ?? c.contractAddress}
+                  </p>
                   <p className="truncate text-[0.65rem] text-foreground/50">
                     {c.floorPriceWei ? (
                       <>
@@ -1107,7 +1117,9 @@ export default function GlobalMarketHub() {
                       )}
                     </div>
                     <div className="space-y-1 p-2.5">
-                      <p className="truncate text-sm font-bold text-foreground">{c.name ?? c.contractAddress}</p>
+                      <p className="truncate text-sm font-bold text-foreground" title={c.name ?? c.contractAddress}>
+                        {c.name ?? c.contractAddress}
+                      </p>
                       <div className="flex flex-wrap gap-1">
                         <span
                           className="inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[0.55rem] font-black uppercase tracking-wider"
@@ -1141,7 +1153,10 @@ export default function GlobalMarketHub() {
                         </p>
                       )}
                       {(c.creatorHandle || c.creatorEns || c.creatorAddress) && (
-                        <p className="truncate text-[0.65rem] text-foreground/40">
+                        <p
+                          className="truncate text-[0.65rem] text-foreground/40"
+                          title={c.creatorHandle ? `@${c.creatorHandle}` : c.creatorEns ? c.creatorEns : c.creatorAddress!}
+                        >
                           by{" "}
                           {c.creatorHandle
                             ? `@${c.creatorHandle}`

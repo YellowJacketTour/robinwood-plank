@@ -172,7 +172,10 @@ export default function ListingCard({
           <p className="sr-only">Collection trust: {trustLabels.join(", ")}</p>
         )}
         <div className="min-w-0 leading-tight">
-          <p className="truncate text-xs font-bold text-foreground sm:text-sm">
+          <p
+            className="truncate text-xs font-bold text-foreground sm:text-sm"
+            title={listing.tokenId ? (rarity?.name ?? `#${listing.tokenId}`) : "Any plank"}
+          >
             {listing.tokenId ? (rarity?.name ?? `#${listing.tokenId}`) : "Any plank"}
           </p>
           {listing.tokenId && (
