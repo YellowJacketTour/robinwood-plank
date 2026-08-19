@@ -95,6 +95,26 @@ function requireApiKey(): string {
   return key;
 }
 
+/**
+ * NETWORK GATE, added to unify this surface with native-bitcoin-listing.ts's
+ * own posture (design-unification finding, 2026-08-19). This module's
+ * UNISAT_API_BASE is hardcoded mainnet -- UniSat's Auction House has no
+ * testnet equivalent to point at -- which meant real mainnet Bitcoin could
+ * be committed through this path with ZERO gate, while every other
+ * Bitcoin-fund-moving path in this app (native-bitcoin-listing.ts) refuses
+ * to touch mainnet unless NATIVE_BITCOIN_MAINNET_ENABLED is explicitly
+ * set. Applied only to the functions that actually commit funds
+ * (createUniSatBid, confirmUniSatBid) -- prepareUniSatBid is a read-only
+ * fee estimate and stays ungated.
+ */
+function requireMainnetEnabled(action: string): void {
+  if (process.env.NATIVE_BITCOIN_MAINNET_ENABLED !== "true") {
+    throw new Error(
+      `unisat-ordinals-trade: ${action} would commit real mainnet Bitcoin, and NATIVE_BITCOIN_MAINNET_ENABLED is not set -- refusing, same gate this app's native Bitcoin listing engine already holds itself to. UniSat's Auction House has no testnet equivalent, so this is the only way to keep every real-money Bitcoin path in this app behind one consistent switch.`
+    );
+  }
+}
+
 async function unisatFetch<T>(path: string, body: Record<string, unknown>): Promise<T> {
   const key = requireApiKey();
   const res = await fetch(`${UNISAT_API_BASE}${path}`, {
@@ -190,6 +210,7 @@ export async function createUniSatBid(input: {
   bidPriceSats: string;
   pubkey: string;
 }): Promise<UniSatBidStep> {
+  requireMainnetEnabled("createUniSatBid");
   const data = await unisatFetch<{ bidId: string; psbtBid: string; bidSignIndexes: number[] }>("/create_bid", {
     address: input.address,
     auctionId: input.auctionId,
@@ -208,6 +229,7 @@ export async function createUniSatBid(input: {
  * createUniSatBid returned for this specific bid, never recomputed.
  */
 export async function confirmUniSatBid(input: { auctionId: string; bidId: string; signedPsbtBase64: string }): Promise<{ txid: string }> {
+  requireMainnetEnabled("confirmUniSatBid");
   return unisatFetch("/confirm_bid", { auctionId: input.auctionId, bidId: input.bidId, psbtBid: input.signedPsbtBase64 });
 }
 
@@ -217,12 +239,22 @@ export async function confirmUniSatBid(input: { auctionId: string; bidId: string
  * the caller to sign and submit, same real per-item-signature UX
  * difference from EVM's single multi-item transaction already documented
  * in magiceden-solana-trade.ts's buildMagicEdenSweep.
+ *
+ * Returns UniSatBidStep[], not UniSatPsbtStep[] (type bug fixed 2026-08-19,
+ * design-unification review) -- it calls createUniSatBid, which returns
+ * UniSatBidStep (auctionId + bidId alongside the PSBT). The old
+ * UniSatPsbtStep return type erased both fields at the type level even
+ * though they exist at runtime, making any real caller unable to reach
+ * confirmUniSatBid (which requires both) without an unsafe cast. No
+ * caller exists yet either way -- foreign-fulfill.ts's own sweep
+ * (sweepBitcoinListingsNow) re-implements this loop directly over
+ * buyBitcoinListingNow instead of using this helper.
  */
 export async function prepareUniSatSweep(input: {
   address: string;
   pubkey: string;
   listings: Array<{ auctionId: string; bidPriceSats: string }>;
-}): Promise<UniSatPsbtStep[]> {
+}): Promise<UniSatBidStep[]> {
   return Promise.all(
     input.listings.map((listing) =>
       createUniSatBid({ address: input.address, pubkey: input.pubkey, auctionId: listing.auctionId, bidPriceSats: listing.bidPriceSats })
@@ -230,20 +262,17 @@ export async function prepareUniSatSweep(input: {
   );
 }
 
-/** Builds the unsigned listing PSBT -- creates a real UniSat Marketplace listing for an inscription the seller's wallet already holds. */
-export async function createUniSatListing(input: {
-  sellerAddress: string;
-  inscriptionId: string;
-  priceSats: string;
-}): Promise<UniSatPsbtStep> {
-  return unisatFetch("/create_put_on", {
-    sellerAddress: input.sellerAddress,
-    inscriptionId: input.inscriptionId,
-    price: input.priceSats,
-  });
-}
-
-/** Submits the wallet-signed listing PSBT, making the listing live. */
-export async function confirmUniSatListing(input: { signedPsbtBase64: string }): Promise<{ success: boolean }> {
-  return unisatFetch("/confirm_put_on", { psbt: input.signedPsbtBase64 });
-}
+/**
+ * createUniSatListing/confirmUniSatListing were REMOVED here
+ * (design-unification review, 2026-08-19), not fixed. This file's own
+ * header documents that create_bid/confirm_bid's assumed request/response
+ * shapes were wrong in seven fields combined, discovered only by hitting
+ * the live API with a real key -- the listing pair below received no such
+ * treatment: still {sellerAddress, inscriptionId, price} to create_put_on,
+ * typed as the exact UniSatPsbtStep shape the bid pair proved was a false
+ * assumption for its own sibling endpoint. Zero callers existed either
+ * way. Shipping unverified trade code next to a header that documents
+ * this precise failure mode was the drift this review was asked to find.
+ * Re-add only after live-verifying against a real key, the same standard
+ * every other endpoint in this file was held to.
+ */

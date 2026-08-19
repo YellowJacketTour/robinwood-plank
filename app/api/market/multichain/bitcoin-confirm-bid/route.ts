@@ -11,7 +11,9 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  const limited = rateLimit(req, { key: "market-multichain-bitcoin-confirm", limit: 30, windowMs: 60_000 });
+  // Tightened alongside bitcoin-buy-psbt/route.ts (audit finding,
+  // 2026-08-19) -- both proxy the same metered, shared UNISAT_API_KEY.
+  const limited = rateLimit(req, { key: "market-multichain-bitcoin-confirm", limit: 10, windowMs: 60_000 });
   if (limited) return limited;
 
   const body = (await req.json().catch(() => null)) as
