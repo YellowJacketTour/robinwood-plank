@@ -416,34 +416,23 @@ export default function GlobalMarketHub() {
   // collection index itself uses. usdPrices stays {} (not fabricated
   // zeros) until this resolves, so every USD-dependent render checks for
   // a real price before showing one.
-  // Home-chain card art -- flagged live 2026-08-19: the "RW" letter box read
-  // as a placeholder, not the real collection. Rank-1 (rarest) real
-  // RobinWood plank, not a random/first token: reuses lib/rarity.ts's
-  // already-computed topRarest (see /api/market/rarity's new topRarest
-  // field), then resolves that ONE token's real image via the same
-  // /api/market/token route every item view already uses -- never a second,
-  // parallel image-resolution path. Falls back to the RW letters if either
-  // fetch fails; never blocks the card on this being real.
-  const [rarestPlankImage, setRarestPlankImage] = useState<{ tokenId: string; image: string } | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const rarity = await swrJson<{ topRarest?: number[] }>("/api/market/rarity", { ttlMs: 300_000, swrMs: 1_800_000, session: true });
-        const tokenId = rarity.topRarest?.[0];
-        if (tokenId == null) return;
-        const res = await fetch(`/api/market/token?tokenId=${tokenId}`);
-        if (!res.ok) return;
-        const data = (await res.json()) as { image?: string | null };
-        if (!cancelled && data.image) setRarestPlankImage({ tokenId: String(tokenId), image: data.image });
-      } catch {
-        // Art is a nice-to-have on this card -- letters fallback covers a failure.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Global Index card art -- static, not live-fetched. PlankyChan (real
+  // on-chain RobinWood Base trait, token #111, confirmed live via the
+  // metadata store -- no "Captain Planket" or "RobinWood Executive" trait
+  // exists in the real collection) downloaded once from IPFS and committed
+  // to public/images/mascots/, per explicit instruction 2026-08-19 ("don't
+  // wire the pictures in [dynamically], just find the art, download, upload
+  // it static") after the live /api/market/token -> IPFS-gateway path hit
+  // real, repeated rate-limiting (Pinata 429/1015, ipfs.io timeouts) during
+  // this same session.
+  const PLANKY_CHAN_IMAGE = "/images/mascots/planky-chan.png";
+
+  // Home-chain ("RW") card art -- same static-not-live-fetched treatment.
+  // "PlankoshiWoodamoto" (real on-chain RobinWood Base trait, token #1474,
+  // Legendary tier, confirmed live via the metadata store) per explicit
+  // instruction 2026-08-19 ("use PlankoshiWoodamoto ... for going back to
+  // robinwood plank"), replacing the earlier feather-glyph placeholder.
+  const WOODAMOTO_IMAGE = "/images/mascots/plankoshi-woodamoto.png";
 
   const [usdPrices, setUsdPrices] = useState<MultiAssetPrices>({});
   useEffect(() => {
@@ -721,20 +710,8 @@ export default function GlobalMarketHub() {
         href="/market"
         className="dense-card group flex items-center gap-3 overflow-hidden border-gold-400/40 p-3 transition-[border-color,box-shadow] duration-200 hover:border-gold-400 hover:shadow-gold"
       >
-        <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-gradient-to-br from-wood-900 to-wood-800 text-2xl font-black text-gold-300 transition-transform duration-200 group-hover:scale-105">
-          {rarestPlankImage ? (
-            <>
-              <Image src={rarestPlankImage.image} alt="" fill sizes="56px" className="object-cover" unoptimized />
-              <span
-                className="card-overlay absolute bottom-0 left-0 right-0 bg-black/70 py-0.5 text-center text-[0.5rem] font-black uppercase tracking-wider text-gold-300"
-                title={`Rarest RobinWood plank on record — #${rarestPlankImage.tokenId}`}
-              >
-                #1 rarest
-              </span>
-            </>
-          ) : (
-            "RW"
-          )}
+        <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[#0c0906] transition-transform duration-200 group-hover:scale-105">
+          <Image src={WOODAMOTO_IMAGE} alt="" fill sizes="56px" className="object-cover" />
         </div>
         <div className="min-w-0 flex-1">
           <span className="inline-flex items-center rounded-full bg-gold-400/15 px-2 py-0.5 text-[0.6rem] font-black uppercase tracking-wider text-gold-300">
@@ -769,18 +746,8 @@ export default function GlobalMarketHub() {
          * "coming soon" stamp on the artwork itself, on top of (not instead
          * of) the existing text badge below.
          */}
-        <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-gradient-to-br from-wood-900 to-wood-800">
-          <svg viewBox="0 0 56 56" className="h-full w-full" aria-hidden="true">
-            <rect x="10" y="14" width="36" height="9" rx="1.5" fill="#7a4d26" />
-            <rect x="10" y="24" width="36" height="9" rx="1.5" fill="#24693f" />
-            <rect x="10" y="34" width="36" height="9" rx="1.5" fill="#af761d" />
-            <rect x="9" y="13" width="38" height="31" rx="2.5" fill="none" stroke="#e9b43f" strokeOpacity="0.55" strokeWidth="1.5" />
-            <g transform="translate(28 28)">
-              <circle r="8" fill="#120a05" fillOpacity="0.85" stroke="#f8d98a" strokeWidth="1.2" />
-              <rect x="-3.5" y="-1" width="7" height="5.5" rx="1" fill="#f8d98a" />
-              <path d="M-2.2 -1 v-2.2 a2.2 2.2 0 0 1 4.4 0 v2.2" fill="none" stroke="#f8d98a" strokeWidth="1.2" />
-            </g>
-          </svg>
+        <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[#0c0906]">
+          <Image src={PLANKY_CHAN_IMAGE} alt="" fill sizes="56px" className="object-cover" />
           <span className="card-overlay absolute -right-5 top-2 w-24 rotate-45 bg-gold-500 py-0.5 text-center text-[0.45rem] font-black uppercase tracking-widest text-wood-950 shadow">
             Soon
           </span>
