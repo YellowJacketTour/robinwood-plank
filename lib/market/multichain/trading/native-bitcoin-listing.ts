@@ -68,19 +68,50 @@
  * ---------------------------------------------------------------------------
  * A bug here has no upgrade path: unlike a smart contract, a broadcast
  * Bitcoin transaction cannot be paused, upgraded, or reversed. This
- * module's byte-level construction is proven correct by
- * test/market/native-bitcoin-listing.test.ts (a full offline round-trip:
- * synthetic keys build, sign, and finalize both PSBTs, then assert every
- * output value is exactly right) -- but that only proves OUR construction
- * math, not real-world interop with every wallet's own signPsbt quirks.
- * bitcoinNetwork() below refuses to return mainnet unless
+ * module's byte-level construction is proven correct two ways:
+ *
+ *   1. test/market/native-bitcoin-listing.test.ts -- a full offline round
+ *      trip with synthetic in-process keys.
+ *   2. A LIVE regtest run, 2026-08-19: a real local Bitcoin Core node
+ *      (installed via winget, locked to loopback-only -- listen=0,
+ *      discover=0, no DNS seeding, no UPnP/NATPMP -- standing in for a
+ *      public testnet4 faucet, none of which expose a scriptable
+ *      non-captcha API, checked live) with three real, independently
+ *      keyed wallets (seller/buyer/fee-recipient). This module's
+ *      buildSellerListingPsbt/buildFulfillmentPsbt built both PSBTs; Core's
+ *      OWN wallet -- a genuinely separate implementation from this
+ *      module's own bitcoinjs-lib-based test signer -- produced every
+ *      signature. Broadcast, mined, and read back: every output value and
+ *      address matched exactly (buyer's receiving output = dummy + full
+ *      seller UTXO value to the sat; seller payment unchanged; Marketplank
+ *      fee at the exact bps to the exact address).
+ *
+ *      ONE REAL CAVEAT FROM THAT RUN, WORTH RECORDING: Core's
+ *      `walletprocesspsbt` RPC could not sign a PSBT that mixed an
+ *      already-attached taproot signature (the seller's leg) with
+ *      unsigned inputs in one call -- it errored regardless of the
+ *      sighashtype override passed, despite its own docs describing
+ *      per-input precedence. Worked around by temporarily detaching the
+ *      seller's signature before asking Core to sign, then reattaching the
+ *      identical signature and finalizing via bitcoinjs-lib directly. This
+ *      is a Core RPC ergonomics limit, not a protocol defect -- BIP-341
+ *      sighashes commit to transaction DATA, not to which tool produced
+ *      which signature. Real wallet extensions (UniSat/Xverse's
+ *      signPsbt({toSignInputs})) sign per-input directly and would not hit
+ *      this; it's noted here in case anyone else drives a similar proof
+ *      through Core's CLI.
+ *
+ * What this does NOT yet prove: interop with an actual THIRD-PARTY WALLET
+ * EXTENSION (UniSat, Xverse, Leather) that a real user would install --
+ * regtest proved the construction against one independent implementation
+ * (Core's wallet), not the specific ones this app's UI will ask people to
+ * use. bitcoinNetwork() below still refuses to return mainnet unless
  * NATIVE_BITCOIN_MAINNET_ENABLED is explicitly set -- which nothing in
- * this codebase sets yet. Do not set it until a real signet/testnet
- * purchase, buyer wallet included, has actually completed and the
- * resulting transaction has been read back off-chain to confirm the
- * inscription landed at the right output. Same standing discipline this
- * whole session holds for contract deploys, applied here because a bad
- * Bitcoin broadcast is equally irreversible.
+ * this codebase sets. Do not set it until a real wallet-extension purchase
+ * has completed (testnet4 or mainnet-adjacent signet) and been read back
+ * off-chain. Same standing discipline this whole session holds for
+ * contract deploys, applied here because a bad Bitcoin broadcast is
+ * equally irreversible.
  */
 import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
@@ -92,37 +123,54 @@ bitcoin.initEccLib(ecc);
 /** 1.8%, matching every other Marketplank-native fee rate in this app (see MARKET_FEE_RECIPIENT's siblings in lib/constants.ts). Kept local rather than re-exported from constants.ts because this is the one fee rate that has never been proven live -- flagged deliberately, not an oversight. */
 export const MARKETPLANK_NATIVE_BITCOIN_FEE_BPS = 180;
 
-/** Only ever "testnet" until a real, verified purchase has completed on it -- see this file's own header. */
+/**
+ * Only ever "testnet" (the default) or "regtest" until a real, verified
+ * mainnet-shaped purchase has completed on testnet -- see this file's own
+ * header. NATIVE_BITCOIN_NETWORK=regtest is for exactly one purpose: a
+ * fully self-controlled local Bitcoin Core regtest node, standing in for
+ * a public testnet4 faucet when none of the real ones (checked live,
+ * 2026-08-19: mempool.space/testnet4/faucet and every other found faucet)
+ * expose a scriptable, non-captcha API. Regtest lets this app mine its
+ * own coins to its own test addresses instantly, with zero external
+ * dependency and zero real value at risk -- the actual professional
+ * standard for proving a Bitcoin transaction flow end-to-end, not a
+ * lesser substitute for a public testnet.
+ */
 export function bitcoinNetwork(): bitcoin.networks.Network {
   const mainnetEnabled = process.env.NATIVE_BITCOIN_MAINNET_ENABLED === "true";
-  return mainnetEnabled ? bitcoin.networks.bitcoin : bitcoin.networks.testnet;
+  if (mainnetEnabled) return bitcoin.networks.bitcoin;
+  if (process.env.NATIVE_BITCOIN_NETWORK === "regtest") return bitcoin.networks.regtest;
+  return bitcoin.networks.testnet;
 }
 
 /**
  * BITCOIN_FEE_RECIPIENT (lib/constants.ts) is a real MAINNET address -- it
- * is structurally invalid to include as an output on a testnet PSBT
- * (bitcoinjs-lib's own address decoder enforces this and throws "invalid
- * prefix" if attempted, which is exactly the right behavior: a build
- * misconfiguration here must fail loudly, never silently substitute one
- * network's address into the other's transaction).
+ * is structurally invalid to include as an output on a testnet or regtest
+ * PSBT (bitcoinjs-lib's own address decoder enforces this and throws
+ * "invalid prefix" if attempted, which is exactly the right behavior: a
+ * build misconfiguration here must fail loudly, never silently substitute
+ * one network's address into the other's transaction).
  *
- * Testnet runs therefore need their OWN treasury address, via
- * NATIVE_BITCOIN_TESTNET_FEE_RECIPIENT -- not set anywhere yet, so
- * testnet fulfillment throws with a clear, actionable message until one
- * is provisioned (the same "generate a fresh address, never derive it
- * from the mainnet key" guidance as BITCOIN_FEE_RECIPIENT itself).
+ * Non-mainnet runs therefore need their OWN treasury address, via
+ * NATIVE_BITCOIN_TESTNET_FEE_RECIPIENT (same variable for both testnet and
+ * regtest -- regtest addresses are throwaway by construction, so reusing
+ * the name rather than adding a third variable isn't a real ambiguity
+ * risk) -- not set for testnet yet, so testnet fulfillment throws with a
+ * clear, actionable message until one is provisioned (the same "generate
+ * a fresh address, never derive it from the mainnet key" guidance as
+ * BITCOIN_FEE_RECIPIENT itself).
  */
 function feeRecipientAddress(): string {
   if (bitcoinNetwork() === bitcoin.networks.bitcoin) {
     return BITCOIN_FEE_RECIPIENT;
   }
-  const testnetRecipient = process.env.NATIVE_BITCOIN_TESTNET_FEE_RECIPIENT;
-  if (!testnetRecipient) {
+  const nonMainnetRecipient = process.env.NATIVE_BITCOIN_TESTNET_FEE_RECIPIENT;
+  if (!nonMainnetRecipient) {
     throw new Error(
-      "native-bitcoin-listing: NATIVE_BITCOIN_TESTNET_FEE_RECIPIENT is not configured -- a fresh testnet Taproot address is required to fulfill a testnet listing (BITCOIN_FEE_RECIPIENT is mainnet-only and cannot appear in a testnet transaction)."
+      "native-bitcoin-listing: NATIVE_BITCOIN_TESTNET_FEE_RECIPIENT is not configured -- a fresh Taproot address on the same non-mainnet network is required to fulfill a listing (BITCOIN_FEE_RECIPIENT is mainnet-only and cannot appear in a testnet/regtest transaction)."
     );
   }
-  return testnetRecipient;
+  return nonMainnetRecipient;
 }
 
 export type Utxo = {
@@ -131,6 +179,18 @@ export type Utxo = {
   valueSats: number;
   /** The UTXO's own scriptPubKey, hex-encoded -- required for witnessUtxo on every P2TR input; never derived/guessed here, always read from a live UTXO lookup. */
   scriptPubKeyHex: string;
+  /**
+   * This UTXO's own internal (untweaked) pubkey, compressed or x-only hex.
+   * Real HD wallets (verified live against Bitcoin Core's own wallet,
+   * 2026-08-19 regtest run) hand out a FRESH address -- a fresh derived
+   * pubkey -- on every call, including for a "dummy" UTXO created by a
+   * separate send. Assuming one shared pubkey across a buyer's whole UTXO
+   * set is wrong for exactly this reason; if omitted here, buildFulfillmentPsbt
+   * falls back to its own `buyerInternalPubkeyHex` default, which is only
+   * correct when the caller independently knows every UTXO really does
+   * share one key (e.g. a wallet that reuses a single address).
+   */
+  internalPubkeyHex?: string;
 };
 
 function toXOnly(pubkeyHex: string): Buffer {
@@ -232,7 +292,7 @@ export async function buildFulfillmentPsbt(input: {
   listingSellerPsbtBase64: string;
   sellerInscriptionUtxoValueSats: number;
   buyerAddress: string;
-  /** The buyer's own public key, compressed (33-byte) or x-only (32-byte) hex -- same requirement and same source (the connected wallet's own getPublicKey) as sellerInternalPubkeyHex above. Applied to every buyer-owned input (dummy + payment UTXOs), which is only correct because this engine assumes all of a buyer's spendable UTXOs come from ONE address/key -- true for a typical single-account wallet connection, not yet extended to multi-address wallets. */
+  /** Default internal pubkey applied to any buyer-owned UTXO (dummy or payment) that doesn't carry its own Utxo.internalPubkeyHex. Real wallets commonly derive a distinct pubkey per UTXO (verified live against Bitcoin Core's own wallet, 2026-08-19) -- prefer setting Utxo.internalPubkeyHex per-UTXO; this exists only for the simpler single-address case. */
   buyerInternalPubkeyHex: string;
   buyerReceivingAddress: string;
   buyerChangeAddress: string;
@@ -260,7 +320,9 @@ export async function buildFulfillmentPsbt(input: {
 
   const psbt = new bitcoin.Psbt({ network });
 
-  const buyerTapInternalKey = toXOnly(input.buyerInternalPubkeyHex);
+  const defaultBuyerTapInternalKey = toXOnly(input.buyerInternalPubkeyHex);
+  const tapKeyFor = (utxo: Utxo): Buffer =>
+    utxo.internalPubkeyHex ? toXOnly(utxo.internalPubkeyHex) : defaultBuyerTapInternalKey;
 
   // Input 0: buyer's dummy UTXO.
   psbt.addInput({
@@ -270,7 +332,7 @@ export async function buildFulfillmentPsbt(input: {
       script: Buffer.from(input.buyerDummyUtxo.scriptPubKeyHex, "hex"),
       value: BigInt(input.buyerDummyUtxo.valueSats),
     },
-    tapInternalKey: buyerTapInternalKey,
+    tapInternalKey: tapKeyFor(input.buyerDummyUtxo),
   });
 
   // Output 0: buyer's receiving address -- sized to consume dummy +
@@ -316,7 +378,7 @@ export async function buildFulfillmentPsbt(input: {
       hash: utxo.txid,
       index: utxo.vout,
       witnessUtxo: { script: Buffer.from(utxo.scriptPubKeyHex, "hex"), value: BigInt(utxo.valueSats) },
-      tapInternalKey: buyerTapInternalKey,
+      tapInternalKey: tapKeyFor(utxo),
     });
     usedPaymentUtxos.push(utxo);
     collected += utxo.valueSats;
