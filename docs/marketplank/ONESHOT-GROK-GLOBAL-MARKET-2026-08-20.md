@@ -1,240 +1,310 @@
-ONESHOT for Grok (continue this Marketplank / robinwood-plank session)
-======================================================================
-Paste this whole file. Do NOT merge `dev` → `master`. Do NOT deploy to
-plank.tanggang.life. Work stays on branch `dev`. Next code change: branch
-off origin/dev, PR with base: `dev` (CONTRIBUTING.md / bullish0x rules).
-Operator local app: http://localhost:3800  (Next, not InMotion).
+ONESHOT for Grok (continue Marketplank / robinwood-plank) — 2026-08-20 late
+===========================================================================
+Paste this WHOLE file into a NEW Grok chat. Work in
+C:\Users\k1rby\projects\robinwood-plank  on branch `dev`.
+Operator local: http://localhost:3800  (Next). Prod is InMotion from `master`
+only: plank.tanggang.life — DO NOT merge `dev`→`master`, DO NOT deploy.
 
 Repo: YellowJacketTour/robinwood-plank
-Compare vs live: https://github.com/YellowJacketTour/robinwood-plank/compare/master...dev
-Intent map: docs/marketplank/HANDOFF-BULLISH0X-GLOBAL-MARKET-2026-08-20.md
-This one-shot: also at docs/marketplank/ONESHOT-GROK-GLOBAL-MARKET-2026-08-20.md
+Compare: https://github.com/YellowJacketTour/robinwood-plank/compare/master...dev
+This file: docs/marketplank/ONESHOT-GROK-GLOBAL-MARKET-2026-08-20.md
+Also copy: C:\Users\k1rby\Desktop\ONESHOT-global-market-dev-handoff-for-grok-2026-08-20.txt
+Intent: docs/marketplank/HANDOFF-BULLISH0X-GLOBAL-MARKET-2026-08-20.md
+PRs: against `dev` (bullish0x). Next change: branch off origin/dev.
 
 Home NFT: 0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156  chainId 4663 (Robinhood)
+Vault V3: 0xacE28f72Fc3e15eA1671e689806694A9b0cE047D
 Native UI: /market     Global hub: /market/multichain
-Alchemy NFT API is FORBIDDEN (monthly 429). Fail closed: never invent floors,
-names, images, ranks, volume, holders. Dash with a reason > fake 0.
+Seaport 1.6 native. Collection slug for native listings: "robinwood"
 
 
-0. WHAT YOU ARE LOOKING AT IN THE LATEST SCREENSHOT
----------------------------------------------------
-http://localhost:3800/market/multichain?chains=robinhood
+================================================================
+0. YOUR JOB (OPERATOR, THIS MESSAGE)
+================================================================
+Research and invent the most fool-proof, exhaustive, AUDITED data path
+for ALL chains, ALL collections, ALL traits, ALL rarities — each chain
+a BESPOKE spoke, wired, fail-closed, never fake-filled.
 
-- Hub COMPILES again (the red Next overlay is gone if they pulled ff6a731+
-  and restarted with a wiped .next).
-- Row #1 is RobinWood (pin + inject). Banner "Home chain" still links /market.
-- Every ranking cell is "—". That is NOT "grade missing as a bug" only:
-  getListings("robinwood","robinhood") often returned [] because old
-  market_orders rows have NULL chain_slug; 17c39ae now loads getListings
-  without forcing chain. If /market Buy&Sell is also empty, floor/listed
-  dashes on the hub row are HONEST (no live Seaport listings in this DB).
-- Rows 2–10 are OpenSea Robinhood SCAN shells (ERC721, hex, ".."). They
-  have images from the scan, almost never OpenSea stats snapshots.
-- Operator wants: (1) RobinWood GRADED, (2) decentralized liquidity / vault
-  as a REAL grade input, (3) RWA/stock-backed NFTs as REAL grade input when
-  sourced, never arbitrary, (4) correct collection NAMES not ERC-721
-  name() junk.
+Operator screenshots (same session) prove the gap:
+  BNB: names like "_-l_", "<< WK Cartoon Football >>", "0x100f…4eca",
+       "币安人生NFT" — some art, ALL ranking cells "—", grades empty.
+       Earlier BNB also showed etherscan URL / vandals scam titles
+       (fixed in 786eb7f isSpamCollectionTitle — keep that gate).
+  Avalanche: 3477 rows, titles are truncated hex 0x000a…4dd4, cards
+       say ART PENDING, every cell dash, LRT/HEND placeholder thumbs.
+  Base: BEST current spoke — Layer3 CUBE, Signal Shards, Basenames,
+       Beezie, Ddrv, RoarMads have REAL floors, 24h volume, sales,
+       holders, grades A/B/C. Still missing Listed on most; 24h Change
+       often 0.0% or dash; Signal Shards 100% listed of 1 is shell-like.
+  Arbitrum: names exist (Bioframe Ascendant etc) and floors exist
+       (ETH) but 24h volume/sales/change almost all dash; Listed is
+       "0.1% 1" (one listing / huge supply) — grade B on floor+jpeg
+       is still too generous if operator wants ETH-standard evidence.
+  Robinhood: RobinWood row is GRADED B but Floor/Listed/Volume/Sales
+       are ALL dash. Operator says the REAL RobinWood floor exists
+       (native Seaport book on /market). You MUST source it from
+       getListings("robinwood") WITHOUT requiring chain_slug (NULL
+       rows). If /market Buy&Sell is also empty, dash is honest —
+       then the work is to INDEX/SHOW the real book, not invent ETH.
+  Duplicate "Ddrv" rows on Base — do not merge by fuzzy name; exact
+       contract only. Investigate duplicate tracking.
 
+Success = every VISIBLE ranked row has:
+  legitimate name (never hex, never URL, never ERC-721 name() junk
+    unless that IS the on-chain identity AND OpenSea/ME/CG has no
+    better exact slug match)
+  legitimate image (or hide the card; never LRT/HEND placeholder as
+    "the collection")
+  floor from a real book (OpenSea stats, ME stats, UniSat, native
+    listings min price, CoinGecko exact id) — never guessed
+  listed count from that book
+  24h volume/sales from OpenSea interval, CG, ME, or first-party
+    plank_seaport_fills — never 0 fabricated
+  holders only if adapter returned a real owner count
+  rarity/traits on COLLECTION PAGE via −log2 kernel, not hub table
+  grade only if hasGradeEvidence (listed OR volume OR native home +
+    real vault) — never A/B for floor+jpeg shells
 
-1. BRANCH / PROD RULES (BULLISH0X)
-----------------------------------
-master = InMotion deploy = public. Do not merge this work to master.
-dev = integration. This session pushed to dev under weekly-limit pressure
-(same exception as docs/HANDOFF-multichain-data-and-bitcoin-audit-2026-08-20.md).
-Merging dev→master is bullish0x's release decision only.
-
-
-2. PRODUCT INTENT (STILL THE GOAL)
-----------------------------------
-Unified NFT marketplace: every chain, every collection, every piece.
-
-Native RobinWood /market: Seaport 1.6, gallery rarity lib/rarity.ts
-  (−log2 on Base/Background/Holographic), vault Instant Swap (V3).
-
-Foreign /market/multichain/:chain/:slug:
-  listings overlay + catalog, same −log2 in lib/rarity-generic.ts,
-  buy via OpenSea fulfillment_data / Magic Eden buy_now / UniSat auctionId.
-
-No hover mega-menus on /market. No Instant Swap for foreign yet (banner).
-No Across/deBridge/0x NFT pay-from-any-chain (receivers null, flags off).
-
-
-3. WHAT THIS SESSION SHIPPED ON `dev` (CHRONOLOGICAL)
------------------------------------------------------
-Rarity / collections (before the hub crash)
-- Claynosaurz empty rarity: ME symbol ≠ Helius collection mint. Resolve
-  mint via ME listing + DAS grouping; dual-write slug+mint.
-- Names were mints: Listing.tokenName from ME token.name; displayTokenLabel.
-- 5k sample stuck: rarity GET only enqueued if map.size===0. Resume if
-  sampleSize in {1000,2000,5000}. Claynosaurz reached ~10,232.
-- Listed 161 vs floors "20 listed": ME first page cap 20. Page offset up
-  to 200; RarityFloorStrip can say "N of M listed".
-- All items used ME listings (20). Now catalog from plank_foreign_rarity
-  (up to 2000). ITEMS uses sampleSize / ME listedCount.
-- Solana verify: don't refetch /v2/tokens/:mint/listings (429/empty).
-  Pass collection escrow (auctionHouse, tokenAccount, seller) into
-  M2 SellerTradeState getAccountInfo. Buy 409s if PDA gone or price moved.
-- Kernel tests: rarity-generic, rarity-index-dispatch, solana-rarity-resolve,
-  token-label, solana-verify-listing, marketplace-harness.
-
-Hub / Robinhood
-- Native RobinWood was ONLY a banner ("deliberately excluded from
-  FOREIGN_CHAINS"). Injected as a ranking row from getListings; isNativeHome
-  → href /market. Unsynced listed_count=0 serialized as null (dash not fake 0).
-- Default "Has real artwork" + hide shells zeroed Robinhood (477 scan rows
-  have no floor/volume). Robinhood-only filter skips those gates.
-- Grade sort dropped native row off page 1 (no snapshot → ungradable).
-  Pin isHomeRow first. Client fallback inserts RobinWood if API miss.
-- Biggest movers now respect chain filter.
-
-THE INCIDENT (operator identified: "you broke something fundamental")
-- Goal: make Optimism/Avalanche cells as complete as unfiltered Ethereum.
-  Ethereum looks complete because those rows already had an OpenSea stats
-  snapshot. OP often has floor only.
-- Implementation: GlobalMarketHub POSTed /api/market/multichain/hydrate-stats
-  for 8 visible contracts. Module
-  lib/market/multichain/opensea-collection-stats.ts called OpenSea+CoinGecko.
-- Bug: `const key = await getOpenSeaApiKey()` declared TWICE in one function.
-  Turbopack compile error: "the name 'key' is defined multiple times".
-- Why the WHOLE GLOBAL MARKET died: Next App Router compiles API routes with
-  the page graph. Visiting /market/multichain compiled hydrate-stats which
-  imported the broken file. Overlay, not a runtime 500. Browser refresh
-  cannot clear it.
-- GitHub was fixed (rename openSeaApiKey, rewrite, delete file, inline
-  route). Operator's Next PID held .next; Remove-Item .next failed while
-  node listened on 3800. Overlay kept showing the GHOST 110-line file.
-- Recovery: kill Next PID, wipe .next, stub the stats module (no-op),
-  disable hydrate POST, restart `next dev -p 3800`. Hub came back.
-- ff6a731 = restore compile. 17c39ae = hydrate again but ONLY inside
-  hydrate-stats/route.ts (no second `const key` file). Stub remains so an
-  old import cannot crash. Visible-page hydrate: CoinGecko
-  /nfts/{platform}/contract/{address}, then OpenSea /stats + num_owners,
-  ME /stats for Solana. Max 6 contracts. Bitcoin skipped.
-
-HEAD around 17c39ae on dev. Do not merge to master.
+Dash with a reason > fake 0. Exact-match only. Do not prune Avalanche
+like Solana. Do not restyle native /market. No hover mega-menus.
+Alchemy NFT API FORBIDDEN (monthly 429). Instant Swap/vaults for
+foreign collections = later. Across/deBridge/0x flags stay off.
 
 
-4. PER-CHAIN STATS SOURCES (ETH-LIKE CELLS, NO ALCHEMY NFT)
------------------------------------------------------------
-| Chain | Floor / listed | 24h volume/sales | Holders |
-| ETH/Base/OP/Arb/Polygon/BNB/Avax | OpenSea listings/sync + hydrate /stats | CoinGecko NFT by contract (keyless demo) then OpenSea intervals | CG unique addresses or OS num_owners |
-| Solana | Magic Eden /stats (keyless) | CoinGecko platform solana | ME uniqueHolders |
-| Bitcoin | UniSat / OW catalog | CoinGecko ordinals slug cron (exact match only) | none yet |
-| Robinhood native | market_orders / Seaport | chain-indexer / vault fills — NOT OpenSea | not Alchemy |
-| Robinhood scan shells | none until OS stats | none | none |
+================================================================
+1. KEEP THE SITE UP WITHOUT HANGING THE AGENT
+================================================================
+Next MUST run in its OWN window, not a Grok-owned foreground command.
 
-Cron (prod later): scripts/refresh-market-data.ts  scaffold-rarity,
-scaffold-rarity-solana, coingecko-solana-stats, coingecko-bitcoin-stats.
-Local DB ≠ prod. Never fabricate volume for 3477 Avax rows in one paint.
+  START-MARKET.bat  (repo root) → start "Marketplank :3800" cmd /k
+  npx next dev -p 3800
 
+Do NOT use START.bat (that is PlankCrash / Hardhat).
+If :3800 already LISTENING, leave it. Kill+wipe .next ONLY if compile
+overlay / ghost modules (Turbopack held PID 13936 once).
+Verify: Invoke-WebRequest http://localhost:3800/market/multichain
+Hub GET stays snapshot-read. Heavy work = scripts in separate cmd.
 
-5. RARITY (ALREADY THE KERNEL — DON'T REINVENT)
------------------------------------------------
-lib/rarity.ts and lib/rarity-generic.ts: informationContent = −log2(count/N).
-Official Background-like trait; spam serials excluded; zero-score → Common.
-indexRarityForCollectionLookup: solana→Helius, bitcoin→UniSat (always
-partial), 0x→OpenSea slug, else OpenSea slug. zkSync openSeaChain null.
-On-demand enqueue if empty OR stale first-pass 1k/2k/5k.
-scoreTokenAgainstTraitIndex: listed mint not in table still scores vs index.
+  npm run market:spokes
+  npx tsx scripts/spoke-backfill.ts --minutes=8
+  npx tsx scripts/spoke-backfill.ts --spoke=evm-opensea-stats --minutes=8
+  npm run market:refresh            # incremental cron
+  npm run market:refresh:full       # daily; includes rarity scaffold
 
-
-6. WHAT TO BUILD NEXT (OPERATOR JUST ASKED)
--------------------------------------------
-A. Grade RobinWood on the hub (screenshot: Grade column is "—" on row 1).
-   Today gradeBreakdown requires artOk && hasMarketEvidence (floor OR
-   listed>0 OR volume OR sales). Empty local book → ungradable.
-   REAL signals to add (do not invent volume):
-   - isNativeHome (this IS the curated collection, MARKET_COLLECTIONS).
-   - isVaultBacked + live V3 vault 0xacE28f72Fc3e15eA1671e689806694A9b0cE047D
-     (Premium Plank Liquidity) = decentralized NFT/ETH AMM. Read on-chain
-     reserve/TVL if you show a number; presence of the vault is already real.
-   - trustBadges already on the collection: lp-burned, ownership-renounced,
-     verified.
-   - Live Seaport listedCount/floor when getListings returns rows.
-   gradable should be true for isNativeHome even if the book is empty THIS
-   machine, because the collection and vault are real mainnet facts — but
-   do NOT fake a floor or 24h volume. Letter from vault+verified+art, not
-   from a made-up book.
-
-B. Decentralized liquidity as a grade axis (all collections, not only us)
-   Only if a REAL source says there is a pool/vault:
-   - Our V3 for RobinWood.
-   - NFTX / Sudoswap / Flooring Protocol / similar ONLY when you can
-     resolve a contract from a public registry or on-chain, not a guess.
-   Points only when verified. Breakdown label must name the source.
-
-C. RWA / stock-backed NFTs
-   Same rule: real value only. Possible honest sources later:
-   - Collection metadata / official docs (Backed, Dinari, etc.) if
-     contract allowlisted.
-   - OpenSea category if they publish it — confirm live before using.
-   Do NOT mark scan shells as RWA because the art looks like a ticker.
-   New optional field on the hub row, fail closed null.
-
-D. Wrong names / titles (ERC721, hex, "..")
-   Those are OpenSea-robinhood-scan + on-chain name() (often "ERC721").
-   Fix: OpenSea collection `name` / `image_url` via hydrate or the existing
-   updateCollectionDisplay path in rarity-index-runner — exact contract
-   match, never fuzzy. Keep hex as subtitle. Don't invent display names.
-
-E. Hydrate safety (do not regress)
-   ALL OpenSea/CG fetch for hub cells stays in
-   app/api/market/multichain/hydrate-stats/route.ts
-   Never reintroduce lib/market/multichain/opensea-collection-stats.ts as a
-   second copy of getOpenSeaApiKey. Stub there must remain a 10-line no-op
-   so leftover imports cannot crash compile.
-   After any hydrate change: kill Next, delete .next, `npx next dev -p 3800`.
-   Turbopack will otherwise keep the ghost overlay.
-
-F. Tests
-   node --import tsx --test test/market/marketplace-harness.test.ts
-   node --import tsx --test test/market/rarity-generic.test.ts
-   npx tsc --noEmit
-   Add a test: isNativeHome is gradable without fabricated volume.
+Spoke worker MUST NOT be imported into App Router page graph.
+Previous crash: duplicate `const key` in a hydrate module imported by
+the page. Hydrate lives in
+  app/api/market/multichain/hydrate-stats/route.ts
+Stub:
+  lib/market/multichain/opensea-collection-stats.ts  (no-op, keep stub)
 
 
-7. CLICK PATHS (LOCAL ONLY)
----------------------------
-http://localhost:3800/market
-http://localhost:3800/market/multichain
-http://localhost:3800/market/multichain?chains=robinhood
-http://localhost:3800/market/multichain?chains=opt-mainnet
-http://localhost:3800/market/multichain?chains=base-mainnet
-http://localhost:3800/market/multichain/solana-mainnet/Claynosaurz
-http://localhost:3800/market/multichain/solana-mainnet/Claynosaurz?show=all
-https://plank.tanggang.life is OLD MASTER. Do not use it to judge this work.
+================================================================
+2. SPOKE MAP (ALREADY IN REPO — EXTEND, DO NOT REPLACE)
+================================================================
+lib/market/multichain/spokes.ts  +  scripts/spoke-backfill.ts
+
+id                     chain            cells                 source
+evm-opensea-stats      EVM w/ OS        floor,vol,sales,name  OpenSea v2 slug EXACT
+evm-seaport-fills      EVM+Robinhood    vol,sales             plank_seaport_fills
+solana-magiceden       solana           floor,listed,name     ME keyless
+solana-helius-rarity   solana           ranks,traits          DAS + −log2 cap 12k
+solana-coingecko       solana           vol,sales,floor       CG platform=solana exact id
+bitcoin-unisat         bitcoin          floor,listed,name     UniSat
+bitcoin-unisat-rarity  bitcoin          ranks,traits          ALWAYS partial
+bitcoin-coingecko      bitcoin          vol,sales             CG ordinals exact slug
+robinhood-native       robinhood        floor,listed,grade    getListings("robinwood")
+adapter-sync           *                snapshot fields       staleness queue, batch 800
+
+FOREIGN_CHAINS (lib/market/multichain/trading/foreign-chain-registry.ts):
+  eth-mainnet 1 ethereum
+  polygon-mainnet 137 matic
+  arb-mainnet 42161 arbitrum
+  base-mainnet 8453 base
+  opt-mainnet 10 optimism
+  bnb-mainnet 56 bsc
+  avax-mainnet 43114 avalanche
+  zksync: openSeaChain NULL — skip OpenSea, native only
+
+Discovery already exists (do not rewrite):
+  evm-log-scan, hypersync-evm-scan, opensea-bulk-scan,
+  unisat-collection-list-scan, ordiscan-collection-scan,
+  helius-collection-scan, robinhood-chain-scan, opensea-robinhood-scan
+
+Stats already exists:
+  discovery/opensea-stats.ts  runOpenSeaStatsSync(chainSlug, batch)
+  discovery/coingecko-nft-stats.ts  runCoinGeckoNftStats(platform, n)
+  scripts/opensea-stats-sync-pass.mjs
+  scripts/coingecko-nft-stats-sync-pass.mjs
+  store.updateEvmVolumeFromSeaportFills
+  lib/market/multichain/sync.ts  runMultichainSync (fair staleness)
+
+Rarity:
+  lib/rarity.ts native Base/Background/Holographic −log2
+  lib/rarity-generic.ts competition rank + dual percentile + spam trait filter
+  rarity-index-runner.ts (EVM)
+  helius-rarity-index-runner.ts (Solana; resolve ME symbol → mint; dual-write)
+  unisat-rarity-index-runner.ts (Bitcoin; always partial)
+  scripts/index-foreign-rarity.ts  scripts/scaffold-all-collections.ts
+
+Titles:
+  lib/market/collection-title.ts  isSpamCollectionTitle
+    (http, explorers, buying transaction, vandals, gorillaPool,
+     length>80, ^[-_*\s.]+$)
+  isHexLikeCollectionName in opensea-stats.ts — never store hex as title
+
+Budget:
+  discovery/source-budget.ts daily ceilings + jail on 429
+  CoinGecko monthly 9000 under 10k demo
+  Alchemy NFT API do not call
+  ME 400ms pace (180/min advertised)
+  UniSat/Ordiscan 500ms
 
 
-8. KEY FILES
-------------
-lib/rarity.ts
-lib/rarity-generic.ts
-lib/market/multichain/rarity-index-runner.ts
-lib/market/multichain/discovery/helius-rarity-index-runner.ts
-app/api/market/multichain/route.ts          (native RobinWood inject)
-app/api/market/multichain/rarity/route.ts
-app/api/market/multichain/listings/route.ts
-app/api/market/multichain/hydrate-stats/route.ts
-app/api/market/multichain/solana-verify-listing/route.ts
-app/api/market/multichain/solana-buy-instruction/route.ts
-components/market/GlobalMarketHub.tsx       (pin, filters, grade)
-components/market/MultichainCollectionView.tsx
-lib/market/multichain/trading/foreign-fulfill.ts
-lib/market/multichain/opensea-collection-stats.ts  (STUB only)
-scripts/refresh-market-data.ts
-test/market/marketplace-harness.test.ts
+================================================================
+3. ROBINWOOD FLOOR — THE CONCRETE BUG TO FIX FIRST
+================================================================
+Hub injects native collection in
+  app/api/market/multichain/route.ts
+Must call getListings("robinwood") WITHOUT forcing chain_slug
+(17c39ae). Then floor = min live listing price in native wei/ETH,
+listedCount = book size.
+
+If still dash: query market_orders locally (Postgres). If rows exist
+with collection_slug robinwood and expires_at > now, the inject is
+wrong. If zero rows, /market is empty too — operator must list, OR
+you index on-chain Seaport OrderFulfilled / OrderValidated for 4663
+via existing seaport-fill-indexer + book — still fail closed if none.
+
+Grade: isNativeHome + isVaultBacked (V3 address above) is allowed
+without fake volume (5c99b23). Floor still must be real or dash.
+
+Do not invent 0.001 ETH.
 
 
-9. DIRECT INSTRUCTION TO THE RECEIVING GROK
--------------------------------------------
-1. Stay on `dev`. No master merge, no InMotion deploy.
-2. Grade RobinWood with REAL vault + native-home + listings if present.
-   Empty book → still gradable as home/vault; cells for floor/volume stay
-   dash if unsourced.
-3. Extend gradeBreakdown with optional real liquidity / RWA parts, sourced
-   or omit. Show the source in the badge breakdown.
-4. Fix display names from OpenSea collection meta on exact contract match.
-5. Do not resurrect a second stats TypeScript file with `const key`.
-6. If the red overlay returns, it is Turbopack cache: kill node on 3800,
-   delete .next, `npx next dev -p 3800`.
-7. Keep fail-closed. Keep Alchemy NFT off.
+================================================================
+4. NAMES AND QUALIFICATIONS — NO JUNK IN RANKINGS
+================================================================
+Hub: components/market/GlobalMarketHub.tsx
+  isSpamCollectionTitle, displayName, isHomeRow, hasGradeEvidence,
+  listedPctOf requires listed>0, pin native first,
+  one-chain skip art/shells (let BNB identity through BUT spam filter
+  must still drop URL/vandals/hex-only titles).
+
+For Avalanche/BNB hex titles:
+  1. Resolve OpenSea slug from chain+contract (opensea-stats resolveOpenSeaSlug)
+  2. If OS returns a human name, updateCollectionDisplay
+  3. If OS name is hex-like, keep dash name / hide from trending
+  4. Never fuzzy-match another collection's name onto this contract
+
+ART PENDING cards: no image_url in snapshot. Either hydrate from OS/ME
+or exclude from "trending (graded)" until image exists.
+
+Duplicate Base "Ddrv": two contracts, two rows — correct unless they
+are the same address. Confirm before collapsing.
+
+
+================================================================
+5. WHAT `dev` ALREADY SHIPPED (DO NOT RE-LITIGATE)
+================================================================
+HEAD origin/dev around 786eb7f (local also has uncommitted:
+  START-MARKET.bat, lib/market/multichain/spokes.ts,
+  scripts/spoke-backfill.ts, package.json market:spokes)
+
+786eb7f  BNB scam-title reject
+0317678  ETH-standard cells; no fake 0 sales; no hex titles;
+         no B-grade on floor-only shells; BNB visible when filtered
+5c99b23  one-shot + RobinWood grade from native+vault
+17c39ae  hydrate-in-route; RobinWood listings without chain filter
+ff6a731  restore compile; disable page-graph stats hydrate
++ Claynosaurz mint resolve, tokenName, ME pagination offset 200,
+  rarity resume 1k/2k/5k, Solana verify via listing escrow,
+  migration 030_collection_integrity.sql (safelist/nsfw),
+  listCollectionsForSync staleness (Solana was starved alphabetically)
+
+Uncommitted work is the spoke catalog + detached START-MARKET +
+spoke-backfill. Commit on a feature branch off origin/dev, PR to `dev`.
+
+
+================================================================
+6. INFRA
+================================================================
+Next 16 App Router + Turbopack. Postgres (PGHOST etc) = durable store.
+plank_multichain_collections + plank_multichain_snapshots
+plank_foreign_rarity
+plank_seaport_fills
+market_orders (native Seaport)
+Non-EVM addresses are case-sensitive (Solana base58). EVM lowercased
+in store.normalizeContractAddress.
+
+InMotion Passenger = `master` only. Local .env for keys:
+  OPENSEA, COINGECKO_API_KEY (demo), HELIUS, UNISAT, ENVIO_API_TOKEN
+  NEVER Alchemy NFT quota.
+
+Tests: npm run test:market  (tsx --test test/market/*.test.ts)
+Do not add exploit PoCs. Fail closed.
+
+
+================================================================
+7. RESEARCH YOU MUST DO (THEN WIRE, THEN AUDIT)
+================================================================
+For EACH chain tab the operator showed empty or partial, write a
+short audit (real HTTP against live APIs, not assumed):
+
+  BNB bsc     — OpenSea collections+stats for the 10 visible contracts
+  Avalanche   — why 3477 hex shells: bulk scan without display hydrate;
+                pace OS stats for the visible window first, not 3477
+  Base        — copy this quality to other EVM spokes; fill Listed from
+                OS listings count if stats expose it; 24h change only
+                if OS/CG returns floor_price_24h_percentage_change
+  Arbitrum    — floors exist, volume missing: runOpenSeaStatsSync
+                intervals one_day; if OS 429, jail, don't zero
+  Robinhood   — native book + OS robinhood chain list for community
+                names (11111zq3, 1337 RH, 3D Chungos already have vol
+                from fills — RobinWood must join that path)
+
+Then rarity: collection pages, not hub. Enqueue scaffold-rarity for
+collections the user actually opens; do not stampede 15k.
+
+Traits: generic −log2; spam trait filter; official-tier detect.
+
+Wash/stolen: only if a real source exists; do not invent flags.
+
+Budget: visible rows first (hub window 10/25/50/100), then staleness
+queue. Never 15k fan-out in the request path.
+
+
+================================================================
+8. HARD NO
+================================================================
+- merge dev→master / push public
+- Alchemy NFT API
+- fabricate floors, names, images, ranks, volume, holders
+- import a second OpenSea hydrate into GlobalMarketHub / page graph
+- hover mega-menus on /market
+- Instant Swap for foreign
+- fuzzy name attach
+- prune Avalanche
+- restyle native /market
+- hang Next on the agent command (use START-MARKET.bat)
+- claim cells "done" without a sourced snapshot write + UI readback
+
+
+================================================================
+9. FIRST 90 MINUTES
+================================================================
+1. Confirm :3800 up via START-MARKET.bat if needed.
+2. SQL: live robinwood listings → wire hub floor/listed if rows exist.
+3. Launch spoke-backfill in a second window; prioritize
+   evm-opensea-stats for bnb-mainnet + avax-mainnet (visible 100).
+4. Hide/spam-filter remaining hex and "_-l_" titles from rankings.
+5. Commit on a branch, PR to `dev`. Do not merge to master.
+6. Paste this file's "audit" notes into the PR: per-chain source,
+   sample contract, HTTP status, fields written, fields still dash
+   and WHY.
+
+When you say a chain is "through and through," you mean: sampled
+visible rows have names from OS/ME/CG/native, floors from a book,
+volume from a 24h source or dash with jail/budget reason, rarity
+kernel runs on open collection, traits stored, tests green.
+Not: every cell on 15366 rows filled this afternoon.

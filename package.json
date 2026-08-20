@@ -24,6 +24,7 @@
     "db:migrate": "node scripts/migrate-postgres.mjs",
     "db:maintenance": "node scripts/postgres-maintenance.mjs",
     "market:refresh": "tsx scripts/refresh-market-data.ts",
+    "market:spokes": "tsx scripts/spoke-backfill.ts",
     "market:refresh:full": "tsx scripts/refresh-market-data.ts --full",
     "market:reindex": "tsx scripts/reindex-chain-events.ts",
     "discover:compute-rarity": "tsx scripts/compute-rarity.ts",

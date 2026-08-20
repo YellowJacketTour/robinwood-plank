@@ -19,5 +19,12 @@ export function isSpamCollectionTitle(name: string | null | undefined): boolean 
 
 export function looksLikeContractName(name: string | null | undefined): boolean {
   const n = (name ?? "").trim();
-  return /^0x[0-9a-fA-F]{12,}$/.test(n) || /^erc-?721$/i.test(n) || n === "..";
+  if (!n) return false;
+  if (n === ".." || /^erc-?721$/i.test(n)) return true;
+  // Full hex, truncated hub labels (0x000a…4dd4), or punctuation-only junk (_-l_).
+  if (/^0x[0-9a-fA-F]{8,}$/.test(n)) return true;
+  if (/^0x[0-9a-fA-F]{4,}[.…]+[0-9a-fA-F]{3,}$/i.test(n)) return true;
+  if (/^[-_*<>.\s]{1,8}$/.test(n)) return true;
+  if (/^[-_*]+\s*l\s*[-_*]+$/i.test(n)) return true;
+  return false;
 }
