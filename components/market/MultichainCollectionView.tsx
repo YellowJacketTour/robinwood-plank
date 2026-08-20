@@ -351,7 +351,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           setListingsUnavailable("book-unavailable");
         });
       void swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }> }>(
-        `/api/market/multichain/tokens?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=40`,
+        `/api/market/multichain/tokens?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=50`,
         { ttlMs: 60_000, swrMs: 300_000, session: true }
       )
         .then((tok) => setTokens(tok.tokens ?? []))
@@ -744,13 +744,31 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     };
   }, [collectionSlug]);
 
+  const browseAsListing = useCallback(
+    (tokenId: string, imageUrl?: string | null, name?: string | null): Listing => {
+      const live = listings.find((l) => l.tokenId === tokenId);
+      if (live) return live;
+      return {
+        id: `browse:${chainSlug}:${tokenId}`,
+        collectionSlug,
+        tokenId,
+        maker: "0x0000000000000000000000000000000000000000",
+        priceWei: "0",
+        expiresAt: new Date(0).toISOString(),
+        kind: "fixed",
+        imageUrl: imageUrl ?? undefined,
+        foreignChainSlug: chainSlug,
+      };
+    },
+    [listings, chainSlug, collectionSlug]
+  );
+
   const openDetails = useCallback(
     (tokenId: string) => {
-      const listing = listings.find((l) => l.tokenId === tokenId);
-      if (!listing) return;
-      setDetailsTarget(listing);
+      const token = tokens.find((t) => t.tokenId === tokenId);
+      setDetailsTarget(browseAsListing(tokenId, token?.imageUrl, token?.name));
     },
-    [listings]
+    [tokens, browseAsListing]
   );
 
   const openOffer = useCallback(
@@ -949,7 +967,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     const min = minPriceEth.trim() ? Number(minPriceEth) : null;
     const max = maxPriceEth.trim() ? Number(maxPriceEth) : null;
     const rows = listings.filter((l) => {
-      if (q && !l.tokenId.startsWith(q)) return false;
+      if (q && !l.tokenId.toLowerCase().includes(q.toLowerCase())) return false;
       const priceEth = Number(l.priceWei) / 1e18;
       if (min !== null && priceEth < min) return false;
       if (max !== null && priceEth > max) return false;
@@ -995,10 +1013,20 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   }, [filteredListings]);
 
   const browseItems = useMemo(() => {
-    if (bookFilter === "listed" || tokens.length === 0) {
+    if (bookFilter === "listed") {
       return filteredListings.map((listing) => ({ tokenId: listing.tokenId, name: null, imageUrl: listing.imageUrl ?? null, listing }));
     }
-    const fromTokens = tokens.map((t) => ({
+    const q = searchQuery.trim().toLowerCase();
+    const fromTokens = tokens
+      .filter((t) => {
+        if (q && !t.tokenId.toLowerCase().includes(q) && !(t.name ?? "").toLowerCase().includes(q)) return false;
+        if (activeTier !== "all") {
+          const r = rarityMap.get(t.tokenId);
+          if (!r || normalizeRarityTier(r.tier) !== activeTier) return false;
+        }
+        return true;
+      })
+      .map((t) => ({
       tokenId: t.tokenId,
       name: t.name,
       imageUrl: t.imageUrl,
@@ -1011,7 +1039,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       listing,
     }));
     return [...fromTokens, ...extra];
-  }, [bookFilter, tokens, filteredListings, listingByToken]);
+  }, [bookFilter, tokens, filteredListings, listingByToken, searchQuery, activeTier, rarityMap]);
 
   // URL persistence -- reflects real filter/sort state into the query
   // string (router.replace, not push, so browsing doesn't spam history),
@@ -1471,16 +1499,24 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 {formatTokenAmount(volumeWei, 18, 3)}
                 <ChainIcon chainSlug={chainSlug} size={16} className="shrink-0" />
                 {statUsd(volumeWei) != null && <span className="text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(volumeWei)!)}</span>}
+                {marketStats?.sales24h != null ? <span className="text-[0.65rem] font-normal text-foreground/40"> · {marketStats.sales24h} sales 24h</span> : null}
               </>
+            ) : marketStats?.sales24h != null ? (
+              <span className="text-[0.65rem] font-normal text-foreground/70">{marketStats.sales24h} sales 24h</span>
             ) : (
               "—"
             )}
           </p>
         </div>
         <div>
-          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Holders</p>
+          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Unique holders</p>
           <p className="truncate text-sm font-bold text-foreground tabular-nums">
             {supplyStats?.holderCount != null ? supplyStats.holderCount.toLocaleString() : "—"}
+            {supplyStats?.holderCount != null && supplyStats.totalSupply != null && supplyStats.totalSupply > 0 ? (
+              <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">
+                {((supplyStats.holderCount / supplyStats.totalSupply) * 100).toFixed(1)}% of supply
+              </span>
+            ) : null}
           </p>
         </div>
         <div>
@@ -1512,7 +1548,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
        * a real window from. Same "24h | 7d | 30d" button-group styling as
        * GlobalMarketHub.tsx's rankings-table window toggle.
        */}
-      {marketStats && (marketStats.volume24hWei != null || marketStats.volume7dWei != null || marketStats.volume30dWei != null) && (
+      {marketStats &&
+        (marketStats.volume24hWei != null ||
+          marketStats.volume7dWei != null ||
+          marketStats.volume30dWei != null ||
+          marketStats.sales24h != null ||
+          marketStats.sales7d != null ||
+          marketStats.sales30d != null) && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
           <div className="flex items-center gap-1.5">
             {(["24h", "7d", "30d"] as const).map((w) => (
@@ -1560,7 +1602,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               : `${browseItems.length} items on ${chainDisplayName(chainSlug)}`
           }
           lead={
-            rarityMap.size > 0 && listings.length > 0 ? (
+            rarityMap.size > 0 ? (
               <RarityFloorStrip
                 listings={listings}
                 rarity={rarityMap}
@@ -1601,7 +1643,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   type="text"
                   inputMode="numeric"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value.replace(/[^0-9]/g, ""))}
+                  onChange={(e) => setSearchQuery(isBitcoin || isSolana ? e.target.value : e.target.value.replace(/[^0-9]/g, ""))}
                   placeholder="Search #..."
                   className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground placeholder:text-foreground/30"
                 />
@@ -1810,6 +1852,24 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                     <div className="space-y-1 p-2">
                       <p className="truncate text-xs font-bold text-foreground">{item.name ?? `#${item.tokenId.slice(0, 8)}`}</p>
                       <p className="text-[0.6rem] uppercase tracking-wide text-foreground/40">Unlisted</p>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => void openDetails(item.tokenId)}
+                          className="min-h-8 flex-1 rounded-md border border-line px-2 text-[0.65rem] font-bold text-foreground/70 hover:border-gold-400 hover:text-gold-300"
+                        >
+                          Details
+                        </button>
+                        {(foreignOfferCurrency(chainSlug) || isSolana) && (
+                          <button
+                            type="button"
+                            onClick={() => void openOffer(browseAsListing(item.tokenId, item.imageUrl, item.name))}
+                            className="min-h-8 flex-1 rounded-md border border-line px-2 text-[0.65rem] font-bold text-foreground/70 hover:border-gold-400 hover:text-gold-300"
+                          >
+                            Offer
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </li>
                 )

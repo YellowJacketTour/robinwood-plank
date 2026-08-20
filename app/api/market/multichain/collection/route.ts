@@ -3,7 +3,8 @@
  * Featured-card clicks were dying in /listings when UniSat/OpenSea 500'd.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getTrackedCollection, getCollectionSupplyStats, getCollectionMarketStats } from "@/lib/market/multichain/store";
+import { getTrackedCollection, getCollectionSupplyStats, getCollectionMarketStats, updateHolderCount } from "@/lib/market/multichain/store";
+import { isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { publicError, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,20 @@ export async function GET(req: NextRequest) {
     }
     const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
     const marketStats = await getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null);
+    let holderCount = supply?.holderCount ?? null;
+    if (holderCount == null && isSolanaChainSlug(chainSlug)) {
+      const me = await fetch(
+        `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/stats`,
+        { headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) }
+      ).catch(() => null);
+      if (me?.ok) {
+        const stats = (await me.json()) as { uniqueHolders?: number; listedCount?: number };
+        if (typeof stats.uniqueHolders === "number" && Number.isFinite(stats.uniqueHolders)) {
+          holderCount = stats.uniqueHolders;
+          await updateHolderCount(chainSlug, collectionSlug, holderCount).catch(() => {});
+        }
+      }
+    }
     return NextResponse.json(
       {
         collection: {
@@ -34,7 +49,7 @@ export async function GET(req: NextRequest) {
           contractAddress: tracked.contractAddress,
           listedCount: supply?.listedCount ?? null,
           totalSupply: supply?.totalSupply ?? null,
-          holderCount: supply?.holderCount ?? null,
+          holderCount,
           floorPriceWei: supply?.floorPriceWei ?? null,
           volume24hWei: marketStats?.volume24hWei ?? null,
           sales24h: marketStats?.sales24h ?? null,

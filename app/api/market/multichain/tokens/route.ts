@@ -52,6 +52,12 @@ export async function GET(req: NextRequest) {
   }
 }
 
+function mapOpenSeaNfts(nfts: Array<{ identifier?: string; name?: string | null; image_url?: string | null }>): CollectionToken[] {
+  return nfts
+    .filter((n) => n.identifier)
+    .map((n) => ({ tokenId: n.identifier!, name: n.name ?? null, imageUrl: n.image_url ?? null }));
+}
+
 async function openSeaTokens(openSeaChain: string, contractOrSlug: string, limit: number): Promise<CollectionToken[]> {
   const key = await getOpenSeaApiKey();
   if (!key) return [];
@@ -59,32 +65,45 @@ async function openSeaTokens(openSeaChain: string, contractOrSlug: string, limit
   if (!gate.allowed) return [];
   const chainPath = openSeaChain === "matic" ? "matic" : openSeaChain;
   const address = /^0x[0-9a-fA-F]{40}$/.test(contractOrSlug) ? contractOrSlug : null;
-  if (!address) return [];
-  const res = await fetch(
-    `https://api.opensea.io/api/v2/chain/${encodeURIComponent(chainPath)}/contract/${address}/nfts?limit=${limit}`,
-    { headers: { "x-api-key": key, accept: "application/json" }, signal: AbortSignal.timeout(15_000) }
-  );
+  const url = address
+    ? `https://api.opensea.io/api/v2/chain/${encodeURIComponent(chainPath)}/contract/${address}/nfts?limit=${limit}`
+    : `https://api.opensea.io/api/v2/collection/${encodeURIComponent(contractOrSlug)}/nfts?limit=${limit}`;
+  const res = await fetch(url, {
+    headers: { "x-api-key": key, accept: "application/json" },
+    signal: AbortSignal.timeout(15_000),
+  });
   if (!res.ok) {
     recordSourceFailure("opensea-stats", res.status === 429);
     return [];
   }
   recordSourceSuccess("opensea-stats");
   const body = (await res.json()) as { nfts?: Array<{ identifier?: string; name?: string | null; image_url?: string | null }> };
-  return (body.nfts ?? [])
-    .filter((n) => n.identifier)
-    .map((n) => ({ tokenId: n.identifier!, name: n.name ?? null, imageUrl: n.image_url ?? null }));
+  return mapOpenSeaNfts(body.nfts ?? []);
 }
 
 async function solanaTokens(symbol: string, limit: number): Promise<CollectionToken[]> {
-  const res = await fetch(
+  const nftsRes = await fetch(
     `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}/listings?offset=0&limit=${limit}`,
     { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) }
   );
-  if (!res.ok) return [];
-  const raw = (await res.json()) as Array<{ tokenMint?: string; token?: { name?: string; image?: string } }>;
   const seen = new Set<string>();
   const out: CollectionToken[] = [];
-  for (const row of raw) {
+  if (nftsRes.ok) {
+    const raw = (await nftsRes.json()) as Array<{ tokenMint?: string; token?: { name?: string; image?: string } }>;
+    for (const row of raw) {
+      if (!row.tokenMint || seen.has(row.tokenMint)) continue;
+      seen.add(row.tokenMint);
+      out.push({ tokenId: row.tokenMint, name: row.token?.name ?? null, imageUrl: row.token?.image ?? null });
+    }
+  }
+  if (out.length > 0) return out;
+  const activities = await fetch(
+    `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}/activities?offset=0&limit=${limit}`,
+    { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) }
+  );
+  if (!activities.ok) return out;
+  const acts = (await activities.json()) as Array<{ tokenMint?: string; token?: { name?: string; image?: string } }>;
+  for (const row of acts) {
     if (!row.tokenMint || seen.has(row.tokenMint)) continue;
     seen.add(row.tokenMint);
     out.push({ tokenId: row.tokenMint, name: row.token?.name ?? null, imageUrl: row.token?.image ?? null });
@@ -92,26 +111,63 @@ async function solanaTokens(symbol: string, limit: number): Promise<CollectionTo
   return out;
 }
 
-async function bitcoinTokens(collectionId: string, limit: number): Promise<CollectionToken[]> {
-  const key = process.env.UNISAT_API_KEY?.trim();
-  if (!key) return [];
-  const res = await fetch("https://open-api.unisat.io/v3/market/collection/auction/collection_item_list", {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-    body: JSON.stringify({ collectionId, start: 0, limit }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) return [];
-  const body = (await res.json()) as {
-    code?: number;
-    data?: { list?: Array<{ inscriptionId?: string; name?: string; content?: string; collectionItemName?: string }> };
-  };
-  if (body.code !== 0) return [];
-  return (body.data?.list ?? [])
+type UniSatItem = { inscriptionId?: string; name?: string; collectionItemName?: string; contentType?: string };
+
+function mapUniSatItems(list: UniSatItem[]): CollectionToken[] {
+  return list
     .filter((i) => i.inscriptionId)
     .map((i) => ({
       tokenId: i.inscriptionId!,
       name: i.collectionItemName ?? i.name ?? null,
       imageUrl: `https://ordinals.com/content/${i.inscriptionId}`,
     }));
+}
+
+async function bitcoinTokens(collectionId: string, limit: number): Promise<CollectionToken[]> {
+  const key = process.env.UNISAT_API_KEY?.trim();
+  if (!key) return [];
+  const headers = { "content-type": "application/json", authorization: `Bearer ${key}` };
+
+  const indexer = await fetch(
+    `https://open-api.unisat.io/v1/collection-indexer/collection/${encodeURIComponent(collectionId)}/items?start=0&limit=${limit}`,
+    { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) }
+  );
+  if (indexer.ok) {
+    const body = (await indexer.json()) as { code?: number; data?: { list?: UniSatItem[]; items?: UniSatItem[] } };
+    const list = body.data?.list ?? body.data?.items ?? [];
+    if (body.code === 0 && list.length > 0) return mapUniSatItems(list);
+  }
+
+  const itemList = await fetch("https://open-api.unisat.io/v3/market/collection/auction/collection_item_list", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ filter: { collectionId }, start: 0, limit }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (itemList.ok) {
+    const body = (await itemList.json()) as { code?: number; data?: { list?: UniSatItem[] } };
+    if (body.code === 0 && (body.data?.list?.length ?? 0) > 0) return mapUniSatItems(body.data!.list!);
+  }
+
+  const actions = await fetch("https://open-api.unisat.io/v3/market/collection/auction/actions", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ filter: { collectionId }, start: 0, limit }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!actions.ok) return [];
+  const body = (await actions.json()) as { code?: number; data?: { list?: UniSatItem[] } };
+  if (body.code !== 0) return [];
+  const seen = new Set<string>();
+  const out: CollectionToken[] = [];
+  for (const row of body.data?.list ?? []) {
+    if (!row.inscriptionId || seen.has(row.inscriptionId)) continue;
+    seen.add(row.inscriptionId);
+    out.push({
+      tokenId: row.inscriptionId,
+      name: row.collectionItemName ?? row.name ?? null,
+      imageUrl: `https://ordinals.com/content/${row.inscriptionId}`,
+    });
+  }
+  return out;
 }
