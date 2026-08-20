@@ -80,8 +80,16 @@ export default function MarketMenu({ className, active, onNavigate, variant = "r
           className="flex min-h-12 items-center gap-2.5 rounded-md border border-line px-3 py-2 text-sm font-bold text-gold-300 hover:border-gold-400"
           onClick={go}
         >
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gold-400/40 text-[0.65rem] font-black text-gold-300">
-            All
+          <span
+            className="flex h-7 w-7 shrink-0 items-center justify-center text-gold-300"
+            aria-hidden
+          >
+            <svg viewBox="0 0 24 24" width={28} height={28} fill="none" className="block">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
+              <ellipse cx="12" cy="12" rx="4" ry="9" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M3.5 12h17" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M5.2 7.5h13.6M5.2 16.5h13.6" stroke="currentColor" strokeWidth="1.35" />
+            </svg>
           </span>
           <span className="leading-tight">
             Global

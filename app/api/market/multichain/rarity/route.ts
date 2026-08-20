@@ -31,7 +31,33 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const map = await getForeignRarity(chainSlug, collectionSlug);
+    let map = await getForeignRarity(chainSlug, collectionSlug);
+    if (map.size > 20) {
+      const tiers = new Set([...map.values()].map((v) => v.tier));
+      if (tiers.size === 1) {
+        const job = `recompute:${chainSlug}:${collectionSlug.toLowerCase()}`;
+        if (!inFlight.has(job)) {
+          inFlight.add(job);
+          try {
+            const meta = await getForeignTraitIndex(chainSlug, collectionSlug);
+            if (meta.traitIndex) {
+              const { itemsFromTraitIndex, applyForeignRaritySnapshot } = await import("@/lib/market/multichain/foreign-rarity-store");
+              const { computeGenericRaritySnapshot } = await import("@/lib/rarity-generic");
+              const items = itemsFromTraitIndex(meta.traitIndex);
+              if (items.length > 0) {
+                const snap = computeGenericRaritySnapshot(items);
+                await applyForeignRaritySnapshot(chainSlug, collectionSlug, snap);
+                map = await getForeignRarity(chainSlug, collectionSlug);
+              }
+            }
+          } catch {
+            /* keep stored tiers */
+          } finally {
+            inFlight.delete(job);
+          }
+        }
+      }
+    }
     const byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number; score: number }> = {};
     for (const [tokenId, v] of map) byTokenId[tokenId] = v;
     const meta = await getForeignTraitIndex(chainSlug, collectionSlug).catch(() => null);
@@ -39,7 +65,8 @@ export async function GET(req: NextRequest) {
     // Old first-pass caps (1k/2k/5k) left Claynosaurz stuck at 5,000 forever
     // because we only enqueued when the map was empty. Resume those samples.
     const staleFirstPass = sampleSize === 1_000 || sampleSize === 2_000 || sampleSize === 5_000;
-    const needsIndex = map.size === 0 || (staleFirstPass && chainSlug !== "bitcoin-mainnet");
+    const needsIndex =
+      map.size === 0 || (staleFirstPass && map.size < 6_000 && chainSlug !== "bitcoin-mainnet");
     if (needsIndex) {
       const job = `${chainSlug}:${collectionSlug.toLowerCase()}`;
       if (!inFlight.has(job)) {

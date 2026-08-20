@@ -12,115 +12,9 @@ import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/colle
 import ChainIcon from "@/components/market/ChainIcon";
 import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
-import { resolveIpfsUrl, withImageWidth, isIpfsGatewayUrl } from "@/lib/ipfs";
+import CollectionArtImage from "@/components/market/CollectionArtImage";
 
-/**
- * Some collection images (any sourced from lib/market/multichain/adapters/
- * defillama-nft.ts) are cached URLs on img.reservoir.tools -- confirmed
- * live 2026-08-18 in a real browser: that domain no longer resolves at all
- * (ERR_NAME_NOT_RESOLVED), since Reservoir shut down its public
- * infrastructure in 2025 (see defillama-nft.ts's own header). A plain
- * <Image> with a dead src throws a real console error and shows a broken
- * image; this swaps to the same "?" placeholder used for a genuinely
- * absent imageUrl, so a real user never sees breakage from third-party
- * infrastructure this app doesn't control.
- */
-/**
- * On-brand placeholder for a collection with no real art yet -- a plain
- * grey "?" reads as broken/generic (flagged live 2026-08-18: "bare
- * artwork/graphics look... generic grey"). This reuses the same
- * wood-grain + gold plank mark the header/nav already establishes as this
- * app's visual identity (bg-wood-900, gold-300/400, PlankFence.tsx's own
- * plank-board motif) instead of inventing a new look, and never claims to
- * be real per-token art -- it's honest about being a placeholder.
- */
-function PlankPlaceholder() {
-  return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-gradient-to-br from-wood-900 via-wood-800 to-wood-900">
-      <svg viewBox="0 0 24 24" className="h-7 w-7 text-gold-400/70" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <rect x="2" y="9" width="20" height="6" rx="1" />
-        <line x1="2" y1="12" x2="22" y2="12" strokeOpacity="0.4" />
-        <circle cx="6" cy="10.5" r="0.5" fill="currentColor" stroke="none" />
-        <circle cx="18" cy="13.5" r="0.5" fill="currentColor" stroke="none" />
-      </svg>
-      <span className="text-[0.55rem] font-black uppercase tracking-wider text-gold-400/50">Art pending</span>
-    </div>
-  );
-}
-
-/**
- * Confirmed live 2026-08-19: some upstream (Alchemy/OpenSea) metadata
- * carries the LITERAL 4-character string "null" for an image field instead
- * of a real null (see alchemy-nft.ts's cleanMetadataString for the
- * verified source) -- a truthy string that sailed past a plain `!src`
- * check and crashed Next's <Image> with "invalid src prop" the moment a
- * user clicked into an affected collection. lib/ipfs.ts's withImageWidth
- * now sanitizes this at the shared chokepoint other callers go through,
- * but this component reads `imageUrl` directly (not via withImageWidth),
- * so it needs its own guard.
- */
-function isPoisonedImageSrc(src: string | null): boolean {
-  if (!src) return true;
-  const trimmed = src.trim().toLowerCase();
-  return trimmed === "" || trimmed === "null" || trimmed === "undefined";
-}
-
-/**
- * Routes every collection thumbnail through the same-origin IPFS/gateway
- * proxy (lib/ipfs.ts's resolveIpfsUrl -> app/api/ipfs/image) instead of
- * rendering a raw external URL. Confirmed live: some discovery adapters
- * (opensea-bulk-scan.ts, opensea-robinhood-scan.ts, and older backfilled
- * rows) still store the raw gateway URL straight from upstream metadata
- * (e.g. "https://bafy....ipfs.dweb.link/1.png") instead of a pre-proxied
- * one. Loading that directly into <img>/<Image> fails in real browsers
- * with net::ERR_BLOCKED_BY_RESPONSE / ORB (Opaque Response Blocking) --
- * resolveIpfsUrl is idempotent (it no-ops on values already under
- * /api/ipfs/) so this is safe regardless of whether the row is already
- * proxied. withImageWidth then asks the proxy for a width-tiered,
- * pre-resized WebP (immutable-cached) instead of full-res art in a small
- * grid cell.
- */
-function CollectionThumb({
-  src,
-  alt,
-  onFail,
-  width = 512,
-  priority = false,
-}: {
-  src: string | null;
-  alt: string;
-  onFail?: () => void;
-  width?: number;
-  priority?: boolean;
-}) {
-  const [failed, setFailed] = useState(false);
-  if (!src || isPoisonedImageSrc(src) || failed) {
-    return <PlankPlaceholder />;
-  }
-  // Only reroute through the proxy for URLs already an /api/ipfs/ path
-  // (proxy tiering) or a raw public IPFS gateway URL the proxy's own
-  // allowlist accepts (see isIpfsGatewayUrl). Anything else (e.g. a
-  // working OpenSea/Alchemy CDN URL) renders as-is -- the proxy would
-  // just 400 it, turning a working image into a broken one.
-  const shouldProxy = src.startsWith("/api/ipfs/") || src.startsWith("ipfs://") || isIpfsGatewayUrl(src);
-  const resolvedSrc = shouldProxy ? withImageWidth(resolveIpfsUrl(src), width) || src : src;
-  return (
-    <Image
-      src={resolvedSrc}
-      alt={alt}
-      fill
-      sizes="20vw"
-      className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04]"
-      unoptimized
-      priority={priority}
-      loading={priority ? undefined : "lazy"}
-      onError={() => {
-        setFailed(true);
-        onFail?.();
-      }}
-    />
-  );
-}
+const CollectionThumb = CollectionArtImage;
 
 /**
  * Pure presentational skeleton loaders -- shimmer/pulse placeholders shaped
@@ -291,6 +185,9 @@ function displayName(c: TrackedCollection): string {
   const n = (c.name ?? "").trim();
   if (!n || n === ".." || /^0x[0-9a-fA-F]{12,}$/.test(n) || /^erc-?721$/i.test(n)) {
     const a = c.contractAddress;
+    // Ordinals/Solana collection ids are slugs or pubkeys — ellipsizing
+    // "bitcoin-booms" into "bitcoi…ooms" hides the only real identity we have.
+    if (c.chainSlug === "bitcoin-mainnet" || c.chainSlug === "solana-mainnet") return a;
     return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
   }
   return n;
@@ -1431,7 +1328,8 @@ export default function GlobalMarketHub() {
                       src={hero.imageUrl}
                       alt={hero.name ?? hero.contractAddress}
                       onFail={() => setDeadArt((prev) => new Set(prev).add(key(hero)))}
-                      width={1024}
+                      width={2048}
+                      variant="hero"
                       priority
                     />
                   </div>
@@ -1485,6 +1383,8 @@ export default function GlobalMarketHub() {
                         src={c.imageUrl}
                         alt={displayName(c)}
                         onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
+                        width={1024}
+                        variant="tile"
                       />
                     </div>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
@@ -1699,6 +1599,7 @@ export default function GlobalMarketHub() {
                               alt={displayName(c)}
                               onFail={() => setDeadArt((prev) => new Set(prev).add(rowKey))}
                               width={256}
+                              variant="thumb"
                             />
                             <span
                               className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70"
@@ -1876,6 +1777,8 @@ export default function GlobalMarketHub() {
                       src={c.imageUrl}
                       alt={displayName(c)}
                       onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
+                      width={1024}
+                      variant="tile"
                     />
                     <span
                       className="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/70"
@@ -1989,7 +1892,8 @@ export default function GlobalMarketHub() {
                         src={c.imageUrl}
                         alt={displayName(c)}
                         onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
-                        width={512}
+                        width={1024}
+                        variant="tile"
                         priority={i < 6}
                       />
                       {/* Chain badge, always on the art -- at-a-glance chain identification via the real brand mark on a translucent disc (readable against any art), same corner-overlay pattern ListingCard uses for rarity tier badges. */}

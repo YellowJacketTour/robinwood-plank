@@ -32,7 +32,7 @@ const MAX_BYTES = 15 * 1024 * 1024; // sane ceiling — this collection's art is
  * immutable cache can't be exploded with arbitrary variant keys. Requests
  * round UP to the nearest tier (a 180px grid cell asks for 256).
  */
-const WIDTH_TIERS = [256, 512, 1024] as const;
+const WIDTH_TIERS = [256, 512, 1024, 2048] as const;
 
 function resolveWidthTier(raw: string | null): number | null {
   if (!raw) return null;
@@ -113,9 +113,18 @@ export async function GET(req: Request) {
     // fetch on a host that can never resolve.
     "arweave.net",
     "ordinals.com",
+    "www.ordinals.com",
     "static.unisat.io",
     "next-cdn.unisat.space",
     "we-assets.pinit.io",
+    "coin-images.coingecko.com",
+    "creator-hub-prod.s3.us-east-2.amazonaws.com",
+    "turbo.ordinalswallet.com",
+    "media.ordinalswallet.com",
+    "cdn.ordinalswallet.com",
+    "ord-mirror.magiceden.dev",
+    "www.miladymaker.net",
+    "miladymaker.net",
   ]);
   // Only the original path-style IPFS gateways require a literal "/ipfs/"
   // segment in the path below. The non-IPFS CDN hosts added above serve

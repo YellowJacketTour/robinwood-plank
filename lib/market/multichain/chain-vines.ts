@@ -14,7 +14,7 @@ export const CHAIN_VINES: ChainVine[] = [
   {
     chainSlug: "eth-mainnet",
     acquire: ["opensea-bulk-v2 (no Alchemy image gate)", "hypersync transfers (no Alchemy when jailed)", "seaport fills"],
-    harness: ["opensea-stats (isolated process)", "slug cache at list time", "CG ethereum exact contract"],
+    harness: ["opensea-stats (isolated process)", "slug cache at list time", "CG ethereum exact contract (cron coingecko-eth-stats, missing-floor first)"],
     express: ["floor/vol/sales/listed/holders from OS", "hex shells only if they have cells"],
     never: ["Alchemy NFT API"],
   },

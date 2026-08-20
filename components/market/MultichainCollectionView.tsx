@@ -5,6 +5,10 @@ import Image from "next/image";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { PackageOpen, Tag } from "lucide-react";
 import { withImageWidth } from "@/lib/ipfs";
+import CollectionArtImage from "@/components/market/CollectionArtImage";
+import { catalogArtExtras } from "@/lib/market/multichain/token-art-templates";
+import { collectionSurface } from "@/lib/market/multichain/collection-surface";
+import { rarityMapGet, countTiers, tokenIdAliases } from "@/lib/market/rarity-lookup";
 import { SkeletonCardGrid, SkeletonRows, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 import ListingCard from "@/components/market/ListingCard";
 import BuyConfirm from "@/components/market/BuyConfirm";
@@ -144,6 +148,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>>([]);
+  const surface = collectionSurface(chainSlug);
+  const [tokenLimit, setTokenLimit] = useState(surface.catalogPageSize);
   const [bookFilter, setBookFilter] = useState<"all" | "listed">(() => (searchParams.get("show") === "all" ? "all" : "listed"));
   /** Real listed-count/total-supply/holder-count from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. holderCount is EVM-only (Alchemy getOwnersForContract) and may arrive later than the rest via the on-demand /api/market/multichain/holder-count backfill below. */
   const [supplyStats, setSupplyStats] = useState<{
@@ -330,6 +336,26 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   const chainLabel = `${chainDisplayName(chainSlug)} via OpenSea`;
 
+  const fetchCatalogTokens = useCallback(() => {
+    const sort =
+      listingSort === "rarity-desc" ? "rank-desc" : listingSort === "rarity-asc" ? "rank" : "id";
+    const tierFilter = activeTiers.length === 1 ? activeTiers[0] : activeTier !== "all" ? activeTier : "";
+    const qs = new URLSearchParams({
+      chainSlug,
+      collectionSlug,
+      limit: String(Math.min(surface.catalogCap, tokenLimit)),
+      art: "2",
+      sort,
+    });
+    if (tierFilter) qs.set("tier", tierFilter);
+    return swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }> }>(
+      `/api/market/multichain/tokens?${qs.toString()}`,
+      { ttlMs: 8_000, swrMs: 45_000, session: true }
+    )
+      .then((tok) => setTokens(tok.tokens ?? []))
+      .catch(() => setTokens([]));
+  }, [chainSlug, collectionSlug, listingSort, activeTier, activeTiers, tokenLimit, surface.catalogCap]);
+
   const load = useCallback(async () => {
     setLoadError(null);
     try {
@@ -360,7 +386,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         listings: Listing[];
         listingsUnavailable?: string | null;
         collection?: { listedCount?: number | null; floorPriceWei?: string | null };
-      }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${isSolana || isBitcoin ? 200 : 50}`, {
+      }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${surface.bookPageSize}`, {
         ttlMs: 8_000,
         swrMs: 45_000,
         session: true,
@@ -372,12 +398,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         .catch(() => {
           setListingsUnavailable("book-unavailable");
         });
-      void swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }> }>(
-        `/api/market/multichain/tokens?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${isBitcoin || isSolana ? 2000 : 200}`,
-        { ttlMs: 60_000, swrMs: 300_000, session: true }
-      )
-        .then((tok) => setTokens(tok.tokens ?? []))
-        .catch(() => setTokens([]));
+      /* catalog tokens: fetchCatalogTokens effect */
       // MarketCollection carries Robinhood-Chain-specific bookkeeping
       // (feeBps/royaltyBps/royaltyRecipient) that has no meaning for a
       // foreign collection -- real royalty is whatever the real Seaport
@@ -432,7 +453,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     } finally {
       setLoading(false);
     }
-  }, [chainSlug, collectionSlug]);
+  }, [chainSlug, collectionSlug, surface.bookPageSize, isNonEvm]);
 
   useEffect(() => {
     void load();
@@ -444,6 +465,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     const id = setInterval(() => void load(), 20_000);
     return () => clearInterval(id);
   }, [load]);
+
+  useEffect(() => {
+    void fetchCatalogTokens();
+  }, [fetchCatalogTokens]);
 
   // Real ETH/SOL/BTC/POL/BNB/AVAX USD prices -- same shared fetch + short-TTL swr pattern
   // GlobalMarketHub.tsx's own usdPrices effect uses. usdPrices stays {} (not
@@ -1057,15 +1082,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   const rarityFor = useCallback(
     (tokenId: string) => {
-      const hit = rarityMap.get(tokenId) ?? rarityMap.get(tokenId.toLowerCase());
+      const hit = rarityMapGet(rarityMap, tokenId);
       if (hit) return hit;
-      try {
-        const n = BigInt(tokenId).toString();
-        const numeric = rarityMap.get(n) ?? rarityMap.get(tokenId.replace(/^0+/, "") || "0");
-        if (numeric) return numeric;
-      } catch {
-        /* not numeric */
-      }
       const listing = listings.find((l) => l.tokenId === tokenId);
       if (!listing?.traits?.length || !traitIndex?.traits || !raritySample?.size) return undefined;
       const traits = listing.traits;
@@ -1106,8 +1124,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       }
       return true;
     });
-    if (listingSort === "price-asc" || listingSort === "price-desc") {
-      const dir = listingSort === "price-asc" ? 1 : -1;
+    if (listingSort === "default" || listingSort === "price-asc" || listingSort === "price-desc") {
+      const dir = listingSort === "price-desc" ? -1 : 1;
       return [...rows].sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -dir : BigInt(a.priceWei) > BigInt(b.priceWei) ? dir : 0));
     }
     if (listingSort === "rarity-asc" || listingSort === "rarity-desc") {
@@ -1126,9 +1144,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   const listingByToken = useMemo(() => {
     const map = new Map<string, Listing>();
-    for (const l of filteredListings) map.set(l.tokenId, l);
+    for (const l of listings) {
+      for (const k of tokenIdAliases(l.tokenId)) map.set(k, l);
+    }
     return map;
-  }, [filteredListings]);
+  }, [listings]);
 
   const browseItems = useMemo(() => {
     if (bookFilter === "listed") {
@@ -1138,26 +1158,53 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     const fromTokens = tokens
       .filter((t) => {
         if (q && !t.tokenId.toLowerCase().includes(q) && !(t.name ?? "").toLowerCase().includes(q)) return false;
-        if (activeTier !== "all") {
+        const tierFilter = activeTiers.length > 0 ? activeTiers : activeTier !== "all" ? [activeTier] : [];
+        if (tierFilter.length > 0) {
           const r = rarityFor(t.tokenId);
-          if (!r || normalizeRarityTier(r.tier) !== activeTier) return false;
+          if (!r || !tierFilter.includes(normalizeRarityTier(r.tier))) return false;
         }
         return true;
       })
       .map((t) => ({
       tokenId: t.tokenId,
       name: t.name,
-      imageUrl: t.imageUrl,
-      listing: listingByToken.get(t.tokenId) ?? null,
+      imageUrl:
+        t.imageUrl ||
+        catalogArtExtras(chainSlug, collection?.contractAddress || collectionSlug, t.tokenId)[0] ||
+        null,
+      listing: tokenIdAliases(t.tokenId).map((k) => listingByToken.get(k)).find(Boolean) ?? null,
     }));
-    const extra = filteredListings.filter((l) => !tokens.some((t) => t.tokenId === l.tokenId)).map((listing) => ({
-      tokenId: listing.tokenId,
-      name: null,
-      imageUrl: listing.imageUrl ?? null,
-      listing,
-    }));
-    return [...fromTokens, ...extra];
-  }, [bookFilter, tokens, filteredListings, listingByToken, searchQuery, activeTier, rarityMap]);
+    const rows = fromTokens;
+    const tierPos = (id: string) => {
+      const t = rarityFor(id)?.tier;
+      const i = t ? TIER_ORDER.indexOf(t) : -1;
+      return i < 0 ? TIER_ORDER.length : i;
+    };
+    if (listingSort === "rarity-asc" || listingSort === "rarity-desc") {
+      const dir = listingSort === "rarity-asc" ? 1 : -1;
+      rows.sort((a, b) => {
+        const td = (tierPos(a.tokenId) - tierPos(b.tokenId)) * dir;
+        if (td !== 0) return td;
+        const ra = rarityFor(a.tokenId)?.rank ?? null;
+        const rb = rarityFor(b.tokenId)?.rank ?? null;
+        if (ra == null && rb == null) return 0;
+        if (ra == null) return 1;
+        if (rb == null) return -1;
+        return (ra - rb) * dir;
+      });
+    } else {
+      rows.sort((a, b) => {
+        try {
+          const na = BigInt(a.tokenId);
+          const nb = BigInt(b.tokenId);
+          return na < nb ? -1 : na > nb ? 1 : 0;
+        } catch {
+          return a.tokenId.localeCompare(b.tokenId);
+        }
+      });
+    }
+    return rows;
+  }, [bookFilter, tokens, filteredListings, listingByToken, searchQuery, activeTier, activeTiers, rarityMap, collection?.contractAddress, collectionSlug, listingSort, rarityFor]);
 
   // URL persistence -- reflects real filter/sort state into the query
   // string (router.replace, not push, so browsing doesn't spam history),
@@ -1572,7 +1619,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           <div className="flex min-w-0 items-center gap-3">
             {collection.image ? (
               <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md border border-line bg-wood-900">
-                <Image src={withImageWidth(collection.image, 96) || collection.image} alt="" fill sizes="48px" className="object-cover" unoptimized />
+                <CollectionArtImage src={collection.image} alt="" width={256} variant="thumb" />
               </div>
             ) : null}
             <div className="min-w-0">
@@ -1744,11 +1791,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 listings={listings}
                 rarity={rarityMap}
                 activeTier={activeTier}
-                onSelectTier={setActiveTier}
+                onSelectTier={(t) => {
+                  setActiveTier(t);
+                  setActiveTiers(t === "all" ? [] : [t]);
+                }}
                 currencySymbol={statCurrencySymbol}
                 chainSlug={chainSlug}
                 usdValueFor={(wei) => toUsd(wei == null ? null : wei.toString(), statCurrencySymbol)}
                 listedTotal={supplyStats?.listedCount ?? null}
+                catalogCounts={countTiers(rarityMap)}
               />
               </>
             ) : undefined
@@ -1786,7 +1837,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 rarityAvailable={rarityMap.size > 0}
                 orientation="sidebar"
                 tierCounts={Object.fromEntries(
-                  TIER_ORDER.map((tier) => [tier, listings.filter((l) => rarityFor(l.tokenId)?.tier === tier).length])
+                  TIER_ORDER.map((tier) => [
+                    tier,
+                    bookFilter === "listed"
+                      ? listings.filter((l) => rarityFor(l.tokenId)?.tier === tier).length
+                      : countTiers(rarityMap)[tier] ?? 0,
+                  ])
                 )}
                 searchLabel="Find a token"
                 searchPlaceholder="Token ID"
@@ -1871,6 +1927,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   onChange={(e) => setListingSort(e.target.value as ListingSort)}
                   className="min-h-10 max-w-[12rem] rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground"
                 >
+                  <option value="default">Token ID</option>
                   <option value="price-asc">Price: low to high</option>
                   <option value="price-desc">Price: high to low</option>
                   {rarityMap.size > 0 && <option value="rarity-asc">Rarest first</option>}
@@ -2027,9 +2084,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                     style={pieceRarity ? { ...tierCardStyle(pieceRarity.tier), boxShadow: tierGlow(pieceRarity.tier) } : undefined}
                   >
                     <div className="relative aspect-square bg-wood-900">
-                      {item.imageUrl ? (
-                        <Image src={item.imageUrl} alt="" fill sizes="200px" className="object-cover" unoptimized />
-                      ) : null}
+                      <CollectionArtImage
+                        src={item.imageUrl}
+                        extras={catalogArtExtras(chainSlug, collection?.contractAddress || collectionSlug, item.tokenId)}
+                        alt=""
+                        width={512}
+                        variant="tile"
+                      />
                       {pieceRarity && (
                         <span
                           className="tier-badge absolute left-2 top-2 rounded-full px-2 py-1 text-[0.55rem] font-black uppercase tracking-wide"
@@ -2065,6 +2126,17 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 );
               })}
             </ul>
+          )}
+          {bookFilter === "all" && tokenLimit < surface.catalogCap && tokens.length >= Math.min(tokenLimit, surface.catalogCap) && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setTokenLimit((n) => Math.min(surface.catalogCap, n + surface.catalogPageSize))}
+                className="min-h-10 rounded-md border border-gold-400/50 px-4 text-xs font-bold text-gold-300 hover:bg-gold-400/10"
+              >
+                Load more of this collection
+              </button>
+            </div>
           )}
         </MarketBrowseLayout>
 

@@ -24,6 +24,7 @@ import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign
 import { postgresQuery } from "@/lib/postgres";
 import { updateCollectionMarketStats, updateCollectionFloorOnly, updateCollectionDisplay, updateCollectionSupplyFields } from "@/lib/market/multichain/store";
 import { durableKv as kv } from "@/lib/market/durable-kv";
+import { preferHighestResImageUrl } from "@/lib/market/collection-art";
 
 const SOURCE = "opensea-stats";
 const OPENSEA_BASE = "https://api.opensea.io/api/v2";
@@ -71,7 +72,7 @@ export function sanitizeOpenSeaImageUrl(url: string | null | undefined): string 
   try {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return trimmed;
+    return preferHighestResImageUrl(trimmed) ?? trimmed;
   } catch {
     return null;
   }

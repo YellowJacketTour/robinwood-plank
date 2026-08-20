@@ -83,6 +83,22 @@ test("no official tier uses percentile bands only", () => {
   assert.equal(gold.tier, "Legendary");
 });
 
+test("giant identical-score sample is not all Legendary", () => {
+  const items = Array.from({ length: 40 }, (_, i) => ({
+    tokenId: String(i),
+    name: `Piece ${i}`,
+    traits: [
+      { traitType: "Background", value: "Bible Black" },
+      { traitType: "Hat", value: "Beret" },
+    ],
+  }));
+  const snap = computeGenericRaritySnapshot(items);
+  assert.equal(snap.officialTierTrait, null);
+  const tiers = new Set([...snap.byTokenId.values()].map((t) => t.tier));
+  assert.equal(tiers.size, 1);
+  assert.equal([...tiers][0], "Common");
+});
+
 test("competition rank ties share rank", () => {
   const items = [
     { tokenId: "a", name: null, traits: [{ traitType: "X", value: "rare" }] },

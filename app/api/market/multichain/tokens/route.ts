@@ -26,16 +26,73 @@ export async function GET(req: NextRequest) {
   const chainSlug = searchParams.get("chainSlug");
   const collectionSlug = searchParams.get("collectionSlug");
   const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "40"), 1), 2000);
+  const sortRaw = (searchParams.get("sort") ?? "id").toLowerCase();
+  const sort = sortRaw === "rank" || sortRaw === "rank-desc" ? sortRaw : "id";
+  const tier = searchParams.get("tier");
   if (!chainSlug || !collectionSlug) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
   try {
     const { hasForeignRarityStore, listForeignRarityTokens } = await import("@/lib/market/multichain/foreign-rarity-store");
     if (hasForeignRarityStore()) {
-      const indexed = await listForeignRarityTokens(chainSlug, collectionSlug, limit).catch(() => []);
+      const indexed = await listForeignRarityTokens(chainSlug, collectionSlug, limit, { sort, tier }).catch(() => []);
       if (indexed.length > 0) {
+        const { templatedErc721Image } = await import("@/lib/market/multichain/token-art");
+        const contractHint = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug) ? collectionSlug : null;
+        const templated: Array<{ tokenId: string; imageUrl: string }> = [];
+        for (const t of indexed) {
+          if (t.imageUrl || !contractHint) continue;
+          const img = templatedErc721Image(contractHint, t.tokenId);
+          if (!img) continue;
+          t.imageUrl = img;
+          templated.push({ tokenId: t.tokenId, imageUrl: img });
+        }
+        if (templated.length > 0) {
+          const { updateForeignRarityImages } = await import("@/lib/market/multichain/foreign-rarity-store");
+          void updateForeignRarityImages(chainSlug, collectionSlug, templated).catch(() => {});
+        }
+        const missing = indexed.filter((t) => !t.imageUrl).length;
+        if (missing > 0) {
+          let extras: CollectionToken[] = [];
+          if (isBitcoinChainSlug(chainSlug)) extras = await bitcoinTokens(collectionSlug, Math.min(limit, 80)).catch(() => []);
+          else if (isSolanaChainSlug(chainSlug)) extras = await solanaTokens(collectionSlug, Math.min(limit, 80)).catch(() => []);
+          else {
+            const chain = foreignChainByChainSlug(chainSlug);
+            if (chain?.openSeaChain) extras = await openSeaTokens(chain.openSeaChain, collectionSlug, Math.min(limit, 200)).catch(() => []);
+          }
+          const byId = new Map(extras.map((t) => [t.tokenId, t.imageUrl]));
+          const filled: Array<{ tokenId: string; imageUrl: string }> = [];
+          for (const t of indexed) {
+            if (t.imageUrl) continue;
+            const img = byId.get(t.tokenId);
+            if (img) {
+              t.imageUrl = img;
+              filled.push({ tokenId: t.tokenId, imageUrl: img });
+            }
+          }
+          if (filled.length > 0) {
+            const { updateForeignRarityImages } = await import("@/lib/market/multichain/foreign-rarity-store");
+            void updateForeignRarityImages(chainSlug, collectionSlug, filled).catch(() => {});
+          }
+          const stillMissing = indexed.filter((t) => !t.imageUrl);
+          if (stillMissing.length > 0) {
+            const chain = foreignChainByChainSlug(chainSlug);
+            const contract = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug) ? collectionSlug : null;
+            const { resolveTokenImagesForPage } = await import("@/lib/market/multichain/token-art");
+            const more = await resolveTokenImagesForPage({
+              openSeaChain: chain?.openSeaChain ?? null,
+              contractAddress: contract,
+              tokens: indexed,
+              maxRemote: 16,
+            });
+            if (more.length > 0) {
+              const { updateForeignRarityImages } = await import("@/lib/market/multichain/foreign-rarity-store");
+              void updateForeignRarityImages(chainSlug, collectionSlug, more).catch(() => {});
+            }
+          }
+        }
         return NextResponse.json(
-          { tokens: indexed.map((t) => ({ tokenId: t.tokenId, name: t.name, imageUrl: null as string | null })) },
+          { tokens: indexed.map((t) => ({ tokenId: t.tokenId, name: t.name, imageUrl: t.imageUrl })) },
           { headers: { "Cache-Control": "no-store" } }
         );
       }
@@ -62,33 +119,50 @@ export async function GET(req: NextRequest) {
   }
 }
 
-function mapOpenSeaNfts(nfts: Array<{ identifier?: string; name?: string | null; image_url?: string | null }>): CollectionToken[] {
-  return nfts
-    .filter((n) => n.identifier)
-    .map((n) => ({ tokenId: n.identifier!, name: n.name ?? null, imageUrl: n.image_url ?? null }));
-}
-
 async function openSeaTokens(openSeaChain: string, contractOrSlug: string, limit: number): Promise<CollectionToken[]> {
   const key = await getOpenSeaApiKey();
   if (!key) return [];
-  const gate = checkSourceBudget("opensea-stats");
-  if (!gate.allowed) return [];
   const chainPath = openSeaChain === "matic" ? "matic" : openSeaChain;
   const address = /^0x[0-9a-fA-F]{40}$/.test(contractOrSlug) ? contractOrSlug : null;
-  const url = address
-    ? `https://api.opensea.io/api/v2/chain/${encodeURIComponent(chainPath)}/contract/${address}/nfts?limit=${limit}`
-    : `https://api.opensea.io/api/v2/collection/${encodeURIComponent(contractOrSlug)}/nfts?limit=${limit}`;
-  const res = await fetch(url, {
-    headers: { "x-api-key": key, accept: "application/json" },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) {
-    recordSourceFailure("opensea-stats", res.status === 429);
-    return [];
+  const out: CollectionToken[] = [];
+  let cursor: string | null = null;
+  const pageSize = Math.min(50, Math.max(limit, 1));
+  const maxPages = Math.min(8, Math.ceil(limit / pageSize) || 1);
+  for (let page = 0; page < maxPages && out.length < limit; page++) {
+    const gate = checkSourceBudget("opensea-stats");
+    if (!gate.allowed) break;
+    const url = new URL(
+      address
+        ? `https://api.opensea.io/api/v2/chain/${encodeURIComponent(chainPath)}/contract/${address}/nfts`
+        : `https://api.opensea.io/api/v2/collection/${encodeURIComponent(contractOrSlug)}/nfts`
+    );
+    url.searchParams.set("limit", String(pageSize));
+    if (cursor) url.searchParams.set("next", cursor);
+    const res = await fetch(url.toString(), {
+      headers: { "x-api-key": key, accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+      recordSourceFailure("opensea-stats", res.status === 429);
+      break;
+    }
+    recordSourceSuccess("opensea-stats");
+    const body = (await res.json()) as {
+      nfts?: Array<{ identifier?: string; name?: string | null; image_url?: string | null; display_image_url?: string | null }>;
+      next?: string | null;
+    };
+    for (const n of body.nfts ?? []) {
+      if (!n.identifier) continue;
+      out.push({
+        tokenId: n.identifier,
+        name: n.name ?? null,
+        imageUrl: n.display_image_url || n.image_url || null,
+      });
+    }
+    cursor = body.next ?? null;
+    if (!cursor) break;
   }
-  recordSourceSuccess("opensea-stats");
-  const body = (await res.json()) as { nfts?: Array<{ identifier?: string; name?: string | null; image_url?: string | null }> };
-  return mapOpenSeaNfts(body.nfts ?? []);
+  return out.slice(0, limit);
 }
 
 async function solanaTokens(symbol: string, limit: number): Promise<CollectionToken[]> {

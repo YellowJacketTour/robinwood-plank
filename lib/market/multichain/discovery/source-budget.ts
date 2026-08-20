@@ -47,7 +47,10 @@ g.__plankSourceBudget = state;
 const DAILY_CEILING: Record<string, number> = {
   "coingecko-nft": 8_000, // real free Demo plan cap is 10,000/mo -- ~330/day sustainable; this ceiling is a same-day burst guard, not the monthly one
   "unisat-indexer": 5_000,
+  "unisat-collections": 400, // authenticated open-api 403s hard; stay well under
   "helius-das": 20_000,
+  "ordinals-wallet": 2_400, // keyless turbo.ordinalswallet.com; paced ~1/s
+  "magiceden-solana": 2_000,
 };
 
 const DEFAULT_JAIL_MS = 15 * 60_000;

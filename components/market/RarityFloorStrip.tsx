@@ -35,6 +35,8 @@ type Props = {
   usdValueFor?: (wei: bigint | string | null) => number | null;
   /** Venue-reported listed count when the loaded book is a page, not the full book. */
   listedTotal?: number | null;
+  /** Full catalog counts so a tier with no listing in the loaded book is still filterable. */
+  catalogCounts?: Record<string, number>;
 };
 
 /**
@@ -51,6 +53,7 @@ export default function RarityFloorStrip({
   chainSlug = "robinhood",
   usdValueFor,
   listedTotal = null,
+  catalogCounts,
 }: Props) {
   const collFloor = useMemo(() => collectionFloorWei(listings), [listings]);
   const rows = useMemo(() => tierFloors(listings, rarity), [listings, rarity]);
@@ -110,7 +113,7 @@ export default function RarityFloorStrip({
         {rows.map((row) => {
           const color = tierColor(row.tier);
           const active = activeTier === row.tier;
-          const empty = row.listed === 0;
+          const empty = row.listed === 0 && !(catalogCounts?.[row.tier]);
           return (
             <button
               key={row.tier}

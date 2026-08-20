@@ -143,7 +143,12 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
 
   const supplyHint = typeof collectionMeta?.total_supply === "number" ? collectionMeta.total_supply : null;
   const cap = itemCeiling(supplyHint ?? null);
-  const items: Array<{ tokenId: string; name: string | null; traits: Array<{ traitType: string; value: string }> }> = [];
+  const items: Array<{
+    tokenId: string;
+    name: string | null;
+    imageUrl: string | null;
+    traits: Array<{ traitType: string; value: string }>;
+  }> = [];
   let cursor: string | null = null;
   let page = 0;
   const maxPages = Math.ceil(cap / PAGE_SIZE) + 1;
@@ -155,13 +160,20 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
     const res: Response = await fetch(url.toString(), { headers: { "x-api-key": key, accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`OpenSea ${res.status} on page ${page}`);
     const data = (await res.json()) as {
-      nfts?: Array<{ identifier: string; name?: string; traits?: Array<{ trait_type: string; value: string }> }>;
+      nfts?: Array<{
+        identifier: string;
+        name?: string;
+        image_url?: string | null;
+        display_image_url?: string | null;
+        traits?: Array<{ trait_type: string; value: string }>;
+      }>;
       next?: string | null;
     };
     for (const nft of data.nfts ?? []) {
       items.push({
         tokenId: nft.identifier,
         name: nft.name ?? null,
+        imageUrl: nft.display_image_url || nft.image_url || null,
         traits: (nft.traits ?? []).filter((t) => t.trait_type && t.value != null).map((t) => ({ traitType: t.trait_type, value: String(t.value) })),
       });
     }
@@ -181,7 +193,8 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
   }
 
   const aliases = collectionSlug.toLowerCase() === contractAddress.toLowerCase() ? [] : [contractAddress];
-  await replaceForeignRarity(chainSlug, collectionSlug, snapshot, traitIndex, aliases);
+  const images = new Map(items.map((i) => [i.tokenId, i.imageUrl]));
+  await replaceForeignRarity(chainSlug, collectionSlug, snapshot, traitIndex, aliases, images);
 
   return { chainSlug, collectionSlug, contractAddress, tokensIndexed: snapshot.byTokenId.size, partial };
 }
