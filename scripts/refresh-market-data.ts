@@ -103,7 +103,7 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana"]
       : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
 );
 
@@ -616,7 +616,23 @@ async function main(): Promise<void> {
     const result = await scaffoldAllTrackedCollections({
       onProgress: (line) => console.log(`[refresh:scaffold-rarity] ${line}`),
     });
-    return `${result.evmInScope} EVM tracked -> ${result.indexed} indexed, ${result.skippedFresh} fresh, ${result.failed} failed; ${result.solanaSkipped} Solana skipped`;
+    return `${result.evmInScope} EVM tracked -> ${result.indexed} indexed, ${result.skippedFresh} fresh, ${result.failed} failed; ${result.solanaSkipped} Solana routed to scaffold-rarity-solana below`;
+  });
+
+  // Solana's own real trait/rarity scaffold -- see
+  // helius-rarity-index-runner.ts's own header for why this is a
+  // DIFFERENT, real capability from the "Solana has no clean grouping
+  // signal" limitation documented for broad DISCOVERY (helius-collection-
+  // scan.ts): once a collection's address is already known (every row
+  // scaffold-rarity's own solanaSkipped count above represents), Helius's
+  // real grouping filter cleanly enumerates its real member NFTs with
+  // real trait attributes, regardless of legacy/pNFT vs. MplCore standard.
+  await step("scaffold-rarity-solana", async () => {
+    const { scaffoldAllTrackedSolanaCollections } = await import("../lib/market/multichain/discovery/helius-rarity-index-runner");
+    const result = await scaffoldAllTrackedSolanaCollections({
+      onProgress: (line) => console.log(`[refresh:scaffold-rarity-solana] ${line}`),
+    });
+    return `${result.totalTracked} Solana tracked -> ${result.indexed} indexed, ${result.skippedFresh} fresh, ${result.failed} failed`;
   });
 
   const failed = results.filter((r) => !r.ok);

@@ -1,0 +1,181 @@
+/**
+ * Real per-token trait/rarity indexing for Solana, the exact same
+ * shared core (computeGenericRaritySnapshot + replaceForeignRarity) as
+ * rarity-index-runner.ts already uses for OpenSea-backed EVM chains --
+ * this is the Solana producer for that same generic, chain-agnostic
+ * storage layer (plank_foreign_rarity, keyed by chain_slug +
+ * collection_slug). getForeignRarity/getForeignTraitIndex and the
+ * /rarity, /trait-index API routes already read generically by
+ * (chainSlug, collectionSlug) with no EVM-specific assumption, and
+ * MultichainCollectionView.tsx already passes the Solana contract
+ * address as collectionSlug for Solana routes -- so indexing here with
+ * matching keys means the existing UI picks this up with ZERO frontend
+ * changes.
+ *
+ * CORRECTS AN EARLIER SCOPING MISTAKE, VERIFIED LIVE 2026-08-20:
+ * helius-collection-scan.ts's own header previously claimed legacy/pNFT
+ * Solana collections (interface: "V1_NFT"/"ProgrammableNFT" -- what most
+ * established projects like Mad Lads actually use) have "no clean
+ * collection-identity signal" for member-asset enumeration. That claim
+ * was about DISCOVERING new collections via a broad searchAssets call,
+ * which is genuinely true (see that file). It does NOT apply here: once a
+ * collection's own address is already known (which it is, for every row
+ * this app tracks), Helius's real, documented `grouping` filter --
+ * searchAssets({ grouping: ["collection", collectionMintAddress] }) --
+ * cleanly and exhaustively enumerates that collection's real member NFTs
+ * regardless of standard, INCLUDING legacy/pNFT collections. Confirmed
+ * live against Mad Lads (a real, well-known pNFT collection, not
+ * MplCoreCollection): returned real member assets with real full trait
+ * attributes (Gender, Type, Expression, Eyes, Clothing, Background).
+ */
+import { computeGenericRaritySnapshot, type GenericRarityInput } from "@/lib/rarity-generic";
+import { replaceForeignRarity, getForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
+import { listTrackedCollections } from "@/lib/market/multichain/store";
+
+const RPC_URL = "https://mainnet.helius-rpc.com";
+const PAGE_SIZE = 1000; // grouping-filtered searchAssets, unlike the broad discovery walk, is a narrow real query -- confirmed live it doesn't hit the same limit=1000 timeout the broad interface-wide walk does.
+/** Hard ceiling matching rarity-index-runner.ts's own MAX_PAGES reasoning -- bounds a runaway/misidentified collection rather than trusting pagination to always terminate quickly. 500 pages * 1000 = 500,000 tokens, the same real ceiling the EVM runner uses. */
+const MAX_PAGES = 500;
+
+function apiKey(): string {
+  const key = process.env.HELIUS_API_KEY?.trim();
+  if (!key) throw new Error("helius-rarity-index-runner: HELIUS_API_KEY is not configured");
+  return key;
+}
+
+type HeliusGroupedAsset = {
+  id: string;
+  content?: {
+    metadata?: {
+      name?: string | null;
+      attributes?: Array<{ trait_type?: string; value?: string | number | null }>;
+    };
+  };
+};
+
+async function fetchGroupedPage(collectionAddress: string, page: number): Promise<HeliusGroupedAsset[]> {
+  const res = await fetch(`${RPC_URL}/?api-key=${apiKey()}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: "plank",
+      method: "searchAssets",
+      params: { grouping: ["collection", collectionAddress], page, limit: PAGE_SIZE },
+    }),
+  });
+  if (!res.ok) throw new Error(`helius-rarity-index-runner: HTTP ${res.status}`);
+  const body = (await res.json()) as {
+    result?: { items: HeliusGroupedAsset[]; total?: number };
+    error?: { code: number; message: string };
+  };
+  if (body.error) throw new Error(`helius-rarity-index-runner: ${body.error.code} ${body.error.message}`);
+  return body.result?.items ?? [];
+}
+
+export type SolanaRarityIndexResult = {
+  chainSlug: "solana-mainnet";
+  collectionAddress: string;
+  tokensIndexed: number;
+  partial: boolean;
+};
+
+export async function indexSolanaCollectionRarity(collectionAddress: string): Promise<SolanaRarityIndexResult> {
+  const items: GenericRarityInput[] = [];
+  let page = 1;
+  let lastPageSize = PAGE_SIZE;
+
+  while (lastPageSize === PAGE_SIZE && page <= MAX_PAGES) {
+    const assets = await fetchGroupedPage(collectionAddress, page);
+    for (const asset of assets) {
+      items.push({
+        tokenId: asset.id,
+        name: asset.content?.metadata?.name ?? null,
+        traits: (asset.content?.metadata?.attributes ?? [])
+          .filter((a) => a.trait_type && a.value != null)
+          .map((a) => ({ traitType: a.trait_type!, value: String(a.value) })),
+      });
+    }
+    lastPageSize = assets.length;
+    page += 1;
+  }
+
+  const partial = page > MAX_PAGES && lastPageSize === PAGE_SIZE;
+  const snapshot = computeGenericRaritySnapshot(items);
+  const traitIndex: Record<string, Record<string, string[]>> = {};
+  for (const item of items) {
+    for (const t of item.traits) {
+      traitIndex[t.traitType] ??= {};
+      traitIndex[t.traitType][t.value] ??= [];
+      traitIndex[t.traitType][t.value].push(item.tokenId);
+    }
+  }
+
+  await replaceForeignRarity("solana-mainnet", collectionAddress, snapshot, traitIndex);
+
+  return { chainSlug: "solana-mainnet", collectionAddress, tokensIndexed: snapshot.byTokenId.size, partial };
+}
+
+export type ScaffoldSolanaResult = {
+  totalTracked: number;
+  indexed: number;
+  skippedFresh: number;
+  failed: number;
+};
+
+/**
+ * Scaffolds every tracked Solana collection to real trait/rarity parity --
+ * same freshness-skip/pacing shape as rarity-index-runner.ts's own
+ * scaffoldAllTrackedCollections (EVM), so the two read the same way in
+ * refresh-market-data.ts's step log.
+ */
+export async function scaffoldAllTrackedSolanaCollections(opts?: {
+  force?: boolean;
+  freshDays?: number;
+  delayMs?: number;
+  limit?: number;
+  onProgress?: (line: string) => void;
+}): Promise<ScaffoldSolanaResult> {
+  const force = opts?.force ?? false;
+  const freshDays = opts?.freshDays ?? 7;
+  const delayMs = opts?.delayMs ?? 1000;
+  const limit = opts?.limit ?? Infinity;
+  const log = opts?.onProgress ?? (() => {});
+
+  const all = await listTrackedCollections();
+  const solana = all.filter((c) => c.chainSlug === "solana-mainnet").slice(0, limit);
+
+  let indexed = 0;
+  let skippedFresh = 0;
+  let failed = 0;
+
+  for (const c of solana) {
+    if (!force) {
+      const existing = await getForeignTraitIndex("solana-mainnet", c.contractAddress).catch(() => null);
+      if (existing?.indexedAt) {
+        const ageDays = (Date.now() - new Date(existing.indexedAt).getTime()) / 86_400_000;
+        if (ageDays < freshDays) {
+          skippedFresh += 1;
+          continue;
+        }
+      }
+    }
+
+    try {
+      const result = await indexSolanaCollectionRarity(c.contractAddress);
+      log(`indexed ${c.contractAddress} (solana-mainnet): ${result.tokensIndexed} tokens${result.partial ? " (PARTIAL)" : ""}`);
+      indexed += 1;
+    } catch (error) {
+      log(`FAILED ${c.contractAddress} (solana-mainnet): ${error instanceof Error ? error.message : error}`);
+      failed += 1;
+    }
+
+    await sleep(delayMs);
+  }
+
+  return { totalTracked: all.length, indexed, skippedFresh, failed };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
