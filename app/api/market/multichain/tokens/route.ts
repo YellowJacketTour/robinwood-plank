@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
           else if (isSolanaChainSlug(chainSlug)) extras = await solanaTokens(collectionSlug, Math.min(limit, 80)).catch(() => []);
           else {
             const chain = foreignChainByChainSlug(chainSlug);
-            if (chain?.openSeaChain) extras = await openSeaTokens(chain.openSeaChain, collectionSlug, Math.min(limit, 50)).catch(() => []);
+            if (chain?.openSeaChain) extras = await openSeaTokens(chain.openSeaChain, collectionSlug, Math.min(limit, 200)).catch(() => []);
           }
           const byId = new Map(extras.map((t) => [t.tokenId, t.imageUrl]));
           const filled: Array<{ tokenId: string; imageUrl: string }> = [];
@@ -95,24 +95,47 @@ function mapOpenSeaNfts(nfts: Array<{ identifier?: string; name?: string | null;
 async function openSeaTokens(openSeaChain: string, contractOrSlug: string, limit: number): Promise<CollectionToken[]> {
   const key = await getOpenSeaApiKey();
   if (!key) return [];
-  const gate = checkSourceBudget("opensea-stats");
-  if (!gate.allowed) return [];
   const chainPath = openSeaChain === "matic" ? "matic" : openSeaChain;
   const address = /^0x[0-9a-fA-F]{40}$/.test(contractOrSlug) ? contractOrSlug : null;
-  const url = address
-    ? `https://api.opensea.io/api/v2/chain/${encodeURIComponent(chainPath)}/contract/${address}/nfts?limit=${limit}`
-    : `https://api.opensea.io/api/v2/collection/${encodeURIComponent(contractOrSlug)}/nfts?limit=${limit}`;
-  const res = await fetch(url, {
-    headers: { "x-api-key": key, accept: "application/json" },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) {
-    recordSourceFailure("opensea-stats", res.status === 429);
-    return [];
+  const out: CollectionToken[] = [];
+  let cursor: string | null = null;
+  const pageSize = Math.min(50, Math.max(limit, 1));
+  const maxPages = Math.min(8, Math.ceil(limit / pageSize) || 1);
+  for (let page = 0; page < maxPages && out.length < limit; page++) {
+    const gate = checkSourceBudget("opensea-stats");
+    if (!gate.allowed) break;
+    const url = new URL(
+      address
+        ? `https://api.opensea.io/api/v2/chain/${encodeURIComponent(chainPath)}/contract/${address}/nfts`
+        : `https://api.opensea.io/api/v2/collection/${encodeURIComponent(contractOrSlug)}/nfts`
+    );
+    url.searchParams.set("limit", String(pageSize));
+    if (cursor) url.searchParams.set("next", cursor);
+    const res = await fetch(url.toString(), {
+      headers: { "x-api-key": key, accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+      recordSourceFailure("opensea-stats", res.status === 429);
+      break;
+    }
+    recordSourceSuccess("opensea-stats");
+    const body = (await res.json()) as {
+      nfts?: Array<{ identifier?: string; name?: string | null; image_url?: string | null; display_image_url?: string | null }>;
+      next?: string | null;
+    };
+    for (const n of body.nfts ?? []) {
+      if (!n.identifier) continue;
+      out.push({
+        tokenId: n.identifier,
+        name: n.name ?? null,
+        imageUrl: n.display_image_url || n.image_url || null,
+      });
+    }
+    cursor = body.next ?? null;
+    if (!cursor) break;
   }
-  recordSourceSuccess("opensea-stats");
-  const body = (await res.json()) as { nfts?: Array<{ identifier?: string; name?: string | null; image_url?: string | null }> };
-  return mapOpenSeaNfts(body.nfts ?? []);
+  return out.slice(0, limit);
 }
 
 async function solanaTokens(symbol: string, limit: number): Promise<CollectionToken[]> {
