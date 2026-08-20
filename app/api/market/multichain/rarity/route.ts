@@ -7,7 +7,7 @@
  * un-tiered cards rather than showing a fabricated rank.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { hasForeignRarityStore, getForeignRarity } from "@/lib/market/multichain/foreign-rarity-store";
+import { hasForeignRarityStore, getForeignRarity, getForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
 import { rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -32,8 +32,18 @@ export async function GET(req: NextRequest) {
     const map = await getForeignRarity(chainSlug, collectionSlug);
     const byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number }> = {};
     for (const [tokenId, v] of map) byTokenId[tokenId] = v;
+    if (map.size === 0) {
+      const { indexRarityForCollectionLookup } = await import("@/lib/market/multichain/rarity-index-runner");
+      void indexRarityForCollectionLookup(chainSlug, collectionSlug).catch(() => {});
+    }
+    const meta = await getForeignTraitIndex(chainSlug, collectionSlug).catch(() => null);
     return NextResponse.json(
-      { byTokenId, indexed: map.size > 0 },
+      {
+        byTokenId,
+        indexed: map.size > 0,
+        sampleSize: meta?.sampleSize ?? map.size,
+        partial: map.size > 0 ? map.size < 10_000 : true,
+      },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch {

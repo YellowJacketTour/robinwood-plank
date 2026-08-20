@@ -311,6 +311,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // Empty map (indexed=false) is a real, expected state for a collection
   // that hasn't been indexed yet -- cards render un-tiered, never a fake rank.
   const [rarityMap, setRarityMap] = useState<Map<string, RarityLookup>>(new Map());
+  const [raritySample, setRaritySample] = useState<{ size: number; partial: boolean } | null>(null);
 
   // DETAILS / MAKE OFFER -- real traits + collection-wide trait-frequency
   // signal (see ForeignDetailsModal's header on why this isn't a numeric
@@ -639,16 +640,22 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         // one-off background job (scripts/index-foreign-rarity.ts), so a
         // collection can go from unindexed to indexed between two page
         // loads within the same swr window.
-        const data = await swrJson<{ byTokenId: Record<string, unknown>; indexed: boolean }>(
+        const data = await swrJson<{
+          byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number }>;
+          indexed: boolean;
+          sampleSize?: number;
+          partial?: boolean;
+        }>(
           `/api/market/multichain/rarity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`,
           { ttlMs: 120_000, swrMs: 1_800_000, session: true, isGood: (d) => Boolean((d as { indexed?: boolean })?.indexed) }
-        ) as { byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number }> };
+        );
         if (cancelled) return;
         const map = new Map<string, RarityLookup>();
         for (const [tokenId, v] of Object.entries(data.byTokenId ?? {})) {
           map.set(tokenId, { ...v, tier: normalizeRarityTier(v.tier) });
         }
         setRarityMap(map);
+        setRaritySample({ size: data.sampleSize ?? map.size, partial: Boolean(data.partial) });
       } catch {
         if (!cancelled) setRarityMap(new Map());
       }
@@ -1644,6 +1651,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           }
           lead={
             listings.length > 0 ? (
+              <>
+              {rarityMap.size > 0 && raritySample && (
+                <p className="px-0.5 text-[0.58rem] text-foreground/40">
+                  Information-content rarity on {raritySample.size.toLocaleString()} indexed pieces
+                  {raritySample.partial ? " · sample (ranks improve as indexing continues)" : ""}
+                </p>
+              )}
               <RarityFloorStrip
                 listings={listings}
                 rarity={rarityMap}
@@ -1653,6 +1667,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 chainSlug={chainSlug}
                 usdValueFor={(wei) => toUsd(wei == null ? null : wei.toString(), statCurrencySymbol)}
               />
+              </>
             ) : undefined
           }
           filters={

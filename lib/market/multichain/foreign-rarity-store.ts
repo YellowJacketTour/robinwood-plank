@@ -27,7 +27,7 @@ export async function getForeignRarity(
   const result = await postgresQuery<RarityRow>(
     `SELECT token_id, name, score, rank, percentile, tier
      FROM plank_foreign_rarity
-     WHERE chain_slug = $1 AND collection_slug = $2`,
+     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
     [chainSlug, collectionSlug]
   );
   const map = new Map<string, { name: string; tier: string; rank: number; percentile: number }>();
@@ -45,7 +45,7 @@ export async function getForeignTraitIndex(
   collectionSlug: string
 ): Promise<{ traitIndex: ForeignTraitIndex | null; sampleSize: number; indexedAt: string | null }> {
   const result = await postgresQuery<{ trait_index: ForeignTraitIndex | null; sample_size: number; indexed_at: string }>(
-    `SELECT trait_index, sample_size, indexed_at FROM plank_foreign_rarity_collections WHERE chain_slug = $1 AND collection_slug = $2`,
+    `SELECT trait_index, sample_size, indexed_at FROM plank_foreign_rarity_collections WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
     [chainSlug, collectionSlug]
   );
   const row = result.rows[0];
@@ -93,29 +93,31 @@ export async function replaceForeignRarity(
   chainSlug: string,
   collectionSlug: string,
   snapshot: GenericRaritySnapshot,
-  traitIndex: ForeignTraitIndex
+  traitIndex: ForeignTraitIndex,
+  aliases: string[] = []
 ): Promise<void> {
+  const keys = [...new Set([collectionSlug, ...aliases].filter(Boolean))];
   const pool = postgresPool();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`DELETE FROM plank_foreign_rarity WHERE chain_slug = $1 AND collection_slug = $2`, [
-      chainSlug,
-      collectionSlug,
-    ]);
-    for (const r of snapshot.byTokenId.values()) {
+    for (const key of keys) {
+      await client.query(`DELETE FROM plank_foreign_rarity WHERE chain_slug = $1 AND collection_slug = $2`, [chainSlug, key]);
+      for (const r of snapshot.byTokenId.values()) {
+        await client.query(
+          `INSERT INTO plank_foreign_rarity (chain_slug, collection_slug, token_id, name, score, rank, percentile, tier)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [chainSlug, key, r.tokenId, r.name, r.score, r.rank, r.percentile, r.tier]
+        );
+      }
       await client.query(
-        `INSERT INTO plank_foreign_rarity (chain_slug, collection_slug, token_id, name, score, rank, percentile, tier)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [chainSlug, collectionSlug, r.tokenId, r.name, r.score, r.rank, r.percentile, r.tier]
+        `INSERT INTO plank_foreign_rarity_collections (chain_slug, collection_slug, sample_size, trait_index, indexed_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (chain_slug, collection_slug) DO UPDATE SET
+           sample_size = EXCLUDED.sample_size, trait_index = EXCLUDED.trait_index, indexed_at = NOW()`,
+        [chainSlug, key, snapshot.sampleSize, JSON.stringify(traitIndex)]
       );
     }
-    await client.query(
-      `INSERT INTO plank_foreign_rarity_collections (chain_slug, collection_slug, sample_size, trait_index, indexed_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (chain_slug, collection_slug) DO UPDATE SET sample_size = EXCLUDED.sample_size, trait_index = EXCLUDED.trait_index, indexed_at = NOW()`,
-      [chainSlug, collectionSlug, snapshot.sampleSize, JSON.stringify(traitIndex)]
-    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

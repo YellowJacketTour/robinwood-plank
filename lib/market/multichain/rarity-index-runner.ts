@@ -12,22 +12,16 @@ import { computeGenericRaritySnapshot } from "@/lib/rarity-generic";
 import { replaceForeignRarity, getForeignTraitIndex, type ForeignTraitIndex } from "@/lib/market/multichain/foreign-rarity-store";
 import { listTrackedCollections } from "@/lib/market/multichain/store";
 
-const PAGE_SIZE = 200;
-/**
- * Hard ceiling so a misconfigured run can't paginate forever against a
- * huge or misidentified contract.
- *
- * RAISED 2026-08-19 from 100 (20,000 tokens) to 2,500 (500,000 tokens).
- * The old ceiling silently truncated every collection larger than 20k --
- * which is not an edge case: Art Blocks, ENS names, Pudgy-scale and most
- * open-edition/1155 collections all exceed it, so their rarity and trait
- * index were built from a partial token set and every rank derived from
- * it was wrong for the tail. It was at least reported honestly (the
- * `partial` flag), but "reported partial" is still partial, and the goal
- * here is full coverage. 500k comfortably covers every real NFT
- * collection while still bounding a runaway/misidentified contract.
- */
-const MAX_PAGES = 2_500;
+const PAGE_SIZE = 50;
+
+/** First-pass item cap so we never block on Art Blocks / ENS. Ranks recompute as sample grows. */
+function itemCeiling(supply: number | null): number {
+  if (supply == null || !Number.isFinite(supply) || supply <= 0) return 1_000;
+  if (supply <= 50) return Math.ceil(supply);
+  if (supply <= 2_000) return 1_000;
+  if (supply <= 20_000) return 2_000;
+  return 5_000;
+}
 
 export type IndexRunResult = {
   chainSlug: string;
@@ -59,6 +53,7 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
     creator_username?: string | null;
     twitter_username?: string | null;
     owner?: string | null;
+    total_supply?: number | null;
   } | null;
   // Real, confirmed API inconsistency (2026-08-18): OpenSea's own
   // /chain/{chain}/contract/{address} path segment for Polygon is "matic"
@@ -133,15 +128,18 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
     }).catch(() => {});
   }
 
+  const supplyHint = typeof collectionMeta?.total_supply === "number" ? collectionMeta.total_supply : null;
+  const cap = itemCeiling(supplyHint ?? null);
   const items: Array<{ tokenId: string; name: string | null; traits: Array<{ traitType: string; value: string }> }> = [];
   let cursor: string | null = null;
   let page = 0;
+  const maxPages = Math.ceil(cap / PAGE_SIZE) + 1;
 
   do {
     const url = new URL(`https://api.opensea.io/api/v2/chain/${chain.openSeaChain}/contract/${contractAddress}/nfts`);
     url.searchParams.set("limit", String(PAGE_SIZE));
     if (cursor) url.searchParams.set("next", cursor);
-    const res: Response = await fetch(url.toString(), { headers: { "x-api-key": key, accept: "application/json" } });
+    const res: Response = await fetch(url.toString(), { headers: { "x-api-key": key, accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`OpenSea ${res.status} on page ${page}`);
     const data = (await res.json()) as {
       nfts?: Array<{ identifier: string; name?: string; traits?: Array<{ trait_type: string; value: string }> }>;
@@ -151,16 +149,15 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
       items.push({
         tokenId: nft.identifier,
         name: nft.name ?? null,
-        traits: (nft.traits ?? []).map((t) => ({ traitType: t.trait_type, value: t.value })),
+        traits: (nft.traits ?? []).filter((t) => t.trait_type && t.value != null).map((t) => ({ traitType: t.trait_type, value: String(t.value) })),
       });
     }
     cursor = data.next ?? null;
     page += 1;
-  } while (cursor && page < MAX_PAGES);
+  } while (cursor && page < maxPages && items.length < cap);
 
-  const partial = page >= MAX_PAGES && Boolean(cursor);
-
-  const snapshot = computeGenericRaritySnapshot(items);
+  const partial = Boolean(cursor) || (supplyHint != null && items.length < supplyHint);
+  const snapshot = { ...computeGenericRaritySnapshot(items), partial };
   const traitIndex: ForeignTraitIndex = {};
   for (const item of items) {
     for (const t of item.traits) {
@@ -170,10 +167,8 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
     }
   }
 
-  await replaceForeignRarity(chainSlug, collectionSlug, snapshot, traitIndex);
-  if (collectionSlug.toLowerCase() !== contractAddress.toLowerCase()) {
-    await replaceForeignRarity(chainSlug, contractAddress, snapshot, traitIndex);
-  }
+  const aliases = collectionSlug.toLowerCase() === contractAddress.toLowerCase() ? [] : [contractAddress];
+  await replaceForeignRarity(chainSlug, collectionSlug, snapshot, traitIndex, aliases);
 
   return { chainSlug, collectionSlug, contractAddress, tokensIndexed: snapshot.byTokenId.size, partial };
 }
@@ -191,6 +186,18 @@ async function resolveOpenSeaSlug(chainSlug: string, contractAddress: string, ke
   if (!res.ok) return null;
   const data = (await res.json()) as { collection?: string };
   return data.collection ?? null;
+}
+
+/** URL lookup is often the contract address; OpenSea collection GET needs the slug. */
+export async function indexRarityForCollectionLookup(chainSlug: string, lookup: string): Promise<IndexRunResult> {
+  if (/^0x[0-9a-fA-F]{40}$/.test(lookup)) {
+    const key = await getOpenSeaApiKey();
+    if (!key) throw new Error("No OpenSea API key available.");
+    const slug = await resolveOpenSeaSlug(chainSlug, lookup, key);
+    if (!slug) throw new Error(`no OpenSea slug for ${chainSlug}:${lookup}`);
+    return indexForeignCollectionRarity(chainSlug, slug);
+  }
+  return indexForeignCollectionRarity(chainSlug, lookup);
 }
 
 export type ScaffoldAllResult = {
