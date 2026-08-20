@@ -488,6 +488,25 @@ type GradeBreakdown = {
   parts: Array<{ label: string; points: number; max: number; met: boolean }>;
 };
 
+function hasUsableCells(c: TrackedCollection): boolean {
+  if (displayFloorWei(c)) return true;
+  if (c.listedCount != null && c.listedCount > 0) return true;
+  if (c.volume24hWei && c.volume24hWei !== "0") return true;
+  if (c.sales24h != null && c.sales24h > 0) return true;
+  if (c.holderCount != null && c.holderCount > 0) return true;
+  if (c.totalSupply != null && c.totalSupply > 0) return true;
+  return false;
+}
+
+/** Hide hex/empty titles only when every economic cell is empty. Never drop a row that already has floor/listed/volume/holders. */
+function isTitleJunkWithoutData(c: TrackedCollection): boolean {
+  if (isHomeRow(c)) return false;
+  if (isSpamCollectionTitle(c.name)) return true;
+  const junk = looksLikeContractName(c.name || displayName(c)) || !(c.name ?? "").trim();
+  if (!junk) return false;
+  return !hasUsableCells(c);
+}
+
 function hasMarketEvidence(c: TrackedCollection): boolean {
   if (c.isNativeHome) return true;
   if (c.floorPriceWei && c.floorPriceWei !== "0") return true;
@@ -980,9 +999,7 @@ export default function GlobalMarketHub() {
   const chains = useMemo(() => {
     const seen = new Map<string, number>();
     for (const c of collections) {
-      if (isSpamCollectionTitle(c.name)) continue;
-      if (!isHomeRow(c) && looksLikeContractName(c.name || displayName(c))) continue;
-      if (!(c.name ?? "").trim()) continue;
+      if (isTitleJunkWithoutData(c)) continue;
       seen.set(c.chainSlug, (seen.get(c.chainSlug) ?? 0) + 1);
     }
     return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -997,8 +1014,7 @@ export default function GlobalMarketHub() {
     const max = priceMax.trim() ? Number(priceMax) : null;
     const rows = collections.filter((c) => {
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
-      if (isSpamCollectionTitle(c.name)) return false;
-      if (!isHomeRow(c) && looksLikeContractName(c.name || displayName(c))) return false;
+      if (isTitleJunkWithoutData(c)) return false;
       if (q && !(c.name ?? "").toLowerCase().includes(q)) return false;
       if (onlyTradeable && !c.tradeable) return false;
       const oneChain = chainFilter.size === 1;
