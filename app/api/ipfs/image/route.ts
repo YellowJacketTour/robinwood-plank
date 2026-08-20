@@ -113,9 +113,14 @@ export async function GET(req: Request) {
     // fetch on a host that can never resolve.
     "arweave.net",
     "ordinals.com",
+    "www.ordinals.com",
     "static.unisat.io",
     "next-cdn.unisat.space",
     "we-assets.pinit.io",
+    "coin-images.coingecko.com",
+    "creator-hub-prod.s3.us-east-2.amazonaws.com",
+    "turbo.ordinalswallet.com",
+    "ord-mirror.magiceden.dev",
   ]);
   // Only the original path-style IPFS gateways require a literal "/ipfs/"
   // segment in the path below. The non-IPFS CDN hosts added above serve

@@ -40,6 +40,12 @@ async function main(): Promise<void> {
 
   const want = (id: string) => !only || only === id;
 
+  if (want("bitcoin-unisat") && remaining()) {
+    const { backfillUnisatCollectionArt } = await import("../lib/market/multichain/adapters/unisat-collections");
+    const r = await backfillUnisatCollectionArt(40);
+    console.log(`[spokes] bitcoin-unisat-art: ${JSON.stringify(r)}`);
+  }
+
   if (want("adapter-sync") && remaining()) {
     const run = await runMultichainSync({ maxCollections: 120 });
     console.log(`[spokes] adapter-sync: ${run.synced} synced, ${run.failed} failed, ${run.skipped} skipped`);
@@ -71,26 +77,25 @@ async function main(): Promise<void> {
     }
   }
 
-  if (want("coingecko-bnb") && remaining()) {
+  const cgBySpoke: Record<string, string> = {
+    "coingecko-bnb": "bnb-mainnet",
+    "coingecko-avax": "avax-mainnet",
+    "solana-coingecko": "solana-mainnet",
+    "bitcoin-coingecko": "bitcoin-mainnet",
+    "coingecko-eth": "eth-mainnet",
+    "coingecko-polygon": "polygon-mainnet",
+    "coingecko-base": "base-mainnet",
+    "coingecko-arb": "arb-mainnet",
+    "coingecko-opt": "opt-mainnet",
+  };
+  for (const [spokeId, slug] of Object.entries(cgBySpoke)) {
+    if (!want(spokeId) || !remaining()) continue;
     const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
-    const r = await runCoinGeckoNftStats("bnb-mainnet", 15);
-    console.log(`[spokes] coingecko-bnb: ${JSON.stringify(r)}`);
-  }
-
-  if (want("coingecko-avax") && remaining()) {
-    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
-    const r = await runCoinGeckoNftStats("avax-mainnet", 15);
-    console.log(`[spokes] coingecko-avax: ${JSON.stringify(r)}`);
-  }
-
-  if (want("solana-coingecko") && remaining()) {
-    const r = await runCoinGeckoNftStats("solana-mainnet", 20);
-    console.log(`[spokes] solana-coingecko: ${JSON.stringify(r)}`);
-  }
-
-  if (want("bitcoin-coingecko") && remaining()) {
-    const r = await runCoinGeckoNftStats("bitcoin-mainnet", 20);
-    console.log(`[spokes] bitcoin-coingecko: ${JSON.stringify(r)}`);
+    do {
+      const r = await runCoinGeckoNftStats(slug, 20);
+      console.log(`[spokes] ${spokeId}: ${JSON.stringify(r)}`);
+      if (r.updated === 0 || !only) break;
+    } while (remaining());
   }
 
   console.log(`[spokes] pass done in ${((Date.now() - started) / 1000).toFixed(1)}s`);

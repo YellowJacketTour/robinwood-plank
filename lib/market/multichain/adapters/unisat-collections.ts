@@ -42,6 +42,13 @@
  * resolve that case.
  */
 import type { ChainAdapter, CollectionSnapshot, DiscoveredCollection } from "@/lib/market/multichain/types";
+import {
+  upsertTrackedCollection,
+  updateCollectionDisplay,
+  updateCollectionFloorOnly,
+  updateCollectionSupplyFields,
+  updateHolderCount,
+} from "@/lib/market/multichain/store";
 
 const API_BASE = "https://open-api.unisat.io/v3/market/collection/auction";
 const PAGE_SIZE = 20; // real, confirmed server-enforced max (exclusiveMaximum 21)
@@ -67,20 +74,29 @@ function requireApiKey(): string {
 
 async function unisatFetch<T>(path: string, body: Record<string, unknown>): Promise<T> {
   const key = requireApiKey();
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
+  let lastErr = "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify(body),
+    });
     const text = await res.text().catch(() => "");
-    throw new Error(`unisat-collections: ${res.status} ${res.statusText} on ${path} -- ${text.slice(0, 200)}`);
+    if (res.status === 403 || res.status === 429 || text.includes("rate limit")) {
+      lastErr = `${res.status} ${text.slice(0, 120)}`;
+      await new Promise((r) => setTimeout(r, 2_000 * (attempt + 1)));
+      continue;
+    }
+    if (!res.ok) {
+      throw new Error(`unisat-collections: ${res.status} ${res.statusText} on ${path} -- ${text.slice(0, 200)}`);
+    }
+    const envelope = JSON.parse(text) as { code: number | string; msg: string; data: T };
+    if (envelope.code !== 0) {
+      throw new Error(`unisat-collections: ${path} returned code ${envelope.code} -- ${envelope.msg}`);
+    }
+    return envelope.data;
   }
-  const envelope = (await res.json()) as { code: number | string; msg: string; data: T };
-  if (envelope.code !== 0) {
-    throw new Error(`unisat-collections: ${path} returned code ${envelope.code} -- ${envelope.msg}`);
-  }
-  return envelope.data;
+  throw new Error(`unisat-collections: rate limited on ${path} -- ${lastErr}`);
 }
 
 /** Real inscription-content gateway resolution for the raw-inscription-id icon case -- see header. */
@@ -178,6 +194,81 @@ export const unisatCollectionsAdapter: ChainAdapter = {
     };
   },
 };
+
+/**
+ * Walk UniSat's ranked list (has icon + name per page of 20) and write
+ * exact-id display. Snapshot fetch of /collection_statistic 500s for many
+ * ids; the list endpoint is the working art/name source. Never invents.
+ */
+export async function backfillUnisatCollectionArt(maxPages = 60): Promise<{
+  scanned: number;
+  named: number;
+  imaged: number;
+}> {
+  let scanned = 0;
+  let named = 0;
+  let imaged = 0;
+  let start = 0;
+  for (let page = 0; page < maxPages; page++) {
+    let data: { list: UniSatCollectionEntry[]; total: number };
+    try {
+      data = await unisatFetch<{ list: UniSatCollectionEntry[]; total: number }>("/collection_statistic_list", {
+        start,
+        limit: PAGE_SIZE,
+        filter: { timeType: "24h" },
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("rate limited") || msg.includes("403")) break;
+      throw e;
+    }
+    for (const entry of data.list) {
+      scanned += 1;
+      const id = entry.collectionId;
+      if (!id) continue;
+      await upsertTrackedCollection({
+        chainSlug: "bitcoin-mainnet",
+        chainId: null,
+        contractAddress: id,
+        adapter: "unisat-collections",
+      });
+      const imageUrl = resolveIconUrl(entry.icon);
+      const name = entry.name?.trim() || null;
+      if (name || imageUrl) {
+        await updateCollectionDisplay("bitcoin-mainnet", id, { name, imageUrl });
+        if (name) named += 1;
+        if (imageUrl) imaged += 1;
+      }
+      const floor = entry.floorPrice != null ? satsToScaledString(entry.floorPrice) : null;
+      if (floor) {
+        await updateCollectionFloorOnly("bitcoin-mainnet", id, {
+          floorPriceWei: floor,
+          floorPriceCurrency: "BTC",
+          floorPriceMarketplace: "unisat",
+        }).catch(() => {});
+      }
+      const supply = entry.total ?? entry.supply ?? null;
+      const listed = entry.listed ?? null;
+      if (supply != null || listed != null) {
+        await updateCollectionSupplyFields("bitcoin-mainnet", id, {
+          totalSupply: supply,
+          listedCount: listed,
+        }).catch(() => {});
+      }
+      const holders =
+        (typeof entry.holders === "number" && entry.holders > 0 && entry.holders) ||
+        (typeof entry.uniqueHolders === "number" && entry.uniqueHolders > 0 && entry.uniqueHolders) ||
+        null;
+      if (holders) {
+        await updateHolderCount("bitcoin-mainnet", id, holders).catch(() => {});
+      }
+    }
+    start += PAGE_SIZE;
+    if (data.list.length < PAGE_SIZE || start >= data.total) break;
+    await new Promise((r) => setTimeout(r, 1_200));
+  }
+  return { scanned, named, imaged };
+}
 
 async function fetchUnisatHolderTotal(collectionId: string): Promise<number | null> {
   const key = process.env.UNISAT_API_KEY;

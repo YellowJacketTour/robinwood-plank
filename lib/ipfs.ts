@@ -52,6 +52,19 @@ function rawGatewayUrl(uri: string, gateway: string): string {
   return `${gateway}${encoded}`;
 }
 
+/** Hosts that fail in-browser with ORB/CORS when loaded as raw <img>/next/image. Same-origin proxy only. */
+export const ORB_PRONE_ART_HOSTS = new Set([
+  "ordinals.com",
+  "www.ordinals.com",
+  "static.unisat.io",
+  "next-cdn.unisat.space",
+  "we-assets.pinit.io",
+  "coin-images.coingecko.com",
+  "creator-hub-prod.s3.us-east-2.amazonaws.com",
+  "turbo.ordinalswallet.com",
+  "ord-mirror.magiceden.dev",
+]);
+
 /**
  * True only for URLs the /api/ipfs/image proxy's own SSRF allowlist will
  * actually accept (mirrors app/api/ipfs/image/route.ts's ALLOWED_HOSTS).
@@ -73,6 +86,7 @@ export function isIpfsGatewayUrl(uri: string): boolean {
     if (gatewayHosts.includes(host)) return true;
     // CID subdomain gateways, e.g. bafy....ipfs.dweb.link
     if (/\.ipfs\.(dweb\.link|nftstorage\.link|w3s\.link|4everland\.io)$/i.test(host)) return true;
+    if (ORB_PRONE_ART_HOSTS.has(host)) return true;
     return false;
   } catch {
     return false;

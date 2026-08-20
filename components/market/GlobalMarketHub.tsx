@@ -12,7 +12,7 @@ import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/colle
 import ChainIcon from "@/components/market/ChainIcon";
 import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
-import { resolveIpfsUrl, withImageWidth, isIpfsGatewayUrl } from "@/lib/ipfs";
+import { resolveIpfsUrl, withImageWidth, isIpfsGatewayUrl, ORB_PRONE_ART_HOSTS } from "@/lib/ipfs";
 
 /**
  * Some collection images (any sourced from lib/market/multichain/adapters/
@@ -102,7 +102,14 @@ function CollectionThumb({
   // allowlist accepts (see isIpfsGatewayUrl). Anything else (e.g. a
   // working OpenSea/Alchemy CDN URL) renders as-is -- the proxy would
   // just 400 it, turning a working image into a broken one.
-  const shouldProxy = src.startsWith("/api/ipfs/") || src.startsWith("ipfs://") || isIpfsGatewayUrl(src);
+  let orbHost = false;
+  try {
+    orbHost = ORB_PRONE_ART_HOSTS.has(new URL(src).hostname.toLowerCase());
+  } catch {
+    orbHost = false;
+  }
+  const shouldProxy =
+    src.startsWith("/api/ipfs/") || src.startsWith("ipfs://") || isIpfsGatewayUrl(src) || orbHost;
   const resolvedSrc = shouldProxy ? withImageWidth(resolveIpfsUrl(src), width) || src : src;
   return (
     <Image
@@ -291,6 +298,9 @@ function displayName(c: TrackedCollection): string {
   const n = (c.name ?? "").trim();
   if (!n || n === ".." || /^0x[0-9a-fA-F]{12,}$/.test(n) || /^erc-?721$/i.test(n)) {
     const a = c.contractAddress;
+    // Ordinals/Solana collection ids are slugs or pubkeys — ellipsizing
+    // "bitcoin-booms" into "bitcoi…ooms" hides the only real identity we have.
+    if (c.chainSlug === "bitcoin-mainnet" || c.chainSlug === "solana-mainnet") return a;
     return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
   }
   return n;

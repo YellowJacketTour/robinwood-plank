@@ -33,7 +33,6 @@
  */
 import {
   hasMultichainStore,
-  listTrackedCollections,
   updateCollectionMarketStats,
   updateCollectionFloorOnly,
   updateCollectionDisplay,
@@ -44,6 +43,7 @@ import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign
 import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
 import { durableKv } from "@/lib/market/durable-kv";
+import { postgresQuery } from "@/lib/postgres";
 
 /** This source's own budget-tracker key -- see source-budget.ts's own header for the real incident (Alchemy's monthly quota) this whole mechanism exists to prevent from happening again, to a different source, silently. */
 const SOURCE = "coingecko-nft";
@@ -67,6 +67,12 @@ const MONTHLY_CEILING = 9_000; // real margin under CoinGecko's documented 10,00
 
 function monthKey(): string {
   return new Date().toISOString().slice(0, 7); // YYYY-MM
+}
+
+async function peekMonthlyBudget(): Promise<number> {
+  if (!process.env.COINGECKO_API_KEY) return 0;
+  const key = `plank:market:coingecko-nft-monthly-v2:${monthKey()}`;
+  return (await durableKv.get<number>(key)) ?? 0;
 }
 
 async function checkAndIncrementMonthlyBudget(): Promise<boolean> {
@@ -95,12 +101,17 @@ const LIST_URL = "https://api.coingecko.com/api/v3/nfts/list";
 const DETAIL_URL = "https://api.coingecko.com/api/v3/nfts";
 const PAGE_SIZE = 250;
 
-/** CoinGecko's own asset_platform_id per chain this app tracks that it also covers -- only the two chains with no OpenSea-equivalent stats path today. Real, additive coverage, not a replacement for the EVM/OpenSea path. */
+/** CoinGecko asset_platform_id. OS remains primary for EVM; CG walks the rest so every tracked/CG-listed collection can get a sourced floor. */
 const PLATFORM_BY_CHAIN: Record<string, string> = {
   "solana-mainnet": "solana",
   "bitcoin-mainnet": "ordinals",
   "bnb-mainnet": "binance-smart-chain",
   "avax-mainnet": "avalanche",
+  "eth-mainnet": "ethereum",
+  "polygon-mainnet": "polygon-pos",
+  "base-mainnet": "base",
+  "arb-mainnet": "arbitrum-one",
+  "opt-mainnet": "optimistic-ethereum",
 };
 
 type ListItem = { id: string; symbol: string | null; contract_address?: string | null; name?: string | null };
@@ -173,6 +184,7 @@ export type CoinGeckoNftStatsResult = {
   matched: number;
   updated: number;
   errors: number;
+  skipReason?: string;
 };
 
 /**
@@ -188,41 +200,77 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
   if (!platform) throw new Error(`coingecko-nft-stats: no CoinGecko platform mapping for "${chainSlug}"`);
   if (!hasMultichainStore()) throw new Error("coingecko-nft-stats: no Postgres config.");
 
-  const tracked = (await listTrackedCollections()).filter((c) => c.chainSlug === chainSlug);
+  const monthlyUsed = await peekMonthlyBudget();
+  if (process.env.COINGECKO_API_KEY && monthlyUsed >= MONTHLY_CEILING) {
+    return { chainSlug, candidates: 0, matched: 0, updated: 0, errors: 0, skipReason: `monthly-cap ${monthlyUsed}` };
+  }
+
   const catalog = await fetchPlatformList(platform);
-  type Job = { contractAddress: string; cgId: string; name: string | null };
+  const missing = await postgresQuery<{ contract_address: string; name: string | null }>(
+    `SELECT c.contract_address, c.name
+     FROM plank_multichain_collections c
+     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+     WHERE c.chain_slug = $1
+       AND (s.floor_price_wei IS NULL OR s.floor_price_wei = '0')
+     ORDER BY c.id
+     LIMIT 8000`,
+    [chainSlug]
+  );
+  const trackedMissing = missing.rows;
+  const trackedCount = (
+    await postgresQuery<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM plank_multichain_collections WHERE chain_slug = $1`,
+      [chainSlug]
+    )
+  ).rows[0]?.n;
+
+  type Job = { contractAddress: string; cgId: string; name: string | null; foreignChainId?: number | null };
   const jobs: Job[] = [];
+  const seen = new Set<string>();
   if (isNonEvmChainSlug(chainSlug)) {
     const ids = new Set(catalog.map((r) => r.id.toLowerCase()));
-    for (const c of tracked) {
-      if (ids.has(c.contractAddress.toLowerCase())) {
-        jobs.push({ contractAddress: c.contractAddress, cgId: c.contractAddress.toLowerCase(), name: c.name });
-      }
+    for (const c of trackedMissing) {
+      const key = c.contract_address.toLowerCase();
+      if (!ids.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      jobs.push({ contractAddress: c.contract_address, cgId: key, name: c.name });
     }
   } else {
     const byAddr = new Map<string, ListItem>();
     for (const row of catalog) {
       if (row.contract_address) byAddr.set(row.contract_address.toLowerCase(), row);
     }
-    const have = new Set(tracked.map((c) => c.contractAddress.toLowerCase()));
-    for (const c of tracked) {
-      const hit = byAddr.get(c.contractAddress.toLowerCase());
-      if (hit) jobs.push({ contractAddress: c.contractAddress, cgId: hit.id, name: hit.name ?? c.name });
+    for (const c of trackedMissing) {
+      const hit = byAddr.get(c.contract_address.toLowerCase());
+      if (!hit || seen.has(c.contract_address.toLowerCase())) continue;
+      seen.add(c.contract_address.toLowerCase());
+      jobs.push({ contractAddress: c.contract_address, cgId: hit.id, name: hit.name ?? c.name });
     }
     const foreign = foreignChainByChainSlug(chainSlug);
-    for (const row of catalog) {
+    const floored = await postgresQuery<{ contract_address: string }>(
+      `SELECT c.contract_address
+       FROM plank_multichain_collections c
+       JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+       WHERE c.chain_slug = $1 AND s.floor_price_wei IS NOT NULL AND s.floor_price_wei <> '0'`,
+      [chainSlug]
+    );
+    const hasFloor = new Set(floored.rows.map((r) => r.contract_address.toLowerCase()));
+    const cursorKey = `plank:market:coingecko-catalog-cursor:${chainSlug}`;
+    let cursor = (await durableKv.get<number>(cursorKey)) ?? 0;
+    if (cursor >= catalog.length) cursor = 0;
+    // Queue catalog rows for THIS pass only. Upsert happens on a successful
+    // detail fetch — registering shells while the monthly cap is spent
+    // inflates chip counts with empty books (live 2026-08-20).
+    for (let i = 0; i < catalog.length && jobs.length < maxUpdates; i++) {
+      const row = catalog[(cursor + i) % catalog.length];
       const addr = row.contract_address?.toLowerCase();
-      if (!addr || have.has(addr) || !row.id) continue;
-      const id = await upsertTrackedCollection({
-        chainSlug,
-        chainId: foreign?.chainId ?? null,
-        contractAddress: addr,
-        adapter: "coingecko-nft",
-      });
-      if (id) have.add(addr);
-      jobs.push({ contractAddress: addr, cgId: row.id, name: row.name ?? null });
-      if (jobs.length >= maxUpdates * 2) break;
+      if (!addr || seen.has(addr) || !row.id || hasFloor.has(addr)) continue;
+      seen.add(addr);
+      jobs.push({ contractAddress: addr, cgId: row.id, name: row.name ?? null, foreignChainId: foreign?.chainId ?? null });
     }
+    await durableKv.set(cursorKey, (cursor + Math.max(jobs.length, 1)) % Math.max(catalog.length, 1), {
+      ex: 40 * 24 * 60 * 60,
+    });
   }
   const matches = jobs;
 
@@ -249,6 +297,12 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
       }
       recordSourceSuccess(SOURCE);
       const detail = (await res.json()) as NftDetail;
+      await upsertTrackedCollection({
+        chainSlug,
+        chainId: collection.foreignChainId ?? foreignChainByChainSlug(chainSlug)?.chainId ?? null,
+        contractAddress: collection.contractAddress,
+        adapter: "coingecko-nft",
+      });
       const volume24hWei = toWeiString(detail.volume_24h?.native_currency);
       const sales24h = typeof detail.one_day_sales === "number" ? detail.one_day_sales : null;
       const change = detail.floor_price_24h_percentage_change?.native_currency;
@@ -291,5 +345,5 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
     if (paced) await sleep(4_500); // real 5-15/min unauthenticated limit -- 4.5s keeps this well inside it
   }
 
-  return { chainSlug, candidates: tracked.length, matched: matches.length, updated, errors };
+  return { chainSlug, candidates: Number(trackedCount ?? 0), matched: matches.length, updated, errors };
 }

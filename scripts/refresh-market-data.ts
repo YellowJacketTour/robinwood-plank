@@ -103,8 +103,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats", "coingecko-eth-stats", "coingecko-polygon-stats", "coingecko-base-stats", "coingecko-arb-stats", "coingecko-opt-stats"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -691,6 +691,31 @@ async function main(): Promise<void> {
   await step("coingecko-avax-stats", async () => {
     const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
     const r = await runCoinGeckoNftStats("avax-mainnet", full ? 80 : 15);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-eth-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("eth-mainnet", full ? 40 : 10);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-polygon-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("polygon-mainnet", full ? 40 : 10);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-base-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("base-mainnet", full ? 30 : 8);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-arb-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("arb-mainnet", full ? 30 : 8);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-opt-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("opt-mainnet", full ? 30 : 8);
     return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
   });
 
