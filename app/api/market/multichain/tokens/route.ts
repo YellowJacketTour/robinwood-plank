@@ -34,8 +34,32 @@ export async function GET(req: NextRequest) {
     if (hasForeignRarityStore()) {
       const indexed = await listForeignRarityTokens(chainSlug, collectionSlug, limit).catch(() => []);
       if (indexed.length > 0) {
+        const missing = indexed.filter((t) => !t.imageUrl).length;
+        if (missing > 0) {
+          let extras: CollectionToken[] = [];
+          if (isBitcoinChainSlug(chainSlug)) extras = await bitcoinTokens(collectionSlug, Math.min(limit, 80)).catch(() => []);
+          else if (isSolanaChainSlug(chainSlug)) extras = await solanaTokens(collectionSlug, Math.min(limit, 80)).catch(() => []);
+          else {
+            const chain = foreignChainByChainSlug(chainSlug);
+            if (chain?.openSeaChain) extras = await openSeaTokens(chain.openSeaChain, collectionSlug, Math.min(limit, 50)).catch(() => []);
+          }
+          const byId = new Map(extras.map((t) => [t.tokenId, t.imageUrl]));
+          const filled: Array<{ tokenId: string; imageUrl: string }> = [];
+          for (const t of indexed) {
+            if (t.imageUrl) continue;
+            const img = byId.get(t.tokenId);
+            if (img) {
+              t.imageUrl = img;
+              filled.push({ tokenId: t.tokenId, imageUrl: img });
+            }
+          }
+          if (filled.length > 0) {
+            const { updateForeignRarityImages } = await import("@/lib/market/multichain/foreign-rarity-store");
+            void updateForeignRarityImages(chainSlug, collectionSlug, filled).catch(() => {});
+          }
+        }
         return NextResponse.json(
-          { tokens: indexed.map((t) => ({ tokenId: t.tokenId, name: t.name, imageUrl: null as string | null })) },
+          { tokens: indexed.map((t) => ({ tokenId: t.tokenId, name: t.name, imageUrl: t.imageUrl })) },
           { headers: { "Cache-Control": "no-store" } }
         );
       }

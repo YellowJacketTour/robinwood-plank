@@ -31,7 +31,33 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const map = await getForeignRarity(chainSlug, collectionSlug);
+    let map = await getForeignRarity(chainSlug, collectionSlug);
+    if (map.size > 20) {
+      const tiers = new Set([...map.values()].map((v) => v.tier));
+      if (tiers.size === 1) {
+        const job = `recompute:${chainSlug}:${collectionSlug.toLowerCase()}`;
+        if (!inFlight.has(job)) {
+          inFlight.add(job);
+          try {
+            const meta = await getForeignTraitIndex(chainSlug, collectionSlug);
+            if (meta.traitIndex) {
+              const { itemsFromTraitIndex, replaceForeignRarity } = await import("@/lib/market/multichain/foreign-rarity-store");
+              const { computeGenericRaritySnapshot } = await import("@/lib/rarity-generic");
+              const items = itemsFromTraitIndex(meta.traitIndex);
+              if (items.length > 0) {
+                const snap = computeGenericRaritySnapshot(items);
+                await replaceForeignRarity(chainSlug, collectionSlug, snap, meta.traitIndex);
+                map = await getForeignRarity(chainSlug, collectionSlug);
+              }
+            }
+          } catch {
+            /* keep stored tiers */
+          } finally {
+            inFlight.delete(job);
+          }
+        }
+      }
+    }
     const byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number; score: number }> = {};
     for (const [tokenId, v] of map) byTokenId[tokenId] = v;
     const meta = await getForeignTraitIndex(chainSlug, collectionSlug).catch(() => null);

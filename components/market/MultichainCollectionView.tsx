@@ -2028,9 +2028,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                     style={pieceRarity ? { ...tierCardStyle(pieceRarity.tier), boxShadow: tierGlow(pieceRarity.tier) } : undefined}
                   >
                     <div className="relative aspect-square bg-wood-900">
-                      {item.imageUrl ? (
-                        <Image src={item.imageUrl} alt="" fill sizes="200px" className="object-cover" unoptimized />
-                      ) : null}
+                      <CollectionArtImage src={item.imageUrl} alt="" width={512} variant="tile" />
                       {pieceRarity && (
                         <span
                           className="tier-badge absolute left-2 top-2 rounded-full px-2 py-1 text-[0.55rem] font-black uppercase tracking-wide"

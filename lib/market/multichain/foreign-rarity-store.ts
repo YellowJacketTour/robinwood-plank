@@ -42,15 +42,65 @@ export async function listForeignRarityTokens(
   chainSlug: string,
   collectionSlug: string,
   limit: number
-): Promise<Array<{ tokenId: string; name: string | null }>> {
-  const result = await postgresQuery<{ token_id: string; name: string }>(
-    `SELECT token_id, name FROM plank_foreign_rarity
-     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)
-     ORDER BY rank ASC
-     LIMIT $3`,
-    [chainSlug, collectionSlug, Math.min(Math.max(limit, 1), 2000)]
-  );
-  return result.rows.map((r) => ({ tokenId: r.token_id, name: r.name || null }));
+): Promise<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>> {
+  try {
+    const result = await postgresQuery<{ token_id: string; name: string; image_url: string | null }>(
+      `SELECT token_id, name, image_url FROM plank_foreign_rarity
+       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)
+       ORDER BY rank ASC
+       LIMIT $3`,
+      [chainSlug, collectionSlug, Math.min(Math.max(limit, 1), 2000)]
+    );
+    return result.rows.map((r) => ({ tokenId: r.token_id, name: r.name || null, imageUrl: r.image_url || null }));
+  } catch {
+    const result = await postgresQuery<{ token_id: string; name: string }>(
+      `SELECT token_id, name FROM plank_foreign_rarity
+       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)
+       ORDER BY rank ASC
+       LIMIT $3`,
+      [chainSlug, collectionSlug, Math.min(Math.max(limit, 1), 2000)]
+    );
+    return result.rows.map((r) => ({ tokenId: r.token_id, name: r.name || null, imageUrl: null }));
+  }
+}
+
+export async function updateForeignRarityImages(
+  chainSlug: string,
+  collectionSlug: string,
+  images: Array<{ tokenId: string; imageUrl: string }>
+): Promise<number> {
+  let n = 0;
+  for (const row of images) {
+    if (!row.imageUrl) continue;
+    const r = await postgresQuery(
+      `UPDATE plank_foreign_rarity SET image_url = $4
+       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND token_id = $3
+         AND (image_url IS NULL OR image_url = '')`,
+      [chainSlug, collectionSlug, row.tokenId, row.imageUrl]
+    );
+    n += r.rowCount ?? 0;
+  }
+  return n;
+}
+
+/** Rebuild −log2 snapshot from stored trait_index (no vendor calls). */
+export function itemsFromTraitIndex(
+  traitIndex: ForeignTraitIndex
+): Array<{ tokenId: string; name: string | null; traits: Array<{ traitType: string; value: string }> }> {
+  const byId = new Map<string, { tokenId: string; name: string | null; traits: Array<{ traitType: string; value: string }> }>();
+  for (const [traitType, values] of Object.entries(traitIndex)) {
+    for (const [value, ids] of Object.entries(values)) {
+      for (const tokenId of ids) {
+        let row = byId.get(tokenId);
+        if (!row) {
+          row = { tokenId, name: null, traits: [] };
+          byId.set(tokenId, row);
+        }
+        row.traits.push({ traitType, value });
+      }
+    }
+  }
+  return [...byId.values()];
 }
 
 /** traitType -> value -> [tokenId], same shape as native's TraitIndexResponse.traits (lib/market/traits.ts) -- powers ForeignOfferForm's criteria-bid builder via the SAME pure resolveCriteriaTokenIds (trait-criteria.ts) native uses. */
@@ -110,7 +160,8 @@ export async function replaceForeignRarity(
   collectionSlug: string,
   snapshot: GenericRaritySnapshot,
   traitIndex: ForeignTraitIndex,
-  aliases: string[] = []
+  aliases: string[] = [],
+  images?: Map<string, string | null>
 ): Promise<void> {
   const keys = [...new Set([collectionSlug, ...aliases].filter(Boolean))];
   const pool = postgresPool();
@@ -121,9 +172,19 @@ export async function replaceForeignRarity(
       await client.query(`DELETE FROM plank_foreign_rarity WHERE chain_slug = $1 AND collection_slug = $2`, [chainSlug, key]);
       for (const r of snapshot.byTokenId.values()) {
         await client.query(
-          `INSERT INTO plank_foreign_rarity (chain_slug, collection_slug, token_id, name, score, rank, percentile, tier)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [chainSlug, key, r.tokenId, r.name, r.score, r.rank, r.percentile, r.tier]
+          `INSERT INTO plank_foreign_rarity (chain_slug, collection_slug, token_id, name, score, rank, percentile, tier, image_url)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            chainSlug,
+            key,
+            r.tokenId,
+            r.name,
+            r.score,
+            r.rank,
+            r.percentile,
+            r.tier,
+            r.imageUrl ?? images?.get(r.tokenId) ?? null,
+          ]
         );
       }
       await client.query(

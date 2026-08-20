@@ -19,6 +19,7 @@ export type GenericTokenRarity = {
   rank: number;
   percentile: number;
   tier: RarityTier;
+  imageUrl?: string | null;
 };
 
 export type GenericRaritySnapshot = {
@@ -41,6 +42,12 @@ const TIER_TYPE_HINTS = ["background", "tier", "rarity", "rank", "class", "editi
 const JUNK_TYPE = /^(tokenid|id|editionnumber|serial|number|#)$/i;
 
 /** Longest-first official-tier trait (RobinWood Background pattern). */
+/** RobinWood-style labels only — not substring "rare" inside unrelated values. */
+export function isStrictOfficialTierValue(value: string): boolean {
+  const s = value.toLowerCase().replace(/[\s_-]+/g, "");
+  return /^(mythic|legendary|epic|raregraded|rare|uncommon|common)$/.test(s);
+}
+
 export function detectOfficialTierTrait(items: GenericRarityInput[]): string | null {
   const types = new Set<string>();
   for (const item of items) for (const t of item.traits) types.add(t.traitType);
@@ -53,7 +60,7 @@ export function detectOfficialTierTrait(items: GenericRarityInput[]): string | n
     const values = items.map((i) => i.traits.find((t) => t.traitType === type)?.value).filter((v): v is string => Boolean(v));
     if (values.length < n * 0.4) continue;
     const unique = [...new Set(values)];
-    const mapped = unique.filter((v) => tierFromBackground(v) != null);
+    const mapped = unique.filter((v) => isStrictOfficialTierValue(v));
     if (mapped.length >= 2 && mapped.length / unique.length >= 0.5) return type;
   }
   return null;
@@ -133,12 +140,22 @@ export function computeGenericRaritySnapshot(items: GenericRarityInput[]): Gener
     while (j < rawScores.length && rawScores[j].score === score) j += 1;
     const rank = i + 1;
     const scorePercentile = sampleSize > 0 ? (countStrictlyBelow(score) / sampleSize) * 100 : 0;
-    const groupPositionPct = sampleSize > 1 ? ((sampleSize - 1 - i) / (sampleSize - 1)) * 100 : 100;
+    const tieSize = j - i;
+    const largeTie = tieSize > Math.max(4, sampleSize * 0.15);
     for (let k = i; k < j; k += 1) {
       const row = rawScores[k];
-      const percentile = row.score <= 0 ? scorePercentile : Math.max(scorePercentile, groupPositionPct);
-      const fromOfficial = row.officialValue ? tierFromBackground(row.officialValue) : null;
-      const tier = fromOfficial ?? (row.score <= 0 ? "Common" : tierFromPercentile(Math.max(scorePercentile, groupPositionPct)));
+      const groupPositionPct =
+        sampleSize > 1 ? ((sampleSize - 1 - k) / (sampleSize - 1)) * 100 : 100;
+      // A giant tie used to inherit the FIRST row's 100th-percentile → every
+      // Milady painted Legendary. Large ties use score percentile only.
+      const pos = largeTie ? scorePercentile : Math.max(scorePercentile, groupPositionPct);
+      const percentile = row.score <= 0 ? scorePercentile : pos;
+      const fromOfficial = row.officialValue
+        ? isStrictOfficialTierValue(row.officialValue)
+          ? tierFromBackground(row.officialValue)
+          : null
+        : null;
+      const tier = fromOfficial ?? (row.score <= 0 ? "Common" : tierFromPercentile(pos));
       byTokenId.set(row.tokenId, {
         tokenId: row.tokenId,
         name: row.name,
