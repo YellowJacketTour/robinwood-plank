@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { swrJson } from "@/lib/market/swr-fetch";
 import ChainIcon from "@/components/market/ChainIcon";
@@ -199,8 +200,6 @@ type TrackedCollection = {
   holderCount: number | null;
 };
 
-type SortMode = "trending" | "floor-desc" | "floor-asc" | "name";
-
 /** Picks the right real volume/sales field for a chosen display window -- never derives 7d/30d from the 24h figure, just reads the matching column populated by the same OpenSea pass (see volume7dWei/sales7d's own doc comment above). */
 function windowVolumeWei(c: TrackedCollection, window: "24h" | "7d" | "30d"): string | null {
   if (window === "7d") return c.volume7dWei;
@@ -212,16 +211,132 @@ function windowSales(c: TrackedCollection, window: "24h" | "7d" | "30d"): number
   if (window === "30d") return c.sales30d;
   return c.sales24h;
 }
+/** Real listed-count/total-supply as a percentage -- null unless both real figures are present (never a fabricated 0%). Shared by both the "Listed" column's own display AND its sort. */
+function listedPctOf(c: TrackedCollection): number | null {
+  return c.listedCount != null && c.totalSupply != null && c.totalSupply > 0 ? (c.listedCount / c.totalSupply) * 100 : null;
+}
+
+/**
+ * A bare "—" reads as "broken" to a viewer -- flagged live ("tons of
+ * missing fields. we want zero missing fields ever"). This app's honesty
+ * discipline means some cells genuinely have no real source to show
+ * (Solana/Bitcoin have no OpenSea-equivalent volume/sales/change feed;
+ * holder count is Alchemy/EVM-only) -- the fix isn't fabricating a number,
+ * it's making every "—" explain itself instead of looking unexplained.
+ * Real per-chain reasoning, not a generic apology.
+ */
+function emptyCellReason(c: TrackedCollection, field: "change" | "volume" | "sales" | "listed" | "holders"): string {
+  const isSolana = c.chainSlug === "solana-mainnet";
+  const isBitcoin = c.chainSlug === "bitcoin-mainnet";
+  if (field === "holders") {
+    if (isSolana || isBitcoin) return "Holder counts aren't sourced for this chain yet -- no clean single-call endpoint exists on Helius DAS or UniSat/Ordiscan.";
+    return "Not fetched yet -- holder count loads the first time this collection's own page is viewed.";
+  }
+  if (isSolana) return "Magic Eden's public API has no volume/sales/change feed for this collection -- floor price is all it exposes.";
+  if (isBitcoin) return "UniSat/Ordiscan expose collection metadata, not a volume/sales/change feed for this collection.";
+  if (field === "change") return "Needs at least two real syncs of this collection to compute a real change -- not yet available.";
+  return "This collection hasn't been through an OpenSea stats pass yet -- real data lands on the next sync, never fabricated in the meantime.";
+}
+
+/**
+ * Every column the rankings table (and, sharing "one sort concept, not two"
+ * the same way chainFilter already does, the browsable grid below it) can
+ * be ordered by -- SOTA rankings pages (OpenSea/Blur/Tensor/Magic Eden, see
+ * this session's own research) make every real column a clickable sort key
+ * rather than hiding sort behind a separate dropdown/button-group; "grade"
+ * is this app's own honest composite (see gradeScore's header) standing in
+ * for OpenSea's plain volume-desc "Trending" default.
+ */
+type SortColumn = "grade" | "name" | "floor" | "change" | "volume" | "sales" | "listed" | "holders";
+type SortDir = "asc" | "desc";
+
+/** Column -> the direction that reads as "most interesting first" on a first click, e.g. Volume/Floor/Sales/Holders/Listed/Grade default to descending (biggest first), Name defaults A-Z (ascending), matching every real marketplace rankings table checked in this session's research. */
+const DEFAULT_SORT_DIR: Record<SortColumn, SortDir> = {
+  grade: "desc",
+  name: "asc",
+  floor: "desc",
+  change: "desc",
+  volume: "desc",
+  sales: "desc",
+  listed: "desc",
+  holders: "desc",
+};
+
+/** Null/undefined always sorts to the end regardless of direction -- the standard convention for a metric that's genuinely absent for some rows (e.g. holderCount is EVM-only, 7d/30d volume needs a later pass) rather than hiding the whole column or fabricating a 0. */
+function compareNullable(a: number | null, b: number | null, dir: SortDir): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return dir === "asc" ? a - b : b - a;
+}
+
+/**
+ * The one real comparator every sortable column above resolves through --
+ * `grade` is the default ("Trending"), everything else reads a single real
+ * field/derived value off the row. Floor price is only ever a MEANINGFUL
+ * ordering within the same currency (see the header this replaced for why
+ * cross-currency floor comparison is dishonest); a cross-currency pair
+ * falls through to a 0 (no opinion), not a fabricated ranking.
+ */
+function compareByColumn(
+  a: TrackedCollection,
+  b: TrackedCollection,
+  column: SortColumn,
+  dir: SortDir,
+  window: "24h" | "7d" | "30d",
+  hasArt: (c: TrackedCollection) => boolean
+): number {
+  switch (column) {
+    case "name":
+      return dir === "asc" ? (a.name ?? "").localeCompare(b.name ?? "") : (b.name ?? "").localeCompare(a.name ?? "");
+    case "floor": {
+      const fa = a.floorPriceWei ? Number(a.floorPriceWei) : null;
+      const fb = b.floorPriceWei ? Number(b.floorPriceWei) : null;
+      if (fa != null && fb != null && a.floorPriceCurrency !== b.floorPriceCurrency) return 0;
+      return compareNullable(fa, fb, dir);
+    }
+    case "change":
+      return compareNullable(a.floorChangePct, b.floorChangePct, dir);
+    case "volume": {
+      const va = windowVolumeWei(a, window);
+      const vb = windowVolumeWei(b, window);
+      return compareNullable(va != null ? Number(va) : null, vb != null ? Number(vb) : null, dir);
+    }
+    case "sales":
+      return compareNullable(windowSales(a, window), windowSales(b, window), dir);
+    case "listed":
+      return compareNullable(listedPctOf(a), listedPctOf(b), dir);
+    case "holders":
+      return compareNullable(a.holderCount, b.holderCount, dir);
+    case "grade":
+    default:
+      return compareNullable(gradeScore(a, hasArt(a)), gradeScore(b, hasArt(b)), dir);
+  }
+}
+
+/** Every real input gradeScore() weighs, plus what each one actually contributed for THIS collection -- so the badge can show its work instead of asking a viewer to trust an opaque letter. Mirrors gradeScore()'s own logic exactly; the two must never drift apart. */
+type GradeBreakdown = {
+  score: number;
+  parts: Array<{ label: string; points: number; max: number; met: boolean }>;
+};
+
+function gradeBreakdown(c: TrackedCollection, artOk: boolean): GradeBreakdown {
+  const activityPoints = (Math.min(c.recentActivity, 5000) / 5000) * 300;
+  const hasVolume = Boolean(c.volume24hWei && c.volume24hWei !== "0");
+  const hasCreator = Boolean(c.creatorHandle || c.creatorEns);
+  const parts: GradeBreakdown["parts"] = [
+    { label: "Has real art", points: artOk ? 1000 : 0, max: 1000, met: artOk },
+    { label: "Tradeable order book", points: c.tradeable ? 500 : 0, max: 500, met: c.tradeable },
+    { label: "Recent chain activity", points: Math.round(activityPoints), max: 300, met: c.recentActivity > 0 },
+    { label: "Real 24h volume", points: hasVolume ? 200 : 0, max: 200, met: hasVolume },
+    { label: "Known creator handle/ENS", points: hasCreator ? 50 : 0, max: 50, met: hasCreator },
+  ];
+  return { score: parts.reduce((sum, p) => sum + p.points, 0), parts };
+}
 
 /** A collection is graded "real" for ranking/display purposes only when it has actual art AND at least one real signal (activity, volume, or a tradeable order book) -- an artless or dead row shouldn't out-rank one a person can actually look at and buy. Max possible score is 2050. */
 function gradeScore(c: TrackedCollection, artOk: boolean): number {
-  let score = 0;
-  if (artOk) score += 1000;
-  if (c.tradeable) score += 500;
-  score += (Math.min(c.recentActivity, 5000) / 5000) * 300;
-  if (c.volume24hWei && c.volume24hWei !== "0") score += 200;
-  if (c.creatorHandle || c.creatorEns) score += 50;
-  return score;
+  return gradeBreakdown(c, artOk).score;
 }
 
 /**
@@ -245,15 +360,89 @@ const GRADE_COLOR: Record<string, string> = {
   D: "#fb7185",
 };
 
-function GradeBadge({ score }: { score: number }) {
-  const letter = gradeLetter(score);
+/** A clickable, real sortable column header -- every real rankings page checked this session (OpenSea/Blur/Tensor/Magic Eden) uses this exact interaction instead of hiding sort behind a separate dropdown. Shows a ▲/▼ on whichever column is currently active. */
+function SortableTh({
+  column,
+  sortColumn,
+  sortDir,
+  onSort,
+  align,
+  className,
+  children,
+}: {
+  column: SortColumn;
+  sortColumn: SortColumn;
+  sortDir: SortDir;
+  onSort: (column: SortColumn) => void;
+  align?: "left" | "right";
+  className?: string;
+  children: ReactNode;
+}) {
+  const active = sortColumn === column;
   return (
-    <span
-      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[0.6rem] font-black text-wood-950"
-      style={{ backgroundColor: GRADE_COLOR[letter] }}
-      title={`Composite grade ${letter} — real art, order book, activity, volume, and creator attribution`}
-    >
-      {letter}
+    <th className={`px-2 py-2 ${align === "left" ? "text-left" : "text-right"} ${className ?? ""}`}>
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        aria-pressed={active}
+        className={`inline-flex items-center gap-0.5 transition-colors hover:text-foreground/70 ${active ? "text-gold-300" : ""}`}
+      >
+        {children}
+        <span className="w-2.5 text-[0.55rem]" aria-hidden="true">
+          {active ? (sortDir === "asc" ? "▲" : "▼") : ""}
+        </span>
+      </button>
+    </th>
+  );
+}
+
+/**
+ * Real per-collection explanation of WHY a grade is what it is -- flagged
+ * live ("grades dont have explanations of criteria or why each collection
+ * is the grade it is"). A tooltip alone (the old behavior) isn't reliably
+ * discoverable or screen-reader-exposed, so this is a real disclosure
+ * popover: click/focus the badge, see the exact point breakdown gradeScore
+ * actually computed for this row, not a generic definition of the letter.
+ */
+function GradeBadge({ breakdown }: { breakdown: GradeBreakdown }) {
+  const [open, setOpen] = useState(false);
+  const letter = gradeLetter(breakdown.score);
+  const thresholdLabel = letter === "A" ? "≥1700" : letter === "B" ? "≥1350" : letter === "C" ? "≥1000" : "<1000";
+  return (
+    <span className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        onBlur={() => setOpen(false)}
+        aria-expanded={open}
+        aria-label={`Grade ${letter}, ${breakdown.score} of 2050 points -- click for the full breakdown`}
+        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[0.6rem] font-black text-wood-950 transition-transform duration-150 hover:scale-110"
+        style={{ backgroundColor: GRADE_COLOR[letter] }}
+      >
+        {letter}
+      </button>
+      {open && (
+        <div
+          role="tooltip"
+          className="absolute right-0 top-6 z-20 w-56 rounded-lg border border-line bg-wood-950 p-2.5 text-left text-[0.65rem] shadow-xl"
+        >
+          <p className="mb-1.5 font-black uppercase tracking-wide text-foreground/50">
+            Grade {letter} · {breakdown.score}/2050 pts ({thresholdLabel} for {letter})
+          </p>
+          <ul className="space-y-1">
+            {breakdown.parts.map((p) => (
+              <li key={p.label} className="flex items-center justify-between gap-2">
+                <span className={p.met ? "text-foreground/80" : "text-foreground/35"}>
+                  {p.met ? "✓" : "✗"} {p.label}
+                </span>
+                <span className="shrink-0 font-mono tabular-nums text-foreground/50">
+                  {p.points}/{p.max}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </span>
   );
 }
@@ -302,22 +491,48 @@ function GradeBadge({ score }: { score: number }) {
  * only by chain until that field exists.
  */
 export default function GlobalMarketHub() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [collections, setCollections] = useState<TrackedCollection[]>([]);
   const [deadArt, setDeadArt] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [chainFilter, setChainFilter] = useState<Set<string>>(new Set());
-  const [search, setSearch] = useState("");
-  const [onlyTradeable, setOnlyTradeable] = useState(false);
-  const [onlyArt, setOnlyArt] = useState(false);
-  const [onlyVerifiedCreator, setOnlyVerifiedCreator] = useState(false);
+  // Every filter/sort field below is initialized straight from the URL
+  // query string (same `searchParams.get(...) || default` pattern
+  // PortfolioView.tsx's own wallet param already uses) so a shared link or
+  // a page reload restores the exact same view, not a reset one.
+  const [chainFilter, setChainFilter] = useState<Set<string>>(
+    () => new Set((searchParams.get("chains") ?? "").split(",").filter(Boolean))
+  );
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
+  const [onlyTradeable, setOnlyTradeable] = useState(() => searchParams.get("tradeable") === "1");
+  const [onlyArt, setOnlyArt] = useState(() => searchParams.get("art") === "1");
+  const [onlyVerifiedCreator, setOnlyVerifiedCreator] = useState(() => searchParams.get("creator") === "1");
+  const [onlyListed, setOnlyListed] = useState(() => searchParams.get("listed") === "1");
+  const [priceMin, setPriceMin] = useState(() => searchParams.get("min") ?? "");
+  const [priceMax, setPriceMax] = useState(() => searchParams.get("max") ?? "");
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-  // Default = "trending": gradeScore() descending, real floor ascending as
-  // the tiebreak -- the volume-primary/floor-secondary pattern
-  // state-of-the-art multichain marketplaces (OpenSea Trending, Blur,
-  // Magic Eden) converge on, now weighted by real art/tradeability instead
-  // of raw activity alone (see gradeScore's own header).
-  const [sortMode, setSortMode] = useState<SortMode>("trending");
+  // Default = "grade" desc: gradeScore() descending -- the volume-primary/
+  // floor-secondary pattern state-of-the-art multichain marketplaces
+  // (OpenSea Trending, Blur, Magic Eden) converge on, now weighted by real
+  // art/tradeability instead of raw activity alone (see gradeScore's own
+  // header). Every column of the rankings table below is a real clickable
+  // sort key (see SortColumn/compareByColumn's own header) -- this is ONE
+  // shared sort concept driving both the rankings table AND the browsable
+  // grid beneath it, same "one filter concept, not two" discipline
+  // chainFilter already follows, not a second parallel sort control.
+  const [sortColumn, setSortColumn] = useState<SortColumn>(() => (searchParams.get("sort") as SortColumn) || "grade");
+  const [sortDir, setSortDir] = useState<SortDir>(() => (searchParams.get("dir") as SortDir) || "desc");
+  /** Clicking a header: same column flips direction, a new column adopts its own sensible default direction (DEFAULT_SORT_DIR) -- the standard sortable-table interaction every real rankings page (OpenSea/Blur/Tensor/Magic Eden) uses. */
+  const toggleSort = (column: SortColumn) => {
+    if (column === sortColumn) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortColumn(column);
+      setSortDir(DEFAULT_SORT_DIR[column]);
+    }
+  };
   // Rankings-table row count -- Magic Eden's real "Show top: 10/25/50/100"
   // control, live-checked 2026-08-19. Matters far more now than it would
   // have before this session's discovery work: this app went from ~170 to
@@ -495,58 +710,62 @@ export default function GlobalMarketHub() {
     return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [collections]);
 
+  /** Real floor price scaled to native units, currency-blind -- honest about the same cross-currency imprecision compareByColumn's own "floor" case documents (Solana lamports and ETH wei both land in the same raw magnitude once scaled). Used ONLY for the min/max price filter below, never for ranking order. */
+  const floorNative = (c: TrackedCollection): number | null => (c.floorPriceWei ? Number(c.floorPriceWei) / 1e18 : null);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const min = priceMin.trim() ? Number(priceMin) : null;
+    const max = priceMax.trim() ? Number(priceMax) : null;
     const rows = collections.filter((c) => {
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
       if (q && !(c.name ?? "").toLowerCase().includes(q)) return false;
       if (onlyTradeable && !c.tradeable) return false;
       if (onlyArt && !hasArt(c)) return false;
       if (onlyVerifiedCreator && !(c.creatorHandle || c.creatorEns)) return false;
+      if (onlyListed && !(c.listedCount != null && c.listedCount > 0)) return false;
+      if (min !== null || max !== null) {
+        const p = floorNative(c);
+        if (p === null) return false;
+        if (min !== null && p < min) return false;
+        if (max !== null && p > max) return false;
+      }
       return true;
     });
-    const floor = (c: TrackedCollection) => (c.floorPriceWei ? Number(c.floorPriceWei) : null);
-    // Floor price is only ever compared WITHIN the same currency. Solana
-    // floors are stored as lamports padded to an 18-decimal-equivalent
-    // integer (see magiceden-solana.ts's lamportsToScaledString) -- that's
-    // decimal-place normalization, NOT a real SOL/ETH exchange-rate
-    // conversion, so "0.27 SOL" and "0.27 ETH" land at the same raw
-    // magnitude despite being worth very different amounts. Comparing that
-    // magnitude across currencies is meaningless (confirmed live: it was
-    // clustering every cheap-looking SOL floor above real, far-more-
-    // valuable ETH collections). Cross-currency pairs fall through to 0
-    // (no opinion) rather than a fabricated ranking.
-    const compareFloor = (a: TrackedCollection, b: TrackedCollection, direction: 1 | -1): number => {
-      const fa = floor(a);
-      const fb = floor(b);
-      if (fa === null && fb === null) return 0;
-      if (fa === null) return 1;
-      if (fb === null) return -1;
-      if (a.floorPriceCurrency !== b.floorPriceCurrency) return 0;
-      return (fa - fb) * direction;
-    };
-    const sorted = [...rows];
-    if (sortMode === "trending") {
-      sorted.sort((a, b) => {
-        const ga = gradeScore(a, hasArt(a));
-        const gb = gradeScore(b, hasArt(b));
-        if (gb !== ga) return gb - ga;
-        return compareFloor(a, b, 1);
-      });
-    } else if (sortMode === "floor-desc" || sortMode === "floor-asc") {
-      sorted.sort((a, b) => {
-        if (a.tradeable !== b.tradeable) return a.tradeable ? -1 : 1;
-        return compareFloor(a, b, sortMode === "floor-desc" ? -1 : 1);
-      });
-    } else {
-      sorted.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
-    }
-    return sorted;
-  }, [collections, chainFilter, search, sortMode, onlyTradeable, onlyArt, onlyVerifiedCreator, deadArt]);
+    return [...rows].sort((a, b) => {
+      const primary = compareByColumn(a, b, sortColumn, sortDir, "24h", hasArt);
+      if (primary !== 0) return primary;
+      return (a.name ?? "").localeCompare(b.name ?? "");
+    });
+  }, [collections, chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, priceMin, priceMax, deadArt]);
 
   useEffect(() => {
     setGridVisibleCount(GRID_PAGE_SIZE);
-  }, [chainFilter, search, sortMode, onlyTradeable, onlyArt, onlyVerifiedCreator]);
+  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, priceMin, priceMax]);
+
+  // URL persistence -- reflects every real filter/sort field above into the
+  // query string (router.replace, not push, so filtering doesn't spam
+  // browser history) via the SAME useSearchParams/router.replace pattern
+  // PortfolioView.tsx's own ?wallet= param already establishes elsewhere in
+  // this codebase. Only non-default values are written, so a plain
+  // "/market/global" with no filters stays clean rather than growing a
+  // query string full of defaults.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (chainFilter.size > 0) params.set("chains", [...chainFilter].join(","));
+    if (search.trim()) params.set("q", search.trim());
+    if (sortColumn !== "grade") params.set("sort", sortColumn);
+    if (sortDir !== DEFAULT_SORT_DIR[sortColumn]) params.set("dir", sortDir);
+    if (onlyTradeable) params.set("tradeable", "1");
+    if (onlyArt) params.set("art", "1");
+    if (onlyVerifiedCreator) params.set("creator", "1");
+    if (onlyListed) params.set("listed", "1");
+    if (priceMin.trim()) params.set("min", priceMin.trim());
+    if (priceMax.trim()) params.set("max", priceMax.trim());
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- router/pathname are stable per Next.js contract; including them would re-run this on every render for no reason.
+  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, priceMin, priceMax]);
 
   // Top movers: real gradeScore-ranked rows with both real art and a real
   // order book, highest 24h volume as the tiebreak -- never a curated/paid
@@ -580,17 +799,32 @@ export default function GlobalMarketHub() {
   // unlike OpenSea's own table, because this app doesn't have that data
   // and this codebase's own standing rule is never to fabricate a metric.
   const rankings = useMemo(() => {
-    const rows = collections.filter((c) => hasArt(c) && (chainFilter.size === 0 || chainFilter.has(c.chainSlug)));
-    return rows
+    const min = priceMin.trim() ? Number(priceMin) : null;
+    const max = priceMax.trim() ? Number(priceMax) : null;
+    const rows = collections.filter((c) => {
+      if (!hasArt(c)) return false;
+      if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
+      if (onlyTradeable && !c.tradeable) return false;
+      if (onlyVerifiedCreator && !(c.creatorHandle || c.creatorEns)) return false;
+      if (onlyListed && !(c.listedCount != null && c.listedCount > 0)) return false;
+      if (min !== null || max !== null) {
+        const p = floorNative(c);
+        if (p === null) return false;
+        if (min !== null && p < min) return false;
+        if (max !== null && p > max) return false;
+      }
+      return true;
+    });
+    return [...rows]
       .sort((a, b) => {
-        const g = gradeScore(b, true) - gradeScore(a, true);
-        if (g !== 0) return g;
+        const primary = compareByColumn(a, b, sortColumn, sortDir, rankingsWindow, hasArt);
+        if (primary !== 0) return primary;
         const va = a.volume24hWei ? BigInt(a.volume24hWei) : BigInt(0);
         const vb = b.volume24hWei ? BigInt(b.volume24hWei) : BigInt(0);
         return vb > va ? 1 : vb < va ? -1 : 0;
       })
       .slice(0, rankingsShowCount);
-  }, [collections, deadArt, chainFilter, rankingsShowCount]);
+  }, [collections, deadArt, chainFilter, rankingsShowCount, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyVerifiedCreator, onlyListed, priceMin, priceMax]);
 
   // Biggest Movers -- Magic Eden's real secondary strip (live-checked
   // 2026-08-19), sorted purely by |24h floor change|, not volume/grade.
@@ -624,7 +858,14 @@ export default function GlobalMarketHub() {
     );
   }
 
-  const activeFilterCount = chainFilter.size + (onlyTradeable ? 1 : 0) + (onlyArt ? 1 : 0) + (onlyVerifiedCreator ? 1 : 0);
+  const activeFilterCount =
+    chainFilter.size +
+    (onlyTradeable ? 1 : 0) +
+    (onlyArt ? 1 : 0) +
+    (onlyVerifiedCreator ? 1 : 0) +
+    (onlyListed ? 1 : 0) +
+    (priceMin.trim() ? 1 : 0) +
+    (priceMax.trim() ? 1 : 0);
 
   const filterPanel = (
     <div className="space-y-4">
@@ -668,6 +909,39 @@ export default function GlobalMarketHub() {
             />
             <span className="text-foreground/80">Known creator (handle / ENS)</span>
           </label>
+          <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 text-sm transition-colors hover:bg-foreground/5">
+            <input type="checkbox" checked={onlyListed} onChange={(e) => setOnlyListed(e.target.checked)} className="h-4 w-4 accent-gold-400" />
+            <span className="text-foreground/80">Listed only (real listedCount &gt; 0)</span>
+          </label>
+        </div>
+      </div>
+      <div>
+        <p className="mb-1.5 text-[0.65rem] font-black uppercase tracking-wider text-foreground/40">Floor price</p>
+        <p className="mb-1.5 text-[0.6rem] text-foreground/35">
+          Native units, currency-blind (mixing ETH/SOL/BTC collections) -- see the rankings table&apos;s own Floor column for a
+          currency-aware figure.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="number"
+            step="0.0001"
+            min="0"
+            value={priceMin}
+            onChange={(e) => setPriceMin(e.target.value)}
+            placeholder="Min"
+            aria-label="Minimum floor price"
+            className="min-h-9 w-1/2 rounded-md border border-line bg-background px-2 text-sm text-foreground placeholder:text-foreground/30"
+          />
+          <input
+            type="number"
+            step="0.0001"
+            min="0"
+            value={priceMax}
+            onChange={(e) => setPriceMax(e.target.value)}
+            placeholder="Max"
+            aria-label="Maximum floor price"
+            className="min-h-9 w-1/2 rounded-md border border-line bg-background px-2 text-sm text-foreground placeholder:text-foreground/30"
+          />
         </div>
       </div>
       {activeFilterCount > 0 && (
@@ -678,6 +952,9 @@ export default function GlobalMarketHub() {
             setOnlyTradeable(false);
             setOnlyArt(false);
             setOnlyVerifiedCreator(false);
+            setOnlyListed(false);
+            setPriceMin("");
+            setPriceMax("");
           }}
           className="min-h-9 w-full rounded-md border border-line px-3 text-xs font-bold text-foreground/60 transition-colors hover:border-line-strong hover:text-foreground/80"
         >
@@ -785,7 +1062,7 @@ export default function GlobalMarketHub() {
             {/* Immersive large hero: the single highest-graded mover, full art, full stats. */}
             {(() => {
               const hero = topMovers[0];
-              const score = gradeScore(hero, true);
+              const heroGrade = gradeBreakdown(hero, true);
               return (
                 <Link
                   href={`/market/multichain/${hero.chainSlug}/${encodeURIComponent(hero.contractAddress)}`}
@@ -804,7 +1081,7 @@ export default function GlobalMarketHub() {
                       <span className="inline-flex items-center rounded-full bg-gold-400/90 px-2 py-0.5 text-[0.6rem] font-black uppercase tracking-wider text-wood-950">
                         Top mover
                       </span>
-                      <GradeBadge score={score} />
+                      <GradeBadge breakdown={heroGrade} />
                     </div>
                     <p className="truncate text-2xl font-bold text-white drop-shadow" title={hero.name ?? hero.contractAddress}>
                       {hero.name ?? hero.contractAddress}
@@ -823,7 +1100,7 @@ export default function GlobalMarketHub() {
             {/* Medium strip: the next 5 graded movers, immersive art tiles, 2-up on mobile. */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-2">
               {topMovers.slice(1).map((c) => {
-                const score = gradeScore(c, true);
+                const grade = gradeBreakdown(c, true);
                 return (
                   <Link
                     key={key(c)}
@@ -839,7 +1116,7 @@ export default function GlobalMarketHub() {
                     </div>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
                     <div className="relative space-y-0.5 p-2">
-                      <GradeBadge score={score} />
+                      <GradeBadge breakdown={grade} />
                       <p className="truncate text-xs font-bold text-white" title={c.name ?? c.contractAddress}>
                         {c.name ?? c.contractAddress}
                       </p>
@@ -961,14 +1238,30 @@ export default function GlobalMarketHub() {
                 <tr className="border-b border-line text-left text-[0.6rem] font-black uppercase tracking-wider text-foreground/40">
                   <th className="w-8 px-2 py-2" />
                   <th className="w-10 px-1 py-2 text-right font-mono">#</th>
-                  <th className="px-2 py-2">Collection</th>
-                  <th className="px-2 py-2 text-right">Floor</th>
-                  <th className="px-2 py-2 text-right">24h Change</th>
-                  <th className="hidden px-2 py-2 text-right sm:table-cell">{rankingsWindow} Volume</th>
-                  <th className="hidden px-2 py-2 text-right md:table-cell">{rankingsWindow} Sales</th>
-                  <th className="hidden px-2 py-2 text-right lg:table-cell">Listed</th>
-                  <th className="hidden px-2 py-2 text-right xl:table-cell">Holders</th>
-                  <th className="w-9 px-2 py-2 text-right">Grade</th>
+                  <SortableTh column="name" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} align="left">
+                    Collection
+                  </SortableTh>
+                  <SortableTh column="floor" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort}>
+                    Floor
+                  </SortableTh>
+                  <SortableTh column="change" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort}>
+                    24h Change
+                  </SortableTh>
+                  <SortableTh column="volume" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden sm:table-cell">
+                    {rankingsWindow} Volume
+                  </SortableTh>
+                  <SortableTh column="sales" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden md:table-cell">
+                    {rankingsWindow} Sales
+                  </SortableTh>
+                  <SortableTh column="listed" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell">
+                    Listed
+                  </SortableTh>
+                  <SortableTh column="holders" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden xl:table-cell">
+                    Holders
+                  </SortableTh>
+                  <SortableTh column="grade" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="w-9">
+                    Grade
+                  </SortableTh>
                 </tr>
               </thead>
               <tbody>
@@ -1051,25 +1344,41 @@ export default function GlobalMarketHub() {
                         )}
                       </td>
                       <td className={`whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono font-bold ${changeColor}`}>
-                        {change != null ? `${changeArrow}${Math.abs(change).toFixed(1)}%` : "—"}
+                        {change != null ? (
+                          `${changeArrow}${Math.abs(change).toFixed(1)}%`
+                        ) : (
+                          <span title={emptyCellReason(c, "change")}>—</span>
+                        )}
                       </td>
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 sm:table-cell">
                         {(() => {
                           const vol = windowVolumeWei(c, rankingsWindow);
-                          return vol && vol !== "0" ? (Number(vol) / 1e18).toFixed(2) : "—";
+                          return vol && vol !== "0" ? (
+                            (Number(vol) / 1e18).toFixed(2)
+                          ) : (
+                            <span title={emptyCellReason(c, "volume")}>—</span>
+                          );
                         })()}
                       </td>
                       <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/60 md:table-cell">
-                        {windowSales(c, rankingsWindow) ?? "—"}
+                        {windowSales(c, rankingsWindow) ?? <span title={emptyCellReason(c, "sales")}>—</span>}
                       </td>
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 lg:table-cell">
-                        {listedPct != null ? `${listedPct.toFixed(1)}% · ${c.listedCount}/${c.totalSupply}` : "—"}
+                        {listedPct != null ? (
+                          `${listedPct.toFixed(1)}% · ${c.listedCount}/${c.totalSupply}`
+                        ) : (
+                          <span title={emptyCellReason(c, "listed")}>—</span>
+                        )}
                       </td>
                       <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/60 xl:table-cell">
-                        {c.holderCount != null ? c.holderCount.toLocaleString() : "—"}
+                        {c.holderCount != null ? (
+                          c.holderCount.toLocaleString()
+                        ) : (
+                          <span title={emptyCellReason(c, "holders")}>—</span>
+                        )}
                       </td>
                       <td className="px-2 py-2 text-right">
-                        <GradeBadge score={gradeScore(c, true)} />
+                        <GradeBadge breakdown={gradeBreakdown(c, true)} />
                       </td>
                     </tr>
                   );
@@ -1189,16 +1498,26 @@ export default function GlobalMarketHub() {
           placeholder="Search collection name…"
           className="min-h-10 flex-1 min-w-[10rem] rounded-md border border-line bg-background px-3 text-sm text-foreground placeholder:text-foreground/30 transition-colors focus:border-gold-400/60"
         />
+        {/* The grid has no table header to click, unlike the rankings table above -- same shared sortColumn/sortDir state, just a dropdown since there's no header row here. */}
         <select
-          value={sortMode}
-          onChange={(e) => setSortMode(e.target.value as SortMode)}
+          value={`${sortColumn}:${sortDir}`}
+          onChange={(e) => {
+            const [col, dir] = e.target.value.split(":") as [SortColumn, SortDir];
+            setSortColumn(col);
+            setSortDir(dir);
+          }}
           className="min-h-10 rounded-md border border-line bg-background px-2 text-sm text-foreground transition-colors focus:border-gold-400/60"
           aria-label="Sort collections"
         >
-          <option value="trending">Trending (graded)</option>
-          <option value="floor-desc">Floor: high to low</option>
-          <option value="floor-asc">Floor: low to high</option>
-          <option value="name">Name</option>
+          <option value="grade:desc">Trending (graded)</option>
+          <option value="floor:desc">Floor: high to low</option>
+          <option value="floor:asc">Floor: low to high</option>
+          <option value="name:asc">Name: A-Z</option>
+          <option value="name:desc">Name: Z-A</option>
+          <option value={`volume:desc`}>{rankingsWindow} volume: high to low</option>
+          <option value="change:desc">24h change: high to low</option>
+          <option value="listed:desc">Listed: high to low</option>
+          <option value="holders:desc">Holders: high to low</option>
         </select>
         <button
           type="button"
@@ -1260,7 +1579,7 @@ export default function GlobalMarketHub() {
                       {/* Visible composite grade, always -- gradeScore already drives the "Trending" sort; this makes that grading legible on the card itself instead of staying an invisible sort key. Only shown for a graded (art-present) row. */}
                       {hasArt(c) && (
                         <span className="absolute right-1.5 top-1.5">
-                          <GradeBadge score={gradeScore(c, true)} />
+                          <GradeBadge breakdown={gradeBreakdown(c, true)} />
                         </span>
                       )}
                     </div>

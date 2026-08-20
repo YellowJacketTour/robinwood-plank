@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { PackageOpen, Tag } from "lucide-react";
 import { withImageWidth } from "@/lib/ipfs";
 import { SkeletonCardGrid, SkeletonRows, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
@@ -105,7 +106,13 @@ const COMBINED_REMAINDER_CAP = 5;
  * buy/sweep/send flow is identical regardless of which collection or chain
  * an item came from, so nothing here reimplements that logic.
  */
+/** Real listings-grid sort keys -- price (from each listing's own real priceWei, currency-consistent within one collection unlike GlobalMarketHub's cross-collection floor) and rarity rank (only meaningful once rarityMap is populated, see rarityMap's own header) -- never a fabricated rank for an unindexed collection. */
+type ListingSort = "default" | "price-asc" | "price-desc" | "rarity-asc" | "rarity-desc";
+
 export default function MultichainCollectionView({ chainSlug, collectionSlug }: Props) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { address: evmAccount, adoptAccount } = useWallet();
   // NON-EVM WALLET STATE -- Solana (Phantom) and Bitcoin (UniSat) addresses
   // live outside lib/wallet-context.tsx's EVM-only account, since that
@@ -145,9 +152,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // instantly to whatever is already loaded. Token-id search matches
   // exact or prefix (typing "54" finds #541, #5432, ...); price range is
   // inclusive on both ends and either side can be left blank.
-  const [searchQuery, setSearchQuery] = useState("");
-  const [minPriceEth, setMinPriceEth] = useState("");
-  const [maxPriceEth, setMaxPriceEth] = useState("");
+  // Every filter/sort field below is initialized from the URL query string
+  // (same `searchParams.get(...) || default` pattern PortfolioView.tsx's
+  // own ?wallet= param and GlobalMarketHub.tsx's own filter state already
+  // use) so a shared link or a page reload restores the exact same view.
+  // chainSlug/collectionSlug themselves are ROUTE params (not query), so
+  // this is purely the browse-state layer on top of a fixed collection.
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") ?? "");
+  const [minPriceEth, setMinPriceEth] = useState(() => searchParams.get("min") ?? "");
+  const [maxPriceEth, setMaxPriceEth] = useState(() => searchParams.get("max") ?? "");
   // TRAIT FILTER -- one selected value per trait category, AND-combined
   // (matches native's existing trait-criteria semantics, e.g.
   // trait-criteria.ts's own AND rule). Empty string = "any value" for that
@@ -156,8 +169,23 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // server-side for sweep (fetchForeignTraitFilteredListings), since a
   // trait-filtered sweep must pull from the FULL collection, not just
   // whatever's in the currently-loaded 40-listing page.
-  const [selectedTraits, setSelectedTraits] = useState<Record<string, string>>({});
-  const [activeTier, setActiveTier] = useState<RarityTier | "all">("all");
+  const [selectedTraits, setSelectedTraits] = useState<Record<string, string>>(() => {
+    const raw = searchParams.get("traits");
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      return typeof parsed === "object" && parsed !== null ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  const [activeTier, setActiveTier] = useState<RarityTier | "all">(() => (searchParams.get("tier") as RarityTier | "all") || "all");
+  // SORT -- price (each listing's own real priceWei, currency-consistent
+  // within a single collection) and rarity rank (rarityMap.rank, real
+  // pre-computed information-content rank from index-foreign-rarity.ts --
+  // never fabricated, and only offered once rarityMap is actually
+  // populated for this collection, see the rarityMap effect's own header).
+  const [listingSort, setListingSort] = useState<ListingSort>(() => (searchParams.get("sort") as ListingSort) || "default");
 
   const [buyTarget, setBuyTarget] = useState<Listing | null>(null);
   const [buyBusy, setBuyBusy] = useState(false);
@@ -886,7 +914,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     const q = searchQuery.trim();
     const min = minPriceEth.trim() ? Number(minPriceEth) : null;
     const max = maxPriceEth.trim() ? Number(maxPriceEth) : null;
-    return listings.filter((l) => {
+    const rows = listings.filter((l) => {
       if (q && !l.tokenId.startsWith(q)) return false;
       const priceEth = Number(l.priceWei) / 1e18;
       if (min !== null && priceEth < min) return false;
@@ -901,7 +929,47 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       }
       return true;
     });
-  }, [listings, searchQuery, minPriceEth, maxPriceEth, traitClauses, activeTier, rarityMap]);
+    // Real sort, applied AFTER filtering -- "default" keeps whatever order
+    // the listings endpoint itself returned (no opinion imposed). Price is
+    // each listing's own real priceWei -- currency-consistent within one
+    // collection, unlike GlobalMarketHub's cross-collection floor compare.
+    // Rarity rank comes straight from rarityMap (real information-content
+    // rank, index-foreign-rarity.ts) -- a listing with no rank yet (rarity
+    // unindexed for this collection) sorts to the end, never fabricated.
+    if (listingSort === "price-asc" || listingSort === "price-desc") {
+      const dir = listingSort === "price-asc" ? 1 : -1;
+      return [...rows].sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -dir : BigInt(a.priceWei) > BigInt(b.priceWei) ? dir : 0));
+    }
+    if (listingSort === "rarity-asc" || listingSort === "rarity-desc") {
+      const dir = listingSort === "rarity-asc" ? 1 : -1;
+      return [...rows].sort((a, b) => {
+        const ra = rarityMap.get(a.tokenId)?.rank ?? null;
+        const rb = rarityMap.get(b.tokenId)?.rank ?? null;
+        if (ra == null && rb == null) return 0;
+        if (ra == null) return 1;
+        if (rb == null) return -1;
+        return (ra - rb) * dir;
+      });
+    }
+    return rows;
+  }, [listings, searchQuery, minPriceEth, maxPriceEth, traitClauses, activeTier, rarityMap, listingSort]);
+
+  // URL persistence -- reflects real filter/sort state into the query
+  // string (router.replace, not push, so browsing doesn't spam history),
+  // same pattern PortfolioView.tsx's own ?wallet= param and
+  // GlobalMarketHub.tsx's own filter state already establish.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (searchQuery.trim()) params.set("q", searchQuery.trim());
+    if (minPriceEth.trim()) params.set("min", minPriceEth.trim());
+    if (maxPriceEth.trim()) params.set("max", maxPriceEth.trim());
+    if (traitClauses.length > 0) params.set("traits", JSON.stringify(selectedTraits));
+    if (activeTier !== "all") params.set("tier", activeTier);
+    if (listingSort !== "default") params.set("sort", listingSort);
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- router/pathname are stable per Next.js contract.
+  }, [searchQuery, minPriceEth, maxPriceEth, selectedTraits, traitClauses.length, activeTier, listingSort]);
 
   const openSweepPreview = useCallback(async () => {
     setError(null);
@@ -1236,7 +1304,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   }
 
   const buyableCount = listings.filter((l) => isCrossChainBuyable(l)).length;
-  const filtersActive = searchQuery.trim() !== "" || minPriceEth.trim() !== "" || maxPriceEth.trim() !== "" || traitClauses.length > 0 || activeTier !== "all";
+  const filtersActive =
+    searchQuery.trim() !== "" ||
+    minPriceEth.trim() !== "" ||
+    maxPriceEth.trim() !== "" ||
+    traitClauses.length > 0 ||
+    activeTier !== "all" ||
+    listingSort !== "default";
 
   // STAT BAR -- real numbers derived from data already loaded for this
   // page (no new API surface): floor = cheapest active listing, best offer
@@ -1245,7 +1319,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // route.ts returned, same honesty as everywhere else here -- this is
   // "volume in the loaded window," not an all-time indexed total).
   const floorWei = listings.length > 0 ? listings.reduce((min, l) => (BigInt(l.priceWei) < BigInt(min) ? l.priceWei : min), listings[0].priceWei) : null;
-  const bestOfferWei = offers.length > 0 ? offers[0].priceWei : null;
+  // Real max across BOTH sources merged by this route (native offers first,
+  // then OpenSea-sourced offers -- see offers/route.ts's header) -- offers[0]
+  // alone was wrong whenever a native offer existed alongside a higher-priced
+  // OpenSea offer, since only the OpenSea slice is internally price-sorted,
+  // not the combined array. Honestly null (via an empty `offers` array) for
+  // Solana/Bitcoin, where no real collection-wide bids source exists yet.
+  const bestOfferWei = offers.length > 0 ? offers.reduce((max, o) => (BigInt(o.priceWei) > BigInt(max) ? o.priceWei : max), offers[0].priceWei) : null;
   const saleEvents = activity.filter((e) => e.type === "sale" && e.priceWei);
   const volumeWei = saleEvents.length > 0 ? saleEvents.reduce((sum, e) => sum + BigInt(e.priceWei!), BigInt(0)).toString() : null;
   const highestSaleWei = saleEvents.length > 0 ? saleEvents.reduce((max, e) => (BigInt(e.priceWei!) > BigInt(max) ? e.priceWei! : max), saleEvents[0].priceWei!) : null;
@@ -1445,6 +1525,40 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 </div>
               </div>
 
+              {/* SORT -- same button-group toggle pattern as GlobalMarketHub's own 24h/7d/30d window and "Show top" pickers, not a dropdown. Rarity options only appear once rarityMap is real (indexed) for this collection -- never offered against a fabricated rank. */}
+              <div>
+                <p className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Sort</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      { v: "default", label: "Default" },
+                      { v: "price-asc", label: "Price ↑" },
+                      { v: "price-desc", label: "Price ↓" },
+                      ...(rarityMap.size > 0
+                        ? ([
+                            { v: "rarity-asc", label: "Rarest first" },
+                            { v: "rarity-desc", label: "Common first" },
+                          ] as const)
+                        : []),
+                    ] as const
+                  ).map(({ v, label }) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setListingSort(v)}
+                      aria-pressed={listingSort === v}
+                      className={`min-h-8 rounded-md border px-2.5 text-xs font-bold transition-colors duration-150 ${
+                        listingSort === v
+                          ? "border-gold-400 bg-gold-400/15 text-gold-300"
+                          : "border-line text-foreground/50 hover:border-line-strong hover:text-foreground/70"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* TRAIT FILTER -- one dropdown per real trait category, AND-combined. Populated from the SAME collection-wide value counts the Details view's rarity % already uses. */}
               {traitCounts &&
                 Object.entries(traitCounts)
@@ -1481,6 +1595,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                     setMaxPriceEth("");
                     setSelectedTraits({});
                     setActiveTier("all");
+                    setListingSort("default");
                   }}
                   className="min-h-10 w-full rounded-md border border-line px-3 text-xs font-bold text-foreground/60 hover:border-gold-400 hover:text-gold-300"
                 >
