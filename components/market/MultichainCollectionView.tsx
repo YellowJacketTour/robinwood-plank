@@ -7,6 +7,7 @@ import { PackageOpen, Tag } from "lucide-react";
 import { withImageWidth } from "@/lib/ipfs";
 import CollectionArtImage from "@/components/market/CollectionArtImage";
 import { templatedErc721Image } from "@/lib/market/multichain/token-art-templates";
+import { rarityMapGet, countTiers } from "@/lib/market/rarity-lookup";
 import { SkeletonCardGrid, SkeletonRows, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 import ListingCard from "@/components/market/ListingCard";
 import BuyConfirm from "@/components/market/BuyConfirm";
@@ -210,7 +211,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // pre-computed information-content rank from index-foreign-rarity.ts --
   // never fabricated, and only offered once rarityMap is actually
   // populated for this collection, see the rarityMap effect's own header).
-  const [listingSort, setListingSort] = useState<ListingSort>(() => (searchParams.get("sort") as ListingSort) || "price-asc");
+  const [listingSort, setListingSort] = useState<ListingSort>(() => (searchParams.get("sort") as ListingSort) || "default");
 
   const [buyTarget, setBuyTarget] = useState<Listing | null>(null);
   const [buyBusy, setBuyBusy] = useState(false);
@@ -332,6 +333,26 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   const chainLabel = `${chainDisplayName(chainSlug)} via OpenSea`;
 
+  const fetchCatalogTokens = useCallback(() => {
+    const sort =
+      listingSort === "rarity-desc" ? "rank-desc" : listingSort === "rarity-asc" ? "rank" : "id";
+    const tierFilter = activeTiers.length === 1 ? activeTiers[0] : activeTier !== "all" ? activeTier : "";
+    const qs = new URLSearchParams({
+      chainSlug,
+      collectionSlug,
+      limit: String(isBitcoin || isSolana ? 2000 : 200),
+      art: "2",
+      sort,
+    });
+    if (tierFilter) qs.set("tier", tierFilter);
+    return swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }> }>(
+      `/api/market/multichain/tokens?${qs.toString()}`,
+      { ttlMs: 8_000, swrMs: 45_000, session: true }
+    )
+      .then((tok) => setTokens(tok.tokens ?? []))
+      .catch(() => setTokens([]));
+  }, [chainSlug, collectionSlug, listingSort, activeTier, activeTiers, isBitcoin, isSolana]);
+
   const load = useCallback(async () => {
     setLoadError(null);
     try {
@@ -374,12 +395,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         .catch(() => {
           setListingsUnavailable("book-unavailable");
         });
-      void swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }> }>(
-        `/api/market/multichain/tokens?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${isBitcoin || isSolana ? 2000 : 200}&art=2`,
-        { ttlMs: 8_000, swrMs: 45_000, session: true }
-      )
-        .then((tok) => setTokens(tok.tokens ?? []))
-        .catch(() => setTokens([]));
+      /* catalog tokens: fetchCatalogTokens effect */
       // MarketCollection carries Robinhood-Chain-specific bookkeeping
       // (feeBps/royaltyBps/royaltyRecipient) that has no meaning for a
       // foreign collection -- real royalty is whatever the real Seaport
@@ -446,6 +462,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     const id = setInterval(() => void load(), 20_000);
     return () => clearInterval(id);
   }, [load]);
+
+  useEffect(() => {
+    void fetchCatalogTokens();
+  }, [fetchCatalogTokens]);
 
   // Real ETH/SOL/BTC/POL/BNB/AVAX USD prices -- same shared fetch + short-TTL swr pattern
   // GlobalMarketHub.tsx's own usdPrices effect uses. usdPrices stays {} (not
@@ -1059,15 +1079,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   const rarityFor = useCallback(
     (tokenId: string) => {
-      const hit = rarityMap.get(tokenId) ?? rarityMap.get(tokenId.toLowerCase());
+      const hit = rarityMapGet(rarityMap, tokenId);
       if (hit) return hit;
-      try {
-        const n = BigInt(tokenId).toString();
-        const numeric = rarityMap.get(n) ?? rarityMap.get(tokenId.replace(/^0+/, "") || "0");
-        if (numeric) return numeric;
-      } catch {
-        /* not numeric */
-      }
       const listing = listings.find((l) => l.tokenId === tokenId);
       if (!listing?.traits?.length || !traitIndex?.traits || !raritySample?.size) return undefined;
       const traits = listing.traits;
@@ -1161,8 +1174,40 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       imageUrl: listing.imageUrl ?? null,
       listing,
     }));
-    return [...fromTokens, ...extra];
-  }, [bookFilter, tokens, filteredListings, listingByToken, searchQuery, activeTier, activeTiers, rarityMap, collection?.contractAddress, collectionSlug]);
+    const rows = [...fromTokens, ...extra];
+    if (listingSort === "rarity-asc" || listingSort === "rarity-desc") {
+      const dir = listingSort === "rarity-asc" ? 1 : -1;
+      rows.sort((a, b) => {
+        const ra = rarityFor(a.tokenId)?.rank ?? null;
+        const rb = rarityFor(b.tokenId)?.rank ?? null;
+        if (ra == null && rb == null) return 0;
+        if (ra == null) return 1;
+        if (rb == null) return -1;
+        return (ra - rb) * dir;
+      });
+    } else if (listingSort === "price-asc" || listingSort === "price-desc") {
+      const dir = listingSort === "price-asc" ? 1 : -1;
+      rows.sort((a, b) => {
+        const pa = a.listing ? BigInt(a.listing.priceWei) : null;
+        const pb = b.listing ? BigInt(b.listing.priceWei) : null;
+        if (pa == null && pb == null) return 0;
+        if (pa == null) return 1;
+        if (pb == null) return -1;
+        return pa < pb ? -dir : pa > pb ? dir : 0;
+      });
+    } else {
+      rows.sort((a, b) => {
+        try {
+          const na = BigInt(a.tokenId);
+          const nb = BigInt(b.tokenId);
+          return na < nb ? -1 : na > nb ? 1 : 0;
+        } catch {
+          return a.tokenId.localeCompare(b.tokenId);
+        }
+      });
+    }
+    return rows;
+  }, [bookFilter, tokens, filteredListings, listingByToken, searchQuery, activeTier, activeTiers, rarityMap, collection?.contractAddress, collectionSlug, listingSort, rarityFor]);
 
   // URL persistence -- reflects real filter/sort state into the query
   // string (router.replace, not push, so browsing doesn't spam history),
@@ -1175,7 +1220,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     if (maxPriceEth.trim()) params.set("max", maxPriceEth.trim());
     if (traitClauses.length > 0) params.set("traits", JSON.stringify(selectedTraits));
     if (activeTier !== "all") params.set("tier", activeTier);
-    if (listingSort !== "price-asc") params.set("sort", listingSort);
+    if (listingSort !== "default") params.set("sort", listingSort);
     if (bookFilter !== "listed") params.set("show", bookFilter);
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
@@ -1535,7 +1580,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     maxPriceEth.trim() !== "" ||
     traitClauses.length > 0 ||
     activeTier !== "all" ||
-    listingSort !== "price-asc" ||
+    listingSort !== "default" ||
     bookFilter !== "listed" ||
     activeTiers.length > 0;
 
@@ -1754,6 +1799,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 chainSlug={chainSlug}
                 usdValueFor={(wei) => toUsd(wei == null ? null : wei.toString(), statCurrencySymbol)}
                 listedTotal={supplyStats?.listedCount ?? null}
+                catalogCounts={countTiers(rarityMap)}
               />
               </>
             ) : undefined
@@ -1795,7 +1841,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                     tier,
                     bookFilter === "listed"
                       ? listings.filter((l) => rarityFor(l.tokenId)?.tier === tier).length
-                      : tokens.filter((t) => rarityFor(t.tokenId)?.tier === tier).length,
+                      : countTiers(rarityMap)[tier] ?? 0,
                   ])
                 )}
                 searchLabel="Find a token"
@@ -1881,6 +1927,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   onChange={(e) => setListingSort(e.target.value as ListingSort)}
                   className="min-h-10 max-w-[12rem] rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground"
                 >
+                  <option value="default">Token ID</option>
                   <option value="price-asc">Price: low to high</option>
                   <option value="price-desc">Price: high to low</option>
                   {rarityMap.size > 0 && <option value="rarity-asc">Rarest first</option>}

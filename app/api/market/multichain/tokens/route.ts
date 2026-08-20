@@ -26,13 +26,16 @@ export async function GET(req: NextRequest) {
   const chainSlug = searchParams.get("chainSlug");
   const collectionSlug = searchParams.get("collectionSlug");
   const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "40"), 1), 2000);
+  const sortRaw = (searchParams.get("sort") ?? "id").toLowerCase();
+  const sort = sortRaw === "rank" || sortRaw === "rank-desc" ? sortRaw : "id";
+  const tier = searchParams.get("tier");
   if (!chainSlug || !collectionSlug) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
   try {
     const { hasForeignRarityStore, listForeignRarityTokens } = await import("@/lib/market/multichain/foreign-rarity-store");
     if (hasForeignRarityStore()) {
-      const indexed = await listForeignRarityTokens(chainSlug, collectionSlug, limit).catch(() => []);
+      const indexed = await listForeignRarityTokens(chainSlug, collectionSlug, limit, { sort, tier }).catch(() => []);
       if (indexed.length > 0) {
         const { templatedErc721Image } = await import("@/lib/market/multichain/token-art");
         const contractHint = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug) ? collectionSlug : null;

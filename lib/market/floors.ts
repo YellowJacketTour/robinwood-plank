@@ -2,6 +2,7 @@ import type { Listing } from "@/lib/market/types";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/rarity";
 import { TIER_ORDER } from "@/lib/rarity";
+import { rarityMapGet } from "@/lib/market/rarity-lookup";
 
 /**
  * Pure floor / premium helpers for Buy & Sell.
@@ -52,7 +53,7 @@ export function tierFloors(
 
   for (const l of listings) {
     if (!l.tokenId) continue;
-    const r = rarity.get(l.tokenId) ?? rarity.get(String(Number(l.tokenId)));
+    const r = rarityMapGet(rarity, l.tokenId);
     if (!r) continue;
     let price: bigint;
     try {

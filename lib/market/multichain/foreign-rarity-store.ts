@@ -41,24 +41,42 @@ export async function getForeignRarity(
 export async function listForeignRarityTokens(
   chainSlug: string,
   collectionSlug: string,
-  limit: number
+  limit: number,
+  opts?: { sort?: "id" | "rank" | "rank-desc"; tier?: string | null }
 ): Promise<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>> {
+  const cap = Math.min(Math.max(limit, 1), 2000);
+  const sort = opts?.sort ?? "id";
+  const tier = opts?.tier?.trim() || null;
+  const orderSql =
+    sort === "rank"
+      ? "rank ASC, token_id"
+      : sort === "rank-desc"
+        ? "rank DESC, token_id"
+        : "CASE WHEN token_id ~ '^[0-9]+$' THEN token_id::numeric END ASC NULLS LAST, token_id";
+  const params: unknown[] = [chainSlug, collectionSlug];
+  let where = `chain_slug = $1 AND lower(collection_slug) = lower($2)`;
+  if (tier) {
+    params.push(tier);
+    where += ` AND lower(tier) = lower($${params.length})`;
+  }
+  params.push(cap);
+  const limitPh = `$${params.length}`;
   try {
     const result = await postgresQuery<{ token_id: string; name: string; image_url: string | null }>(
       `SELECT token_id, name, image_url FROM plank_foreign_rarity
-       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)
-       ORDER BY rank ASC
-       LIMIT $3`,
-      [chainSlug, collectionSlug, Math.min(Math.max(limit, 1), 2000)]
+       WHERE ${where}
+       ORDER BY ${orderSql}
+       LIMIT ${limitPh}`,
+      params
     );
     return result.rows.map((r) => ({ tokenId: r.token_id, name: r.name || null, imageUrl: r.image_url || null }));
   } catch {
     const result = await postgresQuery<{ token_id: string; name: string }>(
       `SELECT token_id, name FROM plank_foreign_rarity
-       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)
-       ORDER BY rank ASC
-       LIMIT $3`,
-      [chainSlug, collectionSlug, Math.min(Math.max(limit, 1), 2000)]
+       WHERE ${where}
+       ORDER BY ${orderSql}
+       LIMIT ${limitPh}`,
+      params
     );
     return result.rows.map((r) => ({ tokenId: r.token_id, name: r.name || null, imageUrl: null }));
   }
