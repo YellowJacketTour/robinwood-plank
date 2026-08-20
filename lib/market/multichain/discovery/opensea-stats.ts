@@ -236,31 +236,58 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
   const apiKey = await getOpenSeaApiKey();
   if (!apiKey) return result;
 
-  const rows = await postgresQuery<{ contract_address: string }>(
-    `SELECT c.contract_address
+  const NO_SLUG = "__none__";
+  const cursorKey = `plank:market:opensea-stats-cursor:${chainSlug}`;
+  const afterId = (await kv.get<number>(cursorKey)) ?? 0;
+  const rows = await postgresQuery<{ id: number; contract_address: string }>(
+    `SELECT c.id, c.contract_address
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
-     WHERE c.chain_slug = $1 AND (s.floor_price_wei IS NULL OR s.synced_at IS NULL OR s.synced_at < NOW() - INTERVAL '6 hours')
+     WHERE c.chain_slug = $1 AND c.id > $2 AND (
+       s.floor_price_wei IS NULL
+       OR s.synced_at IS NULL
+       OR s.synced_at < NOW() - INTERVAL '6 hours'
+       OR c.name IS NULL
+       OR c.image_url IS NULL
+     )
      ORDER BY c.id
-     LIMIT $2`,
-    [chainSlug, maxUpdates]
+     LIMIT $3`,
+    [chainSlug, afterId, Math.max(maxUpdates * 40, 200)]
   );
   result.candidates = rows.rows.length;
+  if (rows.rows.length === 0) {
+    await kv.set(cursorKey, 0);
+    return result;
+  }
 
+  let processed = 0;
+  let lastSeenId = afterId;
   for (const row of rows.rows) {
+    if (processed >= maxUpdates) break;
     const gate = checkSourceBudget(SOURCE);
     if (!gate.allowed) break;
 
-    let slug = await kv.get<string>(slugCacheKey(chainSlug, row.contract_address));
-    if (!slug) {
-      slug = await resolveOpenSeaSlug(chain.openSeaChain, row.contract_address, apiKey);
-      if (slug) await kv.set(slugCacheKey(chainSlug, row.contract_address), slug);
-    }
-    if (!slug) {
+    const cacheKey = slugCacheKey(chainSlug, row.contract_address);
+    let slug = await kv.get<string>(cacheKey);
+    if (slug === NO_SLUG) {
       result.errors += 1;
+      lastSeenId = row.id;
       continue;
     }
+    if (!slug) {
+      slug = await resolveOpenSeaSlug(chain.openSeaChain, row.contract_address, apiKey);
+      if (!slug) {
+        const still = checkSourceBudget(SOURCE);
+        if (!still.allowed) break;
+        await kv.set(cacheKey, NO_SLUG);
+        result.errors += 1;
+        lastSeenId = row.id;
+        continue;
+      }
+      await kv.set(cacheKey, slug);
+    }
     result.slugResolved += 1;
+    processed += 1;
 
     const stats = await fetchOpenSeaCollectionStats(slug, apiKey);
     if (!stats) {
@@ -297,6 +324,8 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
       });
     }
     result.updated += 1;
+    lastSeenId = row.id;
   }
+  if (lastSeenId !== afterId) await kv.set(cursorKey, lastSeenId);
   return result;
 }
