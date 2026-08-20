@@ -16,3 +16,4 @@ Append-only. Each lesson is a synergy: specialize first, then reuse.
 10. **Foreign fulfill allowlist.** Wallet `to` must match venue contracts. No custody, no Across/0x Instant Swap on foreign.
 11. **Synergy:** same exact-match kernel for CG (contract or id), OS named slug, ME symbol→mint, UniSat collectionId. Fuzzy attach is worse than a dash.
 12. **Optimization:** one paced CG worker beats ten concurrent pages. Site stays up if Next is detached (`START-MARKET.bat`).
+13. **`--spoke=coingecko-avax` was a no-op** until `spoke-backfill.ts` grew a `want("coingecko-avax")` branch. Cron steps and spoke IDs must stay in lockstep or workers silently finish in 0.1s.
