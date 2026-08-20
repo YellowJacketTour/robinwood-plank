@@ -197,9 +197,9 @@ spot-check.
   inscription-binding, cancel-proof adversarial cases, Helius quality
   filter).
 - `npm run lint:inmotion` — clean.
-- **`npm run build` was NOT run this session** — flagging honestly per
-  this repo's own PR-description requirement rather than silently
-  omitting it. Should be run before merging to `master`.
+- `npm run build` — clean, run after the initial push (full route table
+  generated, zero errors) — confirms this doesn't just type-check in
+  isolation but actually compiles as a real Next.js production build.
 - `npm run test:contracts` — not applicable, no contract changes.
 - `npm run test:postgres` — not run; storage-shape changes here are
   additive-only (new columns/tables were NOT added — `updateCollection
