@@ -20,7 +20,7 @@ export type HydrateAllArtResult = {
 
 type MeRow = { collectionSymbol?: string; name?: string | null; image?: string | null; cohort?: string | null };
 
-async function hydrateSolanaFromMagicEden(): Promise<{ matched: number; updated: number }> {
+export async function hydrateSolanaFromMagicEden(): Promise<{ matched: number; updated: number }> {
   const src = "magiceden-solana";
   if (!checkSourceBudget(src).allowed) return { matched: 0, updated: 0 };
   let entries: MeRow[] = [];
