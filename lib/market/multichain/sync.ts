@@ -17,6 +17,7 @@ import {
   writeSnapshot,
   writeSnapshotError,
 } from "@/lib/market/multichain/store";
+import { checkSourceBudget } from "@/lib/market/multichain/discovery/source-budget";
 import type { ChainAdapter } from "@/lib/market/multichain/types";
 
 const ADAPTERS: Record<string, ChainAdapter> = {
@@ -102,7 +103,15 @@ export async function runMultichainSync(input: { maxCollections?: number } = {})
     );
   }
 
-  const collections = await listCollectionsForSync(input.maxCollections ?? DEFAULT_SYNC_BATCH_SIZE);
+  const alchemyGate = checkSourceBudget("alchemy-nft");
+  const collections = await listCollectionsForSync(input.maxCollections ?? DEFAULT_SYNC_BATCH_SIZE, {
+    skipAdapters: alchemyGate.allowed ? [] : [alchemyNftAdapter.name],
+  });
+  if (!alchemyGate.allowed) {
+    console.warn(
+      "[multichain-sync] alchemy-nft jailed (monthly 429) — skipping that adapter; OpenSea/CG/ME/UniSat spokes still run"
+    );
+  }
   const result: MultichainSyncResult = { synced: 0, failed: 0, skipped: 0, errors: [] };
 
   for (const collection of collections) {
