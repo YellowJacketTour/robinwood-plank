@@ -133,11 +133,12 @@ export function computeGenericRaritySnapshot(items: GenericRarityInput[]): Gener
     while (j < rawScores.length && rawScores[j].score === score) j += 1;
     const rank = i + 1;
     const scorePercentile = sampleSize > 0 ? (countStrictlyBelow(score) / sampleSize) * 100 : 0;
+    const groupPositionPct = sampleSize > 1 ? ((sampleSize - 1 - i) / (sampleSize - 1)) * 100 : 100;
     for (let k = i; k < j; k += 1) {
       const row = rawScores[k];
-      const positionPct = sampleSize > 1 ? ((sampleSize - 1 - k) / (sampleSize - 1)) * 100 : 100;
-      const percentile = Math.max(scorePercentile, positionPct);
-      const tier = (row.officialValue ? tierFromBackground(row.officialValue) : null) ?? tierFromPercentile(positionPct);
+      const percentile = row.score <= 0 ? scorePercentile : Math.max(scorePercentile, groupPositionPct);
+      const fromOfficial = row.officialValue ? tierFromBackground(row.officialValue) : null;
+      const tier = fromOfficial ?? (row.score <= 0 ? "Common" : tierFromPercentile(Math.max(scorePercentile, groupPositionPct)));
       byTokenId.set(row.tokenId, {
         tokenId: row.tokenId,
         name: row.name,

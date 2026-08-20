@@ -13,6 +13,8 @@ import { rateLimit } from "@/lib/security";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+const inFlight = new Set<string>();
+
 export async function GET(req: NextRequest) {
   const limited = rateLimit(req, { key: "market-multichain-rarity", limit: 60, windowMs: 60_000 });
   if (limited) return limited;
@@ -33,8 +35,14 @@ export async function GET(req: NextRequest) {
     const byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number }> = {};
     for (const [tokenId, v] of map) byTokenId[tokenId] = v;
     if (map.size === 0) {
-      const { indexRarityForCollectionLookup } = await import("@/lib/market/multichain/rarity-index-runner");
-      void indexRarityForCollectionLookup(chainSlug, collectionSlug).catch(() => {});
+      const job = `${chainSlug}:${collectionSlug.toLowerCase()}`;
+      if (!inFlight.has(job)) {
+        inFlight.add(job);
+        const { indexRarityForCollectionLookup } = await import("@/lib/market/multichain/rarity-index-runner");
+        void indexRarityForCollectionLookup(chainSlug, collectionSlug)
+          .catch(() => {})
+          .finally(() => inFlight.delete(job));
+      }
     }
     const meta = await getForeignTraitIndex(chainSlug, collectionSlug).catch(() => null);
     return NextResponse.json(

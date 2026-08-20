@@ -33,9 +33,9 @@ import { replaceForeignRarity, getForeignTraitIndex } from "@/lib/market/multich
 import { listTrackedCollections } from "@/lib/market/multichain/store";
 
 const RPC_URL = "https://mainnet.helius-rpc.com";
-const PAGE_SIZE = 1000; // grouping-filtered searchAssets, unlike the broad discovery walk, is a narrow real query -- confirmed live it doesn't hit the same limit=1000 timeout the broad interface-wide walk does.
-/** Hard ceiling matching rarity-index-runner.ts's own MAX_PAGES reasoning -- bounds a runaway/misidentified collection rather than trusting pagination to always terminate quickly. 500 pages * 1000 = 500,000 tokens, the same real ceiling the EVM runner uses. */
-const MAX_PAGES = 500;
+const PAGE_SIZE = 1000;
+/** First-pass cap (same philosophy as EVM itemCeiling): ranks recompute as the sample grows. */
+const FIRST_PASS_ITEM_CAP = 5_000;
 
 function apiKey(): string {
   const key = process.env.HELIUS_API_KEY?.trim();
@@ -85,7 +85,8 @@ export async function indexSolanaCollectionRarity(collectionAddress: string): Pr
   let page = 1;
   let lastPageSize = PAGE_SIZE;
 
-  while (lastPageSize === PAGE_SIZE && page <= MAX_PAGES) {
+  const maxPages = Math.ceil(FIRST_PASS_ITEM_CAP / PAGE_SIZE);
+  while (lastPageSize === PAGE_SIZE && page <= maxPages && items.length < FIRST_PASS_ITEM_CAP) {
     const assets = await fetchGroupedPage(collectionAddress, page);
     for (const asset of assets) {
       items.push({
@@ -100,8 +101,8 @@ export async function indexSolanaCollectionRarity(collectionAddress: string): Pr
     page += 1;
   }
 
-  const partial = page > MAX_PAGES && lastPageSize === PAGE_SIZE;
-  const snapshot = computeGenericRaritySnapshot(items);
+  const partial = items.length >= FIRST_PASS_ITEM_CAP || (page > maxPages && lastPageSize === PAGE_SIZE);
+  const snapshot = { ...computeGenericRaritySnapshot(items), partial };
   const traitIndex: Record<string, Record<string, string[]>> = {};
   for (const item of items) {
     for (const t of item.traits) {

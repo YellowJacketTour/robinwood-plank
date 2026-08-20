@@ -15,12 +15,26 @@ import { listTrackedCollections } from "@/lib/market/multichain/store";
 const PAGE_SIZE = 50;
 
 /** First-pass item cap so we never block on Art Blocks / ENS. Ranks recompute as sample grows. */
-function itemCeiling(supply: number | null): number {
+export function itemCeiling(supply: number | null): number {
   if (supply == null || !Number.isFinite(supply) || supply <= 0) return 1_000;
   if (supply <= 50) return Math.ceil(supply);
   if (supply <= 2_000) return 1_000;
   if (supply <= 20_000) return 2_000;
   return 5_000;
+}
+
+export type RarityIndexBackend = "helius" | "unisat" | "opensea-contract" | "opensea-slug";
+
+/**
+ * Same −log2 kernel for every chain. Enumerator differs:
+ * Solana = Helius grouping, Bitcoin = UniSat activity (always partial),
+ * Avalanche/ETH/Base/etc. = OpenSea NFT walk (contract or slug).
+ */
+export function rarityIndexBackend(chainSlug: string, lookup: string): RarityIndexBackend {
+  if (chainSlug === "solana-mainnet") return "helius";
+  if (chainSlug === "bitcoin-mainnet") return "unisat";
+  if (/^0x[0-9a-fA-F]{40}$/.test(lookup)) return "opensea-contract";
+  return "opensea-slug";
 }
 
 export type IndexRunResult = {
@@ -188,9 +202,32 @@ async function resolveOpenSeaSlug(chainSlug: string, contractAddress: string, ke
   return data.collection ?? null;
 }
 
-/** URL lookup is often the contract address; OpenSea collection GET needs the slug. */
+/** Dispatches the same −log2 kernel to the chain's real enumerator. Never Alchemy. */
 export async function indexRarityForCollectionLookup(chainSlug: string, lookup: string): Promise<IndexRunResult> {
-  if (/^0x[0-9a-fA-F]{40}$/.test(lookup)) {
+  const backend = rarityIndexBackend(chainSlug, lookup);
+  if (backend === "helius") {
+    const { indexSolanaCollectionRarity } = await import("@/lib/market/multichain/discovery/helius-rarity-index-runner");
+    const r = await indexSolanaCollectionRarity(lookup);
+    return {
+      chainSlug: r.chainSlug,
+      collectionSlug: r.collectionAddress,
+      contractAddress: r.collectionAddress,
+      tokensIndexed: r.tokensIndexed,
+      partial: r.partial,
+    };
+  }
+  if (backend === "unisat") {
+    const { indexBitcoinCollectionRarity } = await import("@/lib/market/multichain/discovery/unisat-rarity-index-runner");
+    const r = await indexBitcoinCollectionRarity(lookup);
+    return {
+      chainSlug: r.chainSlug,
+      collectionSlug: r.collectionId,
+      contractAddress: r.collectionId,
+      tokensIndexed: r.tokensIndexed,
+      partial: r.partial,
+    };
+  }
+  if (backend === "opensea-contract") {
     const key = await getOpenSeaApiKey();
     if (!key) throw new Error("No OpenSea API key available.");
     const slug = await resolveOpenSeaSlug(chainSlug, lookup, key);

@@ -95,7 +95,7 @@ export async function indexBitcoinCollectionRarity(collectionId: string): Promis
   }
 
   const items = [...seen.values()];
-  const snapshot = computeGenericRaritySnapshot(items);
+  const snapshot = { ...computeGenericRaritySnapshot(items), partial: true as const };
   const traitIndex: Record<string, Record<string, string[]>> = {};
   for (const item of items) {
     for (const t of item.traits) {
