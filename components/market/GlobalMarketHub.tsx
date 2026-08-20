@@ -6,7 +6,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { swrJson } from "@/lib/market/swr-fetch";
+import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
+import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
 import ChainIcon from "@/components/market/ChainIcon";
 import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
@@ -343,8 +344,13 @@ function emptyCellReason(c: TrackedCollection, field: "change" | "volume" | "sal
   return "This collection hasn't been through an OpenSea stats pass yet -- real data lands on the next sync, never fabricated in the meantime.";
 }
 
-function collectionHref(c: Pick<TrackedCollection, "chainSlug" | "contractAddress" | "isNativeHome">): string {
-  if (c.isNativeHome) return "/market";
+function isHomeRow(c: Pick<TrackedCollection, "chainSlug" | "contractAddress" | "isNativeHome" | "name">): boolean {
+  if (c.isNativeHome) return true;
+  return c.chainSlug === "robinhood" && c.contractAddress.toLowerCase() === NFT_CONTRACT_ADDRESS.toLowerCase();
+}
+
+function collectionHref(c: Pick<TrackedCollection, "chainSlug" | "contractAddress" | "isNativeHome" | "name">): string {
+  if (isHomeRow(c)) return "/market";
   return `/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`;
 }
 
@@ -789,7 +795,44 @@ export default function GlobalMarketHub() {
           session: true,
           isGood: (d) => Array.isArray((d as { collections?: unknown })?.collections),
         });
-        if (!cancelled) setCollections(data.collections ?? []);
+        if (!cancelled) {
+          const rows = data.collections ?? [];
+          const hasHome = rows.some((c) => isHomeRow(c));
+          setCollections(
+            hasHome
+              ? rows
+              : [
+                  {
+                    chainSlug: "robinhood",
+                    chainId: 4663,
+                    contractAddress: NFT_CONTRACT_ADDRESS,
+                    name: "RobinWood",
+                    imageUrl: "/images/plank-logo.webp",
+                    isVaultBacked: true,
+                    floorPriceWei: null,
+                    floorPriceCurrency: "ETH",
+                    syncedAt: null,
+                    tradeable: true,
+                    recentActivity: 0,
+                    creatorHandle: null,
+                    creatorAddress: null,
+                    creatorEns: null,
+                    volume24hWei: null,
+                    sales24h: null,
+                    volume7dWei: null,
+                    sales7d: null,
+                    volume30dWei: null,
+                    sales30d: null,
+                    floorChangePct: null,
+                    totalSupply: null,
+                    listedCount: null,
+                    holderCount: null,
+                    isNativeHome: true,
+                  },
+                  ...rows,
+                ]
+          );
+        }
       } catch {
         if (!cancelled) setLoadError("Could not load the global market index right now.");
       } finally {
@@ -901,6 +944,8 @@ export default function GlobalMarketHub() {
       return true;
     });
     return [...rows].sort((a, b) => {
+      const home = Number(isHomeRow(b)) - Number(isHomeRow(a));
+      if (home !== 0) return home;
       const primary = compareByColumn(a, b, sortColumn, sortDir, rankingsWindow, hasArt);
       if (primary !== 0) return primary;
       return (a.name ?? a.contractAddress).localeCompare(b.name ?? b.contractAddress);
@@ -961,6 +1006,40 @@ export default function GlobalMarketHub() {
   // required hasArt while the grid defaulted to every tracked contract
   // (hex + "Art pending" on Avalanche while CryptoSeals sat in rankings).
   const rankings = useMemo(() => filtered.slice(0, rankingsShowCount), [filtered, rankingsShowCount]);
+
+  const hydratedKey = useRef<string>("");
+  useEffect(() => {
+    if (loading || rankings.length === 0) return;
+    const chain = chainFilter.size === 1 ? [...chainFilter][0] : null;
+    if (!chain || chain === "solana-mainnet" || chain === "bitcoin-mainnet") return;
+    const missing = rankings.filter((c) => !isHomeRow(c) && c.volume24hWei == null && c.sales24h == null).slice(0, 8);
+    if (missing.length === 0) return;
+    const key = `${chain}:${missing.map((c) => c.contractAddress).join(",")}`;
+    if (hydratedKey.current === key) return;
+    hydratedKey.current = key;
+    let cancelled = false;
+    (async () => {
+      const res = await fetch("/api/market/multichain/hydrate-stats", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chainSlug: chain, contracts: missing.map((c) => c.contractAddress) }),
+      }).catch(() => null);
+      if (!res?.ok || cancelled) return;
+      const body = (await res.json().catch(() => null)) as { hydrated?: number } | null;
+      if (!body?.hydrated) return;
+      invalidateSwr("/api/market/multichain");
+      const data = await swrJson<{ collections: TrackedCollection[] }>("/api/market/multichain", {
+        ttlMs: 0,
+        swrMs: 600_000,
+        session: true,
+        isGood: (d) => Array.isArray((d as { collections?: unknown })?.collections),
+      });
+      if (!cancelled) setCollections(data.collections ?? []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, rankings, chainFilter]);
 
   // Real, per-column "does ANY row currently shown have real data here" --
   // feeds SortableTh's hasData prop (see its own header for why: sorting
@@ -1556,7 +1635,7 @@ export default function GlobalMarketHub() {
                         {windowSales(c, rankingsWindow) ?? <span title={emptyCellReason(c, "sales")}>—</span>}
                       </td>
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 lg:table-cell">
-                        {c.listedCount != null ? (
+                        {c.listedCount != null && c.listedCount > 0 ? (
                           <span
                             className="inline-flex items-baseline justify-end gap-1"
                             title={
