@@ -496,8 +496,6 @@ function hasUsableCells(c: TrackedCollection): boolean {
   if (c.sales24h != null && c.sales24h > 0) return true;
   if (c.holderCount != null && c.holderCount > 0) return true;
   if (c.totalSupply != null && c.totalSupply > 0) return true;
-  if (c.recentActivity > 0) return true;
-  if (c.imageUrl) return true;
   return false;
 }
 
@@ -1053,6 +1051,8 @@ export default function GlobalMarketHub() {
     return [...rows].sort((a, b) => {
       const home = Number(isHomeRow(b)) - Number(isHomeRow(a));
       if (home !== 0) return home;
+      const book = Number(hasMarketEvidence(b)) - Number(hasMarketEvidence(a));
+      if (book !== 0) return book;
       const primary = compareByColumn(a, b, sortColumn, sortDir, rankingsWindow, hasArt);
       if (primary !== 0) return primary;
       const floorTie = compareNullable(

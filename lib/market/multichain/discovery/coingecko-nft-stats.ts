@@ -31,7 +31,16 @@
  * a worse failure than staying null. A collection this can't exactly
  * match simply stays unmatched (fields stay null), never guessed.
  */
-import { hasMultichainStore, listTrackedCollections, updateCollectionMarketStats } from "@/lib/market/multichain/store";
+import {
+  hasMultichainStore,
+  listTrackedCollections,
+  updateCollectionMarketStats,
+  updateCollectionFloorOnly,
+  updateCollectionDisplay,
+  updateHolderCount,
+  upsertTrackedCollection,
+} from "@/lib/market/multichain/store";
+import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
 import { durableKv } from "@/lib/market/durable-kv";
@@ -62,7 +71,7 @@ function monthKey(): string {
 
 async function checkAndIncrementMonthlyBudget(): Promise<boolean> {
   if (!process.env.COINGECKO_API_KEY) return true; // unauthenticated tier has no monthly cap to protect, only the in-memory daily/jail guard applies
-  const key = `plank:market:coingecko-nft-monthly:${monthKey()}`;
+  const key = `plank:market:coingecko-nft-monthly-v2:${monthKey()}`;
   // Read-then-write against plank_kv_values (durable-kv.ts's real, already-
   // existing table -- no new migration needed). This app's own sync loops
   // call CoinGecko sequentially, never concurrently, so the narrow race
@@ -90,9 +99,11 @@ const PAGE_SIZE = 250;
 const PLATFORM_BY_CHAIN: Record<string, string> = {
   "solana-mainnet": "solana",
   "bitcoin-mainnet": "ordinals",
+  "bnb-mainnet": "binance-smart-chain",
+  "avax-mainnet": "avalanche",
 };
 
-type ListItem = { id: string; symbol: string | null };
+type ListItem = { id: string; symbol: string | null; contract_address?: string | null; name?: string | null };
 
 function apiHeaders(): Record<string, string> {
   const key = process.env.COINGECKO_API_KEY?.trim();
@@ -100,8 +111,8 @@ function apiHeaders(): Record<string, string> {
 }
 
 /** Every real id CoinGecko tracks for one platform, paginated -- cached in-process per run, never persisted (this list changes daily on CoinGecko's own side; a fresh fetch each run is correct, not wasteful, since it's ~1-3 pages). */
-async function fetchPlatformIds(platform: string): Promise<Set<string>> {
-  const ids = new Set<string>();
+async function fetchPlatformList(platform: string): Promise<ListItem[]> {
+  const out: ListItem[] = [];
   const paced = !process.env.COINGECKO_API_KEY;
   for (let page = 1; page <= 20; page++) {
     // Real bug found live 2026-08-20: this loop had no pacing between its
@@ -118,12 +129,8 @@ async function fetchPlatformIds(platform: string): Promise<Set<string>> {
     // exhausted) budget finding that out the hard way per-page.
     const gate = checkSourceBudget(SOURCE);
     if (!gate.allowed) {
-      throw new Error(`coingecko-nft-stats: source jailed/exhausted (${gate.reason}) -- stopping platform list fetch for "${platform}" early, ${ids.size} id(s) collected so far`);
+      throw new Error(`coingecko-nft-stats: source jailed/exhausted (${gate.reason}) -- stopping platform list fetch for "${platform}" early, ${out.length} id(s) collected so far`);
     }
-    if (!(await checkAndIncrementMonthlyBudget())) {
-      throw new Error(`coingecko-nft-stats: real monthly cap reached (${MONTHLY_CEILING}) -- stopping platform list fetch for "${platform}" early, ${ids.size} id(s) collected so far`);
-    }
-
     const res = await fetch(`${LIST_URL}?asset_platform_id=${platform}&per_page=${PAGE_SIZE}&page=${page}`, { headers: apiHeaders() });
     if (!res.ok) {
       const bodyText = await res.text().catch(() => "");
@@ -132,16 +139,21 @@ async function fetchPlatformIds(platform: string): Promise<Set<string>> {
     }
     recordSourceSuccess(SOURCE);
     const rows = (await res.json()) as ListItem[];
-    for (const r of rows) ids.add(r.id.toLowerCase());
+    out.push(...rows);
     if (rows.length < PAGE_SIZE) break;
   }
-  return ids;
+  return out;
 }
 
 type NftDetail = {
   volume_24h?: { native_currency?: number | null } | null;
   one_day_sales?: number | null;
+  floor_price?: { native_currency?: number | null } | null;
   floor_price_24h_percentage_change?: { native_currency?: number | null } | null;
+  number_of_unique_addresses?: number | null;
+  total_supply?: number | null;
+  name?: string | null;
+  image?: { small?: string | null } | null;
 };
 
 /** Same 18-decimal-equivalent wei-string convention every adapter in this app uses for a native-currency decimal amount. */
@@ -177,13 +189,42 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
   if (!hasMultichainStore()) throw new Error("coingecko-nft-stats: no Postgres config.");
 
   const tracked = (await listTrackedCollections()).filter((c) => c.chainSlug === chainSlug);
-  const realIds = await fetchPlatformIds(platform);
-  // Only case-insensitive EXACT matches -- see this file's own header on
-  // why fuzzy matching is refused here. isNonEvmChainSlug guards this
-  // module from ever accidentally running against an EVM chain's
-  // already-lowercased-by-convention addresses, which would collide with
-  // real CoinGecko ids by pure coincidence far more often.
-  const matches = isNonEvmChainSlug(chainSlug) ? tracked.filter((c) => realIds.has(c.contractAddress.toLowerCase())) : [];
+  const catalog = await fetchPlatformList(platform);
+  type Job = { contractAddress: string; cgId: string; name: string | null };
+  const jobs: Job[] = [];
+  if (isNonEvmChainSlug(chainSlug)) {
+    const ids = new Set(catalog.map((r) => r.id.toLowerCase()));
+    for (const c of tracked) {
+      if (ids.has(c.contractAddress.toLowerCase())) {
+        jobs.push({ contractAddress: c.contractAddress, cgId: c.contractAddress.toLowerCase(), name: c.name });
+      }
+    }
+  } else {
+    const byAddr = new Map<string, ListItem>();
+    for (const row of catalog) {
+      if (row.contract_address) byAddr.set(row.contract_address.toLowerCase(), row);
+    }
+    const have = new Set(tracked.map((c) => c.contractAddress.toLowerCase()));
+    for (const c of tracked) {
+      const hit = byAddr.get(c.contractAddress.toLowerCase());
+      if (hit) jobs.push({ contractAddress: c.contractAddress, cgId: hit.id, name: hit.name ?? c.name });
+    }
+    const foreign = foreignChainByChainSlug(chainSlug);
+    for (const row of catalog) {
+      const addr = row.contract_address?.toLowerCase();
+      if (!addr || have.has(addr) || !row.id) continue;
+      const id = await upsertTrackedCollection({
+        chainSlug,
+        chainId: foreign?.chainId ?? null,
+        contractAddress: addr,
+        adapter: "alchemy-nft",
+      });
+      if (id) have.add(addr);
+      jobs.push({ contractAddress: addr, cgId: row.id, name: row.name ?? null });
+      if (jobs.length >= maxUpdates * 2) break;
+    }
+  }
+  const matches = jobs;
 
   let updated = 0;
   let errors = 0;
@@ -199,7 +240,7 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
     if (!(await checkAndIncrementMonthlyBudget())) break;
 
     try {
-      const res = await fetch(`${DETAIL_URL}/${encodeURIComponent(collection.contractAddress.toLowerCase())}`, { headers: apiHeaders() });
+      const res = await fetch(`${DETAIL_URL}/${encodeURIComponent(collection.cgId)}`, { headers: apiHeaders() });
       if (!res.ok) {
         const bodyText = await res.text().catch(() => "");
         recordSourceFailure(SOURCE, isQuotaError(res.status, bodyText));
@@ -211,10 +252,27 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
       const volume24hWei = toWeiString(detail.volume_24h?.native_currency);
       const sales24h = typeof detail.one_day_sales === "number" ? detail.one_day_sales : null;
       const change = detail.floor_price_24h_percentage_change?.native_currency;
-      const floorChangePct = typeof change === "number" && Number.isFinite(change) ? change : null;
-      // No currentFloorPriceWei write here -- that field is populated by
-      // this chain's own real fetchSnapshot adapter (unisat-collections /
-      // magiceden-solana), never overwritten by this stats-only pass.
+      const floorChangePct = typeof change === "number" && Number.isFinite(change) && change !== 0 ? change : null;
+      const floorWei = toWeiString(detail.floor_price?.native_currency);
+      const native =
+        foreignChainByChainSlug(chainSlug)?.nativeCurrencySymbol ??
+        (chainSlug === "solana-mainnet" ? "SOL" : chainSlug === "bitcoin-mainnet" ? "BTC" : "BNB");
+      if (floorWei) {
+        await updateCollectionFloorOnly(chainSlug, collection.contractAddress, {
+          floorPriceWei: floorWei,
+          floorPriceCurrency: native,
+          floorPriceMarketplace: "coingecko",
+        });
+      }
+      if (collection.name) {
+        await updateCollectionDisplay(chainSlug, collection.contractAddress, {
+          name: collection.name,
+          imageUrl: detail.image?.small ?? null,
+        }).catch(() => {});
+      }
+      if (typeof detail.number_of_unique_addresses === "number" && detail.number_of_unique_addresses > 0) {
+        await updateHolderCount(chainSlug, collection.contractAddress, detail.number_of_unique_addresses).catch(() => {});
+      }
       await updateCollectionMarketStats(chainSlug, collection.contractAddress, {
         volume24hWei,
         sales24h,
