@@ -94,7 +94,7 @@ export default function BuyConfirm({
               fill
               sizes="64px"
               className="object-cover"
-              unoptimized={Boolean(listing.imageUrl)}
+              unoptimized
             />
           </div>
           <div className="min-w-0">

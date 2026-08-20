@@ -47,6 +47,32 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Arbitrary NFT CDNs (OpenSea seadn, Magic Eden, Ordinals, IPFS gateways).
+  // ListingCard also marks remote art unoptimized; this keep next/image from
+  // crashing the whole collection page when a fallback uses collection.image.
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "**.seadn.io" },
+      { protocol: "https", hostname: "i.seadn.io" },
+      { protocol: "https", hostname: "i2c.seadn.io" },
+      { protocol: "https", hostname: "openseauserdata.com" },
+      { protocol: "https", hostname: "**.openseauserdata.com" },
+      { protocol: "https", hostname: "img.seadn.io" },
+      { protocol: "https", hostname: "**.magiceden.dev" },
+      { protocol: "https", hostname: "**.magiceden.io" },
+      { protocol: "https", hostname: "arweave.net" },
+      { protocol: "https", hostname: "**.arweave.net" },
+      { protocol: "https", hostname: "ipfs.io" },
+      { protocol: "https", hostname: "**.ipfs.io" },
+      { protocol: "https", hostname: "nftstorage.link" },
+      { protocol: "https", hostname: "**.nftstorage.link" },
+      { protocol: "https", hostname: "ordinals.com" },
+      { protocol: "https", hostname: "turbo.ordinalswallet.com" },
+      { protocol: "https", hostname: "**.alchemy.com" },
+      { protocol: "https", hostname: "**.cloudinary.com" },
+      { protocol: "https", hostname: "lh3.googleusercontent.com" },
+    ],
+  },
   // Dev-only: the dev server rejects cross-origin requests by default, which
   // blocks sharing a local preview through a tunnel. Has no effect on
   // production builds — it only widens which origins `next dev` will answer.

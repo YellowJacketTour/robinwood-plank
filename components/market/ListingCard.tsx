@@ -142,7 +142,7 @@ export default function ListingCard({
           fill
           sizes="(min-width: 1024px) 20vw, 50vw"
           className={`object-cover transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
-          unoptimized={Boolean(listing.imageUrl)}
+          unoptimized
           onLoad={() => setImageLoaded(true)}
         />
         {isFloor && (
