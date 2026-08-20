@@ -5,9 +5,29 @@
  */
 import { hasPostgresConfig, postgresQuery } from "@/lib/postgres";
 import type { CollectionSnapshot, TrackedCollection } from "@/lib/market/multichain/types";
+import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 export function hasMultichainStore(): boolean {
   return hasPostgresConfig();
+}
+
+/**
+ * Real bug found live 2026-08-20: every write path here unconditionally
+ * lowercased contractAddress before storing/matching it. That's correct
+ * for EVM hex addresses (case-insensitive, sometimes checksum-cased on
+ * input) but WRONG for Solana pubkeys and Bitcoin Ordinals slugs/
+ * collectionIds -- Solana's base58 addresses are case-sensitive, so
+ * lowercasing one turns it into a different, almost always invalid
+ * pubkey. Confirmed live: every "solana-mainnet" row registered before
+ * this fix had a corrupted, unresolvable address (getAsset returning a
+ * real "Pubkey Validation Err" for -- not a rare edge case, effectively
+ * all of them, since discovery always ran through this same lowercasing
+ * write path). EVM chains keep lowercasing (matches this app's own
+ * existing 0x-prefixed address convention everywhere else); every
+ * non-EVM chain now preserves the exact case it was given.
+ */
+function normalizeContractAddress(chainSlug: string, contractAddress: string): string {
+  return isNonEvmChainSlug(chainSlug) ? contractAddress : contractAddress.toLowerCase();
 }
 
 type CollectionRow = {
@@ -53,6 +73,36 @@ export async function listTrackedCollections(): Promise<TrackedCollection[]> {
 }
 
 /**
+ * The real fix for a real bug found live 2026-08-20: runMultichainSync used
+ * to call listTrackedCollections() unbounded, in fixed chain_slug order,
+ * with real per-adapter pacing delays -- harmless when this app tracked a
+ * few hundred collections, but this session's own discovery work grew the
+ * index past 16,000 rows (44,000+ on Solana alone), and chain_slug order
+ * means "solana-mainnet" sorts after avax/base/bitcoin/bnb/eth/opt/polygon/
+ * robinhood -- confirmed live: every one of Solana's 44,773 registered
+ * rows had ZERO snapshot rows at all (not synced, not even attempted), the
+ * sync loop was structurally never reaching it in one bounded pass.
+ *
+ * The real fix: order by staleness (oldest-synced-or-never-synced first)
+ * and let the caller bound how many rows one call processes. A row that
+ * gets synced has its synced_at set to NOW(), pushing it to the back of
+ * this same query's own ordering -- no separate cursor needed, the queue
+ * is self-maintaining. Every chain now gets real, continuous, fair
+ * progress instead of the alphabetically-later ones starving forever.
+ */
+export async function listCollectionsForSync(limit: number): Promise<TrackedCollection[]> {
+  const result = await postgresQuery<CollectionRow>(
+    `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url, c.is_vault_backed, c.creator_handle, c.creator_address
+     FROM plank_multichain_collections c
+     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+     ORDER BY s.synced_at ASC NULLS FIRST
+     LIMIT $1`,
+    [limit]
+  );
+  return result.rows.map(rowToCollection);
+}
+
+/**
  * One tracked collection by its real key -- targeted single-row lookup,
  * same reasoning as getCollectionSupplyStats below (avoid
  * listTrackedCollections' full 6000+-row scan when the caller only needs
@@ -66,7 +116,7 @@ export async function getTrackedCollection(chainSlug: string, contractAddress: s
      FROM plank_multichain_collections
      WHERE chain_slug = $1 AND contract_address = $2
      LIMIT 1`,
-    [chainSlug, contractAddress]
+    [chainSlug, normalizeContractAddress(chainSlug, contractAddress)]
   );
   const row = result.rows[0];
   return row ? rowToCollection(row) : null;
@@ -93,7 +143,7 @@ export async function upsertTrackedCollection(input: {
     [
       input.chainSlug,
       input.chainId,
-      input.contractAddress.toLowerCase(),
+      normalizeContractAddress(input.chainSlug, input.contractAddress),
       input.adapter,
       input.isVaultBacked ?? false,
     ]
@@ -129,7 +179,7 @@ export async function updateCollectionDisplay(
      WHERE chain_slug = $1 AND contract_address = $2`,
     [
       chainSlug,
-      contractAddress.toLowerCase(),
+      normalizeContractAddress(chainSlug, contractAddress),
       display.name,
       display.imageUrl,
       display.creatorHandle ?? null,
@@ -168,7 +218,7 @@ export async function updateCollectionMarketStats(
 ): Promise<void> {
   const collection = await postgresQuery<{ id: number }>(
     `SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
-    [chainSlug, contractAddress.toLowerCase()]
+    [chainSlug, normalizeContractAddress(chainSlug, contractAddress)]
   );
   const id = collection.rows[0]?.id;
   if (!id) return;
@@ -331,7 +381,7 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
 export async function updateHolderCount(chainSlug: string, contractAddress: string, holderCount: number): Promise<void> {
   const collection = await postgresQuery<{ id: number }>(
     `SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
-    [chainSlug, contractAddress.toLowerCase()]
+    [chainSlug, normalizeContractAddress(chainSlug, contractAddress)]
   );
   const id = collection.rows[0]?.id;
   if (!id) return;
@@ -359,7 +409,7 @@ export async function getCollectionSupplyStats(
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
      WHERE c.chain_slug = $1 AND c.contract_address = $2
      LIMIT 1`,
-    [chainSlug, contractAddress]
+    [chainSlug, normalizeContractAddress(chainSlug, contractAddress)]
   );
   const row = result.rows[0];
   if (!row) return null;
@@ -402,7 +452,7 @@ export async function getCollectionMarketStats(
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
      WHERE c.chain_slug = $1 AND c.contract_address = $2
      LIMIT 1`,
-    [chainSlug, contractAddress]
+    [chainSlug, normalizeContractAddress(chainSlug, contractAddress)]
   );
   const row = result.rows[0];
   if (!row) return null;

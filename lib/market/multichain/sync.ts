@@ -13,7 +13,7 @@ import { heliusSolanaAdapter } from "@/lib/market/multichain/adapters/helius-sol
 import { ordiscanOrdinalsAdapter } from "@/lib/market/multichain/adapters/ordiscan-ordinals";
 import {
   hasMultichainStore,
-  listTrackedCollections,
+  listCollectionsForSync,
   writeSnapshot,
   writeSnapshotError,
 } from "@/lib/market/multichain/store";
@@ -74,7 +74,20 @@ export type MultichainSyncResult = {
   errors: Array<{ chainSlug: string; contractAddress: string; error: string }>;
 };
 
-export async function runMultichainSync(): Promise<MultichainSyncResult> {
+/**
+ * Default bound for one call -- real number chosen from real pacing math,
+ * not guessed: the slowest-paced adapters (unisat-collections,
+ * ordiscan-ordinals) wait 500ms between calls, so 800 rows caps one call at
+ * ~7 real minutes worst case, small enough to run on every scheduled
+ * refresh-market-data.ts pass without blocking everything else in that
+ * script, large enough to make real visible progress against a 16,000+-row
+ * (and growing) index. See listCollectionsForSync's own header for why
+ * bounding + staleness ordering replaced the old unbounded chain_slug-order
+ * walk that structurally starved every chain sorting after "robinhood".
+ */
+const DEFAULT_SYNC_BATCH_SIZE = 800;
+
+export async function runMultichainSync(input: { maxCollections?: number } = {}): Promise<MultichainSyncResult> {
   if (!hasMultichainStore()) {
     throw new Error(
       "multichain sync requires PostgreSQL (PGHOST/PGDATABASE/PGUSER/PGPASSWORD) -- " +
@@ -89,7 +102,7 @@ export async function runMultichainSync(): Promise<MultichainSyncResult> {
     );
   }
 
-  const collections = await listTrackedCollections();
+  const collections = await listCollectionsForSync(input.maxCollections ?? DEFAULT_SYNC_BATCH_SIZE);
   const result: MultichainSyncResult = { synced: 0, failed: 0, skipped: 0, errors: [] };
 
   for (const collection of collections) {

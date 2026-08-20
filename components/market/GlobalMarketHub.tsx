@@ -424,11 +424,12 @@ function GradeBadge({ breakdown }: { breakdown: GradeBreakdown }) {
       {open && (
         <div
           role="tooltip"
-          className="absolute right-0 top-6 z-20 w-56 rounded-lg border border-line bg-wood-950 p-2.5 text-left text-[0.65rem] shadow-xl"
+          className="absolute right-0 top-7 z-50 w-64 max-w-[min(16rem,calc(100vw-2rem))] rounded-lg border border-line-strong bg-wood-950 p-3 text-left text-[0.65rem] shadow-2xl ring-1 ring-black/40"
         >
           <p className="mb-1.5 font-black uppercase tracking-wide text-foreground/50">
-            Grade {letter} · {breakdown.score}/2050 pts ({thresholdLabel} for {letter})
+            Grade {letter} · {breakdown.score}/2050 pts
           </p>
+          <p className="mb-2 text-[0.6rem] text-foreground/35">{thresholdLabel} points needed for {letter}</p>
           <ul className="space-y-1">
             {breakdown.parts.map((p) => (
               <li key={p.label} className="flex items-center justify-between gap-2">
@@ -1387,44 +1388,47 @@ export default function GlobalMarketHub() {
             </table>
           </div>
 
-          {/* Real 24h/7d/30d window toggle for the Volume/Sales columns above -- same "Show top: N" button-group styling, same real OpenSea-sourced data (rarity-index-runner.ts), just a different interval of the same already-fetched response. Never fabricated from a single-window figure. */}
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-foreground/40">Window</span>
-            {(["24h", "7d", "30d"] as const).map((w) => (
-              <button
-                key={w}
-                type="button"
-                onClick={() => setRankingsWindow(w)}
-                aria-pressed={rankingsWindow === w}
-                className={`min-h-8 rounded-md border px-2.5 font-bold transition-colors duration-150 ${
-                  rankingsWindow === w
-                    ? "border-gold-400 bg-gold-400/15 text-gold-300"
-                    : "border-line text-foreground/50 hover:border-line-strong hover:text-foreground/70"
-                }`}
-              >
-                {w}
-              </button>
-            ))}
-          </div>
+          {/* Window + Show-top controls side by side, not stacked -- flagged live ("dont need to be stacked and leave all that empty space"): both are short single-row button groups with real horizontal room to share a line on anything wider than a phone. */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
+            {/* Real 24h/7d/30d window toggle for the Volume/Sales columns above -- same real OpenSea-sourced data (rarity-index-runner.ts), just a different interval of the same already-fetched response. Never fabricated from a single-window figure. */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-foreground/40">Window</span>
+              {(["24h", "7d", "30d"] as const).map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={() => setRankingsWindow(w)}
+                  aria-pressed={rankingsWindow === w}
+                  className={`min-h-8 rounded-md border px-2.5 font-bold transition-colors duration-150 ${
+                    rankingsWindow === w
+                      ? "border-gold-400 bg-gold-400/15 text-gold-300"
+                      : "border-line text-foreground/50 hover:border-line-strong hover:text-foreground/70"
+                  }`}
+                >
+                  {w}
+                </button>
+              ))}
+            </div>
 
-          {/* Real "Show top: N" control, Magic Eden's own pattern -- a fixed cutoff either buried most of 3,500+ tracked collections or flooded the page; this lets the reader choose. */}
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-foreground/40">Show top</span>
-            {[10, 25, 50, 100].map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setRankingsShowCount(n)}
-                aria-pressed={rankingsShowCount === n}
-                className={`min-h-8 rounded-md border px-2.5 font-bold transition-colors duration-150 ${
-                  rankingsShowCount === n
-                    ? "border-gold-400 bg-gold-400/15 text-gold-300"
-                    : "border-line text-foreground/50 hover:border-line-strong hover:text-foreground/70"
-                }`}
-              >
-                {n}
-              </button>
-            ))}
+            {/* Real "Show top: N" control, Magic Eden's own pattern -- a fixed cutoff either buried most of 3,500+ tracked collections or flooded the page; this lets the reader choose. */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-foreground/40">Show top</span>
+              {[10, 25, 50, 100].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setRankingsShowCount(n)}
+                  aria-pressed={rankingsShowCount === n}
+                  className={`min-h-8 rounded-md border px-2.5 font-bold transition-colors duration-150 ${
+                    rankingsShowCount === n
+                      ? "border-gold-400 bg-gold-400/15 text-gold-300"
+                      : "border-line text-foreground/50 hover:border-line-strong hover:text-foreground/70"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
