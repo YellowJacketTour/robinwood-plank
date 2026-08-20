@@ -504,6 +504,7 @@ const CATALOG_ADAPTERS = new Set([
   "ordiscan-ordinals",
   "magiceden-solana",
   "helius-solana",
+  "coingecko-nft",
 ]);
 
 /** UniSat collectionId / ME symbol / Solana mint are the collection — not missing titles. */

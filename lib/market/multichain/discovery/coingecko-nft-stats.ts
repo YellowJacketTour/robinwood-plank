@@ -217,7 +217,7 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
         chainSlug,
         chainId: foreign?.chainId ?? null,
         contractAddress: addr,
-        adapter: "alchemy-nft",
+        adapter: "coingecko-nft",
       });
       if (id) have.add(addr);
       jobs.push({ contractAddress: addr, cgId: row.id, name: row.name ?? null });
