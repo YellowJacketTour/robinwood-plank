@@ -34,7 +34,13 @@ export async function GET(req: NextRequest) {
     const map = await getForeignRarity(chainSlug, collectionSlug);
     const byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number; score: number }> = {};
     for (const [tokenId, v] of map) byTokenId[tokenId] = v;
-    if (map.size === 0) {
+    const meta = await getForeignTraitIndex(chainSlug, collectionSlug).catch(() => null);
+    const sampleSize = meta?.sampleSize ?? map.size;
+    // Old first-pass caps (1k/2k/5k) left Claynosaurz stuck at 5,000 forever
+    // because we only enqueued when the map was empty. Resume those samples.
+    const staleFirstPass = sampleSize === 1_000 || sampleSize === 2_000 || sampleSize === 5_000;
+    const needsIndex = map.size === 0 || (staleFirstPass && chainSlug !== "bitcoin-mainnet");
+    if (needsIndex) {
       const job = `${chainSlug}:${collectionSlug.toLowerCase()}`;
       if (!inFlight.has(job)) {
         inFlight.add(job);
@@ -44,13 +50,12 @@ export async function GET(req: NextRequest) {
           .finally(() => inFlight.delete(job));
       }
     }
-    const meta = await getForeignTraitIndex(chainSlug, collectionSlug).catch(() => null);
     return NextResponse.json(
       {
         byTokenId,
         indexed: map.size > 0,
-        sampleSize: meta?.sampleSize ?? map.size,
-        partial: map.size > 0 ? map.size < 10_000 : true,
+        sampleSize,
+        partial: map.size === 0 || staleFirstPass || chainSlug === "bitcoin-mainnet",
       },
       { headers: { "Cache-Control": "no-store" } }
     );
