@@ -15,6 +15,7 @@
  * silently rate-limited into uselessness.
  */
 import type { ChainAdapter, CollectionSnapshot } from "@/lib/market/multichain/types";
+import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 /**
  * Alchemy's network subdomain per chainSlug. This is the ONE place that
@@ -219,12 +220,18 @@ export async function fetchSnapshotsBatch(
         | null
         | undefined;
       const floorPriceWei = openSea?.floorPrice != null ? toWeiString(openSea.floorPrice) : null;
+      // OpenSea quotes floor price in each chain's own native token (POL on
+      // Polygon, BNB on BSC, AVAX on Avalanche, ETH elsewhere) -- hardcoding
+      // "ETH" here mislabeled every non-ETH-native chain's floor. Real fix:
+      // the same per-chain symbol foreign-chain-registry.ts already carries
+      // for on-chain trading, reused here for display.
+      const nativeSymbol = foreignChainByChainSlug(chainSlug)?.nativeCurrencySymbol ?? "ETH";
       results.set(metadata.address.toLowerCase(), {
         name: cleanMetadataString(openSea?.collectionName) ?? cleanMetadataString(metadata.name),
         imageUrl: cleanMetadataString(openSea?.imageUrl),
         externalUrl: cleanMetadataString(openSea?.externalUrl),
         floorPriceWei,
-        floorPriceCurrency: floorPriceWei != null ? "ETH" : null,
+        floorPriceCurrency: floorPriceWei != null ? nativeSymbol : null,
         floorPriceMarketplace: floorPriceWei != null ? "opensea" : null,
         totalSupply:
           Number.isFinite(totalSupply) && totalSupply! > 0 && totalSupply! <= MAX_PLAUSIBLE_TOTAL_SUPPLY

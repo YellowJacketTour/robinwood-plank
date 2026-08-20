@@ -1000,9 +1000,10 @@ export default function GlobalMarketHub() {
                           <span className="min-w-0 flex-1 truncate font-bold text-foreground/90" title={c.name ?? c.contractAddress}>
                             {c.name ?? c.contractAddress}
                           </span>
-                          {/* Known-creator checkmark -- real signal (a real handle/ENS this app has observed), never OpenSea's own "verified" claim, which this app cannot honestly assert for an auto-discovered collection. */}
+                          {/* Known-creator checkmark -- real signal (a real handle/ENS this app has observed), never OpenSea's own "verified" claim, which this app cannot honestly assert for an auto-discovered collection. The title tooltip alone isn't reliably exposed to screen readers, and there's no dedicated column/header for this icon (it rides inside "Collection"), so the accessible label lives on the icon itself via a sr-only span -- same pattern ListingCard.tsx uses for its own icon-only trust badge. */}
                           {(c.creatorHandle || c.creatorEns) && (
                             <span className="shrink-0 text-emerald-400" title={`Known creator: ${c.creatorHandle ?? c.creatorEns}`}>
+                              <span className="sr-only">Known creator: {c.creatorHandle ?? c.creatorEns} — </span>
                               ✓
                             </span>
                           )}
