@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 /**
@@ -50,6 +51,11 @@ import { chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-r
 const BACKDROP_CHAINS = new Set(["arb-mainnet", "opt-mainnet", "robinhood"]);
 export default function ChainIcon({ chainSlug, size = 20, className = "" }: { chainSlug: string; size?: number; className?: string }) {
   const color = chainBrandColor(chainSlug);
+  // Unique per rendered instance -- multiple ChainIcon instances share one
+  // page (a ranked table can render dozens), so a hardcoded gradient id
+  // would collide and every instance after the first would silently
+  // render whichever definition happened to win the ID race.
+  const gradientId = `solana-gradient-${useId()}`;
   const common = {
     width: size,
     height: size,
@@ -143,11 +149,22 @@ export default function ChainIcon({ chainSlug, size = 20, className = "" }: { ch
       );
     case "solana-mainnet":
     case "solana":
+      // Real official Solana brand gradient (solana.com/branding,
+      // confirmed live 2026-08-20) -- purple #9945FF to green #14F195,
+      // replacing the flat spothq bright-green fill flagged live the
+      // same day as too low-contrast/hard to see. Diagonal stop
+      // positions match Solana's own published logomark gradient angle.
       return (
         <svg {...real}>
-          <circle fill="#66F9A1" cx="16" cy="16" r="16" />
+          <defs>
+            <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#9945FF" />
+              <stop offset="100%" stopColor="#14F195" />
+            </linearGradient>
+          </defs>
+          <circle fill="#131022" cx="16" cy="16" r="16" />
           <path
-            fill="#FFF"
+            fill={`url(#${gradientId})`}
             d="M9.925 19.687a.59.59 0 01.415-.17h14.366a.29.29 0 01.207.497l-2.838 2.815a.59.59 0 01-.415.171H7.294a.291.291 0 01-.207-.498l2.838-2.815zm0-10.517A.59.59 0 0110.34 9h14.366c.261 0 .392.314.207.498l-2.838 2.815a.59.59 0 01-.415.17H7.294a.291.291 0 01-.207-.497L9.925 9.17zm12.15 5.225a.59.59 0 00-.415-.17H7.294a.291.291 0 00-.207.498l2.838 2.815c.11.109.26.17.415.17h14.366a.291.291 0 00.207-.498l-2.838-2.815z"
           />
         </svg>

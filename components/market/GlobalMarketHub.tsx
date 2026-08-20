@@ -1191,11 +1191,24 @@ export default function GlobalMarketHub() {
                     <p className="truncate text-2xl font-bold text-white drop-shadow" title={hero.name ?? hero.contractAddress}>
                       {hero.name ?? hero.contractAddress}
                     </p>
-                    <p className="text-sm text-white/75">
+                    <p className="flex flex-wrap items-center gap-x-1 text-sm text-white/75">
                       <span style={{ color: chainBrandColor(hero.chainSlug) }}>{chainDisplayName(hero.chainSlug)}</span>
-                      {" · "}Vol {(Number(hero.volume24hWei) / 1e18).toFixed(3)} {hero.floorPriceCurrency ?? "ETH"}
-                      {hero.sales24h ? ` · ${hero.sales24h} sales` : ""}
-                      {hero.floorPriceWei && ` · Floor ${(Number(hero.floorPriceWei) / 1e18).toFixed(4)} ${hero.floorPriceCurrency ?? "ETH"}`}
+                      <span>{" · "}Vol</span>
+                      <span className="inline-flex items-center gap-1">
+                        {(Number(hero.volume24hWei) / 1e18).toFixed(3)}
+                        <ChainIcon chainSlug={hero.chainSlug} size={14} className="shrink-0" />
+                        {(() => {
+                          const usd = toUsd(hero.volume24hWei, hero.floorPriceCurrency);
+                          return usd != null ? <span className="text-white/50">{formatUsdCompact(usd)}</span> : null;
+                        })()}
+                      </span>
+                      {hero.sales24h ? <span>{" · "}{hero.sales24h} sales</span> : null}
+                      {hero.floorPriceWei && (
+                        <span className="inline-flex items-center gap-1">
+                          {" · "}Floor {(Number(hero.floorPriceWei) / 1e18).toFixed(4)}
+                          <ChainIcon chainSlug={hero.chainSlug} size={14} className="shrink-0" />
+                        </span>
+                      )}
                     </p>
                   </div>
                 </Link>
@@ -1225,8 +1238,10 @@ export default function GlobalMarketHub() {
                       <p className="truncate text-xs font-bold text-white" title={c.name ?? c.contractAddress}>
                         {c.name ?? c.contractAddress}
                       </p>
-                      <p className="truncate text-[0.65rem] text-white/70">
-                        {(Number(c.volume24hWei) / 1e18).toFixed(2)} {c.floorPriceCurrency ?? "ETH"} · 24h
+                      <p className="flex items-center gap-1 truncate text-[0.65rem] text-white/70">
+                        {(Number(c.volume24hWei) / 1e18).toFixed(2)}
+                        <ChainIcon chainSlug={c.chainSlug} size={12} className="shrink-0" />
+                        · 24h
                       </p>
                     </div>
                   </Link>
@@ -1442,15 +1457,16 @@ export default function GlobalMarketHub() {
                       </td>
                       <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/80">
                         {c.floorPriceWei ? (
-                          <>
-                            {(Number(c.floorPriceWei) / 1e18).toFixed(3)} {c.floorPriceCurrency ?? ""}
+                          <span className="inline-flex items-center justify-end gap-1">
+                            {(Number(c.floorPriceWei) / 1e18).toFixed(3)}
+                            <ChainIcon chainSlug={c.chainSlug} size={14} className="shrink-0" />
                             {(() => {
                               const usd = toUsd(c.floorPriceWei, c.floorPriceCurrency);
                               return usd != null ? (
-                                <span className="ml-1 text-[0.65rem] text-foreground/40">{formatUsdCompact(usd)}</span>
+                                <span className="text-[0.65rem] text-foreground/40">{formatUsdCompact(usd)}</span>
                               ) : null;
                             })()}
-                          </>
+                          </span>
                         ) : (
                           "—"
                         )}
@@ -1465,10 +1481,14 @@ export default function GlobalMarketHub() {
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 sm:table-cell">
                         {(() => {
                           const vol = windowVolumeWei(c, rankingsWindow);
-                          return vol && vol !== "0" ? (
-                            (Number(vol) / 1e18).toFixed(2)
-                          ) : (
-                            <span title={emptyCellReason(c, "volume")}>—</span>
+                          if (!vol || vol === "0") return <span title={emptyCellReason(c, "volume")}>—</span>;
+                          const usd = toUsd(vol, c.floorPriceCurrency);
+                          return (
+                            <span className="inline-flex items-center justify-end gap-1">
+                              {(Number(vol) / 1e18).toFixed(2)}
+                              <ChainIcon chainSlug={c.chainSlug} size={14} className="shrink-0" />
+                              {usd != null && <span className="text-[0.65rem] text-foreground/40">{formatUsdCompact(usd)}</span>}
+                            </span>
                           );
                         })()}
                       </td>
@@ -1731,8 +1751,10 @@ export default function GlobalMarketHub() {
                         </p>
                       )}
                       {c.volume24hWei && (
-                        <p className="text-xs text-foreground/50">
-                          Vol {(Number(c.volume24hWei) / 1e18).toFixed(3)} {c.floorPriceCurrency ?? "ETH"} · 24h
+                        <p className="flex items-center gap-1 text-xs text-foreground/50">
+                          Vol {(Number(c.volume24hWei) / 1e18).toFixed(3)}
+                          <ChainIcon chainSlug={c.chainSlug} size={13} className="shrink-0" />
+                          · 24h
                           {c.sales24h ? ` · ${c.sales24h} sales` : ""}
                         </p>
                       )}
