@@ -34,6 +34,7 @@ import { upsertTrackedCollection, updateCollectionDisplay, hasMultichainStore } 
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
 import { checkSourceBudget } from "@/lib/market/multichain/discovery/source-budget";
 import { isNotRealCollectibleArt } from "@/lib/market/multichain/discovery/evm-log-scan";
+import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/collection-title";
 import { FOREIGN_CHAINS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { durableKv as kv } from "@/lib/market/durable-kv";
 
@@ -181,7 +182,16 @@ export async function runOpenSeaBulkScan(
         }
         const name = snapshot?.name ?? entry.name;
         const imageUrl = snapshot?.imageUrl ?? entry.image_url;
-        if (isNotRealCollectibleArt(name, imageUrl)) {
+        // OpenSea's list often omits image_url (live: 468/500 OP entries).
+        // evm-log-scan still requires image; this list path only needs a
+        // real collection title — image hydrates later from OS stats.
+        const title = (name ?? "").trim();
+        if (
+          !title ||
+          isSpamCollectionTitle(title) ||
+          looksLikeContractName(title) ||
+          (imageUrl && isNotRealCollectibleArt(title, imageUrl))
+        ) {
           result.skippedNotArt += 1;
           continue;
         }
