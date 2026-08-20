@@ -319,6 +319,113 @@ export async function runHypersyncBackfillScan(input: {
   return { chainSlug: input.chainSlug, fromBlock: scannedUpTo, toBlock: nextBlock, logsScanned, candidates: candidates.length, registered, skippedNoMetadata, done };
 }
 
+/**
+ * A second, ADDITIONAL genesis-forward walk over an explicit
+ * [fromBlockFloor, toBlockCeiling) range, under its OWN cursor key -- never
+ * touches runHypersyncBackfillScan's own cursor or its no-gap guarantee.
+ *
+ * Real reason this exists: flagged live 2026-08-20 ("i need to see
+ * ethereums collections climb") -- the real chronological backfill was
+ * genuinely finding zero new candidates for a long stretch because it was
+ * walking Ethereum's earliest blocks (~2018), before ERC-721/NFT
+ * collections existed at any real scale (the actual boom is ~block
+ * 12M-15M, 2021-2022). Rather than fabricate faster progress or silently
+ * jump the real backfill cursor forward (which WOULD create a permanent,
+ * silent gap in the one thing that function's own header explicitly
+ * guarantees never happens), this is a separate, explicitly-labeled,
+ * independently-cursored pass over the known-dense range -- both this and
+ * the real chronological backfill keep running and keep making real,
+ * gap-free progress on their own tracks; this one just gets there faster
+ * by not waiting to crawl through low-density history first.
+ */
+export async function runHypersyncPriorityWindowScan(input: {
+  chainSlug: string;
+  fromBlockFloor: number;
+  toBlockCeiling: number;
+  cursorKey: string;
+}): Promise<DiscoveryScanResult & { done: boolean }> {
+  const chainId = EVM_CHAIN_ID[input.chainSlug];
+  if (!chainId) {
+    return {
+      chainSlug: input.chainSlug,
+      fromBlock: 0,
+      toBlock: 0,
+      logsScanned: 0,
+      candidates: 0,
+      registered: 0,
+      skippedNoMetadata: 0,
+      done: false,
+      error: `hypersync-evm-scan: no chainId mapping for "${input.chainSlug}"`,
+    };
+  }
+
+  const apiToken = requireApiToken();
+  const client = new HypersyncClient({ url: hypersyncUrl(chainId), apiToken });
+
+  const scannedUpTo = (await readCursor(input.cursorKey)) ?? input.fromBlockFloor;
+  if (scannedUpTo >= input.toBlockCeiling) {
+    return { chainSlug: input.chainSlug, fromBlock: scannedUpTo, toBlock: input.toBlockCeiling, logsScanned: 0, candidates: 0, registered: 0, skippedNoMetadata: 0, done: true };
+  }
+
+  const tally = new Map<string, number>();
+  let logsScanned = 0;
+  let query: Query = {
+    fromBlock: scannedUpTo,
+    toBlock: input.toBlockCeiling,
+    logs: [{ topics: [[TRANSFER_TOPIC]] }],
+    fieldSelection: { log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "BlockNumber"] },
+    maxNumLogs: MAX_LOGS_PER_RUN,
+  };
+
+  let nextBlock = scannedUpTo;
+  while (logsScanned < MAX_LOGS_PER_RUN) {
+    const res = await client.get(query);
+    for (const log of res.data.logs) {
+      if (!log.address || log.topics.length !== 4) continue;
+      const key = log.address.toLowerCase();
+      tally.set(key, (tally.get(key) ?? 0) + 1);
+      logsScanned += 1;
+    }
+    nextBlock = res.nextBlock;
+    if (nextBlock >= input.toBlockCeiling || logsScanned >= MAX_LOGS_PER_RUN) break;
+    query = { ...query, fromBlock: nextBlock };
+  }
+
+  await recordActivity(input.chainSlug, tally);
+
+  const candidates = [...tally.entries()].filter(([, count]) => count >= MIN_TRANSFERS_TO_CONSIDER);
+
+  let registered = 0;
+  let skippedNoMetadata = 0;
+  try {
+    const snapshots = await fetchSnapshotsBatch(
+      input.chainSlug,
+      candidates.map(([contractAddress]) => contractAddress)
+    );
+    for (const [contractAddress] of candidates) {
+      const snapshot = snapshots.get(contractAddress.toLowerCase());
+      if (!snapshot || isNotRealCollectibleArt(snapshot.name, snapshot.imageUrl)) {
+        skippedNoMetadata += 1;
+        continue;
+      }
+      await upsertTrackedCollection({
+        chainSlug: input.chainSlug,
+        chainId: EVM_CHAIN_ID[input.chainSlug] ?? null,
+        contractAddress,
+        adapter: alchemyNftAdapter.name,
+        isVaultBacked: false,
+      });
+      registered += 1;
+    }
+  } catch {
+    skippedNoMetadata += candidates.length;
+  }
+
+  await writeCursor(input.cursorKey, nextBlock);
+  const done = nextBlock >= input.toBlockCeiling;
+  return { chainSlug: input.chainSlug, fromBlock: scannedUpTo, toBlock: nextBlock, logsScanned, candidates: candidates.length, registered, skippedNoMetadata, done };
+}
+
 /** Runs the HyperSync scan across every chain evm-log-scan.ts covers,
  * skipping (not throwing on) any chain HyperSync doesn't index -- same
  * fail-soft-per-chain posture runAllOpenSeaBulkScans already uses. */

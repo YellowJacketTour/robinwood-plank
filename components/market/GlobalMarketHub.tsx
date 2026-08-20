@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
@@ -458,13 +458,39 @@ function SortableTh({
  */
 function GradeBadge({ breakdown }: { breakdown: GradeBreakdown }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const letter = gradeLetter(breakdown.score);
   const thresholdLabel = letter === "A" ? "≥1700" : letter === "B" ? "≥1350" : letter === "C" ? "≥1000" : "<1000";
+
+  // Real fix for a real bug flagged live twice ("the graded pop up
+  // explanations are colliding with backgrounds and nearby text and
+  // visuals"): the previous version was absolutely-positioned INSIDE a
+  // table cell, inside this table's own overflow-x-auto scroll wrapper --
+  // ancestor overflow clipping/stacking interacts badly with an
+  // absolutely positioned child meant to float above sibling rows,
+  // regardless of z-index. A position:fixed overlay, positioned from the
+  // button's own real measured screen coordinates, escapes that ancestor
+  // entirely -- it can never be clipped or visually bled-through by
+  // table/row backgrounds again.
+  const openPopover = () => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (rect) {
+      const width = 256; // matches the popover's own w-64
+      setPos({
+        top: rect.bottom + 6,
+        left: Math.min(Math.max(rect.right - width, 8), window.innerWidth - width - 8),
+      });
+    }
+    setOpen((v) => !v);
+  };
+
   return (
     <span className="relative inline-block">
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={openPopover}
         onBlur={() => setOpen(false)}
         aria-expanded={open}
         aria-label={`Grade ${letter}, ${breakdown.score} of 2050 points -- click for the full breakdown`}
@@ -473,10 +499,11 @@ function GradeBadge({ breakdown }: { breakdown: GradeBreakdown }) {
       >
         {letter}
       </button>
-      {open && (
+      {open && pos && (
         <div
           role="tooltip"
-          className="absolute right-0 top-7 z-50 w-64 max-w-[min(16rem,calc(100vw-2rem))] rounded-lg border border-line-strong bg-wood-950 p-3 text-left text-[0.65rem] shadow-2xl ring-1 ring-black/40"
+          className="fixed z-[999] w-64 rounded-lg border border-line-strong bg-wood-950 p-3 text-left text-[0.65rem] opacity-100 shadow-2xl ring-1 ring-black/60"
+          style={{ top: pos.top, left: pos.left, backgroundColor: "#1a1512" }}
         >
           <p className="mb-1.5 font-black uppercase tracking-wide text-foreground/50">
             Grade {letter} · {breakdown.score}/2050 pts
@@ -1300,7 +1327,13 @@ export default function GlobalMarketHub() {
            * columns, same responsive hide/show, same data, same links.
            */}
           <div className="flex items-center justify-between px-1 pb-1.5">
-            <span className="text-[0.6rem] font-black uppercase tracking-wider text-foreground/35">Live rankings</span>
+            <div className="flex items-center gap-3">
+              <span className="text-[0.6rem] font-black uppercase tracking-wider text-foreground/35">Live rankings</span>
+              {/* Real, visible legend for the green checkmark riding inside the Collection column -- flagged live ("check mark column is still unexplained"): a hover-only tooltip isn't visible to a sighted user scanning the table, so this makes the meaning legible without hovering every row. */}
+              <span className="inline-flex items-center gap-1 text-[0.6rem] text-foreground/35">
+                <span className="text-emerald-400">✓</span> = known creator
+              </span>
+            </div>
             <span className="inline-flex items-center gap-1.5 font-mono text-[0.6rem] font-bold uppercase tracking-wider text-emerald-400">
               <span className="live-pulse-dot h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
               Live

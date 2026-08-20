@@ -84,8 +84,16 @@ type UniSatAuctionEntry = {
  * `collectionItemName` per item (e.g. "Bitcoin Frog #2502") -- that last
  * field is real and available even though the response has NO per-token
  * image field at all (contentPreviewURI, assumed by the original version
- * of this function, does not exist in the real response) -- imageUrl stays
- * honestly null rather than guessing a field name.
+ * of this function, does not exist in the real response).
+ *
+ * REAL FIX, not a guessed field name: an inscription's content IS the
+ * artwork itself -- ordinals.com/content/{inscriptionId} is the real,
+ * public, keyless, canonical way to fetch that on-chain content directly
+ * (verified live 2026-08-20: a real tracked Bitcoin Frogs inscriptionId
+ * returned a real 200 image/webp). Already allowlisted in this app's own
+ * image proxy (app/api/ipfs/image/route.ts's ALLOWED_HOSTS). No API call
+ * needed to resolve this -- the URL is fully derivable from the
+ * inscriptionId alone.
  */
 export async function fetchUniSatListings(collectionId: string, limit: number): Promise<SimpleListing[]> {
   const key = requireUnisatApiKey();
@@ -110,7 +118,7 @@ export async function fetchUniSatListings(collectionId: string, limit: number): 
     tokenId: l.inscriptionId,
     maker: l.address,
     priceWei: satsToPriceWei(l.price ?? 0),
-    imageUrl: null,
+    imageUrl: `https://ordinals.com/content/${l.inscriptionId}`,
     name: l.collectionItemName ?? null,
   }));
 }
