@@ -1,6 +1,7 @@
 /**
  * Bounded OpenSea /stats + collection meta refresh for hub ranking cells.
  * Never fabricates volume/sales/floor. One contract at a time; callers cap fan-out.
+ * af1fc7f: OpenSea credential is `openSeaApiKey` only — never a second `const key`.
  */
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
@@ -35,9 +36,9 @@ function toWei(v: number | undefined): string | null {
 async function refreshCoinGeckoByContract(chainSlug: string, contractAddress: string): Promise<boolean> {
   const platform = CG_PLATFORM[chainSlug];
   if (!platform) return false;
-  const key = process.env.COINGECKO_API_KEY?.trim();
-  const headers: Record<string, string> = key
-    ? { accept: "application/json", "x-cg-demo-api-key": key }
+  const cgDemoKey = process.env.COINGECKO_API_KEY?.trim();
+  const headers: Record<string, string> = cgDemoKey
+    ? { accept: "application/json", "x-cg-demo-api-key": cgDemoKey }
     : { accept: "application/json" };
   const res = await fetch(
     `https://api.coingecko.com/api/v3/nfts/${platform}/contract/${encodeURIComponent(contractAddress)}`,
@@ -114,8 +115,9 @@ export async function refreshOpenSeaStatsForContract(
   const slug = identJson.collection;
   if (!slug) return { ok: cgFirst };
 
+  const osHeaders = { "x-api-key": openSeaApiKey, accept: "application/json" };
   const metaRes = await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}`, {
-    headers: { "x-api-key": openSeaApiKey, accept: "application/json" },
+    headers: osHeaders,
     signal: AbortSignal.timeout(15_000),
   });
   const meta = metaRes.ok
@@ -145,7 +147,7 @@ export async function refreshOpenSeaStatsForContract(
   }
 
   const stats = (await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}/stats`, {
-    headers: { "x-api-key": openSeaApiKey, accept: "application/json" },
+    headers: osHeaders,
     signal: AbortSignal.timeout(15_000),
   })
     .then((r) => (r.ok ? r.json() : null))
