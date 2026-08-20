@@ -209,6 +209,7 @@ type TrackedCollection = {
   chainSlug: string;
   chainId: number | null;
   contractAddress: string;
+  adapter?: string | null;
   name: string | null;
   imageUrl: string | null;
   isVaultBacked: boolean;
@@ -495,13 +496,32 @@ function hasUsableCells(c: TrackedCollection): boolean {
   if (c.sales24h != null && c.sales24h > 0) return true;
   if (c.holderCount != null && c.holderCount > 0) return true;
   if (c.totalSupply != null && c.totalSupply > 0) return true;
+  if (c.recentActivity > 0) return true;
+  if (c.imageUrl) return true;
   return false;
 }
 
-/** Hide hex/empty titles only when every economic cell is empty. Never drop a row that already has floor/listed/volume/holders. */
+const CATALOG_ADAPTERS = new Set([
+  "unisat-collections",
+  "ordiscan-ordinals",
+  "magiceden-solana",
+  "helius-solana",
+]);
+
+/** UniSat collectionId / ME symbol / Solana mint are the collection — not missing titles. */
+function isCatalogSourced(c: TrackedCollection): boolean {
+  if (c.chainSlug === "solana-mainnet" || c.chainSlug === "bitcoin-mainnet") return true;
+  if (c.adapter && CATALOG_ADAPTERS.has(c.adapter)) return true;
+  const a = c.contractAddress ?? "";
+  if (a && !/^0x[0-9a-fA-F]{40}$/i.test(a)) return true;
+  return false;
+}
+
+/** Hide EVM hex/empty shells with no cells. Never drop catalog (UniSat/ME/Helius) or rows with floor/listed/volume/holders/activity. */
 function isTitleJunkWithoutData(c: TrackedCollection): boolean {
   if (isHomeRow(c)) return false;
   if (isSpamCollectionTitle(c.name)) return true;
+  if (isCatalogSourced(c)) return false;
   const junk = looksLikeContractName(c.name || displayName(c)) || !(c.name ?? "").trim();
   if (!junk) return false;
   return !hasUsableCells(c);
