@@ -131,7 +131,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   /** Real listed-count/total-supply/holder-count from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. holderCount is EVM-only (Alchemy getOwnersForContract) and may arrive later than the rest via the on-demand /api/market/multichain/holder-count backfill below. */
-  const [supplyStats, setSupplyStats] = useState<{ listedCount: number | null; totalSupply: number | null; holderCount: number | null } | null>(null);
+  const [supplyStats, setSupplyStats] = useState<{
+    listedCount: number | null;
+    totalSupply: number | null;
+    holderCount: number | null;
+    floorPriceWei: string | null;
+  } | null>(null);
   // Real OpenSea 24h/7d/30d volume/sales (rarity-index-runner.ts, EVM-only
   // -- Solana/Bitcoin/Robinhood-native branches of the listings route always
   // resolve these to null, honestly, since neither Magic Eden's nor
@@ -331,6 +336,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           volume30dWei: string | null;
           sales30d: number | null;
           holderCount: number | null;
+          floorPriceWei?: string | null;
         };
         listings: Listing[];
         listingsUnavailable?: string | null;
@@ -357,7 +363,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         royaltyBps: 0,
         royaltyRecipient: "0x0000000000000000000000000000000000000000",
       });
-      setSupplyStats({ listedCount: data.collection.listedCount, totalSupply: data.collection.totalSupply, holderCount: data.collection.holderCount });
+      setSupplyStats({
+        listedCount: data.collection.listedCount,
+        totalSupply: data.collection.totalSupply,
+        holderCount: data.collection.holderCount,
+        floorPriceWei: data.collection.floorPriceWei ?? null,
+      });
       // Real, on-demand backfill: if this collection has never had a holder
       // count computed, fetch one now (see holder-count/route.ts's own
       // header for why this is on-demand-per-view, never bulk sync). Fire-
@@ -1332,7 +1343,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // real sale events in the activity feed (bounded to whatever activity/
   // route.ts returned, same honesty as everywhere else here -- this is
   // "volume in the loaded window," not an all-time indexed total).
-  const floorWei = listings.length > 0 ? listings.reduce((min, l) => (BigInt(l.priceWei) < BigInt(min) ? l.priceWei : min), listings[0].priceWei) : null;
+  const floorWei =
+    listings.length > 0
+      ? listings.reduce((min, l) => (BigInt(l.priceWei) < BigInt(min) ? l.priceWei : min), listings[0].priceWei)
+      : supplyStats?.floorPriceWei ?? null;
   // Real max across BOTH sources merged by this route (native offers first,
   // then OpenSea-sourced offers -- see offers/route.ts's header) -- offers[0]
   // alone was wrong whenever a native offer existed alongside a higher-priced
@@ -1341,7 +1355,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // Solana/Bitcoin, where no real collection-wide bids source exists yet.
   const bestOfferWei = offers.length > 0 ? offers.reduce((max, o) => (BigInt(o.priceWei) > BigInt(max) ? o.priceWei : max), offers[0].priceWei) : null;
   const saleEvents = activity.filter((e) => e.type === "sale" && e.priceWei);
-  const volumeWei = saleEvents.length > 0 ? saleEvents.reduce((sum, e) => sum + BigInt(e.priceWei!), BigInt(0)).toString() : null;
+  const volumeWei =
+    saleEvents.length > 0
+      ? saleEvents.reduce((sum, e) => sum + BigInt(e.priceWei!), BigInt(0)).toString()
+      : marketStatsWindow === "7d"
+        ? marketStats?.volume7dWei ?? null
+        : marketStatsWindow === "30d"
+          ? marketStats?.volume30dWei ?? null
+          : marketStats?.volume24hWei ?? null;
   const highestSaleWei = saleEvents.length > 0 ? saleEvents.reduce((max, e) => (BigInt(e.priceWei!) > BigInt(max) ? e.priceWei! : max), saleEvents[0].priceWei!) : null;
   const statCurrencySymbol = nativeCurrencySymbol(chainSlug, isSolana, isBitcoin);
   const statUsd = (weiStr: string | null): number | null => toUsd(weiStr, statCurrencySymbol);
@@ -1361,7 +1382,9 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             {collection.name}
           </h2>
           <p className="text-xs text-foreground/50">
-            {listings.length} listing{listings.length === 1 ? "" : "s"} on {chainDisplayName(chainSlug)}
+            {listingsUnavailable && supplyStats?.listedCount != null
+              ? `${supplyStats.listedCount.toLocaleString()} listed on ${chainDisplayName(chainSlug)} · live book temporarily unavailable`
+              : `${listings.length} listing${listings.length === 1 ? "" : "s"} on ${chainDisplayName(chainSlug)}`}
           </p>
             </div>
           </div>
@@ -1497,7 +1520,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
       <MarketTabPanel id="buy-sell" active={tab === "buy-sell"}>
         <MarketBrowseLayout
-          summary={`${filteredListings.length} ${filteredListings.length === 1 ? "item" : "items"} on ${chainDisplayName(chainSlug)}`}
+          summary={
+            listingsUnavailable && supplyStats?.listedCount != null
+              ? `${supplyStats.listedCount.toLocaleString()} listed on ${chainDisplayName(chainSlug)}`
+              : `${filteredListings.length} ${filteredListings.length === 1 ? "item" : "items"} on ${chainDisplayName(chainSlug)}`
+          }
           lead={
             rarityMap.size > 0 && listings.length > 0 ? (
               <RarityFloorStrip
@@ -1530,7 +1557,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               <div className="flex gap-2">
                 <div className="flex-1">
                   <label htmlFor="mc-min" className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
-                    Min Ξ
+                    Min {isBitcoin ? "BTC" : isSolana ? "SOL" : chainSlug === "bnb-mainnet" ? "BNB" : chainSlug === "avax-mainnet" ? "AVAX" : "ETH"}
                   </label>
                   <input
                     id="mc-min"
@@ -1545,7 +1572,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 </div>
                 <div className="flex-1">
                   <label htmlFor="mc-max" className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
-                    Max Ξ
+                    Max {isBitcoin ? "BTC" : isSolana ? "SOL" : chainSlug === "bnb-mainnet" ? "BNB" : chainSlug === "avax-mainnet" ? "AVAX" : "ETH"}
                   </label>
                   <input
                     id="mc-max"
@@ -1680,7 +1707,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   min="0"
                   value={combinedBudgetEth}
                   onChange={(e) => setCombinedBudgetEth(e.target.value)}
-                  placeholder="Budget Ξ"
+                  placeholder={`Budget ${isBitcoin ? "BTC" : isSolana ? "SOL" : chainSlug === "bnb-mainnet" ? "BNB" : chainSlug === "avax-mainnet" ? "AVAX" : "ETH"}`}
                   aria-label="Combined buy+offer budget"
                   className="min-h-10 w-20 rounded-md border border-line bg-panel px-2 text-xs text-foreground placeholder:text-foreground/30"
                 />

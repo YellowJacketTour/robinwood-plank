@@ -95,9 +95,8 @@ type UniSatAuctionEntry = {
  * needed to resolve this -- the URL is fully derivable from the
  * inscriptionId alone.
  */
-export async function fetchUniSatListings(collectionId: string, limit: number): Promise<SimpleListing[]> {
-  const key = requireUnisatApiKey();
-  const res = await fetch(`${UNISAT_API_BASE}/collection/auction/list`, {
+async function postUniSatAuctionList(key: string, collectionId: string, limit: number): Promise<Response> {
+  return fetch(`${UNISAT_API_BASE}/collection/auction/list`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: JSON.stringify({
@@ -107,6 +106,15 @@ export async function fetchUniSatListings(collectionId: string, limit: number): 
       sort: {},
     }),
   });
+}
+
+export async function fetchUniSatListings(collectionId: string, limit: number): Promise<SimpleListing[]> {
+  const key = requireUnisatApiKey();
+  let res = await postUniSatAuctionList(key, collectionId, limit);
+  if (res.status === 403) {
+    await new Promise((r) => setTimeout(r, 1500));
+    res = await postUniSatAuctionList(key, collectionId, limit);
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`solana-bitcoin-listings: UniSat ${res.status} ${res.statusText} -- ${body.slice(0, 200)}`);

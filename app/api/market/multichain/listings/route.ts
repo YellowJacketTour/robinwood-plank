@@ -64,6 +64,7 @@ async function collectionEnvelope(
     listedCount: supply?.listedCount ?? null,
     totalSupply: supply?.totalSupply ?? null,
     holderCount: supply?.holderCount ?? null,
+    floorPriceWei: supply?.floorPriceWei ?? null,
     volume24hWei: marketStats?.volume24hWei ?? null,
     sales24h: marketStats?.sales24h ?? null,
     volume7dWei: marketStats?.volume7dWei ?? null,

@@ -512,9 +512,14 @@ export async function updateHolderCount(chainSlug: string, contractAddress: stri
 export async function getCollectionSupplyStats(
   chainSlug: string,
   contractAddress: string
-): Promise<{ listedCount: number | null; totalSupply: number | null; holderCount: number | null } | null> {
-  const result = await postgresQuery<{ total_supply: string | null; listed_count: number | null; holder_count: number | null }>(
-    `SELECT s.total_supply, s.listed_count, s.holder_count
+): Promise<{ listedCount: number | null; totalSupply: number | null; holderCount: number | null; floorPriceWei: string | null } | null> {
+  const result = await postgresQuery<{
+    total_supply: string | null;
+    listed_count: number | null;
+    holder_count: number | null;
+    floor_price_wei: string | null;
+  }>(
+    `SELECT s.total_supply, s.listed_count, s.holder_count, s.floor_price_wei
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
      WHERE c.chain_slug = $1 AND c.contract_address = $2
@@ -527,6 +532,7 @@ export async function getCollectionSupplyStats(
     totalSupply: row.total_supply == null ? null : Number(row.total_supply),
     listedCount: row.listed_count,
     holderCount: row.holder_count,
+    floorPriceWei: row.floor_price_wei,
   };
 }
 
