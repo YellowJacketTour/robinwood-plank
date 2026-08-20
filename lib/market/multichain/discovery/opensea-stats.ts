@@ -22,7 +22,7 @@ import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/l
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { postgresQuery } from "@/lib/postgres";
-import { updateCollectionMarketStats, updateCollectionFloorOnly, updateCollectionDisplay } from "@/lib/market/multichain/store";
+import { updateCollectionMarketStats, updateCollectionFloorOnly, updateCollectionDisplay, updateCollectionSupplyFields } from "@/lib/market/multichain/store";
 import { durableKv as kv } from "@/lib/market/durable-kv";
 
 const SOURCE = "opensea-stats";
@@ -45,6 +45,7 @@ export type OpenSeaCollectionStats = {
 export type OpenSeaCollectionDisplay = {
   name: string | null;
   imageUrl: string | null;
+  totalSupply: number | null;
 };
 
 /** True when OpenSea's own `name` is just the contract (ONESHOT Avalanche pattern) — never store that as a collection title. */
@@ -189,18 +190,72 @@ export async function fetchOpenSeaCollectionDisplay(slug: string, apiKey: string
     return null;
   }
 
-  let body: { name?: string | null; image_url?: string | null };
+  let body: { name?: string | null; image_url?: string | null; total_supply?: number | null };
   try {
-    body = (await res.json()) as { name?: string | null; image_url?: string | null };
+    body = (await res.json()) as { name?: string | null; image_url?: string | null; total_supply?: number | null };
   } catch {
     recordSourceFailure(SOURCE, false);
     return null;
   }
   recordSourceSuccess(SOURCE);
+  const supply = body.total_supply;
   return {
     name: sanitizeOpenSeaCollectionName(body.name),
     imageUrl: sanitizeOpenSeaImageUrl(body.image_url),
+    totalSupply: typeof supply === "number" && Number.isFinite(supply) && supply > 0 ? Math.round(supply) : null,
   };
+}
+
+const MAX_LISTING_PAGES = 20;
+const LISTING_PAGE_SIZE = 50;
+
+/**
+ * Unique tokens with an active OpenSea listing. Exact only when pagination
+ * finishes (no `next`). Truncated walks return null so a partial page is
+ * never stored as if it were the full listed count.
+ */
+export async function fetchOpenSeaListedCount(slug: string, apiKey: string): Promise<number | null> {
+  const unique = new Set<string>();
+  let cursor: string | null = null;
+  for (let page = 0; page < MAX_LISTING_PAGES; page++) {
+    const gate = checkSourceBudget(SOURCE);
+    if (!gate.allowed) return null;
+    const qs = new URLSearchParams({ limit: String(LISTING_PAGE_SIZE) });
+    if (cursor) qs.set("next", cursor);
+    let res: Response;
+    try {
+      res = await fetch(`${OPENSEA_BASE}/listings/collection/${encodeURIComponent(slug)}/all?${qs}`, {
+        headers: { "x-api-key": apiKey, accept: "application/json" },
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch {
+      recordSourceFailure(SOURCE, false);
+      return null;
+    }
+    if (!res.ok) {
+      const bodyText = await res.text().catch(() => "");
+      recordSourceFailure(SOURCE, isQuotaError(res.status, bodyText));
+      return null;
+    }
+    let body: {
+      listings?: Array<{ protocol_data?: { parameters?: { offer?: Array<{ identifierOrCriteria?: string }> } } }>;
+      next?: string | null;
+    };
+    try {
+      body = (await res.json()) as typeof body;
+    } catch {
+      recordSourceFailure(SOURCE, false);
+      return null;
+    }
+    recordSourceSuccess(SOURCE);
+    for (const listing of body.listings ?? []) {
+      const tokenId = listing.protocol_data?.parameters?.offer?.[0]?.identifierOrCriteria;
+      if (tokenId) unique.add(tokenId);
+    }
+    cursor = body.next ?? null;
+    if (!cursor) return unique.size;
+  }
+  return null;
 }
 
 function slugCacheKey(chainSlug: string, contractAddress: string): string {
@@ -249,6 +304,7 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
        OR s.synced_at < NOW() - INTERVAL '6 hours'
        OR c.name IS NULL
        OR c.image_url IS NULL
+       OR s.listed_count IS NULL
      )
      ORDER BY c.id
      LIMIT $3`,
@@ -301,6 +357,15 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
         imageUrl: display.imageUrl,
       }).then(() => {
         result.displayUpdated += 1;
+      }).catch(() => {
+        result.errors += 1;
+      });
+    }
+    const listedCount = await fetchOpenSeaListedCount(slug, apiKey);
+    if (listedCount != null || display?.totalSupply != null) {
+      await updateCollectionSupplyFields(chainSlug, row.contract_address, {
+        listedCount,
+        totalSupply: display?.totalSupply ?? null,
       }).catch(() => {
         result.errors += 1;
       });

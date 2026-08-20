@@ -326,6 +326,31 @@ export async function updateCollectionFloorOnly(
   );
 }
 
+/** Write a real listed-count and/or total-supply without clobbering the other, or floor. 0 is a real count (nothing listed), null means skip that column. */
+export async function updateCollectionSupplyFields(
+  chainSlug: string,
+  contractAddress: string,
+  supply: { listedCount: number | null; totalSupply: number | null }
+): Promise<void> {
+  if (supply.listedCount == null && supply.totalSupply == null) return;
+  const collection = await postgresQuery<{ id: number }>(
+    `SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
+    [chainSlug, normalizeContractAddress(chainSlug, contractAddress)]
+  );
+  const id = collection.rows[0]?.id;
+  if (!id) return;
+  await postgresQuery(
+    `INSERT INTO plank_multichain_snapshots
+       (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error)
+     VALUES ($1, NULL, NULL, NULL, $2, $3, NULL, NOW(), NULL)
+     ON CONFLICT (collection_id) DO UPDATE SET
+       total_supply = COALESCE(EXCLUDED.total_supply, plank_multichain_snapshots.total_supply),
+       listed_count = COALESCE(EXCLUDED.listed_count, plank_multichain_snapshots.listed_count),
+       synced_at = NOW()`,
+    [id, supply.totalSupply, supply.listedCount]
+  );
+}
+
 /** Write a fresh snapshot for a collection, and refresh its display fields. */
 export async function writeSnapshot(
   collectionId: number,
@@ -359,8 +384,8 @@ export async function writeSnapshot(
        floor_price_wei = EXCLUDED.floor_price_wei,
        floor_price_currency = EXCLUDED.floor_price_currency,
        floor_price_marketplace = EXCLUDED.floor_price_marketplace,
-       total_supply = EXCLUDED.total_supply,
-       listed_count = EXCLUDED.listed_count,
+       total_supply = COALESCE(EXCLUDED.total_supply, plank_multichain_snapshots.total_supply),
+       listed_count = COALESCE(EXCLUDED.listed_count, plank_multichain_snapshots.listed_count),
        holder_count = COALESCE(EXCLUDED.holder_count, plank_multichain_snapshots.holder_count),
        synced_at = NOW(),
        sync_error = NULL`,
