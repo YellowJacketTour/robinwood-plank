@@ -102,11 +102,11 @@ export async function refreshOpenSeaStatsForContract(
 
   const osChain = openSeaChainFor(chainSlug);
   if (!osChain) return { ok: cgFirst };
-  const key = await getOpenSeaApiKey();
-  if (!key) return { ok: cgFirst };
+  const openSeaApiKey = await getOpenSeaApiKey();
+  if (!openSeaApiKey) return { ok: cgFirst };
 
   const ident = await fetch(`https://api.opensea.io/api/v2/chain/${osChain}/contract/${contractAddress}`, {
-    headers: { "x-api-key": key, accept: "application/json" },
+    headers: { "x-api-key": openSeaApiKey, accept: "application/json" },
     signal: AbortSignal.timeout(15_000),
   });
   if (!ident.ok) return { ok: cgFirst };
@@ -115,7 +115,7 @@ export async function refreshOpenSeaStatsForContract(
   if (!slug) return { ok: cgFirst };
 
   const metaRes = await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}`, {
-    headers: { "x-api-key": key, accept: "application/json" },
+    headers: { "x-api-key": openSeaApiKey, accept: "application/json" },
     signal: AbortSignal.timeout(15_000),
   });
   const meta = metaRes.ok
@@ -145,7 +145,7 @@ export async function refreshOpenSeaStatsForContract(
   }
 
   const stats = (await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}/stats`, {
-    headers: { "x-api-key": key, accept: "application/json" },
+    headers: { "x-api-key": openSeaApiKey, accept: "application/json" },
     signal: AbortSignal.timeout(15_000),
   })
     .then((r) => (r.ok ? r.json() : null))
