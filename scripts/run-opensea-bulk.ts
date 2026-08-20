@@ -6,12 +6,22 @@ import { runOpenSeaBulkScan } from "../lib/market/multichain/discovery/opensea-b
 import { FOREIGN_CHAINS } from "../lib/market/multichain/trading/foreign-chain-registry";
 import { hasPostgresConfig, postgresPool } from "../lib/postgres";
 
-const want = process.argv.slice(2);
+const argv = process.argv.slice(2);
+const reset = argv.includes("--reset");
+const want = argv.filter((a) => a !== "--reset");
 const chains = FOREIGN_CHAINS.filter(
   (c) => c.openSeaChain && (want.length === 0 || want.includes(c.chainSlug))
 );
 
 async function main(): Promise<void> {
+  if (reset) {
+    const { durableKv } = await import("../lib/market/durable-kv");
+    for (const c of chains) {
+      await durableKv.set(`plank:market:opensea-bulk-scan-cursor-v2:${c.chainSlug}`, null);
+      await durableKv.set(`plank:market:opensea-stats-cursor:${c.chainSlug}`, 0);
+      console.log(`[reset] cursors ${c.chainSlug}`);
+    }
+  }
   for (const c of chains) {
     const r = await runOpenSeaBulkScan({
       chainSlug: c.chainSlug,

@@ -47,10 +47,11 @@ async function main(): Promise<void> {
 
   if (want("evm-opensea-stats") && remaining()) {
     const osChains = FOREIGN_CHAINS.filter((x) => x.openSeaChain);
-    const ordered = [
-      ...chainPriority.map((slug) => osChains.find((c) => c.chainSlug === slug)).filter((c): c is (typeof osChains)[number] => Boolean(c)),
-      ...osChains.filter((c) => !chainPriority.includes(c.chainSlug)),
-    ];
+    const ordered = chainPriority.length
+      ? chainPriority
+          .map((slug) => osChains.find((c) => c.chainSlug === slug))
+          .filter((c): c is (typeof osChains)[number] => Boolean(c))
+      : osChains;
     for (const c of ordered) {
       if (!remaining()) break;
       try {
