@@ -131,7 +131,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>>([]);
-  const [bookFilter, setBookFilter] = useState<"all" | "listed">("all");
+  const [bookFilter, setBookFilter] = useState<"all" | "listed">(() => (searchParams.get("show") === "all" ? "all" : "listed"));
   /** Real listed-count/total-supply/holder-count from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. holderCount is EVM-only (Alchemy getOwnersForContract) and may arrive later than the rest via the on-demand /api/market/multichain/holder-count backfill below. */
   const [supplyStats, setSupplyStats] = useState<{
     listedCount: number | null;
@@ -195,7 +195,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // pre-computed information-content rank from index-foreign-rarity.ts --
   // never fabricated, and only offered once rarityMap is actually
   // populated for this collection, see the rarityMap effect's own header).
-  const [listingSort, setListingSort] = useState<ListingSort>(() => (searchParams.get("sort") as ListingSort) || "default");
+  const [listingSort, setListingSort] = useState<ListingSort>(() => (searchParams.get("sort") as ListingSort) || "price-asc");
 
   const [buyTarget, setBuyTarget] = useState<Listing | null>(null);
   const [buyBusy, setBuyBusy] = useState(false);
@@ -1052,11 +1052,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     if (maxPriceEth.trim()) params.set("max", maxPriceEth.trim());
     if (traitClauses.length > 0) params.set("traits", JSON.stringify(selectedTraits));
     if (activeTier !== "all") params.set("tier", activeTier);
-    if (listingSort !== "default") params.set("sort", listingSort);
+    if (listingSort !== "price-asc") params.set("sort", listingSort);
+    if (bookFilter !== "listed") params.set("show", bookFilter);
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- router/pathname are stable per Next.js contract.
-  }, [searchQuery, minPriceEth, maxPriceEth, selectedTraits, traitClauses.length, activeTier, listingSort]);
+  }, [searchQuery, minPriceEth, maxPriceEth, selectedTraits, traitClauses.length, activeTier, listingSort, bookFilter]);
 
   const openSweepPreview = useCallback(async () => {
     setError(null);
@@ -1397,7 +1398,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     maxPriceEth.trim() !== "" ||
     traitClauses.length > 0 ||
     activeTier !== "all" ||
-    listingSort !== "default";
+    listingSort !== "price-asc" ||
+    bookFilter !== "listed";
 
   // STAT BAR -- real numbers derived from data already loaded for this
   // page (no new API surface): floor = cheapest active listing, best offer
@@ -1687,7 +1689,6 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 <div className="flex flex-wrap gap-1.5">
                   {(
                     [
-                      { v: "default", label: "Default" },
                       { v: "price-asc", label: "Price ↑" },
                       { v: "price-desc", label: "Price ↓" },
                       ...(rarityMap.size > 0
@@ -1751,7 +1752,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                     setMaxPriceEth("");
                     setSelectedTraits({});
                     setActiveTier("all");
-                    setListingSort("default");
+                    setListingSort("price-asc");
+                    setBookFilter("listed");
                   }}
                   className="min-h-10 w-full rounded-md border border-line px-3 text-xs font-bold text-foreground/60 hover:border-gold-400 hover:text-gold-300"
                 >
