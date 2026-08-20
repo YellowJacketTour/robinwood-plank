@@ -14,10 +14,20 @@
 
 const INSCRIPTION_ID = /(?:inscription\/preview|content)\/([0-9a-f]+i[0-9]+)/i;
 
+/** Same-origin static/proxy paths, ipfs, or http(s). Relative `/images/plank-logo.webp` is RobinWood home art. */
+export function isRenderableArtUrl(url: string): boolean {
+  const t = url.trim();
+  if (!t || t.toLowerCase() === "null" || t.toLowerCase() === "undefined") return false;
+  if (t.startsWith("/") && !t.startsWith("//")) return true;
+  if (t.startsWith("ipfs://")) return true;
+  if (t.startsWith("data:image/")) return true;
+  return /^https?:\/\//i.test(t);
+}
+
 function pushUnique(out: string[], url: string | null | undefined): void {
   if (!url) return;
   const t = url.trim();
-  if (!t || t.toLowerCase() === "null" || !/^https?:\/\//i.test(t)) return;
+  if (!isRenderableArtUrl(t)) return;
   if (!out.includes(t)) out.push(t);
 }
 
@@ -57,6 +67,12 @@ export function imageSrcFallbacks(src: string | null | undefined): string[] {
   }
 
   try {
+    if (!/^https?:\/\//i.test(original)) {
+      pushUnique(low, original);
+      const outEarly: string[] = [];
+      for (const u of [...high, ...mid, ...low]) pushUnique(outEarly, u);
+      return outEarly.length ? outEarly : isRenderableArtUrl(original) ? [original] : [];
+    }
     const parsed = new URL(original);
     const host = parsed.hostname.toLowerCase();
     if (host.endsWith("seadn.io") || host.endsWith("openseauserdata.com") || host === "i2.seadn.io") {
