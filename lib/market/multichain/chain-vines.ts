@@ -49,14 +49,14 @@ export const CHAIN_VINES: ChainVine[] = [
   {
     chainSlug: "bnb-mainnet",
     acquire: ["opensea-bulk bsc|bnb", "do not treat inactive OS NFTs as a book"],
-    harness: ["opensea-stats only when slug stats 200", "CG binance-smart-chain exact"],
+    harness: ["opensea-stats only when slug stats 200", "CG binance-smart-chain exact (cron coingecko-bnb-stats)"],
     express: ["OS-listed collections get floors; 1CAKE-class stay dash"],
     never: ["Alchemy NFT API", "invented BNB floors"],
   },
   {
     chainSlug: "avax-mainnet",
     acquire: ["opensea-bulk avalanche", "hypersync Transfer tally as recentActivity"],
-    harness: ["opensea-stats", "keep rows with holders or transfers even if hex title"],
+    harness: ["opensea-stats", "CG avalanche exact (cron coingecko-avax-stats)", "keep rows with holders or transfers even if hex title"],
     express: ["catalog count includes activity-backed rows; OS names overlay hex"],
     never: ["delete 3k hypersync rows", "Alchemy NFT API"],
   },

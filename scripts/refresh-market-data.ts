@@ -103,8 +103,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats", "coingecko-bnb-stats", "coingecko-avax-stats"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -680,6 +680,17 @@ async function main(): Promise<void> {
   await step("coingecko-bitcoin-stats", async () => {
     const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
     const r = await runCoinGeckoNftStats("bitcoin-mainnet", full ? 100 : 20);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  // BNB OpenSea list slugs 404 /stats (pancake-squad zeros). Exact-contract CG is the liquid book.
+  await step("coingecko-bnb-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("bnb-mainnet", full ? 80 : 15);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-avax-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("avax-mainnet", full ? 80 : 15);
     return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
   });
 
