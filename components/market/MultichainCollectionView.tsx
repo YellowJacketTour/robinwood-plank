@@ -19,7 +19,7 @@ import NativeSolanaListForm from "@/components/market/NativeSolanaListForm";
 import NativeForeignOfferForm from "@/components/market/NativeForeignOfferForm";
 import NativeBundleListForm from "@/components/market/NativeBundleListForm";
 import NativeSwapForm from "@/components/market/NativeSwapForm";
-import { normalizeRarityTier, TIER_ORDER } from "@/lib/rarity";
+import { normalizeRarityTier, TIER_ORDER, tierCardStyle, tierGlow, tierAnimationClass } from "@/lib/rarity";
 import FilterBar, { type MarketFilters } from "@/components/market/FilterBar";
 import { SWEEP_MAX } from "@/lib/market/sweep";
 import TraitCriteriaPicker from "@/components/market/TraitCriteriaPicker";
@@ -1051,6 +1051,20 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     return rows;
   }, [listings, searchQuery, minPriceEth, maxPriceEth, traitClauses, activeTier, activeTiers, rarityMap, listingSort]);
 
+  const rarityFor = useCallback(
+    (tokenId: string) => {
+      const hit = rarityMap.get(tokenId);
+      if (hit) return hit;
+      try {
+        const n = BigInt(tokenId).toString();
+        return rarityMap.get(n) ?? rarityMap.get(tokenId.replace(/^0+/, "") || "0");
+      } catch {
+        return rarityMap.get(tokenId.toLowerCase());
+      }
+    },
+    [rarityMap]
+  );
+
   const listingByToken = useMemo(() => {
     const map = new Map<string, Listing>();
     for (const l of filteredListings) map.set(l.tokenId, l);
@@ -1921,8 +1935,9 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             </div>
           ) : (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              {browseItems.map((item) =>
-                item.listing ? (
+              {browseItems.map((item) => {
+                const pieceRarity = rarityFor(item.tokenId);
+                return item.listing ? (
                 <ListingCard
                   key={item.listing.id}
                   listing={item.listing}
@@ -1930,18 +1945,30 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   onBuy={(l) => void handleBuy(l)}
                   onOffer={foreignOfferCurrency(chainSlug) || isSolana ? (l) => void openOffer(l) : undefined}
                   onSelect={(tokenId) => void openDetails(tokenId)}
-                  rarity={rarityMap.get(item.listing.tokenId)}
+                  rarity={pieceRarity}
                   currencySymbol={statCurrencySymbol}
                   chainSlug={chainSlug}
                   usdValue={statUsd(item.listing.priceWei)}
                   isFloor={Boolean(floorWei) && item.listing.priceWei === floorWei}
                 />
                 ) : (
-                  <li key={item.tokenId} className="overflow-hidden rounded-lg border border-line bg-panel">
+                  <li
+                    key={item.tokenId}
+                    className={`overflow-hidden rounded-lg border bg-panel ${pieceRarity ? tierAnimationClass(pieceRarity.tier) : "border-line"}`}
+                    style={pieceRarity ? { ...tierCardStyle(pieceRarity.tier), boxShadow: tierGlow(pieceRarity.tier) } : undefined}
+                  >
                     <div className="relative aspect-square bg-wood-900">
                       {item.imageUrl ? (
                         <Image src={item.imageUrl} alt="" fill sizes="200px" className="object-cover" unoptimized />
                       ) : null}
+                      {pieceRarity && (
+                        <span
+                          className="tier-badge absolute left-2 top-2 rounded-full px-2 py-1 text-[0.55rem] font-black uppercase tracking-wide"
+                          style={{ color: tierColor(pieceRarity.tier) }}
+                        >
+                          {pieceRarity.tier}
+                        </span>
+                      )}
                     </div>
                     <div className="space-y-1 p-2">
                       <p className="truncate text-xs font-bold text-foreground">{item.name ?? `#${item.tokenId.slice(0, 8)}`}</p>
@@ -1966,8 +1993,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                       </div>
                     </div>
                   </li>
-                )
-              )}
+                );
+              })}
             </ul>
           )}
         </MarketBrowseLayout>
@@ -2253,7 +2280,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                         buyLabel={acceptingOrderHash === o.orderHash ? "Confirm…" : "Accept"}
                         canFill={acceptingOrderHash !== o.orderHash}
                         onBuy={() => void handleAcceptOffer(o)}
-                        rarity={rarityMap.get(o.tokenId!)}
+                        rarity={rarityFor(o.tokenId!)}
                         currencySymbol={statCurrencySymbol}
                         chainSlug={chainSlug}
                         usdValue={statUsd(o.priceWei)}
@@ -2301,13 +2328,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               <ul className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2">
                 {ownedItems.map((item) => {
                   const isSelected = selectedForSend.has(item.tokenId);
-                  const r = rarityMap.get(item.tokenId);
+                  const r = rarityFor(item.tokenId);
                   return (
                     <li
                       key={item.tokenId}
-                      className={`dense-card relative flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-line-strong ${
+                      className={`dense-card relative flex flex-col overflow-hidden p-0 transition-[transform,border-color] duration-150 hover:-translate-y-0.5 ${
                         isSelected ? "ring-2 ring-gold-400" : ""
-                      }`}
+                      } ${r ? tierAnimationClass(r.tier) : ""}`}
+                      style={r ? { ...tierCardStyle(r.tier), boxShadow: tierGlow(r.tier) } : undefined}
                     >
                       <button
                         type="button"
