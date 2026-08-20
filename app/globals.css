@@ -27,6 +27,7 @@
   --accent-l-500: 59%;
   --accent-l-400: 66%;
   --accent-l-300: 77%;
+  --melt-bias: 0.35;
 
   /*
    * "Totality" base tones -- flagged live 2026-08-19 ("we need themes for
@@ -280,6 +281,39 @@ body :where(.bg-gold-500, .bg-gold-400):not([data-market-shell] *) {
       hsl(var(--base-h) var(--base-s) 7%) 62%,
       hsl(var(--base-h) var(--base-s) 4%)
     );
+}
+
+/* Disco / opal oil-slick on the page itself so every route (not only
+   AppBackdrop pages) can melt. Spread collapses toward --accent-h as
+   --melt-bias goes 0 → 1. Reduced motion = static. */
+html[data-melt="1"] body::before {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  --spread: calc(180deg * (1 - var(--melt-bias, 0.35)));
+  opacity: 0.38;
+  mix-blend-mode: screen;
+  background:
+    radial-gradient(ellipse 70% 55% at 18% 22%, hsl(calc(var(--accent-h) + var(--spread) * 0.15) 85% 58% / 0.55), transparent 58%),
+    radial-gradient(ellipse 60% 50% at 82% 18%, hsl(calc(var(--accent-h) + var(--spread) * 0.55) 80% 52% / 0.5), transparent 55%),
+    radial-gradient(ellipse 80% 60% at 50% 88%, hsl(calc(var(--accent-h) - var(--spread) * 0.4) 75% 48% / 0.45), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 8% 78%, hsl(calc(var(--accent-h) + var(--spread) * 0.9) 90% 60% / 0.4), transparent 50%),
+    conic-gradient(from 210deg at 50% 40%,
+      hsl(calc(var(--accent-h)) 70% 45% / 0.2),
+      hsl(calc(var(--accent-h) + var(--spread) * 0.33) 80% 50% / 0.25),
+      hsl(calc(var(--accent-h) + var(--spread) * 0.66) 75% 48% / 0.2),
+      hsl(calc(var(--accent-h)) 70% 45% / 0.2));
+  background-size: 140% 140%;
+  animation: disco-drift 32s ease-in-out infinite;
+}
+@keyframes disco-drift {
+  0%, 100% { background-position: 0% 20%, 100% 0%, 50% 100%, 0% 80%, 40% 30%; filter: hue-rotate(0deg); }
+  50% { background-position: 40% 60%, 60% 40%, 30% 20%, 70% 90%, 55% 50%; filter: hue-rotate(calc(40deg * (1 - var(--melt-bias, 0.35)))); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-melt="1"] body::before { animation: none; filter: none; }
 }
 
 .wood-frame {

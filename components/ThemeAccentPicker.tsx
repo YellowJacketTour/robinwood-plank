@@ -4,13 +4,18 @@ import { useEffect, useRef, useState } from "react";
 import {
   ACCENT_PRESETS,
   DEFAULT_ACCENT,
+  DEFAULT_MELT,
   accentFromHue,
   applyAccentTheme,
+  applyMeltPrefs,
   loadSavedAccent,
   loadSavedAccentForAddress,
+  loadSavedMelt,
   saveAccent,
   saveAccentForAddress,
+  saveMelt,
   type AccentTheme,
+  type MeltPrefs,
 } from "@/lib/theme-accent";
 import { useWallet } from "@/lib/wallet-context";
 
@@ -40,6 +45,7 @@ function swatchColor(t: AccentTheme): string {
 export default function ThemeAccentPicker() {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<AccentTheme>(DEFAULT_ACCENT);
+  const [melt, setMelt] = useState<MeltPrefs>(DEFAULT_MELT);
   const popRef = useRef<HTMLDivElement>(null);
   const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null);
   const { address, isConnected } = useWallet();
@@ -65,7 +71,7 @@ export default function ThemeAccentPicker() {
       return;
     }
     const rect = popRef.current.getBoundingClientRect();
-    const panelWidth = 256; // matches the panel's own w-64
+    const panelWidth = 288; // matches the panel's own w-72
     const margin = 12;
     const left = Math.min(
       Math.max(margin, rect.right - panelWidth),
@@ -77,6 +83,11 @@ export default function ThemeAccentPicker() {
   useEffect(() => {
     const saved = loadSavedAccent();
     if (saved) setTheme(saved);
+    const meltSaved = loadSavedMelt();
+    if (meltSaved) {
+      setMelt(meltSaved);
+      applyMeltPrefs(meltSaved);
+    }
   }, []);
 
   // Auto-load per-wallet theme on connect -- flagged live 2026-08-19, then
@@ -208,7 +219,7 @@ export default function ThemeAccentPicker() {
         <div
           role="dialog"
           aria-label="Site color theme"
-          className="dense-card fixed z-[70] w-64 space-y-3 border-line p-3 shadow-panel"
+          className="dense-card fixed z-[70] w-72 space-y-3 border-line p-3 shadow-panel"
           style={{ top: panelPos.top, left: panelPos.left }}
         >
           <p className="text-[0.65rem] font-black uppercase tracking-wider text-foreground/40">Color theme</p>
@@ -253,10 +264,61 @@ export default function ThemeAccentPicker() {
             />
           </div>
 
-          {theme.h !== DEFAULT_ACCENT.h || theme.s !== DEFAULT_ACCENT.s || theme.l600 !== DEFAULT_ACCENT.l600 ? (
+          <div className="space-y-2 border-t border-line pt-2">
             <button
               type="button"
-              onClick={() => commit(DEFAULT_ACCENT)}
+              aria-pressed={melt.on}
+              onClick={() => {
+                const next = { ...melt, on: !melt.on };
+                setMelt(next);
+                applyMeltPrefs(next);
+                saveMelt(next);
+              }}
+              className={`flex min-h-10 w-full items-center justify-between rounded-md border px-2.5 text-xs font-bold ${
+                melt.on ? "border-gold-400 bg-gold-400/15 text-gold-300" : "border-line text-foreground/70"
+              }`}
+            >
+              <span>Disco melt</span>
+              <span aria-hidden className="h-4 w-4 rounded-full" style={{
+                background: melt.on
+                  ? "conic-gradient(red, yellow, lime, cyan, blue, magenta, red)"
+                  : swatchColor(theme),
+              }} />
+            </button>
+            {melt.on && (
+              <div className="space-y-1">
+                <label htmlFor="theme-melt-bias" className="flex items-center justify-between text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">
+                  <span>Technicolor → biased</span>
+                  <span className="tabular-nums text-foreground/60">{Math.round(melt.bias * 100)}%</span>
+                </label>
+                <input
+                  id="theme-melt-bias"
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(melt.bias * 100)}
+                  onChange={(e) => {
+                    const next = { ...melt, bias: Number(e.target.value) / 100 };
+                    setMelt(next);
+                    applyMeltPrefs(next);
+                    saveMelt(next);
+                  }}
+                  className="woodamp-range w-full"
+                  aria-label="Melt color bias, full rainbow to accent-clustered"
+                />
+              </div>
+            )}
+          </div>
+
+          {theme.h !== DEFAULT_ACCENT.h || theme.s !== DEFAULT_ACCENT.s || theme.l600 !== DEFAULT_ACCENT.l600 || melt.on ? (
+            <button
+              type="button"
+              onClick={() => {
+                commit(DEFAULT_ACCENT);
+                setMelt(DEFAULT_MELT);
+                applyMeltPrefs(DEFAULT_MELT);
+                saveMelt(DEFAULT_MELT);
+              }}
               className="w-full rounded-md border border-line px-2 py-1.5 text-xs font-bold text-foreground/60 transition-colors hover:border-line-strong hover:text-foreground/80"
             >
               Reset to Amber Gold

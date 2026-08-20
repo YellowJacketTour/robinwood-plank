@@ -664,6 +664,7 @@ export default function GlobalMarketHub() {
   const [onlyArt, setOnlyArt] = useState(() => searchParams.get("art") !== "0");
   const [onlyVerifiedCreator, setOnlyVerifiedCreator] = useState(() => searchParams.get("creator") === "1");
   const [onlyListed, setOnlyListed] = useState(() => searchParams.get("listed") === "1");
+  const [showShells, setShowShells] = useState(() => searchParams.get("shells") === "1");
   const [priceMin, setPriceMin] = useState(() => searchParams.get("min") ?? "");
   const [priceMax, setPriceMax] = useState(() => searchParams.get("max") ?? "");
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
@@ -878,6 +879,7 @@ export default function GlobalMarketHub() {
       if (onlyArt && !hasArt(c)) return false;
       if (onlyVerifiedCreator && !(c.creatorHandle || c.creatorEns)) return false;
       if (onlyListed && !(c.listedCount != null && c.listedCount > 0)) return false;
+      if (!showShells && !hasMarketEvidence(c)) return false;
       if (min !== null || max !== null) {
         const p = floorNative(c);
         if (p === null) return false;
@@ -891,11 +893,11 @@ export default function GlobalMarketHub() {
       if (primary !== 0) return primary;
       return (a.name ?? a.contractAddress).localeCompare(b.name ?? b.contractAddress);
     });
-  }, [collections, chainFilter, search, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, priceMin, priceMax, deadArt]);
+  }, [collections, chainFilter, search, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, showShells, priceMin, priceMax, deadArt]);
 
   useEffect(() => {
     setGridVisibleCount(GRID_PAGE_SIZE);
-  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, priceMin, priceMax]);
+  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, showShells, priceMin, priceMax]);
 
   // URL persistence -- reflects every real filter/sort field above into the
   // query string (router.replace, not push, so filtering doesn't spam
@@ -914,12 +916,13 @@ export default function GlobalMarketHub() {
     if (!onlyArt) params.set("art", "0");
     if (onlyVerifiedCreator) params.set("creator", "1");
     if (onlyListed) params.set("listed", "1");
+    if (showShells) params.set("shells", "1");
     if (priceMin.trim()) params.set("min", priceMin.trim());
     if (priceMax.trim()) params.set("max", priceMax.trim());
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- router/pathname are stable per Next.js contract; including them would re-run this on every render for no reason.
-  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, priceMin, priceMax]);
+  }, [chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, showShells, priceMin, priceMax]);
 
   // Top movers: real gradeScore-ranked rows with both real art and a real
   // order book, highest 24h volume as the tiebreak -- never a curated/paid
@@ -1052,6 +1055,10 @@ export default function GlobalMarketHub() {
           <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 text-sm transition-colors hover:bg-foreground/5">
             <input type="checkbox" checked={onlyListed} onChange={(e) => setOnlyListed(e.target.checked)} className="h-4 w-4 accent-gold-400" />
             <span className="text-foreground/80">Listed only (real listedCount &gt; 0)</span>
+          </label>
+          <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded px-1 text-sm transition-colors hover:bg-foreground/5">
+            <input type="checkbox" checked={showShells} onChange={(e) => setShowShells(e.target.checked)} className="h-4 w-4 accent-gold-400" />
+            <span className="text-foreground/80">Show shells (no floor / listed / volume yet)</span>
           </label>
         </div>
       </div>

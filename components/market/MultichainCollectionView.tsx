@@ -1643,7 +1643,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               : `${browseItems.length} items`
           }
           lead={
-            rarityMap.size > 0 ? (
+            listings.length > 0 ? (
               <RarityFloorStrip
                 listings={listings}
                 rarity={rarityMap}
