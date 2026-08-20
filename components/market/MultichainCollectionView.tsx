@@ -6,7 +6,8 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { PackageOpen, Tag } from "lucide-react";
 import { withImageWidth } from "@/lib/ipfs";
 import CollectionArtImage from "@/components/market/CollectionArtImage";
-import { templatedErc721Image } from "@/lib/market/multichain/token-art-templates";
+import { catalogArtExtras } from "@/lib/market/multichain/token-art-templates";
+import { collectionSurface } from "@/lib/market/multichain/collection-surface";
 import { rarityMapGet, countTiers, tokenIdAliases } from "@/lib/market/rarity-lookup";
 import { SkeletonCardGrid, SkeletonRows, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 import ListingCard from "@/components/market/ListingCard";
@@ -147,7 +148,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>>([]);
-  const [tokenLimit, setTokenLimit] = useState(400);
+  const surface = collectionSurface(chainSlug);
+  const [tokenLimit, setTokenLimit] = useState(surface.catalogPageSize);
   const [bookFilter, setBookFilter] = useState<"all" | "listed">(() => (searchParams.get("show") === "all" ? "all" : "listed"));
   /** Real listed-count/total-supply/holder-count from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. holderCount is EVM-only (Alchemy getOwnersForContract) and may arrive later than the rest via the on-demand /api/market/multichain/holder-count backfill below. */
   const [supplyStats, setSupplyStats] = useState<{
@@ -341,7 +343,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     const qs = new URLSearchParams({
       chainSlug,
       collectionSlug,
-      limit: String(isBitcoin || isSolana ? 2000 : tokenLimit),
+      limit: String(Math.min(surface.catalogCap, tokenLimit)),
       art: "2",
       sort,
     });
@@ -352,7 +354,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     )
       .then((tok) => setTokens(tok.tokens ?? []))
       .catch(() => setTokens([]));
-  }, [chainSlug, collectionSlug, listingSort, activeTier, activeTiers, isBitcoin, isSolana, tokenLimit]);
+  }, [chainSlug, collectionSlug, listingSort, activeTier, activeTiers, tokenLimit, surface.catalogCap]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -384,7 +386,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         listings: Listing[];
         listingsUnavailable?: string | null;
         collection?: { listedCount?: number | null; floorPriceWei?: string | null };
-      }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${isSolana || isBitcoin ? 200 : 200}`, {
+      }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${surface.bookPageSize}`, {
         ttlMs: 8_000,
         swrMs: 45_000,
         session: true,
@@ -451,7 +453,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     } finally {
       setLoading(false);
     }
-  }, [chainSlug, collectionSlug]);
+  }, [chainSlug, collectionSlug, surface.bookPageSize, isNonEvm]);
 
   useEffect(() => {
     void load();
@@ -1168,7 +1170,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       name: t.name,
       imageUrl:
         t.imageUrl ||
-        templatedErc721Image(collection?.contractAddress || collectionSlug, t.tokenId),
+        catalogArtExtras(chainSlug, collection?.contractAddress || collectionSlug, t.tokenId)[0] ||
+        null,
       listing: tokenIdAliases(t.tokenId).map((k) => listingByToken.get(k)).find(Boolean) ?? null,
     }));
     const rows = fromTokens;
@@ -2083,7 +2086,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                     <div className="relative aspect-square bg-wood-900">
                       <CollectionArtImage
                         src={item.imageUrl}
-                        extras={[templatedErc721Image(collection?.contractAddress || collectionSlug, item.tokenId)]}
+                        extras={catalogArtExtras(chainSlug, collection?.contractAddress || collectionSlug, item.tokenId)}
                         alt=""
                         width={512}
                         variant="tile"
@@ -2124,11 +2127,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               })}
             </ul>
           )}
-          {bookFilter === "all" && tokenLimit < 2000 && tokens.length >= tokenLimit && (
+          {bookFilter === "all" && tokenLimit < surface.catalogCap && tokens.length >= Math.min(tokenLimit, surface.catalogCap) && (
             <div className="mt-3 flex justify-center">
               <button
                 type="button"
-                onClick={() => setTokenLimit((n) => Math.min(2000, n + 400))}
+                onClick={() => setTokenLimit((n) => Math.min(surface.catalogCap, n + surface.catalogPageSize))}
                 className="min-h-10 rounded-md border border-gold-400/50 px-4 text-xs font-bold text-gold-300 hover:bg-gold-400/10"
               >
                 Load more of this collection

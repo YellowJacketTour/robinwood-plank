@@ -85,7 +85,18 @@ Do not add a second mega-script that walks all chains in one Node process.
 
 NFT `0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156`, vault V3 `0xacE28f72Fc3e15eA1671e689806694A9b0cE047D`. Native book `getListings("robinwood")` + `plank.love` overlay when local book empty. Hub injects Home. Foreign Instant Swap / Across / 0x stay off.
 
-## 9. Commands
+## 9. Collection page (Milady-quality, every chain)
+
+`lib/market/multichain/collection-surface.ts` is the product contract:
+
+- **Catalog** is the grid (rarity index / ME / OW). Order: token id, or Legendary→Common.
+- **Book** overlays Buy/price on matching ids. **Listed only** is the book (price sort).
+- Never splice the book as a second list into All items.
+- Art extras are chain-specific (`catalogArtExtras`) and proven URLs only.
+- Caps: page size / cap / book size on the surface. Load more up to cap. Full 10k is not one request.
+- Mesh writers do not DELETE a full catalog to refresh one cell.
+
+## 10. Commands
 
 ```
 npx tsx --env-file=.env.local scripts/mesh-tick.ts --minutes=12

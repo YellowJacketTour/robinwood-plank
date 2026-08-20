@@ -11,3 +11,17 @@ export function templatedErc721Image(contractAddress: string, tokenId: string): 
   if (!fn || !/^\d+$/.test(tokenId)) return null;
   return fn(tokenId);
 }
+
+const INSCRIPTION_ID = /^[0-9a-f]{64}i[0-9]+$/i;
+
+/** Client-safe extra srcs for the collection grid. Chain-specific, exact id only. */
+export function catalogArtExtras(chainSlug: string, contractAddress: string, tokenId: string): string[] {
+  const out: string[] = [];
+  const evm = templatedErc721Image(contractAddress, tokenId);
+  if (evm) out.push(evm);
+  if (chainSlug === "bitcoin-mainnet" && INSCRIPTION_ID.test(tokenId)) {
+    out.push(`https://ordinals.com/content/${tokenId}`);
+    out.push(`https://ord-mirror.magiceden.dev/content/${tokenId}`);
+  }
+  return out;
+}
