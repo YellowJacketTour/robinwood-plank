@@ -100,12 +100,12 @@ export function recordSourceSuccess(source: string): void {
  * gets, because a quota error means every subsequent call in the same
  * window will fail too and is pure wasted spend.
  */
-export function recordSourceFailure(source: string, isQuotaError: boolean): void {
+export function recordSourceFailure(source: string, isQuotaError: boolean, jailMs?: number): void {
   const s = getState(source);
   s.callsToday += 1;
   s.consecutiveFailures += 1;
   if (isQuotaError || s.consecutiveFailures >= CONSECUTIVE_FAILURE_JAIL_THRESHOLD) {
-    s.jailedUntil = Date.now() + DEFAULT_JAIL_MS;
+    s.jailedUntil = Date.now() + (jailMs ?? DEFAULT_JAIL_MS);
   }
 }
 

@@ -16,48 +16,22 @@
  */
 import type { ChainAdapter, CollectionSnapshot } from "@/lib/market/multichain/types";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
-import { recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
-import { durableKv } from "@/lib/market/durable-kv";
+import { checkSourceBudget, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
 
 const ALCHEMY_NFT_SOURCE = "alchemy-nft";
-/** Durable jail so a 429 is not retried from every chain/process after a supervisor relaunch. UTC start of next calendar month. */
-const ALCHEMY_NFT_JAIL_KEY = "plank:market:alchemy-nft-jailed-until";
-
-let alchemyNftJailUntilMs: number | null = null;
 
 function nextUtcMonthStartMs(now = new Date()): number {
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
 }
 
-async function readAlchemyNftJailUntil(): Promise<number | null> {
-  if (alchemyNftJailUntilMs != null && Date.now() < alchemyNftJailUntilMs) return alchemyNftJailUntilMs;
-  try {
-    const until = await durableKv.get<number>(ALCHEMY_NFT_JAIL_KEY);
-    if (typeof until === "number" && Date.now() < until) {
-      alchemyNftJailUntilMs = until;
-      return until;
-    }
-  } catch {
-    // Tests / no Postgres: in-memory jail only.
-  }
-  return alchemyNftJailUntilMs != null && Date.now() < alchemyNftJailUntilMs ? alchemyNftJailUntilMs : null;
+function jailAlchemyNftUntilMonthReset(): void {
+  recordSourceFailure(ALCHEMY_NFT_SOURCE, true, Math.max(60_000, nextUtcMonthStartMs() - Date.now()));
 }
 
-async function jailAlchemyNftUntilMonthReset(): Promise<void> {
-  const until = nextUtcMonthStartMs();
-  alchemyNftJailUntilMs = until;
-  recordSourceFailure(ALCHEMY_NFT_SOURCE, true);
-  try {
-    await durableKv.set(ALCHEMY_NFT_JAIL_KEY, until, { ex: 40 * 24 * 60 * 60 });
-  } catch {
-    // In-memory jail still holds for this process.
-  }
-}
-
-async function assertAlchemyNftNotJailed(): Promise<void> {
-  const until = await readAlchemyNftJailUntil();
-  if (until != null) {
-    throw new Error(`alchemy-nft: jailed after HTTP 429 until ${new Date(until).toISOString()} (monthly quota); skipping`);
+function assertAlchemyNftNotJailed(): void {
+  const gate = checkSourceBudget(ALCHEMY_NFT_SOURCE);
+  if (!gate.allowed) {
+    throw new Error(`alchemy-nft: jailed after HTTP 429 (monthly quota); skipping`);
   }
 }
 
@@ -126,12 +100,12 @@ type AlchemyFloorPriceResponse = {
 };
 
 async function fetchJson<T>(url: string): Promise<T> {
-  await assertAlchemyNftNotJailed();
+  assertAlchemyNftNotJailed();
   const res = await fetch(url, { headers: { accept: "application/json" } });
   if (!res.ok) {
     const bodyText = await res.text().catch(() => "");
     if (isAlchemyQuotaStatus(res.status, bodyText)) {
-      await jailAlchemyNftUntilMonthReset();
+      jailAlchemyNftUntilMonthReset();
     }
     throw new Error(`alchemy-nft: ${res.status} ${res.statusText} fetching ${url}`);
   }
@@ -289,7 +263,7 @@ export async function fetchSnapshotsBatch(
   chainSlug: string,
   contractAddresses: string[]
 ): Promise<Map<string, CollectionSnapshot>> {
-  await assertAlchemyNftNotJailed();
+  assertAlchemyNftNotJailed();
   const base = baseUrl(chainSlug);
   const results = new Map<string, CollectionSnapshot>();
 
@@ -303,7 +277,7 @@ export async function fetchSnapshotsBatch(
     if (!res.ok) {
       const bodyText = await res.text().catch(() => "");
       if (isAlchemyQuotaStatus(res.status, bodyText)) {
-        await jailAlchemyNftUntilMonthReset();
+        jailAlchemyNftUntilMonthReset();
       }
       throw new Error(`alchemy-nft: ${res.status} ${res.statusText} fetching getContractMetadataBatch`);
     }
