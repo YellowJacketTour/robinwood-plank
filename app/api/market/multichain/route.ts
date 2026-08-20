@@ -64,7 +64,9 @@ export async function GET(req: Request) {
 
     const { NFT_CONTRACT_ADDRESS } = await import("@/lib/mint-contract");
     const { getListings } = await import("@/lib/market/orders-store");
-    const nativeListings = await getListings("robinwood", "robinhood").catch(() => []);
+    const bySlug = await getListings("robinwood").catch(() => []);
+    const byContract = await getListings(NFT_CONTRACT_ADDRESS.toLowerCase()).catch(() => []);
+    const nativeListings = bySlug.length >= byContract.length ? bySlug : byContract;
     const nativeFloor = nativeListings.reduce<bigint | null>((min, l) => {
       try {
         const p = BigInt(l.priceWei);
