@@ -343,7 +343,7 @@ function compareByColumn(
     case "sales":
       return compareNullable(windowSales(a, window), windowSales(b, window), dir);
     case "listed":
-      return compareNullable(listedPctOf(a), listedPctOf(b), dir);
+      return compareNullable(a.listedCount, b.listedCount, dir);
     case "holders":
       return compareNullable(a.holderCount, b.holderCount, dir);
     case "grade":
@@ -890,7 +890,7 @@ export default function GlobalMarketHub() {
       change: rankings.some((c) => c.floorChangePct != null),
       volume: rankings.some((c) => windowVolumeWei(c, rankingsWindow) != null),
       sales: rankings.some((c) => windowSales(c, rankingsWindow) != null),
-      listed: rankings.some((c) => listedPctOf(c) != null),
+      listed: rankings.some((c) => c.listedCount != null),
       holders: rankings.some((c) => c.holderCount != null),
     }),
     [rankings, rankingsWindow]
@@ -1472,8 +1472,12 @@ export default function GlobalMarketHub() {
                         {windowSales(c, rankingsWindow) ?? <span title={emptyCellReason(c, "sales")}>—</span>}
                       </td>
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 lg:table-cell">
-                        {listedPct != null ? (
-                          `${listedPct.toFixed(1)}% · ${c.listedCount}/${c.totalSupply}`
+                        {c.listedCount != null ? (
+                          listedPct != null ? (
+                            `${listedPct.toFixed(1)}% · ${c.listedCount}/${c.totalSupply}`
+                          ) : (
+                            String(c.listedCount)
+                          )
                         ) : (
                           <span title={emptyCellReason(c, "listed")}>—</span>
                         )}

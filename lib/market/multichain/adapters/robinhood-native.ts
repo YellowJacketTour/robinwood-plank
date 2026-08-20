@@ -52,7 +52,7 @@ export const robinhoodNativeAdapter: ChainAdapter = {
       floorPriceCurrency: floorPriceWei != null ? "ETH" : null,
       floorPriceMarketplace: floorPriceWei != null ? "marketplank" : null,
       totalSupply: null,
-      listedCount: listedCount > 0 ? listedCount : null,
+      listedCount,
     };
   },
 };

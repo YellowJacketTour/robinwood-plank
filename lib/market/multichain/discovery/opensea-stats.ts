@@ -46,6 +46,7 @@ export type OpenSeaCollectionDisplay = {
   name: string | null;
   imageUrl: string | null;
   totalSupply: number | null;
+  creatorHandle: string | null;
 };
 
 /** True when OpenSea's own `name` is just the contract (ONESHOT Avalanche pattern) — never store that as a collection title. */
@@ -190,19 +191,21 @@ export async function fetchOpenSeaCollectionDisplay(slug: string, apiKey: string
     return null;
   }
 
-  let body: { name?: string | null; image_url?: string | null; total_supply?: number | null };
+  let body: { name?: string | null; image_url?: string | null; total_supply?: number | null; twitter_username?: string | null };
   try {
-    body = (await res.json()) as { name?: string | null; image_url?: string | null; total_supply?: number | null };
+    body = (await res.json()) as { name?: string | null; image_url?: string | null; total_supply?: number | null; twitter_username?: string | null };
   } catch {
     recordSourceFailure(SOURCE, false);
     return null;
   }
   recordSourceSuccess(SOURCE);
   const supply = body.total_supply;
+  const handle = body.twitter_username?.trim().replace(/^@/, "") || null;
   return {
     name: sanitizeOpenSeaCollectionName(body.name),
     imageUrl: sanitizeOpenSeaImageUrl(body.image_url),
     totalSupply: typeof supply === "number" && Number.isFinite(supply) && supply > 0 ? Math.round(supply) : null,
+    creatorHandle: handle && handle.toLowerCase() !== "null" ? handle : null,
   };
 }
 
@@ -351,10 +354,11 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
       continue;
     }
     const display = await fetchOpenSeaCollectionDisplay(slug, apiKey);
-    if (display && (display.name || display.imageUrl)) {
+    if (display && (display.name || display.imageUrl || display.creatorHandle)) {
       await updateCollectionDisplay(chainSlug, row.contract_address, {
         name: display.name,
         imageUrl: display.imageUrl,
+        creatorHandle: display.creatorHandle,
       }).then(() => {
         result.displayUpdated += 1;
       }).catch(() => {
