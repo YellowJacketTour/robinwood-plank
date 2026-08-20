@@ -69,6 +69,8 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "ordinals.com" },
       { protocol: "https", hostname: "www.ordinals.com" },
       { protocol: "https", hostname: "turbo.ordinalswallet.com" },
+      { protocol: "https", hostname: "media.ordinalswallet.com" },
+      { protocol: "https", hostname: "cdn.ordinalswallet.com" },
       { protocol: "https", hostname: "static.unisat.io" },
       { protocol: "https", hostname: "next-cdn.unisat.space" },
       { protocol: "https", hostname: "we-assets.pinit.io" },

@@ -62,6 +62,8 @@ export const ORB_PRONE_ART_HOSTS = new Set([
   "coin-images.coingecko.com",
   "creator-hub-prod.s3.us-east-2.amazonaws.com",
   "turbo.ordinalswallet.com",
+  "media.ordinalswallet.com",
+  "cdn.ordinalswallet.com",
   "ord-mirror.magiceden.dev",
 ]);
 

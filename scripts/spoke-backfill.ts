@@ -41,9 +41,16 @@ async function main(): Promise<void> {
   const want = (id: string) => !only || only === id;
 
   if (want("bitcoin-unisat") && remaining()) {
-    const { backfillUnisatCollectionArt } = await import("../lib/market/multichain/adapters/unisat-collections");
-    const r = await backfillUnisatCollectionArt(40);
-    console.log(`[spokes] bitcoin-unisat-art: ${JSON.stringify(r)}`);
+    const { hydrateBitcoinArt } = await import("../lib/market/multichain/discovery/bitcoin-art-rotator");
+    const art = await hydrateBitcoinArt(50);
+    console.log(`[spokes] bitcoin-art-rotator: ${JSON.stringify(art)}`);
+    try {
+      const { backfillUnisatCollectionArt } = await import("../lib/market/multichain/adapters/unisat-collections");
+      const r = await backfillUnisatCollectionArt(8);
+      console.log(`[spokes] bitcoin-unisat-art: ${JSON.stringify(r)}`);
+    } catch (e) {
+      console.log(`[spokes] bitcoin-unisat-art skipped`, e instanceof Error ? e.message : e);
+    }
   }
 
   if (want("adapter-sync") && remaining()) {

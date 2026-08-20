@@ -71,13 +71,13 @@ function monthKey(): string {
 
 async function peekMonthlyBudget(): Promise<number> {
   if (!process.env.COINGECKO_API_KEY) return 0;
-  const key = `plank:market:coingecko-nft-monthly-v2:${monthKey()}`;
+  const key = `plank:market:coingecko-nft-monthly-v3:${monthKey()}`;
   return (await durableKv.get<number>(key)) ?? 0;
 }
 
 async function checkAndIncrementMonthlyBudget(): Promise<boolean> {
   if (!process.env.COINGECKO_API_KEY) return true; // unauthenticated tier has no monthly cap to protect, only the in-memory daily/jail guard applies
-  const key = `plank:market:coingecko-nft-monthly-v2:${monthKey()}`;
+  const key = `plank:market:coingecko-nft-monthly-v3:${monthKey()}`;
   // Read-then-write against plank_kv_values (durable-kv.ts's real, already-
   // existing table -- no new migration needed). This app's own sync loops
   // call CoinGecko sequentially, never concurrently, so the narrow race
