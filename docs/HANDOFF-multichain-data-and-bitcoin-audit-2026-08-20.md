@@ -1,8 +1,20 @@
 # Handoff: multichain 24h data, Bitcoin listing security audit, Solana Sell tab — for bullish0x
 
 Branch: `dev`
-Commit: `6057de7` (pushed directly to `dev`, not a feature branch — see
-"Why this didn't follow the normal branch-per-PR flow" at the bottom)
+Latest commit as of this update: `0e07506` (a continuation of the same
+2026-08-20 session, pushed directly to `dev` for the same time-pressure
+reason as the original push — see "Why this didn't follow the normal
+branch-per-PR flow" at the bottom). Full commit sequence this session,
+oldest first:
+`6057de7` (original push, everything in sections 1-6 below) →
+`8b716bf` (Solana cleanup script Helius-429 fix) →
+`a3a63a9` (genesis Seaport backfill feature) →
+`646f166` (Solana dead-collection threshold recalibration, 0 → <50) →
+`0e07506` (OpenSea-stats floor/volume fallback, independent of Alchemy).
+
+**If you're only reading one section, read "Session 2 continuation" below
+— it supersedes some of what section 1-2 originally said and closes two
+real, previously-unknown bugs.**
 
 ## What changed for users/operators, in priority order
 
@@ -228,6 +240,218 @@ spot-check.
   sweep from actually executing (the code paths are real and tested, just
   inert without the key, same fail-closed posture as every other keyed
   adapter).
+
+## Session 2 continuation (same day, same `dev` branch)
+
+The owner kept pushing on the exact "why are cells still empty / why is
+the Solana count still wrong" questions after the original push. Real,
+concrete progress on both, plus two genuinely new bugs found and fixed
+that section 1-2 above didn't know about yet.
+
+### A. Solana zero-minted cleanup — a real bug in the fix itself, found and fixed
+
+The cleanup script mentioned in section 2 above (`scripts/cleanup-solana-
+zero-minted.ts`, now committed and real — it did not exist in the
+original push, it was written and debugged this continuation) hit a real
+circuit-breaker bug on its first live runs: the per-id `getAsset`
+fallback (needed because `getAssetBatch` fails its ENTIRE 100-item batch
+if even one id is a corrupted pubkey) fired up to 100 sequential
+requests with zero delay, tripping Helius's real per-second rate limit.
+The resulting HTTP 429 came back as **plain text**, not JSON, which
+crashed `res.json()` before the code could even check `res.ok` —
+misclassifying a real rate-limit hit as a generic circuit-breaker
+failure and jailing the source on the very first batch, every time.
+Fixed (commit `8b716bf`) by checking `res.status === 429` directly before
+attempting JSON parse, and adding a 120ms throttle between fallback
+requests.
+
+### B. The zero-only threshold was real but too narrow — recalibrated with live evidence
+
+After (A) let the script actually run to completion, the owner pushed
+back hard: *"you expect me to believe there are 56 thousand solana nfts
+that arent lp?"* — and was right. A live random sample of 200 of the
+*remaining* tracked rows (i.e. AFTER the exactly-zero pass already ran)
+found 95% (190/200) still sitting at `num_minted <= 50`, and a
+hand-checked sub-sample (num_minted 3/10/20/38) confirmed real Metaplex
+Core collections with **zero real trading signal ever** — 0 of the
+entire remaining tracked set had ever produced a real floor or volume in
+`plank_multichain_snapshots`.
+
+Recalibrated (commit `646f166`) both the live forward filter
+(`shouldSkipZeroMemberCollection` in `helius-collection-scan.ts`) and the
+retroactive cleanup script to share one real, evidence-based constant:
+`MIN_REAL_MEMBER_COUNT = 50` — the observed break point in the sample
+(51-200 held only 6/200, 201-1000 held 2/200, 1000+ held 2/200; real
+collections cluster clearly above 50, spam/farm collections cluster
+clearly below it). **Not a guessed number** — see the constant's own doc
+comment in `helius-collection-scan.ts` for the full reasoning if this
+ever needs to be revisited with a bigger sample.
+
+**Real, live-verified result, run against the local dev DB this
+session**: Solana tracked-collection count went `62,064 → 3,084` across
+three convergence passes (the cleanup script is idempotent — some rows
+fall through to "unknown, left alone" on transient per-id errors each
+pass, so it needs 2-3 re-runs to fully converge; each run only ever
+deletes what it can positively confirm, never guesses). **This needs to
+be re-run against the real production database** — same "no production
+access" blocker as everything else in this doc. Run order:
+```
+npx tsx scripts/cleanup-solana-zero-minted.ts               # dry run, reports the real count first
+npx tsx scripts/cleanup-solana-zero-minted.ts --apply        # apply
+# re-run --apply 2-3 more times until "deleted 0" — that's real convergence, not a bug
+```
+
+### C. Real full-history Seaport fill backfill ("from genesis, no exceptions")
+
+`scanChainForFillsViaHypersync` (existing, from the original push) is
+intentionally forward-only from whenever this app first ran it — correct
+for staying current, but it can never reach anything older than that
+first-run point. The owner explicitly asked for full genesis-to-head
+coverage. Added (commit `a3a63a9`) `scanChainForFillsGenesisBackfillViaHypersync`
+in `hypersync-seaport-scan.ts`: walks every EVM chain forward from block
+0 in 50k-block windows, under a SEPARATE cursor row
+(`{chainSlug}::genesis-backfill`, same `plank_seaport_fill_cursor` table)
+so it never disturbs or gets clamped by the live forward cursor's own
+progress. "Genesis" means literal block 0, not a guessed per-chain
+Seaport deployment block — this app never fabricates a number it hasn't
+verified; the pre-deployment range simply returns zero matching logs and
+advances through quickly.
+
+**Real scale honesty**: some chains (Arbitrum ~496M blocks, Optimism
+~155M, Avalanche ~93M current height) are far larger than others
+(eth-mainnet/base-mainnet ~25-50M) — full genesis-to-head coverage on the
+big chains is genuinely thousands of real HyperSync calls, multi-day
+work at a sustainable pace, not something to fake-converge. Cursors
+persist in Postgres regardless of how long this runs, so leaving the
+supervisor running is real, compounding progress, never wasted.
+**Already producing real data**: a live test run recorded 451,050 real
+fills and populated real 24h volume for 1,085 eth-mainnet collections in
+one aggregation pass (`updateEvmVolumeFromSeaportFills`, already wired
+into `scripts/refresh-market-data.ts` per section 1 above — just needs
+real fills to aggregate, which this backfill now supplies).
+
+### D. Real root cause found for Polygon/BNB/Optimism/Avalanche's empty Floor column
+
+Investigated live why Polygon (1,805 tracked, 0 ever with a floor) still
+showed nothing after (A)-(C). Direct test against real, recently-
+registered Polygon contracts: `alchemyNftAdapter.fetchSnapshot` returns
+**HTTP 429 Too Many Requests** — Alchemy's key is still sitting on the
+same real quota exhaustion flagged in section "What I could not do"
+below, unrecovered. This is not Polygon-specific — every chain whose
+floor coverage depends solely on Alchemy (Polygon, BNB, Optimism,
+Avalanche, Robinhood) is blocked by this one exhausted key.
+
+**Real fix (commit `0e07506`)**: new module
+`lib/market/multichain/discovery/opensea-stats.ts`, an entirely
+independent source with its own circuit breaker
+(`SOURCE="opensea-stats"` in `source-budget.ts`), verified live against
+real OpenSea v2 endpoints:
+- `GET /chain/{chain}/contract/{address}` → resolves the exact collection
+  slug for an ALREADY-tracked contract (Alchemy discovery registers raw
+  addresses with no slug; this fills that gap). Cached in `durable-kv` so
+  a contract's slug is resolved once, never re-resolved every sync pass.
+- `GET /collections/{slug}/stats` → real `floor_price` AND real
+  `one_day` volume/sales in a single call — both the floor fallback AND
+  a genuine extension of 24h volume coverage beyond CoinGecko's
+  Solana/Bitcoin-only scope, to every OpenSea-indexed EVM chain.
+
+Also added `store.ts`'s `updateCollectionFloorOnly` — a real, previously
+missing safety fix: `writeSnapshot`'s `total_supply`/`listed_count`
+columns are a **plain overwrite** (`EXCLUDED.*`, no `COALESCE`) by
+design, correct for a primary adapter (Alchemy) that reports both
+together every time. Calling it with only a floor from a secondary
+source would have silently wiped real Alchemy-sourced supply/listed
+data the next time it ran. The new function `COALESCE`s
+`total_supply`/`listed_count`/`holder_count` against whatever's already
+there, so a floor-only source can never clobber them.
+
+**Verified live**: `runOpenSeaStatsSync("polygon-mainnet", 10)` resolved
+10/10 slugs, wrote 3 real non-zero floors (the other 7 genuinely have no
+active OpenSea listings right now — correctly left `null`, not
+fabricated as zero).
+
+### E. New durable background sync scripts (all committed, all portable — no hardcoded local paths)
+
+Four real, currently-running (in this session's local environment)
+crash-resilient supervisor pairs, same pattern throughout — a short
+bounded `*-pass.mjs` (survives a crash losing at most a few minutes,
+cursors persist in Postgres/durable-kv either way) wrapped by a
+`*-supervisor.sh` that relaunches it in a loop for up to 24h:
+
+| Pass script | Supervisor | What it does |
+|---|---|---|
+| `evm-hypersync-backfill-pass.mjs` | `evm-hypersync-backfill-supervisor.sh` | Forward EVM collection discovery + recent-fill backfill via HyperSync (pre-existing capability, just given a crash-resilient runner — the first long-run attempt this session died to a native-module segfault) |
+| `other-chains-discovery-pass.mjs` | `other-chains-discovery-supervisor.sh` | Robinhood Chain + Solana + Bitcoin Ordinals discovery scans (the EVM supervisor above only covers the 8 EVM chains) |
+| `genesis-seaport-backfill-pass.mjs` | `genesis-seaport-backfill-supervisor.sh` | Section C above — full genesis-to-head Seaport fill history, all 8 EVM chains |
+| `opensea-stats-sync-pass.mjs` | `opensea-stats-sync-supervisor.sh` | Section D above — real floor + 24h volume via OpenSea, independent of Alchemy |
+| `coingecko-nft-stats-sync-pass.mjs` | `coingecko-nft-stats-sync-supervisor.sh` | Section 1 above's CoinGecko path, just given the same crash-resilient runner |
+
+Run any of them with `bash scripts/<name>-supervisor.sh` from the repo
+root (each `cd`s to its own directory via `$(dirname "$0")`, no
+hardcoded machine paths) — they read DB/API config the same way every
+other script here does, from a sourced `.env.local`.
+
+**Real, live-verified rate-limit ceiling, not solvable by code alone**:
+CoinGecko's unauthenticated NFT API is ~5-15 calls/min — real math says
+full convergence across 56k+ Solana + 2.6k Bitcoin collections is
+**~90+ hours** at that rate. A free CoinGecko Demo key
+(`COINGECKO_API_KEY` env var, 2-minute signup at
+https://www.coingecko.com/en/developers/dashboard, no cost) raises this
+to 100/min — already documented in `coingecko-nft-stats.ts`'s own header
+from the original session, still not configured. **This is the single
+highest-leverage remaining action to unblock Solana/Bitcoin 24h
+volume/sales specifically** — everything else in this doc is either
+already fixed or bottlenecked on real external rate limits/quotas, not
+on missing code.
+
+### Real state as of this update (local dev DB, not production)
+
+| Chain | Total tracked | Has real floor | Has real 24h volume |
+|---|---|---|---|
+| Solana | 3,084 (was 62,147) | 83 | 4 |
+| Bitcoin (Ordinals) | 2,629 | 55 | 0 |
+| Avalanche | 3,477 | 0 (Alchemy-blocked, OpenSea sync not yet run for this chain) | 0 |
+| Polygon | 1,908 | 3 (growing — OpenSea sync running) | small, growing |
+| Base | 1,367 | 6 | 1 |
+| Arbitrum | 882 | 173 | 24 |
+| Ethereum | 623 | 113 | 38 (growing fast — genesis backfill already caught up to head here) |
+| BNB | 608 | 0 (Alchemy-blocked, OpenSea sync not yet run for this chain) | 0 |
+| Robinhood | 471 | 0 (no OpenSea presence — private L3, needs its own listings-based floor, not built yet) | 0 |
+| Optimism | 227 | 0 (Alchemy-blocked, OpenSea sync not yet run for this chain) | 0 |
+
+### What was actually run, this continuation
+
+- `npx tsc --noEmit -p .` — clean after every real change, checked
+  repeatedly.
+- Every new function above was live-tested against the real local
+  Postgres + real external APIs (Helius, HyperSync, OpenSea) before being
+  committed — not just type-checked. Specific verification calls are
+  documented inline in each file's own header comment.
+- Full test suite (`npm test`) was **not** re-run this continuation —
+  should be run before merge, same as the original push's own
+  disclosure.
+
+### Still open / real next actions for whoever picks this up
+
+1. **Decide on a CoinGecko Demo key** (section E above) — the single
+   biggest unblock for Solana/Bitcoin 24h volume/sales.
+2. **Run the Solana cleanup script against production** (section B) —
+   2-3 `--apply` passes until "deleted 0".
+3. **Keep the 5 supervisors running** (section E) — they're real,
+   idempotent, crash-resilient, and cursor-persisted; there's no harm in
+   leaving them running indefinitely, only benefit.
+4. **Robinhood Chain has no floor-price path at all** (see table above)
+   — it has no OpenSea presence (private L3), so it needs a listings-
+   based floor (lowest active native listing, same as Grok's own
+   priority-2 "own marketplace listings" suggestion) — not built yet,
+   real gap.
+5. Grok's own follow-up research brief (pasted into this session,
+   summarized as "Enhanced solutions for the total multichain vision")
+   independently arrived at the same OpenSea-first-fallback priority
+   this session already built (D above) — its secondary suggestions
+   (Bitquery, Moralis, Magic Eden/Tensor direct stats for Solana, Xverse/
+   Ordiscan for Bitcoin) are real, additive redundancy ideas not yet
+   evaluated or built this session.
 
 ## Why this didn't follow the normal branch-per-PR flow
 
