@@ -254,6 +254,66 @@ function listedPctOf(c: TrackedCollection): number | null {
   return c.listedCount != null && c.totalSupply != null && c.totalSupply > 0 ? (c.listedCount / c.totalSupply) * 100 : null;
 }
 
+const SUBSCRIPT_DIGITS = "₀₁₂₃₄₅₆₇₈₉";
+function toSubscript(n: number): string {
+  return String(Math.trunc(n))
+    .split("")
+    .map((d) => SUBSCRIPT_DIGITS[Number(d)] ?? d)
+    .join("");
+}
+
+/**
+ * Compact native amount for dense ranking/card stats. BTC (and any
+ * sub-0.001 native floor) loses significant digits under toFixed(3)
+ * ("0.000 ₿"). Leading-zero subscript (Axiom/Photon: 0.0₄123) keeps the
+ * first real digits; scientific only when there are more than six leading
+ * zeros. Never rounds a real non-zero amount to a display zero.
+ */
+function formatCompactNative(weiStr: string): { display: string; title: string } {
+  const abs = Math.abs(Number(weiStr) / 1e18);
+  if (!Number.isFinite(abs) || abs === 0) return { display: "0", title: "0" };
+  const title = abs.toPrecision(8).replace(/\.?0+$/, "");
+  if (abs >= 1_000_000) return { display: `${(abs / 1_000_000).toPrecision(3)}M`, title };
+  if (abs >= 1_000) return { display: `${(abs / 1_000).toPrecision(3)}K`, title };
+  if (abs >= 1) return { display: abs >= 100 ? abs.toFixed(0) : abs >= 10 ? abs.toFixed(1) : abs.toFixed(2), title };
+  const exp = Math.floor(Math.log10(abs));
+  const leadingZeros = -exp - 1;
+  if (leadingZeros <= 2) {
+    const fixed = abs.toFixed(Math.min(6, leadingZeros + 3)).replace(/0+$/, "").replace(/\.$/, "");
+    return { display: fixed, title };
+  }
+  if (leadingZeros <= 6) {
+    const mantissa = abs * 10 ** (leadingZeros + 1);
+    const body = mantissa.toPrecision(3).replace(/\.?0+$/, "");
+    return { display: `0.0${toSubscript(leadingZeros)}${body}`, title: abs.toExponential(4) };
+  }
+  return { display: abs.toExponential(2).replace("e+", "e").replace("e-0", "e-"), title: abs.toExponential(4) };
+}
+
+function formatCompactCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toPrecision(3)}M`;
+  if (n >= 10_000) return `${Math.round(n / 1_000)}k`;
+  return n.toLocaleString();
+}
+
+/** Listed-% as a book-depth signal: thin book (scarce) vs heavy book (easy to buy, more sell pressure). */
+function listedTone(pct: number): string {
+  if (pct < 1) return "text-emerald-400";
+  if (pct < 8) return "text-gold-300";
+  if (pct < 20) return "text-foreground/80";
+  return "text-rose-400";
+}
+
+function NativeAmount({ wei, usdLabel }: { wei: string; usdLabel: string | null }) {
+  const { display, title } = formatCompactNative(wei);
+  return (
+    <span className="inline-flex items-center justify-end gap-1" title={usdLabel ? `${title} · ${usdLabel}` : title}>
+      <span>{display}</span>
+      {usdLabel && <span className="text-[0.65rem] text-foreground/40">{usdLabel}</span>}
+    </span>
+  );
+}
+
 /**
  * A bare "—" reads as "broken" to a viewer -- flagged live ("tons of
  * missing fields. we want zero missing fields ever"). This app's honesty
@@ -1162,7 +1222,7 @@ export default function GlobalMarketHub() {
                       <span style={{ color: chainBrandColor(hero.chainSlug) }}>{chainDisplayName(hero.chainSlug)}</span>
                       <span>{" · "}Vol</span>
                       <span className="inline-flex items-center gap-1">
-                        {(Number(hero.volume24hWei) / 1e18).toFixed(3)}
+                        {formatCompactNative(hero.volume24hWei!).display}
                         <ChainIcon chainSlug={hero.chainSlug} size={14} className="shrink-0" />
                         {(() => {
                           const usd = toUsd(hero.volume24hWei, hero.floorPriceCurrency);
@@ -1172,7 +1232,7 @@ export default function GlobalMarketHub() {
                       {hero.sales24h ? <span>{" · "}{hero.sales24h} sales</span> : null}
                       {hero.floorPriceWei && (
                         <span className="inline-flex items-center gap-1">
-                          {" · "}Floor {(Number(hero.floorPriceWei) / 1e18).toFixed(4)}
+                          {" · "}Floor {formatCompactNative(hero.floorPriceWei).display}
                           <ChainIcon chainSlug={hero.chainSlug} size={14} className="shrink-0" />
                         </span>
                       )}
@@ -1206,7 +1266,7 @@ export default function GlobalMarketHub() {
                         {c.name ?? c.contractAddress}
                       </p>
                       <p className="flex items-center gap-1 truncate text-[0.65rem] text-white/70">
-                        {(Number(c.volume24hWei) / 1e18).toFixed(2)}
+                        {formatCompactNative(c.volume24hWei!).display}
                         <ChainIcon chainSlug={c.chainSlug} size={16} className="shrink-0" />
                         · 24h
                       </p>
@@ -1431,20 +1491,20 @@ export default function GlobalMarketHub() {
                           )}
                         </Link>
                       </td>
-                      <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/80">
+                      <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-gold-300">
                         {c.floorPriceWei ? (
                           <span className="inline-flex items-center justify-end gap-1">
-                            {(Number(c.floorPriceWei) / 1e18).toFixed(3)}
+                            <NativeAmount
+                              wei={c.floorPriceWei}
+                              usdLabel={(() => {
+                                const usd = toUsd(c.floorPriceWei, c.floorPriceCurrency);
+                                return usd != null ? formatUsdCompact(usd) : null;
+                              })()}
+                            />
                             <ChainIcon chainSlug={c.chainSlug} size={14} className="shrink-0" />
-                            {(() => {
-                              const usd = toUsd(c.floorPriceWei, c.floorPriceCurrency);
-                              return usd != null ? (
-                                <span className="text-[0.65rem] text-foreground/40">{formatUsdCompact(usd)}</span>
-                              ) : null;
-                            })()}
                           </span>
                         ) : (
-                          "—"
+                          <span className="text-foreground/40">—</span>
                         )}
                       </td>
                       <td className={`whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono font-bold ${changeColor}`}>
@@ -1461,9 +1521,8 @@ export default function GlobalMarketHub() {
                           const usd = toUsd(vol, c.floorPriceCurrency);
                           return (
                             <span className="inline-flex items-center justify-end gap-1">
-                              {(Number(vol) / 1e18).toFixed(2)}
+                              <NativeAmount wei={vol} usdLabel={usd != null ? formatUsdCompact(usd) : null} />
                               <ChainIcon chainSlug={c.chainSlug} size={14} className="shrink-0" />
-                              {usd != null && <span className="text-[0.65rem] text-foreground/40">{formatUsdCompact(usd)}</span>}
                             </span>
                           );
                         })()}
@@ -1473,11 +1532,19 @@ export default function GlobalMarketHub() {
                       </td>
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 lg:table-cell">
                         {c.listedCount != null ? (
-                          listedPct != null ? (
-                            `${listedPct.toFixed(1)}% · ${c.listedCount}/${c.totalSupply}`
-                          ) : (
-                            String(c.listedCount)
-                          )
+                          <span
+                            className="inline-flex items-baseline justify-end gap-1"
+                            title={
+                              listedPct != null && c.totalSupply != null
+                                ? `${c.listedCount.toLocaleString()} of ${c.totalSupply.toLocaleString()} listed (${listedPct.toFixed(2)}%)`
+                                : `${c.listedCount.toLocaleString()} listed`
+                            }
+                          >
+                            {listedPct != null ? (
+                              <span className={listedTone(listedPct)}>{listedPct >= 10 ? listedPct.toFixed(0) : listedPct.toFixed(1)}%</span>
+                            ) : null}
+                            <span className="text-[0.65rem] text-foreground/40">{formatCompactCount(c.listedCount)}</span>
+                          </span>
                         ) : (
                           <span title={emptyCellReason(c, "listed")}>—</span>
                         )}
@@ -1584,7 +1651,7 @@ export default function GlobalMarketHub() {
                   <p className="truncate text-[0.65rem] text-foreground/50">
                     {c.floorPriceWei ? (
                       <>
-                        {(Number(c.floorPriceWei) / 1e18).toFixed(3)} {c.floorPriceCurrency ?? ""}
+                        {formatCompactNative(c.floorPriceWei).display}
                         {(() => {
                           const usd = toUsd(c.floorPriceWei, c.floorPriceCurrency);
                           return usd != null ? ` · ${formatUsdCompact(usd)}` : "";
@@ -1722,7 +1789,7 @@ export default function GlobalMarketHub() {
                       </div>
                       {c.floorPriceWei && (
                         <p className="text-xs text-foreground/50">
-                          Floor {(Number(c.floorPriceWei) / 1e18).toFixed(4)} {c.floorPriceCurrency ?? "ETH"}
+                          Floor {formatCompactNative(c.floorPriceWei).display}
                           {c.floorChangePct !== null && (
                             <span className={`ml-1.5 font-bold ${c.floorChangePct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                               {c.floorChangePct >= 0 ? "▲" : "▼"} {Math.abs(c.floorChangePct).toFixed(1)}%
@@ -1732,7 +1799,7 @@ export default function GlobalMarketHub() {
                       )}
                       {c.volume24hWei && (
                         <p className="flex items-center gap-1 text-xs text-foreground/50">
-                          Vol {(Number(c.volume24hWei) / 1e18).toFixed(3)}
+                          Vol {formatCompactNative(c.volume24hWei).display}
                           <ChainIcon chainSlug={c.chainSlug} size={16} className="shrink-0" />
                           · 24h
                           {c.sales24h ? ` · ${c.sales24h} sales` : ""}
