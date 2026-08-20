@@ -32,6 +32,7 @@ import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, updateCollectionDisplay, hasMultichainStore } from "@/lib/market/multichain/store";
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
+import { checkSourceBudget } from "@/lib/market/multichain/discovery/source-budget";
 import { isNotRealCollectibleArt } from "@/lib/market/multichain/discovery/evm-log-scan";
 import { FOREIGN_CHAINS } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { durableKv as kv } from "@/lib/market/durable-kv";
@@ -49,7 +50,16 @@ import { durableKv as kv } from "@/lib/market/durable-kv";
  * beyond that window.
  */
 function cursorKey(chainSlug: string): string {
-  return `plank:market:opensea-bulk-scan-cursor:${chainSlug}`;
+  // v2: registration no longer requires Alchemy NFT metadata (monthly 429).
+  return `plank:market:opensea-bulk-scan-cursor-v2:${chainSlug}`;
+}
+
+function acceptableContractChains(openSeaChain: string): string[] {
+  if (openSeaChain === "matic") return ["matic", "polygon"];
+  if (openSeaChain === "bsc") return ["bsc", "bnb", "binance"];
+  if (openSeaChain === "optimism") return ["optimism", "opt"];
+  if (openSeaChain === "arbitrum") return ["arbitrum", "arb"];
+  return [openSeaChain];
 }
 async function readBulkCursor(chainSlug: string): Promise<string | null> {
   return (await kv.get<string>(cursorKey(chainSlug))) ?? null;
@@ -109,7 +119,7 @@ export type OpenSeaBulkScanResult = {
 export async function runOpenSeaBulkScan(
   input: { chainSlug: string; openSeaChain: string; chainId: number | null; maxPages?: number }
 ): Promise<OpenSeaBulkScanResult> {
-  const maxPages = input.maxPages ?? 3;
+  const maxPages = input.maxPages ?? (input.chainSlug === "eth-mainnet" ? 8 : 4);
   const base: OpenSeaBulkScanResult = {
     chainSlug: input.chainSlug,
     pagesScanned: 0,
@@ -144,7 +154,7 @@ export async function runOpenSeaBulkScan(
         // skippedNotArt/skippedNoMetadata/skippedAlreadyTracked all stayed
         // at zero, which is exactly the "0/0/0/0 out of 300 seen" signature
         // that flagged this as a real bug rather than a genuinely thin chain.
-        const acceptableChainValues = input.openSeaChain === "matic" ? ["matic", "polygon"] : [input.openSeaChain];
+        const acceptableChainValues = acceptableContractChains(input.openSeaChain);
         const contract = entry.contracts.find((c) => acceptableChainValues.includes(c.chain));
         if (!contract?.address) continue;
         const contractAddress = contract.address.toLowerCase();
@@ -158,19 +168,19 @@ export async function runOpenSeaBulkScan(
           continue;
         }
 
-        // Same trust boundary evm-log-scan.ts already relies on: OpenSea's
-        // listing alone doesn't prove real, current on-chain metadata --
-        // fetchSnapshot re-derives name/image/floor directly from Alchemy,
-        // and a contract Alchemy can't resolve is simply not registered.
-        let snapshot;
-        try {
-          snapshot = await alchemyNftAdapter.fetchSnapshot({ chainSlug: input.chainSlug, contractAddress });
-        } catch {
-          result.skippedNoMetadata += 1;
-          continue;
+        // Alchemy NFT is jailed (monthly 429). OpenSea's own list already
+        // carries name + image for this exact contract — same fields
+        // Polygon's matic/polygon alias path used. Do not skip registration.
+        let snapshot: Awaited<ReturnType<typeof alchemyNftAdapter.fetchSnapshot>> | null = null;
+        if (checkSourceBudget("alchemy-nft").allowed) {
+          try {
+            snapshot = await alchemyNftAdapter.fetchSnapshot({ chainSlug: input.chainSlug, contractAddress });
+          } catch {
+            snapshot = null;
+          }
         }
-        const name = snapshot.name ?? entry.name;
-        const imageUrl = snapshot.imageUrl ?? entry.image_url;
+        const name = snapshot?.name ?? entry.name;
+        const imageUrl = snapshot?.imageUrl ?? entry.image_url;
         if (isNotRealCollectibleArt(name, imageUrl)) {
           result.skippedNotArt += 1;
           continue;
@@ -183,7 +193,17 @@ export async function runOpenSeaBulkScan(
           adapter: alchemyNftAdapter.name,
         });
         const { writeSnapshot } = await import("@/lib/market/multichain/store");
-        await writeSnapshot(id, snapshot).catch(() => {});
+        await writeSnapshot(id, {
+          name: name ?? null,
+          imageUrl: imageUrl ?? null,
+          externalUrl: null,
+          floorPriceWei: snapshot?.floorPriceWei ?? null,
+          floorPriceCurrency: snapshot?.floorPriceCurrency ?? null,
+          floorPriceMarketplace: snapshot?.floorPriceMarketplace ?? null,
+          totalSupply: snapshot?.totalSupply ?? null,
+          listedCount: snapshot?.listedCount ?? null,
+          holderCount: snapshot?.holderCount ?? null,
+        }).catch(() => {});
         await updateCollectionDisplay(input.chainSlug, contractAddress, { name: name ?? null, imageUrl: imageUrl ?? null }).catch(
           () => {}
         );
