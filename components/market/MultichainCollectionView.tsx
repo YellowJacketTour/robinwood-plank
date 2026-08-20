@@ -360,7 +360,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         listings: Listing[];
         listingsUnavailable?: string | null;
         collection?: { listedCount?: number | null; floorPriceWei?: string | null };
-      }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=40`, {
+      }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${isSolana || isBitcoin ? 200 : 50}`, {
         ttlMs: 8_000,
         swrMs: 45_000,
         session: true,
@@ -1739,6 +1739,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 currencySymbol={statCurrencySymbol}
                 chainSlug={chainSlug}
                 usdValueFor={(wei) => toUsd(wei == null ? null : wei.toString(), statCurrencySymbol)}
+                listedTotal={supplyStats?.listedCount ?? null}
               />
               </>
             ) : undefined

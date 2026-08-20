@@ -876,13 +876,11 @@ export default function GlobalMarketHub() {
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
       if (q && !(c.name ?? "").toLowerCase().includes(q)) return false;
       if (onlyTradeable && !c.tradeable) return false;
-      if (onlyArt && !hasArt(c)) {
-        const robinhoodOnly = chainFilter.size === 1 && chainFilter.has("robinhood");
-        if (!(robinhoodOnly && Boolean(c.name))) return false;
-      }
+      const robinhoodOnly = chainFilter.size === 1 && chainFilter.has("robinhood");
+      if (onlyArt && !hasArt(c) && !robinhoodOnly) return false;
       if (onlyVerifiedCreator && !(c.creatorHandle || c.creatorEns)) return false;
-      if (onlyListed && !(c.listedCount != null && c.listedCount > 0)) return false;
-      if (!showShells && !hasMarketEvidence(c)) return false;
+      if (onlyListed && !(c.listedCount != null && c.listedCount > 0) && !robinhoodOnly) return false;
+      if (!showShells && !hasMarketEvidence(c) && !robinhoodOnly) return false;
       if (min !== null || max !== null) {
         const p = floorNative(c);
         if (p === null) return false;

@@ -33,6 +33,8 @@ type Props = {
   chainSlug?: string;
   /** Real chain-aware USD equivalent for a wei amount, precomputed by the caller (lib/multi-asset-price.ts). Omit to keep this strip's own ETH-only EthUsdValue fetch. */
   usdValueFor?: (wei: bigint | string | null) => number | null;
+  /** Venue-reported listed count when the loaded book is a page, not the full book. */
+  listedTotal?: number | null;
 };
 
 /**
@@ -48,6 +50,7 @@ export default function RarityFloorStrip({
   currencySymbol = "ETH",
   chainSlug = "robinhood",
   usdValueFor,
+  listedTotal = null,
 }: Props) {
   const collFloor = useMemo(() => collectionFloorWei(listings), [listings]);
   const rows = useMemo(() => tierFloors(listings, rarity), [listings, rarity]);
@@ -97,7 +100,11 @@ export default function RarityFloorStrip({
           ) : (
             <EthUsdValue wei={collFloor} className="block text-[clamp(0.55rem,2.2vw,0.65rem)] tabular-nums text-foreground/50" />
           )}
-          <p className="text-[0.55rem] text-foreground/40">{listings.length} listed</p>
+          <p className="text-[0.55rem] text-foreground/40">
+            {listedTotal != null && listedTotal > listings.length
+              ? `${listings.length} of ${listedTotal} listed`
+              : `${listings.length} listed`}
+          </p>
         </button>
 
         {rows.map((row) => {

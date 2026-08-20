@@ -114,7 +114,7 @@ export async function GET(req: NextRequest) {
   const chainSlug = searchParams.get("chainSlug");
   const collectionSlug = searchParams.get("collectionSlug");
   const limitParam = Number(searchParams.get("limit") ?? "24");
-  const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 50) : 24;
+  const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 200) : 24;
 
   if (!chainSlug || !collectionSlug) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
@@ -177,14 +177,6 @@ export async function GET(req: NextRequest) {
   // row in GlobalMarketHub, so collectionSlug here is that identical string.
   if (chainSlug && isSolanaChainSlug(chainSlug)) {
     try {
-      const meLimit = Math.min(limit, 20); // ME's own documented cap for this endpoint
-      const res = await fetch(
-        `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/listings?limit=${meLimit}`,
-        { headers: { accept: "application/json" } }
-      );
-      if (!res.ok) {
-        return NextResponse.json({ error: `Magic Eden ${res.status}` }, { status: 502 });
-      }
       type MeListing = {
         tokenMint: string;
         seller: string;
@@ -195,7 +187,27 @@ export async function GET(req: NextRequest) {
         tokenAddress?: string;
         token?: { name?: string; image?: string; collectionName?: string; attributes?: Array<{ trait_type: string; value: string }> };
       };
-      const raw = (await res.json()) as MeListing[];
+      const pageSize = 20;
+      const raw: MeListing[] = [];
+      const seenMint = new Set<string>();
+      for (let offset = 0; offset < limit; offset += pageSize) {
+        const res = await fetch(
+          `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/listings?limit=${pageSize}&offset=${offset}`,
+          { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) }
+        );
+        if (!res.ok) {
+          if (raw.length === 0) return NextResponse.json({ error: `Magic Eden ${res.status}` }, { status: 502 });
+          break;
+        }
+        const page = (await res.json()) as MeListing[];
+        if (!Array.isArray(page) || page.length === 0) break;
+        for (const row of page) {
+          if (!row.tokenMint || seenMint.has(row.tokenMint)) continue;
+          seenMint.add(row.tokenMint);
+          raw.push(row);
+        }
+        if (page.length < pageSize) break;
+      }
       const listings: Listing[] = raw
         .filter((l) => l.tokenMint && typeof l.price === "number")
         .map((l) => {
