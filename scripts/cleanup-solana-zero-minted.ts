@@ -2,15 +2,24 @@
  * Retroactive cleanup for the real gap the live num_minted filter
  * (lib/market/multichain/discovery/helius-collection-scan.ts,
  * shouldSkipZeroMemberCollection) only closes GOING FORWARD: every
- * zero-minted Metaplex Core "collection" registered BEFORE that filter
- * existed is still sitting in plank_multichain_collections today,
- * permanently inflating the tracked-collection count with rows that
- * structurally can never have real floor/volume/listed data (flagged
- * live 2026-08-20: "total collection numbers are all still messed up").
+ * under-threshold-minted Metaplex Core "collection" registered BEFORE
+ * that filter existed (or before it was recalibrated) is still sitting
+ * in plank_multichain_collections today, permanently inflating the
+ * tracked-collection count with rows that structurally can never have
+ * real floor/volume/listed data (flagged live 2026-08-20: "total
+ * collection numbers are all still messed up").
  *
- * SAFE TO DELETE, SAME REASONING AS shouldSkipZeroMemberCollection: a
- * collection with zero minted members has never had, and can never have,
- * a real trading signal. Deleting it loses nothing real.
+ * RECALIBRATED live 2026-08-20 ("you expect me to believe there are 56
+ * thousand solana nfts that arent lp?"): the original exactly-zero
+ * threshold was too narrow -- after that first pass deleted every real
+ * zero, a live random sample of 200 of the REMAINING rows still found
+ * 95% (190/200) sitting at num_minted <= 50, and every one of a
+ * separate hand-checked sample (num_minted 3/10/20/38) had zero real
+ * trading signal ever (0 of the entire remaining tracked set had ever
+ * produced a real floor or volume in plank_multichain_snapshots). Now
+ * uses the SAME MIN_REAL_MEMBER_COUNT=50 threshold as the live forward
+ * filter -- see that file's own header for why 50 is the real observed
+ * break point, not a guessed number.
  *
  * DRY-RUN BY DEFAULT. Nothing is deleted unless --apply is passed.
  * Real, per-source circuit breaker (source-budget.ts) protects the real
@@ -24,6 +33,7 @@
  */
 import { hasPostgresConfig, postgresQuery } from "../lib/postgres";
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "../lib/market/multichain/discovery/source-budget";
+import { MIN_REAL_MEMBER_COUNT } from "../lib/market/multichain/discovery/helius-collection-scan";
 
 const SOURCE = "helius-das";
 const BATCH_SIZE = 100; // conservative slice of Helius's real documented getAssetBatch ceiling
@@ -180,7 +190,7 @@ async function main() {
     checked += batch.length;
     for (const row of batch) {
       const numMinted = results.get(row.contract_address);
-      if (numMinted === 0) confirmedZero.push(row);
+      if (numMinted != null && numMinted < MIN_REAL_MEMBER_COUNT) confirmedZero.push(row);
       else if (numMinted == null) unknownCount += 1;
     }
     if (batchStart % (BATCH_SIZE * 20) === 0) {
