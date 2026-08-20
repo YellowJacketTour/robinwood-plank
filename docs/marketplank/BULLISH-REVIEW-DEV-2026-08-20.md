@@ -6,6 +6,18 @@ PR: https://github.com/YellowJacketTour/robinwood-plank/pull/95
 Branch: `feat/market-spokes-visible-window` → base **`dev`**  
 Local: http://localhost:3800 (`START-MARKET.bat` — own window, not Grok)
 
+## Chain-by-chain cell sources (fail closed)
+
+| Chain | Floor | 24h vol/sales | Change | Listed | Holders | Notes |
+|-------|--------|----------------|--------|--------|---------|-------|
+| robinhood native | Seaport book or public plank.love | fills / ledger | two floors | book + 1542 | owner-index unique wallets | @RobinWoodPlank; vault/sends in activity |
+| robinhood others | OpenSea if slug | OS one_day / fills | only if ≠0 with volume | OS listed_count | OS num_owners | 0 listed of N is real |
+| eth/base/arb/op/poly/bnb/avax | OpenSea stats floor + hydrate | OS intervals + CG NFT | never stored 0.0% without volume | OS + snapshot | OS/CG unique addresses | Hydrate **visible named rows**, skip junk titles |
+| solana | Magic Eden stats | CG + ME vol | CG ≠0 | ME listedCount | ME uniqueHolders | Browse-only buy |
+| bitcoin | UniSat floor | CG ordinals exact slug | — | UniSat | not sourced | always partial rarity |
+
+Display: floor `0` / `$0.00` → dash. `0.0%` with no 24h tape → dash. Vol `0` → dash.
+
 ## How to audit in 15 minutes
 
 1. `/market` — RobinWood floor ~0.019 Ξ / 105 listed (public plank.love book if local Postgres is empty). Activity includes **Vault / Send / Batch send**, not only sales.

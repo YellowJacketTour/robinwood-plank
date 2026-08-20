@@ -21,6 +21,8 @@ test("hex and ERC721 are contract names not titles", () => {
   assert.equal(looksLikeContractName("0x000a…4dd4"), true);
   assert.equal(looksLikeContractName("_-l_"), true);
   assert.equal(looksLikeContractName("25125"), true);
+  assert.equal(looksLikeContractName("-l-"), true);
+  assert.equal(looksLikeContractName("1CAKE"), false);
   assert.equal(looksLikeContractName("Decentraland"), false);
   assert.equal(looksLikeContractName("RobinWood"), false);
 });

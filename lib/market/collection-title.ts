@@ -28,5 +28,7 @@ export function looksLikeContractName(name: string | null | undefined): boolean 
   const collapsed = n.replace(/[\s._*\-<>\u2013\u2014]/g, "");
   if (!collapsed || /^l$/i.test(collapsed)) return true;
   if (/^\d{1,8}$/.test(n)) return true;
+  const letters = n.replace(/[^a-zA-Z\u00c0-\u024f\u4e00-\u9fff]/g, "");
+  if (letters.length <= 1 && n.length <= 16) return true;
   return false;
 }

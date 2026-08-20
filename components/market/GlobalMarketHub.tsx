@@ -259,6 +259,25 @@ function displaySales(c: TrackedCollection, window: "24h" | "7d" | "30d"): numbe
   if (n == null || n === 0) return null;
   return n;
 }
+function isZeroWei(wei: string | null | undefined): boolean {
+  if (wei == null || wei === "" || wei === "0") return true;
+  try {
+    return BigInt(wei) === 0n;
+  } catch {
+    return true;
+  }
+}
+function displayFloorWei(c: TrackedCollection): string | null {
+  return isZeroWei(c.floorPriceWei) ? null : c.floorPriceWei;
+}
+/** 0.0% with no 24h volume/sales is a stored zero, not a measured flat tape. */
+function displayChangePct(c: TrackedCollection): number | null {
+  if (c.floorChangePct == null || !Number.isFinite(c.floorChangePct)) return null;
+  if (c.floorChangePct === 0 && isZeroWei(c.volume24hWei) && !(c.sales24h != null && c.sales24h > 0)) {
+    return null;
+  }
+  return c.floorChangePct;
+}
 function displayHolders(c: TrackedCollection): number | null {
   if (c.holderCount == null || c.holderCount <= 0) return null;
   if (isHomeRow(c)) return c.holderCount;
@@ -995,6 +1014,12 @@ export default function GlobalMarketHub() {
       if (home !== 0) return home;
       const primary = compareByColumn(a, b, sortColumn, sortDir, rankingsWindow, hasArt);
       if (primary !== 0) return primary;
+      const floorTie = compareNullable(
+        displayFloorWei(a) ? Number(displayFloorWei(a)) : null,
+        displayFloorWei(b) ? Number(displayFloorWei(b)) : null,
+        "desc"
+      );
+      if (floorTie !== 0) return floorTie;
       return (a.name ?? a.contractAddress).localeCompare(b.name ?? b.contractAddress);
     });
   }, [collections, chainFilter, search, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, showShells, priceMin, priceMax, deadArt]);
@@ -1057,21 +1082,20 @@ export default function GlobalMarketHub() {
   const hydratedKey = useRef("");
   useEffect(() => {
     if (loading || rankings.length === 0) return;
-    const chain = chainFilter.size === 1 ? [...chainFilter][0] : null;
-    if (!chain || chain === "bitcoin-mainnet") return;
     const missing = rankings
       .filter((c) => {
         if (isHomeRow(c)) return false;
-        if (!c.floorPriceWei) return true;
+        if (c.chainSlug === "bitcoin-mainnet") return false;
+        if (looksLikeContractName(c.name) || isSpamCollectionTitle(c.name)) return false;
+        if (!displayFloorWei(c)) return true;
         if (c.listedCount == null) return true;
         if (c.holderCount == null) return true;
         if (c.volume24hWei == null) return true;
-        if (looksLikeContractName(c.name)) return true;
         return false;
       })
       .slice(0, 10);
     if (missing.length === 0) return;
-    const stamp = `${chain}:${missing.map((c) => c.contractAddress).join(",")}`;
+    const stamp = missing.map((c) => `${c.chainSlug}:${c.contractAddress}`).join(",");
     if (hydratedKey.current === stamp) return;
     hydratedKey.current = stamp;
     let cancelled = false;
@@ -1079,7 +1103,9 @@ export default function GlobalMarketHub() {
       const res = await fetch("/api/market/multichain/hydrate-stats", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ chainSlug: chain, contracts: missing.map((c) => c.contractAddress) }),
+        body: JSON.stringify({
+          rows: missing.map((c) => ({ chainSlug: c.chainSlug, contractAddress: c.contractAddress })),
+        }),
       }).catch(() => null);
       if (!res?.ok || cancelled) return;
       const body = (await res.json().catch(() => null)) as { hydrated?: number } | null;
@@ -1589,7 +1615,7 @@ export default function GlobalMarketHub() {
               </thead>
               <tbody>
                 {rankings.map((c, i) => {
-                  const change = c.floorChangePct;
+                  const change = displayChangePct(c);
                   const changeColor = change == null ? "text-foreground/40" : change > 0 ? "text-emerald-400" : change < 0 ? "text-rose-400" : "text-foreground/40";
                   // Directional arrow ALONGSIDE color, not instead of it --
                   // Magic Eden's own table pairs both (live-checked
@@ -1661,12 +1687,12 @@ export default function GlobalMarketHub() {
                         </Link>
                       </td>
                       <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-gold-300">
-                        {c.floorPriceWei ? (
+                        {displayFloorWei(c) ? (
                           <span className="inline-flex items-center justify-end gap-1">
                             <NativeAmount
-                              wei={c.floorPriceWei}
+                              wei={displayFloorWei(c)!}
                               usdLabel={(() => {
-                                const usd = toUsd(c.floorPriceWei, c.floorPriceCurrency);
+                                const usd = toUsd(displayFloorWei(c), c.floorPriceCurrency);
                                 return usd != null ? formatUsdCompact(usd) : null;
                               })()}
                             />
@@ -1959,12 +1985,12 @@ export default function GlobalMarketHub() {
                           </span>
                         )}
                       </div>
-                      {c.floorPriceWei && (
+                      {displayFloorWei(c) && (
                         <p className="text-xs text-foreground/50">
-                          Floor {formatCompactNative(c.floorPriceWei).display}
-                          {c.floorChangePct !== null && (
-                            <span className={`ml-1.5 font-bold ${c.floorChangePct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                              {c.floorChangePct >= 0 ? "▲" : "▼"} {Math.abs(c.floorChangePct).toFixed(1)}%
+                          Floor {formatCompactNative(displayFloorWei(c)!).display}
+                          {displayChangePct(c) != null && (
+                            <span className={`ml-1.5 font-bold ${displayChangePct(c)! >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                              {displayChangePct(c)! >= 0 ? "▲" : "▼"} {Math.abs(displayChangePct(c)!).toFixed(1)}%
                             </span>
                           )}
                         </p>
@@ -1975,6 +2001,13 @@ export default function GlobalMarketHub() {
                           <ChainIcon chainSlug={c.chainSlug} size={16} className="shrink-0" />
                           · 24h
                           {c.sales24h ? ` · ${c.sales24h} sales` : ""}
+                        </p>
+                      )}
+                      {(c.listedCount != null || displayHolders(c) != null) && (
+                        <p className="text-[0.65rem] text-foreground/45">
+                          {c.listedCount != null ? `${c.listedCount.toLocaleString()} listed` : null}
+                          {c.listedCount != null && c.totalSupply != null ? ` / ${c.totalSupply.toLocaleString()}` : null}
+                          {displayHolders(c) != null ? `${c.listedCount != null ? " · " : ""}${displayHolders(c)!.toLocaleString()} wallets` : null}
                         </p>
                       )}
                       {(c.creatorHandle || c.creatorEns || c.creatorAddress) && (

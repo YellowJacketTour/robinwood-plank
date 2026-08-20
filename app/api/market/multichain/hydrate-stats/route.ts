@@ -77,7 +77,8 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
         sales24h: typeof d.one_day_sales === "number" ? d.one_day_sales : null,
         currentFloorPriceWei: null,
         floorChangePct:
-          typeof d.floor_price_24h_percentage_change?.native_currency === "number"
+          typeof d.floor_price_24h_percentage_change?.native_currency === "number" &&
+          d.floor_price_24h_percentage_change.native_currency !== 0
             ? d.floor_price_24h_percentage_change.native_currency
             : null,
       }).catch(() => {});
@@ -178,19 +179,34 @@ export async function POST(req: NextRequest) {
   const limited = rateLimit(req, { key: "market-multichain-hydrate-stats", limit: 8, windowMs: 60_000 });
   if (limited) return limited;
 
-  const body = (await req.json().catch(() => null)) as { chainSlug?: string; contracts?: string[] } | null;
-  const chainSlug = body?.chainSlug;
-  const contracts = [...new Set((body?.contracts ?? []).filter((a) => typeof a === "string" && a.length > 8))].slice(0, 10);
-  if (!chainSlug || contracts.length === 0) {
-    return NextResponse.json({ error: "chainSlug and contracts[] required" }, { status: 400 });
+  const body = (await req.json().catch(() => null)) as {
+    chainSlug?: string;
+    contracts?: string[];
+    rows?: Array<{ chainSlug?: string; contractAddress?: string }>;
+  } | null;
+  const fromRows = (body?.rows ?? [])
+    .filter((r) => r && typeof r.chainSlug === "string" && typeof r.contractAddress === "string" && r.contractAddress.length > 8)
+    .map((r) => ({ chainSlug: r.chainSlug as string, contractAddress: r.contractAddress as string }));
+  const fromLegacy = (body?.chainSlug && Array.isArray(body.contracts) ? body.contracts : [])
+    .filter((a) => typeof a === "string" && a.length > 8)
+    .map((contractAddress) => ({ chainSlug: body!.chainSlug as string, contractAddress }));
+  const seen = new Set<string>();
+  const jobs = [...fromRows, ...fromLegacy].filter((j) => {
+    const k = `${j.chainSlug}:${j.contractAddress}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).slice(0, 10);
+  if (jobs.length === 0) {
+    return NextResponse.json({ error: "rows[] or chainSlug+contracts[] required" }, { status: 400 });
   }
 
   try {
     let ok = 0;
-    for (const address of contracts) {
-      if (await refreshOne(chainSlug, address)) ok += 1;
+    for (const job of jobs) {
+      if (await refreshOne(job.chainSlug, job.contractAddress)) ok += 1;
     }
-    return NextResponse.json({ hydrated: ok, attempted: contracts.length }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ hydrated: ok, attempted: jobs.length }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return publicError(error, "Failed to hydrate collection stats");
   }
