@@ -34,8 +34,11 @@ while (Date.now() - started < 1000 * 60 * minutes) {
   }
   const budget = readSourceBudget("opensea-stats");
   if (budget.jailed) {
-    const waitMs = Math.max(5_000, (budget.jailedUntil ?? Date.now()) - Date.now());
-    console.log(`=== opensea-stats jailed, sleeping ${Math.ceil(waitMs / 1000)}s ===`);
+    const remainingMs = 1000 * 60 * minutes - (Date.now() - started);
+    if (remainingMs <= 0) break;
+    const jailMs = Math.max(0, (budget.jailedUntil ?? Date.now()) - Date.now());
+    const waitMs = Math.min(jailMs, remainingMs);
+    console.log(`=== opensea-stats jailed, sleeping ${Math.ceil(waitMs / 1000)}s (pass deadline-capped) ===`);
     await new Promise((resolve) => setTimeout(resolve, waitMs));
     continue;
   }
