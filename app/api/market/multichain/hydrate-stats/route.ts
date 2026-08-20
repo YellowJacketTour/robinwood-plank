@@ -41,7 +41,7 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
       signal: AbortSignal.timeout(12_000),
     }).catch(() => null);
     if (!me?.ok) return false;
-    const stats = (await me.json()) as { listedCount?: number; uniqueHolders?: number };
+    const stats = (await me.json()) as { listedCount?: number; uniqueHolders?: number; floorPrice?: number | null };
     if (typeof stats.listedCount === "number") {
       await updateCollectionSupplyFields("solana-mainnet", contractAddress, {
         listedCount: stats.listedCount,
@@ -50,6 +50,14 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
     }
     if (typeof stats.uniqueHolders === "number" && stats.uniqueHolders > 0) {
       await updateHolderCount("solana-mainnet", contractAddress, stats.uniqueHolders).catch(() => {});
+    }
+    if (typeof stats.floorPrice === "number" && stats.floorPrice > 0) {
+      const wei = (BigInt(Math.round(stats.floorPrice)) * BigInt(1_000_000_000)).toString();
+      await updateCollectionFloorOnly("solana-mainnet", contractAddress, {
+        floorPriceWei: wei,
+        floorPriceCurrency: "SOL",
+        floorPriceMarketplace: "magiceden",
+      }).catch(() => {});
     }
     return true;
   }

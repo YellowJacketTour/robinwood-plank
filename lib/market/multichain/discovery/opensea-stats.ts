@@ -129,6 +129,11 @@ export async function resolveOpenSeaSlug(openSeaChain: string, contractAddress: 
   return body.collection ?? null;
 }
 
+let lastStatsNotFound = false;
+function statsNoneKey(slug: string): string {
+  return `plank:market:opensea-stats-none:${slug}`;
+}
+
 /** Returns null (never throws) on any real failure -- a stats miss must never break the caller's own registration flow, same discipline every other adapter in this app holds. */
 export async function fetchOpenSeaCollectionStats(slug: string, apiKey: string): Promise<OpenSeaCollectionStats | null> {
   const gate = checkSourceBudget(SOURCE);
@@ -145,9 +150,11 @@ export async function fetchOpenSeaCollectionStats(slug: string, apiKey: string):
     return null;
   }
 
+  lastStatsNotFound = false;
   if (!res.ok) {
     const bodyText = await res.text().catch(() => "");
     recordSourceFailure(SOURCE, isQuotaError(res.status, bodyText));
+    lastStatsNotFound = res.status === 404;
     return null;
   }
 
@@ -165,7 +172,7 @@ export async function fetchOpenSeaCollectionStats(slug: string, apiKey: string):
     floorPriceWei: toWeiString(body.total?.floor_price),
     floorPriceCurrency: body.total?.floor_price != null && body.total.floor_price > 0 ? (body.total.floor_price_symbol || "ETH") : null,
     volume24hWei: toWeiString(oneDay?.volume),
-    sales24h: typeof oneDay?.sales === "number" ? oneDay.sales : null,
+    sales24h: typeof oneDay?.sales === "number" && oneDay.sales > 0 ? oneDay.sales : null,
   };
 }
 
@@ -309,7 +316,7 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
        OR c.image_url IS NULL
        OR s.listed_count IS NULL
      )
-     ORDER BY c.id
+     ORDER BY (c.name IS NOT NULL AND c.name NOT ILIKE '0x%') DESC, c.id
      LIMIT $3`,
     [chainSlug, afterId, Math.max(maxUpdates * 40, 200)]
   );
@@ -345,12 +352,21 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
       }
       await kv.set(cacheKey, slug);
     }
+    const noneKey = statsNoneKey(slug);
+    if ((await kv.get<string>(noneKey)) === "1") {
+      result.errors += 1;
+      lastSeenId = row.id;
+      continue;
+    }
+
     result.slugResolved += 1;
     processed += 1;
 
     const stats = await fetchOpenSeaCollectionStats(slug, apiKey);
     if (!stats) {
+      if (lastStatsNotFound) await kv.set(noneKey, "1").catch(() => {});
       result.errors += 1;
+      lastSeenId = row.id;
       continue;
     }
     const display = await fetchOpenSeaCollectionDisplay(slug, apiKey);
