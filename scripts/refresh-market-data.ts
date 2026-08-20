@@ -103,7 +103,7 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin"]
       : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
 );
 
@@ -633,6 +633,18 @@ async function main(): Promise<void> {
       onProgress: (line) => console.log(`[refresh:scaffold-rarity-solana] ${line}`),
     });
     return `${result.totalTracked} Solana tracked -> ${result.indexed} indexed, ${result.skippedFresh} fresh, ${result.failed} failed`;
+  });
+
+  // Bitcoin's own real trait/rarity scaffold -- see unisat-rarity-index-
+  // runner.ts's own header for the real source (UniSat's marketplace
+  // activity log, not a collection enumeration) and why it's ALWAYS
+  // partial coverage by construction, never a bug to chase to 100%.
+  await step("scaffold-rarity-bitcoin", async () => {
+    const { scaffoldAllTrackedBitcoinCollections } = await import("../lib/market/multichain/discovery/unisat-rarity-index-runner");
+    const result = await scaffoldAllTrackedBitcoinCollections({
+      onProgress: (line) => console.log(`[refresh:scaffold-rarity-bitcoin] ${line}`),
+    });
+    return `${result.totalTracked} Bitcoin tracked -> ${result.indexed} indexed (partial coverage), ${result.skippedFresh} fresh, ${result.failed} failed`;
   });
 
   const failed = results.filter((r) => !r.ok);
