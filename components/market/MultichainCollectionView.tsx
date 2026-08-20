@@ -147,6 +147,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>>([]);
+  const [tokenLimit, setTokenLimit] = useState(400);
   const [bookFilter, setBookFilter] = useState<"all" | "listed">(() => (searchParams.get("show") === "all" ? "all" : "listed"));
   /** Real listed-count/total-supply/holder-count from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. holderCount is EVM-only (Alchemy getOwnersForContract) and may arrive later than the rest via the on-demand /api/market/multichain/holder-count backfill below. */
   const [supplyStats, setSupplyStats] = useState<{
@@ -340,7 +341,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     const qs = new URLSearchParams({
       chainSlug,
       collectionSlug,
-      limit: String(isBitcoin || isSolana ? 2000 : 200),
+      limit: String(isBitcoin || isSolana ? 2000 : tokenLimit),
       art: "2",
       sort,
     });
@@ -351,7 +352,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     )
       .then((tok) => setTokens(tok.tokens ?? []))
       .catch(() => setTokens([]));
-  }, [chainSlug, collectionSlug, listingSort, activeTier, activeTiers, isBitcoin, isSolana]);
+  }, [chainSlug, collectionSlug, listingSort, activeTier, activeTiers, isBitcoin, isSolana, tokenLimit]);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -383,7 +384,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         listings: Listing[];
         listingsUnavailable?: string | null;
         collection?: { listedCount?: number | null; floorPriceWei?: string | null };
-      }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${isSolana || isBitcoin ? 200 : 50}`, {
+      }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${isSolana || isBitcoin ? 200 : 200}`, {
         ttlMs: 8_000,
         swrMs: 45_000,
         session: true,
@@ -1170,18 +1171,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         templatedErc721Image(collection?.contractAddress || collectionSlug, t.tokenId),
       listing: tokenIdAliases(t.tokenId).map((k) => listingByToken.get(k)).find(Boolean) ?? null,
     }));
-    const catalogKeys = new Set(tokens.flatMap((t) => tokenIdAliases(t.tokenId)));
-    const extra = filteredListings
-      .filter((l) => !tokenIdAliases(l.tokenId).some((k) => catalogKeys.has(k)))
-      .map((listing) => ({
-        tokenId: listing.tokenId,
-        name: listing.tokenName ?? null,
-        imageUrl:
-          listing.imageUrl ||
-          templatedErc721Image(collection?.contractAddress || collectionSlug, listing.tokenId),
-        listing,
-      }));
-    const rows = [...fromTokens, ...extra];
+    const rows = fromTokens;
     const tierPos = (id: string) => {
       const t = rarityFor(id)?.tier;
       const i = t ? TIER_ORDER.indexOf(t) : -1;
@@ -1198,16 +1188,6 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         if (ra == null) return 1;
         if (rb == null) return -1;
         return (ra - rb) * dir;
-      });
-    } else if (listingSort === "price-asc" || listingSort === "price-desc") {
-      const dir = listingSort === "price-asc" ? 1 : -1;
-      rows.sort((a, b) => {
-        const pa = a.listing ? BigInt(a.listing.priceWei) : null;
-        const pb = b.listing ? BigInt(b.listing.priceWei) : null;
-        if (pa == null && pb == null) return 0;
-        if (pa == null) return 1;
-        if (pb == null) return -1;
-        return pa < pb ? -dir : pa > pb ? dir : 0;
       });
     } else {
       rows.sort((a, b) => {
@@ -2143,6 +2123,17 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 );
               })}
             </ul>
+          )}
+          {bookFilter === "all" && tokenLimit < 2000 && tokens.length >= tokenLimit && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setTokenLimit((n) => Math.min(2000, n + 400))}
+                className="min-h-10 rounded-md border border-gold-400/50 px-4 text-xs font-bold text-gold-300 hover:bg-gold-400/10"
+              >
+                Load more of this collection
+              </button>
+            </div>
           )}
         </MarketBrowseLayout>
 

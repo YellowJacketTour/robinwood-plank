@@ -65,7 +65,8 @@ export async function GET(req: NextRequest) {
     // Old first-pass caps (1k/2k/5k) left Claynosaurz stuck at 5,000 forever
     // because we only enqueued when the map was empty. Resume those samples.
     const staleFirstPass = sampleSize === 1_000 || sampleSize === 2_000 || sampleSize === 5_000;
-    const needsIndex = map.size === 0 || (staleFirstPass && chainSlug !== "bitcoin-mainnet");
+    const needsIndex =
+      map.size === 0 || (staleFirstPass && map.size < 6_000 && chainSlug !== "bitcoin-mainnet");
     if (needsIndex) {
       const job = `${chainSlug}:${collectionSlug.toLowerCase()}`;
       if (!inFlight.has(job)) {
