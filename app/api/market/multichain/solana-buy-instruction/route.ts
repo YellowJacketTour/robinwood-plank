@@ -38,7 +38,9 @@ export async function POST(req: NextRequest) {
       const helius = process.env.HELIUS_API_KEY?.trim();
       const rpc = helius
         ? `https://mainnet.helius-rpc.com/?api-key=${helius}`
-        : process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+        : process.env.SOLANA_RPC_URL?.trim() ||
+          process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
+          "https://api.mainnet-beta.solana.com";
       const onchain = await fetchM2Listing({
         connection: new Connection(rpc, "confirmed"),
         seller: body.seller,

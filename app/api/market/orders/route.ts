@@ -148,7 +148,27 @@ async function handleGet(req: Request) {
 
   // Listings only. Offers stay ours alone — a foreign offer is not something a
   // holder can accept from here, so surfacing one would be a dead end.
-  const annotatedLive = await annotateRoyaltyEnforcement(live as Array<{
+  let liveRows = live as Array<{
+    collectionSlug: string;
+    rawOrder: unknown;
+    royaltyEnforced?: boolean;
+    id?: string;
+  }>;
+  if (
+    kind === "listing" &&
+    liveRows.length === 0 &&
+    (collectionSlug == null || collectionSlug === "robinwood")
+  ) {
+    const { fetchCanonicalRobinwoodStats } = await import("@/lib/market/canonical-robinwood");
+    const canonical = await fetchCanonicalRobinwoodStats({
+      hostHeader: req.headers.get("host"),
+    });
+    if (canonical && canonical.listings.length > 0) {
+      liveRows = canonical.listings as typeof liveRows;
+    }
+  }
+
+  const annotatedLive = await annotateRoyaltyEnforcement(liveRows as Array<{
     collectionSlug: string;
     rawOrder: unknown;
     royaltyEnforced?: boolean;

@@ -37,7 +37,11 @@ export const runtime = "nodejs";
 function solanaRpcUrl(): string {
   const helius = process.env.HELIUS_API_KEY?.trim();
   if (helius) return `https://mainnet.helius-rpc.com/?api-key=${helius}`;
-  return process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+  return (
+    process.env.SOLANA_RPC_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
+    "https://api.mainnet-beta.solana.com"
+  );
 }
 
 type MeTokenListing = {

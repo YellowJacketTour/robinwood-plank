@@ -1584,17 +1584,20 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               ? `${supplyStats.listedCount.toLocaleString()} listed of ${supplyStats.totalSupply != null ? supplyStats.totalSupply.toLocaleString() : "—"} on ${chainDisplayName(chainSlug)}${listingsUnavailable ? " · UniSat book delayed" : ""}`
               : `${listings.length} listing${listings.length === 1 ? "" : "s"} on ${chainDisplayName(chainSlug)}`}
           </p>
+          <p className="truncate font-mono text-[0.62rem] text-foreground/40" title={collection.contractAddress}>
+            {collection.contractAddress}
+          </p>
             </div>
           </div>
         </div>
       </div>
 
-      <dl className="flex gap-px overflow-x-auto rounded-xl border border-line bg-gold-500/20 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-6 sm:overflow-hidden">
+      <dl className="flex gap-px overflow-x-auto rounded-xl border border-line bg-gold-500/20 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-7 sm:overflow-hidden">
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Floor price</dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
             {floorWei ? formatTokenAmount(floorWei, 18, 4) : "—"}
-            {floorWei && statUsd(floorWei) != null && <span className="block font-sans text-[0.62rem] text-foreground/50">{formatUsdCompact(statUsd(floorWei)!)}</span>}
+            {floorWei && statUsd(floorWei) != null && <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(statUsd(floorWei)!)}</span>}
           </dd>
         </div>
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
@@ -1612,6 +1615,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           </dd>
         </div>
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
+          <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Holders</dt>
+          <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
+            {supplyStats?.holderCount != null ? supplyStats.holderCount.toLocaleString() : "—"}
+          </dd>
+        </div>
+        <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Best offer</dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
             {bestOfferWei ? formatTokenAmount(bestOfferWei, 18, 4) : "—"}
@@ -1622,7 +1631,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Volume</dt>
           <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
             {volumeWei ? formatTokenAmount(volumeWei, 18, 3) : marketStats?.sales24h != null ? `${marketStats.sales24h} sales` : "—"}
-            {volumeWei && statUsd(volumeWei) != null && <span className="block font-sans text-[0.62rem] text-foreground/50">{formatUsdCompact(statUsd(volumeWei)!)}</span>}
+            {volumeWei && statUsd(volumeWei) != null && <span className="block font-sans text-[0.68rem] font-semibold text-cream-muted/90">{formatUsdCompact(statUsd(volumeWei)!)}</span>}
           </dd>
         </div>
         <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">

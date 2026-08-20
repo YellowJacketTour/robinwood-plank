@@ -7,8 +7,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
-import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
-import { isSpamCollectionTitle } from "@/lib/market/collection-title";
+import { NFT_CONTRACT_ADDRESS, ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
+import { isSpamCollectionTitle, looksLikeContractName } from "@/lib/market/collection-title";
 import ChainIcon from "@/components/market/ChainIcon";
 import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
@@ -261,6 +261,7 @@ function displaySales(c: TrackedCollection, window: "24h" | "7d" | "30d"): numbe
 }
 function displayHolders(c: TrackedCollection): number | null {
   if (c.holderCount == null || c.holderCount <= 0) return null;
+  if (isHomeRow(c)) return c.holderCount;
   if (c.holderCount <= 2 && !(c.listedCount && c.listedCount > 0) && !(c.volume24hWei && c.volume24hWei !== "0")) {
     return null;
   }
@@ -334,11 +335,19 @@ function listedTone(pct: number): string {
 function NativeAmount({ wei, usdLabel }: { wei: string; usdLabel: string | null }) {
   const { display, title } = formatCompactNative(wei);
   return (
-    <span className="inline-flex items-center justify-end gap-1" title={usdLabel ? `${title} · ${usdLabel}` : title}>
-      <span>{display}</span>
-      {usdLabel && <span className="text-[0.65rem] text-foreground/40">{usdLabel}</span>}
+    <span className="inline-flex flex-col items-end leading-tight" title={usdLabel ? `${title} · ${usdLabel}` : title}>
+      <span className="font-display tabular-nums text-gold-300">{display}</span>
+      {usdLabel && (
+        <span className="font-sans text-[0.62rem] font-semibold text-cream-muted/90">{usdLabel}</span>
+      )}
     </span>
   );
+}
+
+function shortCollectionId(address: string): string {
+  if (address.length <= 14) return address;
+  if (address.startsWith("0x")) return `${address.slice(0, 6)}…${address.slice(-4)}`;
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
 /**
@@ -850,7 +859,7 @@ export default function GlobalMarketHub() {
                     syncedAt: null,
                     tradeable: true,
                     recentActivity: 0,
-                    creatorHandle: null,
+                    creatorHandle: "RobinWoodPlank",
                     creatorAddress: null,
                     creatorEns: null,
                     volume24hWei: null,
@@ -860,7 +869,7 @@ export default function GlobalMarketHub() {
                     volume30dWei: null,
                     sales30d: null,
                     floorChangePct: null,
-                    totalSupply: null,
+                    totalSupply: ROBINWOOD_TOTAL_SUPPLY,
                     listedCount: null,
                     holderCount: null,
                     isNativeHome: true,
@@ -965,6 +974,7 @@ export default function GlobalMarketHub() {
     const rows = collections.filter((c) => {
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
       if (isSpamCollectionTitle(c.name)) return false;
+      if (!isHomeRow(c) && looksLikeContractName(c.name || displayName(c))) return false;
       if (q && !(c.name ?? "").toLowerCase().includes(q)) return false;
       if (onlyTradeable && !c.tradeable) return false;
       const oneChain = chainFilter.size === 1;
@@ -1049,7 +1059,17 @@ export default function GlobalMarketHub() {
     if (loading || rankings.length === 0) return;
     const chain = chainFilter.size === 1 ? [...chainFilter][0] : null;
     if (!chain || chain === "bitcoin-mainnet") return;
-    const missing = rankings.filter((c) => !isHomeRow(c) && c.volume24hWei == null).slice(0, 6);
+    const missing = rankings
+      .filter((c) => {
+        if (isHomeRow(c)) return false;
+        if (!c.floorPriceWei) return true;
+        if (c.listedCount == null) return true;
+        if (c.holderCount == null) return true;
+        if (c.volume24hWei == null) return true;
+        if (looksLikeContractName(c.name)) return true;
+        return false;
+      })
+      .slice(0, 10);
     if (missing.length === 0) return;
     const stamp = `${chain}:${missing.map((c) => c.contractAddress).join(",")}`;
     if (hydratedKey.current === stamp) return;
@@ -1556,10 +1576,10 @@ export default function GlobalMarketHub() {
                   <SortableTh column="sales" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden md:table-cell" hasData={rankingsHasData.sales}>
                     {rankingsWindow} Sales
                   </SortableTh>
-                  <SortableTh column="listed" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" hasData={rankingsHasData.listed}>
+                  <SortableTh column="listed" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden md:table-cell" hasData={rankingsHasData.listed}>
                     Listed
                   </SortableTh>
-                  <SortableTh column="holders" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden xl:table-cell" hasData={rankingsHasData.holders}>
+                  <SortableTh column="holders" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden md:table-cell" hasData={rankingsHasData.holders}>
                     Holders
                   </SortableTh>
                   <SortableTh column="grade" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="w-9">
@@ -1620,8 +1640,16 @@ export default function GlobalMarketHub() {
                               <ChainIcon chainSlug={c.chainSlug} size={10} />
                             </span>
                           </div>
-                          <span className="min-w-0 flex-1 truncate font-bold text-foreground/90" title={displayName(c)}>
-                            {displayName(c)}
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-bold text-foreground/90" title={displayName(c)}>
+                              {displayName(c)}
+                            </span>
+                            <span
+                              className="block truncate font-mono text-[0.58rem] text-foreground/40"
+                              title={`Collection id ${c.contractAddress}`}
+                            >
+                              {shortCollectionId(c.contractAddress)}
+                            </span>
                           </span>
                           {/* Known-creator checkmark -- real signal (a real handle/ENS this app has observed), never OpenSea's own "verified" claim, which this app cannot honestly assert for an auto-discovered collection. The title tooltip alone isn't reliably exposed to screen readers, and there's no dedicated column/header for this icon (it rides inside "Collection"), so the accessible label lives on the icon itself via a sr-only span -- same pattern ListingCard.tsx uses for its own icon-only trust badge. */}
                           {(c.creatorHandle || c.creatorEns) && (
@@ -1671,28 +1699,31 @@ export default function GlobalMarketHub() {
                       <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/60 md:table-cell">
                         {displaySales(c, rankingsWindow) ?? <span title={emptyCellReason(c, "sales")}>—</span>}
                       </td>
-                      <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 lg:table-cell">
-                        {c.listedCount != null && c.listedCount > 0 ? (
+                      <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 md:table-cell">
+                        {c.listedCount != null ? (
                           <span
-                            className="inline-flex items-baseline justify-end gap-1"
+                            className="inline-flex flex-col items-end leading-tight"
                             title={
-                              listedPct != null && c.totalSupply != null
-                                ? `${c.listedCount.toLocaleString()} of ${c.totalSupply.toLocaleString()} listed (${listedPct.toFixed(2)}%)`
+                              c.totalSupply != null
+                                ? `${c.listedCount.toLocaleString()} listed of ${c.totalSupply.toLocaleString()} supply`
                                 : `${c.listedCount.toLocaleString()} listed`
                             }
                           >
-                            {listedPct != null ? (
-                              <span className={listedTone(listedPct)}>{listedPct >= 10 ? listedPct.toFixed(0) : listedPct.toFixed(1)}%</span>
-                            ) : null}
-                            <span className="text-[0.65rem] text-foreground/40">{formatCompactCount(c.listedCount)}</span>
+                            <span className="text-foreground/90">{formatCompactCount(c.listedCount)}</span>
+                            <span className="text-[0.58rem] text-foreground/40">
+                              {c.totalSupply != null ? `of ${formatCompactCount(c.totalSupply)}` : "listed"}
+                            </span>
                           </span>
                         ) : (
                           <span title={emptyCellReason(c, "listed")}>—</span>
                         )}
                       </td>
-                      <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/60 xl:table-cell">
+                      <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/80 md:table-cell">
                         {displayHolders(c) != null ? (
-                          displayHolders(c)!.toLocaleString()
+                          <span className="inline-flex flex-col items-end leading-tight" title={`${displayHolders(c)!.toLocaleString()} unique wallets`}>
+                            <span>{displayHolders(c)!.toLocaleString()}</span>
+                            <span className="text-[0.58rem] font-sans text-foreground/40">wallets</span>
+                          </span>
                         ) : (
                           <span title={emptyCellReason(c, "holders")}>—</span>
                         )}
@@ -1938,7 +1969,7 @@ export default function GlobalMarketHub() {
                           )}
                         </p>
                       )}
-                      {c.volume24hWei && (
+                      {c.volume24hWei && c.volume24hWei !== "0" && (
                         <p className="flex items-center gap-1 text-xs text-foreground/50">
                           Vol {formatCompactNative(c.volume24hWei).display}
                           <ChainIcon chainSlug={c.chainSlug} size={16} className="shrink-0" />

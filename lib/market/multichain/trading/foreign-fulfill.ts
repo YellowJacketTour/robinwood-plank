@@ -652,7 +652,10 @@ export async function sweepSolanaListingsBatched(
 
   const plan = planSolanaBatches({ listings: listingInstructions, feePayer: buyerAddress });
 
-  const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+  const SOLANA_RPC_URL =
+    process.env.SOLANA_RPC_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
+    "https://api.mainnet-beta.solana.com";
   const connection = new web3.Connection(SOLANA_RPC_URL, "confirmed");
   const feePayerKey = new web3.PublicKey(buyerAddress);
 

@@ -39,8 +39,16 @@ type ActivityEvent = {
 const KIND_STYLE: Record<ActivityEvent["kind"], string> = {
   sale: "text-gold-300",
   mint: "text-emerald-300",
-  transfer: "text-foreground/50",
+  transfer: "text-sky-200",
 };
+
+function eventKindLabel(event: ActivityEvent, batchSize: number): string {
+  if (event.venue?.kind === "vault") return "Vault";
+  if (event.kind === "transfer") return batchSize > 1 ? "Batch send" : "Send";
+  if (event.kind === "sale") return "Sale";
+  if (event.kind === "mint") return "Mint";
+  return event.kind;
+}
 
 /** True for a real 0x-prefixed 20-byte contract address, false for the
  * occasional bare method name ("multicall", "transferfrom") a venue's
@@ -321,7 +329,7 @@ export default function ActivityFeed({
               <option value="all">All events</option>
               <option value="sale">Sales</option>
               <option value="mint">Mints</option>
-              <option value="transfer">Transfers</option>
+              <option value="transfer">Sends &amp; vault</option>
             </select>
           </label>
           {venueOptions.length > 0 && (
@@ -381,6 +389,9 @@ export default function ActivityFeed({
         ) : (events?.length ?? 0) === 0 ? (
           <div className="rounded-lg border border-dashed border-line bg-panel-strong px-4 py-8 text-center">
             <p className="text-sm font-bold text-foreground/65">No activity yet.</p>
+            <p className="mt-1 text-xs text-foreground/45">
+              Vault deposits, redeems, wallet sends, and batch sends count as activity — not only sales, bids, or floor sweeps.
+            </p>
             <button
               type="button"
               onClick={retry}
@@ -410,6 +421,7 @@ export default function ActivityFeed({
               {filtered.map((event) => {
                 const eventRarity = rarity.get(event.tokenId);
                 const selectable = Boolean(onSelectToken);
+                const batchSize = filtered.filter((e) => e.txHash === event.txHash && e.kind === "transfer").length;
                 return (
                   <li
                     key={`${event.txHash}-${event.tokenId}`}
@@ -468,9 +480,11 @@ export default function ActivityFeed({
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(clickEvent) => clickEvent.stopPropagation()}
-                          className={`shrink-0 text-xs font-bold capitalize hover:underline ${KIND_STYLE[event.kind]}`}
+                          className={`shrink-0 text-xs font-bold hover:underline ${
+                            event.venue?.kind === "vault" ? "text-sky-300" : KIND_STYLE[event.kind]
+                          }`}
                         >
-                          {event.kind}
+                          {eventKindLabel(event, batchSize)}
                         </a>
                         <span className="truncate text-xs font-bold text-foreground">
                           {eventRarity?.name ?? `#${event.tokenId}`}
@@ -496,7 +510,7 @@ export default function ActivityFeed({
                       {event.priceEth
                         ? <>
                             <span className="block">{Number(event.priceEth).toFixed(4)} Ξ</span>
-                            <EthUsdValue wei={event.priceWei} className="block text-[0.6rem] font-normal text-foreground/50" />
+                            <EthUsdValue wei={event.priceWei} className="block text-[0.65rem] font-semibold text-cream-muted/90" />
                           </>
                         : event.kind === "sale"
                           ? "Unavailable"

@@ -27,6 +27,7 @@ import RedeemOdds from "@/components/market/RedeemOdds";
 import EventCountdown from "@/components/market/EventCountdown";
 import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import CollectionStats from "@/components/market/CollectionStats";
+import { ROBINWOOD_TOTAL_SUPPLY } from "@/lib/mint-contract";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import SweepConfirm from "@/components/market/SweepConfirm";
 import RarityFloorStrip from "@/components/market/RarityFloorStrip";
@@ -233,7 +234,7 @@ function readUrlState(): { tab: MarketTab | null; item: string | null } {
 }
 
 /** RobinWood's fixed supply — shown as "Items" in the stats strip. */
-const TOTAL_SUPPLY = 1542;
+const TOTAL_SUPPLY = ROBINWOOD_TOTAL_SUPPLY;
 
 type WithOrder<T> = T & { rawOrder: unknown };
 

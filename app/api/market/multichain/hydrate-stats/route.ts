@@ -10,6 +10,7 @@ import {
   updateCollectionMarketStats,
   updateCollectionSupplyFields,
   updateCollectionDisplay,
+  updateCollectionFloorOnly,
   updateHolderCount,
 } from "@/lib/market/multichain/store";
 import { isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
@@ -106,7 +107,7 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
   }).catch(() => null);
   if (statsRes?.ok) {
     const stats = (await statsRes.json()) as {
-      total?: { num_owners?: number };
+      total?: { num_owners?: number; floor_price?: number; listed_count?: number };
       intervals?: Array<{ interval: string; volume?: number; sales?: number }>;
     };
     const oneDay = stats.intervals?.find((i) => i.interval === "one_day");
@@ -126,6 +127,23 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
     }
     if (typeof stats.total?.num_owners === "number" && stats.total.num_owners > 0) {
       await updateHolderCount(chainSlug, contractAddress, stats.total.num_owners).catch(() => {});
+      filled = true;
+    }
+    const floorWei = nativeToWei(stats.total?.floor_price);
+    if (floorWei) {
+      const currency = foreignChainByChainSlug(chainSlug)?.nativeCurrencySymbol ?? "ETH";
+      await updateCollectionFloorOnly(chainSlug, contractAddress, {
+        floorPriceWei: floorWei,
+        floorPriceCurrency: currency,
+        floorPriceMarketplace: "opensea",
+      }).catch(() => {});
+      filled = true;
+    }
+    if (typeof stats.total?.listed_count === "number") {
+      await updateCollectionSupplyFields(chainSlug, contractAddress, {
+        listedCount: stats.total.listed_count,
+        totalSupply: null,
+      }).catch(() => {});
       filled = true;
     }
   }
@@ -162,7 +180,7 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json().catch(() => null)) as { chainSlug?: string; contracts?: string[] } | null;
   const chainSlug = body?.chainSlug;
-  const contracts = [...new Set((body?.contracts ?? []).filter((a) => typeof a === "string" && a.length > 8))].slice(0, 6);
+  const contracts = [...new Set((body?.contracts ?? []).filter((a) => typeof a === "string" && a.length > 8))].slice(0, 10);
   if (!chainSlug || contracts.length === 0) {
     return NextResponse.json({ error: "chainSlug and contracts[] required" }, { status: 400 });
   }
