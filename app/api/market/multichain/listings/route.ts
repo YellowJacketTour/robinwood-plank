@@ -33,7 +33,7 @@ import { fetchForeignAllListings, resolveOpenSeaCollectionSlug } from "@/lib/mar
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { getListings } from "@/lib/market/orders-store";
-import { getCollectionSupplyStats, getCollectionMarketStats } from "@/lib/market/multichain/store";
+import { getCollectionSupplyStats, getCollectionMarketStats, getTrackedCollection } from "@/lib/market/multichain/store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
 import { publicError, rateLimit } from "@/lib/security";
 import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
@@ -46,6 +46,32 @@ const OPENSEA = "https://api.opensea.io/api/v2";
 
 /** Bounds the per-token art fan-out. Distinct tokens are usually few (see header); this only guards a pathological case. */
 const MAX_ART_LOOKUPS = 30;
+
+/** Hub identity (name/image/stats) for the collection page even when a listings venue is rate-limited or empty. */
+async function collectionEnvelope(
+  chainSlug: string,
+  collectionSlug: string,
+  overrides: { name?: string | null; imageUrl?: string | null } = {}
+) {
+  const tracked = await getTrackedCollection(chainSlug, collectionSlug).catch(() => null);
+  const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
+  const marketStats = await getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null);
+  return {
+    slug: collectionSlug,
+    name: overrides.name || tracked?.name || collectionSlug,
+    imageUrl: overrides.imageUrl ?? tracked?.imageUrl ?? null,
+    contractAddress: tracked?.contractAddress ?? collectionSlug,
+    listedCount: supply?.listedCount ?? null,
+    totalSupply: supply?.totalSupply ?? null,
+    holderCount: supply?.holderCount ?? null,
+    volume24hWei: marketStats?.volume24hWei ?? null,
+    sales24h: marketStats?.sales24h ?? null,
+    volume7dWei: marketStats?.volume7dWei ?? null,
+    sales7d: marketStats?.sales7d ?? null,
+    volume30dWei: marketStats?.volume30dWei ?? null,
+    sales30d: marketStats?.sales30d ?? null,
+  };
+}
 
 async function openSeaJson<T>(path: string, key: string): Promise<T | null> {
   const res = await fetch(`${OPENSEA}${path}`, { headers: { "x-api-key": key, accept: "application/json" } });
@@ -175,30 +201,11 @@ export async function GET(req: NextRequest) {
         })
         .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1));
 
-      const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
-      // Solana has no OpenSea-backed pass (rarity-index-runner.ts is EVM
-      // only, via foreignChainByChainSlug's openSeaChain) -- this always
-      // resolves to nulls here, which is the honest outcome: no fabricated
-      // multi-window figure derived from Magic Eden's own single-window
-      // stat.
-      const marketStats = await getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null);
       return NextResponse.json(
         {
-          collection: {
-            slug: collectionSlug,
-            name: raw[0]?.token?.collectionName ?? collectionSlug,
-            imageUrl: null,
-            contractAddress: collectionSlug,
-            listedCount: supply?.listedCount ?? null,
-            totalSupply: supply?.totalSupply ?? null,
-            holderCount: supply?.holderCount ?? null,
-            volume24hWei: marketStats?.volume24hWei ?? null,
-            sales24h: marketStats?.sales24h ?? null,
-            volume7dWei: marketStats?.volume7dWei ?? null,
-            sales7d: marketStats?.sales7d ?? null,
-            volume30dWei: marketStats?.volume30dWei ?? null,
-            sales30d: marketStats?.sales30d ?? null,
-          },
+          collection: await collectionEnvelope(chainSlug, collectionSlug, {
+            name: raw[0]?.token?.collectionName ?? null,
+          }),
           listings,
         },
         { headers: { "Cache-Control": "no-store" } }
@@ -251,33 +258,25 @@ export async function GET(req: NextRequest) {
           // listing identifier for UniSat's real current buy-flow API.
           foreignOrderHash: l.id,
         }));
-      const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
-      // Bitcoin Ordinals has no OpenSea-backed pass either (UniSat is the
-      // only source, single-window) -- same honest null outcome as Solana
-      // above, never a fabricated 7d/30d figure.
-      const marketStats = await getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null);
       return NextResponse.json(
         {
-          collection: {
-            slug: collectionSlug,
-            name: collectionSlug,
-            imageUrl: null,
-            contractAddress: collectionSlug,
-            listedCount: supply?.listedCount ?? null,
-            totalSupply: supply?.totalSupply ?? null,
-            holderCount: supply?.holderCount ?? null,
-            volume24hWei: marketStats?.volume24hWei ?? null,
-            sales24h: marketStats?.sales24h ?? null,
-            volume7dWei: marketStats?.volume7dWei ?? null,
-            sales7d: marketStats?.sales7d ?? null,
-            volume30dWei: marketStats?.volume30dWei ?? null,
-            sales30d: marketStats?.sales30d ?? null,
-          },
+          collection: await collectionEnvelope(chainSlug, collectionSlug),
           listings,
         },
         { headers: { "Cache-Control": "no-store" } }
       );
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (/403|rate limit|-2006/i.test(msg)) {
+        return NextResponse.json(
+          {
+            collection: await collectionEnvelope(chainSlug, collectionSlug),
+            listings: [],
+            listingsUnavailable: "unisat-rate-limit",
+          },
+          { headers: { "Cache-Control": "no-store" } }
+        );
+      }
       return publicError(error, "Failed to load Bitcoin Ordinals listings");
     }
   }
@@ -406,33 +405,29 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    const supply = await getCollectionSupplyStats(chainSlug, contractAddress.toLowerCase()).catch(() => null);
-    // The real EVM/OpenSea path -- the only branch of this route where
-    // volume7d/30d are ever non-null, since rarity-index-runner.ts's
-    // OpenSea stats pass is EVM-only.
-    const marketStats = await getCollectionMarketStats(chainSlug, contractAddress.toLowerCase()).catch(() => null);
+    const fromIndex = await collectionEnvelope(chainSlug, collectionSlug, {
+      name: collectionMeta?.name ?? null,
+      imageUrl: collectionMeta?.image_url ?? null,
+    });
     return NextResponse.json(
       {
-        collection: {
-          slug: collectionSlug,
-          name: collectionMeta?.name ?? collectionSlug,
-          imageUrl: collectionMeta?.image_url ?? null,
-          contractAddress,
-          listedCount: supply?.listedCount ?? null,
-          totalSupply: supply?.totalSupply ?? null,
-          holderCount: supply?.holderCount ?? null,
-          volume24hWei: marketStats?.volume24hWei ?? null,
-          sales24h: marketStats?.sales24h ?? null,
-          volume7dWei: marketStats?.volume7dWei ?? null,
-          sales7d: marketStats?.sales7d ?? null,
-          volume30dWei: marketStats?.volume30dWei ?? null,
-          sales30d: marketStats?.sales30d ?? null,
-        },
+        collection: { ...fromIndex, contractAddress: contractAddress || fromIndex.contractAddress },
         listings,
       },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (/429|rate limit|quota/i.test(msg)) {
+      return NextResponse.json(
+        {
+          collection: await collectionEnvelope(chainSlug, collectionSlug),
+          listings: [],
+          listingsUnavailable: "opensea-rate-limit",
+        },
+        { headers: { "Cache-Control": "no-store" } }
+      );
+    }
     return publicError(error, "Failed to load multichain listings");
   }
 }

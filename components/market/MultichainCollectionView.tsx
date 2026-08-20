@@ -147,6 +147,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [marketStatsWindow, setMarketStatsWindow] = useState<"24h" | "7d" | "30d">("24h");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [listingsUnavailable, setListingsUnavailable] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -332,6 +333,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           holderCount: number | null;
         };
         listings: Listing[];
+        listingsUnavailable?: string | null;
       }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=40`, {
         ttlMs: 8_000,
         swrMs: 45_000,
@@ -382,6 +384,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         sales30d: data.collection.sales30d,
       });
       setListings(data.listings ?? []);
+      setListingsUnavailable(data.listingsUnavailable ?? null);
     } catch {
       setLoadError("Could not load this collection's listings right now.");
     } finally {
@@ -1347,12 +1350,21 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     <div className="space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-3">
+            {collection.image ? (
+              <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md border border-line bg-wood-900">
+                <Image src={withImageWidth(collection.image, 96) || collection.image} alt="" fill sizes="48px" className="object-cover" unoptimized />
+              </div>
+            ) : null}
+            <div className="min-w-0">
           <h2 className="truncate font-display text-xl text-gold-300" title={collection.name}>
             {collection.name}
           </h2>
           <p className="text-xs text-foreground/50">
             {listings.length} listing{listings.length === 1 ? "" : "s"} on {chainDisplayName(chainSlug)}
           </p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1687,10 +1699,18 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line bg-panel-strong px-4 py-10 text-center">
               <PackageOpen size={28} strokeWidth={1.75} className="text-gold-400/70" aria-hidden />
               <p className="text-sm font-bold text-foreground/75">
-                {filtersActive ? "No listings match your search." : "No listings right now."}
+                {filtersActive
+                  ? "No listings match your search."
+                  : listingsUnavailable
+                    ? "Live listings are temporarily unavailable from the venue (rate limit)."
+                    : "No listings right now."}
               </p>
               <p className="text-xs text-foreground/45">
-                {filtersActive ? "Try widening your price range or clearing a filter." : "Check back soon, or watch this collection for the next drop."}
+                {filtersActive
+                  ? "Try widening your price range or clearing a filter."
+                  : listingsUnavailable
+                    ? "Collection identity, stats, and sell/offer tools stay on this page — retry in a minute."
+                    : "Check back soon, or watch this collection for the next drop."}
               </p>
             </div>
           ) : (
