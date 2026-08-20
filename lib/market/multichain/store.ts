@@ -286,6 +286,46 @@ export async function updateEvmVolumeFromSeaportFills(chainSlug: string): Promis
   return { updated };
 }
 
+/**
+ * Real, floor-ONLY write for a secondary stats source (e.g. OpenSea's
+ * per-collection /stats endpoint, opensea-stats.ts) that doesn't have
+ * totalSupply/listedCount to report -- unlike writeSnapshot below, whose
+ * total_supply/listed_count columns are a PLAIN OVERWRITE (EXCLUDED.*,
+ * no COALESCE) specifically because a real primary adapter (Alchemy)
+ * reports both together every time. Calling writeSnapshot with only a
+ * floor and null supply/listed would silently wipe out real values a
+ * prior Alchemy sync already recorded -- this function exists so a
+ * floor-only source can never do that: total_supply/listed_count/
+ * holder_count all COALESCE against whatever is already there.
+ */
+export async function updateCollectionFloorOnly(
+  chainSlug: string,
+  contractAddress: string,
+  floor: { floorPriceWei: string | null; floorPriceCurrency: string | null; floorPriceMarketplace: string | null }
+): Promise<void> {
+  const collection = await postgresQuery<{ id: number }>(
+    `SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
+    [chainSlug, normalizeContractAddress(chainSlug, contractAddress)]
+  );
+  const id = collection.rows[0]?.id;
+  if (!id || floor.floorPriceWei == null) return;
+  await postgresQuery(
+    `INSERT INTO plank_multichain_snapshots
+       (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error)
+     VALUES ($1, $2, $3, $4, NULL, NULL, NULL, NOW(), NULL)
+     ON CONFLICT (collection_id) DO UPDATE SET
+       floor_price_wei = EXCLUDED.floor_price_wei,
+       floor_price_currency = EXCLUDED.floor_price_currency,
+       floor_price_marketplace = EXCLUDED.floor_price_marketplace,
+       total_supply = COALESCE(plank_multichain_snapshots.total_supply, EXCLUDED.total_supply),
+       listed_count = COALESCE(plank_multichain_snapshots.listed_count, EXCLUDED.listed_count),
+       holder_count = COALESCE(plank_multichain_snapshots.holder_count, EXCLUDED.holder_count),
+       synced_at = NOW(),
+       sync_error = NULL`,
+    [id, floor.floorPriceWei, floor.floorPriceCurrency, floor.floorPriceMarketplace]
+  );
+}
+
 /** Write a fresh snapshot for a collection, and refresh its display fields. */
 export async function writeSnapshot(
   collectionId: number,
