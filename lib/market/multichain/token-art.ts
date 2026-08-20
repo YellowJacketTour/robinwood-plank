@@ -7,17 +7,8 @@
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
 import { preferHighestResImageUrl } from "@/lib/market/collection-art";
-
-/** Live-checked 2026-08-20: HEAD 200 image/png for milady/1.png and milady/6770.png. */
-const ERC721_IMAGE_TEMPLATE: Record<string, (tokenId: string) => string> = {
-  "0x5af0d9827e0c53e31634944c487d43a2b04f8e38": (id) => `https://www.miladymaker.net/milady/${id}.png`,
-};
-
-export function templatedErc721Image(contractAddress: string, tokenId: string): string | null {
-  const fn = ERC721_IMAGE_TEMPLATE[contractAddress.toLowerCase()];
-  if (!fn || !/^\d+$/.test(tokenId)) return null;
-  return fn(tokenId);
-}
+export { templatedErc721Image } from "@/lib/market/multichain/token-art-templates";
+import { templatedErc721Image } from "@/lib/market/multichain/token-art-templates";
 
 export async function fetchOpenSeaTokenImage(
   openSeaChain: string,

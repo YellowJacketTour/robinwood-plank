@@ -6,7 +6,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { PackageOpen, Tag } from "lucide-react";
 import { withImageWidth } from "@/lib/ipfs";
 import CollectionArtImage from "@/components/market/CollectionArtImage";
-import { templatedErc721Image } from "@/lib/market/multichain/token-art";
+import { templatedErc721Image } from "@/lib/market/multichain/token-art-templates";
 import { SkeletonCardGrid, SkeletonRows, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 import ListingCard from "@/components/market/ListingCard";
 import BuyConfirm from "@/components/market/BuyConfirm";

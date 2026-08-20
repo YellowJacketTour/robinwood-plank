@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { templatedErc721Image } from "../../lib/market/multichain/token-art";
+import { templatedErc721Image } from "../../lib/market/multichain/token-art-templates";
 
 describe("per-token art templates", () => {
   it("resolves proven Milady CDN for numeric ids", () => {
