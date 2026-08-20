@@ -37,6 +37,22 @@ export async function getForeignRarity(
   return map;
 }
 
+/** Token catalog from the rarity index (JIT browse of every scored piece). */
+export async function listForeignRarityTokens(
+  chainSlug: string,
+  collectionSlug: string,
+  limit: number
+): Promise<Array<{ tokenId: string; name: string | null }>> {
+  const result = await postgresQuery<{ token_id: string; name: string }>(
+    `SELECT token_id, name FROM plank_foreign_rarity
+     WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)
+     ORDER BY rank ASC
+     LIMIT $3`,
+    [chainSlug, collectionSlug, Math.min(Math.max(limit, 1), 2000)]
+  );
+  return result.rows.map((r) => ({ tokenId: r.token_id, name: r.name || null }));
+}
+
 /** traitType -> value -> [tokenId], same shape as native's TraitIndexResponse.traits (lib/market/traits.ts) -- powers ForeignOfferForm's criteria-bid builder via the SAME pure resolveCriteriaTokenIds (trait-criteria.ts) native uses. */
 export type ForeignTraitIndex = Record<string, Record<string, string[]>>;
 

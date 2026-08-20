@@ -373,7 +373,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           setListingsUnavailable("book-unavailable");
         });
       void swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }> }>(
-        `/api/market/multichain/tokens?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${isBitcoin ? 2000 : 50}`,
+        `/api/market/multichain/tokens?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${isBitcoin || isSolana ? 2000 : 200}`,
         { ttlMs: 60_000, swrMs: 300_000, session: true }
       )
         .then((tok) => setTokens(tok.tokens ?? []))

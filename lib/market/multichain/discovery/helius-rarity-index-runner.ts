@@ -162,6 +162,13 @@ async function persistSolanaSnapshot(
     traitIndex,
     aliases.filter((a) => a !== collectionKey)
   );
+  const { updateCollectionSupplyFields } = await import("@/lib/market/multichain/store");
+  for (const key of [collectionKey, ...aliases]) {
+    await updateCollectionSupplyFields("solana-mainnet", key, {
+      listedCount: null,
+      totalSupply: snapshot.sampleSize,
+    }).catch(() => {});
+  }
   return { chainSlug: "solana-mainnet", collectionAddress: collectionKey, tokensIndexed: snapshot.byTokenId.size, partial };
 }
 

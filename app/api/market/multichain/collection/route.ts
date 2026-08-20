@@ -27,7 +27,9 @@ export async function GET(req: NextRequest) {
     const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
     const marketStats = await getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null);
     let holderCount = supply?.holderCount ?? null;
-    if (holderCount == null && isSolanaChainSlug(chainSlug)) {
+    let listedCount = supply?.listedCount ?? null;
+    let totalSupply = supply?.totalSupply ?? null;
+    if (isSolanaChainSlug(chainSlug)) {
       const me = await fetch(
         `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(collectionSlug)}/stats`,
         { headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) }
@@ -38,6 +40,16 @@ export async function GET(req: NextRequest) {
           holderCount = stats.uniqueHolders;
           await updateHolderCount(chainSlug, collectionSlug, holderCount).catch(() => {});
         }
+        if (typeof stats.listedCount === "number" && Number.isFinite(stats.listedCount)) {
+          listedCount = stats.listedCount;
+        }
+      }
+    }
+    if (totalSupply == null) {
+      const { hasForeignRarityStore, getForeignTraitIndex } = await import("@/lib/market/multichain/foreign-rarity-store");
+      if (hasForeignRarityStore()) {
+        const idx = await getForeignTraitIndex(chainSlug, collectionSlug).catch(() => null);
+        if (idx && idx.sampleSize > 0) totalSupply = idx.sampleSize;
       }
     }
     return NextResponse.json(
@@ -47,8 +59,8 @@ export async function GET(req: NextRequest) {
           name: tracked.name ?? tracked.contractAddress,
           imageUrl: tracked.imageUrl,
           contractAddress: tracked.contractAddress,
-          listedCount: supply?.listedCount ?? null,
-          totalSupply: supply?.totalSupply ?? null,
+          listedCount,
+          totalSupply,
           holderCount,
           floorPriceWei: supply?.floorPriceWei ?? null,
           volume24hWei: marketStats?.volume24hWei ?? null,

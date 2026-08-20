@@ -30,6 +30,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
   try {
+    const { hasForeignRarityStore, listForeignRarityTokens } = await import("@/lib/market/multichain/foreign-rarity-store");
+    if (hasForeignRarityStore()) {
+      const indexed = await listForeignRarityTokens(chainSlug, collectionSlug, limit).catch(() => []);
+      if (indexed.length > 0) {
+        return NextResponse.json(
+          { tokens: indexed.map((t) => ({ tokenId: t.tokenId, name: t.name, imageUrl: null as string | null })) },
+          { headers: { "Cache-Control": "no-store" } }
+        );
+      }
+    }
     if (isBitcoinChainSlug(chainSlug)) {
       return NextResponse.json({ tokens: await bitcoinTokens(collectionSlug, limit) }, { headers: { "Cache-Control": "no-store" } });
     }

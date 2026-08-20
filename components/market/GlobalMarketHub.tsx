@@ -876,7 +876,10 @@ export default function GlobalMarketHub() {
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
       if (q && !(c.name ?? "").toLowerCase().includes(q)) return false;
       if (onlyTradeable && !c.tradeable) return false;
-      if (onlyArt && !hasArt(c)) return false;
+      if (onlyArt && !hasArt(c)) {
+        const robinhoodOnly = chainFilter.size === 1 && chainFilter.has("robinhood");
+        if (!(robinhoodOnly && Boolean(c.name))) return false;
+      }
       if (onlyVerifiedCreator && !(c.creatorHandle || c.creatorEns)) return false;
       if (onlyListed && !(c.listedCount != null && c.listedCount > 0)) return false;
       if (!showShells && !hasMarketEvidence(c)) return false;
@@ -977,9 +980,12 @@ export default function GlobalMarketHub() {
   // Requires floorChangePct to actually be present (at least two syncs
   // observed) -- skipped, not zero-filled, for a collection that hasn't.
   const biggestMovers = useMemo(() => {
-    const rows = collections.filter((c) => hasArt(c) && c.floorChangePct != null && c.floorChangePct !== 0);
+    const rows = collections.filter((c) => {
+      if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
+      return hasArt(c) && c.floorChangePct != null && c.floorChangePct !== 0;
+    });
     return rows.sort((a, b) => Math.abs(b.floorChangePct!) - Math.abs(a.floorChangePct!)).slice(0, 8);
-  }, [collections, deadArt]);
+  }, [collections, deadArt, chainFilter]);
 
   const toggleChain = (slug: string) => {
     setChainFilter((prev) => {
