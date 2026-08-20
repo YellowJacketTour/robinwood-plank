@@ -67,8 +67,8 @@ async function main() {
 
     if (remaining()) {
       try {
-        const { hydrateBitcoinArt } = await import("../lib/market/multichain/discovery/bitcoin-art-rotator");
-        console.log("[fill-all] btc-art", JSON.stringify(await hydrateBitcoinArt(40)));
+        const { hydrateAllCollectionArt } = await import("../lib/market/multichain/discovery/hydrate-all-collection-art");
+        console.log("[fill-all] all-art", JSON.stringify(await hydrateAllCollectionArt()));
         const { backfillUnisatCollectionArt } = await import("../lib/market/multichain/adapters/unisat-collections");
         const art = await backfillUnisatCollectionArt(8);
         console.log("[fill-all] unisat-art", JSON.stringify(art));

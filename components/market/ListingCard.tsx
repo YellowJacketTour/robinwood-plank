@@ -28,6 +28,7 @@ import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import { tierColor, tierGlow, tierAnimationClass, tierCardStyle } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { withImageWidth } from "@/lib/ipfs";
+import { preferHighestResImageUrl } from "@/lib/market/collection-art";
 import EthUsdValue from "@/components/market/EthUsdValue";
 import { formatUsd } from "@/lib/eth-price";
 import { chainDisplayName } from "@/lib/market/multichain/trading/foreign-chain-registry";
@@ -138,7 +139,7 @@ export default function ListingCard({
         <Image
           // The token's own art, not the collection logo — a grid of identical
           // logos reads as broken. Falls back only if resolution failed.
-          src={withImageWidth(listing.imageUrl, 256) || collection.image}
+          src={withImageWidth(preferHighestResImageUrl(listing.imageUrl) || listing.imageUrl, 512) || collection.image}
           alt={`${collection.name} ${displayTokenLabel({ tokenId: listing.tokenId, tokenName: listing.tokenName, rarityName: rarity?.name })}`}
           fill
           sizes="(min-width: 1024px) 20vw, 50vw"

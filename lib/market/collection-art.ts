@@ -56,6 +56,25 @@ export function imageSrcFallbacks(src: string | null | undefined): string[] {
     pushUnique(mid, original.replace(/\/small\//i, "/small_2x/"));
   }
 
+  try {
+    const parsed = new URL(original);
+    const host = parsed.hostname.toLowerCase();
+    if (host.endsWith("seadn.io") || host.endsWith("openseauserdata.com") || host === "i2.seadn.io") {
+      const big = new URL(original);
+      big.searchParams.set("w", "2000");
+      pushUnique(high, big.toString());
+      const med = new URL(original);
+      med.searchParams.set("w", "1000");
+      pushUnique(mid, med.toString());
+      pushUnique(mid, original.replace(/=s\d+/i, "=s1200"));
+    }
+    if (host.includes("magiceden") || host.includes("arweave.net")) {
+      pushUnique(high, original);
+    }
+  } catch {
+    /* keep original */
+  }
+
   const ins = original.match(INSCRIPTION_ID);
   if (ins) {
     const id = ins[1];

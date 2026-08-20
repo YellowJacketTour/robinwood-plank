@@ -40,7 +40,9 @@ async function main(): Promise<void> {
 
   const want = (id: string) => !only || only === id;
 
-  if (want("bitcoin-unisat") && remaining()) {
+  if ((want("bitcoin-unisat") || want("all-art")) && remaining()) {
+    const { hydrateAllCollectionArt } = await import("../lib/market/multichain/discovery/hydrate-all-collection-art");
+    console.log(`[spokes] all-art: ${JSON.stringify(await hydrateAllCollectionArt())}`);
     const { hydrateBitcoinArt } = await import("../lib/market/multichain/discovery/bitcoin-art-rotator");
     const art = await hydrateBitcoinArt(50);
     console.log(`[spokes] bitcoin-art-rotator: ${JSON.stringify(art)}`);

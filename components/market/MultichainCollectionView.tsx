@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { PackageOpen, Tag } from "lucide-react";
 import { withImageWidth } from "@/lib/ipfs";
+import CollectionArtImage from "@/components/market/CollectionArtImage";
 import { SkeletonCardGrid, SkeletonRows, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 import ListingCard from "@/components/market/ListingCard";
 import BuyConfirm from "@/components/market/BuyConfirm";
@@ -1572,7 +1573,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           <div className="flex min-w-0 items-center gap-3">
             {collection.image ? (
               <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md border border-line bg-wood-900">
-                <Image src={withImageWidth(collection.image, 96) || collection.image} alt="" fill sizes="48px" className="object-cover" unoptimized />
+                <CollectionArtImage src={collection.image} alt="" width={256} variant="thumb" />
               </div>
             ) : null}
             <div className="min-w-0">
