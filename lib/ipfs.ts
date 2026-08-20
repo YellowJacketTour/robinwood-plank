@@ -65,8 +65,6 @@ export const ORB_PRONE_ART_HOSTS = new Set([
   "media.ordinalswallet.com",
   "cdn.ordinalswallet.com",
   "ord-mirror.magiceden.dev",
-  "www.miladymaker.net",
-  "miladymaker.net",
 ]);
 
 /**

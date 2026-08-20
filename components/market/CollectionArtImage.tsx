@@ -33,6 +33,7 @@ export default function CollectionArtImage({
   width = 512,
   priority = false,
   variant = "tile",
+  extras = [],
 }: {
   src: string | null;
   alt: string;
@@ -40,14 +41,19 @@ export default function CollectionArtImage({
   width?: number;
   priority?: boolean;
   variant?: "hero" | "tile" | "thumb";
+  extras?: Array<string | null | undefined>;
 }) {
-  const candidates = imageSrcFallbacks(src);
+  const candidates = [
+    ...imageSrcFallbacks(src),
+    ...extras.flatMap((u) => (u ? imageSrcFallbacks(u) : [])),
+  ].filter((u, i, a) => a.indexOf(u) === i);
   const [idx, setIdx] = useState(0);
   const [failed, setFailed] = useState(false);
+  const extraKey = extras.filter(Boolean).join("|");
   useEffect(() => {
     setIdx(0);
     setFailed(false);
-  }, [src]);
+  }, [src, extraKey]);
   const current = candidates[idx] ?? null;
   if (failed || !current || isPoisonedImageSrc(current)) {
     return <PlankPlaceholder />;

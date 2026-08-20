@@ -6,6 +6,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { PackageOpen, Tag } from "lucide-react";
 import { withImageWidth } from "@/lib/ipfs";
 import CollectionArtImage from "@/components/market/CollectionArtImage";
+import { templatedErc721Image } from "@/lib/market/multichain/token-art";
 import { SkeletonCardGrid, SkeletonRows, SkeletonStats, SkeletonStatus } from "@/components/Skeleton";
 import ListingCard from "@/components/market/ListingCard";
 import BuyConfirm from "@/components/market/BuyConfirm";
@@ -374,8 +375,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           setListingsUnavailable("book-unavailable");
         });
       void swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }> }>(
-        `/api/market/multichain/tokens?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${isBitcoin || isSolana ? 2000 : 200}`,
-        { ttlMs: 60_000, swrMs: 300_000, session: true }
+        `/api/market/multichain/tokens?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${isBitcoin || isSolana ? 2000 : 200}&art=2`,
+        { ttlMs: 8_000, swrMs: 45_000, session: true }
       )
         .then((tok) => setTokens(tok.tokens ?? []))
         .catch(() => setTokens([]));
@@ -1139,16 +1140,19 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     const fromTokens = tokens
       .filter((t) => {
         if (q && !t.tokenId.toLowerCase().includes(q) && !(t.name ?? "").toLowerCase().includes(q)) return false;
-        if (activeTier !== "all") {
+        const tierFilter = activeTiers.length > 0 ? activeTiers : activeTier !== "all" ? [activeTier] : [];
+        if (tierFilter.length > 0) {
           const r = rarityFor(t.tokenId);
-          if (!r || normalizeRarityTier(r.tier) !== activeTier) return false;
+          if (!r || !tierFilter.includes(normalizeRarityTier(r.tier))) return false;
         }
         return true;
       })
       .map((t) => ({
       tokenId: t.tokenId,
       name: t.name,
-      imageUrl: t.imageUrl,
+      imageUrl:
+        t.imageUrl ||
+        templatedErc721Image(collection?.contractAddress || collectionSlug, t.tokenId),
       listing: listingByToken.get(t.tokenId) ?? null,
     }));
     const extra = filteredListings.filter((l) => !tokens.some((t) => t.tokenId === l.tokenId)).map((listing) => ({
@@ -1158,7 +1162,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       listing,
     }));
     return [...fromTokens, ...extra];
-  }, [bookFilter, tokens, filteredListings, listingByToken, searchQuery, activeTier, rarityMap]);
+  }, [bookFilter, tokens, filteredListings, listingByToken, searchQuery, activeTier, activeTiers, rarityMap, collection?.contractAddress, collectionSlug]);
 
   // URL persistence -- reflects real filter/sort state into the query
   // string (router.replace, not push, so browsing doesn't spam history),
@@ -1787,7 +1791,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                 rarityAvailable={rarityMap.size > 0}
                 orientation="sidebar"
                 tierCounts={Object.fromEntries(
-                  TIER_ORDER.map((tier) => [tier, listings.filter((l) => rarityFor(l.tokenId)?.tier === tier).length])
+                  TIER_ORDER.map((tier) => [
+                    tier,
+                    bookFilter === "listed"
+                      ? listings.filter((l) => rarityFor(l.tokenId)?.tier === tier).length
+                      : tokens.filter((t) => rarityFor(t.tokenId)?.tier === tier).length,
+                  ])
                 )}
                 searchLabel="Find a token"
                 searchPlaceholder="Token ID"
@@ -2028,7 +2037,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                     style={pieceRarity ? { ...tierCardStyle(pieceRarity.tier), boxShadow: tierGlow(pieceRarity.tier) } : undefined}
                   >
                     <div className="relative aspect-square bg-wood-900">
-                      <CollectionArtImage src={item.imageUrl} alt="" width={512} variant="tile" />
+                      <CollectionArtImage
+                        src={item.imageUrl}
+                        extras={[templatedErc721Image(collection?.contractAddress || collectionSlug, item.tokenId)]}
+                        alt=""
+                        width={512}
+                        variant="tile"
+                      />
                       {pieceRarity && (
                         <span
                           className="tier-badge absolute left-2 top-2 rounded-full px-2 py-1 text-[0.55rem] font-black uppercase tracking-wide"

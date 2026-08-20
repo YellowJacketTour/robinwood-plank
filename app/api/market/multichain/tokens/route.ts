@@ -34,6 +34,20 @@ export async function GET(req: NextRequest) {
     if (hasForeignRarityStore()) {
       const indexed = await listForeignRarityTokens(chainSlug, collectionSlug, limit).catch(() => []);
       if (indexed.length > 0) {
+        const { templatedErc721Image } = await import("@/lib/market/multichain/token-art");
+        const contractHint = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug) ? collectionSlug : null;
+        const templated: Array<{ tokenId: string; imageUrl: string }> = [];
+        for (const t of indexed) {
+          if (t.imageUrl || !contractHint) continue;
+          const img = templatedErc721Image(contractHint, t.tokenId);
+          if (!img) continue;
+          t.imageUrl = img;
+          templated.push({ tokenId: t.tokenId, imageUrl: img });
+        }
+        if (templated.length > 0) {
+          const { updateForeignRarityImages } = await import("@/lib/market/multichain/foreign-rarity-store");
+          void updateForeignRarityImages(chainSlug, collectionSlug, templated).catch(() => {});
+        }
         const missing = indexed.filter((t) => !t.imageUrl).length;
         if (missing > 0) {
           let extras: CollectionToken[] = [];
