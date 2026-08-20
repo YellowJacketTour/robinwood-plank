@@ -34,7 +34,11 @@ export const runtime = "nodejs";
 // header on why this stays a plain module constant read at the call site
 // (in an app/ route, not lib/) rather than something that test's
 // KNOWN_BUILD_FROZEN registry needs to track.
-const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+function solanaRpcUrl(): string {
+  const helius = process.env.HELIUS_API_KEY?.trim();
+  if (helius) return `https://mainnet.helius-rpc.com/?api-key=${helius}`;
+  return process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+}
 
 type MeTokenListing = {
   pdaAddress?: string;
@@ -60,40 +64,74 @@ export type SolanaListingVerification =
  * network call) and returns the verdict. The GET handler below is a thin
  * wrapper that builds the real Connection and calls this.
  */
+export type SolanaListingLead = {
+  seller: string;
+  auctionHouse: string;
+  tokenAccount: string;
+  /** True lamports the UI is showing. Preferred over priceSol. */
+  priceLamports?: string;
+  priceSol?: number;
+};
+
 export async function verifySolanaListingOnChain(input: {
   tokenMint: string;
   connection: Connection;
   fetchImpl?: typeof fetch;
+  lead?: SolanaListingLead;
 }): Promise<SolanaListingVerification> {
-  const doFetch = input.fetchImpl ?? fetch;
-  const res = await doFetch(`https://api-mainnet.magiceden.dev/v2/tokens/${encodeURIComponent(input.tokenMint)}/listings`, {
-    headers: { accept: "application/json" },
-  });
-  if (!res.ok) {
-    return { verified: false, reason: `Magic Eden ${res.status}` };
+  const tokenAccountOf = (row: MeTokenListing | SolanaListingLead | undefined): string | undefined => {
+    if (!row) return undefined;
+    if ("tokenAccount" in row && row.tokenAccount) return row.tokenAccount;
+    if ("tokenAddress" in row) return (row as MeTokenListing).tokenAddress;
+    return undefined;
+  };
+  let lead: MeTokenListing | SolanaListingLead | undefined = input.lead;
+  if (!lead?.seller || !lead.auctionHouse || !tokenAccountOf(lead)) {
+    const doFetch = input.fetchImpl ?? fetch;
+    const res = await doFetch(`https://api-mainnet.magiceden.dev/v2/tokens/${encodeURIComponent(input.tokenMint)}/listings`, {
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) {
+      return { verified: false, reason: `Magic Eden ${res.status}` };
+    }
+    const raw = (await res.json().catch(() => null)) as MeTokenListing[] | null;
+    lead = raw?.[0];
   }
-  const raw = (await res.json().catch(() => null)) as MeTokenListing[] | null;
-  const lead = raw?.[0];
-  if (!lead?.seller || !lead.auctionHouse || !lead.tokenAddress || typeof lead.price !== "number") {
+  const seller = lead?.seller;
+  const auctionHouse = lead?.auctionHouse;
+  const tokenAccount = tokenAccountOf(lead);
+  if (!seller || !auctionHouse || !tokenAccount) {
     return { verified: false, reason: "No active Magic Eden listing found for this token." };
   }
 
-  const onchain = await fetchM2Listing({
-    connection: input.connection,
-    seller: lead.seller,
-    auctionHouse: lead.auctionHouse,
-    tokenAccount: lead.tokenAddress,
-    tokenMint: input.tokenMint,
-  });
+  let onchain;
+  try {
+    onchain = await fetchM2Listing({
+      connection: input.connection,
+      seller,
+      auctionHouse,
+      tokenAccount,
+      tokenMint: input.tokenMint,
+    });
+  } catch (error) {
+    return {
+      verified: false,
+      reason: error instanceof Error ? error.message : "On-chain listing lookup failed.",
+    };
+  }
 
   if (!onchain) {
     return { verified: false, reason: "Magic Eden's API shows this listing, but no matching on-chain account was found." };
   }
 
-  // Same 1 SOL = 1e9 lamports unscale convention every other Solana branch
-  // in this app uses (see confirmOffer's own comment in
-  // MultichainCollectionView.tsx).
-  const apiPriceLamports = BigInt(Math.round(lead.price * 1_000_000_000)).toString();
+  const typedLead = lead as SolanaListingLead & MeTokenListing;
+  const apiPriceLamports = typedLead.priceLamports
+    ? typedLead.priceLamports
+    : typeof typedLead.price === "number"
+      ? BigInt(Math.round(typedLead.price * 1_000_000_000)).toString()
+      : typeof typedLead.priceSol === "number"
+        ? BigInt(Math.round(typedLead.priceSol * 1_000_000_000)).toString()
+        : onchain.priceLamports;
 
   return {
     verified: true,
@@ -120,8 +158,14 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const connection = new Connection(SOLANA_RPC_URL, "confirmed");
-    const result = await verifySolanaListingOnChain({ tokenMint, connection });
+    const seller = searchParams.get("seller") ?? undefined;
+    const auctionHouse = searchParams.get("auctionHouse") ?? undefined;
+    const tokenAccount = searchParams.get("tokenAccount") ?? undefined;
+    const priceLamports = searchParams.get("priceLamports") ?? undefined;
+    const lead =
+      seller && auctionHouse && tokenAccount ? { seller, auctionHouse, tokenAccount, priceLamports } : undefined;
+    const connection = new Connection(solanaRpcUrl(), "confirmed");
+    const result = await verifySolanaListingOnChain({ tokenMint, connection, lead });
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return publicError(error, "Failed to verify this listing on-chain");

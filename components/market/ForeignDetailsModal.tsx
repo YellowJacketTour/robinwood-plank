@@ -79,7 +79,18 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
     setVerification("loading");
     (async () => {
       try {
-        const res = await fetch(`/api/market/multichain/solana-verify-listing?tokenMint=${encodeURIComponent(listing.tokenId)}`);
+        const params = new URLSearchParams({ tokenMint: listing.tokenId });
+        if (listing.solanaEscrow && listing.maker) {
+          params.set("seller", listing.maker);
+          params.set("auctionHouse", listing.solanaEscrow.auctionHouse);
+          params.set("tokenAccount", listing.solanaEscrow.tokenAccount);
+          try {
+            params.set("priceLamports", (BigInt(listing.priceWei) / 1_000_000_000n).toString());
+          } catch {
+            /* keep mint-only verify */
+          }
+        }
+        const res = await fetch(`/api/market/multichain/solana-verify-listing?${params.toString()}`);
         const data = (await res.json()) as SolanaListingVerification;
         if (!cancelled) setVerification(data);
       } catch {

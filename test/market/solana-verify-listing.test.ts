@@ -106,6 +106,26 @@ test("verifySolanaListingOnChain fails closed when Magic Eden's API itself error
   if (!result.verified) assert.match(result.reason, /Magic Eden 502/);
 });
 
+test("verifySolanaListingOnChain uses an explicit collection-listing lead and does not call Magic Eden again", async () => {
+  const connection = fakeConnectionReturning(buildSellerTradeStateBuffer(BigInt(REAL_LISTING.priceLamports)));
+  const fetchImpl = (async () => {
+    throw new Error("must not refetch /v2/tokens listings when escrow lead is present");
+  }) as unknown as typeof fetch;
+  const result = await verifySolanaListingOnChain({
+    tokenMint: REAL_LISTING.tokenMint,
+    connection,
+    fetchImpl,
+    lead: {
+      seller: REAL_LISTING.seller,
+      auctionHouse: REAL_LISTING.auctionHouse,
+      tokenAccount: REAL_LISTING.tokenAccount,
+      priceLamports: REAL_LISTING.priceLamports,
+    },
+  });
+  assert.equal(result.verified, true);
+  if (result.verified) assert.equal(result.priceMatches, true);
+});
+
 test("verifySolanaListingOnChain fails closed when the API lead resolves but no on-chain account exists at the derived PDA (listing was cancelled/filled)", async () => {
   // Real lead, but the PDA the app derives from it doesn't exist on-chain --
   // fetchM2Listing returns null (see magiceden-m2-onchain.ts's own

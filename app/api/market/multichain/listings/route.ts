@@ -190,6 +190,9 @@ export async function GET(req: NextRequest) {
         seller: string;
         price: number;
         expiry?: number;
+        pdaAddress?: string;
+        auctionHouse?: string;
+        tokenAddress?: string;
         token?: { name?: string; image?: string; collectionName?: string; attributes?: Array<{ trait_type: string; value: string }> };
       };
       const raw = (await res.json()) as MeListing[];
@@ -225,6 +228,10 @@ export async function GET(req: NextRequest) {
             externalUrl: `https://magiceden.io/item-details/${l.tokenMint}`,
             foreignChainSlug: chainSlug,
             foreignOrderHash: l.tokenMint,
+            solanaEscrow:
+              l.auctionHouse && l.tokenAddress
+                ? { auctionHouse: l.auctionHouse, tokenAccount: l.tokenAddress, pdaAddress: l.pdaAddress }
+                : undefined,
           };
         })
         .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1));

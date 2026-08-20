@@ -1030,6 +1030,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         priceWei: buyTarget.priceWei,
         expectedContractAddress: collection?.contractAddress,
         expectedTokenId: buyTarget.tokenId,
+        expectedMaker: buyTarget.maker,
+        solanaEscrow: buyTarget.solanaEscrow,
       });
       setBuyTarget(null);
       setStatus("Purchase confirmed.");

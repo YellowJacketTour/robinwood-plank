@@ -381,14 +381,27 @@ async function buyRobinhoodListingNow(input: { orderHash: string; collectionSlug
  * ADDITIVE ONLY -- this function and buyBitcoinListingNow are new code
  * paths; nothing above this comment in this file was touched to add them.
  */
-async function buySolanaListingNow(input: { tokenMint: string; priceLamports: string }): Promise<ForeignBuyResult> {
+async function buySolanaListingNow(input: {
+  tokenMint: string;
+  priceLamports: string;
+  seller?: string;
+  auctionHouse?: string;
+  tokenAccount?: string;
+}): Promise<ForeignBuyResult> {
   const { connectPhantomWallet, signAndSendSolanaTransaction } = await import("@/lib/market/multichain/trading/non-evm-wallet");
   const buyerAddress = await connectPhantomWallet();
 
   const res = await fetch("/api/market/multichain/solana-buy-instruction", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ buyerAddress, tokenMint: input.tokenMint, priceLamports: input.priceLamports }),
+    body: JSON.stringify({
+      buyerAddress,
+      tokenMint: input.tokenMint,
+      priceLamports: input.priceLamports,
+      seller: input.seller,
+      auctionHouse: input.auctionHouse,
+      tokenAccount: input.tokenAccount,
+    }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -817,6 +830,8 @@ export async function buyForeignListingNow(input: {
   expectedContractAddress?: string;
   /** The token id the user believes they're buying -- asserted against the signed order on the EVM path. */
   expectedTokenId?: string;
+  solanaEscrow?: { auctionHouse: string; tokenAccount: string };
+  expectedMaker?: string;
 }): Promise<ForeignBuyResult> {
   if (input.chainSlug === "robinhood") {
     if (!input.collectionSlug) throw new Error("buyForeignListingNow: collectionSlug is required for Robinhood Chain purchases.");
@@ -840,7 +855,13 @@ export async function buyForeignListingNow(input: {
     // true lamports before calling Magic Eden's own API, which expects real
     // lamports, never the display-scaled figure.
     const lamports = (BigInt(input.priceWei) / BigInt(1_000_000_000)).toString();
-    return buySolanaListingNow({ tokenMint: input.orderHash, priceLamports: lamports });
+    return buySolanaListingNow({
+      tokenMint: input.orderHash,
+      priceLamports: lamports,
+      seller: input.expectedMaker,
+      auctionHouse: input.solanaEscrow?.auctionHouse,
+      tokenAccount: input.solanaEscrow?.tokenAccount,
+    });
   }
   if (isBitcoinChainSlug(input.chainSlug)) {
     if (!input.priceWei) throw new Error("buyForeignListingNow: priceWei is required for a Bitcoin purchase.");

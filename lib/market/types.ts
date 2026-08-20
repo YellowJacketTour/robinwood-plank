@@ -154,6 +154,16 @@ export type Listing = {
    * fetching every token in the collection (see traits/route.ts's header).
    */
   traits?: Array<{ traitType: string; value: string }>;
+  /**
+   * Magic Eden M2 SellerTradeState leads from the collection listings
+   * payload — enough to derive the PDA and check the listing on-chain
+   * without a second /v2/tokens/:mint/listings round-trip.
+   */
+  solanaEscrow?: {
+    auctionHouse: string;
+    tokenAccount: string;
+    pdaAddress?: string;
+  };
 };
 
 /**

@@ -8,8 +8,11 @@
  * Phantom wallet to sign -- this route never signs or broadcasts anything.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { Connection } from "@solana/web3.js";
 import { buildMagicEdenBuyNow } from "@/lib/market/multichain/adapters/magiceden-solana-trade";
+import { fetchM2Listing } from "@/lib/market/multichain/adapters/magiceden-m2-onchain";
 import { publicError, rateLimit } from "@/lib/security";
+import { looksLikeSolanaPubkey } from "@/lib/market/multichain/solana-pubkey";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,12 +21,38 @@ export async function POST(req: NextRequest) {
   const limited = rateLimit(req, { key: "market-multichain-solana-buy", limit: 30, windowMs: 60_000 });
   if (limited) return limited;
 
-  const body = (await req.json().catch(() => null)) as { buyerAddress?: string; tokenMint?: string; priceLamports?: string } | null;
+  const body = (await req.json().catch(() => null)) as {
+    buyerAddress?: string;
+    tokenMint?: string;
+    priceLamports?: string;
+    seller?: string;
+    auctionHouse?: string;
+    tokenAccount?: string;
+  } | null;
   if (!body?.buyerAddress || !body.tokenMint || !body.priceLamports) {
     return NextResponse.json({ error: "buyerAddress, tokenMint, and priceLamports are required" }, { status: 400 });
   }
 
   try {
+    if (body.seller && body.auctionHouse && body.tokenAccount && looksLikeSolanaPubkey(body.tokenMint)) {
+      const helius = process.env.HELIUS_API_KEY?.trim();
+      const rpc = helius
+        ? `https://mainnet.helius-rpc.com/?api-key=${helius}`
+        : process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+      const onchain = await fetchM2Listing({
+        connection: new Connection(rpc, "confirmed"),
+        seller: body.seller,
+        auctionHouse: body.auctionHouse,
+        tokenAccount: body.tokenAccount,
+        tokenMint: body.tokenMint,
+      });
+      if (!onchain) {
+        return NextResponse.json({ error: "This listing is no longer live on-chain." }, { status: 409 });
+      }
+      if (onchain.priceLamports !== body.priceLamports) {
+        return NextResponse.json({ error: "On-chain price no longer matches the price shown." }, { status: 409 });
+      }
+    }
     const instruction = await buildMagicEdenBuyNow({
       buyerAddress: body.buyerAddress,
       tokenMint: body.tokenMint,
