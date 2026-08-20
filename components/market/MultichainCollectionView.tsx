@@ -640,22 +640,37 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         // one-off background job (scripts/index-foreign-rarity.ts), so a
         // collection can go from unindexed to indexed between two page
         // loads within the same swr window.
+        const rarityUrl = `/api/market/multichain/rarity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`;
+        const apply = (data: {
+          byTokenId?: Record<string, { name: string; tier: string; rank: number; percentile: number }>;
+          sampleSize?: number;
+          partial?: boolean;
+        }) => {
+          const map = new Map<string, RarityLookup>();
+          for (const [tokenId, v] of Object.entries(data.byTokenId ?? {})) {
+            map.set(tokenId, { ...v, tier: normalizeRarityTier(v.tier) });
+          }
+          setRarityMap(map);
+          setRaritySample({ size: data.sampleSize ?? map.size, partial: Boolean(data.partial) });
+          return map.size > 0;
+        };
         const data = await swrJson<{
           byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number }>;
           indexed: boolean;
           sampleSize?: number;
           partial?: boolean;
-        }>(
-          `/api/market/multichain/rarity?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`,
-          { ttlMs: 120_000, swrMs: 1_800_000, session: true, isGood: (d) => Boolean((d as { indexed?: boolean })?.indexed) }
-        );
+        }>(rarityUrl, { ttlMs: 15_000, swrMs: 120_000, session: true, isGood: (d) => Boolean((d as { indexed?: boolean })?.indexed) });
         if (cancelled) return;
-        const map = new Map<string, RarityLookup>();
-        for (const [tokenId, v] of Object.entries(data.byTokenId ?? {})) {
-          map.set(tokenId, { ...v, tier: normalizeRarityTier(v.tier) });
+        const ready = apply(data);
+        if (!ready) {
+          for (const wait of [4_000, 8_000, 16_000]) {
+            await new Promise((r) => setTimeout(r, wait));
+            if (cancelled) return;
+            invalidateSwr(rarityUrl);
+            const again = await fetch(rarityUrl, { cache: "no-store" }).then((res) => res.json()).catch(() => null);
+            if (again && apply(again)) break;
+          }
         }
-        setRarityMap(map);
-        setRaritySample({ size: data.sampleSize ?? map.size, partial: Boolean(data.partial) });
       } catch {
         if (!cancelled) setRarityMap(new Map());
       }
@@ -754,30 +769,42 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (!isSolana && !isBitcoin) {
+        try {
+          const data = await swrJson<{ counts: Record<string, Record<string, number>> }>(
+            `/api/market/multichain/traits?collectionSlug=${encodeURIComponent(collectionSlug)}`,
+            { ttlMs: 300_000, swrMs: 3_600_000, session: true }
+          );
+          if (!cancelled) setTraitCounts(data.counts ?? {});
+        } catch {
+          if (!cancelled) setTraitCounts({});
+        }
+      }
       try {
-        const data = await swrJson<{ counts: Record<string, Record<string, number>> }>(
-          `/api/market/multichain/traits?collectionSlug=${encodeURIComponent(collectionSlug)}`,
-          { ttlMs: 300_000, swrMs: 3_600_000, session: true }
-        );
-        if (!cancelled) setTraitCounts(data.counts ?? {});
         const idx = await swrJson<TraitIndexResponse>(
           `/api/market/multichain/trait-index?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`,
-          { ttlMs: 300_000, swrMs: 3_600_000, session: true, isGood: (d) => Boolean((d as TraitIndexResponse)?.complete) }
+          { ttlMs: 15_000, swrMs: 120_000, session: true, isGood: (d) => Boolean((d as TraitIndexResponse)?.complete) }
         );
         if (!cancelled) {
           setTraitIndex(idx);
           if (idx.complete && idx.traits) {
+            const derived: Record<string, Record<string, number>> = {};
+            for (const [type, values] of Object.entries(idx.traits)) {
+              derived[type] = {};
+              for (const [value, ids] of Object.entries(values)) derived[type][value] = ids.length;
+            }
+            setTraitCounts((prev) => (prev && Object.keys(prev).length > 0 ? prev : derived));
             setSweepClauses((prev) => (prev.length > 0 ? prev : defaultFirstClause(idx.traits!) ? [defaultFirstClause(idx.traits!)!] : []));
           }
         }
       } catch {
-        if (!cancelled) setTraitCounts({});
+        if (!cancelled && traitCounts == null) setTraitCounts({});
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [collectionSlug, chainSlug]);
+  }, [collectionSlug, chainSlug, isSolana, isBitcoin]);
 
   const browseAsListing = useCallback(
     (tokenId: string, imageUrl?: string | null, name?: string | null): Listing => {
@@ -2641,7 +2668,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           onClose={() => setDetailsTarget(null)}
           currencySymbol={statCurrencySymbol}
           chainSlug={chainSlug}
-          rarity={rarityMap.get(detailsTarget.tokenId) ?? null}
+          rarity={rarityFor(detailsTarget.tokenId) ?? null}
         />
       )}
 

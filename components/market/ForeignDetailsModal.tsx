@@ -44,6 +44,24 @@ type Props = {
  * real total-supply proxy (every token has exactly one value per
  * category) -- confirmed by the shape OpenSea's /traits response returns.
  */
+export function lookupTraitCategory(
+  counts: Record<string, Record<string, number>> | null,
+  traitType: string
+): Record<string, number> | undefined {
+  if (!counts) return undefined;
+  if (counts[traitType]) return counts[traitType];
+  const needle = traitType.toLowerCase();
+  const hit = Object.entries(counts).find(([k]) => k.toLowerCase() === needle);
+  return hit?.[1];
+}
+
+export function lookupTraitCount(category: Record<string, number>, value: string): number | undefined {
+  if (category[value] != null) return category[value];
+  const needle = value.toLowerCase();
+  const hit = Object.entries(category).find(([k]) => k.toLowerCase() === needle);
+  return hit?.[1];
+}
+
 export default function ForeignDetailsModal({ listing, collectionName, traitCounts, isSolana, onClose, currencySymbol = "ETH", chainSlug = "robinhood", rarity = null }: Props) {
   // ON-CHAIN VERIFICATION -- fires once per modal open, for this ONE token
   // only (a bounded, single-item action, never a scan). "idle" covers both
@@ -72,14 +90,20 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
     };
   }, [isSolana, listing.tokenId]);
 
+  const shortId =
+    listing.tokenId.length > 12 ? `${listing.tokenId.slice(0, 4)}…${listing.tokenId.slice(-4)}` : listing.tokenId;
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center" role="dialog" aria-modal="true">
-      <div className="wood-ledger w-full max-w-md space-y-3 p-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-display text-lg text-gold-300">
-            {collectionName} #{listing.tokenId}
+      <div className="wood-ledger max-h-[92vh] w-full max-w-md space-y-3 overflow-y-auto p-4">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="min-w-0 font-display text-lg leading-tight text-gold-300">
+            <span className="block truncate">{collectionName}</span>
+            <span className="mt-0.5 block break-all font-sans text-[0.7rem] font-semibold tracking-normal text-gold-300/80" title={listing.tokenId}>
+              #{shortId}
+            </span>
           </h3>
-          <button type="button" onClick={onClose} aria-label="Close" className="flex h-8 w-8 items-center justify-center rounded-full text-foreground/60 hover:text-gold-300">
+          <button type="button" onClick={onClose} aria-label="Close" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-foreground/60 hover:text-gold-300">
             ✕
           </button>
         </div>
@@ -151,7 +175,7 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
             ) : (
               <p className="flex items-center gap-1.5 text-xs text-foreground/45">
                 <ShieldAlert size={13} strokeWidth={2.5} className="shrink-0 text-foreground/35" aria-hidden />
-                {verification.reason}
+                {verification.reason || "Could not verify this listing on-chain."}
               </p>
             )}
           </div>
@@ -164,9 +188,9 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
           ) : (
             <ul className="grid grid-cols-2 gap-1.5">
               {listing.traits.map((t) => {
-                const categoryCounts = traitCounts?.[t.traitType];
+                const categoryCounts = lookupTraitCategory(traitCounts, t.traitType);
                 const total = categoryCounts ? Object.values(categoryCounts).reduce((s, n) => s + n, 0) : null;
-                const count = categoryCounts?.[t.value];
+                const count = categoryCounts ? lookupTraitCount(categoryCounts, t.value) : undefined;
                 const pct = total && count ? ((count / total) * 100) : null;
                 return (
                   <li key={t.traitType} className="rounded-md border border-line-strong bg-background px-2 py-1.5">
