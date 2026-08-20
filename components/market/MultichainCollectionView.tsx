@@ -19,7 +19,9 @@ import NativeSolanaListForm from "@/components/market/NativeSolanaListForm";
 import NativeForeignOfferForm from "@/components/market/NativeForeignOfferForm";
 import NativeBundleListForm from "@/components/market/NativeBundleListForm";
 import NativeSwapForm from "@/components/market/NativeSwapForm";
-import { normalizeRarityTier } from "@/lib/rarity";
+import { normalizeRarityTier, TIER_ORDER } from "@/lib/rarity";
+import FilterBar, { type MarketFilters } from "@/components/market/FilterBar";
+import { SWEEP_MAX } from "@/lib/market/sweep";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { useWallet } from "@/lib/wallet-context";
@@ -77,7 +79,7 @@ type Props = {
   collectionSlug: string;
 };
 
-const SWEEP_SIZE_OPTIONS = [3, 5, 10];
+const SWEEP_SIZE_OPTIONS = [3, 5, 10, 20] as const;
 /**
  * Offer discount for the "buy what's affordable, offer for the rest"
  * combined control -- 10% below each remainder item's own current listed
@@ -200,7 +202,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [buyTarget, setBuyTarget] = useState<Listing | null>(null);
   const [buyBusy, setBuyBusy] = useState(false);
 
-  const [sweepCount, setSweepCount] = useState(SWEEP_SIZE_OPTIONS[0]);
+  const [sweepCount, setSweepCount] = useState<number>(SWEEP_SIZE_OPTIONS[0]);
+  const [sweepOpen, setSweepOpen] = useState(false);
+  const [sweepCustom, setSweepCustom] = useState("");
+  const [activeTiers, setActiveTiers] = useState<RarityTier[]>([]);
   const [sweepPreview, setSweepPreview] = useState<Listing[] | null>(null);
   const [sweepBusy, setSweepBusy] = useState(false);
 
@@ -975,9 +980,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         const has = (traitType: string, value: string) => (l.traits ?? []).some((t) => t.traitType === traitType && t.value === value);
         if (!traitClauses.every((c) => has(c.traitType, c.value))) return false;
       }
-      if (activeTier !== "all") {
+      const tierFilter = activeTiers.length > 0 ? activeTiers : activeTier !== "all" ? [activeTier] : [];
+      if (tierFilter.length > 0) {
         const r = rarityMap.get(l.tokenId);
-        if (!r || r.tier !== activeTier) return false;
+        if (!r || !tierFilter.includes(r.tier)) return false;
       }
       return true;
     });
@@ -1004,7 +1010,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       });
     }
     return rows;
-  }, [listings, searchQuery, minPriceEth, maxPriceEth, traitClauses, activeTier, rarityMap, listingSort]);
+  }, [listings, searchQuery, minPriceEth, maxPriceEth, traitClauses, activeTier, activeTiers, rarityMap, listingSort]);
 
   const listingByToken = useMemo(() => {
     const map = new Map<string, Listing>();
@@ -1399,7 +1405,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     traitClauses.length > 0 ||
     activeTier !== "all" ||
     listingSort !== "price-asc" ||
-    bookFilter !== "listed";
+    bookFilter !== "listed" ||
+    activeTiers.length > 0;
 
   // STAT BAR -- real numbers derived from data already loaded for this
   // page (no new API surface): floor = cheapest active listing, best offer
@@ -1455,89 +1462,60 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </div>
       </div>
 
-      {/* STAT BAR -- real, same shape as the native page's floor/items/listed/best-offer/volume/highest-sale row. */}
-      <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-panel p-3 sm:grid-cols-3 lg:grid-cols-6">
-        <div>
-          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Listed / supply</p>
-          <p className="truncate text-sm font-bold text-foreground tabular-nums" title={supplyStats?.totalSupply != null ? `${supplyStats.listedCount ?? "—"} of ${supplyStats.totalSupply} tokens listed for sale` : undefined}>
-            {supplyStats?.listedCount != null ? supplyStats.listedCount.toLocaleString() : "—"}
-            {" / "}
+      <dl className="flex gap-px overflow-x-auto rounded-xl border border-line bg-gold-500/20 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-6 sm:overflow-hidden">
+        <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
+          <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Floor price</dt>
+          <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
+            {floorWei ? formatTokenAmount(floorWei, 18, 4) : "—"}
+            {floorWei && statUsd(floorWei) != null && <span className="block font-sans text-[0.62rem] text-foreground/50">{formatUsdCompact(statUsd(floorWei)!)}</span>}
+          </dd>
+        </div>
+        <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
+          <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Items</dt>
+          <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
             {supplyStats?.totalSupply != null ? supplyStats.totalSupply.toLocaleString() : "—"}
-          </p>
+          </dd>
         </div>
-        <div>
-          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Floor</p>
-          <p className="flex flex-wrap items-center gap-1 text-[clamp(0.8rem,3vw,0.95rem)] font-bold text-foreground tabular-nums">
-            {floorWei ? (
-              <>
-                {formatTokenAmount(floorWei, 18, 4)}
-                <ChainIcon chainSlug={chainSlug} size={16} className="shrink-0" />
-                {statUsd(floorWei) != null && <span className="text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(floorWei)!)}</span>}
-              </>
-            ) : (
-              "—"
+        <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
+          <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Listed</dt>
+          <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
+            {supplyStats?.totalSupply != null
+              ? `${(supplyStats.listedCount ?? listings.length).toLocaleString()} / ${supplyStats.totalSupply.toLocaleString()}`
+              : (supplyStats?.listedCount ?? listings.length).toLocaleString()}
+          </dd>
+        </div>
+        <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
+          <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Best offer</dt>
+          <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
+            {bestOfferWei ? formatTokenAmount(bestOfferWei, 18, 4) : "—"}
+            {bestOfferWei && statUsd(bestOfferWei) != null && <span className="block font-sans text-[0.62rem] text-foreground/50">{formatUsdCompact(statUsd(bestOfferWei)!)}</span>}
+          </dd>
+        </div>
+        <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
+          <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Volume</dt>
+          <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
+            {volumeWei ? formatTokenAmount(volumeWei, 18, 3) : marketStats?.sales24h != null ? `${marketStats.sales24h} sales` : "—"}
+            {volumeWei && statUsd(volumeWei) != null && <span className="block font-sans text-[0.62rem] text-foreground/50">{formatUsdCompact(statUsd(volumeWei)!)}</span>}
+          </dd>
+        </div>
+        <div className="min-w-[7rem] flex-1 bg-panel px-3 py-2 text-center sm:min-w-0">
+          <dt className="text-[0.6rem] font-bold uppercase tracking-wider text-foreground/45">Highest sale</dt>
+          <dd className="font-display text-base text-gold-300 tabular-nums sm:text-lg">
+            {highestSaleWei ? formatTokenAmount(highestSaleWei, 18, 4) : "—"}
+            {highestSaleWei && statUsd(highestSaleWei) != null && (
+              <span className="block font-sans text-[0.62rem] text-foreground/50">{formatUsdCompact(statUsd(highestSaleWei)!)}</span>
             )}
-          </p>
+          </dd>
         </div>
-        <div>
-          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Best offer</p>
-          <p className="flex flex-wrap items-center gap-1 text-[clamp(0.8rem,3vw,0.95rem)] font-bold text-foreground tabular-nums">
-            {bestOfferWei ? (
-              <>
-                {formatTokenAmount(bestOfferWei, 18, 4)}
-                <ChainIcon chainSlug={chainSlug} size={16} className="shrink-0" />
-                {statUsd(bestOfferWei) != null && <span className="text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(bestOfferWei)!)}</span>}
-              </>
-            ) : (
-              "—"
-            )}
-          </p>
-        </div>
-        <div>
-          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Volume</p>
-          <p className="flex flex-wrap items-center gap-1 text-[clamp(0.8rem,3vw,0.95rem)] font-bold text-foreground tabular-nums">
-            {volumeWei ? (
-              <>
-                {formatTokenAmount(volumeWei, 18, 3)}
-                <ChainIcon chainSlug={chainSlug} size={16} className="shrink-0" />
-                {statUsd(volumeWei) != null && <span className="text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(volumeWei)!)}</span>}
-                {marketStats?.sales24h != null ? <span className="text-[0.65rem] font-normal text-foreground/40"> · {marketStats.sales24h} sales 24h</span> : null}
-              </>
-            ) : marketStats?.sales24h != null ? (
-              <span className="text-[0.65rem] font-normal text-foreground/70">{marketStats.sales24h} sales 24h</span>
-            ) : (
-              "—"
-            )}
-          </p>
-        </div>
-        <div>
-          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Unique holders</p>
-          <p className="truncate text-sm font-bold text-foreground tabular-nums">
-            {supplyStats?.holderCount != null ? supplyStats.holderCount.toLocaleString() : "—"}
-            {supplyStats?.holderCount != null && supplyStats.totalSupply != null && supplyStats.totalSupply > 0 ? (
-              <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">
-                {((supplyStats.holderCount / supplyStats.totalSupply) * 100).toFixed(1)}% of supply
-              </span>
-            ) : null}
-          </p>
-        </div>
-        <div>
-          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Highest sale</p>
-          <p className="flex flex-wrap items-center gap-1 text-[clamp(0.8rem,3vw,0.95rem)] font-bold text-foreground tabular-nums">
-            {highestSaleWei ? (
-              <>
-                {formatTokenAmount(highestSaleWei, 18, 4)}
-                <ChainIcon chainSlug={chainSlug} size={16} className="shrink-0" />
-                {statUsd(highestSaleWei) != null && (
-                  <span className="text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(highestSaleWei)!)}</span>
-                )}
-              </>
-            ) : (
-              "—"
-            )}
-          </p>
-        </div>
-      </div>
+      </dl>
+      {supplyStats?.holderCount != null && (
+        <p className="text-[0.65rem] text-foreground/45">
+          Unique holders {supplyStats.holderCount.toLocaleString()}
+          {supplyStats.totalSupply != null && supplyStats.totalSupply > 0
+            ? ` · ${((supplyStats.holderCount / supplyStats.totalSupply) * 100).toFixed(1)}% of supply`
+            : ""}
+        </p>
+      )}
 
       {/*
        * Real 24h/7d/30d volume/sales, distinct from the "Volume" stat above
@@ -1588,7 +1566,21 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </div>
       )}
 
-      <MarketTabRail navigation={<MarketNav active={tab} onChange={setTab} tabs={tabs} />} />
+      <MarketTabRail
+        navigation={
+          <MarketNav
+            active={tab}
+            onChange={setTab}
+            tabs={tabs}
+            counts={{
+              "buy-sell": listings.length,
+              offers: offers.length,
+              "my-nfts": ownedItems.length,
+              positions: myListings.length,
+            }}
+          />
+        }
+      />
 
       {error && (
         <p role="alert" className="rounded-lg border border-red-500/35 bg-red-950/25 px-3 py-2.5 text-sm text-red-100">
@@ -1600,8 +1592,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         <MarketBrowseLayout
           summary={
             bookFilter === "listed"
-              ? `${filteredListings.length} listed on ${chainDisplayName(chainSlug)}`
-              : `${browseItems.length} items on ${chainDisplayName(chainSlug)}`
+              ? `${filteredListings.length} on the market`
+              : `${browseItems.length} items`
           }
           lead={
             rarityMap.size > 0 ? (
@@ -1636,85 +1628,25 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   ))}
                 </div>
               </div>
-              <div>
-                <label htmlFor="mc-search" className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
-                  Token #
-                </label>
-                <input
-                  id="mc-search"
-                  type="text"
-                  inputMode="numeric"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(isBitcoin || isSolana ? e.target.value : e.target.value.replace(/[^0-9]/g, ""))}
-                  placeholder="Search #..."
-                  className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground placeholder:text-foreground/30"
-                />
-              </div>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label htmlFor="mc-min" className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
-                    Min {isBitcoin ? "BTC" : isSolana ? "SOL" : chainSlug === "bnb-mainnet" ? "BNB" : chainSlug === "avax-mainnet" ? "AVAX" : "ETH"}
-                  </label>
-                  <input
-                    id="mc-min"
-                    type="number"
-                    step="0.001"
-                    min="0"
-                    value={minPriceEth}
-                    onChange={(e) => setMinPriceEth(e.target.value)}
-                    placeholder="0"
-                    className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground placeholder:text-foreground/30"
-                  />
-                </div>
-                <div className="flex-1">
-                  <label htmlFor="mc-max" className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
-                    Max {isBitcoin ? "BTC" : isSolana ? "SOL" : chainSlug === "bnb-mainnet" ? "BNB" : chainSlug === "avax-mainnet" ? "AVAX" : "ETH"}
-                  </label>
-                  <input
-                    id="mc-max"
-                    type="number"
-                    step="0.001"
-                    min="0"
-                    value={maxPriceEth}
-                    onChange={(e) => setMaxPriceEth(e.target.value)}
-                    placeholder="∞"
-                    className="min-h-10 w-full rounded-md border border-line bg-background px-2 text-sm text-foreground placeholder:text-foreground/30"
-                  />
-                </div>
-              </div>
-
-              {/* SORT -- same button-group toggle pattern as GlobalMarketHub's own 24h/7d/30d window and "Show top" pickers, not a dropdown. Rarity options only appear once rarityMap is real (indexed) for this collection -- never offered against a fabricated rank. */}
-              <div>
-                <p className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Sort</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {(
-                    [
-                      { v: "price-asc", label: "Price ↑" },
-                      { v: "price-desc", label: "Price ↓" },
-                      ...(rarityMap.size > 0
-                        ? ([
-                            { v: "rarity-asc", label: "Rarest first" },
-                            { v: "rarity-desc", label: "Common first" },
-                          ] as const)
-                        : []),
-                    ] as const
-                  ).map(({ v, label }) => (
-                    <button
-                      key={v}
-                      type="button"
-                      onClick={() => setListingSort(v)}
-                      aria-pressed={listingSort === v}
-                      className={`min-h-8 rounded-md border px-2.5 text-xs font-bold transition-colors duration-150 ${
-                        listingSort === v
-                          ? "border-gold-400 bg-gold-400/15 text-gold-300"
-                          : "border-line text-foreground/50 hover:border-line-strong hover:text-foreground/70"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <FilterBar
+                filters={{ query: searchQuery, minEth: minPriceEth, maxEth: maxPriceEth, tier: activeTier, tiers: activeTiers }}
+                onChange={(next: MarketFilters) => {
+                  setSearchQuery(next.query);
+                  setMinPriceEth(next.minEth);
+                  setMaxPriceEth(next.maxEth);
+                  setActiveTier(next.tier);
+                  setActiveTiers(next.tiers ?? []);
+                }}
+                resultCount={bookFilter === "listed" ? filteredListings.length : browseItems.length}
+                rarityAvailable={rarityMap.size > 0}
+                orientation="sidebar"
+                tierCounts={Object.fromEntries(
+                  TIER_ORDER.map((tier) => [tier, listings.filter((l) => rarityMap.get(l.tokenId)?.tier === tier).length])
+                )}
+                searchLabel="Find a token"
+                searchPlaceholder="Token ID"
+                priceLegend={`Price in ${statCurrencySymbol}`}
+              />
 
               {/* TRAIT FILTER -- one dropdown per real trait category, AND-combined. Populated from the SAME collection-wide value counts the Details view's rarity % already uses. */}
               {traitCounts &&
@@ -1752,6 +1684,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                     setMaxPriceEth("");
                     setSelectedTraits({});
                     setActiveTier("all");
+                    setActiveTiers([]);
                     setListingSort("price-asc");
                     setBookFilter("listed");
                   }}
@@ -1763,61 +1696,87 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             </div>
           }
           toolbar={
-            // Sweep is real for every chain family now. EVM keeps the
-            // single-transaction MarketplankForeignFeeRouter.sweepBuy path.
-            // Solana/Bitcoin have no batch-buy endpoint on either venue
-            // (re-verified live 2026-08-18 -- see magiceden-solana-trade.ts
-            // and unisat-ordinals-trade.ts's own "per-venue, per-listing, no
-            // native batch endpoint" headers), so sweepSolanaListingsNow/
-            // sweepBitcoinListingsNow do N genuinely sequential signed
-            // transactions instead -- real, honest, just not atomic the way
-            // the EVM router's single tx is (ForeignSweepConfirm's
-            // `sequential` prop makes that distinction visible, not hidden).
-            buyableCount > 0 && (
-              <>
-                <select
-                  value={sweepCount}
-                  onChange={(e) => setSweepCount(Number(e.target.value))}
-                  className="min-h-10 rounded-md border border-line bg-panel px-2 text-xs text-foreground"
-                  aria-label="Sweep size"
-                >
-                  {SWEEP_SIZE_OPTIONS.map((n) => (
-                    <option key={n} value={n}>
-                      Sweep {n}
-                    </option>
-                  ))}
-                </select>
+            <>
+              <button
+                type="button"
+                onClick={() => setSweepOpen((v) => !v)}
+                aria-pressed={sweepOpen}
+                className={`min-h-10 shrink-0 rounded-lg border px-3 text-xs font-bold transition ${
+                  sweepOpen ? "border-gold-400 bg-gold-500/15 text-gold-200" : "border-line-strong text-gold-300 hover:border-gold-400"
+                }`}
+              >
+                Sweep floorboards
+              </button>
+              {!isNonEvm && (
                 <button
                   type="button"
-                  onClick={() => void openSweepPreview()}
-                  className="min-h-10 shrink-0 rounded-lg border border-line-strong bg-gold-500 px-3 text-xs font-bold text-wood-950 transition hover:bg-gold-400"
+                  onClick={() => setTab("offers")}
+                  className="min-h-10 shrink-0 rounded-lg border border-line-strong px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
                 >
-                  {traitClauses.length > 0 ? "Sweep by traits" : "Sweep floor"}
+                  Bid by criteria
                 </button>
-                {/* Additive "buy what's affordable, offer for the rest"
-                    combined control -- a NEW third action alongside sweep
-                    and single-item offer, not a replacement for either. */}
+              )}
+              <label className="flex items-center gap-1.5">
+                <span className="sr-only">Sort listings</span>
+                <select
+                  value={listingSort}
+                  onChange={(e) => setListingSort(e.target.value as ListingSort)}
+                  className="min-h-10 max-w-[12rem] rounded-md border border-line bg-wood-950 px-2 text-xs text-foreground"
+                >
+                  <option value="price-asc">Price: low to high</option>
+                  <option value="price-desc">Price: high to low</option>
+                  {rarityMap.size > 0 && <option value="rarity-asc">Rarest first</option>}
+                  {rarityMap.size > 0 && <option value="rarity-desc">Common first</option>}
+                </select>
+              </label>
+            </>
+          }
+        >
+          {sweepOpen && (
+            <div className="mb-3 rounded-xl border border-line bg-wood-900/80 p-3">
+              <p className="mb-2 text-[0.62rem] font-black uppercase tracking-wider text-foreground/50">
+                Sweep · {filteredListings.filter((l) => isCrossChainBuyable(l)).length} listed · max {SWEEP_MAX}
+              </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {SWEEP_SIZE_OPTIONS.map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => {
+                      setSweepCount(n);
+                      setSweepCustom("");
+                    }}
+                    className={`min-h-8 rounded-md border px-2.5 text-xs font-bold ${
+                      sweepCount === n && !sweepCustom ? "border-gold-400 bg-gold-400/15 text-gold-300" : "border-line text-foreground/60"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
                 <input
                   type="number"
-                  step="0.0001"
-                  min="0"
-                  value={combinedBudgetEth}
-                  onChange={(e) => setCombinedBudgetEth(e.target.value)}
-                  placeholder={`Budget ${isBitcoin ? "BTC" : isSolana ? "SOL" : chainSlug === "bnb-mainnet" ? "BNB" : chainSlug === "avax-mainnet" ? "AVAX" : "ETH"}`}
-                  aria-label="Combined buy+offer budget"
-                  className="min-h-10 w-20 rounded-md border border-line bg-panel px-2 text-xs text-foreground placeholder:text-foreground/30"
+                  min={1}
+                  max={SWEEP_MAX}
+                  value={sweepCustom}
+                  onChange={(e) => {
+                    setSweepCustom(e.target.value);
+                    const n = Number(e.target.value);
+                    if (Number.isFinite(n) && n >= 1) setSweepCount(Math.min(SWEEP_MAX, Math.floor(n)));
+                  }}
+                  placeholder="N"
+                  className="min-h-8 w-14 rounded-md border border-line bg-panel px-2 text-xs"
                 />
                 <button
                   type="button"
-                  onClick={() => void openCombinedPreview()}
-                  className="min-h-10 shrink-0 rounded-lg border border-line-strong bg-emerald-500 px-3 text-xs font-bold text-wood-950 transition hover:bg-emerald-400"
+                  onClick={() => void openSweepPreview()}
+                  disabled={buyableCount === 0}
+                  className="min-h-8 rounded-lg border border-line-strong bg-gold-500 px-3 text-xs font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-40"
                 >
-                  Buy + offer rest
+                  Sweep {sweepCount} floor
                 </button>
-              </>
-            )
-          }
-        >
+              </div>
+            </div>
+          )}
           {browseItems.length === 0 ? (
             <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line bg-panel-strong px-4 py-10 text-center">
               <PackageOpen size={28} strokeWidth={1.75} className="text-gold-400/70" aria-hidden />

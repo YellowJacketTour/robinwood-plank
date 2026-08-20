@@ -29,6 +29,11 @@ type Props = {
   orientation?: "inline" | "sidebar";
   /** Listed count per tier — shown beside each rarity checkbox (mockup). */
   tierCounts?: Partial<Record<RarityTier, number>>;
+  /** Native copy says "Find a plank"; foreign collections pass "Find a token". */
+  searchLabel?: string;
+  searchPlaceholder?: string;
+  /** Native copy says "Price in ETH"; foreign collections pass the chain's unit. */
+  priceLegend?: string;
 };
 
 export default function FilterBar({
@@ -38,6 +43,9 @@ export default function FilterBar({
   rarityAvailable,
   orientation = "inline",
   tierCounts,
+  searchLabel = "Find a plank",
+  searchPlaceholder = "Token ID",
+  priceLegend = "Price in ETH",
 }: Props) {
   const dirty =
     filters.query !== "" ||
@@ -67,7 +75,7 @@ export default function FilterBar({
             htmlFor="market-token-filter"
             className="mb-2 block text-[0.62rem] font-black uppercase tracking-wider text-gold-300"
           >
-            Find a plank
+            {searchLabel}
           </label>
           <input
             id="market-token-filter"
@@ -75,14 +83,14 @@ export default function FilterBar({
             inputMode="numeric"
             value={filters.query}
             onChange={(e) => onChange({ ...filters, query: e.target.value })}
-            placeholder="Token ID"
+            placeholder={searchPlaceholder}
             className="min-h-11 w-full rounded-md border border-line bg-wood-950 px-3 text-sm text-foreground placeholder:text-foreground/35"
           />
         </div>
 
         <fieldset>
           <legend className="mb-2 text-[0.62rem] font-black uppercase tracking-wider text-gold-300">
-            Price in ETH
+            {priceLegend}
           </legend>
           <div className="grid grid-cols-2 gap-2">
             <input
