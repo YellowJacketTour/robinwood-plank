@@ -57,6 +57,22 @@ export async function GET(req: NextRequest) {
             const { updateForeignRarityImages } = await import("@/lib/market/multichain/foreign-rarity-store");
             void updateForeignRarityImages(chainSlug, collectionSlug, filled).catch(() => {});
           }
+          const stillMissing = indexed.filter((t) => !t.imageUrl);
+          if (stillMissing.length > 0) {
+            const chain = foreignChainByChainSlug(chainSlug);
+            const contract = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug) ? collectionSlug : null;
+            const { resolveTokenImagesForPage } = await import("@/lib/market/multichain/token-art");
+            const more = await resolveTokenImagesForPage({
+              openSeaChain: chain?.openSeaChain ?? null,
+              contractAddress: contract,
+              tokens: indexed,
+              maxRemote: 16,
+            });
+            if (more.length > 0) {
+              const { updateForeignRarityImages } = await import("@/lib/market/multichain/foreign-rarity-store");
+              void updateForeignRarityImages(chainSlug, collectionSlug, more).catch(() => {});
+            }
+          }
         }
         return NextResponse.json(
           { tokens: indexed.map((t) => ({ tokenId: t.tokenId, name: t.name, imageUrl: t.imageUrl })) },

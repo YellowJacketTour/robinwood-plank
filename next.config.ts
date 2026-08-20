@@ -75,6 +75,8 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "next-cdn.unisat.space" },
       { protocol: "https", hostname: "we-assets.pinit.io" },
       { protocol: "https", hostname: "coin-images.coingecko.com" },
+      { protocol: "https", hostname: "www.miladymaker.net" },
+      { protocol: "https", hostname: "miladymaker.net" },
       { protocol: "https", hostname: "ord-mirror.magiceden.dev" },
       { protocol: "https", hostname: "creator-hub-prod.s3.us-east-2.amazonaws.com" },
       { protocol: "https", hostname: "**.alchemy.com" },

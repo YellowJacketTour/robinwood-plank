@@ -123,6 +123,8 @@ export async function GET(req: Request) {
     "media.ordinalswallet.com",
     "cdn.ordinalswallet.com",
     "ord-mirror.magiceden.dev",
+    "www.miladymaker.net",
+    "miladymaker.net",
   ]);
   // Only the original path-style IPFS gateways require a literal "/ipfs/"
   // segment in the path below. The non-IPFS CDN hosts added above serve

@@ -64,6 +64,22 @@ export async function listForeignRarityTokens(
   }
 }
 
+/** Update ranks/tiers without DELETE (keeps image_url). */
+export async function applyForeignRaritySnapshot(
+  chainSlug: string,
+  collectionSlug: string,
+  snapshot: GenericRaritySnapshot
+): Promise<void> {
+  for (const r of snapshot.byTokenId.values()) {
+    await postgresQuery(
+      `UPDATE plank_foreign_rarity
+       SET name = COALESCE(NULLIF($4, ''), name), score = $5, rank = $6, percentile = $7, tier = $8
+       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2) AND token_id = $3`,
+      [chainSlug, collectionSlug, r.tokenId, r.name, r.score, r.rank, r.percentile, r.tier]
+    );
+  }
+}
+
 export async function updateForeignRarityImages(
   chainSlug: string,
   collectionSlug: string,

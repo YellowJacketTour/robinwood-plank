@@ -41,12 +41,12 @@ export async function GET(req: NextRequest) {
           try {
             const meta = await getForeignTraitIndex(chainSlug, collectionSlug);
             if (meta.traitIndex) {
-              const { itemsFromTraitIndex, replaceForeignRarity } = await import("@/lib/market/multichain/foreign-rarity-store");
+              const { itemsFromTraitIndex, applyForeignRaritySnapshot } = await import("@/lib/market/multichain/foreign-rarity-store");
               const { computeGenericRaritySnapshot } = await import("@/lib/rarity-generic");
               const items = itemsFromTraitIndex(meta.traitIndex);
               if (items.length > 0) {
                 const snap = computeGenericRaritySnapshot(items);
-                await replaceForeignRarity(chainSlug, collectionSlug, snap, meta.traitIndex);
+                await applyForeignRaritySnapshot(chainSlug, collectionSlug, snap);
                 map = await getForeignRarity(chainSlug, collectionSlug);
               }
             }
