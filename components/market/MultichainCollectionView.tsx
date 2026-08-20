@@ -22,6 +22,14 @@ import NativeSwapForm from "@/components/market/NativeSwapForm";
 import { normalizeRarityTier, TIER_ORDER } from "@/lib/rarity";
 import FilterBar, { type MarketFilters } from "@/components/market/FilterBar";
 import { SWEEP_MAX } from "@/lib/market/sweep";
+import TraitCriteriaPicker from "@/components/market/TraitCriteriaPicker";
+import {
+  defaultFirstClause,
+  formatCriteriaLabel,
+  resolveCriteriaTokenIds,
+  type CriteriaClause,
+} from "@/lib/market/trait-criteria";
+import type { TraitIndexResponse } from "@/lib/market/traits";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { useWallet } from "@/lib/wallet-context";
@@ -205,6 +213,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [sweepCount, setSweepCount] = useState<number>(SWEEP_SIZE_OPTIONS[0]);
   const [sweepOpen, setSweepOpen] = useState(false);
   const [sweepCustom, setSweepCustom] = useState("");
+  const [sweepScope, setSweepScope] = useState<"floor" | "tier" | "trait">("floor");
+  const [sweepClauses, setSweepClauses] = useState<CriteriaClause[]>([]);
+  const [traitIndex, setTraitIndex] = useState<TraitIndexResponse | null>(null);
+  const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [activeTiers, setActiveTiers] = useState<RarityTier[]>([]);
   const [sweepPreview, setSweepPreview] = useState<Listing[] | null>(null);
   const [sweepBusy, setSweepBusy] = useState(false);
@@ -740,6 +752,16 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           { ttlMs: 300_000, swrMs: 3_600_000, session: true }
         );
         if (!cancelled) setTraitCounts(data.counts ?? {});
+        const idx = await swrJson<TraitIndexResponse>(
+          `/api/market/multichain/trait-index?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`,
+          { ttlMs: 300_000, swrMs: 3_600_000, session: true, isGood: (d) => Boolean((d as TraitIndexResponse)?.complete) }
+        );
+        if (!cancelled) {
+          setTraitIndex(idx);
+          if (idx.complete && idx.traits) {
+            setSweepClauses((prev) => (prev.length > 0 ? prev : defaultFirstClause(idx.traits!) ? [defaultFirstClause(idx.traits!)!] : []));
+          }
+        }
       } catch {
         if (!cancelled) setTraitCounts({});
       }
@@ -747,7 +769,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     return () => {
       cancelled = true;
     };
-  }, [collectionSlug]);
+  }, [collectionSlug, chainSlug]);
 
   const browseAsListing = useCallback(
     (tokenId: string, imageUrl?: string | null, name?: string | null): Listing => {
@@ -1072,21 +1094,35 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     // Preview from the trait-filtered set when a filter is active, so what
     // the confirm modal shows matches what the real sweep (below, via
     // fetchForeignTraitFilteredListings) will actually pull.
-    const source = traitClauses.length > 0 ? filteredListings : listings;
+    let source = traitClauses.length > 0 ? filteredListings : listings;
+    if (sweepScope === "tier" && activeTier !== "all") {
+      source = source.filter((l) => rarityMap.get(l.tokenId)?.tier === activeTier);
+    }
+    if (sweepScope === "trait" && traitIndex?.traits && sweepClauses.length > 0) {
+      const ids = new Set(resolveCriteriaTokenIds(traitIndex.traits, sweepClauses, traitIndex.rankings));
+      source = source.filter((l) => {
+        if (ids.has(l.tokenId)) return true;
+        try {
+          return ids.has(BigInt(l.tokenId).toString());
+        } catch {
+          return false;
+        }
+      });
+    }
     const cheapest = [...source]
       .filter((l) => isCrossChainBuyable(l))
       .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1))
       .slice(0, sweepCount);
     if (cheapest.length === 0) {
       setError(
-        traitClauses.length > 0
-          ? "No cross-chain-buyable listings match the selected traits right now."
+        sweepScope !== "floor" || traitClauses.length > 0
+          ? "No cross-chain-buyable listings match the selected sweep scope right now."
           : "No cross-chain-buyable listings available to sweep right now."
       );
       return;
     }
     setSweepPreview(cheapest);
-  }, [listings, filteredListings, traitClauses, sweepCount, requireAccount]);
+  }, [listings, filteredListings, traitClauses, sweepCount, requireAccount, sweepScope, activeTier, rarityMap, traitIndex, sweepClauses]);
 
   const confirmSweep = useCallback(async () => {
     if (!sweepPreview || sweepPreview.length === 0) return;
@@ -1710,8 +1746,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
               {!isNonEvm && (
                 <button
                   type="button"
-                  onClick={() => setTab("offers")}
-                  className="min-h-10 shrink-0 rounded-lg border border-line-strong px-3 text-xs font-bold text-gold-300 transition hover:border-gold-400"
+                  onClick={() => setCriteriaOpen((v) => !v)}
+                  aria-pressed={criteriaOpen}
+                  className={`min-h-10 shrink-0 rounded-lg border px-3 text-xs font-bold transition ${
+                    criteriaOpen ? "border-gold-400 bg-gold-500/15 text-gold-200" : "border-line-strong text-gold-300 hover:border-gold-400"
+                  }`}
                 >
                   Bid by criteria
                 </button>
@@ -1732,11 +1771,78 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             </>
           }
         >
+          {criteriaOpen && !isNonEvm && collection && (
+            <div className="mb-3">
+              {isForeignEvm && bidVenue === "native" ? (
+                <NativeForeignOfferForm
+                  chainSlug={chainSlug}
+                  currencySymbol={statCurrencySymbol}
+                  account={account}
+                  collection={collection}
+                  listings={listings}
+                  onSubmitted={() => {
+                    invalidateSwr("/api/market/multichain/offers");
+                    void loadOffers();
+                    setCriteriaOpen(false);
+                  }}
+                  onConnect={() => void requireAccount()}
+                />
+              ) : (
+                <ForeignOfferForm
+                  chainSlug={chainSlug}
+                  currencySymbol={statCurrencySymbol}
+                  account={account}
+                  collection={collection}
+                  listings={listings}
+                  onSubmitted={() => {
+                    invalidateSwr("/api/market/multichain/offers");
+                    void loadOffers();
+                    setCriteriaOpen(false);
+                  }}
+                  onConnect={() => void requireAccount()}
+                />
+              )}
+            </div>
+          )}
           {sweepOpen && (
             <div className="mb-3 rounded-xl border border-line bg-wood-900/80 p-3">
-              <p className="mb-2 text-[0.62rem] font-black uppercase tracking-wider text-foreground/50">
-                Sweep · {filteredListings.filter((l) => isCrossChainBuyable(l)).length} listed · max {SWEEP_MAX}
-              </p>
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-[0.62rem] font-black uppercase tracking-wider text-foreground/50">Sweep</span>
+                {(
+                  [
+                    { id: "floor" as const, label: "All" },
+                    { id: "tier" as const, label: "Rarity" },
+                    { id: "trait" as const, label: "Trait / combo" },
+                  ] as const
+                ).map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setSweepScope(m.id)}
+                    aria-pressed={sweepScope === m.id}
+                    className={`min-h-8 rounded-md border px-2 text-[0.65rem] font-bold ${
+                      sweepScope === m.id ? "border-gold-400 bg-gold-500/15 text-gold-300" : "border-line text-foreground/55"
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+                <span className="text-[0.58rem] text-foreground/40">
+                  {filteredListings.filter((l) => isCrossChainBuyable(l)).length} listed · max {SWEEP_MAX}
+                  {sweepScope === "trait" && sweepClauses.length > 0 ? ` · ${formatCriteriaLabel(sweepClauses)}` : ""}
+                </span>
+              </div>
+              {sweepScope === "trait" && (
+                <div className="mb-2 rounded-md border border-line bg-panel p-2">
+                  <TraitCriteriaPicker
+                    traits={traitIndex?.traits ?? null}
+                    rankings={traitIndex?.rankings}
+                    complete={Boolean(traitIndex?.complete && traitIndex.traits)}
+                    clauses={sweepClauses}
+                    onChange={setSweepClauses}
+                  />
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-1.5">
                 {SWEEP_SIZE_OPTIONS.map((n) => (
                   <button
@@ -1772,7 +1878,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   disabled={buyableCount === 0}
                   className="min-h-8 rounded-lg border border-line-strong bg-gold-500 px-3 text-xs font-bold text-wood-950 hover:bg-gold-400 disabled:opacity-40"
                 >
-                  Sweep {sweepCount} floor
+                  Sweep {sweepCount} {sweepScope === "floor" ? "floor" : sweepScope === "tier" ? activeTier : "by traits"}
                 </button>
               </div>
             </div>
@@ -1802,6 +1908,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   currencySymbol={statCurrencySymbol}
                   chainSlug={chainSlug}
                   usdValue={statUsd(item.listing.priceWei)}
+                  isFloor={Boolean(floorWei) && item.listing.priceWei === floorWei}
                 />
                 ) : (
                   <li key={item.tokenId} className="overflow-hidden rounded-lg border border-line bg-panel">
