@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   ACCENT_PRESETS,
   DEFAULT_ACCENT,
@@ -30,6 +30,30 @@ const PRESET_LABELS: Record<string, string> = {
 /** Swatch preview color -- mid lightness stop, full saturation, so each button reads as its actual hue rather than the pale/dark extremes. */
 function swatchColor(t: AccentTheme): string {
   return `hsl(${t.h} ${t.s}% ${t.l400}%)`;
+}
+
+function DiscoBallIcon({ size = 20 }: { size?: number }) {
+  const shineId = `disco-shine-${useId()}`;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden className="shrink-0">
+      <defs>
+        <linearGradient id={shineId} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#fff" stopOpacity="0.95" />
+          <stop offset="45%" stopColor="#f8d98a" stopOpacity="0.85" />
+          <stop offset="100%" stopColor="#c4b5fd" stopOpacity="0.9" />
+        </linearGradient>
+      </defs>
+      <circle cx="12" cy="13" r="8" fill={`url(#${shineId})`} stroke="#1a1512" strokeWidth="1" />
+      <path d="M12 5 V3 M10 3.2 L14 3.2" stroke="#f8d98a" strokeWidth="1.4" strokeLinecap="round" />
+      {[
+        [8, 9], [12, 8], [16, 9],
+        [7.5, 13], [12, 12.5], [16.5, 13],
+        [9, 17], [12, 16.5], [15, 17],
+      ].map(([x, y], i) => (
+        <rect key={i} x={x - 1.1} y={y - 1.1} width="2.2" height="2.2" rx="0.3" fill={["#f472b6", "#22d3ee", "#facc15", "#a78bfa", "#34d399", "#fb7185", "#60a5fa", "#f8d98a", "#c084fc"][i]} />
+      ))}
+    </svg>
+  );
 }
 
 /**
@@ -208,12 +232,17 @@ export default function ThemeAccentPicker() {
         title="Site color theme"
         className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line transition-colors hover:border-line-strong"
       >
-        <span
-          aria-hidden="true"
-          className="h-5 w-5 rounded-full border border-black/30 shadow-inner"
-          style={{ backgroundColor: swatchColor(theme) }}
-        />
+        {melt.on ? (
+          <DiscoBallIcon size={20} />
+        ) : (
+          <span
+            aria-hidden="true"
+            className="h-5 w-5 rounded-full border border-black/30 shadow-inner"
+            style={{ backgroundColor: swatchColor(theme) }}
+          />
+        )}
       </button>
+
 
       {open && panelPos && (
         <div
@@ -279,11 +308,7 @@ export default function ThemeAccentPicker() {
               }`}
             >
               <span>Disco melt</span>
-              <span aria-hidden className="h-4 w-4 rounded-full" style={{
-                background: melt.on
-                  ? "conic-gradient(red, yellow, lime, cyan, blue, magenta, red)"
-                  : swatchColor(theme),
-              }} />
+              <DiscoBallIcon size={18} />
             </button>
             {melt.on && (
               <div className="space-y-1">
