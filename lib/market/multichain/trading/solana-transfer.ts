@@ -45,7 +45,10 @@
 import { validateRecipient } from "@/lib/market/transfer";
 import type { BatchSendStatus } from "@/lib/market/transfer";
 
-const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
+const SOLANA_RPC_URL =
+  process.env.SOLANA_RPC_URL?.trim() ||
+  process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() ||
+  "https://api.mainnet-beta.solana.com";
 
 /**
  * Validates a Solana address by shape only (base58, 32-byte public key) --

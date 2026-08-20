@@ -67,7 +67,7 @@ export async function GET(req: Request) {
     const bySlug = await getListings("robinwood").catch(() => []);
     const byContract = await getListings(NFT_CONTRACT_ADDRESS.toLowerCase()).catch(() => []);
     const nativeListings = bySlug.length >= byContract.length ? bySlug : byContract;
-    const nativeFloor = nativeListings.reduce<bigint | null>((min, l) => {
+    let nativeFloor = nativeListings.reduce<bigint | null>((min, l) => {
       try {
         const p = BigInt(l.priceWei);
         return min == null || p < min ? p : min;
@@ -75,6 +75,23 @@ export async function GET(req: Request) {
         return min;
       }
     }, null);
+    let nativeListed = nativeListings.length;
+    if (nativeListed === 0) {
+      const { fetchCanonicalRobinwoodStats } = await import("@/lib/market/canonical-robinwood");
+      const canonical = await fetchCanonicalRobinwoodStats({
+        hostHeader: req.headers.get("host"),
+      });
+      if (canonical) {
+        nativeListed = canonical.listedCount;
+        if (canonical.floorPriceWei) {
+          try {
+            nativeFloor = BigInt(canonical.floorPriceWei);
+          } catch {
+            /* keep null */
+          }
+        }
+      }
+    }
     const nativeAddr = NFT_CONTRACT_ADDRESS.toLowerCase();
     const nativeRow = {
       chainSlug: "robinhood" as const,
@@ -88,7 +105,7 @@ export async function GET(req: Request) {
       floorPriceCurrency: "ETH",
       floorPriceMarketplace: "marketplank",
       totalSupply: null as number | null,
-      listedCount: nativeListings.length,
+      listedCount: nativeListed,
       syncedAt: new Date().toISOString(),
       syncError: null as string | null,
       tradeable: true,
