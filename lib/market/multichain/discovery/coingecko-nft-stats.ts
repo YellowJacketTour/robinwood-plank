@@ -34,9 +34,46 @@
 import { hasMultichainStore, listTrackedCollections, updateCollectionMarketStats } from "@/lib/market/multichain/store";
 import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
+import { durableKv } from "@/lib/market/durable-kv";
 
 /** This source's own budget-tracker key -- see source-budget.ts's own header for the real incident (Alchemy's monthly quota) this whole mechanism exists to prevent from happening again, to a different source, silently. */
 const SOURCE = "coingecko-nft";
+
+/**
+ * Real, PERSISTENT monthly cap, added live 2026-08-20 the same session a
+ * real COINGECKO_API_KEY (free Demo tier) was wired in for the first
+ * time -- source-budget.ts's own DAILY_CEILING is real but lives in
+ * in-memory `globalThis` state, which does NOT survive a process
+ * restart. This app's own sync scripts (coingecko-nft-stats-sync-pass.mjs
+ * + its supervisor) are SHORT bounded passes relaunched every few
+ * minutes for up to 24h BY DESIGN (crash resilience) -- meaning the
+ * in-memory daily ceiling resets on every single relaunch and provides
+ * ZERO real protection against exceeding CoinGecko's own real monthly
+ * cap (10,000/mo on the free Demo tier, confirmed in this file's own
+ * header) across a day of repeated passes. This table-backed counter is
+ * the real, durable guard: checked BEFORE every real request, same
+ * fail-closed discipline as checkSourceBudget.
+ */
+const MONTHLY_CEILING = 9_000; // real margin under CoinGecko's documented 10,000/mo Demo cap
+
+function monthKey(): string {
+  return new Date().toISOString().slice(0, 7); // YYYY-MM
+}
+
+async function checkAndIncrementMonthlyBudget(): Promise<boolean> {
+  if (!process.env.COINGECKO_API_KEY) return true; // unauthenticated tier has no monthly cap to protect, only the in-memory daily/jail guard applies
+  const key = `plank:market:coingecko-nft-monthly:${monthKey()}`;
+  // Read-then-write against plank_kv_values (durable-kv.ts's real, already-
+  // existing table -- no new migration needed). This app's own sync loops
+  // call CoinGecko sequentially, never concurrently, so the narrow race
+  // window here is a real but low-severity risk, not a correctness gap
+  // worth a bespoke atomic-increment migration for a soft safety margin
+  // that's already conservative (9,000 vs the real 10,000 cap).
+  const current = (await durableKv.get<number>(key)) ?? 0;
+  const next = current + 1;
+  await durableKv.set(key, next, { ex: 40 * 24 * 60 * 60 }); // 40-day TTL, comfortably outlives any one calendar month
+  return next <= MONTHLY_CEILING;
+}
 
 /** A 429, or any response body containing a real rate-limit/quota phrase CoinGecko is confirmed to use -- distinguishes "this specific call failed" from "this whole source is now hot and every further call this window will fail too," which is exactly the live incident (unpaced LIST pagination) this session actually hit. */
 function isQuotaError(status: number, bodyText: string): boolean {
@@ -82,6 +119,9 @@ async function fetchPlatformIds(platform: string): Promise<Set<string>> {
     const gate = checkSourceBudget(SOURCE);
     if (!gate.allowed) {
       throw new Error(`coingecko-nft-stats: source jailed/exhausted (${gate.reason}) -- stopping platform list fetch for "${platform}" early, ${ids.size} id(s) collected so far`);
+    }
+    if (!(await checkAndIncrementMonthlyBudget())) {
+      throw new Error(`coingecko-nft-stats: real monthly cap reached (${MONTHLY_CEILING}) -- stopping platform list fetch for "${platform}" early, ${ids.size} id(s) collected so far`);
     }
 
     const res = await fetch(`${LIST_URL}?asset_platform_id=${platform}&per_page=${PAGE_SIZE}&page=${page}`, { headers: apiHeaders() });
@@ -156,6 +196,7 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
     // source already known to be failing/quota'd this window.
     const gate = checkSourceBudget(SOURCE);
     if (!gate.allowed) break;
+    if (!(await checkAndIncrementMonthlyBudget())) break;
 
     try {
       const res = await fetch(`${DETAIL_URL}/${encodeURIComponent(collection.contractAddress.toLowerCase())}`, { headers: apiHeaders() });
