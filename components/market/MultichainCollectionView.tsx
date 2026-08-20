@@ -15,6 +15,7 @@ import ForeignDetailsModal from "@/components/market/ForeignDetailsModal";
 import ForeignOfferConfirm from "@/components/market/ForeignOfferConfirm";
 import ForeignOfferForm from "@/components/market/ForeignOfferForm";
 import NativeForeignListForm from "@/components/market/NativeForeignListForm";
+import NativeSolanaListForm from "@/components/market/NativeSolanaListForm";
 import NativeForeignOfferForm from "@/components/market/NativeForeignOfferForm";
 import NativeBundleListForm from "@/components/market/NativeBundleListForm";
 import NativeSwapForm from "@/components/market/NativeSwapForm";
@@ -36,6 +37,7 @@ import MarketNav from "@/components/market/MarketNav";
 import { MarketTabRail, MarketTabPanel } from "@/components/market/MarketScaffold";
 import MarketBrowseLayout from "@/components/market/MarketBrowseLayout";
 import RarityFloorStrip from "@/components/market/RarityFloorStrip";
+import ChainIcon from "@/components/market/ChainIcon";
 import type { RarityTier } from "@/lib/rarity";
 import ForeignSwapComingSoon from "@/components/market/ForeignSwapComingSoon";
 import ForeignActivityFeed, { type ForeignActivityEvent } from "@/components/market/ForeignActivityFeed";
@@ -247,12 +249,21 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [tab, setTab] = useState<MarketTab>("buy-sell");
 
   // "sell" (Marketplank-native listing, see NativeForeignListForm.tsx) is
-  // additive to MARKET_TABS -- shown only for foreign EVM chains. Robinhood
-  // Chain already has its own native listing flow (MyInventory.tsx);
-  // Solana/Bitcoin native listing is a separate, later phase (see this
-  // session's plan doc -- Phase 1 is EVM only).
+  // additive to MARKET_TABS. Robinhood Chain already has its own native
+  // listing flow (MyInventory.tsx), so it's excluded here. Solana now gets
+  // its own real Sell tab too (NativeSolanaListForm.tsx, via Magic Eden's
+  // live Auction House program) -- flagged live 2026-08-20 ("all
+  // collections on all chains of all types need ALL features in all
+  // tabs"). Bitcoin stays excluded FOR NOW: its native listing engine
+  // passed a testnet4-only security audit but explicitly failed the
+  // mainnet bar (unverified inscription-to-UTXO binding is a real,
+  // working fraud primitive against buyers -- see native-bitcoin-listing.ts's
+  // own header), so wiring it into a real mainnet collection's Sell tab
+  // before that's fixed would ship a real fund-loss risk, not "no
+  // shortcuts." Revisit the moment that audit's remediation list closes.
   const isForeignEvm = !isNonEvm && !isRobinhoodChainSlug(chainSlug);
-  const tabs = isForeignEvm ? [...MARKET_TABS, { id: "sell" as const, label: "Sell" }] : MARKET_TABS;
+  const canSell = isForeignEvm || isSolana;
+  const tabs = canSell ? [...MARKET_TABS, { id: "sell" as const, label: "Sell" }] : MARKET_TABS;
   /** One-click relist target, set by the "Relist" button in My Listings -- consumed once by NativeForeignListForm then cleared. */
   const [relistPreset, setRelistPreset] = useState<{ tokenId: string; priceWei: string } | null>(null);
   /** Which criteria-bid form to show on a foreign EVM chain's Offers tab -- defaults to Marketplank's own lower-fee direct path. */
@@ -1329,7 +1340,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const saleEvents = activity.filter((e) => e.type === "sale" && e.priceWei);
   const volumeWei = saleEvents.length > 0 ? saleEvents.reduce((sum, e) => sum + BigInt(e.priceWei!), BigInt(0)).toString() : null;
   const highestSaleWei = saleEvents.length > 0 ? saleEvents.reduce((max, e) => (BigInt(e.priceWei!) > BigInt(max) ? e.priceWei! : max), saleEvents[0].priceWei!) : null;
-  const statCurrencySymbol = nativeCurrencySymbol(chainSlug, isSolana);
+  const statCurrencySymbol = nativeCurrencySymbol(chainSlug, isSolana, isBitcoin);
   const statUsd = (weiStr: string | null): number | null => toUsd(weiStr, statCurrencySymbol);
 
   return (
@@ -1357,11 +1368,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </div>
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Floor</p>
-          <p className="truncate text-sm font-bold text-foreground tabular-nums">
+          <p className="flex flex-wrap items-center gap-1 text-[clamp(0.8rem,3vw,0.95rem)] font-bold text-foreground tabular-nums">
             {floorWei ? (
               <>
-                {formatTokenAmount(floorWei, 18, 4)} {statCurrencySymbol}
-                {statUsd(floorWei) != null && <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(floorWei)!)}</span>}
+                {formatTokenAmount(floorWei, 18, 4)}
+                <ChainIcon chainSlug={chainSlug} size={16} className="shrink-0" />
+                {statUsd(floorWei) != null && <span className="text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(floorWei)!)}</span>}
               </>
             ) : (
               "—"
@@ -1370,11 +1382,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </div>
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Best offer</p>
-          <p className="truncate text-sm font-bold text-foreground tabular-nums">
+          <p className="flex flex-wrap items-center gap-1 text-[clamp(0.8rem,3vw,0.95rem)] font-bold text-foreground tabular-nums">
             {bestOfferWei ? (
               <>
-                {formatTokenAmount(bestOfferWei, 18, 4)} {statCurrencySymbol}
-                {statUsd(bestOfferWei) != null && <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(bestOfferWei)!)}</span>}
+                {formatTokenAmount(bestOfferWei, 18, 4)}
+                <ChainIcon chainSlug={chainSlug} size={16} className="shrink-0" />
+                {statUsd(bestOfferWei) != null && <span className="text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(bestOfferWei)!)}</span>}
               </>
             ) : (
               "—"
@@ -1383,11 +1396,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </div>
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Volume</p>
-          <p className="truncate text-sm font-bold text-foreground tabular-nums">
+          <p className="flex flex-wrap items-center gap-1 text-[clamp(0.8rem,3vw,0.95rem)] font-bold text-foreground tabular-nums">
             {volumeWei ? (
               <>
-                {formatTokenAmount(volumeWei, 18, 3)} {statCurrencySymbol}
-                {statUsd(volumeWei) != null && <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(volumeWei)!)}</span>}
+                {formatTokenAmount(volumeWei, 18, 3)}
+                <ChainIcon chainSlug={chainSlug} size={16} className="shrink-0" />
+                {statUsd(volumeWei) != null && <span className="text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(volumeWei)!)}</span>}
               </>
             ) : (
               "—"
@@ -1402,12 +1416,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         </div>
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Highest sale</p>
-          <p className="truncate text-sm font-bold text-foreground tabular-nums">
+          <p className="flex flex-wrap items-center gap-1 text-[clamp(0.8rem,3vw,0.95rem)] font-bold text-foreground tabular-nums">
             {highestSaleWei ? (
               <>
-                {formatTokenAmount(highestSaleWei, 18, 4)} {statCurrencySymbol}
+                {formatTokenAmount(highestSaleWei, 18, 4)}
+                <ChainIcon chainSlug={chainSlug} size={16} className="shrink-0" />
                 {statUsd(highestSaleWei) != null && (
-                  <span className="ml-1 text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(highestSaleWei)!)}</span>
+                  <span className="text-[0.65rem] font-normal text-foreground/40">{formatUsdCompact(statUsd(highestSaleWei)!)}</span>
                 )}
               </>
             ) : (
@@ -1473,7 +1488,15 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           summary={`${filteredListings.length} ${filteredListings.length === 1 ? "item" : "items"} on ${chainDisplayName(chainSlug)}`}
           lead={
             rarityMap.size > 0 && listings.length > 0 ? (
-              <RarityFloorStrip listings={listings} rarity={rarityMap} activeTier={activeTier} onSelectTier={setActiveTier} />
+              <RarityFloorStrip
+                listings={listings}
+                rarity={rarityMap}
+                activeTier={activeTier}
+                onSelectTier={setActiveTier}
+                currencySymbol={statCurrencySymbol}
+                chainSlug={chainSlug}
+                usdValueFor={(wei) => toUsd(wei == null ? null : wei.toString(), statCurrencySymbol)}
+              />
             ) : undefined
           }
           filters={
@@ -1688,6 +1711,9 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   onOffer={foreignOfferCurrency(chainSlug) || isSolana ? (l) => void openOffer(l) : undefined}
                   onSelect={(tokenId) => void openDetails(tokenId)}
                   rarity={rarityMap.get(listing.tokenId)}
+                  currencySymbol={statCurrencySymbol}
+                  chainSlug={chainSlug}
+                  usdValue={statUsd(listing.priceWei)}
                 />
               ))}
             </ul>
@@ -1843,7 +1869,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   {isForeignEvm && bidVenue === "native" ? (
                     <NativeForeignOfferForm
                       chainSlug={chainSlug}
-                      currencySymbol={nativeCurrencySymbol(chainSlug, isSolana)}
+                      currencySymbol={nativeCurrencySymbol(chainSlug, isSolana, isBitcoin)}
                       account={account}
                       collection={collection}
                       listings={listings}
@@ -1856,7 +1882,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   ) : (
                     <ForeignOfferForm
                       chainSlug={chainSlug}
-                      currencySymbol={nativeCurrencySymbol(chainSlug, isSolana)}
+                      currencySymbol={nativeCurrencySymbol(chainSlug, isSolana, isBitcoin)}
                       account={account}
                       collection={collection}
                       listings={listings}
@@ -1975,6 +2001,9 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                         canFill={acceptingOrderHash !== o.orderHash}
                         onBuy={() => void handleAcceptOffer(o)}
                         rarity={rarityMap.get(o.tokenId!)}
+                        currencySymbol={statCurrencySymbol}
+                        chainSlug={chainSlug}
+                        usdValue={statUsd(o.priceWei)}
                       />
                     ))}
                   </ul>
@@ -2115,53 +2144,69 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         )}
       </MarketTabPanel>
 
-      {isForeignEvm && (
+      {canSell && (
         <MarketTabPanel id="sell" active={tab === "sell"}>
-          {collection && (
-            <NativeForeignListForm
-              chainSlug={chainSlug}
-              currencySymbol={statCurrencySymbol}
-              account={account}
-              collection={collection}
-              ownedItems={ownedItems}
-              ownedLoading={ownedLoading}
-              onListed={() => void loadOwned()}
-              onConnect={() => void requireAccount()}
-              floorWei={floorWei}
-              relistPreset={relistPreset}
-              onRelistConsumed={() => setRelistPreset(null)}
-            />
-          )}
-          {collection && !ownedLoading && ownedItems.length >= 2 && (
-            <div className="mt-4">
-              <NativeBundleListForm
-                chainSlug={chainSlug}
-                currencySymbol={statCurrencySymbol}
+          {isSolana ? (
+            collection && (
+              <NativeSolanaListForm
                 account={account}
                 collection={collection}
                 ownedItems={ownedItems}
-                onListed={() => {
-                  void loadOwned();
-                  void loadBundles();
-                }}
+                ownedLoading={ownedLoading}
+                onListed={() => void loadOwned()}
                 onConnect={() => void requireAccount()}
+                floorWei={floorWei}
               />
-            </div>
-          )}
-          {collection && !ownedLoading && ownedItems.length >= 1 && (
-            <div className="mt-4">
-              <NativeSwapForm
-                chainSlug={chainSlug}
-                account={account}
-                collection={collection}
-                ownedItems={ownedItems}
-                onListed={() => {
-                  void loadOwned();
-                  void loadSwaps();
-                }}
-                onConnect={() => void requireAccount()}
-              />
-            </div>
+            )
+          ) : (
+            <>
+              {collection && (
+                <NativeForeignListForm
+                  chainSlug={chainSlug}
+                  currencySymbol={statCurrencySymbol}
+                  account={account}
+                  collection={collection}
+                  ownedItems={ownedItems}
+                  ownedLoading={ownedLoading}
+                  onListed={() => void loadOwned()}
+                  onConnect={() => void requireAccount()}
+                  floorWei={floorWei}
+                  relistPreset={relistPreset}
+                  onRelistConsumed={() => setRelistPreset(null)}
+                />
+              )}
+              {collection && !ownedLoading && ownedItems.length >= 2 && (
+                <div className="mt-4">
+                  <NativeBundleListForm
+                    chainSlug={chainSlug}
+                    currencySymbol={statCurrencySymbol}
+                    account={account}
+                    collection={collection}
+                    ownedItems={ownedItems}
+                    onListed={() => {
+                      void loadOwned();
+                      void loadBundles();
+                    }}
+                    onConnect={() => void requireAccount()}
+                  />
+                </div>
+              )}
+              {collection && !ownedLoading && ownedItems.length >= 1 && (
+                <div className="mt-4">
+                  <NativeSwapForm
+                    chainSlug={chainSlug}
+                    account={account}
+                    collection={collection}
+                    ownedItems={ownedItems}
+                    onListed={() => {
+                      void loadOwned();
+                      void loadSwaps();
+                    }}
+                    onConnect={() => void requireAccount()}
+                  />
+                </div>
+              )}
+            </>
           )}
         </MarketTabPanel>
       )}
@@ -2313,6 +2358,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           traitCounts={traitCounts}
           isSolana={isSolana}
           onClose={() => setDetailsTarget(null)}
+          currencySymbol={statCurrencySymbol}
+          chainSlug={chainSlug}
         />
       )}
 
@@ -2320,7 +2367,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         <ForeignOfferConfirm
           chainLabel={chainDisplayName(chainSlug)}
           tokenId={offerTarget.tokenId}
-          currencySymbol={nativeCurrencySymbol(chainSlug, isSolana)}
+          currencySymbol={nativeCurrencySymbol(chainSlug, isSolana, isBitcoin)}
           nativeCurrency={isSolana}
           amountEth={offerAmountEth}
           onAmountChange={setOfferAmountEth}

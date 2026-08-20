@@ -241,6 +241,51 @@ export async function updateCollectionMarketStats(
   );
 }
 
+/**
+ * Real 24h volume/sales for every EVM collection this app tracks, computed
+ * from `plank_seaport_fills` (migration 023) -- this app's own first-party,
+ * self-hosted on-chain fill index (watches Seaport's OrderFulfilled event
+ * directly, no third party involved). Closes a real gap flagged live
+ * 2026-08-20: that table has been populated by seaport-fill-indexer.ts
+ * this whole time but was never queried by anything, so every EVM
+ * collection's 24h Change/Volume/Sales stayed empty unless it also
+ * happened to have a resolvable OpenSea slug (rarity-index-runner.ts's
+ * OpenSea-stats path, the only other writer of these same columns).
+ * Covers Robinhood Chain's own community collections too -- they have no
+ * OpenSea presence at all (private L3), so this is their ONLY possible
+ * source of real volume data.
+ *
+ * ONE BATCHED SQL AGGREGATION, NOT N PER-COLLECTION QUERIES -- every
+ * collection on a chain gets its real 24h sum/count in a single query,
+ * matching getTopByActivity's own "our own ranking, not a third-party
+ * endpoint" pattern one file up. Collections with zero real fills in the
+ * window are simply absent from the aggregation result and correctly stay
+ * at their prior value (never zeroed out -- a real zero-volume day and
+ * "we haven't observed anything yet" must not be conflated).
+ */
+export async function updateEvmVolumeFromSeaportFills(chainSlug: string): Promise<{ updated: number }> {
+  const result = await postgresQuery<{ contract_address: string; volume_wei: string; sales: string }>(
+    `SELECT LOWER(nft_contract) AS contract_address, SUM(price_wei)::text AS volume_wei, COUNT(*)::text AS sales
+     FROM plank_seaport_fills
+     WHERE chain_slug = $1
+       AND nft_contract IS NOT NULL
+       AND price_wei IS NOT NULL
+       AND block_timestamp > NOW() - INTERVAL '24 hours'
+     GROUP BY LOWER(nft_contract)`,
+    [chainSlug]
+  );
+  let updated = 0;
+  for (const row of result.rows) {
+    await updateCollectionMarketStats(chainSlug, row.contract_address, {
+      volume24hWei: row.volume_wei,
+      sales24h: Number(row.sales),
+      currentFloorPriceWei: null,
+    });
+    updated += 1;
+  }
+  return { updated };
+}
+
 /** Write a fresh snapshot for a collection, and refresh its display fields. */
 export async function writeSnapshot(
   collectionId: number,

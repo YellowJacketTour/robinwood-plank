@@ -11,8 +11,9 @@
  * accidentally paying with a UTXO that holds an inscription or Rune.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getNativeBitcoinListingById } from "@/lib/market/bitcoin-listings-store";
+import { getNativeBitcoinListingById, cancelNativeBitcoinListing } from "@/lib/market/bitcoin-listings-store";
 import { buildFulfillmentPsbt, type Utxo } from "@/lib/market/multichain/trading/native-bitcoin-listing";
+import { getInscriptionIdsOnUtxo } from "@/lib/market/multichain/trading/bitcoin-utxo-safety";
 import { publicError, rateLimit } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
@@ -61,9 +62,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "NOT_ACTIVE", message: `Listing is ${listing.status}, not active.` }, { status: 409 });
     }
 
+    // Fulfillment-time re-verification -- closes the CRITICAL/C2 finding
+    // from this session's Opus security audit alongside the listing-time
+    // check in native-bitcoin-listings/route.ts's POST: an inscription can
+    // move (or be spent) AFTER a real, correctly-verified listing was
+    // created. Re-checking only at listing time leaves the order book
+    // polluted with now-stale listings a buyer could still be shown.
+    // Fails closed and auto-invalidates the stale listing rather than
+    // building a fulfillment PSBT against it.
+    const realInscriptionIds = await getInscriptionIdsOnUtxo({ txid: listing.utxoTxid, vout: listing.utxoVout });
+    if (realInscriptionIds === null) {
+      return NextResponse.json(
+        { error: "INSCRIPTION_UNVERIFIABLE", message: "Could not re-verify this inscription right now. Try again shortly." },
+        { status: 503 }
+      );
+    }
+    if (!realInscriptionIds.includes(listing.inscriptionId)) {
+      await cancelNativeBitcoinListing(id, listing.sellerAddress);
+      return NextResponse.json(
+        { error: "INSCRIPTION_MOVED", message: "This inscription no longer matches its listed UTXO -- the listing has been invalidated." },
+        { status: 409 }
+      );
+    }
+
     const result = await buildFulfillmentPsbt({
       listingSellerPsbtBase64: listing.sellerPsbtBase64,
-      sellerInscriptionUtxoValueSats: listing.utxoValueSats,
       buyerAddress: body.buyerAddress,
       buyerInternalPubkeyHex: body.buyerInternalPubkeyHex,
       buyerReceivingAddress: body.buyerReceivingAddress,

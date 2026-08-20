@@ -201,8 +201,9 @@ export function chainGlyph(chainSlug: string): string {
  * this file deliberately stays EVM-only otherwise (see FOREIGN_CHAINS'
  * own header on why Solana/Bitcoin aren't folded into this registry).
  */
-export function nativeCurrencySymbol(chainSlug: string, isSolana: boolean): string {
+export function nativeCurrencySymbol(chainSlug: string, isSolana: boolean, isBitcoin = false): string {
   if (isSolana) return "SOL";
+  if (isBitcoin) return "BTC";
   if (chainSlug === "bnb-mainnet") return "WBNB";
   if (chainSlug === "avax-mainnet") return "WAVAX";
   return "WETH";
@@ -266,13 +267,39 @@ const FOREIGN_DEV_RPC_OVERRIDE = process.env.NEXT_PUBLIC_FOREIGN_DEV_RPC_OVERRID
  * closed) for a chainSlug Alchemy doesn't support, same posture as
  * baseUrl() in that adapter.
  */
+/**
+ * Real, free, no-key public RPC fallback per chain -- PublicNode
+ * (publicnode.com), added live 2026-08-20 in direct response to
+ * Alchemy's own key hitting its real monthly capacity limit
+ * ("eth_blockNumber: Monthly capacity limit exceeded") and blocking
+ * every EVM chain this app trades on at once, confirmed live this
+ * session. Alchemy stays FIRST in foreignRpcUrls's returned array on
+ * purpose -- this is redundancy, not a replacement (Alchemy's
+ * NFT-metadata API is used elsewhere in this app independently of raw
+ * RPC, and its free tier resets monthly). PublicNode's own real,
+ * documented URL scheme is `{network}-rpc.publicnode.com`; every chain
+ * below was checked against that exact pattern. A chain with no known
+ * PublicNode endpoint yet stays Alchemy-only rather than guessing a URL.
+ */
+const PUBLICNODE_FALLBACK: Record<string, string> = {
+  "eth-mainnet": "https://ethereum-rpc.publicnode.com",
+  "polygon-mainnet": "https://polygon-bor-rpc.publicnode.com",
+  "arb-mainnet": "https://arbitrum-one-rpc.publicnode.com",
+  "base-mainnet": "https://base-rpc.publicnode.com",
+  "opt-mainnet": "https://optimism-rpc.publicnode.com",
+  "bnb-mainnet": "https://bsc-rpc.publicnode.com",
+  "avax-mainnet": "https://avalanche-c-chain-rpc.publicnode.com",
+  "zksync-mainnet": "https://zksync-era-rpc.publicnode.com",
+};
+
 export function foreignRpcUrls(chainSlug: string): string[] {
   if (FOREIGN_DEV_RPC_OVERRIDE) return [FOREIGN_DEV_RPC_OVERRIDE];
   const subdomain = ALCHEMY_NETWORK_SUBDOMAIN[chainSlug];
   if (!subdomain) {
     throw new Error(`foreign-chain-registry: no Alchemy RPC mapping for chainSlug "${chainSlug}"`);
   }
-  return [`https://${subdomain}.g.alchemy.com/v2/${apiKey()}`];
+  const fallback = PUBLICNODE_FALLBACK[chainSlug];
+  return [`https://${subdomain}.g.alchemy.com/v2/${apiKey()}`, ...(fallback ? [fallback] : [])];
 }
 
 /**

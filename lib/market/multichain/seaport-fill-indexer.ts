@@ -560,19 +560,34 @@ async function writeFills(
 export async function scanAllChainsForFills(): Promise<FillScanResult[]> {
   const results: FillScanResult[] = [];
   for (const chain of FOREIGN_CHAINS) {
-    try {
-      const rpcUrl = foreignRpcUrls(chain.chainSlug)[0];
-      results.push(await scanChainForFills(chain.chainSlug, rpcUrl));
-    } catch (err) {
-      results.push({
-        chainSlug: chain.chainSlug,
-        fromBlock: 0,
-        toBlock: 0,
-        logsScanned: 0,
-        fillsWritten: 0,
-        error: err instanceof Error ? err.message : String(err),
-      });
+    // Real fallback across every URL foreignRpcUrls returns (Alchemy
+    // first, a free PublicNode endpoint second) -- added live 2026-08-20
+    // after Alchemy's own key hit its real monthly capacity limit and
+    // took down fill scanning for every chain at once, since this loop
+    // previously only ever tried URL [0]. Each URL gets one real attempt;
+    // the last real error is what's reported if every URL fails, not a
+    // generic "no RPC available" message.
+    const urls = foreignRpcUrls(chain.chainSlug);
+    let lastError: unknown = new Error(`no RPC URL configured for ${chain.chainSlug}`);
+    let succeeded = false;
+    for (const rpcUrl of urls) {
+      try {
+        results.push(await scanChainForFills(chain.chainSlug, rpcUrl));
+        succeeded = true;
+        break;
+      } catch (err) {
+        lastError = err;
+      }
     }
+    if (succeeded) continue;
+    results.push({
+      chainSlug: chain.chainSlug,
+      fromBlock: 0,
+      toBlock: 0,
+      logsScanned: 0,
+      fillsWritten: 0,
+      error: lastError instanceof Error ? lastError.message : String(lastError),
+    });
   }
   return results;
 }

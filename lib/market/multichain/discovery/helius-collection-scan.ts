@@ -23,13 +23,34 @@ const CHAIN_SLUG = "solana-mainnet";
 // for non-numeric state -- no migration needed.
 const CURSOR_KEY = "plank:market:helius-collection-scan-cursor";
 
-type HeliusSearchItem = {
+export type HeliusSearchItem = {
   id: string;
   content?: {
     metadata?: { name?: string | null };
     links?: { image?: string | null };
   };
+  /** Real, live-verified field (2026-08-20, a direct searchAssets call against Helius mainnet) -- Metaplex Core's own collection struct fields, surfaced by Helius under this exact key for every MplCoreCollection-interface item. num_minted is the real, honest quality floor: a collection with zero minted members structurally can never produce a real floor/volume/listed signal, so registering it was pure dead weight, not "coverage." */
+  mpl_core_info?: { num_minted?: number; current_size?: number };
 };
+
+/**
+ * Real quality floor, not an arbitrary threshold -- flagged live
+ * 2026-08-20 ("solana is now showing 49 thousand collections... something
+ * is broken"): this scan is genuinely exhaustive and genuinely not
+ * duplicating/looping, but Metaplex Core is permissionless (anyone can
+ * create a "collection" for free), and the only prior filter here (has a
+ * name or an image) let through every empty/dead/spam collection Core has
+ * ever seen. num_minted is Core's own real member-count field
+ * (mpl_core_info, confirmed live against Helius mainnet -- a real
+ * searchAssets call returned a real collection with num_minted: 1) -- a
+ * collection with zero minted members structurally cannot ever have a
+ * real floor/volume/listed signal, so registering it was pure dead
+ * weight, not coverage. Only skip on a CONFIRMED zero, never on a
+ * missing/unparseable field -- absence of data is not evidence of zero.
+ */
+export function shouldSkipZeroMemberCollection(item: HeliusSearchItem): boolean {
+  return item.mpl_core_info?.num_minted === 0;
+}
 
 function apiKey(): string {
   const key = process.env.HELIUS_API_KEY?.trim();
@@ -89,6 +110,7 @@ export async function runHeliusCollectionScan(input: { maxPages?: number } = {})
     const page = await fetchPage(cursor);
     for (const item of page.items) {
       if (!item.content?.metadata?.name && !item.content?.links?.image) continue; // no real signal at all
+      if (shouldSkipZeroMemberCollection(item)) continue;
       await upsertTrackedCollection({
         chainSlug: CHAIN_SLUG,
         chainId: null,

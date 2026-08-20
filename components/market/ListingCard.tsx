@@ -29,7 +29,9 @@ import { tierColor, tierGlow, tierAnimationClass, tierCardStyle } from "@/lib/ma
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import { withImageWidth } from "@/lib/ipfs";
 import EthUsdValue from "@/components/market/EthUsdValue";
-import { chainDisplayName, chainBrandColor, chainGlyph } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { formatUsd } from "@/lib/eth-price";
+import { chainDisplayName } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import ChainIcon from "@/components/market/ChainIcon";
 
 type Props = {
   listing: Listing;
@@ -47,6 +49,12 @@ type Props = {
   isFloor?: boolean;
   /** Same tier/rank math as the Gallery page — one shared source of truth, fetched once per grid. */
   rarity?: RarityLookup;
+  /** Real per-chain native currency symbol this listing's priceWei is actually denominated in (e.g. "BTC" on Bitcoin Ordinals, "SOL" on Solana, "WETH" on foreign EVM chains) -- see lib/market/multichain/trading/foreign-chain-registry.ts's nativeCurrencySymbol. Defaults to "ETH" for Marketplank's own native Robinhood Chain listings (ListingGrid.tsx's only caller), which is genuinely correct there and unchanged from this card's prior hardcoded behavior. Still used for the aria-label/screen-reader text even once ChainIcon replaces the visible glyph. */
+  currencySymbol?: string;
+  /** Real chain slug for ChainIcon's own recognizable per-chain mark (real Bitcoin ₿, Solana bars, etc.) instead of a plain-text ticker abbreviation -- flagged live 2026-08-20 ("cant we get the currency symbol instead of writing BTC or avax or any of the shorthand tickers"). Defaults to "robinhood" (Marketplank's own chain) to match currencySymbol's own "ETH" default. */
+  chainSlug?: string;
+  /** Real chain-aware USD equivalent, precomputed by the caller via lib/multi-asset-price.ts (never fabricated). Omit to keep this card's own ETH-only EthUsdValue fetch (ListingGrid.tsx's native-chain case, where ETH is genuinely correct) -- explicit undefined vs. explicit null both mean "no USD figure," they just come from different reasons (not fetched yet vs. this currency has no price feed). */
+  usdValue?: number | null;
 };
 
 const TRUST_BADGE: Record<string, { icon: string; label: string }> = {
@@ -67,6 +75,9 @@ export default function ListingCard({
   onSelect,
   isFloor = false,
   rarity,
+  currencySymbol = "ETH",
+  chainSlug = "robinhood",
+  usdValue,
 }: Props) {
   const isOffer = variant === "offer";
   // Presentational only -- swaps a shimmer placeholder for the art once the
@@ -154,18 +165,12 @@ export default function ListingCard({
             {rarity.tier}
           </span>
         )}
-        {listing.foreignChainSlug && (
-          // At-a-glance chain identification via that chain's real brand
-          // color -- opposite corner from the rarity badge so the two
-          // never collide.
-          <span
-            className="card-overlay absolute right-2 top-2 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[0.55rem] font-black text-white shadow"
-            style={{ backgroundColor: chainBrandColor(listing.foreignChainSlug) }}
-            title={chainDisplayName(listing.foreignChainSlug)}
-          >
-            {chainGlyph(listing.foreignChainSlug)}
-          </span>
-        )}
+        {/* Chain badge removed from the artwork corner -- flagged live
+            2026-08-20 ("i like the icon on price line, because thats the
+            price. take it off the artists work"): the price line's own
+            ChainIcon is the one place currency identity belongs, since it's
+            actually attached to the number it describes. Repeating it here
+            over the art was redundant, not clarifying. */}
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-2.5 sm:p-3">
         {trustLabels.length > 0 && (
@@ -185,22 +190,41 @@ export default function ListingCard({
             </p>
           )}
         </div>
-        <div className="mt-auto flex items-end justify-between gap-2 pt-1">
+        <div className="mt-auto flex flex-col gap-1.5 pt-1">
+          {/* Always stacked (Price full-width, action full-width below) --
+              flagged live 2026-08-20 with real measured evidence: this grid
+              is auto-fill with a 180-200px column floor, so card width
+              barely changes across breakpoints (only column COUNT does). A
+              conditional sm:flex-row here looked fine on a couple of
+              widths tested but still squeezed price+icon into the same
+              ~45px sliver at other real column counts (measured -14px
+              overlap between the icon and the Buy button at 1253px/5-col).
+              Always-stacked is the one layout proven safe at every width
+              actually tested (360/640/1253/1440), not just the ones this
+              session happened to check first -- and it gives the buy
+              action a full-width, more-tappable target as a side benefit. */}
           <div className="min-w-0">
             <span className="block text-[0.55rem] font-black uppercase tracking-[0.12em] text-foreground/45">
               Price
             </span>
             <p
-              className={`whitespace-nowrap text-sm font-extrabold tabular-nums sm:text-lg ${
+              className={`whitespace-nowrap text-[clamp(0.95rem,4vw,1.25rem)] font-extrabold tabular-nums ${
                 isOffer ? "text-emerald-300" : "text-gold-300"
               }`}
-              aria-label={`${formatTokenAmount(listing.priceWei, 18, 4)} ETH`}
+              aria-label={`${formatTokenAmount(listing.priceWei, 18, 4)} ${currencySymbol}`}
             >
-              <span aria-hidden="true">
-                {formatTokenAmount(listing.priceWei, 18, 4)} Ξ
+              <span aria-hidden="true" className="inline-flex items-center gap-1.5">
+                {formatTokenAmount(listing.priceWei, 18, 4)}
+                <ChainIcon chainSlug={chainSlug} size={20} className="inline-block shrink-0" />
               </span>
             </p>
-            <EthUsdValue wei={listing.priceWei} className="block text-[0.62rem] tabular-nums text-foreground/50" />
+            {usdValue === undefined ? (
+              <EthUsdValue wei={listing.priceWei} className="block text-[clamp(0.6rem,2.4vw,0.75rem)] tabular-nums text-foreground/55" />
+            ) : (
+              usdValue != null && (
+                <span className="block text-[clamp(0.6rem,2.4vw,0.75rem)] tabular-nums text-foreground/55">≈ {formatUsd(usdValue)}</span>
+              )
+            )}
           </div>
           {isForeignListing(listing) && !isCrossChainBuyable(listing) ? (
             /**
@@ -222,7 +246,7 @@ export default function ListingCard({
               href={listing.externalUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex min-h-11 min-w-16 items-center justify-center gap-1 rounded-md border border-[#58BDF0]/40 px-2 text-xs font-bold text-[#58BDF0] transition hover:border-[#58BDF0] sm:min-w-[4.25rem] sm:px-3 sm:text-sm"
+              className="flex min-h-11 w-full items-center justify-center gap-1 rounded-md border border-[#58BDF0]/40 px-2 text-xs font-bold text-[#58BDF0] transition hover:border-[#58BDF0] sm:px-3 sm:text-sm"
             >
               View
               <ExternalLink size={12} strokeWidth={2.5} aria-hidden />
@@ -232,7 +256,7 @@ export default function ListingCard({
             <span
               role="status"
               title={MARKETPLANK_RELIST_MESSAGE}
-              className="flex min-h-11 max-w-[8.5rem] items-center justify-center rounded-md border border-red-400/60 bg-red-950/40 px-2 text-center text-[0.62rem] font-bold leading-tight text-red-100"
+              className="flex min-h-11 w-full items-center justify-center rounded-md border border-red-400/60 bg-red-950/40 px-2 text-center text-[0.62rem] font-bold leading-tight text-red-100"
             >
               <span>
                 <span className="block uppercase tracking-wide">Relist required</span>
@@ -260,10 +284,10 @@ export default function ListingCard({
                       `Settles on ${chainDisplayName(listing.foreignChainSlug!)} via ${venueLabel(listing)}. A 1.8% Marketplank fee is added on top of the listed price.`
                     : undefined
               }
-              className={`min-h-11 rounded-md px-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-100 sm:px-3 sm:text-sm ${
+              className={`min-h-11 w-full rounded-md px-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-100 sm:px-3 sm:text-sm ${
                 isOffer
-                  ? "min-w-16 bg-emerald-500 text-wood-950 hover:bg-emerald-400 sm:min-w-[4.25rem]"
-                  : "min-w-16 bg-gold-500 text-wood-950 hover:bg-gold-400 sm:min-w-[4.25rem]"
+                  ? "bg-emerald-500 text-wood-950 hover:bg-emerald-400"
+                  : "bg-gold-500 text-wood-950 hover:bg-gold-400"
               }`}
             >
               {buyLabel ?? "Buy"}
@@ -282,13 +306,27 @@ export default function ListingCard({
            * price with no indication it settles on a different chain than
            * the one the wallet is currently connected to.
            */
+          // Softer, non-alert styling -- flagged live 2026-08-20 ("the
+          // unisat bitcoin ordinals text looks like a warning"): the old
+          // uppercase/tracking-wider/font-black pill used near-identical
+          // typography to the actual Relist-required warning a few lines
+          // up, so a purely informational "where this is listed" tag read
+          // as a caution notice. Normal case, lighter weight, same
+          // per-venue brand color (still a real, useful at-a-glance
+          // signal, just not shouting). The chain name suffix is now ONLY
+          // shown for the cross-chain-buyable case, where it's genuinely
+          // safety-relevant (settles on a different chain than the one
+          // connected) -- for every other row the price line's own
+          // ChainIcon already says which chain this is, so repeating it
+          // here was the same redundancy already fixed on the artwork
+          // corner badge.
           <span
-            className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[0.55rem] font-black uppercase tracking-wider ${
+            className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[0.6rem] font-semibold ${
               VENUE_BADGE_CLASS[listing.venue ?? "marketplank"]
             }`}
           >
             {venueLabel(listing)}
-            {listing.foreignChainSlug ? ` · ${chainDisplayName(listing.foreignChainSlug)}` : ""}
+            {isCrossChainBuyable(listing) && listing.foreignChainSlug ? ` · ${chainDisplayName(listing.foreignChainSlug)}` : ""}
           </span>
         )}
         <div className="flex items-center justify-between gap-2">

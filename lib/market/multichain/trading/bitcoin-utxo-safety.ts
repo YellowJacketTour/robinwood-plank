@@ -116,8 +116,20 @@ type AvailableUtxoResponse = {
   data?: { utxo?: Array<{ txid: string; vout: number; satoshi: number }> };
 };
 
+/**
+ * `inscriptions[].inscriptionId` per UniSat's own public API convention
+ * (the same field name their other inscription-bearing endpoints use
+ * throughout this app -- see solana-bitcoin-listings.ts's SimpleListing).
+ * DOCUMENTED, NOT YET LIVE-VERIFIED against a real inscription-bearing
+ * UTXO on this key (this session had a working key + endpoint but no known
+ * real testnet4 inscription UTXO on hand to test against) -- same honest
+ * "documented vs. proven" boundary this file's own header already draws
+ * for the base-URL fix above. getInscriptionIdsOnUtxo below is exactly
+ * where that live proof needs to happen during testnet4 piloting, before
+ * this is trusted for a real listing-time/fulfillment-time binding check.
+ */
 type UtxoDetailResponse = {
-  data?: { inscriptionsCount?: number };
+  data?: { inscriptionsCount?: number; inscriptions?: Array<{ inscriptionId?: string }> };
 };
 
 type RunesUtxoBalanceResponse = {
@@ -136,6 +148,49 @@ export async function fetchUnisatAvailableUtxos(address: string): Promise<Bitcoi
   );
   const list = res.data?.utxo ?? [];
   return list.map((u) => ({ txid: u.txid, vout: u.vout }));
+}
+
+export type WalletInscription = { inscriptionId: string; inscriptionNumber: number | null; txid: string; vout: number; valueSats: number };
+
+/**
+ * Real, documented UniSat indexer endpoint (`/v1/indexer/address/{address}/
+ * inscription-data`), live-verified 2026-08-20 -- the envelope
+ * ({cursor,total,...,inscription:[]}) is confirmed real (a genuine
+ * `{"code":0,"msg":"ok"}` response against a real testnet4 address), but
+ * this session had no known real inscription-bearing testnet4 address on
+ * hand to confirm the PER-ITEM field names against, so the two plausible
+ * shapes UniSat's own API commonly uses elsewhere (a flat `utxo`-object
+ * per item, vs. flat txid/vout fields) are both handled defensively --
+ * an item matching NEITHER shape is skipped, never guessed at. Lets
+ * NativeBitcoinListingsPanel populate a real "pick from your own
+ * inscriptions" list instead of asking a seller to hand-type a raw
+ * txid/vout/value, which this session's own owner flagged as too much
+ * friction for a smooth pilot.
+ */
+export async function fetchWalletInscriptions(address: string): Promise<WalletInscription[]> {
+  type RawItem = {
+    inscriptionId?: string;
+    inscriptionNumber?: number;
+    txid?: string;
+    vout?: number;
+    outputValue?: number;
+    satoshi?: number;
+    utxo?: { txid?: string; vout?: number; satoshi?: number };
+  };
+  const res = await indexerGet<{ data?: { inscription?: RawItem[] } }>(
+    `/v1/indexer/address/${encodeURIComponent(address)}/inscription-data?cursor=0&size=100`
+  );
+  const raw = res.data?.inscription ?? [];
+  const out: WalletInscription[] = [];
+  for (const item of raw) {
+    const inscriptionId = item.inscriptionId;
+    const txid = item.txid ?? item.utxo?.txid;
+    const vout = item.vout ?? item.utxo?.vout;
+    const valueSats = item.outputValue ?? item.satoshi ?? item.utxo?.satoshi;
+    if (!inscriptionId || !txid || typeof vout !== "number" || typeof valueSats !== "number") continue;
+    out.push({ inscriptionId, inscriptionNumber: item.inscriptionNumber ?? null, txid, vout, valueSats });
+  }
+  return out;
 }
 
 /**
@@ -169,6 +224,37 @@ async function isIndependentlyClean(ref: BitcoinUtxoRef): Promise<boolean> {
  * Never returns a UTXO on partial/ambiguous data -- see this module's own
  * header on why fail-closed is the only acceptable default here.
  */
+/**
+ * THE binding check native-bitcoin-listing.ts's listing-creation AND
+ * fulfillment paths must both call before trusting a claimed
+ * `inscriptionId` -- closes the CRITICAL finding from this session's real
+ * Opus security audit: nothing previously verified a listing's claimed
+ * inscriptionId actually lived on the UTXO being listed, a real, working
+ * fraud primitive (list a worthless UTXO under a blue-chip inscription's
+ * id; a buyer's fully-valid transaction pays real money for a worthless
+ * sat, irreversibly).
+ *
+ * Returns the real, current inscription ids UniSat's own indexer reports
+ * for this exact UTXO, or null on ANY failure/ambiguity -- fail closed,
+ * same discipline as isIndependentlyClean above. Callers must treat null
+ * as "cannot verify, reject" never as "assume it's fine."
+ */
+export async function getInscriptionIdsOnUtxo(ref: BitcoinUtxoRef): Promise<string[] | null> {
+  try {
+    const detail = await indexerGet<UtxoDetailResponse>(`/v1/indexer/utxo/${ref.txid}/${ref.vout}`);
+    const inscriptions = detail.data?.inscriptions;
+    if (!Array.isArray(inscriptions)) return null;
+    const ids = inscriptions.map((i) => i.inscriptionId).filter((id): id is string => Boolean(id));
+    // A UTXO the indexer says HAS inscriptions but returned zero real ids
+    // is malformed data, not "no inscriptions" -- fail closed rather than
+    // silently treating it as an empty (clean) UTXO.
+    if (ids.length === 0 && (detail.data?.inscriptionsCount ?? 0) > 0) return null;
+    return ids;
+  } catch {
+    return null;
+  }
+}
+
 export async function filterProvenSafeUtxos(
   address: string,
   candidates: BitcoinUtxoRef[]

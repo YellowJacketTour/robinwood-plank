@@ -28,19 +28,38 @@
  * raw UTXO list, so this is the same public indexer this app already
  * trusts for exactly this class of read.
  *
- * TESTNET4-ONLY FOR NOW, ON PURPOSE. NATIVE_BITCOIN_MAINNET_ENABLED is a
- * server-only env var (never NEXT_PUBLIC_) by design -- see
- * native-bitcoin-listing.ts's own "HARD MAINNET GATE" header on why. This
- * component hardcodes the testnet4 mempool.space base to match; the day
- * that gate is lifted server-side, this needs its own explicit follow-up,
- * not a silent flip.
+ * NETWORK-PARAMETERIZED, NOT HARDCODED -- closes audit finding H3
+ * (2026-08-20). The old version of this header said this panel hardcoded
+ * testnet4 "on purpose" and would need its own explicit follow-up the day
+ * NATIVE_BITCOIN_MAINNET_ENABLED (a server-only env var, never
+ * NEXT_PUBLIC_ -- see native-bitcoin-listing.ts's own "HARD MAINNET GATE"
+ * header) was lifted. This IS that follow-up: the real flag is now read
+ * server-side by this component's page (app/market/bitcoin-listings/
+ * page.tsx) and passed down as the `mainnetEnabled` prop, which drives
+ * every mempool.space URL below. Flipping NATIVE_BITCOIN_MAINNET_ENABLED
+ * server-side now correctly and automatically flips this UI too -- no
+ * separate manual step, no risk of the two silently disagreeing.
  */
 import { useCallback, useEffect, useState } from "react";
 
-const MEMPOOL_BASE = "https://mempool.space/testnet4/api";
+/**
+ * Network-parameterized, not hardcoded -- closes audit finding H3
+ * (2026-08-20). `mainnetEnabled` must be read from the real server-only
+ * NATIVE_BITCOIN_MAINNET_ENABLED env var by this component's SERVER
+ * component parent (see app/market/bitcoin-listings/page.tsx) and passed
+ * down as a plain boolean prop -- this component itself must never read
+ * that env var directly (it's deliberately never NEXT_PUBLIC_, so a
+ * client bundle can't see it at all), and must never guess or default to
+ * mainnet if the prop is somehow omitted.
+ */
+type Props = { mainnetEnabled: boolean };
+
 const DUMMY_UTXO_TARGET_SATS = 600;
 
 type Utxo = { txid: string; vout: number; valueSats: number; scriptPubKeyHex: string };
+
+/** Mirrors bitcoin-utxo-safety.ts's WalletInscription -- duplicated, not imported, since that module is server-only (it holds UNISAT_TESTNET_API_KEY logic) and this is a client component. */
+type WalletInscription = { inscriptionId: string; inscriptionNumber: number | null; txid: string; vout: number; valueSats: number };
 
 type Listing = {
   id: string;
@@ -86,21 +105,24 @@ function errorMessage(e: unknown, fallback: string): string {
   return fallback;
 }
 
-async function fetchAddressUtxos(address: string): Promise<Array<{ txid: string; vout: number; valueSats: number }>> {
-  const res = await fetch(`${MEMPOOL_BASE}/address/${address}/utxo`);
+async function fetchAddressUtxos(mempoolBase: string, address: string): Promise<Array<{ txid: string; vout: number; valueSats: number }>> {
+  const res = await fetch(`${mempoolBase}/address/${address}/utxo`);
   if (!res.ok) throw new Error("Could not load your wallet's UTXOs from mempool.space.");
   const raw = (await res.json()) as Array<{ txid: string; vout: number; value: number }>;
   return raw.map((u) => ({ txid: u.txid, vout: u.vout, valueSats: u.value }));
 }
 
-async function fetchScriptPubKeyHex(txid: string): Promise<string[]> {
-  const res = await fetch(`${MEMPOOL_BASE}/tx/${txid}`);
+async function fetchScriptPubKeyHex(mempoolBase: string, txid: string): Promise<string[]> {
+  const res = await fetch(`${mempoolBase}/tx/${txid}`);
   if (!res.ok) throw new Error("Could not load transaction detail from mempool.space.");
   const tx = (await res.json()) as { vout: Array<{ scriptpubkey: string }> };
   return tx.vout.map((o) => o.scriptpubkey);
 }
 
-export default function NativeBitcoinListingsPanel() {
+export default function NativeBitcoinListingsPanel({ mainnetEnabled }: Props) {
+  const mempoolBase = mainnetEnabled ? "https://mempool.space/api" : "https://mempool.space/testnet4/api";
+  const mempoolTxPath = mainnetEnabled ? "https://mempool.space/tx" : "https://mempool.space/testnet4/tx";
+
   const [address, setAddress] = useState<string | null>(null);
   const [pubkeyHex, setPubkeyHex] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
@@ -117,6 +139,9 @@ export default function NativeBitcoinListingsPanel() {
   const [sellVout, setSellVout] = useState("0");
   const [sellValueSats, setSellValueSats] = useState("");
   const [sellPriceSats, setSellPriceSats] = useState("");
+  const [myInscriptions, setMyInscriptions] = useState<WalletInscription[] | null>(null);
+  const [myInscriptionsLoading, setMyInscriptionsLoading] = useState(false);
+  const [myInscriptionsError, setMyInscriptionsError] = useState<string | null>(null);
   const [selling, setSelling] = useState(false);
   const [sellError, setSellError] = useState<string | null>(null);
 
@@ -137,6 +162,36 @@ export default function NativeBitcoinListingsPanel() {
   useEffect(() => {
     loadListings();
   }, [loadListings]);
+
+  // Real, live-fetched list of the connected wallet's OWN inscriptions --
+  // built 2026-08-20 so a seller can pick one to list instead of hand-
+  // typing a raw txid/vout/value (flagged live as too much friction for a
+  // smooth pilot). Auto-loads the moment `address` is set.
+  const loadMyInscriptions = useCallback(async (addr: string) => {
+    setMyInscriptionsLoading(true);
+    setMyInscriptionsError(null);
+    try {
+      const res = await fetch(`/api/market/native-bitcoin-listing/my-inscriptions?address=${encodeURIComponent(addr)}`);
+      const body = (await res.json()) as { inscriptions?: WalletInscription[]; error?: string; message?: string };
+      if (!res.ok) throw new Error(body.message ?? body.error ?? "Failed to load your inscriptions.");
+      setMyInscriptions(body.inscriptions ?? []);
+    } catch (e) {
+      setMyInscriptionsError(errorMessage(e, "Failed to load your inscriptions."));
+    } finally {
+      setMyInscriptionsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (address) void loadMyInscriptions(address);
+  }, [address, loadMyInscriptions]);
+
+  const pickInscription = (item: WalletInscription) => {
+    setSellInscriptionId(item.inscriptionId);
+    setSellTxid(item.txid);
+    setSellVout(String(item.vout));
+    setSellValueSats(String(item.valueSats));
+  };
 
   const connect = useCallback(async () => {
     setConnecting(true);
@@ -174,7 +229,7 @@ export default function NativeBitcoinListingsPanel() {
         throw new Error("Fill in every field with real values from your inscription's own UTXO.");
       }
 
-      const scriptPubKeys = await fetchScriptPubKeyHex(sellTxid.trim());
+      const scriptPubKeys = await fetchScriptPubKeyHex(mempoolBase, sellTxid.trim());
       const scriptPubKeyHex = scriptPubKeys[vout];
       if (!scriptPubKeyHex) throw new Error(`Output ${vout} not found on that transaction.`);
 
@@ -238,8 +293,8 @@ export default function NativeBitcoinListingsPanel() {
       setActionError(null);
       setLastTxid(null);
       try {
-        const utxos = await fetchAddressUtxos(address);
-        if (utxos.length === 0) throw new Error("Your wallet has no spendable testnet4 UTXOs.");
+        const utxos = await fetchAddressUtxos(mempoolBase, address);
+        if (utxos.length === 0) throw new Error("Your wallet has no spendable UTXOs on this network.");
 
         // Same dummy/payment split logic proven live this session: smallest
         // UTXO near the dummy target as input 0, largest remaining as payment.
@@ -264,7 +319,7 @@ export default function NativeBitcoinListingsPanel() {
         if (paymentCandidates.length === 0) throw new Error("Need at least two separate UTXOs (one for the dummy input, one for payment).");
 
         const withScripts = async (u: { txid: string; vout: number; valueSats: number }): Promise<Utxo> => {
-          const scripts = await fetchScriptPubKeyHex(u.txid);
+          const scripts = await fetchScriptPubKeyHex(mempoolBase, u.txid);
           return { ...u, scriptPubKeyHex: scripts[u.vout] };
         };
         const buyerDummyUtxo = await withScripts(dummyCandidate);
@@ -349,7 +404,7 @@ export default function NativeBitcoinListingsPanel() {
           Purchase broadcast:{" "}
           <a
             className="underline"
-            href={`https://mempool.space/testnet4/tx/${lastTxid}`}
+            href={`${mempoolTxPath}/${lastTxid}`}
             target="_blank"
             rel="noreferrer"
           >
@@ -360,6 +415,39 @@ export default function NativeBitcoinListingsPanel() {
 
       <section className="rounded-lg border border-line bg-panel p-4">
         <h3 className="mb-3 text-base font-bold text-foreground">List an inscription</h3>
+
+        {address && (
+          <div className="mb-4">
+            {myInscriptionsLoading ? (
+              <p className="text-sm text-foreground/60">Loading your inscriptions…</p>
+            ) : myInscriptionsError ? (
+              <p className="text-sm text-red-400">{myInscriptionsError}</p>
+            ) : myInscriptions && myInscriptions.length > 0 ? (
+              <div className="space-y-1.5">
+                <p className="text-xs font-bold uppercase tracking-wide text-foreground/50">Pick one of your inscriptions</p>
+                <div className="flex flex-wrap gap-2">
+                  {myInscriptions.map((item) => (
+                    <button
+                      key={item.inscriptionId}
+                      type="button"
+                      onClick={() => pickInscription(item)}
+                      className={`rounded-md border px-3 py-1.5 text-xs transition ${
+                        sellInscriptionId === item.inscriptionId
+                          ? "border-gold-400 bg-gold-500/10 text-gold-300"
+                          : "border-line text-foreground/70 hover:border-line-strong"
+                      }`}
+                    >
+                      {item.inscriptionNumber != null ? `#${item.inscriptionNumber}` : `${item.inscriptionId.slice(0, 8)}…`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : myInscriptions ? (
+              <p className="text-sm text-foreground/50">No inscriptions found on this wallet on this network.</p>
+            ) : null}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <input
             value={sellInscriptionId}

@@ -1,10 +1,26 @@
 import { chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 
 /**
- * Real, recognizable per-chain marks -- simplified geometric renditions of
- * each chain's own published brand shape (Ethereum's diamond, Bitcoin's ₿,
- * Solana's three parallel bars, BNB's diamond-cluster, Polygon's hexagon
- * pair, Base's filled circle, Arbitrum's arrow, Optimism's ring), not
+ * Real, recognizable per-chain marks. Six of these (Ethereum, Bitcoin,
+ * Solana, BNB, Avalanche, Polygon) use the REAL official brand path data --
+ * flagged live 2026-08-20 ("the icons youve used are very low resolution",
+ * meaning low visual fidelity, not literal raster resolution: this file was
+ * always inline vector, but the ETH/SOL/AVAX/BNB/Polygon marks were
+ * hand-approximated geometric stand-ins, not the actual published logos a
+ * viewer already recognizes from every wallet/exchange they've used --
+ * see this session's own research: token-icon recognition depends on
+ * matching the real mark, a simplified substitute doesn't earn that). Path
+ * data pulled from spothq/cryptocurrency-icons (MIT-licensed, the same
+ * widely-used open icon set wallets/exchanges draw from), inlined here --
+ * same zero-external-request, no-hotlinking discipline as before, just
+ * accurate paths instead of approximated ones. Each of these six already
+ * bakes in its own real official color and circular backing, so they skip
+ * chainBrandColor()/BACKDROP_CHAINS entirely (that machinery still serves
+ * the remaining hand-drawn marks below: Base, Arbitrum, Optimism, and
+ * Robinhood Chain's own real feather mark, none of which this icon set
+ * covers -- it's a coin set, not an L2/appchain set).
+ *
+ * Base's filled circle, Arbitrum's arrow, Optimism's ring), not
  * hotlinked third-party logo files -- same "no hotlinking" discipline
  * chainGlyph's own header already documents, just upgraded from a bare
  * letter/dot to an actual recognizable shape. Colored via
@@ -21,25 +37,17 @@ import { chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-r
  * -- this component stays a static mark so those transitions aren't
  * duplicated here.
  *
- * Backdrop: marks that are just strokes/bars with no fill (Ethereum,
- * Polygon, Arbitrum, Optimism, BNB, Solana, Robinhood) get a dark solid-
- * circle backing (BACKDROP_CHAINS) -- flagged live 2026-08-19 ("solana and
- * polygon and optimism need to be easier to see... black background behind
- * all transparent logo symbols") because a transparent mark on a
- * similarly-dark card background reads as almost invisible. Chains whose
- * mark already IS a filled circle (Base, Avalanche, Bitcoin) are excluded
- * so they don't get a second circle stacked underneath.
+ * Backdrop: marks that are just strokes/bars with no fill (Arbitrum,
+ * Optimism, Robinhood) get a dark solid-circle backing (BACKDROP_CHAINS) --
+ * flagged live 2026-08-19 ("solana and polygon and optimism need to be
+ * easier to see... black background behind all transparent logo symbols")
+ * because a transparent mark on a similarly-dark card background reads as
+ * almost invisible. Ethereum/Polygon/BNB/Solana/Bitcoin/Avalanche no longer
+ * need this: each now renders its own real official mark (see this file's
+ * top header), and every one of those bakes in its own solid circular
+ * backing already, same as Base always did.
  */
-const BACKDROP_CHAINS = new Set([
-  "eth-mainnet",
-  "polygon-mainnet",
-  "arb-mainnet",
-  "opt-mainnet",
-  "bnb-mainnet",
-  "solana-mainnet",
-  "solana",
-  "robinhood",
-]);
+const BACKDROP_CHAINS = new Set(["arb-mainnet", "opt-mainnet", "robinhood"]);
 export default function ChainIcon({ chainSlug, size = 20, className = "" }: { chainSlug: string; size?: number; className?: string }) {
   const color = chainBrandColor(chainSlug);
   const common = {
@@ -58,24 +66,33 @@ export default function ChainIcon({ chainSlug, size = 20, className = "" }: { ch
     <circle cx="12" cy="12" r="10.5" fill="#0c0906" />
   ) : null;
 
+  // These six render the real spothq/cryptocurrency-icons path data at its
+  // own native 0-32 viewBox (not this file's usual 0-24) and own baked-in
+  // official color -- no backdrop, no chainBrandColor() fill, both already
+  // built into the real mark itself.
+  const real = { width: size, height: size, viewBox: "0 0 32 32", className, "aria-hidden": true, style: { display: "block", flexShrink: 0 } } as const;
   switch (chainSlug) {
     case "eth-mainnet":
       return (
-        <svg {...common}>
-          {backdrop}
-          <path d="M12 1.5 4.5 12.6 12 16.8l7.5-4.2z" fill={color} opacity="0.55" />
-          <path d="M12 1.5 4.5 12.6 12 16.8V1.5z" fill={color} />
-          <path d="M12 18.3 4.5 14l7.5 8.2 7.5-8.2z" fill={color} opacity="0.55" />
-          <path d="M12 22.2V18.3L4.5 14z" fill={color} />
+        <svg {...real}>
+          <circle cx="16" cy="16" r="16" fill="#627EEA" />
+          <g fill="#FFF">
+            <path fillOpacity="0.602" d="M16.498 4v8.87l7.497 3.35z" />
+            <path d="M16.498 4L9 16.22l7.498-3.35z" />
+            <path fillOpacity="0.602" d="M16.498 21.968v6.027L24 17.616z" />
+            <path d="M16.498 27.995v-6.028L9 17.616z" />
+            <path fillOpacity="0.2" d="M16.498 20.573l7.497-4.353-7.497-3.348z" />
+            <path fillOpacity="0.602" d="M9 16.22l7.498 4.353v-7.701z" />
+          </g>
         </svg>
       );
     case "polygon-mainnet":
       return (
-        <svg {...common}>
-          {backdrop}
+        <svg {...real}>
+          <circle cx="16" cy="16" r="16" fill="#6F41D8" />
           <path
-            d="M16.4 8.3c-.4-.2-.9-.2-1.3 0l-3 1.8-2 1.2-3 1.8c-.4.2-.9.2-1.3 0L3.4 11.6c-.4-.2-.6-.6-.6-1.1V8.1c0-.4.2-.8.6-1.1l2.4-1.4c.4-.2.9-.2 1.3 0l2.4 1.4c.4.2.6.6.6 1.1v1.8l2-1.2V6.9c0-.4-.2-.8-.6-1.1L7.8 3c-.4-.2-.9-.2-1.3 0L2.6 5.4c-.4.2-.6.6-.6 1.1v4.7c0 .4.2.8.6 1.1l3.9 2.4c.4.2.9.2 1.3 0l3-1.8 2-1.2 3-1.8c.4-.2.9-.2 1.3 0l2.4 1.4c.4.2.6.6.6 1.1v2.4c0 .4-.2.8-.6 1.1l-2.4 1.4c-.4.2-.9.2-1.3 0l-2.4-1.4c-.4-.2-.6-.6-.6-1.1v-1.8l-2 1.2v1.8c0 .4.2.8.6 1.1l3.9 2.4c.4.2.9.2 1.3 0l3.9-2.4c.4-.2.6-.6.6-1.1V9.7c0-.4-.2-.8-.6-1.1z"
-            fill={color}
+            fill="#FFF"
+            d="M21.092 12.693c-.369-.215-.848-.215-1.254 0l-2.879 1.654-1.955 1.078-2.879 1.653c-.369.216-.848.216-1.254 0l-2.288-1.294c-.369-.215-.627-.61-.627-1.042V12.19c0-.431.221-.826.627-1.042l2.25-1.258c.37-.216.85-.216 1.256 0l2.25 1.258c.37.216.628.611.628 1.042v1.654l1.955-1.115v-1.653a1.16 1.16 0 00-.627-1.042l-4.17-2.372c-.369-.216-.848-.216-1.254 0l-4.244 2.372A1.16 1.16 0 006 11.076v4.78c0 .432.221.827.627 1.043l4.244 2.372c.369.215.849.215 1.254 0l2.879-1.618 1.955-1.114 2.879-1.617c.369-.216.848-.216 1.254 0l2.251 1.258c.37.215.627.61.627 1.042v2.552c0 .431-.22.826-.627 1.042l-2.25 1.294c-.37.216-.85.216-1.255 0l-2.251-1.258c-.37-.216-.628-.611-.628-1.042v-1.654l-1.955 1.115v1.653c0 .431.221.827.627 1.042l4.244 2.372c.369.216.848.216 1.254 0l4.244-2.372c.369-.215.627-.61.627-1.042v-4.78a1.16 1.16 0 00-.627-1.042l-4.28-2.409z"
           />
         </svg>
       );
@@ -106,44 +123,43 @@ export default function ChainIcon({ chainSlug, size = 20, className = "" }: { ch
       );
     case "bnb-mainnet":
       return (
-        <svg {...common}>
-          {backdrop}
-          <g fill={color}>
-            <path d="m12 3 2.6 2.6L12 8.2 9.4 5.6z" />
-            <path d="m6.4 8.6 2.6 2.6L6.4 13.8 3.8 11.2z" />
-            <path d="m17.6 8.6 2.6 2.6-2.6 2.6-2.6-2.6z" />
-            <path d="m12 12.4 2.6 2.6L12 17.6l-2.6-2.6z" />
-            <path d="m12 15.8 2.6 2.6L12 21l-2.6-2.6z" />
-          </g>
+        <svg {...real}>
+          <circle cx="16" cy="16" r="16" fill="#F3BA2F" />
+          <path
+            fill="#FFF"
+            d="M12.116 14.404L16 10.52l3.886 3.886 2.26-2.26L16 6l-6.144 6.144 2.26 2.26zM6 16l2.26-2.26L10.52 16l-2.26 2.26L6 16zm6.116 1.596L16 21.48l3.886-3.886 2.26 2.259L16 26l-6.144-6.144-.003-.003 2.263-2.257zM21.48 16l2.26-2.26L26 16l-2.26 2.26L21.48 16zm-3.188-.002h.002V16L16 18.294l-2.291-2.29-.004-.004.004-.003.401-.402.195-.195L16 13.706l2.293 2.293z"
+          />
         </svg>
       );
     case "avax-mainnet":
       return (
-        <svg {...common}>
-          <circle cx="12" cy="12" r="10.5" fill={color} />
-          <path d="M9.9 15.9H7.2l3.5-6.1 1.35 2.35zM16.8 15.9h-3l-4.2-7.3.6-1.05a1.05 1.05 0 0 1 1.8 0l5.7 9.9h-1.7z" fill="#fff" />
+        <svg {...real}>
+          <circle cx="16" cy="16" r="16" fill="#E84142" />
+          <path
+            fill="#FFF"
+            d="M11.518 22.75H8.49c-.636 0-.95 0-1.142-.123A.77.77 0 017 22.025c-.012-.226.145-.503.46-1.055l7.472-13.193c.318-.56.48-.84.682-.944a.77.77 0 01.698 0c.203.104.364.384.682.944l1.536 2.686.008.014c.343.6.517.906.593 1.226a2.26 2.26 0 010 1.066c-.076.323-.249.63-.597 1.24l-3.926 6.95-.01.017c-.346.606-.52.913-.764 1.145a2.284 2.284 0 01-.93.54c-.319.089-.675.089-1.387.089zm7.643 0h4.336c.64 0 .962 0 1.154-.126a.768.768 0 00.348-.607c.011-.219-.142-.484-.443-1.005l-.032-.054-2.172-3.722-.025-.042c-.305-.517-.46-.778-.657-.879a.762.762 0 00-.693 0c-.2.104-.36.377-.678.925l-2.165 3.722-.007.013c-.317.548-.476.821-.464 1.046a.777.777 0 00.348.606c.188.123.51.123 1.15.123z"
+          />
         </svg>
       );
     case "solana-mainnet":
     case "solana":
       return (
-        <svg {...common}>
-          {backdrop}
-          <g fill={color}>
-            <path d="M5.5 15.6h13l-2.4 2.7h-13z" />
-            <path d="M5.5 5.7h13l-2.4 2.7h-13z" />
-            <path d="M5.5 10.65h13l-2.4 2.7h-13z" opacity="0.75" />
-          </g>
+        <svg {...real}>
+          <circle fill="#66F9A1" cx="16" cy="16" r="16" />
+          <path
+            fill="#FFF"
+            d="M9.925 19.687a.59.59 0 01.415-.17h14.366a.29.29 0 01.207.497l-2.838 2.815a.59.59 0 01-.415.171H7.294a.291.291 0 01-.207-.498l2.838-2.815zm0-10.517A.59.59 0 0110.34 9h14.366c.261 0 .392.314.207.498l-2.838 2.815a.59.59 0 01-.415.17H7.294a.291.291 0 01-.207-.497L9.925 9.17zm12.15 5.225a.59.59 0 00-.415-.17H7.294a.291.291 0 00-.207.498l2.838 2.815c.11.109.26.17.415.17h14.366a.291.291 0 00.207-.498l-2.838-2.815z"
+          />
         </svg>
       );
     case "bitcoin-mainnet":
     case "bitcoin":
       return (
-        <svg {...common}>
-          <circle cx="12" cy="12" r="10.5" fill={color} />
+        <svg {...real}>
+          <circle cx="16" cy="16" r="16" fill="#F7931A" />
           <path
-            d="M10.7 6.6h.9v1.5c1.7.1 3 .9 3 2.4 0 .9-.5 1.5-1.2 1.8.9.3 1.5 1 1.5 2 0 1.6-1.4 2.4-3.3 2.5v1.5h-.9v-1.5h-.9v1.5h-.9v-1.5H7v-1.3h1c.4 0 .6-.2.6-.6V9.2c0-.3-.2-.5-.6-.5H7V7.4h1.9V6.6h.9v1.4h.9zm.2 3.6c.9 0 1.5-.3 1.5-1s-.6-1-1.5-1H9.9v2zm.2 3.9c1 0 1.7-.4 1.7-1.1s-.7-1.1-1.7-1.1H9.9v2.2z"
-            fill="#fff"
+            fill="#FFF"
+            d="M23.189 14.02c.314-2.096-1.283-3.223-3.465-3.975l.708-2.84-1.728-.43-.69 2.765c-.454-.114-.92-.22-1.385-.326l.695-2.783L15.596 6l-.708 2.839c-.376-.086-.746-.17-1.104-.26l.002-.009-2.384-.595-.46 1.846s1.283.294 1.256.312c.7.175.826.638.805 1.006l-.806 3.235c.048.012.11.03.18.057l-.183-.045-1.13 4.532c-.086.212-.303.531-.793.41.018.025-1.256-.313-1.256-.313l-.858 1.978 2.25.561c.418.105.828.215 1.231.318l-.715 2.872 1.727.43.708-2.84c.472.127.93.245 1.378.357l-.706 2.828 1.728.43.715-2.866c2.948.558 5.164.333 6.097-2.333.752-2.146-.037-3.385-1.588-4.192 1.13-.26 1.98-1.003 2.207-2.538zm-3.95 5.538c-.533 2.147-4.148.986-5.32.695l.95-3.805c1.172.293 4.929.872 4.37 3.11zm.535-5.569c-.487 1.953-3.495.96-4.47.717l.86-3.45c.975.243 4.118.696 3.61 2.733z"
           />
         </svg>
       );

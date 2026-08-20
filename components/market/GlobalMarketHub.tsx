@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
@@ -499,30 +500,33 @@ function GradeBadge({ breakdown }: { breakdown: GradeBreakdown }) {
       >
         {letter}
       </button>
-      {open && pos && (
-        <div
-          role="tooltip"
-          className="fixed z-[999] w-64 rounded-lg border border-line-strong bg-wood-950 p-3 text-left text-[0.65rem] opacity-100 shadow-2xl ring-1 ring-black/60"
-          style={{ top: pos.top, left: pos.left, backgroundColor: "#1a1512" }}
-        >
-          <p className="mb-1.5 font-black uppercase tracking-wide text-foreground/50">
-            Grade {letter} · {breakdown.score}/2050 pts
-          </p>
-          <p className="mb-2 text-[0.6rem] text-foreground/35">{thresholdLabel} points needed for {letter}</p>
-          <ul className="space-y-1">
-            {breakdown.parts.map((p) => (
-              <li key={p.label} className="flex items-center justify-between gap-2">
-                <span className={p.met ? "text-foreground/80" : "text-foreground/35"}>
-                  {p.met ? "✓" : "✗"} {p.label}
-                </span>
-                <span className="shrink-0 font-mono tabular-nums text-foreground/50">
-                  {p.points}/{p.max}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {open && pos && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              role="tooltip"
+              className="fixed z-[999] w-64 rounded-lg border border-line-strong bg-wood-950 p-3 text-left text-[0.65rem] opacity-100 shadow-2xl ring-1 ring-black/60"
+              style={{ top: pos.top, left: pos.left, backgroundColor: "#1a1512" }}
+            >
+              <p className="mb-1.5 font-black uppercase tracking-wide text-foreground/50">
+                Grade {letter} · {breakdown.score}/2050 pts
+              </p>
+              <p className="mb-2 text-[0.6rem] text-foreground/35">{thresholdLabel} points needed for {letter}</p>
+              <ul className="space-y-1">
+                {breakdown.parts.map((p) => (
+                  <li key={p.label} className="flex items-center justify-between gap-2">
+                    <span className={p.met ? "text-foreground/80" : "text-foreground/35"}>
+                      {p.met ? "✓" : "✗"} {p.label}
+                    </span>
+                    <span className="shrink-0 font-mono tabular-nums text-foreground/50">
+                      {p.points}/{p.max}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>,
+            document.body
+          )
+        : null}
     </span>
   );
 }

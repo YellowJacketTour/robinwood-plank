@@ -103,8 +103,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity", "scaffold-rarity-solana", "scaffold-rarity-bitcoin", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "evm-fill-stats", "coingecko-solana-stats", "coingecko-bitcoin-stats"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -645,6 +645,42 @@ async function main(): Promise<void> {
       onProgress: (line) => console.log(`[refresh:scaffold-rarity-bitcoin] ${line}`),
     });
     return `${result.totalTracked} Bitcoin tracked -> ${result.indexed} indexed (partial coverage), ${result.skippedFresh} fresh, ${result.failed} failed`;
+  });
+
+  // Real 24h volume/sales for every EVM chain, from this app's own
+  // first-party plank_seaport_fills index -- see
+  // updateEvmVolumeFromSeaportFills's own header (store.ts) for why this
+  // was a real, present, unused data asset before 2026-08-20. Covers
+  // Robinhood Chain's own community collections too, which have zero
+  // OpenSea presence and so had zero other possible source of this data.
+  await step("evm-fill-stats", async () => {
+    const { updateEvmVolumeFromSeaportFills } = await import("../lib/market/multichain/store");
+    const { FOREIGN_CHAINS } = await import("../lib/market/multichain/trading/foreign-chain-registry");
+    const { ROBINHOOD_CHAIN_SLUG } = await import("../lib/market/multichain/trading/non-evm-chains");
+    const chains = [ROBINHOOD_CHAIN_SLUG, ...FOREIGN_CHAINS.map((c) => c.chainSlug)];
+    let totalUpdated = 0;
+    for (const chainSlug of chains) {
+      const r = await updateEvmVolumeFromSeaportFills(chainSlug);
+      totalUpdated += r.updated;
+    }
+    return `${totalUpdated} collection(s) updated across ${chains.length} EVM chains from real observed fills`;
+  });
+
+  // Real 24h volume/sales/floor-change for Solana and Bitcoin Ordinals,
+  // via CoinGecko's free public NFT API -- see coingecko-nft-stats.ts's
+  // own header for the live-verified source and the exact-slug-only
+  // matching discipline. Two separate steps (not one) so a failure on one
+  // chain never blocks the other, same isolation every other per-chain
+  // step in this file already has.
+  await step("coingecko-solana-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("solana-mainnet", full ? 100 : 20);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
+  });
+  await step("coingecko-bitcoin-stats", async () => {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("bitcoin-mainnet", full ? 100 : 20);
+    return `${r.candidates} tracked -> ${r.matched} real CoinGecko matches -> ${r.updated} updated, ${r.errors} errors`;
   });
 
   const failed = results.filter((r) => !r.ok);

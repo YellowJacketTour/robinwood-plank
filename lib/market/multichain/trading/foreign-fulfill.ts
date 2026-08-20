@@ -400,6 +400,38 @@ async function buySolanaListingNow(input: { tokenMint: string; priceLamports: st
 }
 
 /**
+ * List (or accept the current best bid on) a Solana token the connected
+ * wallet owns, via Magic Eden's own real Auction House program -- same
+ * "build unsigned tx server-side, sign+send client-side" shape as
+ * buySolanaListingNow above, just the sell-side counterpart. mode "list"
+ * creates a new fixed-price listing; mode "sellNow" accepts the live best
+ * bid at exactly its own price (the caller must pass that bid's real
+ * priceLamports, not an arbitrary one -- Magic Eden's sell_now endpoint
+ * rejects a mismatch).
+ */
+export async function listSolanaTokenNow(input: {
+  tokenMint: string;
+  priceLamports: string;
+  mode: "list" | "sellNow";
+}): Promise<ForeignBuyResult> {
+  const { connectPhantomWallet, signAndSendSolanaTransaction } = await import("@/lib/market/multichain/trading/non-evm-wallet");
+  const sellerAddress = await connectPhantomWallet();
+
+  const res = await fetch("/api/market/multichain/solana-sell-instruction", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mode: input.mode, sellerAddress, tokenMint: input.tokenMint, priceLamports: input.priceLamports }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Failed to build the Magic Eden sell instruction (${res.status})`);
+  }
+  const { tx } = (await res.json()) as { tx: string };
+  const txHash = await signAndSendSolanaTransaction(tx);
+  return { txHash };
+}
+
+/**
  * Buy one UniSat (Bitcoin Ordinals) listing right now, driving the real
  * create_bid -> wallet-sign -> confirm_bid flow (see unisat-ordinals-trade.ts's
  * header). `orderHash` carries the real UniSat auctionId (see

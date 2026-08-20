@@ -120,7 +120,6 @@ test("native-bitcoin-listing: full seller-list -> buyer-fulfill round trip final
 
   const { psbtBase64: fulfillmentPsbtBase64, inputIndexesForBuyerToSign } = await buildFulfillmentPsbt({
     listingSellerPsbtBase64: signedListingPsbtBase64,
-    sellerInscriptionUtxoValueSats: inscriptionUtxo.valueSats,
     buyerAddress: buyer.address,
     buyerInternalPubkeyHex: Buffer.from(buyerKey.publicKey).toString("hex"),
     buyerReceivingAddress: buyerReceiving.address,
@@ -214,7 +213,6 @@ test("native-bitcoin-listing: throws rather than under-funding when no safe UTXO
     () =>
       buildFulfillmentPsbt({
         listingSellerPsbtBase64: listingPsbt.toBase64(),
-        sellerInscriptionUtxoValueSats: inscriptionUtxo.valueSats,
         buyerAddress: buyer.address,
         buyerInternalPubkeyHex: Buffer.from(buyerKey.publicKey).toString("hex"),
         buyerReceivingAddress: buyer.address,
@@ -224,7 +222,7 @@ test("native-bitcoin-listing: throws rather than under-funding when no safe UTXO
         feeRateSatPerVb: 5,
         safetyFilter: async (_address, candidates) => candidates,
       }),
-    /insufficient proven-safe buyer UTXOs/
+    /[Ii]nsufficient proven-safe UTXOs/
   );
 });
 
@@ -258,7 +256,6 @@ test("native-bitcoin-listing: a payment UTXO the safety filter rejects is never 
     () =>
       buildFulfillmentPsbt({
         listingSellerPsbtBase64: listingPsbt.toBase64(),
-        sellerInscriptionUtxoValueSats: inscriptionUtxo.valueSats,
         buyerAddress: buyer.address,
         buyerInternalPubkeyHex: Buffer.from(buyerKey.publicKey).toString("hex"),
         buyerReceivingAddress: buyer.address,
@@ -274,7 +271,7 @@ test("native-bitcoin-listing: a payment UTXO the safety filter rejects is never 
         safetyFilter: async (_address, candidates) =>
           candidates.filter((c) => c.txid === dummyUtxo.txid && c.vout === dummyUtxo.vout),
       }),
-    /insufficient proven-safe buyer UTXOs/
+    /[Ii]nsufficient proven-safe UTXOs/
   );
 });
 
@@ -314,7 +311,6 @@ test("native-bitcoin-listing: a dummy UTXO the safety filter rejects is never us
     () =>
       buildFulfillmentPsbt({
         listingSellerPsbtBase64: listingPsbt.toBase64(),
-        sellerInscriptionUtxoValueSats: inscriptionUtxo.valueSats,
         buyerAddress: buyer.address,
         buyerInternalPubkeyHex: Buffer.from(buyerKey.publicKey).toString("hex"),
         buyerReceivingAddress: buyer.address,
@@ -351,7 +347,7 @@ test("native-bitcoin-listing: refuses to create a listing whose fee would be dus
         inscriptionUtxo,
         priceSats: 15_000,
       }),
-    /MINIMUM_LISTING_PRICE_SATS|priceSats must be at least/
+    /must be at least/
   );
 
   // The threshold itself: MINIMUM_LISTING_PRICE_SATS's own fee must clear

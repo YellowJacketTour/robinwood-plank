@@ -22,16 +22,28 @@ import type { Metadata } from "next";
  */
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = createPageMetadata({
-  title: "Native Bitcoin Listings — Marketplank",
-  description: "List and buy Bitcoin Ordinals directly with Marketplank's own PSBT engine — no third-party order book, testnet4.",
-  path: "/market/bitcoin-listings",
-  keywords: ["Marketplank", "Bitcoin Ordinals", "PSBT", "native listing"],
-});
+export function generateMetadata(): Metadata {
+  // Real, not hardcoded -- the description must never claim "testnet4"
+  // once NATIVE_BITCOIN_MAINNET_ENABLED is actually flipped (same H3 fix
+  // as the panel component itself).
+  const mainnetEnabled = process.env.NATIVE_BITCOIN_MAINNET_ENABLED === "true";
+  return createPageMetadata({
+    title: "Native Bitcoin Listings — Marketplank",
+    description: mainnetEnabled
+      ? "List and buy Bitcoin Ordinals directly with Marketplank's own PSBT engine — no third-party order book."
+      : "List and buy Bitcoin Ordinals directly with Marketplank's own PSBT engine — no third-party order book, testnet4.",
+    path: "/market/bitcoin-listings",
+    keywords: ["Marketplank", "Bitcoin Ordinals", "PSBT", "native listing"],
+  });
+}
 
 export default async function NativeBitcoinListingsPage() {
   const flags = (await getContent("flags").catch(() => null)) as FlagsDoc | null;
   const marketEnabled = flags && flags.marketEnabled !== null ? flags.marketEnabled : MARKET_ENABLED;
+  // Real, server-only flag -- see NativeBitcoinListingsPanel's own header
+  // on why this must be read here (a server component) and passed down as
+  // a plain boolean, never read directly by the client panel itself.
+  const mainnetEnabled = process.env.NATIVE_BITCOIN_MAINNET_ENABLED === "true";
 
   return (
     <>
@@ -44,7 +56,7 @@ export default async function NativeBitcoinListingsPage() {
         className="flex-1 px-3 pb-10 pt-0 sm:px-5 sm:py-6 lg:py-10"
       >
         <div className={marketEnabled ? "mx-auto w-full max-w-[900px]" : "site-shell"}>
-          {marketEnabled ? <NativeBitcoinListingsPanel /> : <ComingSoonGate />}
+          {marketEnabled ? <NativeBitcoinListingsPanel mainnetEnabled={mainnetEnabled} /> : <ComingSoonGate />}
         </div>
       </main>
       <Footer />

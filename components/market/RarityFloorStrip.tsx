@@ -2,12 +2,24 @@
 
 import { useMemo } from "react";
 import { formatTokenAmount } from "@/lib/trade";
+import { formatUsd } from "@/lib/eth-price";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
 import type { RarityTier } from "@/lib/rarity";
 import { collectionFloorWei, formatPremiumBps, tierFloors } from "@/lib/market/floors";
 import type { Listing } from "@/lib/market/types";
 import EthUsdValue from "@/components/market/EthUsdValue";
+import ChainIcon from "@/components/market/ChainIcon";
+
+/** Renders the same "≈ $X.XX" shape as EthUsdValue, from a real precomputed chain-aware USD value instead of an ETH-only fetch. Null renders nothing, matching EthUsdValue's own null-hides behavior. */
+function UsdFigure({ usd, className }: { usd: number | null; className?: string }) {
+  if (usd == null) return null;
+  return (
+    <span className={className} title={`Approximate USD value: ${formatUsd(usd)}`}>
+      ≈ {formatUsd(usd)}
+    </span>
+  );
+}
 
 type Props = {
   listings: Listing[];
@@ -15,6 +27,12 @@ type Props = {
   /** Active tier filter / sweep scope — "all" highlights collection floor chip. */
   activeTier: RarityTier | "all";
   onSelectTier: (tier: RarityTier | "all") => void;
+  /** Real per-chain native currency these floors are denominated in (see nativeCurrencySymbol in foreign-chain-registry.ts). Defaults to "ETH" only as a last resort -- callers should always pass the real value. */
+  currencySymbol?: string;
+  /** Real chain slug for ChainIcon's own recognizable per-chain mark instead of a plain-text ticker abbreviation. Defaults to "robinhood" to match currencySymbol's own "ETH" default. */
+  chainSlug?: string;
+  /** Real chain-aware USD equivalent for a wei amount, precomputed by the caller (lib/multi-asset-price.ts). Omit to keep this strip's own ETH-only EthUsdValue fetch. */
+  usdValueFor?: (wei: bigint | string | null) => number | null;
 };
 
 /**
@@ -27,6 +45,9 @@ export default function RarityFloorStrip({
   rarity,
   activeTier,
   onSelectTier,
+  currencySymbol = "ETH",
+  chainSlug = "robinhood",
+  usdValueFor,
 }: Props) {
   const collFloor = useMemo(() => collectionFloorWei(listings), [listings]);
   const rows = useMemo(() => tierFloors(listings, rarity), [listings, rarity]);
@@ -58,10 +79,24 @@ export default function RarityFloorStrip({
           }`}
         >
           <p className="text-[0.55rem] font-bold uppercase tracking-wide text-foreground/45">All</p>
-          <p className="font-display text-sm tabular-nums text-gold-300">
-            {collFloor == null ? "—" : `${formatTokenAmount(collFloor, 18, 3)} Ξ`}
+          <p
+            className="flex items-center gap-1 font-display text-[clamp(0.85rem,3.5vw,1.05rem)] tabular-nums text-gold-300"
+            aria-label={collFloor == null ? "—" : `${formatTokenAmount(collFloor, 18, 3)} ${currencySymbol}`}
+          >
+            {collFloor == null ? (
+              "—"
+            ) : (
+              <>
+                {formatTokenAmount(collFloor, 18, 3)}
+                <ChainIcon chainSlug={chainSlug} size={20} className="shrink-0" />
+              </>
+            )}
           </p>
-          <EthUsdValue wei={collFloor} className="block text-[0.55rem] tabular-nums text-foreground/50" />
+          {usdValueFor ? (
+            <UsdFigure usd={usdValueFor(collFloor)} className="block text-[clamp(0.55rem,2.2vw,0.65rem)] tabular-nums text-foreground/50" />
+          ) : (
+            <EthUsdValue wei={collFloor} className="block text-[clamp(0.55rem,2.2vw,0.65rem)] tabular-nums text-foreground/50" />
+          )}
           <p className="text-[0.55rem] text-foreground/40">{listings.length} listed</p>
         </button>
 
@@ -96,10 +131,24 @@ export default function RarityFloorStrip({
                 <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
                 <span style={{ color }}>{row.tier}</span>
               </p>
-              <p className="font-display text-sm tabular-nums text-foreground">
-                {row.floorWei == null ? "—" : `${formatTokenAmount(row.floorWei, 18, 3)} Ξ`}
+              <p
+                className="flex items-center gap-1 font-display text-[clamp(0.85rem,3.5vw,1.05rem)] tabular-nums text-foreground"
+                aria-label={row.floorWei == null ? "—" : `${formatTokenAmount(row.floorWei, 18, 3)} ${currencySymbol}`}
+              >
+                {row.floorWei == null ? (
+                  "—"
+                ) : (
+                  <>
+                    {formatTokenAmount(row.floorWei, 18, 3)}
+                    <ChainIcon chainSlug={chainSlug} size={20} className="shrink-0" />
+                  </>
+                )}
               </p>
-              <EthUsdValue wei={row.floorWei} className="block text-[0.55rem] tabular-nums text-foreground/50" />
+              {usdValueFor ? (
+                <UsdFigure usd={usdValueFor(row.floorWei)} className="block text-[clamp(0.55rem,2.2vw,0.65rem)] tabular-nums text-foreground/50" />
+              ) : (
+                <EthUsdValue wei={row.floorWei} className="block text-[clamp(0.55rem,2.2vw,0.65rem)] tabular-nums text-foreground/50" />
+              )}
               <p
                 className={`text-[0.55rem] tabular-nums ${
                   row.premiumBps == null

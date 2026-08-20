@@ -88,3 +88,12 @@ test("nativeCurrencySymbol defaults to WETH for every other EVM chain (matches t
   assert.equal(nativeCurrencySymbol("base-mainnet", false), "WETH");
   assert.equal(nativeCurrencySymbol("totally-unknown-chain", false), "WETH");
 });
+
+test("nativeCurrencySymbol returns BTC when isBitcoin is true -- real bug found live 2026-08-19: MultichainCollectionView never passed isBitcoin through despite computing it, so every Bitcoin Ordinals collection's floor/best-offer/volume/highest-sale fell through to the WETH default", () => {
+  assert.equal(nativeCurrencySymbol("bitcoin-mainnet", false, true), "BTC");
+  assert.equal(nativeCurrencySymbol("bitcoin-testnet4", false, true), "BTC");
+});
+
+test("nativeCurrencySymbol prioritizes isSolana over isBitcoin if a caller somehow passes both true (isSolana checked first)", () => {
+  assert.equal(nativeCurrencySymbol("solana-mainnet", true, true), "SOL");
+});

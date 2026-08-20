@@ -39,6 +39,7 @@ import {
   putNativeBitcoinListing,
 } from "@/lib/market/bitcoin-listings-store";
 import { publicError, publicJson, rateLimit, readJsonBody } from "@/lib/security";
+import { getInscriptionIdsOnUtxo } from "@/lib/market/multichain/trading/bitcoin-utxo-safety";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -167,6 +168,31 @@ export async function POST(req: Request) {
 
     if ((await countActiveNativeBitcoinListingsBySeller(sellerAddress)) >= MAX_ACTIVE_LISTINGS_PER_SELLER) {
       return publicJson({ error: "TOO_MANY", message: "You have too many open Bitcoin listings." }, 429);
+    }
+
+    // REAL inscription-to-UTXO binding check, closing a CRITICAL finding
+    // from this session's Opus security audit: without this, nothing
+    // verified a listing's claimed inscriptionId actually lived on the
+    // signed UTXO -- a working fraud primitive (list a worthless UTXO
+    // under a blue-chip inscription's real id; a buyer's fully-valid
+    // transaction pays real money for a worthless sat, irreversibly).
+    // getInscriptionIdsOnUtxo fails closed (returns null) on any indexer
+    // error/ambiguity, so a transient UniSat outage rejects the listing
+    // rather than silently trusting the client's claim -- the same
+    // "over-cautious false rejection beats a false acceptance" posture
+    // bitcoin-utxo-safety.ts's own header already establishes.
+    const realInscriptionIds = await getInscriptionIdsOnUtxo({ txid: utxoTxid, vout: utxoVout });
+    if (realInscriptionIds === null) {
+      return publicJson(
+        { error: "INSCRIPTION_UNVERIFIABLE", message: "Could not verify this inscription against its UTXO right now. Try again shortly." },
+        503
+      );
+    }
+    if (!realInscriptionIds.includes(inscriptionId)) {
+      return publicJson(
+        { error: "INSCRIPTION_MISMATCH", message: "The claimed inscription does not match what's actually on this UTXO." },
+        400
+      );
     }
 
     const id = `native-btc-${sellerAddress}-${utxoTxid}-${utxoVout}`;

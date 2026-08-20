@@ -117,6 +117,7 @@ import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
 import { BITCOIN_FEE_RECIPIENT } from "@/lib/constants";
 import { filterProvenSafeUtxos, type BitcoinUtxoRef } from "@/lib/market/multichain/trading/bitcoin-utxo-safety";
+import { TradeApiError } from "@/lib/uniswap-server";
 
 bitcoin.initEccLib(ecc);
 
@@ -199,7 +200,9 @@ export function feeRecipientAddress(): string {
   }
   const nonMainnetRecipient = process.env.NATIVE_BITCOIN_TESTNET_FEE_RECIPIENT;
   if (!nonMainnetRecipient) {
-    throw new Error(
+    throw new TradeApiError(
+      503,
+      "MISCONFIGURED",
       "native-bitcoin-listing: NATIVE_BITCOIN_TESTNET_FEE_RECIPIENT is not configured -- a fresh Taproot address on the same non-mainnet network is required to fulfill a listing (BITCOIN_FEE_RECIPIENT is mainnet-only and cannot appear in a testnet/regtest transaction)."
     );
   }
@@ -254,10 +257,12 @@ export function buildSellerListingPsbt(input: {
   inscriptionUtxo: Utxo;
   priceSats: number;
 }): { psbtBase64: string; inputIndexToSign: 0 } {
-  if (input.priceSats <= 0) throw new Error("native-bitcoin-listing: priceSats must be positive.");
+  if (input.priceSats <= 0) throw new TradeApiError(400, "BAD_PRICE", "native-bitcoin-listing: priceSats must be positive.");
   if (input.priceSats < MINIMUM_LISTING_PRICE_SATS) {
-    throw new Error(
-      `native-bitcoin-listing: priceSats must be at least ${MINIMUM_LISTING_PRICE_SATS} sats -- below that, the ${MARKETPLANK_NATIVE_BITCOIN_FEE_BPS}bps Marketplank fee output would be dust (under ${BITCOIN_DUST_THRESHOLD_SATS} sats) and every Bitcoin node would reject the resulting fulfillment transaction outright.`
+    throw new TradeApiError(
+      400,
+      "PRICE_BELOW_MINIMUM",
+      `Price must be at least ${MINIMUM_LISTING_PRICE_SATS} sats -- below that, the ${MARKETPLANK_NATIVE_BITCOIN_FEE_BPS}bps Marketplank fee output would be dust (under ${BITCOIN_DUST_THRESHOLD_SATS} sats) and every Bitcoin node would reject the resulting fulfillment transaction outright.`
     );
   }
   const network = bitcoinNetwork();
@@ -280,6 +285,96 @@ export function buildSellerListingPsbt(input: {
 }
 
 /**
+ * Builds the seller's CANCEL-PROOF PSBT -- closes audit finding H2
+ * (2026-08-20): `cancelNativeBitcoinListing` in bitcoin-listings-store.ts
+ * has always existed but had zero callers, because nothing verified a
+ * cancel request actually came from the real listing owner rather than
+ * anyone who guessed the listing id.
+ *
+ * DELIBERATELY REUSES THIS APP'S ALREADY-PROVEN SIGNING PRIMITIVE INSTEAD
+ * OF A NEW ONE (e.g. BIP-322 message signing, which would need a new
+ * dependency and a new, unproven verification path). Spends the EXACT
+ * SAME UTXO the listing itself is on, back to the seller's own address,
+ * same value -- self-send, zero fund-movement risk even if this is ever
+ * accidentally broadcast. Only whoever currently controls that UTXO's
+ * private key can produce a valid signature over it, so a valid signature
+ * here is airtight proof of current ownership -- the same guarantee
+ * buildSellerListingPsbt's own signature already gave the system at
+ * listing-creation time, just re-asked at cancel time.
+ *
+ * SIGHASH_ALL, NEVER SIGHASH_SINGLE|ANYONECANPAY -- the listing's own
+ * sighash. This is the one property that makes this safe to build from
+ * server state and safe to have the seller sign at all: SIGHASH_ALL
+ * commits the signature to this ENTIRE transaction (this one input, this
+ * one output, nothing else), so it can never be extracted and recombined
+ * into a different transaction the way an ANYONECANPAY signature could.
+ * A cancel-proof signature and a listing signature can never be confused
+ * for one another by construction, not just by convention.
+ */
+export function buildCancelProofPsbt(input: {
+  sellerAddress: string;
+  sellerInternalPubkeyHex: string;
+  listingUtxo: Utxo;
+}): { psbtBase64: string; inputIndexToSign: 0 } {
+  const network = bitcoinNetwork();
+  const psbt = new bitcoin.Psbt({ network });
+
+  psbt.addInput({
+    hash: input.listingUtxo.txid,
+    index: input.listingUtxo.vout,
+    witnessUtxo: {
+      script: Buffer.from(input.listingUtxo.scriptPubKeyHex, "hex"),
+      value: BigInt(input.listingUtxo.valueSats),
+    },
+    tapInternalKey: toXOnly(input.sellerInternalPubkeyHex),
+    sighashType: bitcoin.Transaction.SIGHASH_ALL,
+  });
+
+  // Self-send: same address, same value. This transaction moves nothing
+  // real even if broadcast -- its only purpose is proving control of the
+  // input via a valid signature, though it happens to ALSO be a real,
+  // valid recovery transaction the seller could broadcast to reclaim
+  // their inscription outright, if ever needed.
+  psbt.addOutput({ address: input.sellerAddress, value: BigInt(input.listingUtxo.valueSats) });
+
+  return { psbtBase64: psbt.toBase64(), inputIndexToSign: 0 };
+}
+
+/**
+ * Verifies a signed cancel-proof PSBT (from buildCancelProofPsbt above)
+ * actually proves control of `expectedUtxo`, paying back to
+ * `expectedSellerAddress`. Returns false on ANY malformed/mismatched/
+ * unverifiable input -- fail closed, same posture as every other
+ * signature check in this file.
+ */
+export function verifyCancelProofPsbt(
+  signedPsbtBase64: string,
+  expectedUtxo: { txid: string; vout: number },
+  expectedSellerAddress: string
+): boolean {
+  try {
+    const network = bitcoinNetwork();
+    const psbt = bitcoin.Psbt.fromBase64(signedPsbtBase64, { network });
+    if (psbt.txInputs.length !== 1 || psbt.txOutputs.length !== 1) return false;
+
+    const inputData = psbt.data.inputs[0];
+    if (inputData.sighashType !== bitcoin.Transaction.SIGHASH_ALL) return false;
+    if (!inputData.tapKeySig) return false;
+
+    const rawInput = psbt.txInputs[0];
+    const utxoTxid = Buffer.from(rawInput.hash).reverse().toString("hex");
+    if (utxoTxid !== expectedUtxo.txid || rawInput.index !== expectedUtxo.vout) return false;
+
+    const outAddress = bitcoin.address.fromOutputScript(psbt.txOutputs[0].script, network);
+    if (outAddress !== expectedSellerAddress) return false;
+
+    return psbt.validateSignaturesOfInput(0, (pubkey, msghash, signature) => ecc.verifySchnorr(msghash, pubkey, signature));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Copies the seller's already-signed input (index 0 of their listing
  * PSBT) and its matching output (index 0) into a fresh Psbt, verbatim --
  * never re-derives or re-signs either. Throws if the listing PSBT isn't
@@ -297,11 +392,11 @@ function extractSellerLeg(sellerPsbtBase64: string): SellerLeg {
   const network = bitcoinNetwork();
   const sellerPsbt = bitcoin.Psbt.fromBase64(sellerPsbtBase64, { network });
   if (sellerPsbt.txInputs.length !== 1 || sellerPsbt.txOutputs.length !== 1) {
-    throw new Error("native-bitcoin-listing: listing PSBT must have exactly one input and one output.");
+    throw new TradeApiError(400, "BAD_SHAPE", "native-bitcoin-listing: listing PSBT must have exactly one input and one output.");
   }
   const psbtInputData = sellerPsbt.data.inputs[0];
   if (!psbtInputData.partialSig && !psbtInputData.tapKeySig) {
-    throw new Error("native-bitcoin-listing: listing PSBT's input is unsigned.");
+    throw new TradeApiError(400, "UNSIGNED", "native-bitcoin-listing: listing PSBT's input is unsigned.");
   }
   const rawInput = sellerPsbt.txInputs[0];
   const out = sellerPsbt.txOutputs[0];
@@ -328,7 +423,6 @@ function extractSellerLeg(sellerPsbtBase64: string): SellerLeg {
  */
 export async function buildFulfillmentPsbt(input: {
   listingSellerPsbtBase64: string;
-  sellerInscriptionUtxoValueSats: number;
   buyerAddress: string;
   /** Default internal pubkey applied to any buyer-owned UTXO (dummy or payment) that doesn't carry its own Utxo.internalPubkeyHex. Real wallets commonly derive a distinct pubkey per UTXO (verified live against Bitcoin Core's own wallet, 2026-08-19) -- prefer setting Utxo.internalPubkeyHex per-UTXO; this exists only for the simpler single-address case. */
   buyerInternalPubkeyHex: string;
@@ -365,8 +459,10 @@ export async function buildFulfillmentPsbt(input: {
   );
   const safeSet = new Set(safeCandidates.map((u) => `${u.txid}:${u.vout}`));
   if (!safeSet.has(`${input.buyerDummyUtxo.txid}:${input.buyerDummyUtxo.vout}`)) {
-    throw new Error(
-      "native-bitcoin-listing: the buyer's dummy UTXO did not pass the inscription/Rune safety check -- refusing to use it as padding. Choose a different UTXO, or create a fresh one with a plain wallet-to-self send."
+    throw new TradeApiError(
+      400,
+      "UNSAFE_DUMMY_UTXO",
+      "The buyer's dummy UTXO did not pass the inscription/Rune safety check -- refusing to use it as padding. Choose a different UTXO, or create a fresh one with a plain wallet-to-self send."
     );
   }
   const provenSafeUtxos = input.buyerPaymentUtxoCandidates.filter((u) => safeSet.has(`${u.txid}:${u.vout}`));
@@ -379,8 +475,10 @@ export async function buildFulfillmentPsbt(input: {
   // buildSellerListingPsbt, could still reach here) -- never build a
   // transaction Bitcoin's own mempool policy will reject.
   if (feeSats < BITCOIN_DUST_THRESHOLD_SATS) {
-    throw new Error(
-      `native-bitcoin-listing: this listing's price yields a ${feeSats}-sat Marketplank fee output, below Bitcoin's ${BITCOIN_DUST_THRESHOLD_SATS}-sat dust threshold -- every node would reject the resulting transaction. This listing was created below MINIMUM_LISTING_PRICE_SATS and cannot be fulfilled; it should be cancelled.`
+    throw new TradeApiError(
+      409,
+      "LISTING_BELOW_MINIMUM",
+      `This listing's price yields a ${feeSats}-sat Marketplank fee output, below Bitcoin's ${BITCOIN_DUST_THRESHOLD_SATS}-sat dust threshold -- every node would reject the resulting transaction. This listing was created below the minimum price and cannot be fulfilled; it should be cancelled.`
     );
   }
 
@@ -401,16 +499,30 @@ export async function buildFulfillmentPsbt(input: {
     tapInternalKey: tapKeyFor(input.buyerDummyUtxo),
   });
 
+  // Input 1's witnessUtxo, extracted BEFORE output 0 is sized -- audit
+  // finding H1, 2026-08-19: this used to size output 0 off a caller-
+  // supplied sellerInscriptionUtxoValueSats (in practice, a value read
+  // back out of Postgres), while the real, cryptographically-committed
+  // value sat right here the whole time. Sourcing it from anywhere other
+  // than the signed PSBT itself means a future schema change, backfill,
+  // or new write path that doesn't derive its stored value from this
+  // exact field could silently undersize this output and spill the
+  // inscribed sat into the fee or change output -- a burn. This was
+  // "coincidentally correct" before only because every current write path
+  // happened to derive the stored value from this same witnessUtxo; that
+  // invariant now holds by construction instead of by convention.
+  if (!seller.psbtInputData.witnessUtxo) {
+    throw new TradeApiError(400, "BAD_SHAPE", "native-bitcoin-listing: listing PSBT's input is missing its witness UTXO.");
+  }
+  const sellerUtxoValueSats = Number(seller.psbtInputData.witnessUtxo.value);
+
   // Output 0: buyer's receiving address -- sized to consume dummy +
   // the ENTIRE seller UTXO, guaranteeing the inscribed sat lands here.
   // See this file's own header for why this exact sum is load-bearing.
-  const receivingValue = input.buyerDummyUtxo.valueSats + input.sellerInscriptionUtxoValueSats;
+  const receivingValue = input.buyerDummyUtxo.valueSats + sellerUtxoValueSats;
   psbt.addOutput({ address: input.buyerReceivingAddress, value: BigInt(receivingValue) });
 
   // Input 1: the seller's already-signed input, copied verbatim.
-  if (!seller.psbtInputData.witnessUtxo) {
-    throw new Error("native-bitcoin-listing: listing PSBT's input is missing its witness UTXO.");
-  }
   psbt.addInput({
     hash: seller.rawInput.hash,
     index: seller.rawInput.index,
@@ -468,11 +580,13 @@ export async function buildFulfillmentPsbt(input: {
   const minerFeeSats = Math.ceil(estimatedVBytes * input.feeRateSatPerVb);
 
   const totalOut = receivingValue + seller.output.valueSats + feeSats + newDummyValue;
-  const totalIn = input.buyerDummyUtxo.valueSats + input.sellerInscriptionUtxoValueSats + collected;
+  const totalIn = input.buyerDummyUtxo.valueSats + sellerUtxoValueSats + collected;
   const changeSats = totalIn - totalOut - minerFeeSats;
   if (changeSats < 0) {
-    throw new Error(
-      `native-bitcoin-listing: insufficient proven-safe buyer UTXOs to cover price + fee + miner fee (short by ${-changeSats} sats).`
+    throw new TradeApiError(
+      400,
+      "INSUFFICIENT_FUNDS",
+      `Insufficient proven-safe UTXOs to cover price + fee + miner fee (short by ${-changeSats} sats).`
     );
   }
 

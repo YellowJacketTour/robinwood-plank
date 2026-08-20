@@ -7,6 +7,7 @@ import type { Listing } from "@/lib/market/types";
 import { withImageWidth } from "@/lib/ipfs";
 import { formatTokenAmount } from "@/lib/trade";
 import type { SolanaListingVerification } from "@/app/api/market/multichain/solana-verify-listing/route";
+import ChainIcon from "@/components/market/ChainIcon";
 
 type Props = {
   listing: Listing;
@@ -24,6 +25,10 @@ type Props = {
    */
   isSolana?: boolean;
   onClose: () => void;
+  /** Real per-chain native currency this listing's priceWei is denominated in (see nativeCurrencySymbol in foreign-chain-registry.ts). Defaults to "ETH" only as a last resort -- callers should always pass the real value. */
+  currencySymbol?: string;
+  /** Real chain slug for ChainIcon's own recognizable per-chain mark instead of a plain-text ticker abbreviation. Defaults to "robinhood" to match currencySymbol's own "ETH" default. */
+  chainSlug?: string;
 };
 
 /**
@@ -34,7 +39,7 @@ type Props = {
  * real total-supply proxy (every token has exactly one value per
  * category) -- confirmed by the shape OpenSea's /traits response returns.
  */
-export default function ForeignDetailsModal({ listing, collectionName, traitCounts, isSolana, onClose }: Props) {
+export default function ForeignDetailsModal({ listing, collectionName, traitCounts, isSolana, onClose, currencySymbol = "ETH", chainSlug = "robinhood" }: Props) {
   // ON-CHAIN VERIFICATION -- fires once per modal open, for this ONE token
   // only (a bounded, single-item action, never a scan). "idle" covers both
   // "not Solana" and "haven't started yet" so the section below can render
@@ -80,7 +85,13 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
 
         <div className="flex items-center justify-between rounded-lg border border-line bg-panel px-3 py-2">
           <span className="text-xs text-foreground/60">Price</span>
-          <span className="text-sm font-bold text-gold-300 tabular-nums">{formatTokenAmount(listing.priceWei, 18, 4)} Ξ</span>
+          <span
+            className="flex items-center gap-1.5 text-[clamp(0.8rem,3.5vw,1rem)] font-bold text-gold-300 tabular-nums"
+            aria-label={`${formatTokenAmount(listing.priceWei, 18, 4)} ${currencySymbol}`}
+          >
+            {formatTokenAmount(listing.priceWei, 18, 4)}
+            <ChainIcon chainSlug={chainSlug} size={18} className="shrink-0" />
+          </span>
         </div>
 
         {/* ON-CHAIN VERIFICATION -- Solana only, this one token only. Real
