@@ -55,6 +55,8 @@ type UniSatCollectionEntry = {
   listed?: number | null;
   total?: number | null;
   supply?: number | null;
+  holders?: number | null;
+  uniqueHolders?: number | null;
 };
 
 function requireApiKey(): string {
@@ -157,6 +159,12 @@ export const unisatCollectionsAdapter: ChainAdapter = {
   },
   async fetchSnapshot({ contractAddress: collectionId }): Promise<CollectionSnapshot> {
     const entry = await unisatFetch<UniSatCollectionEntry>("/collection_statistic", { collectionId });
+    let holders: number | null = null;
+    if (typeof entry.holders === "number" && entry.holders > 0) holders = entry.holders;
+    else if (typeof entry.uniqueHolders === "number" && entry.uniqueHolders > 0) holders = entry.uniqueHolders;
+    if (holders == null) {
+      holders = await fetchUnisatHolderTotal(collectionId);
+    }
     return {
       name: entry.name ?? null,
       imageUrl: resolveIconUrl(entry.icon),
@@ -166,6 +174,23 @@ export const unisatCollectionsAdapter: ChainAdapter = {
       floorPriceMarketplace: "unisat",
       totalSupply: entry.total ?? entry.supply ?? null,
       listedCount: entry.listed ?? null,
+      holderCount: holders,
     };
   },
 };
+
+async function fetchUnisatHolderTotal(collectionId: string): Promise<number | null> {
+  const key = process.env.UNISAT_API_KEY;
+  if (!key) return null;
+  const res = await fetch(
+    `https://open-api.unisat.io/v1/collection-indexer/collection/${encodeURIComponent(collectionId)}/holders?start=0&limit=1`,
+    {
+      headers: { authorization: `Bearer ${key}`, accept: "application/json" },
+      signal: AbortSignal.timeout(12_000),
+    }
+  ).catch(() => null);
+  if (!res?.ok) return null;
+  const envelope = (await res.json().catch(() => null)) as { code?: number; data?: { total?: number } } | null;
+  const total = envelope?.data?.total;
+  return typeof total === "number" && total > 0 ? total : null;
+}

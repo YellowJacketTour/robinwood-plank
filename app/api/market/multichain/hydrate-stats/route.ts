@@ -13,7 +13,7 @@ import {
   updateCollectionFloorOnly,
   updateHolderCount,
 } from "@/lib/market/multichain/store";
-import { isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
+import { isBitcoinChainSlug, isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -30,7 +30,8 @@ const CG_PLATFORM: Record<string, string> = {
 };
 
 function nativeToWei(v: number | undefined): string | null {
-  return typeof v === "number" && Number.isFinite(v) ? BigInt(Math.round(v * 1e18)).toString() : null;
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return null;
+  return BigInt(Math.round(v * 1e18)).toString();
 }
 
 async function refreshOne(chainSlug: string, contractAddress: string): Promise<boolean> {
@@ -51,6 +52,35 @@ async function refreshOne(chainSlug: string, contractAddress: string): Promise<b
       await updateHolderCount("solana-mainnet", contractAddress, stats.uniqueHolders).catch(() => {});
     }
     return true;
+  }
+
+  if (isBitcoinChainSlug(chainSlug)) {
+    const { unisatCollectionsAdapter } = await import("@/lib/market/multichain/adapters/unisat-collections");
+    try {
+      const snap = await unisatCollectionsAdapter.fetchSnapshot({
+        chainSlug: "bitcoin-mainnet",
+        contractAddress,
+      });
+      if (snap.listedCount != null || snap.totalSupply != null) {
+        await updateCollectionSupplyFields("bitcoin-mainnet", contractAddress, {
+          listedCount: snap.listedCount,
+          totalSupply: snap.totalSupply,
+        }).catch(() => {});
+      }
+      if (snap.floorPriceWei) {
+        await updateCollectionFloorOnly("bitcoin-mainnet", contractAddress, {
+          floorPriceWei: snap.floorPriceWei,
+          floorPriceCurrency: "BTC",
+          floorPriceMarketplace: "unisat",
+        }).catch(() => {});
+      }
+      if (typeof snap.holderCount === "number" && snap.holderCount > 0) {
+        await updateHolderCount("bitcoin-mainnet", contractAddress, snap.holderCount).catch(() => {});
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   let filled = false;
