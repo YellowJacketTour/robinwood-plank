@@ -1,11 +1,22 @@
 # Handoff: Global Market + rarity + listings (bullish0x / bot harnesses)
 
-**Branch:** `dev` (do **not** merge to `master` assuming local DB = prod).  
+**Branch:** `dev` at `9e211e8` (and follow-ups on the same branch).  
 **Repo:** `YellowJacketTour/robinwood-plank`.  
 **Home collection:** RobinWood NFT `0x327ceaaedbbCf55F40d6F1aBc71bd9bC8ADCb156` on Robinhood Chain `4663`. Native UI is `/market`. Global hub is `/market/multichain`.  
 **This document is the intent map.** Code is source of truth; if they disagree, fix the code and this file together.
 
-Nothing here requires the original operator’s laptop. Keys live in InMotion env / `.env.inmotion.example`. Cron is `scripts/refresh-market-data.ts`. Tests: `node --import tsx --test test/market/*.test.ts`.
+### Bullish0x engagement (do not skip)
+
+Matches `CONTRIBUTING.md` and the 2026-08-20 multichain handoff:
+
+- **`master` deploys to InMotion / public prod.** Do **not** merge `dev` → `master` for this work. Global marketplace is **not** going public yet.
+- **`dev` is the integration branch.** This session pushed here under time pressure (same exception as the other 2026-08-20 handoff). Next code change: `git switch -c <type>/<short-description>` off `origin/dev`, PR with **`base: dev`**.
+- Merging `dev` into `master` remains **bullish0x’s explicit release decision**.
+- Prod host (`plank.tanggang.life`) will stay on whatever SHA is on `master` until that decision. Verify this stack on **local `npm run dev`** (operator used `http://localhost:3800`) or any private preview — not by shipping.
+
+**Review without shipping:** [compare `master`…`dev`](https://github.com/YellowJacketTour/robinwood-plank/compare/master...dev) · [tree at `dev`](https://github.com/YellowJacketTour/robinwood-plank/tree/dev)
+
+Nothing here requires the original operator’s laptop for *code*. Keys for live indexers live in InMotion env / `.env.inmotion.example` **after** a future master deploy. Until then, local `.env.local` / `.env.docker.local`. Cron: `scripts/refresh-market-data.ts`. Tests: `node --import tsx --test test/market/*.test.ts`.
 
 ---
 
@@ -137,7 +148,19 @@ Harness asserts: Helius for SOL, UniSat for BTC, OpenSea for AVAX+EVM, slug iden
 1. Open `/market/multichain/solana-mainnet/Claynosaurz` — ITEMS ≈ indexed N; listings page toward ME listedCount; rarity floors not stuck at 20.  
 2. Details → on-chain verify uses escrow query params.  
 3. `/market/multichain?chains=robinhood` — **RobinWood** row #1 with real listed/floor from native book; click → `/market`. Other Robinhood names visible; volume cells may still be `—`.  
-4. Do not merge `dev`→`master` because “local listings look full.”
+4. Do **not** merge `dev`→`master`. Local/dev-DB fullness ≠ prod.
+
+### Local click paths (private; not the public host)
+
+Replace host if the operator’s Next port differs (`3800` was live this session):
+
+- Native book: http://localhost:3800/market
+- Global hub: http://localhost:3800/market/multichain
+- Robinhood-only rankings (RobinWood row + scan names): http://localhost:3800/market/multichain?chains=robinhood
+- Claynosaurz (rarity ~10k, paged ME book): http://localhost:3800/market/multichain/solana-mainnet/Claynosaurz
+- Claynosaurz all items: http://localhost:3800/market/multichain/solana-mainnet/Claynosaurz?show=all
+
+Paste any of those (or a deployed **preview**, never `master`) back to the agent for a fetch. Public `https://plank.tanggang.life/…` is **old `master`** until bullish0x ships.
 
 ---
 
