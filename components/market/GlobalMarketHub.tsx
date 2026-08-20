@@ -591,7 +591,7 @@ export default function GlobalMarketHub() {
   );
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [onlyTradeable, setOnlyTradeable] = useState(() => searchParams.get("tradeable") === "1");
-  const [onlyArt, setOnlyArt] = useState(() => searchParams.get("art") === "1");
+  const [onlyArt, setOnlyArt] = useState(() => searchParams.get("art") !== "0");
   const [onlyVerifiedCreator, setOnlyVerifiedCreator] = useState(() => searchParams.get("creator") === "1");
   const [onlyListed, setOnlyListed] = useState(() => searchParams.get("listed") === "1");
   const [priceMin, setPriceMin] = useState(() => searchParams.get("min") ?? "");
@@ -817,11 +817,11 @@ export default function GlobalMarketHub() {
       return true;
     });
     return [...rows].sort((a, b) => {
-      const primary = compareByColumn(a, b, sortColumn, sortDir, "24h", hasArt);
+      const primary = compareByColumn(a, b, sortColumn, sortDir, rankingsWindow, hasArt);
       if (primary !== 0) return primary;
-      return (a.name ?? "").localeCompare(b.name ?? "");
+      return (a.name ?? a.contractAddress).localeCompare(b.name ?? b.contractAddress);
     });
-  }, [collections, chainFilter, search, sortColumn, sortDir, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, priceMin, priceMax, deadArt]);
+  }, [collections, chainFilter, search, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, priceMin, priceMax, deadArt]);
 
   useEffect(() => {
     setGridVisibleCount(GRID_PAGE_SIZE);
@@ -841,7 +841,7 @@ export default function GlobalMarketHub() {
     if (sortColumn !== "grade") params.set("sort", sortColumn);
     if (sortDir !== DEFAULT_SORT_DIR[sortColumn]) params.set("dir", sortDir);
     if (onlyTradeable) params.set("tradeable", "1");
-    if (onlyArt) params.set("art", "1");
+    if (!onlyArt) params.set("art", "0");
     if (onlyVerifiedCreator) params.set("creator", "1");
     if (onlyListed) params.set("listed", "1");
     if (priceMin.trim()) params.set("min", priceMin.trim());
@@ -871,47 +871,11 @@ export default function GlobalMarketHub() {
       .slice(0, 6);
   }, [collections, deadArt, chainFilter]);
 
-  // A single ranked table across every chain, filterable by the SAME chain
-  // pills used everywhere else on this page (one filter concept, not two
-  // parallel ones) -- reverse-engineered from OpenSea's own real rankings
-  // page (opensea.io/collections, live-checked 2026-08-19): a dense table
-  // -- Collection / Floor / 24h Change / 24h Volume / 24h Sales -- not a
-  // card grid, with chain identity carried by a badge on each row rather
-  // than by segregating chains into separate side-by-side panels. That
-  // earlier per-chain-panel version read as a horizontal scroll strip on
-  // anything narrower than a very wide desktop and hid most chains off-
-  // screen -- the opposite of "insight at a glance." Every field below is
-  // real data this app already tracks (floorPriceWei/Currency,
-  // floorChangePct, volume24hWei, sales24h) -- no owners/supply column,
-  // unlike OpenSea's own table, because this app doesn't have that data
-  // and this codebase's own standing rule is never to fabricate a metric.
-  const rankings = useMemo(() => {
-    const min = priceMin.trim() ? Number(priceMin) : null;
-    const max = priceMax.trim() ? Number(priceMax) : null;
-    const rows = collections.filter((c) => {
-      if (!hasArt(c)) return false;
-      if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
-      if (onlyTradeable && !c.tradeable) return false;
-      if (onlyVerifiedCreator && !(c.creatorHandle || c.creatorEns)) return false;
-      if (onlyListed && !(c.listedCount != null && c.listedCount > 0)) return false;
-      if (min !== null || max !== null) {
-        const p = floorNative(c);
-        if (p === null) return false;
-        if (min !== null && p < min) return false;
-        if (max !== null && p > max) return false;
-      }
-      return true;
-    });
-    return [...rows]
-      .sort((a, b) => {
-        const primary = compareByColumn(a, b, sortColumn, sortDir, rankingsWindow, hasArt);
-        if (primary !== 0) return primary;
-        const va = a.volume24hWei ? BigInt(a.volume24hWei) : BigInt(0);
-        const vb = b.volume24hWei ? BigInt(b.volume24hWei) : BigInt(0);
-        return vb > va ? 1 : vb < va ? -1 : 0;
-      })
-      .slice(0, rankingsShowCount);
-  }, [collections, deadArt, chainFilter, rankingsShowCount, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyVerifiedCreator, onlyListed, priceMin, priceMax]);
+  // Rankings is the first N rows of the SAME `filtered` list the grid
+  // renders -- one filter/sort, two presentations. Previously the table
+  // required hasArt while the grid defaulted to every tracked contract
+  // (hex + "Art pending" on Avalanche while CryptoSeals sat in rankings).
+  const rankings = useMemo(() => filtered.slice(0, rankingsShowCount), [filtered, rankingsShowCount]);
 
   // Real, per-column "does ANY row currently shown have real data here" --
   // feeds SortableTh's hasData prop (see its own header for why: sorting
