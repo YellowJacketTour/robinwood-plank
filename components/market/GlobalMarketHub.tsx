@@ -438,6 +438,7 @@ type GradeBreakdown = {
 };
 
 function hasMarketEvidence(c: TrackedCollection): boolean {
+  if (c.isNativeHome) return true;
   if (c.floorPriceWei && c.floorPriceWei !== "0") return true;
   if (c.listedCount != null && c.listedCount > 0) return true;
   if (c.volume24hWei && c.volume24hWei !== "0") return true;
@@ -451,6 +452,8 @@ function gradeBreakdown(c: TrackedCollection, artOk: boolean): GradeBreakdown {
   const hasCreator = Boolean(c.creatorHandle || c.creatorEns);
   const liveBook = c.listedCount != null && c.listedCount > 0;
   const hasFloor = Boolean(c.floorPriceWei && c.floorPriceWei !== "0");
+  const vault = Boolean(c.isVaultBacked);
+  const home = Boolean(c.isNativeHome);
   const parts: GradeBreakdown["parts"] = [
     { label: "Has real art", points: artOk ? 400 : 0, max: 400, met: artOk },
     { label: "Live listed count", points: liveBook ? 500 : 0, max: 500, met: liveBook },
@@ -458,10 +461,12 @@ function gradeBreakdown(c: TrackedCollection, artOk: boolean): GradeBreakdown {
     { label: "Real 24h volume", points: hasVolume ? 400 : 0, max: 400, met: hasVolume },
     { label: "Recent chain activity", points: Math.round(activityPoints), max: 300, met: c.recentActivity > 0 },
     { label: "Known creator handle/ENS", points: hasCreator ? 50 : 0, max: 50, met: hasCreator },
+    { label: "Native RobinWood collection", points: home ? 400 : 0, max: 400, met: home },
+    { label: "Vault / decentralized NFT liquidity (on-chain)", points: vault ? 400 : 0, max: 400, met: vault },
   ];
   return {
     score: parts.reduce((sum, p) => sum + p.points, 0),
-    gradable: artOk && hasMarketEvidence(c),
+    gradable: (artOk || home) && hasMarketEvidence(c),
     parts,
   };
 }
