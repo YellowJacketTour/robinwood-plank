@@ -74,6 +74,8 @@ export type Listing = {
    */
   chainSlug?: string;
   tokenId: string;
+  /** Human metadata name when the venue sends one (ME `token.name`, OpenSea `nft.name`). Never a fabricated title. */
+  tokenName?: string;
   /** Wallet that placed this order — the seller for a listing. */
   maker: string;
   priceWei: string;

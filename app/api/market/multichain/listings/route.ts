@@ -209,6 +209,7 @@ export async function GET(req: NextRequest) {
             id: l.tokenMint,
             collectionSlug,
             tokenId: l.tokenMint,
+            tokenName: l.token?.name ?? undefined,
             maker: l.seller,
             priceWei,
             // ME's listings endpoint returns expiry -1 for "no expiry" --
@@ -410,6 +411,7 @@ export async function GET(req: NextRequest) {
         id: order.orderHash,
         collectionSlug,
         tokenId,
+        tokenName: art?.name ?? undefined,
         maker: order.parameters.offerer,
         priceWei,
         expiresAt: new Date(Number(order.parameters.endTime) * 1000).toISOString(),

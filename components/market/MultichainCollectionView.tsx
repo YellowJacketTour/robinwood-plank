@@ -20,6 +20,8 @@ import NativeForeignOfferForm from "@/components/market/NativeForeignOfferForm";
 import NativeBundleListForm from "@/components/market/NativeBundleListForm";
 import NativeSwapForm from "@/components/market/NativeSwapForm";
 import { normalizeRarityTier, TIER_ORDER, tierCardStyle, tierGlow, tierAnimationClass } from "@/lib/rarity";
+import { computeGenericRaritySnapshot } from "@/lib/rarity-generic";
+import { displayTokenLabel, shortTokenId } from "@/lib/market/token-label";
 import FilterBar, { type MarketFilters } from "@/components/market/FilterBar";
 import { SWEEP_MAX } from "@/lib/market/sweep";
 import TraitCriteriaPicker from "@/components/market/TraitCriteriaPicker";
@@ -311,6 +313,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   // Empty map (indexed=false) is a real, expected state for a collection
   // that hasn't been indexed yet -- cards render un-tiered, never a fake rank.
   const [rarityMap, setRarityMap] = useState<Map<string, RarityLookup>>(new Map());
+  const [rarityFromIndex, setRarityFromIndex] = useState(false);
   const [raritySample, setRaritySample] = useState<{ size: number; partial: boolean } | null>(null);
 
   // DETAILS / MAKE OFFER -- real traits + collection-wide trait-frequency
@@ -650,9 +653,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           for (const [tokenId, v] of Object.entries(data.byTokenId ?? {})) {
             map.set(tokenId, { ...v, tier: normalizeRarityTier(v.tier) });
           }
+          if (map.size === 0) return false;
+          setRarityFromIndex(true);
           setRarityMap(map);
           setRaritySample({ size: data.sampleSize ?? map.size, partial: Boolean(data.partial) });
-          return map.size > 0;
+          return true;
         };
         const data = await swrJson<{
           byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number }>;
@@ -672,13 +677,28 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           }
         }
       } catch {
-        if (!cancelled) setRarityMap(new Map());
+        /* keep any listing-local snapshot */
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [chainSlug, collectionSlug]);
+
+  useEffect(() => {
+    if (rarityFromIndex) return;
+    const items = listings
+      .filter((l) => l.tokenId && (l.traits?.length ?? 0) > 0)
+      .map((l) => ({ tokenId: l.tokenId, name: l.tokenName ?? null, traits: l.traits ?? [] }));
+    if (items.length < 3) return;
+    const snap = computeGenericRaritySnapshot(items);
+    const map = new Map<string, RarityLookup>();
+    for (const [tokenId, v] of snap.byTokenId) {
+      map.set(tokenId, { name: v.name, tier: normalizeRarityTier(v.tier), rank: v.rank, percentile: v.percentile });
+    }
+    setRarityMap(map);
+    setRaritySample({ size: snap.sampleSize, partial: true });
+  }, [listings, rarityFromIndex]);
 
   const requireAccount = useCallback(async () => {
     if (account) return account;

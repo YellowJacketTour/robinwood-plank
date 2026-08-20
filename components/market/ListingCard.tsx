@@ -32,6 +32,7 @@ import EthUsdValue from "@/components/market/EthUsdValue";
 import { formatUsd } from "@/lib/eth-price";
 import { chainDisplayName } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import ChainIcon from "@/components/market/ChainIcon";
+import { displayTokenLabel, shortTokenId } from "@/lib/market/token-label";
 
 type Props = {
   listing: Listing;
@@ -114,7 +115,7 @@ export default function ListingCard({
         }`}
         role={selectable ? "button" : undefined}
         tabIndex={selectable ? 0 : undefined}
-        aria-label={selectable ? `View #${listing.tokenId}` : undefined}
+        aria-label={selectable ? `View ${displayTokenLabel({ tokenId: listing.tokenId, tokenName: listing.tokenName, rarityName: rarity?.name })}` : undefined}
         onClick={selectable ? () => onSelect!(listing.tokenId) : undefined}
         onKeyDown={
           selectable
@@ -138,7 +139,7 @@ export default function ListingCard({
           // The token's own art, not the collection logo — a grid of identical
           // logos reads as broken. Falls back only if resolution failed.
           src={withImageWidth(listing.imageUrl, 256) || collection.image}
-          alt={`${collection.name} #${listing.tokenId}`}
+          alt={`${collection.name} ${displayTokenLabel({ tokenId: listing.tokenId, tokenName: listing.tokenName, rarityName: rarity?.name })}`}
           fill
           sizes="(min-width: 1024px) 20vw, 50vw"
           className={`object-cover transition-opacity duration-200 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
@@ -179,13 +180,13 @@ export default function ListingCard({
         <div className="min-w-0 leading-tight">
           <p
             className="truncate text-xs font-bold text-foreground sm:text-sm"
-            title={listing.tokenId ? (rarity?.name ?? `#${listing.tokenId}`) : "Any plank"}
+            title={listing.tokenId ? displayTokenLabel({ tokenId: listing.tokenId, tokenName: listing.tokenName, rarityName: rarity?.name }) : "Any plank"}
           >
-            {listing.tokenId ? (rarity?.name ?? `#${listing.tokenId}`) : "Any plank"}
+            {listing.tokenId ? displayTokenLabel({ tokenId: listing.tokenId, tokenName: listing.tokenName, rarityName: rarity?.name }) : "Any plank"}
           </p>
           {listing.tokenId && (
             <p className="truncate text-[0.55rem] text-foreground/40">
-              #{listing.tokenId}
+              {shortTokenId(listing.tokenId)}
               {rarity ? ` · Rank ${rarity.rank}` : ""}
             </p>
           )}

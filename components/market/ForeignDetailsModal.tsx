@@ -11,6 +11,7 @@ import ChainIcon from "@/components/market/ChainIcon";
 import { formatRank } from "@/lib/rarity";
 import { tierColor } from "@/lib/market/rarityClient";
 import type { RarityLookup } from "@/lib/market/rarityClient";
+import { displayTokenLabel, shortTokenId } from "@/lib/market/token-label";
 
 type Props = {
   listing: Listing;
@@ -90,8 +91,7 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
     };
   }, [isSolana, listing.tokenId]);
 
-  const shortId =
-    listing.tokenId.length > 12 ? `${listing.tokenId.slice(0, 4)}…${listing.tokenId.slice(-4)}` : listing.tokenId;
+  const title = displayTokenLabel({ tokenId: listing.tokenId, tokenName: listing.tokenName, rarityName: rarity?.name });
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center" role="dialog" aria-modal="true">
@@ -99,8 +99,11 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
         <div className="flex items-start justify-between gap-2">
           <h3 className="min-w-0 font-display text-lg leading-tight text-gold-300">
             <span className="block truncate">{collectionName}</span>
-            <span className="mt-0.5 block break-all font-sans text-[0.7rem] font-semibold tracking-normal text-gold-300/80" title={listing.tokenId}>
-              #{shortId}
+            <span className="mt-0.5 block font-sans text-[0.75rem] font-semibold tracking-normal text-gold-300/80" title={listing.tokenId}>
+              {title}
+              {title !== shortTokenId(listing.tokenId) ? (
+                <span className="mt-0.5 block font-normal text-foreground/45">{shortTokenId(listing.tokenId)}</span>
+              ) : null}
             </span>
           </h3>
           <button type="button" onClick={onClose} aria-label="Close" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-foreground/60 hover:text-gold-300">

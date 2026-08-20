@@ -140,24 +140,12 @@ export type SolanaRarityIndexResult = {
   partial: boolean;
 };
 
-export async function indexSolanaCollectionRarity(collectionAddress: string): Promise<SolanaRarityIndexResult> {
-  const { mint, aliases } = await resolveCollectionMint(collectionAddress);
-  const items: GenericRarityInput[] = [];
-  let page = 1;
-  let lastPageSize = PAGE_SIZE;
-
-  const maxPages = Math.ceil(FIRST_PASS_ITEM_CAP / PAGE_SIZE);
-  while (lastPageSize === PAGE_SIZE && page <= maxPages && items.length < FIRST_PASS_ITEM_CAP) {
-    const assets = await fetchGroupedPage(mint, page);
-    items.push(...assetsToItems(assets));
-    lastPageSize = assets.length;
-    page += 1;
-  }
-
-  if (items.length === 0) {
-    throw new Error(`helius-rarity-index-runner: no member NFTs for "${collectionAddress}" (mint ${mint})`);
-  }
-  const partial = items.length >= FIRST_PASS_ITEM_CAP || (page > maxPages && lastPageSize === PAGE_SIZE);
+async function persistSolanaSnapshot(
+  collectionKey: string,
+  items: GenericRarityInput[],
+  partial: boolean,
+  aliases: string[]
+): Promise<SolanaRarityIndexResult> {
   const snapshot = { ...computeGenericRaritySnapshot(items), partial };
   const traitIndex: Record<string, Record<string, string[]>> = {};
   for (const item of items) {
@@ -167,16 +155,63 @@ export async function indexSolanaCollectionRarity(collectionAddress: string): Pr
       traitIndex[t.traitType][t.value].push(item.tokenId);
     }
   }
-
   await replaceForeignRarity(
     "solana-mainnet",
-    mint,
+    collectionKey,
     snapshot,
     traitIndex,
-    aliases.filter((a) => a !== mint)
+    aliases.filter((a) => a !== collectionKey)
   );
+  return { chainSlug: "solana-mainnet", collectionAddress: collectionKey, tokensIndexed: snapshot.byTokenId.size, partial };
+}
 
-  return { chainSlug: "solana-mainnet", collectionAddress: mint, tokensIndexed: snapshot.byTokenId.size, partial };
+async function itemsFromMagicEdenListings(symbol: string): Promise<GenericRarityInput[]> {
+  const res = await fetch(
+    `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}/listings?limit=20`,
+    { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) }
+  );
+  if (!res.ok) return [];
+  const raw = (await res.json()) as Array<{
+    tokenMint?: string;
+    token?: { name?: string | null; attributes?: Array<{ trait_type?: string; value?: string | number | null }> };
+  }>;
+  return raw
+    .filter((l) => l.tokenMint)
+    .map((l) => ({
+      tokenId: l.tokenMint!,
+      name: l.token?.name ?? null,
+      traits: (l.token?.attributes ?? [])
+        .filter((a) => a.trait_type && a.value != null)
+        .map((a) => ({ traitType: a.trait_type!, value: String(a.value) })),
+    }));
+}
+
+export async function indexSolanaCollectionRarity(collectionAddress: string): Promise<SolanaRarityIndexResult> {
+  try {
+    const { mint, aliases } = await resolveCollectionMint(collectionAddress);
+    const items: GenericRarityInput[] = [];
+    let page = 1;
+    let lastPageSize = PAGE_SIZE;
+
+    const maxPages = Math.ceil(FIRST_PASS_ITEM_CAP / PAGE_SIZE);
+    while (lastPageSize === PAGE_SIZE && page <= maxPages && items.length < FIRST_PASS_ITEM_CAP) {
+      const assets = await fetchGroupedPage(mint, page);
+      items.push(...assetsToItems(assets));
+      lastPageSize = assets.length;
+      page += 1;
+    }
+
+    if (items.length === 0) {
+      throw new Error(`helius-rarity-index-runner: no member NFTs for "${collectionAddress}" (mint ${mint})`);
+    }
+    const partial = items.length >= FIRST_PASS_ITEM_CAP || (page > maxPages && lastPageSize === PAGE_SIZE);
+    return persistSolanaSnapshot(mint, items, partial, aliases);
+  } catch (primary) {
+    const listed = await itemsFromMagicEdenListings(collectionAddress);
+    const withTraits = listed.filter((i) => i.traits.length > 0);
+    if (withTraits.length === 0) throw primary;
+    return persistSolanaSnapshot(collectionAddress, withTraits, true, []);
+  }
 }
 
 export type ScaffoldSolanaResult = {
