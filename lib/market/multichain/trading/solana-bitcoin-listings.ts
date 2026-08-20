@@ -108,19 +108,7 @@ async function postUniSatAuctionList(key: string, collectionId: string, limit: n
   });
 }
 
-export async function fetchUniSatListings(collectionId: string, limit: number): Promise<SimpleListing[]> {
-  const key = requireUnisatApiKey();
-  let res = await postUniSatAuctionList(key, collectionId, limit);
-  if (res.status === 403) {
-    await new Promise((r) => setTimeout(r, 1500));
-    res = await postUniSatAuctionList(key, collectionId, limit);
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`solana-bitcoin-listings: UniSat ${res.status} ${res.statusText} -- ${body.slice(0, 200)}`);
-  }
-  const body = (await res.json()) as { data?: { list?: UniSatAuctionEntry[] } };
-  const list = body.data?.list ?? [];
+function mapUniSatList(list: UniSatAuctionEntry[]): SimpleListing[] {
   return list.map((l) => ({
     id: l.auctionId,
     tokenId: l.inscriptionId,
@@ -129,4 +117,36 @@ export async function fetchUniSatListings(collectionId: string, limit: number): 
     imageUrl: `https://ordinals.com/content/${l.inscriptionId}`,
     name: l.collectionItemName ?? null,
   }));
+}
+
+export async function fetchUniSatListings(collectionId: string, limit: number): Promise<SimpleListing[]> {
+  const key = requireUnisatApiKey();
+  const cacheKey = `plank:market:unisat-listings:${collectionId.toLowerCase()}`;
+  let res = await postUniSatAuctionList(key, collectionId, limit);
+  if (res.status === 403 || res.status === 429) {
+    await new Promise((r) => setTimeout(r, 1500));
+    res = await postUniSatAuctionList(key, collectionId, limit);
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    try {
+      const { durableKv } = await import("@/lib/market/durable-kv");
+      const cached = await durableKv.get<SimpleListing[]>(cacheKey);
+      if (cached && cached.length > 0) return cached;
+    } catch {
+      // no cache
+    }
+    throw new Error(`solana-bitcoin-listings: UniSat ${res.status} ${res.statusText} -- ${body.slice(0, 200)}`);
+  }
+  const body = (await res.json()) as { data?: { list?: UniSatAuctionEntry[] } };
+  const mapped = mapUniSatList(body.data?.list ?? []);
+  if (mapped.length > 0) {
+    try {
+      const { durableKv } = await import("@/lib/market/durable-kv");
+      await durableKv.set(cacheKey, mapped, { ex: 15 * 60 });
+    } catch {
+      // cache is best-effort
+    }
+  }
+  return mapped;
 }

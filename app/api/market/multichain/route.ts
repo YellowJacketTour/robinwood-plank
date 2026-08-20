@@ -115,9 +115,11 @@ export async function GET(req: Request) {
         // updateCollectionMarketStats's header) -- OpenSea's stats
         // endpoint has no floor-change field at all.
         floorChangePct:
-          c.previousFloorPriceWei && c.floorPriceWei && BigInt(c.previousFloorPriceWei) > BigInt(0)
-            ? (Number(BigInt(c.floorPriceWei) - BigInt(c.previousFloorPriceWei)) / Number(BigInt(c.previousFloorPriceWei))) * 100
-            : null,
+          c.floorChangePct != null && Number.isFinite(c.floorChangePct)
+            ? c.floorChangePct
+            : c.previousFloorPriceWei && c.floorPriceWei && BigInt(c.previousFloorPriceWei) > BigInt(0)
+              ? (Number(BigInt(c.floorPriceWei) - BigInt(c.previousFloorPriceWei)) / Number(BigInt(c.previousFloorPriceWei))) * 100
+              : null,
       })),
     });
   } catch (error) {

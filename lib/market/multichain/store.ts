@@ -214,6 +214,7 @@ export async function updateCollectionMarketStats(
     sales7d?: number | null;
     volume30dWei?: string | null;
     sales30d?: number | null;
+    floorChangePct?: number | null;
   }
 ): Promise<void> {
   const collection = await postgresQuery<{ id: number }>(
@@ -224,10 +225,10 @@ export async function updateCollectionMarketStats(
   if (!id) return;
   await postgresQuery(
     `UPDATE plank_multichain_snapshots
-     SET previous_floor_price_wei = COALESCE(floor_price_wei, previous_floor_price_wei),
-         volume_24h_wei = $2, sales_24h = $3,
+     SET volume_24h_wei = $2, sales_24h = $3,
          volume_7d_wei = $4, sales_7d = $5,
-         volume_30d_wei = $6, sales_30d = $7
+         volume_30d_wei = $6, sales_30d = $7,
+         floor_change_pct = COALESCE($8, floor_change_pct)
      WHERE collection_id = $1`,
     [
       id,
@@ -237,6 +238,7 @@ export async function updateCollectionMarketStats(
       stats.sales7d ?? null,
       stats.volume30dWei ?? null,
       stats.sales30d ?? null,
+      stats.floorChangePct ?? null,
     ]
   );
 }
@@ -320,6 +322,14 @@ export async function updateCollectionFloorOnly(
        total_supply = COALESCE(plank_multichain_snapshots.total_supply, EXCLUDED.total_supply),
        listed_count = COALESCE(plank_multichain_snapshots.listed_count, EXCLUDED.listed_count),
        holder_count = COALESCE(plank_multichain_snapshots.holder_count, EXCLUDED.holder_count),
+       previous_floor_price_wei = CASE
+         WHEN EXCLUDED.floor_price_wei IS NOT NULL
+          AND plank_multichain_snapshots.floor_price_wei IS NOT NULL
+          AND EXCLUDED.floor_price_wei IS DISTINCT FROM plank_multichain_snapshots.floor_price_wei
+          AND plank_multichain_snapshots.synced_at < NOW() - INTERVAL '20 hours'
+         THEN plank_multichain_snapshots.floor_price_wei
+         ELSE plank_multichain_snapshots.previous_floor_price_wei
+       END,
        synced_at = NOW(),
        sync_error = NULL`,
     [id, floor.floorPriceWei, floor.floorPriceCurrency, floor.floorPriceMarketplace]
@@ -387,6 +397,14 @@ export async function writeSnapshot(
        total_supply = COALESCE(EXCLUDED.total_supply, plank_multichain_snapshots.total_supply),
        listed_count = COALESCE(EXCLUDED.listed_count, plank_multichain_snapshots.listed_count),
        holder_count = COALESCE(EXCLUDED.holder_count, plank_multichain_snapshots.holder_count),
+       previous_floor_price_wei = CASE
+         WHEN EXCLUDED.floor_price_wei IS NOT NULL
+          AND plank_multichain_snapshots.floor_price_wei IS NOT NULL
+          AND EXCLUDED.floor_price_wei IS DISTINCT FROM plank_multichain_snapshots.floor_price_wei
+          AND plank_multichain_snapshots.synced_at < NOW() - INTERVAL '20 hours'
+         THEN plank_multichain_snapshots.floor_price_wei
+         ELSE plank_multichain_snapshots.previous_floor_price_wei
+       END,
        synced_at = NOW(),
        sync_error = NULL`,
     [
@@ -429,6 +447,8 @@ export type CollectionWithSnapshot = TrackedCollection & {
   previousFloorPriceWei: string | null;
   /** Real distinct-owner count (Alchemy getOwnersForContract, EVM chains only) -- null, never a fabricated 0. */
   holderCount: number | null;
+  /** Real 24h floor change % when a source reports it (CoinGecko) or when previous_floor is a ~24h-old observation. */
+  floorChangePct: number | null;
 };
 
 /** Everything the read API needs in one query — collections joined to their latest snapshot. */
@@ -450,13 +470,14 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
       sales_30d: number | null;
       previous_floor_price_wei: string | null;
       holder_count: number | null;
+      floor_change_pct: number | null;
     }
   >(
     `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url, c.is_vault_backed,
             c.creator_handle, c.creator_address, c.creator_ens,
             s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count, s.synced_at, s.sync_error,
             s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d, s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei,
-            s.holder_count
+            s.holder_count, s.floor_change_pct
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
      ORDER BY c.chain_slug, c.contract_address`
@@ -478,6 +499,7 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
     sales30d: row.sales_30d,
     previousFloorPriceWei: row.previous_floor_price_wei,
     holderCount: row.holder_count,
+    floorChangePct: row.floor_change_pct,
   }));
 }
 

@@ -210,6 +210,8 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
       const detail = (await res.json()) as NftDetail;
       const volume24hWei = toWeiString(detail.volume_24h?.native_currency);
       const sales24h = typeof detail.one_day_sales === "number" ? detail.one_day_sales : null;
+      const change = detail.floor_price_24h_percentage_change?.native_currency;
+      const floorChangePct = typeof change === "number" && Number.isFinite(change) ? change : null;
       // No currentFloorPriceWei write here -- that field is populated by
       // this chain's own real fetchSnapshot adapter (unisat-collections /
       // magiceden-solana), never overwritten by this stats-only pass.
@@ -217,6 +219,7 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
         volume24hWei,
         sales24h,
         currentFloorPriceWei: null,
+        floorChangePct,
       });
       updated += 1;
     } catch {
