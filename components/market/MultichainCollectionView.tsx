@@ -130,6 +130,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const account = isNonEvm ? nonEvmAccount : evmAccount;
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
+  const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>>([]);
+  const [bookFilter, setBookFilter] = useState<"all" | "listed">("all");
   /** Real listed-count/total-supply/holder-count from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. holderCount is EVM-only (Alchemy getOwnersForContract) and may arrive later than the rest via the on-demand /api/market/multichain/holder-count backfill below. */
   const [supplyStats, setSupplyStats] = useState<{
     listedCount: number | null;
@@ -309,19 +311,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      // Collection identity comes from the SAME response as the listings.
-      // An earlier version looked it up in /api/market/multichain by
-      // matching contractAddress against collectionSlug -- those are
-      // different identifiers entirely (an OpenSea slug like "gribbits" is
-      // never a 0x address), so the lookup silently never matched and every
-      // card fell back to an EMPTY image src. Real-browser loading caught
-      // it: 120 console errors and an art-less grid. One source, no
-      // cross-referencing by mismatched key.
-      // Listing state (price/availability) can change within seconds --
-      // short ttl so a background revalidation kicks in almost every time
-      // this collection is revisited, while still giving instant paint
-      // from cache on rapid re-renders/filter changes within this window.
-      const data = await swrJson<{
+      const ident = await swrJson<{
         collection: {
           slug: string;
           name: string;
@@ -338,13 +328,34 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           holderCount: number | null;
           floorPriceWei?: string | null;
         };
+      }>(`/api/market/multichain/collection?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`, {
+        ttlMs: 30_000,
+        swrMs: 120_000,
+        session: true,
+      });
+      const data = ident;
+      void swrJson<{
         listings: Listing[];
         listingsUnavailable?: string | null;
+        collection?: { listedCount?: number | null; floorPriceWei?: string | null };
       }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=40`, {
         ttlMs: 8_000,
         swrMs: 45_000,
         session: true,
-      });
+      })
+        .then((book) => {
+          setListings(book.listings ?? []);
+          setListingsUnavailable(book.listingsUnavailable ?? null);
+        })
+        .catch(() => {
+          setListingsUnavailable("book-unavailable");
+        });
+      void swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }> }>(
+        `/api/market/multichain/tokens?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=40`,
+        { ttlMs: 60_000, swrMs: 300_000, session: true }
+      )
+        .then((tok) => setTokens(tok.tokens ?? []))
+        .catch(() => setTokens([]));
       // MarketCollection carries Robinhood-Chain-specific bookkeeping
       // (feeBps/royaltyBps/royaltyRecipient) that has no meaning for a
       // foreign collection -- real royalty is whatever the real Seaport
@@ -394,10 +405,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         volume30dWei: data.collection.volume30dWei,
         sales30d: data.collection.sales30d,
       });
-      setListings(data.listings ?? []);
-      setListingsUnavailable(data.listingsUnavailable ?? null);
     } catch {
-      setLoadError("Could not load this collection's listings right now.");
+      setLoadError("Could not load this collection.");
     } finally {
       setLoading(false);
     }
@@ -979,6 +988,31 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     return rows;
   }, [listings, searchQuery, minPriceEth, maxPriceEth, traitClauses, activeTier, rarityMap, listingSort]);
 
+  const listingByToken = useMemo(() => {
+    const map = new Map<string, Listing>();
+    for (const l of filteredListings) map.set(l.tokenId, l);
+    return map;
+  }, [filteredListings]);
+
+  const browseItems = useMemo(() => {
+    if (bookFilter === "listed" || tokens.length === 0) {
+      return filteredListings.map((listing) => ({ tokenId: listing.tokenId, name: null, imageUrl: listing.imageUrl ?? null, listing }));
+    }
+    const fromTokens = tokens.map((t) => ({
+      tokenId: t.tokenId,
+      name: t.name,
+      imageUrl: t.imageUrl,
+      listing: listingByToken.get(t.tokenId) ?? null,
+    }));
+    const extra = filteredListings.filter((l) => !tokens.some((t) => t.tokenId === l.tokenId)).map((listing) => ({
+      tokenId: listing.tokenId,
+      name: null,
+      imageUrl: listing.imageUrl ?? null,
+      listing,
+    }));
+    return [...fromTokens, ...extra];
+  }, [bookFilter, tokens, filteredListings, listingByToken]);
+
   // URL persistence -- reflects real filter/sort state into the query
   // string (router.replace, not push, so browsing doesn't spam history),
   // same pattern PortfolioView.tsx's own ?wallet= param and
@@ -1521,9 +1555,9 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       <MarketTabPanel id="buy-sell" active={tab === "buy-sell"}>
         <MarketBrowseLayout
           summary={
-            listingsUnavailable && supplyStats?.listedCount != null
-              ? `${supplyStats.listedCount.toLocaleString()} listed on ${chainDisplayName(chainSlug)}`
-              : `${filteredListings.length} ${filteredListings.length === 1 ? "item" : "items"} on ${chainDisplayName(chainSlug)}`
+            bookFilter === "listed"
+              ? `${filteredListings.length} listed on ${chainDisplayName(chainSlug)}`
+              : `${browseItems.length} items on ${chainDisplayName(chainSlug)}`
           }
           lead={
             rarityMap.size > 0 && listings.length > 0 ? (
@@ -1540,6 +1574,24 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           }
           filters={
             <div className="space-y-3">
+              <div className="mb-3">
+                <p className="mb-1 text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Show</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(["all", "listed"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setBookFilter(mode)}
+                      aria-pressed={bookFilter === mode}
+                      className={`min-h-8 rounded-md border px-2.5 text-xs font-bold ${
+                        bookFilter === mode ? "border-gold-400 bg-gold-400/15 text-gold-300" : "border-line text-foreground/55 hover:text-gold-300"
+                      }`}
+                    >
+                      {mode === "all" ? "All items" : "Listed only"}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div>
                 <label htmlFor="mc-search" className="mb-1 block text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">
                   Token #
@@ -1722,47 +1774,46 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             )
           }
         >
-          {filteredListings.length === 0 ? (
+          {browseItems.length === 0 ? (
             <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line bg-panel-strong px-4 py-10 text-center">
               <PackageOpen size={28} strokeWidth={1.75} className="text-gold-400/70" aria-hidden />
               <p className="text-sm font-bold text-foreground/75">
-                {filtersActive
-                  ? "No listings match your search."
-                  : listingsUnavailable
-                    ? "Live listings are temporarily unavailable from the venue (rate limit)."
-                    : "No listings right now."}
+                {filtersActive ? "No items match your search." : bookFilter === "listed" ? "No live listings in this page." : "No items loaded for this collection yet."}
               </p>
               <p className="text-xs text-foreground/45">
-                {filtersActive
-                  ? "Try widening your price range or clearing a filter."
-                  : listingsUnavailable
-                    ? "Collection identity, stats, and sell/offer tools stay on this page — retry in a minute."
-                    : "Check back soon, or watch this collection for the next drop."}
+                {filtersActive ? "Try widening your price range or clearing a filter." : "Identity and tools stay on this page. Instant Swap vaults for foreign collections come later."}
               </p>
             </div>
           ) : (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              {/* Solana gets single-token offers too, via Magic Eden's real
-                  /instructions/buy bid endpoint (placeSolanaOfferNow) --
-                  foreignOfferCurrency itself stays EVM-only (it resolves a
-                  WETH/WBNB/WAVAX address, which has no Solana meaning). No
-                  Bitcoin equivalent was found (see foreign-fulfill.ts's
-                  placeSolanaOfferNow header), so Bitcoin still gets no
-                  onOffer here. */}
-              {filteredListings.map((listing) => (
+              {browseItems.map((item) =>
+                item.listing ? (
                 <ListingCard
-                  key={listing.id}
-                  listing={listing}
+                  key={item.listing.id}
+                  listing={item.listing}
                   collection={collection}
                   onBuy={(l) => void handleBuy(l)}
                   onOffer={foreignOfferCurrency(chainSlug) || isSolana ? (l) => void openOffer(l) : undefined}
                   onSelect={(tokenId) => void openDetails(tokenId)}
-                  rarity={rarityMap.get(listing.tokenId)}
+                  rarity={rarityMap.get(item.listing.tokenId)}
                   currencySymbol={statCurrencySymbol}
                   chainSlug={chainSlug}
-                  usdValue={statUsd(listing.priceWei)}
+                  usdValue={statUsd(item.listing.priceWei)}
                 />
-              ))}
+                ) : (
+                  <li key={item.tokenId} className="overflow-hidden rounded-lg border border-line bg-panel">
+                    <div className="relative aspect-square bg-wood-900">
+                      {item.imageUrl ? (
+                        <Image src={item.imageUrl} alt="" fill sizes="200px" className="object-cover" unoptimized />
+                      ) : null}
+                    </div>
+                    <div className="space-y-1 p-2">
+                      <p className="truncate text-xs font-bold text-foreground">{item.name ?? `#${item.tokenId.slice(0, 8)}`}</p>
+                      <p className="text-[0.6rem] uppercase tracking-wide text-foreground/40">Unlisted</p>
+                    </div>
+                  </li>
+                )
+              )}
             </ul>
           )}
         </MarketBrowseLayout>
