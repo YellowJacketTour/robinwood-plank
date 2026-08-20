@@ -8,6 +8,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { swrJson, invalidateSwr } from "@/lib/market/swr-fetch";
 import { NFT_CONTRACT_ADDRESS } from "@/lib/mint-contract";
+import { isSpamCollectionTitle } from "@/lib/market/collection-title";
 import ChainIcon from "@/components/market/ChainIcon";
 import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
@@ -963,6 +964,7 @@ export default function GlobalMarketHub() {
     const max = priceMax.trim() ? Number(priceMax) : null;
     const rows = collections.filter((c) => {
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
+      if (isSpamCollectionTitle(c.name)) return false;
       if (q && !(c.name ?? "").toLowerCase().includes(q)) return false;
       if (onlyTradeable && !c.tradeable) return false;
       const oneChain = chainFilter.size === 1;
