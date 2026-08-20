@@ -858,7 +858,10 @@ export default function GlobalMarketHub() {
   // carousel (flagged live 2026-08-18: the single-card banner "isn't
   // immersive"), not a single static banner.
   const topMovers = useMemo(() => {
-    const candidates = collections.filter((c) => c.tradeable && hasArt(c) && c.volume24hWei && c.volume24hWei !== "0");
+    const candidates = collections.filter((c) => {
+      if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
+      return c.tradeable && hasArt(c) && c.volume24hWei && c.volume24hWei !== "0";
+    });
     return candidates
       .sort((a, b) => {
         const g = gradeScore(b, true) - gradeScore(a, true);
@@ -866,7 +869,7 @@ export default function GlobalMarketHub() {
         return Number(BigInt(b.volume24hWei!) - BigInt(a.volume24hWei!));
       })
       .slice(0, 6);
-  }, [collections, deadArt]);
+  }, [collections, deadArt, chainFilter]);
 
   // A single ranked table across every chain, filterable by the SAME chain
   // pills used everywhere else on this page (one filter concept, not two
@@ -1252,8 +1255,7 @@ export default function GlobalMarketHub() {
         </div>
       )}
 
-      {rankings.length > 0 && (
-        <div className="space-y-2">
+      <div className="space-y-2">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <p className="text-[0.65rem] font-black uppercase tracking-wider text-foreground/40">Rankings · 24h</p>
             {chainFilter.size > 0 && (
@@ -1358,6 +1360,16 @@ export default function GlobalMarketHub() {
               Live
             </span>
           </div>
+          {rankings.length === 0 ? (
+            <EmptyState
+              title="No collections with art yet on this chain"
+              body={
+                chainFilter.size > 0
+                  ? "Rankings only list collections that already have real artwork. The chain filter is still on — cards below may still show activity with art pending."
+                  : "Rankings only list collections that already have real artwork. Nothing currently tracked qualifies."
+              }
+            />
+          ) : (
           <div className="overflow-x-auto rounded-lg border border-line bg-panel">
             <table className="w-full min-w-[36rem] border-collapse text-sm">
               <thead>
@@ -1518,6 +1530,7 @@ export default function GlobalMarketHub() {
               </tbody>
             </table>
           </div>
+          )}
 
           {/* Window + Show-top controls side by side, not stacked -- flagged live ("dont need to be stacked and leave all that empty space"): both are short single-row button groups with real horizontal room to share a line on anything wider than a phone. */}
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
@@ -1562,7 +1575,6 @@ export default function GlobalMarketHub() {
             </div>
           </div>
         </div>
-      )}
 
       {/*
        * Biggest Movers -- Magic Eden's real secondary strip (live-checked

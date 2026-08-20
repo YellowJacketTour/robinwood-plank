@@ -22,7 +22,7 @@ import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/l
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { postgresQuery } from "@/lib/postgres";
-import { updateCollectionMarketStats, updateCollectionFloorOnly } from "@/lib/market/multichain/store";
+import { updateCollectionMarketStats, updateCollectionFloorOnly, updateCollectionDisplay } from "@/lib/market/multichain/store";
 import { durableKv as kv } from "@/lib/market/durable-kv";
 
 const SOURCE = "opensea-stats";
@@ -41,6 +41,39 @@ export type OpenSeaCollectionStats = {
   volume24hWei: string | null;
   sales24h: number | null;
 };
+
+export type OpenSeaCollectionDisplay = {
+  name: string | null;
+  imageUrl: string | null;
+};
+
+/** True when OpenSea's own `name` is just the contract (ONESHOT Avalanche pattern) — never store that as a collection title. */
+export function isHexLikeCollectionName(name: string): boolean {
+  const t = name.trim();
+  if (/^0x[0-9a-fA-F]{8,}$/.test(t)) return true;
+  if (/^[0-9a-fA-F]{40}$/.test(t)) return true;
+  return false;
+}
+
+export function sanitizeOpenSeaCollectionName(name: string | null | undefined): string | null {
+  if (name == null) return null;
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.toLowerCase() === "null" || isHexLikeCollectionName(trimmed)) return null;
+  return trimmed;
+}
+
+export function sanitizeOpenSeaImageUrl(url: string | null | undefined): string | null {
+  if (url == null) return null;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.toLowerCase() === "null") return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return trimmed;
+  } catch {
+    return null;
+  }
+}
 
 function toWeiString(decimalAmount: number | null | undefined): string | null {
   if (decimalAmount == null || !Number.isFinite(decimalAmount) || decimalAmount <= 0 || decimalAmount > MAX_PLAUSIBLE_FLOOR) return null;
@@ -134,6 +167,42 @@ export async function fetchOpenSeaCollectionStats(slug: string, apiKey: string):
   };
 }
 
+/** Exact-slug collection object — name/image only. Null fields stay null (fail closed). */
+export async function fetchOpenSeaCollectionDisplay(slug: string, apiKey: string): Promise<OpenSeaCollectionDisplay | null> {
+  const gate = checkSourceBudget(SOURCE);
+  if (!gate.allowed) return null;
+
+  let res: Response;
+  try {
+    res = await fetch(`${OPENSEA_BASE}/collections/${encodeURIComponent(slug)}`, {
+      headers: { "x-api-key": apiKey, accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    recordSourceFailure(SOURCE, false);
+    return null;
+  }
+
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => "");
+    recordSourceFailure(SOURCE, isQuotaError(res.status, bodyText));
+    return null;
+  }
+
+  let body: { name?: string | null; image_url?: string | null };
+  try {
+    body = (await res.json()) as { name?: string | null; image_url?: string | null };
+  } catch {
+    recordSourceFailure(SOURCE, false);
+    return null;
+  }
+  recordSourceSuccess(SOURCE);
+  return {
+    name: sanitizeOpenSeaCollectionName(body.name),
+    imageUrl: sanitizeOpenSeaImageUrl(body.image_url),
+  };
+}
+
 function slugCacheKey(chainSlug: string, contractAddress: string): string {
   return `plank:market:opensea-slug:${chainSlug}:${contractAddress.toLowerCase()}`;
 }
@@ -143,6 +212,7 @@ export type OpenSeaStatsSyncResult = {
   candidates: number;
   slugResolved: number;
   updated: number;
+  displayUpdated: number;
   errors: number;
 };
 
@@ -159,7 +229,7 @@ export type OpenSeaStatsSyncResult = {
  * resolved once, not re-resolved every sync pass.
  */
 export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): Promise<OpenSeaStatsSyncResult> {
-  const result: OpenSeaStatsSyncResult = { chainSlug, candidates: 0, slugResolved: 0, updated: 0, errors: 0 };
+  const result: OpenSeaStatsSyncResult = { chainSlug, candidates: 0, slugResolved: 0, updated: 0, displayUpdated: 0, errors: 0 };
   const chain = foreignChainByChainSlug(chainSlug);
   if (!chain?.openSeaChain) return result;
 
@@ -196,6 +266,17 @@ export async function runOpenSeaStatsSync(chainSlug: string, maxUpdates = 25): P
     if (!stats) {
       result.errors += 1;
       continue;
+    }
+    const display = await fetchOpenSeaCollectionDisplay(slug, apiKey);
+    if (display && (display.name || display.imageUrl)) {
+      await updateCollectionDisplay(chainSlug, row.contract_address, {
+        name: display.name,
+        imageUrl: display.imageUrl,
+      }).then(() => {
+        result.displayUpdated += 1;
+      }).catch(() => {
+        result.errors += 1;
+      });
     }
     if (stats.floorPriceWei != null) {
       await updateCollectionFloorOnly(chainSlug, row.contract_address, {
