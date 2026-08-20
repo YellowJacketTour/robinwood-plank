@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const chainSlug = searchParams.get("chainSlug");
   const collectionSlug = searchParams.get("collectionSlug");
-  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "40"), 1), 50);
+  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? "40"), 1), 2000);
   if (!chainSlug || !collectionSlug) {
     return NextResponse.json({ error: "chainSlug and collectionSlug are required" }, { status: 400 });
   }
@@ -124,6 +124,10 @@ function mapUniSatItems(list: UniSatItem[]): CollectionToken[] {
 }
 
 async function bitcoinTokens(collectionId: string, limit: number): Promise<CollectionToken[]> {
+  const { fetchOrdinalsWalletCatalog } = await import("@/lib/market/multichain/adapters/ordinalswallet-catalog");
+  const ow = await fetchOrdinalsWalletCatalog(collectionId).catch(() => ({ tokens: [] as CollectionToken[] }));
+  if (ow.tokens.length > 0) return ow.tokens.slice(0, limit);
+
   const key = process.env.UNISAT_API_KEY?.trim();
   if (!key) return [];
   const headers = { "content-type": "application/json", authorization: `Bearer ${key}` };

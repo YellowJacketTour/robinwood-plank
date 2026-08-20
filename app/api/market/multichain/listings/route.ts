@@ -47,6 +47,32 @@ const OPENSEA = "https://api.opensea.io/api/v2";
 /** Bounds the per-token art fan-out. Distinct tokens are usually few (see header); this only guards a pathological case. */
 const MAX_ART_LOOKUPS = 30;
 
+function mapBitcoinListings(
+  collectionSlug: string,
+  chainSlug: string,
+  raw: Array<{ id: string; tokenId: string; maker: string; priceWei: string; imageUrl: string | null }>,
+  buyable: boolean
+): Listing[] {
+  return [...raw]
+    .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1))
+    .map((l) => ({
+      id: l.id,
+      collectionSlug,
+      tokenId: l.tokenId,
+      maker: l.maker,
+      priceWei: l.priceWei,
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+      kind: "fixed" as const,
+      imageUrl: l.imageUrl ?? undefined,
+      venue: "unisat" as const,
+      externalUrl: `https://unisat.io/inscription/${l.tokenId}`,
+      foreignChainSlug: chainSlug,
+      // UniSat auctionId only -- Ordinals Wallet escrow prices are display
+      // overlays and cannot be filled via create_bid_prepare.
+      foreignOrderHash: buyable ? l.id : undefined,
+    }));
+}
+
 /** Hub identity (name/image/stats) for the collection page even when a listings venue is rate-limited or empty. */
 async function collectionEnvelope(
   chainSlug: string,
@@ -235,30 +261,19 @@ export async function GET(req: NextRequest) {
     try {
       const { fetchUniSatListings } = await import("@/lib/market/multichain/trading/solana-bitcoin-listings");
       const raw = await fetchUniSatListings(collectionSlug, Math.min(limit, 20));
-      const listings: Listing[] = raw
-        .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1))
-        .map((l) => ({
-          id: l.id,
-          collectionSlug,
-          tokenId: l.tokenId,
-          maker: l.maker,
-          priceWei: l.priceWei,
-          // UniSat Ordinals listings have no fixed expiry the way a Seaport
-          // order does -- same honest far-future display-only placeholder
-          // as the Solana branch above, never used to gate buyability.
-          expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-          kind: "fixed" as const,
-          imageUrl: l.imageUrl ?? undefined,
-          venue: "unisat" as const,
-          externalUrl: `https://unisat.io/inscription/${l.tokenId}`,
-          foreignChainSlug: chainSlug,
-          // The real UniSat auctionId (l.id), NOT the inscriptionId
-          // (l.tokenId) -- buyBitcoinListingNow needs this exact value to
-          // call create_bid_prepare/create_bid, see solana-bitcoin-listings.ts's
-          // own header on why the inscriptionId alone is not a valid
-          // listing identifier for UniSat's real current buy-flow API.
-          foreignOrderHash: l.id,
-        }));
+      const listings: Listing[] = mapBitcoinListings(collectionSlug, chainSlug, raw, true);
+      if (listings.length === 0) {
+        const { fetchOrdinalsWalletCatalog } = await import("@/lib/market/multichain/adapters/ordinalswallet-catalog");
+        const ow = await fetchOrdinalsWalletCatalog(collectionSlug);
+        return NextResponse.json(
+          {
+            collection: await collectionEnvelope(chainSlug, collectionSlug),
+            listings: mapBitcoinListings(collectionSlug, chainSlug, ow.listings, false),
+            listingsUnavailable: ow.listings.length > 0 ? null : "unisat-rate-limit",
+          },
+          { headers: { "Cache-Control": "no-store" } }
+        );
+      }
       return NextResponse.json(
         {
           collection: await collectionEnvelope(chainSlug, collectionSlug),
@@ -269,10 +284,12 @@ export async function GET(req: NextRequest) {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       if (/403|rate limit|-2006/i.test(msg)) {
+        const { fetchOrdinalsWalletCatalog } = await import("@/lib/market/multichain/adapters/ordinalswallet-catalog");
+        const ow = await fetchOrdinalsWalletCatalog(collectionSlug).catch(() => ({ listings: [] }));
         return NextResponse.json(
           {
             collection: await collectionEnvelope(chainSlug, collectionSlug),
-            listings: [],
+            listings: mapBitcoinListings(collectionSlug, chainSlug, ow.listings, false),
             listingsUnavailable: "unisat-rate-limit",
           },
           { headers: { "Cache-Control": "no-store" } }

@@ -351,7 +351,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           setListingsUnavailable("book-unavailable");
         });
       void swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }> }>(
-        `/api/market/multichain/tokens?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=50`,
+        `/api/market/multichain/tokens?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=${isBitcoin ? 2000 : 50}`,
         { ttlMs: 60_000, swrMs: 300_000, session: true }
       )
         .then((tok) => setTokens(tok.tokens ?? []))
@@ -1444,8 +1444,8 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             {collection.name}
           </h2>
           <p className="text-xs text-foreground/50">
-            {listingsUnavailable && supplyStats?.listedCount != null
-              ? `${supplyStats.listedCount.toLocaleString()} listed on ${chainDisplayName(chainSlug)} · live book temporarily unavailable`
+            {supplyStats?.listedCount != null
+              ? `${supplyStats.listedCount.toLocaleString()} listed of ${supplyStats.totalSupply != null ? supplyStats.totalSupply.toLocaleString() : "—"} on ${chainDisplayName(chainSlug)}${listingsUnavailable ? " · UniSat book delayed" : ""}`
               : `${listings.length} listing${listings.length === 1 ? "" : "s"} on ${chainDisplayName(chainSlug)}`}
           </p>
             </div>
