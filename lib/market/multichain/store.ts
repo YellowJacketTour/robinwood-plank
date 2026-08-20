@@ -250,15 +250,55 @@ export async function updateCollectionMarketStats(
      WHERE collection_id = $1`,
     [
       id,
-      stats.volume24hWei,
-      stats.sales24h,
-      stats.volume7dWei ?? null,
-      stats.sales7d ?? null,
-      stats.volume30dWei ?? null,
-      stats.sales30d ?? null,
-      stats.floorChangePct ?? null,
+      nonzeroWei(stats.volume24hWei),
+      nonzeroCount(stats.sales24h),
+      nonzeroWei(stats.volume7dWei ?? null),
+      nonzeroCount(stats.sales7d ?? null),
+      nonzeroWei(stats.volume30dWei ?? null),
+      nonzeroCount(stats.sales30d ?? null),
+      stats.floorChangePct === 0 ? null : (stats.floorChangePct ?? null),
     ]
   );
+}
+
+function nonzeroWei(v: string | null | undefined): string | null {
+  if (v == null || v === "" || v === "0") return null;
+  try {
+    return BigInt(v) > 0n ? v : null;
+  } catch {
+    return null;
+  }
+}
+function nonzeroCount(n: number | null | undefined): number | null {
+  if (n == null || n === 0) return null;
+  return n;
+}
+
+/**
+ * Stored "0" was written when OpenSea/CG returned a real empty interval or
+ * Alchemy returned a zero floor — the hub then showed Vol 0 / $0.00 / 0.0%.
+ * Unknown is NULL (dash). Self-heal: scrub zeros, leave positive values.
+ */
+export async function sanitizeUnknownZeros(): Promise<{ floors: number; volumes: number; sales: number; changes: number }> {
+  const floors = await postgresQuery(
+    `UPDATE plank_multichain_snapshots SET floor_price_wei = NULL, floor_price_currency = NULL, floor_price_marketplace = NULL
+     WHERE floor_price_wei = '0'`
+  );
+  const volumes = await postgresQuery(
+    `UPDATE plank_multichain_snapshots SET volume_24h_wei = NULL WHERE volume_24h_wei = '0'`
+  );
+  const sales = await postgresQuery(
+    `UPDATE plank_multichain_snapshots SET sales_24h = NULL WHERE sales_24h = 0`
+  );
+  const changes = await postgresQuery(
+    `UPDATE plank_multichain_snapshots SET floor_change_pct = NULL WHERE floor_change_pct = 0`
+  );
+  return {
+    floors: floors.rowCount ?? 0,
+    volumes: volumes.rowCount ?? 0,
+    sales: sales.rowCount ?? 0,
+    changes: changes.rowCount ?? 0,
+  };
 }
 
 /**
@@ -328,7 +368,7 @@ export async function updateCollectionFloorOnly(
     [chainSlug, normalizeContractAddress(chainSlug, contractAddress)]
   );
   const id = collection.rows[0]?.id;
-  if (!id || floor.floorPriceWei == null) return;
+  if (!id || nonzeroWei(floor.floorPriceWei) == null) return;
   await postgresQuery(
     `INSERT INTO plank_multichain_snapshots
        (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error)
@@ -409,9 +449,9 @@ export async function writeSnapshot(
        (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error)
      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NULL)
      ON CONFLICT (collection_id) DO UPDATE SET
-       floor_price_wei = EXCLUDED.floor_price_wei,
-       floor_price_currency = EXCLUDED.floor_price_currency,
-       floor_price_marketplace = EXCLUDED.floor_price_marketplace,
+       floor_price_wei = COALESCE(EXCLUDED.floor_price_wei, plank_multichain_snapshots.floor_price_wei),
+       floor_price_currency = COALESCE(EXCLUDED.floor_price_currency, plank_multichain_snapshots.floor_price_currency),
+       floor_price_marketplace = COALESCE(EXCLUDED.floor_price_marketplace, plank_multichain_snapshots.floor_price_marketplace),
        total_supply = COALESCE(EXCLUDED.total_supply, plank_multichain_snapshots.total_supply),
        listed_count = COALESCE(EXCLUDED.listed_count, plank_multichain_snapshots.listed_count),
        holder_count = COALESCE(EXCLUDED.holder_count, plank_multichain_snapshots.holder_count),
@@ -427,7 +467,7 @@ export async function writeSnapshot(
        sync_error = NULL`,
     [
       collectionId,
-      snapshot.floorPriceWei,
+      nonzeroWei(snapshot.floorPriceWei),
       snapshot.floorPriceCurrency,
       snapshot.floorPriceMarketplace,
       snapshot.totalSupply,

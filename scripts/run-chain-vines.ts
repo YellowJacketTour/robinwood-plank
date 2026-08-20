@@ -65,11 +65,14 @@ async function vine(chainSlug: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  const { sanitizeUnknownZeros } = await import("../lib/market/multichain/store");
+  const healed = await sanitizeUnknownZeros();
+  console.log("[heal] scrubbed stored zeros", JSON.stringify(healed));
   for (const slug of slugs) {
     try {
       await vine(slug);
     } catch (e) {
-      console.error(`[vine] ${slug} FAILED`, e);
+      console.error(`[vine] ${slug} FAILED`, e instanceof Error ? e.message : e);
     }
   }
 }
