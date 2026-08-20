@@ -261,7 +261,7 @@ export async function fetchOpenSeaListedCount(slug: string, apiKey: string): Pro
   return null;
 }
 
-function slugCacheKey(chainSlug: string, contractAddress: string): string {
+export function slugCacheKey(chainSlug: string, contractAddress: string): string {
   return `plank:market:opensea-slug:${chainSlug}:${contractAddress.toLowerCase()}`;
 }
 
