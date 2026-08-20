@@ -65,6 +65,37 @@ function hypersyncUrl(chainId: number): string {
  * it's stored.
  */
 export async function scanChainForFillsViaHypersync(chainSlug: string): Promise<FillScanResult> {
+  return scanChainForFillsInternal(chainSlug, chainSlug, "forward-from-recent");
+}
+
+/**
+ * Real full-history backfill, live 2026-08-20 ("i want from all genesis
+ * blocks no exceptions"): scanChainForFillsViaHypersync's own cursor is
+ * intentionally forward-only from whenever this app FIRST ran it (same
+ * documented scope the RPC path already holds) -- it can never reach
+ * anything older than that first-run point, which is exactly why
+ * volume/sales stayed near-empty for chains this only just started
+ * covering. This walks forward from block 0 instead, under a SEPARATE
+ * cursor key (":genesis-backfill" suffix, same plank_seaport_fill_cursor
+ * table, just a different row) so repeated calls make real incremental
+ * progress toward the current chain height without disturbing or being
+ * clamped by the live forward cursor's own GREATEST() progress.
+ *
+ * Honest about what "genesis" means here: literal block 0 as the real
+ * floor, not a guessed/fabricated Seaport deployment block for each
+ * chain (this app never fabricates a number it hasn't verified) -- the
+ * pre-deployment range simply returns zero matching logs and advances
+ * through quickly, no wasted correctness risk either way.
+ */
+export async function scanChainForFillsGenesisBackfillViaHypersync(chainSlug: string): Promise<FillScanResult> {
+  return scanChainForFillsInternal(chainSlug, `${chainSlug}::genesis-backfill`, "forward-from-genesis");
+}
+
+async function scanChainForFillsInternal(
+  chainSlug: string,
+  cursorKey: string,
+  mode: "forward-from-recent" | "forward-from-genesis"
+): Promise<FillScanResult> {
   const chainId = EVM_CHAIN_ID[chainSlug];
   if (!chainId) {
     return { chainSlug, fromBlock: 0, toBlock: 0, logsScanned: 0, fillsWritten: 0, error: `hypersync-seaport-scan: no chainId mapping for "${chainSlug}"` };
@@ -92,11 +123,13 @@ export async function scanChainForFillsViaHypersync(chainSlug: string): Promise<
     return { chainSlug, fromBlock: 0, toBlock: 0, logsScanned: 0, fillsWritten: 0, error: message };
   }
 
-  const cursor = await readCursor(chainSlug);
-  // Same forward-only-from-first-run scope the RPC path's own migration
-  // header documents -- this is a SUPPLEMENTARY fast path for chains the
-  // RPC path can't currently reach at all, not a separate history.
-  const fromBlock = cursor == null ? Math.max(0, height - CHUNK_BLOCKS) : cursor + 1;
+  const cursor = await readCursor(cursorKey);
+  const fromBlock =
+    cursor != null
+      ? cursor + 1
+      : mode === "forward-from-genesis"
+        ? 0
+        : Math.max(0, height - CHUNK_BLOCKS);
   const toBlock = Math.min(height, fromBlock + CHUNK_BLOCKS);
 
   if (fromBlock >= toBlock) {
@@ -171,7 +204,7 @@ export async function scanChainForFillsViaHypersync(chainSlug: string): Promise<
       }
 
       const nextBlock = res.nextBlock;
-      await writeCursor(chainSlug, Math.min(nextBlock, toBlock) - 1 >= fromBlock ? nextBlock : toBlock);
+      await writeCursor(cursorKey, Math.min(nextBlock, toBlock) - 1 >= fromBlock ? nextBlock : toBlock);
       lastSucceededBlock = nextBlock;
       if (nextBlock >= toBlock || totalLogs >= MAX_LOGS_PER_RUN) break;
       query = { ...query, fromBlock: nextBlock };
