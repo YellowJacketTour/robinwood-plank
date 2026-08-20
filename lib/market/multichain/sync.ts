@@ -88,7 +88,7 @@ export type MultichainSyncResult = {
  */
 const DEFAULT_SYNC_BATCH_SIZE = 800;
 
-export async function runMultichainSync(input: { maxCollections?: number } = {}): Promise<MultichainSyncResult> {
+export async function runMultichainSync(input: { maxCollections?: number; chainSlug?: string } = {}): Promise<MultichainSyncResult> {
   if (!hasMultichainStore()) {
     throw new Error(
       "multichain sync requires PostgreSQL (PGHOST/PGDATABASE/PGUSER/PGPASSWORD) -- " +
@@ -106,6 +106,7 @@ export async function runMultichainSync(input: { maxCollections?: number } = {})
   const alchemyGate = checkSourceBudget("alchemy-nft");
   const collections = await listCollectionsForSync(input.maxCollections ?? DEFAULT_SYNC_BATCH_SIZE, {
     skipAdapters: alchemyGate.allowed ? [] : [alchemyNftAdapter.name],
+    chainSlug: input.chainSlug,
   });
   if (!alchemyGate.allowed) {
     console.warn(

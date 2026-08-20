@@ -92,23 +92,30 @@ export async function listTrackedCollections(): Promise<TrackedCollection[]> {
  */
 export async function listCollectionsForSync(
   limit: number,
-  opts?: { skipAdapters?: string[] }
+  opts?: { skipAdapters?: string[]; chainSlug?: string }
 ): Promise<TrackedCollection[]> {
   const skip = opts?.skipAdapters?.filter(Boolean) ?? [];
+  const chain = opts?.chainSlug?.trim();
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (skip.length > 0) {
+    params.push(skip);
+    clauses.push(`c.adapter <> ALL($${params.length}::text[])`);
+  }
+  if (chain) {
+    params.push(chain);
+    clauses.push(`c.chain_slug = $${params.length}`);
+  }
+  params.push(limit);
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const result = await postgresQuery<CollectionRow>(
-    skip.length > 0
-      ? `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url, c.is_vault_backed, c.creator_handle, c.creator_address
-         FROM plank_multichain_collections c
-         LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
-         WHERE c.adapter <> ALL($2::text[])
-         ORDER BY s.synced_at ASC NULLS FIRST
-         LIMIT $1`
-      : `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url, c.is_vault_backed, c.creator_handle, c.creator_address
-         FROM plank_multichain_collections c
-         LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
-         ORDER BY s.synced_at ASC NULLS FIRST
-         LIMIT $1`,
-    skip.length > 0 ? [limit, skip] : [limit]
+    `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url, c.is_vault_backed, c.creator_handle, c.creator_address
+     FROM plank_multichain_collections c
+     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+     ${where}
+     ORDER BY s.synced_at ASC NULLS FIRST
+     LIMIT $${params.length}`,
+    params
   );
   return result.rows.map(rowToCollection);
 }
