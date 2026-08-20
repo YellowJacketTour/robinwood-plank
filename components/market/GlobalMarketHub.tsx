@@ -304,7 +304,12 @@ export default function GlobalMarketHub() {
   // have before this session's discovery work: this app went from ~170 to
   // 3,500+ tracked collections, so a fixed cutoff either buries most of
   // them or floods the page -- a real control beats guessing one number.
-  const [rankingsShowCount, setRankingsShowCount] = useState(25);
+  // Default 10, not 25 -- flagged live 2026-08-20 ("so its not a journey to
+  // get to the more immersive listing displays"): the ranked table was
+  // pushing the real art-driven grid below the fold by default. The
+  // existing 10/25/50/100 picker already lets a reader opt into more --
+  // this only changes what a first-time visitor sees before choosing.
+  const [rankingsShowCount, setRankingsShowCount] = useState(10);
   // The full filterable/browsable grid below the rankings table has no
   // natural cutoff of its own -- unlike rankings (capped at 100 max) it's
   // meant to hold every tracked collection matching the current filters,
@@ -1152,7 +1157,15 @@ export default function GlobalMarketHub() {
       </div>
 
       <div className="flex gap-4">
-        <aside className="hidden w-56 shrink-0 rounded-lg border border-line bg-panel p-3 lg:block">{filterPanel}</aside>
+        {/* sticky, not just top-aligned -- flagged live 2026-08-20 ("no
+         * wasted real estate"): a non-sticky sidebar this short left its
+         * entire column dead for the rest of a long scroll once the reader
+         * passed its own height. max-h-[calc(100dvh-2rem)] + overflow-y-auto
+         * so it never grows taller than the viewport itself if the filter
+         * list ever gets long. */}
+        <aside className="sticky top-4 hidden max-h-[calc(100dvh-2rem)] w-56 shrink-0 overflow-y-auto rounded-lg border border-line bg-panel p-3 lg:block">
+          {filterPanel}
+        </aside>
 
         <div className="min-w-0 flex-1">
           {filtered.length === 0 ? (
@@ -1165,7 +1178,13 @@ export default function GlobalMarketHub() {
               }
             />
           ) : (
-            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+            // Density scales with real available width instead of capping at
+            // 4 columns forever -- flagged live 2026-08-20 ("no wasted real
+            // estate"): a wide desktop monitor was stretching each card far
+            // larger than the art itself needed, the same complaint real
+            // high-density gallery sites (Unsplash et al.) solve by adding
+            // columns, not by growing cell size.
+            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-6">
               {filtered.slice(0, gridVisibleCount).map((c, i) => (
                 <li key={key(c)} className="row-enter" style={{ "--row-delay": `${Math.min(i, 16) * 15}ms` } as CSSProperties}>
                   <Link
