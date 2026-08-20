@@ -62,9 +62,50 @@ export async function GET(req: Request) {
       for (const row of rows) activityByContract.set(`${chainSlug}:${row.contractAddress.toLowerCase()}`, row.totalTransfers);
     }
 
-    return NextResponse.json({
-      count: collections.length,
-      collections: collections.map((c) => ({
+    const { NFT_CONTRACT_ADDRESS } = await import("@/lib/mint-contract");
+    const { getListings } = await import("@/lib/market/orders-store");
+    const nativeListings = await getListings("robinwood", "robinhood").catch(() => []);
+    const nativeFloor = nativeListings.reduce<bigint | null>((min, l) => {
+      try {
+        const p = BigInt(l.priceWei);
+        return min == null || p < min ? p : min;
+      } catch {
+        return min;
+      }
+    }, null);
+    const nativeAddr = NFT_CONTRACT_ADDRESS.toLowerCase();
+    const nativeRow = {
+      chainSlug: "robinhood" as const,
+      chainId: 4663,
+      contractAddress: NFT_CONTRACT_ADDRESS,
+      name: "RobinWood",
+      imageUrl: "/images/plank-logo.webp",
+      externalUrl: "/market",
+      isVaultBacked: true,
+      floorPriceWei: nativeFloor != null ? nativeFloor.toString() : null,
+      floorPriceCurrency: "ETH",
+      floorPriceMarketplace: "marketplank",
+      totalSupply: null as number | null,
+      listedCount: nativeListings.length,
+      syncedAt: new Date().toISOString(),
+      syncError: null as string | null,
+      tradeable: true,
+      recentActivity: 0,
+      creatorHandle: null as string | null,
+      creatorAddress: null as string | null,
+      creatorEns: null as string | null,
+      volume24hWei: null as string | null,
+      sales24h: null as number | null,
+      volume7dWei: null as string | null,
+      sales7d: null as number | null,
+      volume30dWei: null as string | null,
+      sales30d: null as number | null,
+      holderCount: null as number | null,
+      floorChangePct: null as number | null,
+      isNativeHome: true,
+    };
+
+    const mapped = collections.map((c) => ({
         chainSlug: c.chainSlug,
         chainId: c.chainId,
         contractAddress: c.contractAddress,
@@ -76,7 +117,8 @@ export async function GET(req: Request) {
         floorPriceCurrency: c.floorPriceCurrency,
         floorPriceMarketplace: c.floorPriceMarketplace,
         totalSupply: c.totalSupply,
-        listedCount: c.listedCount,
+        listedCount:
+          c.listedCount === 0 && !c.floorPriceWei && !c.volume24hWei ? null : c.listedCount,
         syncedAt: c.syncedAt,
         syncError: c.syncError,
         // TRUE for: the 7 real foreign EVM chains (Seaport buy/sweep/send/
@@ -120,7 +162,12 @@ export async function GET(req: Request) {
             : c.previousFloorPriceWei && c.floorPriceWei && BigInt(c.previousFloorPriceWei) > BigInt(0)
               ? (Number(BigInt(c.floorPriceWei) - BigInt(c.previousFloorPriceWei)) / Number(BigInt(c.previousFloorPriceWei))) * 100
               : null,
-      })),
+        isNativeHome: false,
+      }));
+    const withoutDupNative = mapped.filter((c) => !(isRobinhoodChainSlug(c.chainSlug) && c.contractAddress.toLowerCase() === nativeAddr));
+    return NextResponse.json({
+      count: withoutDupNative.length + 1,
+      collections: [nativeRow, ...withoutDupNative],
     });
   } catch (error) {
     return publicError(error, "Failed to load the multichain index.");

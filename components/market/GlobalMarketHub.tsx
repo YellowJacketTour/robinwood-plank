@@ -237,6 +237,8 @@ type TrackedCollection = {
   listedCount: number | null;
   /** Real distinct-owner count (Alchemy getOwnersForContract, EVM chains only) -- null for Solana/Bitcoin and any EVM collection not yet fetched, never a fabricated 0. */
   holderCount: number | null;
+  /** True only for the injected RobinWood native book row — links to /market, not /market/multichain. */
+  isNativeHome?: boolean;
 };
 
 /** Picks the right real volume/sales field for a chosen display window -- never derives 7d/30d from the 24h figure, just reads the matching column populated by the same OpenSea pass (see volume7dWei/sales7d's own doc comment above). */
@@ -327,14 +329,23 @@ function NativeAmount({ wei, usdLabel }: { wei: string; usdLabel: string | null 
 function emptyCellReason(c: TrackedCollection, field: "change" | "volume" | "sales" | "listed" | "holders"): string {
   const isSolana = c.chainSlug === "solana-mainnet";
   const isBitcoin = c.chainSlug === "bitcoin-mainnet";
+  const isRobinhood = c.chainSlug === "robinhood";
   if (field === "holders") {
     if (isSolana || isBitcoin) return "Holder counts aren't sourced for this chain yet -- no clean single-call endpoint exists on Helius DAS or UniSat/Ordiscan.";
     return "Not fetched yet -- holder count loads the first time this collection's own page is viewed.";
   }
   if (isSolana) return "Magic Eden's public API has no volume/sales/change feed for this collection -- floor price is all it exposes.";
   if (isBitcoin) return "UniSat/Ordiscan expose collection metadata, not a volume/sales/change feed for this collection.";
+  if (isRobinhood && field !== "listed") {
+    return "OpenSea indexed this Robinhood contract with no floor/volume snapshot -- a dash is unknown, not a fake zero.";
+  }
   if (field === "change") return "Needs at least two real syncs of this collection to compute a real change -- not yet available.";
   return "This collection hasn't been through an OpenSea stats pass yet -- real data lands on the next sync, never fabricated in the meantime.";
+}
+
+function collectionHref(c: Pick<TrackedCollection, "chainSlug" | "contractAddress" | "isNativeHome">): string {
+  if (c.isNativeHome) return "/market";
+  return `/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`;
 }
 
 /**
@@ -1209,7 +1220,7 @@ export default function GlobalMarketHub() {
               const heroGrade = gradeBreakdown(hero, true);
               return (
                 <Link
-                  href={`/market/multichain/${hero.chainSlug}/${encodeURIComponent(hero.contractAddress)}`}
+                  href={collectionHref(hero)}
                   className="dense-card group relative flex min-h-[15rem] flex-col justify-end overflow-hidden p-0 transition-[border-color,box-shadow] duration-200 hover:border-gold-400/60 hover:shadow-gold sm:min-h-[18rem]"
                 >
                   <div className="absolute inset-0">
@@ -1263,7 +1274,7 @@ export default function GlobalMarketHub() {
                 return (
                   <Link
                     key={key(c)}
-                    href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
+                    href={collectionHref(c)}
                     className="group relative flex min-h-[6.5rem] flex-col justify-end overflow-hidden rounded-lg border border-line transition-[border-color,box-shadow] duration-200 hover:border-gold-400/60 hover:shadow-gold"
                   >
                     <div className="absolute inset-0">
@@ -1476,7 +1487,7 @@ export default function GlobalMarketHub() {
                       <td className="px-1 py-2 text-right text-xs text-foreground/40 tabular-nums font-mono">{i + 1}</td>
                       <td className="px-2 py-2">
                         <Link
-                          href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
+                          href={collectionHref(c)}
                           className="group flex min-w-0 items-center gap-2"
                         >
                           <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded bg-wood-900 transition-shadow duration-200 group-hover:shadow-gold">
@@ -1571,7 +1582,7 @@ export default function GlobalMarketHub() {
                         )}
                       </td>
                       <td className="px-2 py-2 text-right">
-                        <GradeBadge breakdown={gradeBreakdown(c, true)} />
+                        <GradeBadge breakdown={gradeBreakdown(c, hasArt(c))} />
                       </td>
                     </tr>
                   );
@@ -1642,7 +1653,7 @@ export default function GlobalMarketHub() {
               return (
                 <Link
                   key={key(c)}
-                  href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
+                  href={collectionHref(c)}
                   className="row-enter group rounded-lg border border-line bg-panel p-2 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-gold-400/60 hover:shadow-gold"
                   style={{ "--row-delay": `${Math.min(i, 12) * 25}ms` } as CSSProperties}
                 >
@@ -1756,7 +1767,7 @@ export default function GlobalMarketHub() {
               {filtered.slice(0, gridVisibleCount).map((c, i) => (
                 <li key={key(c)} className="row-enter" style={{ "--row-delay": `${Math.min(i, 16) * 15}ms` } as CSSProperties}>
                   <Link
-                    href={`/market/multichain/${c.chainSlug}/${encodeURIComponent(c.contractAddress)}`}
+                    href={collectionHref(c)}
                     className="dense-card group flex flex-col overflow-hidden p-0 transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-line-strong hover:shadow-gold"
                   >
                     <div className="relative aspect-square w-full bg-wood-900">
@@ -1777,7 +1788,7 @@ export default function GlobalMarketHub() {
                       {/* Visible composite grade, always -- gradeScore already drives the "Trending" sort; this makes that grading legible on the card itself instead of staying an invisible sort key. Only shown for a graded (art-present) row. */}
                       {hasArt(c) && (
                         <span className="absolute right-1.5 top-1.5">
-                          <GradeBadge breakdown={gradeBreakdown(c, true)} />
+                          <GradeBadge breakdown={gradeBreakdown(c, hasArt(c))} />
                         </span>
                       )}
                     </div>
