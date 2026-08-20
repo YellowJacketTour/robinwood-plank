@@ -24,6 +24,7 @@ import {
   recordSourceSuccess,
   recordSourceFailure,
 } from "@/lib/market/multichain/discovery/source-budget";
+import { preferHighestResImageUrl } from "@/lib/market/collection-art";
 
 const OW = "ordinals-wallet";
 const UNISAT = "unisat-collections";
@@ -91,7 +92,7 @@ async function tryOrdinalsWallet(slug: string): Promise<{ name: string | null; i
     }
     recordSourceSuccess(OW);
     const body = (await res.json()) as { name?: string | null; icon?: string | null };
-    const imageUrl = isHttpsImage(body.icon);
+    const imageUrl = preferHighestResImageUrl(isHttpsImage(body.icon));
     const name = body.name?.trim() || null;
     if (!imageUrl && !name) return "none";
     return { name, imageUrl };
@@ -135,8 +136,8 @@ async function tryCoinGecko(slug: string): Promise<{ name: string | null; imageU
       return "skip";
     }
     recordSourceSuccess(CG);
-    const body = (await res.json()) as { name?: string; image?: { small?: string | null } };
-    const imageUrl = isHttpsImage(body.image?.small ?? null);
+    const body = (await res.json()) as { name?: string; image?: { small?: string | null; small_2x?: string | null } };
+    const imageUrl = preferHighestResImageUrl(isHttpsImage(body.image?.small_2x) || isHttpsImage(body.image?.small));
     const name = body.name?.trim() || null;
     if (!imageUrl && !name) return "none";
     return { name, imageUrl };

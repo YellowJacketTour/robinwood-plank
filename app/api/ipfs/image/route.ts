@@ -32,7 +32,7 @@ const MAX_BYTES = 15 * 1024 * 1024; // sane ceiling — this collection's art is
  * immutable cache can't be exploded with arbitrary variant keys. Requests
  * round UP to the nearest tier (a 180px grid cell asks for 256).
  */
-const WIDTH_TIERS = [256, 512, 1024] as const;
+const WIDTH_TIERS = [256, 512, 1024, 2048] as const;
 
 function resolveWidthTier(raw: string | null): number | null {
   if (!raw) return null;

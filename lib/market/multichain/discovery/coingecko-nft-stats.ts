@@ -44,6 +44,7 @@ import { isNonEvmChainSlug } from "@/lib/market/multichain/trading/non-evm-chain
 import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
 import { durableKv } from "@/lib/market/durable-kv";
 import { postgresQuery } from "@/lib/postgres";
+import { preferHighestResImageUrl } from "@/lib/market/collection-art";
 
 /** This source's own budget-tracker key -- see source-budget.ts's own header for the real incident (Alchemy's monthly quota) this whole mechanism exists to prevent from happening again, to a different source, silently. */
 const SOURCE = "coingecko-nft";
@@ -164,7 +165,7 @@ type NftDetail = {
   number_of_unique_addresses?: number | null;
   total_supply?: number | null;
   name?: string | null;
-  image?: { small?: string | null } | null;
+  image?: { small?: string | null; small_2x?: string | null; large?: string | null } | null;
 };
 
 /** Same 18-decimal-equivalent wei-string convention every adapter in this app uses for a native-currency decimal amount. */
@@ -321,7 +322,7 @@ export async function runCoinGeckoNftStats(chainSlug: string, maxUpdates = 30): 
       if (collection.name) {
         await updateCollectionDisplay(chainSlug, collection.contractAddress, {
           name: collection.name,
-          imageUrl: detail.image?.small ?? null,
+          imageUrl: preferHighestResImageUrl(detail.image?.small_2x || detail.image?.small) ?? detail.image?.small ?? null,
         }).catch(() => {});
       }
       if (typeof detail.number_of_unique_addresses === "number" && detail.number_of_unique_addresses > 0) {

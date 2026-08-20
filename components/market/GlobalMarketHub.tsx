@@ -13,6 +13,7 @@ import ChainIcon from "@/components/market/ChainIcon";
 import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
 import { resolveIpfsUrl, withImageWidth, isIpfsGatewayUrl, ORB_PRONE_ART_HOSTS } from "@/lib/ipfs";
+import { imageSrcFallbacks, isInscriptionArtUrl } from "@/lib/market/collection-art";
 
 /**
  * Some collection images (any sourced from lib/market/multichain/adapters/
@@ -86,42 +87,54 @@ function CollectionThumb({
   onFail,
   width = 512,
   priority = false,
+  variant = "tile",
 }: {
   src: string | null;
   alt: string;
   onFail?: () => void;
   width?: number;
   priority?: boolean;
+  variant?: "hero" | "tile" | "thumb";
 }) {
+  const candidates = imageSrcFallbacks(src);
+  const [idx, setIdx] = useState(0);
   const [failed, setFailed] = useState(false);
-  if (!src || isPoisonedImageSrc(src) || failed) {
+  useEffect(() => {
+    setIdx(0);
+    setFailed(false);
+  }, [src]);
+  const current = candidates[idx] ?? null;
+  if (failed || !current || isPoisonedImageSrc(current)) {
     return <PlankPlaceholder />;
   }
-  // Only reroute through the proxy for URLs already an /api/ipfs/ path
-  // (proxy tiering) or a raw public IPFS gateway URL the proxy's own
-  // allowlist accepts (see isIpfsGatewayUrl). Anything else (e.g. a
-  // working OpenSea/Alchemy CDN URL) renders as-is -- the proxy would
-  // just 400 it, turning a working image into a broken one.
   let orbHost = false;
   try {
-    orbHost = ORB_PRONE_ART_HOSTS.has(new URL(src).hostname.toLowerCase());
+    orbHost = ORB_PRONE_ART_HOSTS.has(new URL(current).hostname.toLowerCase());
   } catch {
     orbHost = false;
   }
   const shouldProxy =
-    src.startsWith("/api/ipfs/") || src.startsWith("ipfs://") || isIpfsGatewayUrl(src) || orbHost;
-  const resolvedSrc = shouldProxy ? withImageWidth(resolveIpfsUrl(src), width) || src : src;
+    current.startsWith("/api/ipfs/") || current.startsWith("ipfs://") || isIpfsGatewayUrl(current) || orbHost;
+  const resolvedSrc = shouldProxy ? withImageWidth(resolveIpfsUrl(current), width) || current : current;
+  const sizes =
+    variant === "hero" ? "(min-width: 1024px) 60vw, 100vw" : variant === "thumb" ? "40px" : "(min-width: 1280px) 16vw, 45vw";
+  const pixel = isInscriptionArtUrl(current);
   return (
     <Image
+      key={resolvedSrc}
       src={resolvedSrc}
       alt={alt}
       fill
-      sizes="20vw"
-      className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04]"
+      sizes={sizes}
+      className={`object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04] ${pixel ? "[image-rendering:pixelated]" : ""}`}
       unoptimized
       priority={priority}
       loading={priority ? undefined : "lazy"}
       onError={() => {
+        if (idx + 1 < candidates.length) {
+          setIdx(idx + 1);
+          return;
+        }
         setFailed(true);
         onFail?.();
       }}
@@ -1441,7 +1454,8 @@ export default function GlobalMarketHub() {
                       src={hero.imageUrl}
                       alt={hero.name ?? hero.contractAddress}
                       onFail={() => setDeadArt((prev) => new Set(prev).add(key(hero)))}
-                      width={1024}
+                      width={2048}
+                      variant="hero"
                       priority
                     />
                   </div>
@@ -1495,6 +1509,8 @@ export default function GlobalMarketHub() {
                         src={c.imageUrl}
                         alt={displayName(c)}
                         onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
+                        width={1024}
+                        variant="tile"
                       />
                     </div>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
@@ -1709,6 +1725,7 @@ export default function GlobalMarketHub() {
                               alt={displayName(c)}
                               onFail={() => setDeadArt((prev) => new Set(prev).add(rowKey))}
                               width={256}
+                              variant="thumb"
                             />
                             <span
                               className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70"
@@ -1886,6 +1903,8 @@ export default function GlobalMarketHub() {
                       src={c.imageUrl}
                       alt={displayName(c)}
                       onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
+                      width={1024}
+                      variant="tile"
                     />
                     <span
                       className="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/70"
@@ -1999,7 +2018,8 @@ export default function GlobalMarketHub() {
                         src={c.imageUrl}
                         alt={displayName(c)}
                         onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
-                        width={512}
+                        width={1024}
+                        variant="tile"
                         priority={i < 6}
                       />
                       {/* Chain badge, always on the art -- at-a-glance chain identification via the real brand mark on a translucent disc (readable against any art), same corner-overlay pattern ListingCard uses for rarity tier badges. */}

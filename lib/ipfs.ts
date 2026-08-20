@@ -115,8 +115,8 @@ export function resolveIpfsUrl(
 }
 
 /**
- * Ask the image proxy for a width-tiered thumbnail (256 / 512 / 1024 — the
- * route rounds up and ignores anything else). Only applies to our own
+ * Ask the image proxy for a width-tiered thumbnail (256 / 512 / 1024 / 2048 — the
+ * route rounds up and ignores anything else). Hero uses 2048. Only applies to our own
  * /api/ipfs/image URLs; data: URIs, static assets, and raw URLs pass
  * through untouched. Full-res art in a ~200px grid cell was the single
  * biggest transfer cost on /market.
