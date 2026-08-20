@@ -33,7 +33,7 @@ import { fetchForeignAllListings, resolveOpenSeaCollectionSlug } from "@/lib/mar
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
 import { getListings } from "@/lib/market/orders-store";
-import { getCollectionSupplyStats } from "@/lib/market/multichain/store";
+import { getCollectionSupplyStats, getCollectionMarketStats } from "@/lib/market/multichain/store";
 import { getCollectionAsync } from "@/lib/market/collections-server";
 import { publicError, rateLimit } from "@/lib/security";
 import { isSolanaChainSlug, isBitcoinChainSlug, isRobinhoodChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
@@ -86,6 +86,7 @@ export async function GET(req: NextRequest) {
       const native = await getListings(collectionSlug);
       const listings: Listing[] = native.slice(0, limit).map(({ rawOrder: _rawOrder, ...listing }) => listing);
       const supply = await getCollectionSupplyStats(chainSlug, collection.contractAddress).catch(() => null);
+      const marketStats = await getCollectionMarketStats(chainSlug, collection.contractAddress).catch(() => null);
       return NextResponse.json(
         {
           collection: {
@@ -95,6 +96,13 @@ export async function GET(req: NextRequest) {
             contractAddress: collection.contractAddress,
             listedCount: supply?.listedCount ?? null,
             totalSupply: supply?.totalSupply ?? null,
+            holderCount: supply?.holderCount ?? null,
+            volume24hWei: marketStats?.volume24hWei ?? null,
+            sales24h: marketStats?.sales24h ?? null,
+            volume7dWei: marketStats?.volume7dWei ?? null,
+            sales7d: marketStats?.sales7d ?? null,
+            volume30dWei: marketStats?.volume30dWei ?? null,
+            sales30d: marketStats?.sales30d ?? null,
           },
           listings,
         },
@@ -168,6 +176,12 @@ export async function GET(req: NextRequest) {
         .sort((a, b) => (BigInt(a.priceWei) < BigInt(b.priceWei) ? -1 : 1));
 
       const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
+      // Solana has no OpenSea-backed pass (rarity-index-runner.ts is EVM
+      // only, via foreignChainByChainSlug's openSeaChain) -- this always
+      // resolves to nulls here, which is the honest outcome: no fabricated
+      // multi-window figure derived from Magic Eden's own single-window
+      // stat.
+      const marketStats = await getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null);
       return NextResponse.json(
         {
           collection: {
@@ -177,6 +191,13 @@ export async function GET(req: NextRequest) {
             contractAddress: collectionSlug,
             listedCount: supply?.listedCount ?? null,
             totalSupply: supply?.totalSupply ?? null,
+            holderCount: supply?.holderCount ?? null,
+            volume24hWei: marketStats?.volume24hWei ?? null,
+            sales24h: marketStats?.sales24h ?? null,
+            volume7dWei: marketStats?.volume7dWei ?? null,
+            sales7d: marketStats?.sales7d ?? null,
+            volume30dWei: marketStats?.volume30dWei ?? null,
+            sales30d: marketStats?.sales30d ?? null,
           },
           listings,
         },
@@ -231,6 +252,10 @@ export async function GET(req: NextRequest) {
           foreignOrderHash: l.id,
         }));
       const supply = await getCollectionSupplyStats(chainSlug, collectionSlug).catch(() => null);
+      // Bitcoin Ordinals has no OpenSea-backed pass either (UniSat is the
+      // only source, single-window) -- same honest null outcome as Solana
+      // above, never a fabricated 7d/30d figure.
+      const marketStats = await getCollectionMarketStats(chainSlug, collectionSlug).catch(() => null);
       return NextResponse.json(
         {
           collection: {
@@ -240,6 +265,13 @@ export async function GET(req: NextRequest) {
             contractAddress: collectionSlug,
             listedCount: supply?.listedCount ?? null,
             totalSupply: supply?.totalSupply ?? null,
+            holderCount: supply?.holderCount ?? null,
+            volume24hWei: marketStats?.volume24hWei ?? null,
+            sales24h: marketStats?.sales24h ?? null,
+            volume7dWei: marketStats?.volume7dWei ?? null,
+            sales7d: marketStats?.sales7d ?? null,
+            volume30dWei: marketStats?.volume30dWei ?? null,
+            sales30d: marketStats?.sales30d ?? null,
           },
           listings,
         },
@@ -375,6 +407,10 @@ export async function GET(req: NextRequest) {
     });
 
     const supply = await getCollectionSupplyStats(chainSlug, contractAddress.toLowerCase()).catch(() => null);
+    // The real EVM/OpenSea path -- the only branch of this route where
+    // volume7d/30d are ever non-null, since rarity-index-runner.ts's
+    // OpenSea stats pass is EVM-only.
+    const marketStats = await getCollectionMarketStats(chainSlug, contractAddress.toLowerCase()).catch(() => null);
     return NextResponse.json(
       {
         collection: {
@@ -384,6 +420,13 @@ export async function GET(req: NextRequest) {
           contractAddress,
           listedCount: supply?.listedCount ?? null,
           totalSupply: supply?.totalSupply ?? null,
+          holderCount: supply?.holderCount ?? null,
+          volume24hWei: marketStats?.volume24hWei ?? null,
+          sales24h: marketStats?.sales24h ?? null,
+          volume7dWei: marketStats?.volume7dWei ?? null,
+          sales7d: marketStats?.sales7d ?? null,
+          volume30dWei: marketStats?.volume30dWei ?? null,
+          sales30d: marketStats?.sales30d ?? null,
         },
         listings,
       },

@@ -121,8 +121,21 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const account = isNonEvm ? nonEvmAccount : evmAccount;
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
-  /** Real listed-count/total-supply from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. */
-  const [supplyStats, setSupplyStats] = useState<{ listedCount: number | null; totalSupply: number | null } | null>(null);
+  /** Real listed-count/total-supply/holder-count from the tracked-collection snapshot (see getCollectionSupplyStats) -- null fields render as "—", never fabricated. holderCount is EVM-only (Alchemy getOwnersForContract) and may arrive later than the rest via the on-demand /api/market/multichain/holder-count backfill below. */
+  const [supplyStats, setSupplyStats] = useState<{ listedCount: number | null; totalSupply: number | null; holderCount: number | null } | null>(null);
+  // Real OpenSea 24h/7d/30d volume/sales (rarity-index-runner.ts, EVM-only
+  // -- Solana/Bitcoin/Robinhood-native branches of the listings route always
+  // resolve these to null, honestly, since neither Magic Eden's nor
+  // UniSat's API exposes row-level history to sum a real window from).
+  const [marketStats, setMarketStats] = useState<{
+    volume24hWei: string | null;
+    sales24h: number | null;
+    volume7dWei: string | null;
+    sales7d: number | null;
+    volume30dWei: string | null;
+    sales30d: number | null;
+  } | null>(null);
+  const [marketStatsWindow, setMarketStatsWindow] = useState<"24h" | "7d" | "30d">("24h");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -271,6 +284,13 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           contractAddress: string;
           listedCount: number | null;
           totalSupply: number | null;
+          volume24hWei: string | null;
+          sales24h: number | null;
+          volume7dWei: string | null;
+          sales7d: number | null;
+          volume30dWei: string | null;
+          sales30d: number | null;
+          holderCount: number | null;
         };
         listings: Listing[];
       }>(`/api/market/multichain/listings?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}&limit=40`, {
@@ -296,7 +316,32 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         royaltyBps: 0,
         royaltyRecipient: "0x0000000000000000000000000000000000000000",
       });
-      setSupplyStats({ listedCount: data.collection.listedCount, totalSupply: data.collection.totalSupply });
+      setSupplyStats({ listedCount: data.collection.listedCount, totalSupply: data.collection.totalSupply, holderCount: data.collection.holderCount });
+      // Real, on-demand backfill: if this collection has never had a holder
+      // count computed, fetch one now (see holder-count/route.ts's own
+      // header for why this is on-demand-per-view, never bulk sync). Fire-
+      // and-forget -- the stat bar just shows "—" until it resolves, same
+      // as every other "—" placeholder on this page while data loads.
+      if (data.collection.holderCount == null && !isNonEvm) {
+        void swrJson<{ holderCount: number | null }>(
+          `/api/market/multichain/holder-count?chainSlug=${chainSlug}&contractAddress=${encodeURIComponent(data.collection.contractAddress)}`,
+          { ttlMs: 0, swrMs: 0, session: true }
+        )
+          .then((res) => {
+            if (res.holderCount != null) {
+              setSupplyStats((prev) => (prev ? { ...prev, holderCount: res.holderCount } : prev));
+            }
+          })
+          .catch(() => {});
+      }
+      setMarketStats({
+        volume24hWei: data.collection.volume24hWei,
+        sales24h: data.collection.sales24h,
+        volume7dWei: data.collection.volume7dWei,
+        sales7d: data.collection.sales7d,
+        volume30dWei: data.collection.volume30dWei,
+        sales30d: data.collection.sales30d,
+      });
       setListings(data.listings ?? []);
     } catch {
       setLoadError("Could not load this collection's listings right now.");
@@ -316,7 +361,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
     return () => clearInterval(id);
   }, [load]);
 
-  // Real ETH/SOL/BTC USD prices -- same shared fetch + short-TTL swr pattern
+  // Real ETH/SOL/BTC/POL/BNB/AVAX USD prices -- same shared fetch + short-TTL swr pattern
   // GlobalMarketHub.tsx's own usdPrices effect uses. usdPrices stays {} (not
   // fabricated zeros) until this resolves, so every USD-dependent render
   // checks for a real price before showing one.
@@ -1221,7 +1266,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       </div>
 
       {/* STAT BAR -- real, same shape as the native page's floor/items/listed/best-offer/volume/highest-sale row. */}
-      <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-panel p-3 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-panel p-3 sm:grid-cols-3 lg:grid-cols-6">
         <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Listed / supply</p>
           <p className="truncate text-sm font-bold text-foreground tabular-nums" title={supplyStats?.totalSupply != null ? `${supplyStats.listedCount ?? "—"} of ${supplyStats.totalSupply} tokens listed for sale` : undefined}>
@@ -1270,6 +1315,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           </p>
         </div>
         <div>
+          <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Holders</p>
+          <p className="truncate text-sm font-bold text-foreground tabular-nums">
+            {supplyStats?.holderCount != null ? supplyStats.holderCount.toLocaleString() : "—"}
+          </p>
+        </div>
+        <div>
           <p className="text-[0.55rem] font-black uppercase tracking-wide text-foreground/45">Highest sale</p>
           <p className="truncate text-sm font-bold text-foreground tabular-nums">
             {highestSaleWei ? (
@@ -1285,6 +1336,49 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           </p>
         </div>
       </div>
+
+      {/*
+       * Real 24h/7d/30d volume/sales, distinct from the "Volume" stat above
+       * (which is aggregated on the fly from whatever activity page happens
+       * to be loaded -- see that stat's own header comment). This strip is
+       * OpenSea's own indexed multi-window figures (rarity-index-runner.ts),
+       * EVM-only: Solana/Bitcoin/Robinhood-native collections show "—" for
+       * every window here rather than a fabricated number, because neither
+       * Magic Eden's nor UniSat's API exposes row-level sale history to sum
+       * a real window from. Same "24h | 7d | 30d" button-group styling as
+       * GlobalMarketHub.tsx's rankings-table window toggle.
+       */}
+      {marketStats && (marketStats.volume24hWei != null || marketStats.volume7dWei != null || marketStats.volume30dWei != null) && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-xs">
+          <div className="flex items-center gap-1.5">
+            {(["24h", "7d", "30d"] as const).map((w) => (
+              <button
+                key={w}
+                type="button"
+                onClick={() => setMarketStatsWindow(w)}
+                aria-pressed={marketStatsWindow === w}
+                className={`min-h-8 rounded-md border px-2.5 font-bold transition-colors duration-150 ${
+                  marketStatsWindow === w
+                    ? "border-gold-400 bg-gold-400/15 text-gold-300"
+                    : "border-line text-foreground/50 hover:border-line-strong hover:text-foreground/70"
+                }`}
+              >
+                {w}
+              </button>
+            ))}
+          </div>
+          {(() => {
+            const vol = marketStatsWindow === "7d" ? marketStats.volume7dWei : marketStatsWindow === "30d" ? marketStats.volume30dWei : marketStats.volume24hWei;
+            const sales = marketStatsWindow === "7d" ? marketStats.sales7d : marketStatsWindow === "30d" ? marketStats.sales30d : marketStats.sales24h;
+            return (
+              <span className="font-mono tabular-nums text-foreground/70">
+                {vol ? `${formatTokenAmount(vol, 18, 3)} ${statCurrencySymbol}` : "—"}
+                {sales != null ? ` · ${sales} sales` : ""}
+              </span>
+            );
+          })()}
+        </div>
+      )}
 
       <MarketTabRail navigation={<MarketNav active={tab} onChange={setTab} tabs={tabs} />} />
 

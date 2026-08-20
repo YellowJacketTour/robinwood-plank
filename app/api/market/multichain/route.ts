@@ -100,6 +100,17 @@ export async function GET(req: Request) {
         creatorEns: c.creatorEns,
         volume24hWei: c.volume24hWei,
         sales24h: c.sales24h,
+        // Real OpenSea 7d/30d intervals, same response as 24h (see
+        // updateCollectionMarketStats's header) -- null, not zero, until a
+        // collection has been through that stats pass at least once.
+        volume7dWei: c.volume7dWei,
+        sales7d: c.sales7d,
+        volume30dWei: c.volume30dWei,
+        sales30d: c.sales30d,
+        // Real distinct-owner count (Alchemy getOwnersForContract, EVM
+        // chains only) -- null for chains/collections without a fetched
+        // count yet, never a fabricated 0.
+        holderCount: c.holderCount,
         // Real, computed from this app's own prior observation (see
         // updateCollectionMarketStats's header) -- OpenSea's stats
         // endpoint has no floor-change field at all.

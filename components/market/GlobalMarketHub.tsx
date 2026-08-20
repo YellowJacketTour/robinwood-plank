@@ -185,14 +185,33 @@ type TrackedCollection = {
   /** Real OpenSea 24h volume/sales (rarity-index-runner.ts). Null until a collection has been through that scaffold pass. */
   volume24hWei: string | null;
   sales24h: number | null;
+  /** Real OpenSea 7d/30d volume/sales, same response/pass as the 24h fields above -- never fabricated from a single-window data point. Null until that pass has run. */
+  volume7dWei: string | null;
+  sales7d: number | null;
+  volume30dWei: string | null;
+  sales30d: number | null;
   /** Real floor % change from this app's own prior observation -- OpenSea has no such field. Null until at least two syncs have run. */
   floorChangePct: number | null;
   /** Real, from the same source as floorPriceWei (Alchemy/Magic Eden snapshot) -- already returned by this route, just never surfaced on this page until now. */
   totalSupply: number | null;
   listedCount: number | null;
+  /** Real distinct-owner count (Alchemy getOwnersForContract, EVM chains only) -- null for Solana/Bitcoin and any EVM collection not yet fetched, never a fabricated 0. */
+  holderCount: number | null;
 };
 
 type SortMode = "trending" | "floor-desc" | "floor-asc" | "name";
+
+/** Picks the right real volume/sales field for a chosen display window -- never derives 7d/30d from the 24h figure, just reads the matching column populated by the same OpenSea pass (see volume7dWei/sales7d's own doc comment above). */
+function windowVolumeWei(c: TrackedCollection, window: "24h" | "7d" | "30d"): string | null {
+  if (window === "7d") return c.volume7dWei;
+  if (window === "30d") return c.volume30dWei;
+  return c.volume24hWei;
+}
+function windowSales(c: TrackedCollection, window: "24h" | "7d" | "30d"): number | null {
+  if (window === "7d") return c.sales7d;
+  if (window === "30d") return c.sales30d;
+  return c.sales24h;
+}
 
 /** A collection is graded "real" for ranking/display purposes only when it has actual art AND at least one real signal (activity, volume, or a tradeable order book) -- an artless or dead row shouldn't out-rank one a person can actually look at and buy. Max possible score is 2050. */
 function gradeScore(c: TrackedCollection, artOk: boolean): number {
@@ -310,6 +329,12 @@ export default function GlobalMarketHub() {
   // existing 10/25/50/100 picker already lets a reader opt into more --
   // this only changes what a first-time visitor sees before choosing.
   const [rankingsShowCount, setRankingsShowCount] = useState(10);
+  // Real 24h/7d/30d selector for the rankings table's Volume/Sales columns --
+  // same OpenSea-sourced fields as volume24hWei/sales24h, just a different
+  // window of the same already-fetched response (see rarity-index-runner.ts
+  // and 027_collection_stats_multiwindow.sql). Purely a display choice, no
+  // extra fetch.
+  const [rankingsWindow, setRankingsWindow] = useState<"24h" | "7d" | "30d">("24h");
   // The full filterable/browsable grid below the rankings table has no
   // natural cutoff of its own -- unlike rankings (capped at 100 max) it's
   // meant to hold every tracked collection matching the current filters,
@@ -395,7 +420,7 @@ export default function GlobalMarketHub() {
     };
   }, []);
 
-  // Real ETH/SOL/BTC USD prices -- one shared fetch for the whole hub
+  // Real ETH/SOL/BTC/POL/BNB/AVAX USD prices -- one shared fetch for the whole hub
   // (rankings table + Biggest Movers), same short-TTL swr pattern the
   // collection index itself uses. usdPrices stays {} (not fabricated
   // zeros) until this resolves, so every USD-dependent render checks for
@@ -939,9 +964,10 @@ export default function GlobalMarketHub() {
                   <th className="px-2 py-2">Collection</th>
                   <th className="px-2 py-2 text-right">Floor</th>
                   <th className="px-2 py-2 text-right">24h Change</th>
-                  <th className="hidden px-2 py-2 text-right sm:table-cell">24h Volume</th>
-                  <th className="hidden px-2 py-2 text-right md:table-cell">24h Sales</th>
+                  <th className="hidden px-2 py-2 text-right sm:table-cell">{rankingsWindow} Volume</th>
+                  <th className="hidden px-2 py-2 text-right md:table-cell">{rankingsWindow} Sales</th>
                   <th className="hidden px-2 py-2 text-right lg:table-cell">Listed</th>
+                  <th className="hidden px-2 py-2 text-right xl:table-cell">Holders</th>
                   <th className="w-9 px-2 py-2 text-right">Grade</th>
                 </tr>
               </thead>
@@ -1028,13 +1054,19 @@ export default function GlobalMarketHub() {
                         {change != null ? `${changeArrow}${Math.abs(change).toFixed(1)}%` : "—"}
                       </td>
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 sm:table-cell">
-                        {c.volume24hWei && c.volume24hWei !== "0" ? (Number(c.volume24hWei) / 1e18).toFixed(2) : "—"}
+                        {(() => {
+                          const vol = windowVolumeWei(c, rankingsWindow);
+                          return vol && vol !== "0" ? (Number(vol) / 1e18).toFixed(2) : "—";
+                        })()}
                       </td>
                       <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/60 md:table-cell">
-                        {c.sales24h ?? "—"}
+                        {windowSales(c, rankingsWindow) ?? "—"}
                       </td>
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 lg:table-cell">
                         {listedPct != null ? `${listedPct.toFixed(1)}% · ${c.listedCount}/${c.totalSupply}` : "—"}
+                      </td>
+                      <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/60 xl:table-cell">
+                        {c.holderCount != null ? c.holderCount.toLocaleString() : "—"}
                       </td>
                       <td className="px-2 py-2 text-right">
                         <GradeBadge score={gradeScore(c, true)} />
@@ -1044,6 +1076,26 @@ export default function GlobalMarketHub() {
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* Real 24h/7d/30d window toggle for the Volume/Sales columns above -- same "Show top: N" button-group styling, same real OpenSea-sourced data (rarity-index-runner.ts), just a different interval of the same already-fetched response. Never fabricated from a single-window figure. */}
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-foreground/40">Window</span>
+            {(["24h", "7d", "30d"] as const).map((w) => (
+              <button
+                key={w}
+                type="button"
+                onClick={() => setRankingsWindow(w)}
+                aria-pressed={rankingsWindow === w}
+                className={`min-h-8 rounded-md border px-2.5 font-bold transition-colors duration-150 ${
+                  rankingsWindow === w
+                    ? "border-gold-400 bg-gold-400/15 text-gold-300"
+                    : "border-line text-foreground/50 hover:border-line-strong hover:text-foreground/70"
+                }`}
+              >
+                {w}
+              </button>
+            ))}
           </div>
 
           {/* Real "Show top: N" control, Magic Eden's own pattern -- a fixed cutoff either buried most of 3,500+ tracked collections or flooded the page; this lets the reader choose. */}

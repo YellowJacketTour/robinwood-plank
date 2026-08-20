@@ -1,19 +1,29 @@
 /**
- * Live USD price for the three native assets this app's tracked
- * collections are actually denominated in -- ETH (every EVM foreign chain
- * per alchemy-nft.ts's own floor-price reporting), SOL (Magic Eden's
- * Solana floors), and BTC (UniSat's Ordinals listings, sats-denominated).
- * Generalizes lib/eth-price.ts's single-asset pattern (same CoinGecko
- * primary / Coinbase fallback, same brief cache) to three assets in one
- * shared cache, rather than three separate near-duplicate modules.
+ * Live USD price for the native assets this app's tracked collections are
+ * actually denominated in -- ETH (every EVM foreign chain per
+ * alchemy-nft.ts's own floor-price reporting, except Polygon/BSC/Avalanche
+ * which report POL/BNB/AVAX respectively -- see foreign-chain-registry.ts's
+ * nativeCurrencySymbol), SOL (Magic Eden's Solana floors), and BTC (UniSat's
+ * Ordinals listings, sats-denominated). Generalizes lib/eth-price.ts's
+ * single-asset pattern (same CoinGecko primary / Coinbase fallback, same
+ * brief cache) to N assets in one shared cache, rather than several
+ * near-duplicate modules.
  *
- * Every OTHER currency this app might see in a floorPriceCurrency field
- * (WBNB, WMATIC, WAVAX -- see foreign-chain-registry.ts's
- * FOREIGN_OFFER_CURRENCY) has NO USD conversion here on purpose: adding a
- * price for a currency this module doesn't actually fetch would mean
- * silently mapping it to the wrong asset's price. assetUsdPrice() returns
- * null for anything not in ASSET_IDS, and callers must treat null as
- * "show native value only," never as zero.
+ * POL, BNB, AVAX ids verified live against CoinGecko's /simple/price and
+ * Coinbase's /v2/prices/*-USD/spot 2026-08-19. Note CoinGecko has TWO
+ * separate coins for Polygon's token: "matic-network" (the old, now-frozen
+ * MATIC coin -- symbol "matic") and "polygon-ecosystem-token" (the real
+ * live POL token post-migration -- symbol "pol"). floorPriceCurrency
+ * reports "POL" (nativeCurrencySymbol for polygon-mainnet), so this module
+ * uses polygon-ecosystem-token, NOT matic-network -- using the old id would
+ * silently show the wrong (frozen, no-longer-tracking) token's price.
+ *
+ * Every OTHER currency this app might see in a floorPriceCurrency field has
+ * NO USD conversion here on purpose: adding a price for a currency this
+ * module doesn't actually fetch would mean silently mapping it to the
+ * wrong asset's price. assetUsdPrice() returns null for anything not in
+ * ASSET_IDS, and callers must treat null as "show native value only,"
+ * never as zero.
  */
 
 type PriceCache = { usd: number; fetchedAt: number; source: string };
@@ -27,6 +37,9 @@ const ASSET_IDS: Record<string, { coingecko: string; coinbase: string }> = {
   ETH: { coingecko: "ethereum", coinbase: "ETH-USD" },
   SOL: { coingecko: "solana", coinbase: "SOL-USD" },
   BTC: { coingecko: "bitcoin", coinbase: "BTC-USD" },
+  POL: { coingecko: "polygon-ecosystem-token", coinbase: "POL-USD" },
+  BNB: { coingecko: "binancecoin", coinbase: "BNB-USD" },
+  AVAX: { coingecko: "avalanche-2", coinbase: "AVAX-USD" },
 };
 
 export type MultiAssetPrices = Record<string, { usd: number | null; source: string }>;

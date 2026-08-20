@@ -1,0 +1,12 @@
+-- Real distinct-owner count for EVM collections, from Alchemy's
+-- getOwnersForContract (owners array length -- there is no cheap
+-- totalCount-only mode; confirmed live 2026-08-19, the response's own
+-- documented `totalCount` field came back null and the full owner array
+-- had to be paginated/counted). Snapshot-level like floor_price/listed_count
+-- (an observation from one sync run), not collection-identity-level like
+-- creator_handle/creator_address -- so it lives on plank_multichain_snapshots,
+-- not plank_multichain_collections. Nullable/additive: adapters that can't
+-- provide a holder count (Helius DAS for Solana, UniSat/Ordiscan for
+-- Bitcoin -- neither has a clean single-call holder-count endpoint, checked
+-- live) simply never write this column, never a fabricated 0.
+ALTER TABLE plank_multichain_snapshots ADD COLUMN IF NOT EXISTS holder_count INTEGER;

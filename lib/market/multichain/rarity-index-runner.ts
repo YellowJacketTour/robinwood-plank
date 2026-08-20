@@ -105,20 +105,30 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
     }).catch(() => {});
   }
 
-  // Real 24h volume/sales (OpenSea /collections/{slug}/stats, confirmed
-  // live) -- separate call, separate endpoint, same pass.
+  // Real 24h/7d/30d volume/sales (OpenSea /collections/{slug}/stats,
+  // confirmed live) -- separate call, separate endpoint, same pass. The
+  // same `intervals` response already carries "seven_day" and "thirty_day"
+  // entries alongside "one_day", so reading those out is zero extra API
+  // calls -- not a second fetch, not a fabricated multi-window figure
+  // derived from a single data point.
   const stats = (await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(collectionSlug)}/stats`, {
     headers: { "x-api-key": key, accept: "application/json" },
   })
     .then((r) => (r.ok ? r.json() : null))
     .catch(() => null)) as { intervals?: Array<{ interval: string; volume?: number; sales?: number }> } | null;
   const oneDay = stats?.intervals?.find((i) => i.interval === "one_day");
-  if (oneDay) {
+  const sevenDay = stats?.intervals?.find((i) => i.interval === "seven_day");
+  const thirtyDay = stats?.intervals?.find((i) => i.interval === "thirty_day");
+  if (oneDay || sevenDay || thirtyDay) {
     const { updateCollectionMarketStats } = await import("@/lib/market/multichain/store");
-    const volume24hWei = typeof oneDay.volume === "number" ? BigInt(Math.round(oneDay.volume * 1e18)).toString() : null;
+    const toWei = (v: number | undefined) => (typeof v === "number" ? BigInt(Math.round(v * 1e18)).toString() : null);
     await updateCollectionMarketStats(chainSlug, contractAddress, {
-      volume24hWei,
-      sales24h: oneDay.sales ?? null,
+      volume24hWei: toWei(oneDay?.volume),
+      sales24h: oneDay?.sales ?? null,
+      volume7dWei: toWei(sevenDay?.volume),
+      sales7d: sevenDay?.sales ?? null,
+      volume30dWei: toWei(thirtyDay?.volume),
+      sales30d: thirtyDay?.sales ?? null,
       currentFloorPriceWei: null,
     }).catch(() => {});
   }

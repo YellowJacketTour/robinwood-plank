@@ -40,6 +40,8 @@ export type CollectionSnapshot = {
   creatorAddress?: string | null;
   /** Real creator handle (e.g. a Twitter/X handle), "whenever the adapter's own API exposes one" -- never fabricated. Same optionality as creatorAddress. */
   creatorHandle?: string | null;
+  /** Real distinct-owner count, "whenever the adapter's own API exposes one" (e.g. Alchemy's getOwnersForContract owner list length) -- never fabricated or estimated. Same optionality as creatorAddress/creatorHandle: undefined for adapters that don't support it, explicit null is also honest "checked, none present". */
+  holderCount?: number | null;
 };
 
 /** One entry from a ranked-discovery call — enough to register + seed a snapshot in one step. */

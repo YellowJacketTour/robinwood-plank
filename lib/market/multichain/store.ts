@@ -140,16 +140,31 @@ export async function updateCollectionDisplay(
 }
 
 /**
- * Real 24h volume/sales (OpenSea /collections/{slug}/stats, confirmed
- * live) plus a real floor % change computed from THIS app's own prior
- * observation -- OpenSea's stats endpoint has no floor-change field at
- * all, so previous_floor_price_wei is this app's own history, not a
- * third-party figure repackaged as if it were.
+ * Real 24h/7d/30d volume/sales (OpenSea /collections/{slug}/stats,
+ * confirmed live -- all three windows come out of the same response) plus
+ * a real floor % change computed from THIS app's own prior observation --
+ * OpenSea's stats endpoint has no floor-change field at all, so
+ * previous_floor_price_wei is this app's own history, not a third-party
+ * figure repackaged as if it were.
+ *
+ * volume7dWei/sales7d/volume30dWei/sales30d default to null (not COALESCE'd
+ * against the prior row) when omitted, matching volume24hWei/sales24h's own
+ * existing overwrite-on-each-pass semantics -- a caller that doesn't have
+ * multi-window data yet (e.g. an older code path) simply clears it rather
+ * than leaving a stale figure standing in for a fresh one.
  */
 export async function updateCollectionMarketStats(
   chainSlug: string,
   contractAddress: string,
-  stats: { volume24hWei: string | null; sales24h: number | null; currentFloorPriceWei: string | null }
+  stats: {
+    volume24hWei: string | null;
+    sales24h: number | null;
+    currentFloorPriceWei: string | null;
+    volume7dWei?: string | null;
+    sales7d?: number | null;
+    volume30dWei?: string | null;
+    sales30d?: number | null;
+  }
 ): Promise<void> {
   const collection = await postgresQuery<{ id: number }>(
     `SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
@@ -160,9 +175,19 @@ export async function updateCollectionMarketStats(
   await postgresQuery(
     `UPDATE plank_multichain_snapshots
      SET previous_floor_price_wei = COALESCE(floor_price_wei, previous_floor_price_wei),
-         volume_24h_wei = $2, sales_24h = $3
+         volume_24h_wei = $2, sales_24h = $3,
+         volume_7d_wei = $4, sales_7d = $5,
+         volume_30d_wei = $6, sales_30d = $7
      WHERE collection_id = $1`,
-    [id, stats.volume24hWei, stats.sales24h]
+    [
+      id,
+      stats.volume24hWei,
+      stats.sales24h,
+      stats.volume7dWei ?? null,
+      stats.sales7d ?? null,
+      stats.volume30dWei ?? null,
+      stats.sales30d ?? null,
+    ]
   );
 }
 
@@ -185,16 +210,23 @@ export async function writeSnapshot(
       snapshot.creatorHandle ?? null,
     ]
   );
+  // holder_count uses COALESCE (like creator_address/creator_handle above),
+  // not a plain overwrite like floor_price/total_supply/listed_count -- an
+  // adapter that can't provide a holder count (or the on-demand-only path
+  // simply not having been asked for one this run, see fetchSnapshotsBatch's
+  // reasoning in alchemy-nft.ts) passes null, and that null must never
+  // clobber a real value a prior single-collection fetch already recorded.
   await postgresQuery(
     `INSERT INTO plank_multichain_snapshots
-       (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, synced_at, sync_error)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW(), NULL)
+       (collection_id, floor_price_wei, floor_price_currency, floor_price_marketplace, total_supply, listed_count, holder_count, synced_at, sync_error)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NULL)
      ON CONFLICT (collection_id) DO UPDATE SET
        floor_price_wei = EXCLUDED.floor_price_wei,
        floor_price_currency = EXCLUDED.floor_price_currency,
        floor_price_marketplace = EXCLUDED.floor_price_marketplace,
        total_supply = EXCLUDED.total_supply,
        listed_count = EXCLUDED.listed_count,
+       holder_count = COALESCE(EXCLUDED.holder_count, plank_multichain_snapshots.holder_count),
        synced_at = NOW(),
        sync_error = NULL`,
     [
@@ -204,6 +236,7 @@ export async function writeSnapshot(
       snapshot.floorPriceMarketplace,
       snapshot.totalSupply,
       snapshot.listedCount,
+      snapshot.holderCount ?? null,
     ]
   );
 }
@@ -228,7 +261,14 @@ export type CollectionWithSnapshot = TrackedCollection & {
   syncError: string | null;
   volume24hWei: string | null;
   sales24h: number | null;
+  /** Real OpenSea 7d/30d volume/sales -- same response as the 24h fields (see updateCollectionMarketStats), never a fabricated multi-window figure derived from a single data point. Null until a collection has been through the OpenSea stats pass at least once. */
+  volume7dWei: string | null;
+  sales7d: number | null;
+  volume30dWei: string | null;
+  sales30d: number | null;
   previousFloorPriceWei: string | null;
+  /** Real distinct-owner count (Alchemy getOwnersForContract, EVM chains only) -- null, never a fabricated 0. */
+  holderCount: number | null;
 };
 
 /** Everything the read API needs in one query — collections joined to their latest snapshot. */
@@ -244,13 +284,19 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
       sync_error: string | null;
       volume_24h_wei: string | null;
       sales_24h: number | null;
+      volume_7d_wei: string | null;
+      sales_7d: number | null;
+      volume_30d_wei: string | null;
+      sales_30d: number | null;
       previous_floor_price_wei: string | null;
+      holder_count: number | null;
     }
   >(
     `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url, c.is_vault_backed,
             c.creator_handle, c.creator_address, c.creator_ens,
             s.floor_price_wei, s.floor_price_currency, s.floor_price_marketplace, s.total_supply, s.listed_count, s.synced_at, s.sync_error,
-            s.volume_24h_wei, s.sales_24h, s.previous_floor_price_wei
+            s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d, s.volume_30d_wei, s.sales_30d, s.previous_floor_price_wei,
+            s.holder_count
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
      ORDER BY c.chain_slug, c.contract_address`
@@ -266,8 +312,35 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
     syncError: row.sync_error,
     volume24hWei: row.volume_24h_wei,
     sales24h: row.sales_24h,
+    volume7dWei: row.volume_7d_wei,
+    sales7d: row.sales_7d,
+    volume30dWei: row.volume_30d_wei,
+    sales30d: row.sales_30d,
     previousFloorPriceWei: row.previous_floor_price_wei,
+    holderCount: row.holder_count,
   }));
+}
+
+/**
+ * Writes a real, freshly-fetched holder count for one collection -- the
+ * on-demand path (see fetchHolderCount in alchemy-nft.ts, called from the
+ * collection detail page, never from the bulk sync loop). Reuses the same
+ * COALESCE-safe upsert writeSnapshot already does for holder_count, without
+ * touching floor/listed/supply, which this call has no fresher data for.
+ */
+export async function updateHolderCount(chainSlug: string, contractAddress: string, holderCount: number): Promise<void> {
+  const collection = await postgresQuery<{ id: number }>(
+    `SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
+    [chainSlug, contractAddress.toLowerCase()]
+  );
+  const id = collection.rows[0]?.id;
+  if (!id) return;
+  await postgresQuery(
+    `INSERT INTO plank_multichain_snapshots (collection_id, holder_count, synced_at, sync_error)
+     VALUES ($1, $2, NOW(), NULL)
+     ON CONFLICT (collection_id) DO UPDATE SET holder_count = EXCLUDED.holder_count`,
+    [id, holderCount]
+  );
 }
 
 /**
@@ -279,9 +352,9 @@ export async function listCollectionsWithSnapshots(): Promise<CollectionWithSnap
 export async function getCollectionSupplyStats(
   chainSlug: string,
   contractAddress: string
-): Promise<{ listedCount: number | null; totalSupply: number | null } | null> {
-  const result = await postgresQuery<{ total_supply: string | null; listed_count: number | null }>(
-    `SELECT s.total_supply, s.listed_count
+): Promise<{ listedCount: number | null; totalSupply: number | null; holderCount: number | null } | null> {
+  const result = await postgresQuery<{ total_supply: string | null; listed_count: number | null; holder_count: number | null }>(
+    `SELECT s.total_supply, s.listed_count, s.holder_count
      FROM plank_multichain_collections c
      LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
      WHERE c.chain_slug = $1 AND c.contract_address = $2
@@ -290,7 +363,57 @@ export async function getCollectionSupplyStats(
   );
   const row = result.rows[0];
   if (!row) return null;
-  return { totalSupply: row.total_supply == null ? null : Number(row.total_supply), listedCount: row.listed_count };
+  return {
+    totalSupply: row.total_supply == null ? null : Number(row.total_supply),
+    listedCount: row.listed_count,
+    holderCount: row.holder_count,
+  };
+}
+
+/**
+ * Single-collection real 24h/7d/30d volume/sales, same source/columns as
+ * listCollectionsWithSnapshots (OpenSea's own multi-interval stats response,
+ * see rarity-index-runner.ts) -- for the collection detail page, which
+ * shouldn't pull the full 6000+-row scan just to show one collection's
+ * numbers. Null fields, never fabricated zeroes, until that OpenSea pass has
+ * run for this collection.
+ */
+export async function getCollectionMarketStats(
+  chainSlug: string,
+  contractAddress: string
+): Promise<{
+  volume24hWei: string | null;
+  sales24h: number | null;
+  volume7dWei: string | null;
+  sales7d: number | null;
+  volume30dWei: string | null;
+  sales30d: number | null;
+} | null> {
+  const result = await postgresQuery<{
+    volume_24h_wei: string | null;
+    sales_24h: number | null;
+    volume_7d_wei: string | null;
+    sales_7d: number | null;
+    volume_30d_wei: string | null;
+    sales_30d: number | null;
+  }>(
+    `SELECT s.volume_24h_wei, s.sales_24h, s.volume_7d_wei, s.sales_7d, s.volume_30d_wei, s.sales_30d
+     FROM plank_multichain_collections c
+     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+     WHERE c.chain_slug = $1 AND c.contract_address = $2
+     LIMIT 1`,
+    [chainSlug, contractAddress]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    volume24hWei: row.volume_24h_wei,
+    sales24h: row.sales_24h,
+    volume7dWei: row.volume_7d_wei,
+    sales7d: row.sales_7d,
+    volume30dWei: row.volume_30d_wei,
+    sales30d: row.sales_30d,
+  };
 }
 
 /**

@@ -84,6 +84,42 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+type OwnersForContractResponse = { owners: string[]; pageKey?: string | null };
+
+/**
+ * Real distinct-owner count via Alchemy's getOwnersForContract. Verified
+ * live 2026-08-20: the response's own documented `totalCount` field comes
+ * back null (not populated) -- there is no cheap count-only mode, the full
+ * owners array (already deduped, one entry per unique holder) has to be
+ * paginated and counted. For a real collection this size (BAYC, ~10k
+ * supply) that was a single call, 5,597 owners, pageKey null -- cheap
+ * enough for ON-DEMAND use (one collection at a time, when its detail page
+ * is viewed), but NOT wired into fetchSnapshot/fetchSnapshotsBatch, which
+ * run in bulk over every one of thousands of tracked collections every
+ * sync pass -- that would multiply this call by the whole index for no
+ * real reason, since a rankings-table row doesn't need a live holder count.
+ * MAX_PAGES bounds runaway cost for an unusually large/degenerate
+ * collection rather than trusting pageKey to always terminate quickly.
+ */
+const MAX_OWNER_PAGES = 20;
+
+export async function fetchHolderCount(chainSlug: string, contractAddress: string): Promise<number | null> {
+  const base = baseUrl(chainSlug);
+  let owners = new Set<string>();
+  let pageKey: string | null = null;
+  for (let page = 0; page < MAX_OWNER_PAGES; page++) {
+    const url = new URL(`${base}/getOwnersForContract`);
+    url.searchParams.set("contractAddress", contractAddress);
+    url.searchParams.set("withTokenBalances", "false");
+    if (pageKey) url.searchParams.set("pageKey", pageKey);
+    const data = await fetchJson<OwnersForContractResponse>(url.toString());
+    for (const owner of data.owners ?? []) owners.add(owner.toLowerCase());
+    pageKey = data.pageKey ?? null;
+    if (!pageKey) break;
+  }
+  return owners.size > 0 ? owners.size : null;
+}
+
 /**
  * A human-currency floor price (Alchemy reports these as decimal ETH/MATIC/
  * etc, not wei) converted to a wei-equivalent string for storage alongside
