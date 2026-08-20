@@ -476,33 +476,24 @@ function SortableTh({
   align?: "left" | "right";
   className?: string;
   children: ReactNode;
-  /** False when every row currently shown has a real null for this column -- e.g. Bitcoin/Solana have no volume/sales/change feed at all (confirmed live: 0 of 2,618 Bitcoin collections have any). Sorting by an all-null column is a real no-op (every row ties, order never visibly changes), which reads as "sort is broken" rather than "there's genuinely nothing to sort" -- flagged live. The header stays visible but disabled with a real explanation, instead of silently doing nothing on click. */
+  /** When false, every visible row is null for this column -- click still sorts (and sets the active header) so the control never disappears. Title explains why the order may not change. */
   hasData?: boolean;
 }) {
   const active = sortColumn === column;
-  if (!hasData) {
-    return (
-      <th className={`px-2 py-2 ${align === "left" ? "text-left" : "text-right"} ${className ?? ""}`}>
-        <span
-          className="inline-flex cursor-not-allowed items-center gap-0.5 text-foreground/25"
-          title="No collection shown here has real data for this column yet -- nothing to sort."
-        >
-          {children}
-        </span>
-      </th>
-    );
-  }
   return (
     <th className={`px-2 py-2 ${align === "left" ? "text-left" : "text-right"} ${className ?? ""}`}>
       <button
         type="button"
         onClick={() => onSort(column)}
         aria-pressed={active}
-        className={`inline-flex items-center gap-0.5 transition-colors hover:text-foreground/70 ${active ? "text-gold-300" : ""}`}
+        title={!hasData ? "No collection shown here has real data for this column yet — order may not change until it does." : undefined}
+        className={`inline-flex min-h-8 items-center gap-0.5 transition-colors ${
+          active ? "text-gold-300" : "text-foreground/55 hover:text-gold-300"
+        }`}
       >
         {children}
-        <span className="w-2.5 text-[0.55rem]" aria-hidden="true">
-          {active ? (sortDir === "asc" ? "▲" : "▼") : ""}
+        <span className={`w-2.5 text-[0.55rem] ${active ? "" : "text-foreground/30"}`} aria-hidden="true">
+          {active ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
         </span>
       </button>
     </th>
