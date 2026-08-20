@@ -86,12 +86,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-function mapOpenSeaNfts(nfts: Array<{ identifier?: string; name?: string | null; image_url?: string | null }>): CollectionToken[] {
-  return nfts
-    .filter((n) => n.identifier)
-    .map((n) => ({ tokenId: n.identifier!, name: n.name ?? null, imageUrl: n.image_url ?? null }));
-}
-
 async function openSeaTokens(openSeaChain: string, contractOrSlug: string, limit: number): Promise<CollectionToken[]> {
   const key = await getOpenSeaApiKey();
   if (!key) return [];
