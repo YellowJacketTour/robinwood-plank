@@ -152,14 +152,12 @@ export async function runHypersyncDiscoveryScan(input: {
 
   let registered = 0;
   let skippedNoMetadata = 0;
-  // Batch-resolve every candidate in as few HTTP round-trips as possible
-  // (fetchSnapshotsBatch, up to 100 per call) instead of one fetchSnapshot
-  // call per candidate -- the real, measured bottleneck this module had:
-  // ~90s for ~1,350 candidates on eth-mainnet alone, confirmed live
-  // 2026-08-20, against a raw-log fetch stage that itself completes in
-  // under a second thanks to HyperSync. A contract missing from the batch
-  // response (metadata resolution failed upstream) is treated the same as
-  // isNotRealCollectibleArt -- skipped, not retried individually.
+  const { checkSourceBudget } = await import("@/lib/market/multichain/discovery/source-budget");
+  if (!checkSourceBudget("alchemy-nft").allowed) {
+    skippedNoMetadata += candidates.length;
+    await writeCursor(input.chainSlug, lastBlockSeen - 1);
+    return { chainSlug: input.chainSlug, fromBlock, toBlock: lastBlockSeen - 1, logsScanned, candidates: candidates.length, registered, skippedNoMetadata };
+  }
   try {
     const snapshots = await fetchSnapshotsBatch(
       input.chainSlug,

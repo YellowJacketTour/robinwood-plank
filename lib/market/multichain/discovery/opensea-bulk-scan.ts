@@ -29,6 +29,7 @@
  * OpenSeaCollectionsPage type applies chain-agnostically.
  */
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
+import { slugCacheKey } from "@/lib/market/multichain/discovery/opensea-stats";
 import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, updateCollectionDisplay, hasMultichainStore } from "@/lib/market/multichain/store";
 import { alchemyNftAdapter } from "@/lib/market/multichain/adapters/alchemy-nft";
@@ -160,11 +161,20 @@ export async function runOpenSeaBulkScan(
         if (!contract?.address) continue;
         const contractAddress = contract.address.toLowerCase();
 
-        const existing = await postgresQuery<{ id: number }>(
-          `SELECT id FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
+        const existing = await postgresQuery<{ id: number; name: string | null }>(
+          `SELECT id, name FROM plank_multichain_collections WHERE chain_slug = $1 AND contract_address = $2`,
           [input.chainSlug, contractAddress]
         );
+        if (entry.collection) {
+          await kv.set(slugCacheKey(input.chainSlug, contractAddress), entry.collection).catch(() => {});
+        }
         if (existing.rows.length > 0) {
+          if ((!existing.rows[0].name || looksLikeContractName(existing.rows[0].name)) && entry.name) {
+            await updateCollectionDisplay(input.chainSlug, contractAddress, {
+              name: entry.name,
+              imageUrl: entry.image_url ?? null,
+            }).catch(() => {});
+          }
           result.skippedAlreadyTracked += 1;
           continue;
         }
