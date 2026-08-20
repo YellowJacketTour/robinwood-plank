@@ -369,6 +369,7 @@ function SortableTh({
   align,
   className,
   children,
+  hasData = true,
 }: {
   column: SortColumn;
   sortColumn: SortColumn;
@@ -377,8 +378,22 @@ function SortableTh({
   align?: "left" | "right";
   className?: string;
   children: ReactNode;
+  /** False when every row currently shown has a real null for this column -- e.g. Bitcoin/Solana have no volume/sales/change feed at all (confirmed live: 0 of 2,618 Bitcoin collections have any). Sorting by an all-null column is a real no-op (every row ties, order never visibly changes), which reads as "sort is broken" rather than "there's genuinely nothing to sort" -- flagged live. The header stays visible but disabled with a real explanation, instead of silently doing nothing on click. */
+  hasData?: boolean;
 }) {
   const active = sortColumn === column;
+  if (!hasData) {
+    return (
+      <th className={`px-2 py-2 ${align === "left" ? "text-left" : "text-right"} ${className ?? ""}`}>
+        <span
+          className="inline-flex cursor-not-allowed items-center gap-0.5 text-foreground/25"
+          title="No collection shown here has real data for this column yet -- nothing to sort."
+        >
+          {children}
+        </span>
+      </th>
+    );
+  }
   return (
     <th className={`px-2 py-2 ${align === "left" ? "text-left" : "text-right"} ${className ?? ""}`}>
       <button
@@ -827,6 +842,25 @@ export default function GlobalMarketHub() {
       .slice(0, rankingsShowCount);
   }, [collections, deadArt, chainFilter, rankingsShowCount, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyVerifiedCreator, onlyListed, priceMin, priceMax]);
 
+  // Real, per-column "does ANY row currently shown have real data here" --
+  // feeds SortableTh's hasData prop (see its own header for why: sorting
+  // an all-null column is a real no-op that reads as broken rather than
+  // "genuinely nothing to sort here", flagged live against Bitcoin's
+  // rankings, where 0 of 2,618 tracked collections have any volume/sales/
+  // change data). Computed from `rankings` itself, so it always reflects
+  // the CURRENT chain filter -- switching to a chain that does have real
+  // data re-enables the column immediately.
+  const rankingsHasData = useMemo(
+    () => ({
+      change: rankings.some((c) => c.floorChangePct != null),
+      volume: rankings.some((c) => windowVolumeWei(c, rankingsWindow) != null),
+      sales: rankings.some((c) => windowSales(c, rankingsWindow) != null),
+      listed: rankings.some((c) => listedPctOf(c) != null),
+      holders: rankings.some((c) => c.holderCount != null),
+    }),
+    [rankings, rankingsWindow]
+  );
+
   // Biggest Movers -- Magic Eden's real secondary strip (live-checked
   // 2026-08-19), sorted purely by |24h floor change|, not volume/grade.
   // This surfaces a DIFFERENT real signal than the rankings table above
@@ -1245,19 +1279,19 @@ export default function GlobalMarketHub() {
                   <SortableTh column="floor" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort}>
                     Floor
                   </SortableTh>
-                  <SortableTh column="change" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort}>
+                  <SortableTh column="change" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} hasData={rankingsHasData.change}>
                     24h Change
                   </SortableTh>
-                  <SortableTh column="volume" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden sm:table-cell">
+                  <SortableTh column="volume" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden sm:table-cell" hasData={rankingsHasData.volume}>
                     {rankingsWindow} Volume
                   </SortableTh>
-                  <SortableTh column="sales" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden md:table-cell">
+                  <SortableTh column="sales" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden md:table-cell" hasData={rankingsHasData.sales}>
                     {rankingsWindow} Sales
                   </SortableTh>
-                  <SortableTh column="listed" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell">
+                  <SortableTh column="listed" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden lg:table-cell" hasData={rankingsHasData.listed}>
                     Listed
                   </SortableTh>
-                  <SortableTh column="holders" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden xl:table-cell">
+                  <SortableTh column="holders" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="hidden xl:table-cell" hasData={rankingsHasData.holders}>
                     Holders
                   </SortableTh>
                   <SortableTh column="grade" sortColumn={sortColumn} sortDir={sortDir} onSort={toggleSort} className="w-9">
