@@ -79,6 +79,7 @@ const explicit = [
   "--discover-hypersync",
   "--discover-hypersync-backfill",
   "--discover-bitcoin-collections",
+  "--discover-ordiscan-collections",
   "--discover-solana-collections",
   "--discover-robinhood",
   "--discover-robinhood-opensea",
@@ -102,8 +103,8 @@ const targets = new Set(
   explicit.length > 0
     ? explicit.map((t) => t.slice(2))
     : full
-      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
-      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
+      ? ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "metadata", "rarity", "traits", "collection", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking", "scaffold-rarity"]
+      : ["events", "sales", "vault", "portfolio", "opensea", "pulp", "official-assets", "token-registry", "owners", "multichain", "discover-evm", "discover-hypersync", "discover-hypersync-backfill", "discover-bitcoin-collections", "discover-ordiscan-collections", "discover-solana-collections", "discover-robinhood", "discover-robinhood-opensea", "discover-opensea-bulk", "own-ranking"]
 );
 
 type Outcome = { target: string; ok: boolean; detail: string };
@@ -489,6 +490,18 @@ async function main(): Promise<void> {
     return r.error
       ? `ERR(${r.error.slice(0, 60)})`
       : `start ${r.start}/${r.total}, ${r.pagesWalked} pages, +${r.registered} new (${r.skippedHiddenOrEmpty} hidden/empty)${r.done ? " — DONE, full catalog walked" : ""}`;
+  });
+
+  // Second real Bitcoin Ordinals collection-discovery source, alongside
+  // discover-bitcoin-collections above -- see ordiscan-collection-scan.ts's
+  // own header for why it's registered under its own "ordiscan-ordinals"
+  // adapter rather than merged into UniSat's rows (Ordiscan's slug and
+  // UniSat's collectionId are two different indexers' own identity
+  // strings for what may or may not be the same real-world collection).
+  await step("discover-ordiscan-collections", async () => {
+    const { runOrdiscanCollectionScan } = await import("../lib/market/multichain/discovery/ordiscan-collection-scan");
+    const r = await runOrdiscanCollectionScan({ maxPages: full ? 30 : 10 });
+    return `page ${r.page}, ${r.pagesWalked} pages, +${r.registered} new (${r.skippedEmpty} empty)${r.done ? " — DONE, full catalog walked" : ""}`;
   });
 
   // Exhaustive Solana collection discovery via Helius DAS -- see

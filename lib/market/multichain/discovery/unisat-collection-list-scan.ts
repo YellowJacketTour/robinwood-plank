@@ -26,6 +26,7 @@
  */
 import { postgresQuery } from "@/lib/postgres";
 import { upsertTrackedCollection, updateCollectionDisplay } from "@/lib/market/multichain/store";
+import { extractHandleFromTwitterUrl } from "@/lib/market/multichain/twitter-handle";
 
 const API_BASE = "https://open-api.unisat.io/v1/collection-indexer/collection";
 const PAGE_SIZE = 100;
@@ -42,21 +43,6 @@ type UniSatCollectionListEntry = {
   discord?: string | null;
   website?: string | null;
 };
-
-/**
- * Real creator handle from UniSat's own `twitter` field -- strips a leading
- * "@" or reduces a full twitter.com/x.com URL down to the bare handle.
- * Never fabricated: null when the field is absent, blank, or clearly not a
- * handle/URL this app recognizes.
- */
-function extractTwitterHandle(twitter: string | null | undefined): string | null {
-  const trimmed = twitter?.trim();
-  if (!trimmed) return null;
-  const urlMatch = trimmed.match(/(?:twitter\.com|x\.com)\/@?([A-Za-z0-9_]{1,15})/i);
-  if (urlMatch) return urlMatch[1];
-  const handle = trimmed.replace(/^@/, "");
-  return /^[A-Za-z0-9_]{1,15}$/.test(handle) ? handle : null;
-}
 
 function requireApiKey(): string {
   const key = process.env.UNISAT_API_KEY?.trim();
@@ -138,7 +124,7 @@ export async function runUnisatCollectionListScan(input: { maxPages?: number } =
         adapter: "unisat-collections",
         isVaultBacked: false,
       });
-      const creatorHandle = extractTwitterHandle(entry.twitter);
+      const creatorHandle = extractHandleFromTwitterUrl(entry.twitter);
       if (creatorHandle) {
         await updateCollectionDisplay(CHAIN_SLUG, entry.collectionId, {
           name: null,

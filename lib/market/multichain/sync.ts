@@ -10,6 +10,7 @@ import { defillamaNftAdapter } from "@/lib/market/multichain/adapters/defillama-
 import { unisatCollectionsAdapter } from "@/lib/market/multichain/adapters/unisat-collections";
 import { robinhoodNativeAdapter } from "@/lib/market/multichain/adapters/robinhood-native";
 import { heliusSolanaAdapter } from "@/lib/market/multichain/adapters/helius-solana";
+import { ordiscanOrdinalsAdapter } from "@/lib/market/multichain/adapters/ordiscan-ordinals";
 import {
   hasMultichainStore,
   listTrackedCollections,
@@ -25,6 +26,7 @@ const ADAPTERS: Record<string, ChainAdapter> = {
   [unisatCollectionsAdapter.name]: unisatCollectionsAdapter,
   [robinhoodNativeAdapter.name]: robinhoodNativeAdapter,
   [heliusSolanaAdapter.name]: heliusSolanaAdapter,
+  [ordiscanOrdinalsAdapter.name]: ordiscanOrdinalsAdapter,
 };
 
 /**
@@ -47,6 +49,11 @@ const ADAPTER_MIN_INTERVAL_MS: Record<string, number> = {
   // precaution since this hits a keyed, presumably tiered API, unlike
   // Magic Eden's confirmed 180/min where the number above is measured.
   [unisatCollectionsAdapter.name]: 500,
+  // No documented rate limit found for Ordiscan's authenticated API either
+  // (checked the real docs repo -- nothing published there beyond the
+  // page itself, which is Cloudflare-challenge-gated). Paced the same as
+  // UniSat above, same reasoning: a keyed, presumably tiered API.
+  [ordiscanOrdinalsAdapter.name]: 500,
 };
 
 const lastCallAt = new Map<string, number>();
