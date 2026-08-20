@@ -311,7 +311,7 @@ export function decodeOrderFulfilled(topics: string[], data: string): DecodedFil
   };
 }
 
-async function readCursor(chainSlug: string): Promise<number | null> {
+export async function readCursor(chainSlug: string): Promise<number | null> {
   const result = await postgresQuery<{ last_indexed_block: string }>(
     `SELECT last_indexed_block FROM plank_seaport_fill_cursor WHERE chain_slug = $1`,
     [chainSlug]
@@ -319,7 +319,7 @@ async function readCursor(chainSlug: string): Promise<number | null> {
   return result.rows[0] ? Number(result.rows[0].last_indexed_block) : null;
 }
 
-async function writeCursor(chainSlug: string, block: number): Promise<void> {
+export async function writeCursor(chainSlug: string, block: number): Promise<void> {
   await postgresQuery(
     `INSERT INTO plank_seaport_fill_cursor (chain_slug, last_indexed_block, updated_at)
      VALUES ($1, $2, NOW())
@@ -408,17 +408,53 @@ export async function scanChainForFills(
         txHash: string;
         logIndex: number;
         blockNumber: number;
+        blockTimestamp: number | null;
         fill: DecodedFill;
       }[] = [];
+      const decoded: { txHash: string; logIndex: number; blockNumber: number; fill: DecodedFill }[] = [];
       for (const log of logs) {
         const fill = decodeOrderFulfilled(log.topics, log.data);
         if (!fill) continue;
-        rows.push({
-          chainSlug,
+        decoded.push({
           txHash: log.transactionHash,
           logIndex: Number.parseInt(log.logIndex, 16),
           blockNumber: Number.parseInt(log.blockNumber, 16),
           fill,
+        });
+      }
+      // Real block_timestamp, one real eth_getBlockByNumber call per
+      // UNIQUE block number actually present in this window's real logs
+      // (never one per log -- multiple fills often land in the same
+      // block) -- bounded by this window's own chunk size (<=10 blocks),
+      // so at most ~10 extra real RPC calls per window, not unbounded.
+      // Closes the same real gap the HyperSync path already gets for
+      // free from its own block field selection: writeFills's INSERT
+      // never populated this column at all before 2026-08-20, silently
+      // breaking updateEvmVolumeFromSeaportFills's 24h window filter for
+      // every fill ever written by either path.
+      const uniqueBlocks = [...new Set(decoded.map((d) => d.blockNumber))];
+      const timestampByBlock = new Map<number, number>();
+      await Promise.all(
+        uniqueBlocks.map(async (blockNumber) => {
+          try {
+            const block = await rpcCall<{ timestamp: string } | null>(rpcUrl, "eth_getBlockByNumber", ["0x" + blockNumber.toString(16), false]);
+            if (block?.timestamp) timestampByBlock.set(blockNumber, Number.parseInt(block.timestamp, 16));
+          } catch {
+            // A missing timestamp is honest ("we don't know yet"), never
+            // fabricated as "now" -- the row still gets written with a
+            // null block_timestamp, same as writeFills's own documented
+            // null-stays-null contract.
+          }
+        })
+      );
+      for (const d of decoded) {
+        rows.push({
+          chainSlug,
+          txHash: d.txHash,
+          logIndex: d.logIndex,
+          blockNumber: d.blockNumber,
+          blockTimestamp: timestampByBlock.get(d.blockNumber) ?? null,
+          fill: d.fill,
         });
       }
       if (rows.length > 0) {
@@ -447,8 +483,8 @@ export async function scanChainForFills(
   };
 }
 
-async function writeFills(
-  rows: { chainSlug: string; txHash: string; logIndex: number; blockNumber: number; fill: DecodedFill }[]
+export async function writeFills(
+  rows: { chainSlug: string; txHash: string; logIndex: number; blockNumber: number; blockTimestamp?: number | null; fill: DecodedFill }[]
 ): Promise<number> {
   // Dedupe within-batch -- same reason appendChainEvents does: Postgres
   // rejects ON CONFLICT DO NOTHING against two conflicting rows in one
@@ -463,10 +499,21 @@ async function writeFills(
 
   let written = 0;
   for (const r of deduped) {
+    // Real bug found live 2026-08-20: this INSERT never populated
+    // block_timestamp at all (missing from both the column list and the
+    // VALUES clause), so every fill ever written by ANY path always had
+    // a NULL timestamp -- silently, permanently breaking
+    // updateEvmVolumeFromSeaportFills's own `WHERE block_timestamp >
+    // NOW() - INTERVAL '24 hours'` filter regardless of how the fill was
+    // fetched. `to_timestamp($14)` converts a real Unix-seconds block
+    // timestamp (HyperSync's own Block.timestamp field, or a real
+    // eth_getBlockByNumber `timestamp` on the RPC path) into a real
+    // TIMESTAMPTZ; NULL stays NULL when a caller genuinely doesn't have
+    // one yet, never fabricated as "now."
     const result = await postgresQuery(
       `INSERT INTO plank_seaport_fills
-         (chain_slug, tx_hash, log_index, block_number, order_hash, seller, buyer, nft_contract, token_id, currency_token, price_wei, marketplace_fee_wei, shape)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10, $11::numeric, $12::numeric, $13)
+         (chain_slug, tx_hash, log_index, block_number, block_timestamp, order_hash, seller, buyer, nft_contract, token_id, currency_token, price_wei, marketplace_fee_wei, shape)
+       VALUES ($1, $2, $3, $4, to_timestamp($14), $5, $6, $7, $8, $9::numeric, $10, $11::numeric, $12::numeric, $13)
        ON CONFLICT (chain_slug, tx_hash, log_index) DO NOTHING`,
       [
         r.chainSlug,
@@ -482,6 +529,7 @@ async function writeFills(
         r.fill.priceWei,
         r.fill.marketplaceFeeWei,
         r.fill.shape,
+        r.blockTimestamp ?? null,
       ]
     );
     const isNew = (result.rowCount ?? 0) > 0;
@@ -559,7 +607,39 @@ async function writeFills(
  */
 export async function scanAllChainsForFills(): Promise<FillScanResult[]> {
   const results: FillScanResult[] = [];
+  // Dynamic import, not a static one -- hypersync-seaport-scan.ts imports
+  // FROM this file (writeFills/readCursor/writeCursor/decodeOrderFulfilled/
+  // ORDER_FULFILLED_TOPIC), so a static import here would be circular.
+  // Same pattern every other cross-module call in this app's discovery
+  // pipeline already uses for exactly this reason (see refresh-market-
+  // data.ts's own step() bodies).
+  const hasHyperSync = Boolean(process.env.ENVIO_API_TOKEN?.trim());
+  const hypersyncModule = hasHyperSync ? await import("@/lib/market/multichain/discovery/hypersync-seaport-scan") : null;
+
   for (const chain of FOREIGN_CHAINS) {
+    // HyperSync first when available -- real, independently-benchmarked
+    // (up to 2000x vs RPC) and, critically, has no free-tier "archive
+    // requests require a personal token" restriction the way PublicNode's
+    // free eth_getLogs does (confirmed live 2026-08-20: this exact error
+    // blocked eth/arb/base/bnb-mainnet on the RPC path). Only fall
+    // through to the RPC rotation below if HyperSync itself fails or its
+    // token is unset -- never silently skip a chain HyperSync could
+    // actually reach.
+    if (hypersyncModule) {
+      try {
+        const result = await hypersyncModule.scanChainForFillsViaHypersync(chain.chainSlug);
+        if (!result.error) {
+          results.push(result);
+          continue;
+        }
+        // A real error came back (not thrown) -- fall through to RPC
+        // rather than reporting a failure this chain might still recover
+        // from via the other path.
+      } catch {
+        // Fall through to RPC below.
+      }
+    }
+
     // Real fallback across every URL foreignRpcUrls returns (Alchemy
     // first, a free PublicNode endpoint second) -- added live 2026-08-20
     // after Alchemy's own key hit its real monthly capacity limit and

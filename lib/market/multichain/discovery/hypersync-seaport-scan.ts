@@ -1,0 +1,186 @@
+/**
+ * HyperSync-backed Seaport OrderFulfilled fill scanning -- the fast path
+ * for the exact chains still blocked on free RPC's own real archive-range
+ * restriction (confirmed live 2026-08-20: PublicNode's free tier answers
+ * "Archive requests require a personal token" for eth/arb/base/bnb-mainnet
+ * when scanChainForFills's own cursor asks for a window it classifies as
+ * historical). HyperSync has no such archive-vs-recent distinction for a
+ * bounded log query -- same real, independently-benchmarked (up to 2000x
+ * vs RPC) engine hypersync-evm-scan.ts already proves out for collection
+ * discovery, applied here to the SAME OrderFulfilled decode/write pipeline
+ * seaport-fill-indexer.ts already uses for its RPC path.
+ *
+ * REUSES, NEVER DUPLICATES, THE REAL DECODE/WRITE LOGIC
+ * ---------------------------------------------------------------------------
+ * ORDER_FULFILLED_TOPIC, decodeOrderFulfilled, writeFills, readCursor,
+ * writeCursor are all imported directly from seaport-fill-indexer.ts (the
+ * latter three newly exported for this purpose, behavior unchanged) --
+ * this module's only real job is fetching the raw logs via HyperSync
+ * instead of eth_getLogs. Both paths share the SAME cursor table
+ * (plank_seaport_fill_cursor), and writeCursor's own GREATEST() clause
+ * makes it safe for either path to run for a given chain without the
+ * other regressing progress.
+ *
+ * SAME HONEST HyperSync LIMIT hypersync-evm-scan.ts ALREADY DOCUMENTS:
+ * free tier is soft-capped (~100k events / 5GB / 7-day-idle flag),
+ * positioned for development/testing, not unlimited. MAX_LOGS_PER_RUN
+ * below protects that ceiling directly, same as the discovery scanner's
+ * own budget.
+ */
+import { HypersyncClient, type Query } from "@envio-dev/hypersync-client";
+import { EVM_CHAIN_ID } from "@/lib/market/multichain/discovery/evm-log-scan";
+import {
+  ORDER_FULFILLED_TOPIC,
+  decodeOrderFulfilled,
+  writeFills,
+  readCursor,
+  writeCursor,
+  type FillScanResult,
+} from "@/lib/market/multichain/seaport-fill-indexer";
+import { FOREIGN_SEAPORT_ADDRESS } from "@/lib/market/multichain/trading/foreign-chain-registry";
+import { checkSourceBudget, recordSourceSuccess, recordSourceFailure } from "@/lib/market/multichain/discovery/source-budget";
+
+const SOURCE = "hypersync-seaport";
+const CHUNK_BLOCKS = 50_000; // same conservative window hypersync-evm-scan.ts already uses
+const MAX_LOGS_PER_RUN = 20_000; // same free-tier event-quota guard
+
+function requireApiToken(): string {
+  const token = process.env.ENVIO_API_TOKEN?.trim();
+  if (!token) {
+    throw new Error(
+      "hypersync-seaport-scan: ENVIO_API_TOKEN is not set -- generate one at https://envio.dev/app/api-tokens. This scan is skipped, not silently run as a no-op."
+    );
+  }
+  return token;
+}
+
+function hypersyncUrl(chainId: number): string {
+  return `https://${chainId}.hypersync.xyz`;
+}
+
+/**
+ * Same real signature/return shape as scanChainForFills (seaport-fill-
+ * indexer.ts) so a caller can use either interchangeably -- the only
+ * difference is HOW logs are fetched, never what "a fill" means or how
+ * it's stored.
+ */
+export async function scanChainForFillsViaHypersync(chainSlug: string): Promise<FillScanResult> {
+  const chainId = EVM_CHAIN_ID[chainSlug];
+  if (!chainId) {
+    return { chainSlug, fromBlock: 0, toBlock: 0, logsScanned: 0, fillsWritten: 0, error: `hypersync-seaport-scan: no chainId mapping for "${chainSlug}"` };
+  }
+
+  const gate = checkSourceBudget(SOURCE);
+  if (!gate.allowed) {
+    return { chainSlug, fromBlock: 0, toBlock: 0, logsScanned: 0, fillsWritten: 0, error: `hypersync-seaport-scan: source jailed/exhausted (${gate.reason})` };
+  }
+
+  let client: HypersyncClient;
+  try {
+    client = new HypersyncClient({ url: hypersyncUrl(chainId), apiToken: requireApiToken() });
+  } catch (err) {
+    return { chainSlug, fromBlock: 0, toBlock: 0, logsScanned: 0, fillsWritten: 0, error: err instanceof Error ? err.message : String(err) };
+  }
+
+  let height: number;
+  try {
+    height = await client.getHeight();
+    recordSourceSuccess(SOURCE);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    recordSourceFailure(SOURCE, /rate limit|quota|429|too many/i.test(message));
+    return { chainSlug, fromBlock: 0, toBlock: 0, logsScanned: 0, fillsWritten: 0, error: message };
+  }
+
+  const cursor = await readCursor(chainSlug);
+  // Same forward-only-from-first-run scope the RPC path's own migration
+  // header documents -- this is a SUPPLEMENTARY fast path for chains the
+  // RPC path can't currently reach at all, not a separate history.
+  const fromBlock = cursor == null ? Math.max(0, height - CHUNK_BLOCKS) : cursor + 1;
+  const toBlock = Math.min(height, fromBlock + CHUNK_BLOCKS);
+
+  if (fromBlock >= toBlock) {
+    return { chainSlug, fromBlock, toBlock: fromBlock, logsScanned: 0, fillsWritten: 0 };
+  }
+
+  let totalLogs = 0;
+  let totalWritten = 0;
+  let lastSucceededBlock = cursor ?? fromBlock;
+
+  let query: Query = {
+    fromBlock,
+    toBlock,
+    logs: [{ address: [FOREIGN_SEAPORT_ADDRESS], topics: [[ORDER_FULFILLED_TOPIC]] }],
+    fieldSelection: {
+      log: ["Address", "Topic0", "Topic1", "Topic2", "Topic3", "Data", "BlockNumber", "TransactionHash", "LogIndex"],
+      // Real block.timestamp field (confirmed against the installed
+      // package's own index.d.ts, 2026-08-20) -- HyperSync returns the
+      // blocks touched by the matched logs in the SAME response
+      // (res.data.blocks), no second round-trip needed, unlike the RPC
+      // path which has no such join and needs its own eth_getBlockByNumber
+      // calls. This is what makes real block_timestamp population
+      // possible here at zero extra request cost.
+      block: ["Number", "Timestamp"],
+    },
+  };
+
+  try {
+    while (totalLogs < MAX_LOGS_PER_RUN) {
+      const res = await client.get(query);
+      recordSourceSuccess(SOURCE);
+
+      const timestampByBlock = new Map<number, number>();
+      for (const block of res.data.blocks ?? []) {
+        if (block.number != null && block.timestamp != null) timestampByBlock.set(block.number, block.timestamp);
+      }
+
+      const rows: { chainSlug: string; txHash: string; logIndex: number; blockNumber: number; blockTimestamp: number | null; fill: ReturnType<typeof decodeOrderFulfilled> }[] = [];
+      for (const log of res.data.logs) {
+        totalLogs += 1;
+        if (!log.topics || !log.data || !log.transactionHash) continue;
+        // Real bug found live 2026-08-20: HyperSync's field selection
+        // always returns exactly 4 topic slots (Topic0..Topic3), padded
+        // with `null` for any event whose real topic count is fewer --
+        // OrderFulfilled only ever has 2 (the event signature + the
+        // indexed `offerer`). ethers' Interface.parseLog expects ONLY
+        // the real topics, no padding, and throws on a literal `null`
+        // entry -- decodeOrderFulfilled's own try/catch silently
+        // swallowed that into a null return, so EVERY log from this path
+        // failed to decode (confirmed live: 5,174 real matched logs on
+        // eth-mainnet alone, zero real fills written). Strip the padding
+        // before decoding, exactly restoring the real topics array shape
+        // eth_getLogs already provides natively on the RPC path.
+        const realTopics = log.topics.filter((t): t is string => t != null);
+        const fill = decodeOrderFulfilled(realTopics, log.data);
+        if (!fill) continue;
+        const blockNumber = log.blockNumber ?? fromBlock;
+        rows.push({
+          chainSlug,
+          txHash: log.transactionHash,
+          logIndex: log.logIndex ?? 0,
+          blockNumber,
+          blockTimestamp: timestampByBlock.get(blockNumber) ?? null,
+          fill,
+        });
+      }
+      const validRows = rows.filter(
+        (r): r is { chainSlug: string; txHash: string; logIndex: number; blockNumber: number; blockTimestamp: number | null; fill: NonNullable<typeof r.fill> } => r.fill != null
+      );
+      if (validRows.length > 0) {
+        totalWritten += await writeFills(validRows);
+      }
+
+      const nextBlock = res.nextBlock;
+      await writeCursor(chainSlug, Math.min(nextBlock, toBlock) - 1 >= fromBlock ? nextBlock : toBlock);
+      lastSucceededBlock = nextBlock;
+      if (nextBlock >= toBlock || totalLogs >= MAX_LOGS_PER_RUN) break;
+      query = { ...query, fromBlock: nextBlock };
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    recordSourceFailure(SOURCE, /rate limit|quota|429|too many/i.test(message));
+    return { chainSlug, fromBlock, toBlock: lastSucceededBlock, logsScanned: totalLogs, fillsWritten: totalWritten, error: message };
+  }
+
+  return { chainSlug, fromBlock, toBlock: lastSucceededBlock, logsScanned: totalLogs, fillsWritten: totalWritten };
+}
