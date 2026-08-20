@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const map = await getForeignRarity(chainSlug, collectionSlug);
-    const byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number }> = {};
+    const byTokenId: Record<string, { name: string; tier: string; rank: number; percentile: number; score: number }> = {};
     for (const [tokenId, v] of map) byTokenId[tokenId] = v;
     if (map.size === 0) {
       const job = `${chainSlug}:${collectionSlug.toLowerCase()}`;

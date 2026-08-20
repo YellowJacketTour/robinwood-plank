@@ -16,11 +16,10 @@ const PAGE_SIZE = 50;
 
 /** First-pass item cap so we never block on Art Blocks / ENS. Ranks recompute as sample grows. */
 export function itemCeiling(supply: number | null): number {
-  if (supply == null || !Number.isFinite(supply) || supply <= 0) return 1_000;
-  if (supply <= 50) return Math.ceil(supply);
-  if (supply <= 2_000) return 1_000;
-  if (supply <= 20_000) return 2_000;
-  return 5_000;
+  if (supply == null || !Number.isFinite(supply) || supply <= 0) return 2_000;
+  if (supply <= 12_000) return Math.ceil(supply);
+  if (supply <= 40_000) return 12_000;
+  return 8_000;
 }
 
 export type RarityIndexBackend = "helius" | "unisat" | "opensea-contract" | "opensea-slug";

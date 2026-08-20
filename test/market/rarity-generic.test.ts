@@ -4,6 +4,7 @@ import {
   computeGenericRaritySnapshot,
   detectOfficialTierTrait,
   isSpamTraitType,
+  scoreTokenAgainstTraitIndex,
 } from "@/lib/rarity-generic";
 
 test("official tier trait: Background with Legendary/Common maps like RobinWood", () => {
@@ -140,6 +141,27 @@ test("adversarial: empty snapshot is empty, not fabricated ranks", () => {
   assert.equal(snap.sampleSize, 0);
   assert.equal(snap.byTokenId.size, 0);
   assert.equal(snap.officialTierTrait, null);
+});
+
+test("unindexed listed token still scores against collection trait frequencies", () => {
+  const items = Array.from({ length: 10 }, (_, i) => ({
+    tokenId: String(i),
+    name: null,
+    traits: [{ traitType: "Color", value: i === 0 ? "Gold" : "Gray" }],
+  }));
+  const snap = computeGenericRaritySnapshot(items);
+  const traitIndex: Record<string, Record<string, string[]>> = { Color: { Gold: ["0"], Gray: items.slice(1).map((x) => x.tokenId) } };
+  const scoresAsc = [...snap.byTokenId.values()].map((r) => r.score).sort((a, b) => a - b);
+  const listed = scoreTokenAgainstTraitIndex({
+    tokenId: "mint-not-in-sample",
+    name: "Claynosaurz #1318",
+    traits: [{ traitType: "Color", value: "Gold" }],
+    traitIndex,
+    sampleSize: 10,
+    knownScoresAsc: scoresAsc,
+  });
+  assert.equal(listed.rank, 1);
+  assert.ok(listed.score > 0);
 });
 
 test("adversarial: Bitcoin inscription ids and Avalanche token ids share the kernel", () => {

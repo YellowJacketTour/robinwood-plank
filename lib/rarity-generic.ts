@@ -153,3 +153,69 @@ export function computeGenericRaritySnapshot(items: GenericRarityInput[]): Gener
 
   return { sampleSize, byTokenId, officialTierTrait, scoredTraitTypes: [...keepTypes] };
 }
+
+function findIndexValues(
+  traitIndex: Record<string, Record<string, string[]>>,
+  traitType: string
+): Record<string, string[]> | undefined {
+  if (traitIndex[traitType]) return traitIndex[traitType];
+  const needle = traitType.toLowerCase();
+  const hit = Object.entries(traitIndex).find(([k]) => k.toLowerCase() === needle);
+  return hit?.[1];
+}
+
+function findIndexIds(values: Record<string, string[]>, value: string): string[] | undefined {
+  if (values[value]) return values[value];
+  const needle = value.toLowerCase();
+  const hit = Object.entries(values).find(([k]) => k.toLowerCase() === needle);
+  return hit?.[1];
+}
+
+/** Score any piece that has traits against an already-built collection trait index. */
+export function scoreTokenAgainstTraitIndex(input: {
+  tokenId: string;
+  name?: string | null;
+  traits: Array<{ traitType: string; value: string }>;
+  traitIndex: Record<string, Record<string, string[]>>;
+  sampleSize: number;
+  knownScoresAsc: number[];
+}): GenericTokenRarity {
+  const n = Math.max(1, input.sampleSize);
+  let score = 0;
+  let officialValue: string | null = null;
+  for (const t of input.traits) {
+    const cat = findIndexValues(input.traitIndex, t.traitType);
+    if (!cat) continue;
+    const ids = findIndexIds(cat, t.value);
+    const count = ids?.length ?? 0;
+    if (count <= 0) continue;
+    score += informationContent(Math.min(1, count / n));
+    if (!officialValue && /background|tier|rarity|rank|class|edition/i.test(t.traitType.replace(/[\s_-]+/g, ""))) {
+      officialValue = t.value;
+    }
+  }
+  const scoresAsc = input.knownScoresAsc;
+  let lo = 0;
+  let hi = scoresAsc.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (scoresAsc[mid] < score) lo = mid + 1;
+    else hi = mid;
+  }
+  const below = lo;
+  let ge = lo;
+  while (ge < scoresAsc.length && scoresAsc[ge] === score) ge += 1;
+  const above = scoresAsc.length - ge;
+  const rank = above + 1;
+  const percentile = input.sampleSize > 0 ? (below / input.sampleSize) * 100 : 0;
+  const fromOfficial = officialValue ? tierFromBackground(officialValue) : null;
+  const tier = fromOfficial ?? (score <= 0 ? "Common" : tierFromPercentile(percentile));
+  return {
+    tokenId: input.tokenId,
+    name: input.name ?? `#${input.tokenId}`,
+    score,
+    rank,
+    percentile,
+    tier,
+  };
+}

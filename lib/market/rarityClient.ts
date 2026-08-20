@@ -17,6 +17,7 @@ export type RarityLookup = {
   tier: RarityTier;
   rank: number;
   percentile: number;
+  score?: number;
 };
 
 type RarityResponse = {

@@ -23,16 +23,16 @@ type RarityRow = {
 export async function getForeignRarity(
   chainSlug: string,
   collectionSlug: string
-): Promise<Map<string, { name: string; tier: string; rank: number; percentile: number }>> {
+): Promise<Map<string, { name: string; tier: string; rank: number; percentile: number; score: number }>> {
   const result = await postgresQuery<RarityRow>(
     `SELECT token_id, name, score, rank, percentile, tier
      FROM plank_foreign_rarity
      WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`,
     [chainSlug, collectionSlug]
   );
-  const map = new Map<string, { name: string; tier: string; rank: number; percentile: number }>();
+  const map = new Map<string, { name: string; tier: string; rank: number; percentile: number; score: number }>();
   for (const row of result.rows) {
-    map.set(row.token_id, { name: row.name, tier: row.tier, rank: row.rank, percentile: row.percentile });
+    map.set(row.token_id, { name: row.name, tier: row.tier, rank: row.rank, percentile: row.percentile, score: row.score });
   }
   return map;
 }

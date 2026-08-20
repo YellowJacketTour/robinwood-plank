@@ -36,7 +36,7 @@ import { looksLikeSolanaPubkey } from "@/lib/market/multichain/solana-pubkey";
 const RPC_URL = "https://mainnet.helius-rpc.com";
 const PAGE_SIZE = 1000;
 /** First-pass cap (same philosophy as EVM itemCeiling): ranks recompute as the sample grows. */
-const FIRST_PASS_ITEM_CAP = 5_000;
+const FIRST_PASS_ITEM_CAP = 12_000;
 
 function apiKey(): string {
   const key = process.env.HELIUS_API_KEY?.trim();

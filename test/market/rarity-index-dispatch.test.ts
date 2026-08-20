@@ -21,10 +21,10 @@ test("Avalanche and every OpenSea EVM chain share the slug/contract backends", (
   }
 });
 
-test("itemCeiling never walks unbounded 10k+ collections on first pass", () => {
-  assert.equal(itemCeiling(null), 1000);
+test("itemCeiling indexes full 10k-class collections, caps mega-sets", () => {
+  assert.equal(itemCeiling(null), 2000);
   assert.equal(itemCeiling(10), 10);
-  assert.equal(itemCeiling(500), 1000);
-  assert.equal(itemCeiling(5000), 2000);
-  assert.equal(itemCeiling(100_000), 5000);
+  assert.equal(itemCeiling(10_000), 10_000);
+  assert.equal(itemCeiling(25_000), 12_000);
+  assert.equal(itemCeiling(100_000), 8_000);
 });
