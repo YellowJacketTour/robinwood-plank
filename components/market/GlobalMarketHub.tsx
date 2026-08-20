@@ -415,40 +415,50 @@ function compareByColumn(
 /** Every real input gradeScore() weighs, plus what each one actually contributed for THIS collection -- so the badge can show its work instead of asking a viewer to trust an opaque letter. Mirrors gradeScore()'s own logic exactly; the two must never drift apart. */
 type GradeBreakdown = {
   score: number;
+  gradable: boolean;
   parts: Array<{ label: string; points: number; max: number; met: boolean }>;
 };
+
+function hasMarketEvidence(c: TrackedCollection): boolean {
+  if (c.floorPriceWei && c.floorPriceWei !== "0") return true;
+  if (c.listedCount != null && c.listedCount > 0) return true;
+  if (c.volume24hWei && c.volume24hWei !== "0") return true;
+  if (c.sales24h != null && c.sales24h > 0) return true;
+  return false;
+}
 
 function gradeBreakdown(c: TrackedCollection, artOk: boolean): GradeBreakdown {
   const activityPoints = (Math.min(c.recentActivity, 5000) / 5000) * 300;
   const hasVolume = Boolean(c.volume24hWei && c.volume24hWei !== "0");
   const hasCreator = Boolean(c.creatorHandle || c.creatorEns);
+  const liveBook = c.listedCount != null && c.listedCount > 0;
+  const hasFloor = Boolean(c.floorPriceWei && c.floorPriceWei !== "0");
   const parts: GradeBreakdown["parts"] = [
-    { label: "Has real art", points: artOk ? 1000 : 0, max: 1000, met: artOk },
-    { label: "Tradeable order book", points: c.tradeable ? 500 : 0, max: 500, met: c.tradeable },
+    { label: "Has real art", points: artOk ? 400 : 0, max: 400, met: artOk },
+    { label: "Live listed count", points: liveBook ? 500 : 0, max: 500, met: liveBook },
+    { label: "Real floor price", points: hasFloor ? 400 : 0, max: 400, met: hasFloor },
+    { label: "Real 24h volume", points: hasVolume ? 400 : 0, max: 400, met: hasVolume },
     { label: "Recent chain activity", points: Math.round(activityPoints), max: 300, met: c.recentActivity > 0 },
-    { label: "Real 24h volume", points: hasVolume ? 200 : 0, max: 200, met: hasVolume },
     { label: "Known creator handle/ENS", points: hasCreator ? 50 : 0, max: 50, met: hasCreator },
   ];
-  return { score: parts.reduce((sum, p) => sum + p.points, 0), parts };
+  return {
+    score: parts.reduce((sum, p) => sum + p.points, 0),
+    gradable: artOk && hasMarketEvidence(c),
+    parts,
+  };
 }
 
-/** A collection is graded "real" for ranking/display purposes only when it has actual art AND at least one real signal (activity, volume, or a tradeable order book) -- an artless or dead row shouldn't out-rank one a person can actually look at and buy. Max possible score is 2050. */
-function gradeScore(c: TrackedCollection, artOk: boolean): number {
-  return gradeBreakdown(c, artOk).score;
+/** Null when the row has no market evidence -- an image on a tradeable chain is not a grade. Still not wash-trade or stolen-art detection. */
+function gradeScore(c: TrackedCollection, artOk: boolean): number | null {
+  const b = gradeBreakdown(c, artOk);
+  return b.gradable ? b.score : null;
 }
 
-/**
- * A visible A/B/C/D letter for gradeScore(), because "the sort order
- * changed" isn't the same as "grading is visibly real" -- flagged live
- * 2026-08-18 ("dont properly graded collections as far as i can genuinely
- * tell"). Same four real inputs as gradeScore, just thresholded into a
- * legible band instead of staying an invisible sort key. Never shown for a
- * row with no art at all -- an ungraded placeholder, not a fabricated D.
- */
-function gradeLetter(score: number): "A" | "B" | "C" | "D" {
-  if (score >= 1700) return "A";
-  if (score >= 1350) return "B";
-  if (score >= 1000) return "C";
+function gradeLetter(breakdown: GradeBreakdown): "A" | "B" | "C" | "D" | null {
+  if (!breakdown.gradable) return null;
+  if (breakdown.score >= 1500) return "A";
+  if (breakdown.score >= 1100) return "B";
+  if (breakdown.score >= 700) return "C";
   return "D";
 }
 const GRADE_COLOR: Record<string, string> = {
@@ -512,8 +522,8 @@ function GradeBadge({ breakdown }: { breakdown: GradeBreakdown }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const letter = gradeLetter(breakdown.score);
-  const thresholdLabel = letter === "A" ? "≥1700" : letter === "B" ? "≥1350" : letter === "C" ? "≥1000" : "<1000";
+  const letter = gradeLetter(breakdown);
+  const thresholdLabel = letter === "A" ? "≥1500" : letter === "B" ? "≥1100" : letter === "C" ? "≥700" : letter === "D" ? "<700" : "needs floor, listed, volume, or sales";
 
   // Real fix for a real bug flagged live twice ("the graded pop up
   // explanations are colliding with backgrounds and nearby text and
@@ -545,11 +555,15 @@ function GradeBadge({ breakdown }: { breakdown: GradeBreakdown }) {
         onClick={openPopover}
         onBlur={() => setOpen(false)}
         aria-expanded={open}
-        aria-label={`Grade ${letter}, ${breakdown.score} of 2050 points -- click for the full breakdown`}
-        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[0.6rem] font-black text-wood-950 transition-transform duration-150 hover:scale-110"
-        style={{ backgroundColor: GRADE_COLOR[letter] }}
+        aria-label={letter ? `Grade ${letter}, ${breakdown.score} points -- click for the full breakdown` : `Ungraded -- no floor, listed, volume, or sales yet`}
+        className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-0.5 text-[0.55rem] font-black transition-transform duration-150 hover:scale-110 ${letter ? "text-wood-950" : ""}`}
+        style={{
+          backgroundColor: letter ? GRADE_COLOR[letter] : "transparent",
+          color: letter ? undefined : "rgba(245,237,224,0.4)",
+          border: letter ? undefined : "1px solid rgba(245,237,224,0.25)",
+        }}
       >
-        {letter}
+        {letter ?? "—"}
       </button>
       {open && pos && typeof document !== "undefined"
         ? createPortal(
@@ -559,9 +573,13 @@ function GradeBadge({ breakdown }: { breakdown: GradeBreakdown }) {
               style={{ top: pos.top, left: pos.left, backgroundColor: "#1a1512" }}
             >
               <p className="mb-1.5 font-black uppercase tracking-wide text-foreground/50">
-                Grade {letter} · {breakdown.score}/2050 pts
+                {letter ? `Grade ${letter} · ${breakdown.score} pts` : "Ungraded"}
               </p>
-              <p className="mb-2 text-[0.6rem] text-foreground/35">{thresholdLabel} points needed for {letter}</p>
+              <p className="mb-2 text-[0.6rem] text-foreground/35">
+                {letter
+                  ? `${thresholdLabel} points needed for ${letter}. Not a wash-trade or stolen-art score.`
+                  : "No letter until this collection has a real floor, listed count, 24h volume, or 24h sales. Transfer activity and a JPEG are not a market grade. Not wash-trade or stolen-art detection."}
+              </p>
               <ul className="space-y-1">
                 {breakdown.parts.map((p) => (
                   <li key={p.label} className="flex items-center justify-between gap-2">
@@ -915,7 +933,7 @@ export default function GlobalMarketHub() {
     });
     return candidates
       .sort((a, b) => {
-        const g = gradeScore(b, true) - gradeScore(a, true);
+        const g = (gradeScore(b, true) ?? 0) - (gradeScore(a, true) ?? 0);
         if (g !== 0) return g;
         return Number(BigInt(b.volume24hWei!) - BigInt(a.volume24hWei!));
       })
