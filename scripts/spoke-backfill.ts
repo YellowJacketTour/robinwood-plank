@@ -77,6 +77,12 @@ async function main(): Promise<void> {
     console.log(`[spokes] coingecko-bnb: ${JSON.stringify(r)}`);
   }
 
+  if (want("coingecko-avax") && remaining()) {
+    const { runCoinGeckoNftStats } = await import("../lib/market/multichain/discovery/coingecko-nft-stats");
+    const r = await runCoinGeckoNftStats("avax-mainnet", 15);
+    console.log(`[spokes] coingecko-avax: ${JSON.stringify(r)}`);
+  }
+
   if (want("solana-coingecko") && remaining()) {
     const r = await runCoinGeckoNftStats("solana-mainnet", 20);
     console.log(`[spokes] solana-coingecko: ${JSON.stringify(r)}`);
