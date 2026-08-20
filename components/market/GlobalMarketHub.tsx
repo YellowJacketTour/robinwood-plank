@@ -979,7 +979,12 @@ export default function GlobalMarketHub() {
   // pin.
   const chains = useMemo(() => {
     const seen = new Map<string, number>();
-    for (const c of collections) seen.set(c.chainSlug, (seen.get(c.chainSlug) ?? 0) + 1);
+    for (const c of collections) {
+      if (isSpamCollectionTitle(c.name)) continue;
+      if (!isHomeRow(c) && looksLikeContractName(c.name || displayName(c))) continue;
+      if (!(c.name ?? "").trim()) continue;
+      seen.set(c.chainSlug, (seen.get(c.chainSlug) ?? 0) + 1);
+    }
     return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [collections]);
 
