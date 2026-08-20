@@ -166,6 +166,19 @@ Paste any of those (or a deployed **preview**, never `master`) back to the agent
 
 ## 8. Taking it to totality (ordered, no fantasy)
 
+### Hub ranking completeness (ETH-like cells)
+
+Unfiltered Ethereum looks “complete” because those rows already had an OpenSea stats snapshot. Optimism/Avalanche often have **floor only**. Visible-page hydrate (`POST /api/market/multichain/hydrate-stats`, 8 contracts):
+
+| Chain | Primary (keyless where possible) | Fallback |
+|---|---|---|
+| ETH/Base/OP/Arb/Polygon/BNB/Avax | CoinGecko `GET /nfts/{platform}/contract/{address}` | OpenSea `/stats` + `num_owners` |
+| Solana | Magic Eden `/v2/collections/{symbol}/stats` (keyless) | CoinGecko platform `solana` |
+| Bitcoin | CoinGecko `ordinals` slug match (existing cron) | UniSat floor only |
+| Robinhood native | `getListings("robinwood")` | never OpenSea for the home collection |
+
+Holders stay `—` unless CoinGecko unique addresses or OpenSea `num_owners` returns. Alchemy NFT stays off.
+
 1. Cron `scaffold-rarity*` + OpenSea `/stats` for Robinhood scan rows that have slugs (cells fill **only** after a real pass).  
 2. Persist `partial` (`031_foreign_rarity_partial.sql` if applied) instead of inferring 5k.  
 3. Native 24h volume/sales/holders for RobinWood from chain-indexer / rarity sample — still no Alchemy.  

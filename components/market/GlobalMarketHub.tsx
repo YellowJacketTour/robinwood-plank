@@ -1011,8 +1011,10 @@ export default function GlobalMarketHub() {
   useEffect(() => {
     if (loading || rankings.length === 0) return;
     const chain = chainFilter.size === 1 ? [...chainFilter][0] : null;
-    if (!chain || chain === "solana-mainnet" || chain === "bitcoin-mainnet") return;
-    const missing = rankings.filter((c) => !isHomeRow(c) && c.volume24hWei == null && c.sales24h == null).slice(0, 8);
+    if (!chain || chain === "bitcoin-mainnet") return;
+    const missing = rankings
+      .filter((c) => !isHomeRow(c) && (c.volume24hWei == null || c.volume24hWei === "0"))
+      .slice(0, 8);
     if (missing.length === 0) return;
     const key = `${chain}:${missing.map((c) => c.contractAddress).join(",")}`;
     if (hydratedKey.current === key) return;

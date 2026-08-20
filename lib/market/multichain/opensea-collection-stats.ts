@@ -4,30 +4,115 @@
  */
 import { foreignChainByChainSlug } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { getOpenSeaApiKey } from "@/lib/market/opensea";
-import { updateCollectionMarketStats, updateCollectionSupplyFields, updateCollectionDisplay } from "@/lib/market/multichain/store";
+import {
+  updateCollectionMarketStats,
+  updateCollectionSupplyFields,
+  updateCollectionDisplay,
+  updateHolderCount,
+} from "@/lib/market/multichain/store";
+import { isSolanaChainSlug } from "@/lib/market/multichain/trading/non-evm-chains";
 
 function openSeaChainFor(chainSlug: string): string | null {
   if (chainSlug === "robinhood") return "robinhood";
   return foreignChainByChainSlug(chainSlug)?.openSeaChain ?? null;
 }
 
+const CG_PLATFORM: Record<string, string> = {
+  "eth-mainnet": "ethereum",
+  "opt-mainnet": "optimistic-ethereum",
+  "arb-mainnet": "arbitrum-one",
+  "base-mainnet": "base",
+  "polygon-mainnet": "polygon-pos",
+  "bnb-mainnet": "binance-smart-chain",
+  "avax-mainnet": "avalanche",
+  "solana-mainnet": "solana",
+};
+
+function toWei(v: number | undefined): string | null {
+  return typeof v === "number" && Number.isFinite(v) ? BigInt(Math.round(v * 1e18)).toString() : null;
+}
+
+async function refreshCoinGeckoByContract(chainSlug: string, contractAddress: string): Promise<boolean> {
+  const platform = CG_PLATFORM[chainSlug];
+  if (!platform) return false;
+  const key = process.env.COINGECKO_API_KEY?.trim();
+  const headers: Record<string, string> = key
+    ? { accept: "application/json", "x-cg-demo-api-key": key }
+    : { accept: "application/json" };
+  const res = await fetch(
+    `https://api.coingecko.com/api/v3/nfts/${platform}/contract/${encodeURIComponent(contractAddress)}`,
+    { headers, signal: AbortSignal.timeout(15_000) }
+  );
+  if (!res.ok) return false;
+  const d = (await res.json()) as {
+    volume_24h?: { native_currency?: number };
+    one_day_sales?: number;
+    floor_price_24h_percentage_change?: { native_currency?: number };
+    number_of_unique_addresses?: number;
+    total_supply?: number;
+  };
+  const volume24hWei = toWei(d.volume_24h?.native_currency);
+  const sales24h = typeof d.one_day_sales === "number" ? d.one_day_sales : null;
+  const change = d.floor_price_24h_percentage_change?.native_currency;
+  await updateCollectionMarketStats(chainSlug, contractAddress, {
+    volume24hWei,
+    sales24h,
+    currentFloorPriceWei: null,
+    floorChangePct: typeof change === "number" && Number.isFinite(change) ? change : null,
+  }).catch(() => {});
+  if (typeof d.number_of_unique_addresses === "number" && d.number_of_unique_addresses > 0) {
+    await updateHolderCount(chainSlug, contractAddress, d.number_of_unique_addresses).catch(() => {});
+  }
+  if (typeof d.total_supply === "number" && d.total_supply > 0) {
+    await updateCollectionSupplyFields(chainSlug, contractAddress, { listedCount: null, totalSupply: d.total_supply }).catch(() => {});
+  }
+  return volume24hWei != null || sales24h != null;
+}
+
+async function refreshMagicEdenSolana(symbol: string): Promise<boolean> {
+  const res = await fetch(`https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}/stats`, {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) return false;
+  const stats = (await res.json()) as { listedCount?: number; floorPrice?: number; uniqueHolders?: number };
+  if (typeof stats.listedCount === "number") {
+    await updateCollectionSupplyFields("solana-mainnet", symbol, {
+      listedCount: stats.listedCount,
+      totalSupply: null,
+    }).catch(() => {});
+  }
+  if (typeof stats.uniqueHolders === "number" && stats.uniqueHolders > 0) {
+    await updateHolderCount("solana-mainnet", symbol, stats.uniqueHolders).catch(() => {});
+  }
+  return true;
+}
+
 export async function refreshOpenSeaStatsForContract(
   chainSlug: string,
   contractAddress: string
 ): Promise<{ ok: boolean; slug?: string }> {
+  if (isSolanaChainSlug(chainSlug)) {
+    const ok = await refreshMagicEdenSolana(contractAddress);
+    const cg = await refreshCoinGeckoByContract(chainSlug, contractAddress).catch(() => false);
+    return { ok: ok || cg };
+  }
+
+  const cgFirst = await refreshCoinGeckoByContract(chainSlug, contractAddress).catch(() => false);
+
   const osChain = openSeaChainFor(chainSlug);
-  if (!osChain) return { ok: false };
+  if (!osChain) return { ok: cgFirst };
   const key = await getOpenSeaApiKey();
-  if (!key) return { ok: false };
+  if (!key) return { ok: cgFirst };
 
   const ident = await fetch(`https://api.opensea.io/api/v2/chain/${osChain}/contract/${contractAddress}`, {
     headers: { "x-api-key": key, accept: "application/json" },
     signal: AbortSignal.timeout(15_000),
   });
-  if (!ident.ok) return { ok: false };
+  if (!ident.ok) return { ok: cgFirst };
   const identJson = (await ident.json()) as { collection?: string };
   const slug = identJson.collection;
-  if (!slug) return { ok: false };
+  if (!slug) return { ok: cgFirst };
 
   const metaRes = await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}`, {
     headers: { "x-api-key": key, accept: "application/json" },
@@ -72,8 +157,6 @@ export async function refreshOpenSeaStatsForContract(
   const oneDay = stats?.intervals?.find((i) => i.interval === "one_day");
   const sevenDay = stats?.intervals?.find((i) => i.interval === "seven_day");
   const thirtyDay = stats?.intervals?.find((i) => i.interval === "thirty_day");
-  const toWei = (v: number | undefined) => (typeof v === "number" ? BigInt(Math.round(v * 1e18)).toString() : null);
-
   if (oneDay || sevenDay || thirtyDay) {
     await updateCollectionMarketStats(chainSlug, contractAddress, {
       volume24hWei: toWei(oneDay?.volume),
@@ -84,6 +167,9 @@ export async function refreshOpenSeaStatsForContract(
       sales30d: thirtyDay?.sales ?? null,
       currentFloorPriceWei: null,
     }).catch(() => {});
+  }
+  if (typeof stats?.total?.num_owners === "number" && stats.total.num_owners > 0) {
+    await updateHolderCount(chainSlug, contractAddress, stats.total.num_owners).catch(() => {});
   }
 
   return { ok: true, slug };
