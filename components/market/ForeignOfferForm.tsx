@@ -52,6 +52,7 @@ export default function ForeignOfferForm({ chainSlug, currencySymbol, account, c
   const [index, setIndex] = useState<TraitIndexResponse | null>(null);
   const [indexError, setIndexError] = useState<string | null>(null);
   const [clauses, setClauses] = useState<CriteriaClause[]>([]);
+  const [collectionWildcard, setCollectionWildcard] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,8 +97,8 @@ export default function ForeignOfferForm({ chainSlug, currencySymbol, account, c
       setError("Enter an amount.");
       return;
     }
-    if (clauses.length === 0 || qualifyingIds.length === 0) {
-      setError("Pick at least one trait or rarity that matches some items.");
+    if (!collectionWildcard && (clauses.length === 0 || qualifyingIds.length === 0)) {
+      setError("Pick at least one trait or rarity that matches some items, or bid on the whole collection.");
       return;
     }
     try {
@@ -107,7 +108,7 @@ export default function ForeignOfferForm({ chainSlug, currencySymbol, account, c
       await buildForeignOffer({
         chainSlug,
         collectionAddress: collection.contractAddress,
-        criteriaTokenIds: qualifyingIds,
+        ...(collectionWildcard ? { collectionWildcard: true } : { criteriaTokenIds: qualifyingIds }),
         offerWei: wei,
         expiresAt,
         accountAddress: account,
@@ -138,8 +139,8 @@ export default function ForeignOfferForm({ chainSlug, currencySymbol, account, c
       setError("Enter an amount.");
       return;
     }
-    if (clauses.length === 0 || qualifyingIds.length === 0) {
-      setError("Pick at least one trait or rarity that matches some items.");
+    if (!collectionWildcard && (clauses.length === 0 || qualifyingIds.length === 0)) {
+      setError("Pick at least one trait or rarity that matches some items, or bid on the whole collection.");
       return;
     }
     setReviewOpen(true);
@@ -174,11 +175,15 @@ export default function ForeignOfferForm({ chainSlug, currencySymbol, account, c
             <dl className="mt-4 grid grid-cols-2 gap-2">
               <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
                 <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Scope</dt>
-                <dd className="mt-1 text-xs font-bold text-foreground">{formatCriteriaLabel(clauses)}</dd>
+                <dd className="mt-1 text-xs font-bold text-foreground">
+                  {collectionWildcard ? `Any ${collection.name} token` : formatCriteriaLabel(clauses)}
+                </dd>
               </div>
               <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
                 <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Qualifying</dt>
-                <dd className="mt-1 text-xs font-bold text-foreground">{qualifyingIds.length} items</dd>
+                <dd className="mt-1 text-xs font-bold text-foreground">
+                  {collectionWildcard ? "Entire collection" : `${qualifyingIds.length} items`}
+                </dd>
               </div>
               <div className="rounded-lg border border-line bg-wood-950 px-3 py-2">
                 <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Offer</dt>
@@ -237,7 +242,17 @@ export default function ForeignOfferForm({ chainSlug, currencySymbol, account, c
 
       <h3 className="font-display text-lg text-gold-300">Build a criteria bid</h3>
 
-      <div className="space-y-2">
+      <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-md border border-line px-3 text-xs font-bold text-foreground/80">
+        <input
+          type="checkbox"
+          checked={collectionWildcard}
+          onChange={(e) => setCollectionWildcard(e.target.checked)}
+          className="accent-[#d9a441]"
+        />
+        Entire collection (any token)
+      </label>
+
+      <div className={`space-y-2 ${collectionWildcard ? "pointer-events-none opacity-40" : ""}`}>
         <p className="text-center text-[0.65rem] text-foreground/55">
           Same scopes as Sweep: rarity tier, single trait, or AND combo. Sellers of any matching item can accept.
         </p>

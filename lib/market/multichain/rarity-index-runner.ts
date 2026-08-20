@@ -171,6 +171,9 @@ export async function indexForeignCollectionRarity(chainSlug: string, collection
   }
 
   await replaceForeignRarity(chainSlug, collectionSlug, snapshot, traitIndex);
+  if (collectionSlug.toLowerCase() !== contractAddress.toLowerCase()) {
+    await replaceForeignRarity(chainSlug, contractAddress, snapshot, traitIndex);
+  }
 
   return { chainSlug, collectionSlug, contractAddress, tokensIndexed: snapshot.byTokenId.size, partial };
 }
@@ -248,7 +251,7 @@ export async function scaffoldAllTrackedCollections(opts?: {
   for (const c of evm) {
     const slug = await resolveOpenSeaSlug(c.chainSlug, c.contractAddress, key).catch(() => null);
     if (!slug) {
-      log(`SKIP ${c.chainSlug}:${c.contractAddress} -- could not resolve an OpenSea collection slug`);
+      log(`SKIP ${c.chainSlug}:${c.contractAddress} -- no OpenSea slug; Alchemy rarity is off (monthly cap). Helius/UniSat runners cover SOL/BTC.`);
       failed += 1;
       continue;
     }

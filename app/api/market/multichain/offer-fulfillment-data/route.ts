@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   if (limited) return limited;
 
   try {
-    const body = (await req.json()) as { chainSlug?: string; orderHash?: string; fulfillerAddress?: string };
+    const body = (await req.json()) as { chainSlug?: string; orderHash?: string; fulfillerAddress?: string; tokenId?: string };
     if (!body.chainSlug || !body.orderHash || !body.fulfillerAddress) {
       return NextResponse.json({ error: "chainSlug, orderHash, and fulfillerAddress are required" }, { status: 400 });
     }
@@ -49,6 +49,13 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         offer: { hash: body.orderHash, chain: chain.openSeaChain, protocol_address: FOREIGN_SEAPORT_ADDRESS },
         fulfiller: { address: body.fulfillerAddress },
+        ...(body.tokenId
+          ? {
+              consideration: {
+                token_id: body.tokenId,
+              },
+            }
+          : {}),
       }),
     });
     if (!res.ok) {

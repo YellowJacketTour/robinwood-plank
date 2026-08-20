@@ -8,6 +8,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/trading/foreign-chain-registry";
 import { swrJson } from "@/lib/market/swr-fetch";
 import ChainIcon from "@/components/market/ChainIcon";
+import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
 import { resolveIpfsUrl, withImageWidth, isIpfsGatewayUrl } from "@/lib/ipfs";
 
@@ -1105,14 +1106,7 @@ export default function GlobalMarketHub() {
 
   return (
     <div className="space-y-4 p-4">
-      {/*
-       * Deliberately no "← Home" link up here anymore -- it duplicated the
-       * "Home chain" card immediately below (both went to /market), just
-       * stacked directly on top of each other. Flagged live 2026-08-19
-       * ("this looks or feels redundant"). The card is the more
-       * informative, more prominent version of the same action, so it's
-       * now the ONLY way back to /market from this header area.
-       */}
+      <MarketBreadcrumb variant="hub" />
       <div>
         <h2 className="font-display text-xl text-gold-300">Global Market</h2>
         <p className="text-xs text-foreground/50">

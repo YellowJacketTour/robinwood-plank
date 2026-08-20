@@ -44,6 +44,7 @@ import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-p
 import { isCrossChainBuyable, venueLabel, type Listing, type MarketCollection } from "@/lib/market/types";
 import { formatTokenAmount, shortAddress } from "@/lib/trade";
 import MarketNav from "@/components/market/MarketNav";
+import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import { MarketTabRail, MarketTabPanel } from "@/components/market/MarketScaffold";
 import MarketBrowseLayout from "@/components/market/MarketBrowseLayout";
 import RarityFloorStrip from "@/components/market/RarityFloorStrip";
@@ -917,7 +918,16 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           }
         } else {
           const { acceptForeignOffer } = await import("@/lib/market/multichain/trading/foreign-offer");
-          await acceptForeignOffer({ chainSlug, orderHash: offer.orderHash, accountAddress: who });
+          const fillTokenId = offer.tokenId || (offer.isWildcard ? ownedTokenIds[0] : undefined);
+          if (offer.isWildcard && !fillTokenId) {
+            throw new Error("Own a token in this collection to accept a collection-wide bid.");
+          }
+          await acceptForeignOffer({
+            chainSlug,
+            orderHash: offer.orderHash,
+            accountAddress: who,
+            tokenId: fillTokenId ?? undefined,
+          });
         }
         setStatus("Offer accepted.");
         invalidateSwr("/api/market/multichain/offers");
@@ -1476,6 +1486,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
 
   return (
     <div className="space-y-4 p-4">
+      <MarketBreadcrumb variant="collection" chainSlug={chainSlug} collectionName={collection.name} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-3">
@@ -2149,10 +2160,11 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
                   <ul className="space-y-2">
                     {collectionWideOffers.map((o) => {
                       const canAcceptHere =
-                        o.native &&
-                        !o.tokenId &&
-                        Boolean(o.criteriaTokenIds?.length) &&
-                        ownedTokenIds.some((id) => o.criteriaTokenIds!.map((c) => BigInt(c).toString()).includes(BigInt(id).toString()));
+                        (o.native &&
+                          !o.tokenId &&
+                          Boolean(o.criteriaTokenIds?.length) &&
+                          ownedTokenIds.some((id) => o.criteriaTokenIds!.map((c) => BigInt(c).toString()).includes(BigInt(id).toString()))) ||
+                        (Boolean(o.isWildcard) && o.acceptable && ownedTokenIds.length > 0);
                       return (
                         <li key={o.orderHash} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-panel px-3 py-2">
                           <div className="min-w-0">
@@ -2586,6 +2598,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
           onClose={() => setDetailsTarget(null)}
           currencySymbol={statCurrencySymbol}
           chainSlug={chainSlug}
+          rarity={rarityMap.get(detailsTarget.tokenId) ?? null}
         />
       )}
 

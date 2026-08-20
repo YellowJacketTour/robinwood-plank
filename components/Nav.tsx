@@ -12,6 +12,7 @@ import {
   WoodAmpRailChip,
 } from "@/components/woodamp/WoodAmpChip";
 import ThemeAccentPicker from "@/components/ThemeAccentPicker";
+import MarketMenu from "@/components/market/MarketMenu";
 
 function navHref(href: string, pathname: string) {
   if (href.startsWith("#") && pathname !== "/") {
@@ -321,6 +322,9 @@ export default function Nav() {
                   active ? "bg-gold-500/15 text-gold-300" : "text-foreground/75"
                 }`;
 
+                if (href === "/market") {
+                  return <MarketMenu key={link.href} className={className} active={active} />;
+                }
                 return (
                   <li key={link.href}>
                     {isRoute(href) ? (
@@ -405,6 +409,17 @@ export default function Nav() {
                   active ? "bg-gold-500/10 text-gold-300" : "text-foreground/80"
                 }`;
 
+                if (href === "/market") {
+                  return (
+                    <MarketMenu
+                      key={link.href}
+                      className={className}
+                      active={active}
+                      variant="sheet"
+                      onNavigate={() => closeMenu()}
+                    />
+                  );
+                }
                 return (
                   <li key={link.href}>
                     {isRoute(href) ? (

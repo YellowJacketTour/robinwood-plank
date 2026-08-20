@@ -103,15 +103,18 @@ async function executeActions(actions: SeaportAction[], signer: Awaited<ReturnTy
 export async function buildForeignOffer(input: {
   chainSlug: string;
   collectionAddress: string;
-  /** Exactly one of tokenId / criteriaTokenIds -- mirrors lib/market/seaport.ts's buildOffer branching exactly. */
+  /** Exactly one of tokenId / criteriaTokenIds / collectionWildcard. */
   tokenId?: string;
   criteriaTokenIds?: string[];
+  /** OpenSea collection offer (Seaport ERC721_WITH_CRITERIA identifier 0). Fulfillment requires the seller's chosen tokenId. */
+  collectionWildcard?: boolean;
   offerWei: bigint;
   expiresAt: string;
   accountAddress: string;
 }): Promise<{ orderHash: string }> {
-  if (input.tokenId && input.criteriaTokenIds) {
-    throw new Error("An offer cannot be both single-token and trait-scoped.");
+  const modes = [Boolean(input.tokenId), Boolean(input.criteriaTokenIds?.length), Boolean(input.collectionWildcard)].filter(Boolean).length;
+  if (modes !== 1) {
+    throw new Error("Offer must be exactly one of: single token, trait snapshot, or collection-wide.");
   }
   // This function submits to OpenSea's own orderbook specifically -- fail
   // BEFORE signing anything for a chain with no OpenSea integration
@@ -130,7 +133,8 @@ export async function buildForeignOffer(input: {
 
   let considerationItem:
     | { itemType: ItemType.ERC721; token: string; identifier: string; recipient: string }
-    | { itemType: ItemType.ERC721; token: string; identifiers: string[]; recipient: string };
+    | { itemType: ItemType.ERC721; token: string; identifiers: string[]; recipient: string }
+    | { itemType: ItemType.ERC721_WITH_CRITERIA; token: string; identifier: string; recipient: string };
   if (input.tokenId) {
     considerationItem = {
       itemType: ItemType.ERC721,
@@ -139,11 +143,6 @@ export async function buildForeignOffer(input: {
       recipient: input.accountAddress,
     };
   } else if (input.criteriaTokenIds && input.criteriaTokenIds.length > 0) {
-    // TRAIT BID (criteria order). seaport-js converts `identifiers` into an
-    // ERC721_WITH_CRITERIA item whose identifierOrCriteria is the Merkle
-    // root of this exact set -- same mechanism, same seaport-js code path,
-    // as lib/market/seaport.ts's own buildOffer. normalizeTokenIds throws
-    // on malformed/oversized sets before anything reaches the wallet.
     considerationItem = {
       itemType: ItemType.ERC721,
       token: input.collectionAddress,
@@ -151,7 +150,15 @@ export async function buildForeignOffer(input: {
       recipient: input.accountAddress,
     };
   } else {
-    throw new Error("Provide either a tokenId or a non-empty criteriaTokenIds set.");
+    // Collection-wide: identifier 0 is Seaport/OpenSea's "any token in this
+    // contract" criteria. Fill goes through OpenSea fulfillment_data with the
+    // seller's chosen token_id -- not a homemade empty Merkle proof.
+    considerationItem = {
+      itemType: ItemType.ERC721_WITH_CRITERIA,
+      token: input.collectionAddress,
+      identifier: "0",
+      recipient: input.accountAddress,
+    };
   }
 
   const { seaport, signer } = await connectedSeaport(input.chainSlug);
@@ -168,7 +175,7 @@ export async function buildForeignOffer(input: {
   const { actions } = await seaport.createOrder(
     {
       offer: [{ amount: input.offerWei.toString(), token: currency }],
-      consideration: [considerationItem],
+      consideration: [considerationItem as never],
       fees: [{ recipient: MARKET_FEE_RECIPIENT, basisPoints: MARKETPLANK_FOREIGN_OFFER_FEE_BPS }],
       endTime,
     },
@@ -220,6 +227,8 @@ export async function acceptForeignOffer(input: {
   chainSlug: string;
   orderHash: string;
   accountAddress: string;
+  /** Required for collection-wide (wildcard) offers -- the token the seller delivers. */
+  tokenId?: string;
 }): Promise<void> {
   const chain = foreignChainByChainSlug(input.chainSlug);
   if (!chain) throw new Error(`foreign-offer: "${input.chainSlug}" is not a supported foreign chain.`);
@@ -227,7 +236,12 @@ export async function acceptForeignOffer(input: {
   const fulfillRes = await fetch("/api/market/multichain/offer-fulfillment-data", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ chainSlug: input.chainSlug, orderHash: input.orderHash, fulfillerAddress: input.accountAddress }),
+    body: JSON.stringify({
+      chainSlug: input.chainSlug,
+      orderHash: input.orderHash,
+      fulfillerAddress: input.accountAddress,
+      tokenId: input.tokenId,
+    }),
   });
   if (!fulfillRes.ok) {
     const body = await fulfillRes.text().catch(() => "");

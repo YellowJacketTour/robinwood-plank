@@ -8,6 +8,9 @@ import { withImageWidth } from "@/lib/ipfs";
 import { formatTokenAmount } from "@/lib/trade";
 import type { SolanaListingVerification } from "@/app/api/market/multichain/solana-verify-listing/route";
 import ChainIcon from "@/components/market/ChainIcon";
+import { formatRank } from "@/lib/rarity";
+import { tierColor } from "@/lib/market/rarityClient";
+import type { RarityLookup } from "@/lib/market/rarityClient";
 
 type Props = {
   listing: Listing;
@@ -29,6 +32,8 @@ type Props = {
   currencySymbol?: string;
   /** Real chain slug for ChainIcon's own recognizable per-chain mark instead of a plain-text ticker abbreviation. Defaults to "robinhood" to match currencySymbol's own "ETH" default. */
   chainSlug?: string;
+  /** Same information-content rank/percentile as RobinWood ItemDetail when indexed. */
+  rarity?: RarityLookup | null;
 };
 
 /**
@@ -39,7 +44,7 @@ type Props = {
  * real total-supply proxy (every token has exactly one value per
  * category) -- confirmed by the shape OpenSea's /traits response returns.
  */
-export default function ForeignDetailsModal({ listing, collectionName, traitCounts, isSolana, onClose, currencySymbol = "ETH", chainSlug = "robinhood" }: Props) {
+export default function ForeignDetailsModal({ listing, collectionName, traitCounts, isSolana, onClose, currencySymbol = "ETH", chainSlug = "robinhood", rarity = null }: Props) {
   // ON-CHAIN VERIFICATION -- fires once per modal open, for this ONE token
   // only (a bounded, single-item action, never a scan). "idle" covers both
   // "not Solana" and "haven't started yet" so the section below can render
@@ -82,6 +87,24 @@ export default function ForeignDetailsModal({ listing, collectionName, traitCoun
         <div className="relative aspect-square w-full overflow-hidden rounded-lg bg-wood-900">
           <Image src={withImageWidth(listing.imageUrl, 400) || ""} alt={`${collectionName} #${listing.tokenId}`} fill sizes="400px" className="object-cover" unoptimized />
         </div>
+
+        {rarity && (
+          <dl className="grid grid-cols-2 gap-2">
+            <div className="rounded-lg border border-line bg-wood-950 px-3 py-2.5">
+              <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Rank</dt>
+              <dd className="mt-1 text-xs font-bold" style={{ color: tierColor(rarity.tier) }}>
+                {formatRank(rarity.rank)} · {rarity.tier}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-wood-950 px-3 py-2.5">
+              <dt className="text-[0.57rem] font-black uppercase tracking-[0.06em] text-cream-muted">Exclusivity</dt>
+              <dd className="mt-1 text-xs font-bold text-foreground">
+                {rarity.percentile.toFixed(1)}
+                <span className="text-foreground/45"> · rarer than this % of the indexed collection</span>
+              </dd>
+            </div>
+          </dl>
+        )}
 
         <div className="flex items-center justify-between rounded-lg border border-line bg-panel px-3 py-2">
           <span className="text-xs text-foreground/60">Price</span>

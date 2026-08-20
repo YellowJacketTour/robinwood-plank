@@ -144,7 +144,7 @@ export async function GET(req: NextRequest) {
           maker: o.parameters.offerer,
           priceWei: bid.startAmount,
           expiresAt: new Date(Number(o.parameters.endTime) * 1000).toISOString(),
-          acceptable: !isCriteria,
+          acceptable: !isCriteria || (isCriteria && consideration?.identifierOrCriteria === "0"),
           isWildcard: isCriteria && consideration?.identifierOrCriteria === "0",
           tokenId: isCriteria ? null : (consideration?.identifierOrCriteria ?? null),
           contractAddress: isCriteria ? null : consideration?.token ?? null,

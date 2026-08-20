@@ -25,6 +25,7 @@ import VaultTradeHistory from "@/components/market/VaultTradeHistory";
 import LivingLiquidityViz from "@/components/market/LivingLiquidityViz";
 import RedeemOdds from "@/components/market/RedeemOdds";
 import EventCountdown from "@/components/market/EventCountdown";
+import MarketBreadcrumb from "@/components/market/MarketBreadcrumb";
 import CollectionStats from "@/components/market/CollectionStats";
 import BuyConfirm from "@/components/market/BuyConfirm";
 import SweepConfirm from "@/components/market/SweepConfirm";
@@ -1257,12 +1258,7 @@ export default function MarketView() {
                     cannot gain a seventh tab for this, so the global
                     multichain market gets a small text link here instead
                     of new tab-rail real estate. */}
-                <a
-                  href="/market/multichain"
-                  className="inline-flex items-center gap-1 text-xs font-bold text-gold-300 hover:text-gold-200"
-                >
-                  Explore the global market (all chains) →
-                </a>
+                <MarketBreadcrumb variant="native" />
                 <EventCountdown />
                 {COLLECTION && (
                   <CollectionStats
