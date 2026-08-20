@@ -1240,7 +1240,7 @@ export default function GlobalMarketHub() {
                       </p>
                       <p className="flex items-center gap-1 truncate text-[0.65rem] text-white/70">
                         {(Number(c.volume24hWei) / 1e18).toFixed(2)}
-                        <ChainIcon chainSlug={c.chainSlug} size={12} className="shrink-0" />
+                        <ChainIcon chainSlug={c.chainSlug} size={16} className="shrink-0" />
                         · 24h
                       </p>
                     </div>
@@ -1753,7 +1753,7 @@ export default function GlobalMarketHub() {
                       {c.volume24hWei && (
                         <p className="flex items-center gap-1 text-xs text-foreground/50">
                           Vol {(Number(c.volume24hWei) / 1e18).toFixed(3)}
-                          <ChainIcon chainSlug={c.chainSlug} size={13} className="shrink-0" />
+                          <ChainIcon chainSlug={c.chainSlug} size={16} className="shrink-0" />
                           · 24h
                           {c.sales24h ? ` · ${c.sales24h} sales` : ""}
                         </p>
