@@ -1085,7 +1085,6 @@ export default function GlobalMarketHub() {
     const missing = rankings
       .filter((c) => {
         if (isHomeRow(c)) return false;
-        if (c.chainSlug === "bitcoin-mainnet") return false;
         if (looksLikeContractName(c.name) || isSpamCollectionTitle(c.name)) return false;
         if (!displayFloorWei(c)) return true;
         if (c.listedCount == null) return true;
