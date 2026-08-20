@@ -173,9 +173,17 @@ export async function writeSnapshot(
 ): Promise<void> {
   await postgresQuery(
     `UPDATE plank_multichain_collections
-     SET name = COALESCE($2, name), image_url = COALESCE($3, image_url), external_url = COALESCE($4, external_url)
+     SET name = COALESCE($2, name), image_url = COALESCE($3, image_url), external_url = COALESCE($4, external_url),
+         creator_address = COALESCE($5, creator_address), creator_handle = COALESCE($6, creator_handle)
      WHERE id = $1`,
-    [collectionId, snapshot.name, snapshot.imageUrl, snapshot.externalUrl]
+    [
+      collectionId,
+      snapshot.name,
+      snapshot.imageUrl,
+      snapshot.externalUrl,
+      snapshot.creatorAddress ?? null,
+      snapshot.creatorHandle ?? null,
+    ]
   );
   await postgresQuery(
     `INSERT INTO plank_multichain_snapshots

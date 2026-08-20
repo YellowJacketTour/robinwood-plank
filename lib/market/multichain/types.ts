@@ -36,6 +36,10 @@ export type CollectionSnapshot = {
   floorPriceMarketplace: string | null;
   totalSupply: number | null;
   listedCount: number | null;
+  /** Real creator wallet, "whenever the adapter's own API exposes one" (e.g. Helius DAS `creators[]`, Alchemy's `contractDeployer`) -- never fabricated or cross-referenced from another source. Optional/undefined for adapters with no such field; explicit null is also honest "checked, none present". */
+  creatorAddress?: string | null;
+  /** Real creator handle (e.g. a Twitter/X handle), "whenever the adapter's own API exposes one" -- never fabricated. Same optionality as creatorAddress. */
+  creatorHandle?: string | null;
 };
 
 /** One entry from a ranked-discovery call — enough to register + seed a snapshot in one step. */

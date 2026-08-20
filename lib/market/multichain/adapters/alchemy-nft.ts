@@ -54,6 +54,8 @@ function baseUrl(chainSlug: string): string {
 type AlchemyContractMetadata = {
   name?: string | null;
   totalSupply?: string | null;
+  /** Real on-chain deployer address, from Alchemy's own contract metadata -- never fabricated. */
+  contractDeployer?: string | null;
   openSeaMetadata?: {
     collectionName?: string | null;
     imageUrl?: string | null;
@@ -229,6 +231,8 @@ export async function fetchSnapshotsBatch(
             ? totalSupply
             : null,
         listedCount: null,
+        creatorAddress: cleanMetadataString(metadata.contractDeployer),
+        creatorHandle: null,
       });
     }
   }
@@ -266,6 +270,8 @@ export const alchemyNftAdapter: ChainAdapter = {
       // calls -- left null rather than guessed. A future adapter revision
       // could add getNFTsForContract pagination totals if this matters.
       listedCount: null,
+      creatorAddress: cleanMetadataString(metadata.contractDeployer),
+      creatorHandle: null,
     };
   },
 };

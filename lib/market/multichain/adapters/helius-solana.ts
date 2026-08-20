@@ -47,7 +47,15 @@ type HeliusAsset = {
     metadata?: { name?: string | null; description?: string | null };
     links?: { image?: string | null; external_url?: string | null };
   };
+  creators?: Array<{ address?: string | null; verified?: boolean; share?: number }>;
 };
+
+/** The first verified creator's address, or the first creator at all if none are verified -- real DAS data, never fabricated. */
+function pickCreatorAddress(creators: HeliusAsset["creators"]): string | null {
+  if (!creators || creators.length === 0) return null;
+  const verified = creators.find((c) => c.verified && c.address);
+  return (verified ?? creators.find((c) => c.address))?.address ?? null;
+}
 
 async function rpc<T>(method: string, params: Record<string, unknown>): Promise<T> {
   const res = await fetch(`${RPC_URL}/?api-key=${apiKey()}`, {
@@ -76,6 +84,10 @@ export const heliusSolanaAdapter: ChainAdapter = {
       floorPriceMarketplace: null,
       totalSupply: null,
       listedCount: null,
+      // Real DAS creators[] data -- first verified creator, else first
+      // listed creator. Never fabricated; null when the asset has none.
+      creatorAddress: pickCreatorAddress(asset.creators),
+      creatorHandle: null,
     };
   },
 };
