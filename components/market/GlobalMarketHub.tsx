@@ -253,9 +253,31 @@ function windowSales(c: TrackedCollection, window: "24h" | "7d" | "30d"): number
   if (window === "30d") return c.sales30d;
   return c.sales24h;
 }
+function displaySales(c: TrackedCollection, window: "24h" | "7d" | "30d"): number | null {
+  const n = windowSales(c, window);
+  if (n == null || n === 0) return null;
+  return n;
+}
+function displayHolders(c: TrackedCollection): number | null {
+  if (c.holderCount == null || c.holderCount <= 0) return null;
+  if (c.holderCount <= 2 && !(c.listedCount && c.listedCount > 0) && !(c.volume24hWei && c.volume24hWei !== "0")) {
+    return null;
+  }
+  return c.holderCount;
+}
+function displayName(c: TrackedCollection): string {
+  const n = (c.name ?? "").trim();
+  if (!n || n === ".." || /^0x[0-9a-fA-F]{12,}$/.test(n) || /^erc-?721$/i.test(n)) {
+    const a = c.contractAddress;
+    return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
+  }
+  return n;
+}
 /** Real listed-count/total-supply as a percentage -- null unless both real figures are present (never a fabricated 0%). Shared by both the "Listed" column's own display AND its sort. */
 function listedPctOf(c: TrackedCollection): number | null {
-  return c.listedCount != null && c.totalSupply != null && c.totalSupply > 0 ? (c.listedCount / c.totalSupply) * 100 : null;
+  if (c.listedCount == null || c.listedCount <= 0) return null;
+  if (c.totalSupply == null || c.totalSupply <= 0) return null;
+  return (c.listedCount / c.totalSupply) * 100;
 }
 
 const SUBSCRIPT_DIGITS = "₀₁₂₃₄₅₆₇₈₉";
@@ -445,6 +467,14 @@ function hasMarketEvidence(c: TrackedCollection): boolean {
   if (c.sales24h != null && c.sales24h > 0) return true;
   return false;
 }
+/** ETH-like grades need a book or volume, not floor+JPEG alone. */
+function hasGradeEvidence(c: TrackedCollection): boolean {
+  if (c.isNativeHome) return true;
+  if (c.listedCount != null && c.listedCount > 0) return true;
+  if (c.volume24hWei && c.volume24hWei !== "0") return true;
+  if (c.sales24h != null && c.sales24h > 0) return true;
+  return false;
+}
 
 function gradeBreakdown(c: TrackedCollection, artOk: boolean): GradeBreakdown {
   const activityPoints = (Math.min(c.recentActivity, 5000) / 5000) * 300;
@@ -466,7 +496,7 @@ function gradeBreakdown(c: TrackedCollection, artOk: boolean): GradeBreakdown {
   ];
   return {
     score: parts.reduce((sum, p) => sum + p.points, 0),
-    gradable: (artOk || home) && hasMarketEvidence(c),
+    gradable: (artOk || home) && hasGradeEvidence(c),
     parts,
   };
 }
@@ -935,11 +965,11 @@ export default function GlobalMarketHub() {
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
       if (q && !(c.name ?? "").toLowerCase().includes(q)) return false;
       if (onlyTradeable && !c.tradeable) return false;
-      const robinhoodOnly = chainFilter.size === 1 && chainFilter.has("robinhood");
-      if (onlyArt && !hasArt(c) && !robinhoodOnly) return false;
+      const oneChain = chainFilter.size === 1;
+      if (onlyArt && !hasArt(c) && !oneChain) return false;
       if (onlyVerifiedCreator && !(c.creatorHandle || c.creatorEns)) return false;
-      if (onlyListed && !(c.listedCount != null && c.listedCount > 0) && !robinhoodOnly) return false;
-      if (!showShells && !hasMarketEvidence(c) && !robinhoodOnly) return false;
+      if (onlyListed && !(c.listedCount != null && c.listedCount > 0) && !oneChain) return false;
+      if (!showShells && !hasMarketEvidence(c) && !oneChain) return false;
       if (min !== null || max !== null) {
         const p = floorNative(c);
         if (p === null) return false;
@@ -1364,15 +1394,15 @@ export default function GlobalMarketHub() {
                     <div className="absolute inset-0">
                       <CollectionThumb
                         src={c.imageUrl}
-                        alt={c.name ?? c.contractAddress}
+                        alt={displayName(c)}
                         onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
                       />
                     </div>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
                     <div className="relative space-y-0.5 p-2">
                       <GradeBadge breakdown={grade} />
-                      <p className="truncate text-xs font-bold text-white" title={c.name ?? c.contractAddress}>
-                        {c.name ?? c.contractAddress}
+                      <p className="truncate text-xs font-bold text-white" title={displayName(c)}>
+                        {displayName(c)}
                       </p>
                       <p className="flex items-center gap-1 truncate text-[0.65rem] text-white/70">
                         {formatCompactNative(c.volume24hWei!).display}
@@ -1577,7 +1607,7 @@ export default function GlobalMarketHub() {
                           <div className="relative h-9 w-9 shrink-0 overflow-hidden rounded bg-wood-900 transition-shadow duration-200 group-hover:shadow-gold">
                             <CollectionThumb
                               src={c.imageUrl}
-                              alt={c.name ?? c.contractAddress}
+                              alt={displayName(c)}
                               onFail={() => setDeadArt((prev) => new Set(prev).add(rowKey))}
                               width={256}
                             />
@@ -1588,8 +1618,8 @@ export default function GlobalMarketHub() {
                               <ChainIcon chainSlug={c.chainSlug} size={10} />
                             </span>
                           </div>
-                          <span className="min-w-0 flex-1 truncate font-bold text-foreground/90" title={c.name ?? c.contractAddress}>
-                            {c.name ?? c.contractAddress}
+                          <span className="min-w-0 flex-1 truncate font-bold text-foreground/90" title={displayName(c)}>
+                            {displayName(c)}
                           </span>
                           {/* Known-creator checkmark -- real signal (a real handle/ENS this app has observed), never OpenSea's own "verified" claim, which this app cannot honestly assert for an auto-discovered collection. The title tooltip alone isn't reliably exposed to screen readers, and there's no dedicated column/header for this icon (it rides inside "Collection"), so the accessible label lives on the icon itself via a sr-only span -- same pattern ListingCard.tsx uses for its own icon-only trust badge. */}
                           {(c.creatorHandle || c.creatorEns) && (
@@ -1637,7 +1667,7 @@ export default function GlobalMarketHub() {
                         })()}
                       </td>
                       <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/60 md:table-cell">
-                        {windowSales(c, rankingsWindow) ?? <span title={emptyCellReason(c, "sales")}>—</span>}
+                        {displaySales(c, rankingsWindow) ?? <span title={emptyCellReason(c, "sales")}>—</span>}
                       </td>
                       <td className="hidden whitespace-nowrap px-2 py-2 text-right tabular-nums font-mono text-foreground/60 lg:table-cell">
                         {c.listedCount != null && c.listedCount > 0 ? (
@@ -1659,8 +1689,8 @@ export default function GlobalMarketHub() {
                         )}
                       </td>
                       <td className="hidden px-2 py-2 text-right tabular-nums font-mono text-foreground/60 xl:table-cell">
-                        {c.holderCount != null ? (
-                          c.holderCount.toLocaleString()
+                        {displayHolders(c) != null ? (
+                          displayHolders(c)!.toLocaleString()
                         ) : (
                           <span title={emptyCellReason(c, "holders")}>—</span>
                         )}
@@ -1744,7 +1774,7 @@ export default function GlobalMarketHub() {
                   <div className="relative mb-1.5 aspect-square w-full overflow-hidden rounded bg-wood-900">
                     <CollectionThumb
                       src={c.imageUrl}
-                      alt={c.name ?? c.contractAddress}
+                      alt={displayName(c)}
                       onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
                     />
                     <span
@@ -1754,8 +1784,8 @@ export default function GlobalMarketHub() {
                       <ChainIcon chainSlug={c.chainSlug} size={10} />
                     </span>
                   </div>
-                  <p className="truncate text-xs font-bold text-foreground/90" title={c.name ?? c.contractAddress}>
-                    {c.name ?? c.contractAddress}
+                  <p className="truncate text-xs font-bold text-foreground/90" title={displayName(c)}>
+                    {displayName(c)}
                   </p>
                   <p className="truncate text-[0.65rem] text-foreground/50">
                     {c.floorPriceWei ? (
@@ -1857,7 +1887,7 @@ export default function GlobalMarketHub() {
                     <div className="relative aspect-square w-full bg-wood-900">
                       <CollectionThumb
                         src={c.imageUrl}
-                        alt={c.name ?? c.contractAddress}
+                        alt={displayName(c)}
                         onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
                         width={512}
                         priority={i < 6}
@@ -1877,8 +1907,8 @@ export default function GlobalMarketHub() {
                       )}
                     </div>
                     <div className="space-y-1 p-2.5">
-                      <p className="truncate text-sm font-bold text-foreground" title={c.name ?? c.contractAddress}>
-                        {c.name ?? c.contractAddress}
+                      <p className="truncate text-sm font-bold text-foreground" title={displayName(c)}>
+                        {displayName(c)}
                       </p>
                       <div className="flex flex-wrap gap-1">
                         <span
