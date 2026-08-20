@@ -94,6 +94,42 @@ export async function GET(req: Request) {
     "dweb.link",
     "4everland.io",
     "cloudflare-ipfs.com",
+    // Non-IPFS art CDNs that server-side resolveIpfsUrl() (lib/ipfs.ts) also
+    // wraps in this proxy unconditionally for any http(s) image URL -- this
+    // route is the one same-origin chokepoint for ALL third-party art, not
+    // only IPFS. Confirmed live 2026-08-19: real DB rows already stored as
+    // /api/ipfs/image?uri=https://arweave.net/... (Solana/Arweave-hosted
+    // art), .../ordinals.com/content/... (Bitcoin ordinal inscriptions),
+    // .../static.unisat.io and .../next-cdn.unisat.space (Unisat collection
+    // art), and .../we-assets.pinit.io (Bitcoin/Pinit-hosted art) were all
+    // 400ing here because their hosts weren't allowlisted -- turning working
+    // upstream art into a permanently broken image for every viewer, on
+    // every load, forever (unlike a raw-gateway CORS/ORB failure, there's no
+    // "load it directly instead" fallback once a value is stored proxied).
+    // img.reservoir.tools is deliberately NOT added: confirmed dead
+    // (ERR_NAME_NOT_RESOLVED, Reservoir shut down its public infra in 2025 —
+    // see defillama-nft.ts and GlobalMarketHub.tsx's own notes), so it's
+    // correctly left to fail closed to the placeholder instead of wasting a
+    // fetch on a host that can never resolve.
+    "arweave.net",
+    "ordinals.com",
+    "static.unisat.io",
+    "next-cdn.unisat.space",
+    "we-assets.pinit.io",
+  ]);
+  // Only the original path-style IPFS gateways require a literal "/ipfs/"
+  // segment in the path below. The non-IPFS CDN hosts added above serve
+  // content directly off the root path (e.g. arweave.net/<txid>,
+  // ordinals.com/content/<id>) and must NOT be held to that IPFS-specific
+  // shape.
+  const PATH_STYLE_IPFS_HOSTS = new Set([
+    "gateway.pinata.cloud",
+    "ipfs.io",
+    "nftstorage.link",
+    "w3s.link",
+    "dweb.link",
+    "4everland.io",
+    "cloudflare-ipfs.com",
   ]);
   function isAllowedHost(hostname: string): boolean {
     const h = hostname.toLowerCase();
@@ -109,7 +145,7 @@ export async function GET(req: Request) {
       if (u.protocol !== "https:") return false;
       if (!isAllowedHost(u.hostname)) return false;
       // Path-style gateways need /ipfs/; subdomain style may not.
-      if (ALLOWED_HOSTS.has(u.hostname.toLowerCase()) && !u.pathname.includes("/ipfs/")) {
+      if (PATH_STYLE_IPFS_HOSTS.has(u.hostname.toLowerCase()) && !u.pathname.includes("/ipfs/")) {
         return false;
       }
       return true;

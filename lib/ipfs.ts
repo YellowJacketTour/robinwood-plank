@@ -52,6 +52,33 @@ function rawGatewayUrl(uri: string, gateway: string): string {
   return `${gateway}${encoded}`;
 }
 
+/**
+ * True only for URLs the /api/ipfs/image proxy's own SSRF allowlist will
+ * actually accept (mirrors app/api/ipfs/image/route.ts's ALLOWED_HOSTS).
+ * Used client-side to decide whether a raw http(s) URL is safe to route
+ * through resolveIpfsUrl: wrapping an arbitrary URL (e.g. an OpenSea/Alchemy
+ * CDN image on i.seadn.io, which loads fine directly) would just get a 400
+ * back from the proxy and turn a working image into a broken one. Only
+ * known public IPFS gateway hosts -- the ones actually seen to trip
+ * ERR_BLOCKED_BY_RESPONSE/ORB in a real browser -- get proxied; everything
+ * else is left as-is, unproxied, exactly like it renders today.
+ */
+export function isIpfsGatewayUrl(uri: string): boolean {
+  if (!uri) return false;
+  try {
+    const u = new URL(uri);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+    const host = u.hostname.toLowerCase();
+    const gatewayHosts = IPFS_GATEWAYS.map((g) => new URL(g).hostname.toLowerCase());
+    if (gatewayHosts.includes(host)) return true;
+    // CID subdomain gateways, e.g. bafy....ipfs.dweb.link
+    if (/\.ipfs\.(dweb\.link|nftstorage\.link|w3s\.link|4everland\.io)$/i.test(host)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function resolveIpfsUrl(
   uri: string,
   gateway: string = IPFS_GATEWAYS[0],

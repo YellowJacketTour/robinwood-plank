@@ -8,6 +8,7 @@ import { chainDisplayName, chainBrandColor } from "@/lib/market/multichain/tradi
 import { swrJson } from "@/lib/market/swr-fetch";
 import ChainIcon from "@/components/market/ChainIcon";
 import { normalizeAssetSymbol, type MultiAssetPrices } from "@/lib/multi-asset-price";
+import { resolveIpfsUrl, withImageWidth, isIpfsGatewayUrl } from "@/lib/ipfs";
 
 /**
  * Some collection images (any sourced from lib/market/multichain/adapters/
@@ -60,19 +61,55 @@ function isPoisonedImageSrc(src: string | null): boolean {
   return trimmed === "" || trimmed === "null" || trimmed === "undefined";
 }
 
-function CollectionThumb({ src, alt, onFail }: { src: string | null; alt: string; onFail?: () => void }) {
+/**
+ * Routes every collection thumbnail through the same-origin IPFS/gateway
+ * proxy (lib/ipfs.ts's resolveIpfsUrl -> app/api/ipfs/image) instead of
+ * rendering a raw external URL. Confirmed live: some discovery adapters
+ * (opensea-bulk-scan.ts, opensea-robinhood-scan.ts, and older backfilled
+ * rows) still store the raw gateway URL straight from upstream metadata
+ * (e.g. "https://bafy....ipfs.dweb.link/1.png") instead of a pre-proxied
+ * one. Loading that directly into <img>/<Image> fails in real browsers
+ * with net::ERR_BLOCKED_BY_RESPONSE / ORB (Opaque Response Blocking) --
+ * resolveIpfsUrl is idempotent (it no-ops on values already under
+ * /api/ipfs/) so this is safe regardless of whether the row is already
+ * proxied. withImageWidth then asks the proxy for a width-tiered,
+ * pre-resized WebP (immutable-cached) instead of full-res art in a small
+ * grid cell.
+ */
+function CollectionThumb({
+  src,
+  alt,
+  onFail,
+  width = 512,
+  priority = false,
+}: {
+  src: string | null;
+  alt: string;
+  onFail?: () => void;
+  width?: number;
+  priority?: boolean;
+}) {
   const [failed, setFailed] = useState(false);
   if (!src || isPoisonedImageSrc(src) || failed) {
     return <PlankPlaceholder />;
   }
+  // Only reroute through the proxy for URLs already an /api/ipfs/ path
+  // (proxy tiering) or a raw public IPFS gateway URL the proxy's own
+  // allowlist accepts (see isIpfsGatewayUrl). Anything else (e.g. a
+  // working OpenSea/Alchemy CDN URL) renders as-is -- the proxy would
+  // just 400 it, turning a working image into a broken one.
+  const shouldProxy = src.startsWith("/api/ipfs/") || src.startsWith("ipfs://") || isIpfsGatewayUrl(src);
+  const resolvedSrc = shouldProxy ? withImageWidth(resolveIpfsUrl(src), width) || src : src;
   return (
     <Image
-      src={src}
+      src={resolvedSrc}
       alt={alt}
       fill
       sizes="20vw"
       className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04]"
       unoptimized
+      priority={priority}
+      loading={priority ? undefined : "lazy"}
       onError={() => {
         setFailed(true);
         onFail?.();
@@ -1108,6 +1145,8 @@ export default function GlobalMarketHub() {
                       src={hero.imageUrl}
                       alt={hero.name ?? hero.contractAddress}
                       onFail={() => setDeadArt((prev) => new Set(prev).add(key(hero)))}
+                      width={1024}
+                      priority
                     />
                   </div>
                   <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent transition-opacity group-hover:from-black/95" />
@@ -1343,6 +1382,7 @@ export default function GlobalMarketHub() {
                               src={c.imageUrl}
                               alt={c.name ?? c.contractAddress}
                               onFail={() => setDeadArt((prev) => new Set(prev).add(rowKey))}
+                              width={256}
                             />
                             <span
                               className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70"
@@ -1606,6 +1646,8 @@ export default function GlobalMarketHub() {
                         src={c.imageUrl}
                         alt={c.name ?? c.contractAddress}
                         onFail={() => setDeadArt((prev) => new Set(prev).add(key(c)))}
+                        width={512}
+                        priority={i < 6}
                       />
                       {/* Chain badge, always on the art -- at-a-glance chain identification via the real brand mark on a translucent disc (readable against any art), same corner-overlay pattern ListingCard uses for rarity tier badges. */}
                       <span
