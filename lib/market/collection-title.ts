@@ -21,10 +21,12 @@ export function looksLikeContractName(name: string | null | undefined): boolean 
   const n = (name ?? "").trim();
   if (!n) return false;
   if (n === ".." || /^erc-?721$/i.test(n)) return true;
-  // Full hex, truncated hub labels (0x000a…4dd4), or punctuation-only junk (_-l_).
   if (/^0x[0-9a-fA-F]{8,}$/.test(n)) return true;
   if (/^0x[0-9a-fA-F]{4,}[.…]+[0-9a-fA-F]{3,}$/i.test(n)) return true;
-  if (/^[-_*<>.\s]{1,8}$/.test(n)) return true;
-  if (/^[-_*]+\s*l\s*[-_*]+$/i.test(n)) return true;
+  if (/^[-_*<>.\s\u2013\u2014]{1,12}$/.test(n)) return true;
+  if (/^[-_*\u2013\u2014]+\s*l\s*[-_*\u2013\u2014]+$/i.test(n)) return true;
+  const collapsed = n.replace(/[\s._*\-<>\u2013\u2014]/g, "");
+  if (!collapsed || /^l$/i.test(collapsed)) return true;
+  if (/^\d{1,8}$/.test(n)) return true;
   return false;
 }

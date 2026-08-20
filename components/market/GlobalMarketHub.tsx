@@ -1059,7 +1059,17 @@ export default function GlobalMarketHub() {
     if (loading || rankings.length === 0) return;
     const chain = chainFilter.size === 1 ? [...chainFilter][0] : null;
     if (!chain || chain === "bitcoin-mainnet") return;
-    const missing = rankings.filter((c) => !isHomeRow(c) && c.volume24hWei == null).slice(0, 6);
+    const missing = rankings
+      .filter((c) => {
+        if (isHomeRow(c)) return false;
+        if (!c.floorPriceWei) return true;
+        if (c.listedCount == null) return true;
+        if (c.holderCount == null) return true;
+        if (c.volume24hWei == null) return true;
+        if (looksLikeContractName(c.name)) return true;
+        return false;
+      })
+      .slice(0, 10);
     if (missing.length === 0) return;
     const stamp = `${chain}:${missing.map((c) => c.contractAddress).join(",")}`;
     if (hydratedKey.current === stamp) return;
@@ -1959,7 +1969,7 @@ export default function GlobalMarketHub() {
                           )}
                         </p>
                       )}
-                      {c.volume24hWei && (
+                      {c.volume24hWei && c.volume24hWei !== "0" && (
                         <p className="flex items-center gap-1 text-xs text-foreground/50">
                           Vol {formatCompactNative(c.volume24hWei).display}
                           <ChainIcon chainSlug={c.chainSlug} size={16} className="shrink-0" />

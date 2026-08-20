@@ -21,6 +21,7 @@ import type { ChainAdapter, CollectionSnapshot, DiscoveredCollection } from "@/l
 type MagicEdenStats = {
   floorPrice?: number | null;
   listedCount?: number | null;
+  uniqueHolders?: number | null;
 };
 
 /**
@@ -96,6 +97,8 @@ export const magicEdenSolanaAdapter: ChainAdapter = {
       floorPriceMarketplace: "magiceden",
       totalSupply: null, // not returned by /stats
       listedCount: stats.listedCount ?? null,
+      holderCount:
+        typeof stats.uniqueHolders === "number" && stats.uniqueHolders > 0 ? stats.uniqueHolders : null,
     };
   },
 };
