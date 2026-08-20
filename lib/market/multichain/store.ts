@@ -90,14 +90,25 @@ export async function listTrackedCollections(): Promise<TrackedCollection[]> {
  * is self-maintaining. Every chain now gets real, continuous, fair
  * progress instead of the alphabetically-later ones starving forever.
  */
-export async function listCollectionsForSync(limit: number): Promise<TrackedCollection[]> {
+export async function listCollectionsForSync(
+  limit: number,
+  opts?: { skipAdapters?: string[] }
+): Promise<TrackedCollection[]> {
+  const skip = opts?.skipAdapters?.filter(Boolean) ?? [];
   const result = await postgresQuery<CollectionRow>(
-    `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url, c.is_vault_backed, c.creator_handle, c.creator_address
-     FROM plank_multichain_collections c
-     LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
-     ORDER BY s.synced_at ASC NULLS FIRST
-     LIMIT $1`,
-    [limit]
+    skip.length > 0
+      ? `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url, c.is_vault_backed, c.creator_handle, c.creator_address
+         FROM plank_multichain_collections c
+         LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+         WHERE c.adapter <> ALL($2::text[])
+         ORDER BY s.synced_at ASC NULLS FIRST
+         LIMIT $1`
+      : `SELECT c.id, c.chain_slug, c.chain_id, c.contract_address, c.adapter, c.name, c.image_url, c.external_url, c.is_vault_backed, c.creator_handle, c.creator_address
+         FROM plank_multichain_collections c
+         LEFT JOIN plank_multichain_snapshots s ON s.collection_id = c.id
+         ORDER BY s.synced_at ASC NULLS FIRST
+         LIMIT $1`,
+    skip.length > 0 ? [limit, skip] : [limit]
   );
   return result.rows.map(rowToCollection);
 }

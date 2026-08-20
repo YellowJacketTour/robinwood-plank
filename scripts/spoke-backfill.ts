@@ -15,7 +15,7 @@ const only = argv.find((a) => a.startsWith("--spoke="))?.slice("--spoke=".length
 const chainsArg = argv.find((a) => a.startsWith("--chains="))?.slice("--chains=".length);
 const chainPriority = chainsArg
   ? chainsArg.split(",").map((s) => s.trim()).filter(Boolean)
-  : ["bnb-mainnet", "avax-mainnet", "arb-mainnet", "base-mainnet", "eth-mainnet", "polygon-mainnet", "opt-mainnet"];
+  : ["opt-mainnet", "bnb-mainnet", "avax-mainnet", "arb-mainnet", "base-mainnet", "eth-mainnet", "polygon-mainnet"];
 const started = Date.now();
 const deadline = started + minutes * 60_000;
 
