@@ -53,7 +53,7 @@ export default function EthUsdValue({ wei, className, digits = 2 }: Props) {
 
   return (
     <span
-      className={className ?? "text-[0.65rem] text-foreground/50"}
+      className={className ?? "text-[0.68rem] font-semibold text-cream-muted/90"}
       title={label}
       aria-label={label}
     >

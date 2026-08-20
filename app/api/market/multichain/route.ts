@@ -93,6 +93,16 @@ export async function GET(req: Request) {
       }
     }
     const nativeAddr = NFT_CONTRACT_ADDRESS.toLowerCase();
+    const { ROBINWOOD_TOTAL_SUPPLY, ROBINWOOD_X_HANDLE } = await import("@/lib/mint-contract");
+    let nativeHolders: number | null = null;
+    try {
+      const { getOwnerIndex, uniqueWalletCount } = await import("@/lib/market/owner-index");
+      const index = await getOwnerIndex(NFT_CONTRACT_ADDRESS);
+      const n = index ? uniqueWalletCount(index.owners) : 0;
+      nativeHolders = n > 0 ? n : null;
+    } catch {
+      nativeHolders = null;
+    }
     const nativeRow = {
       chainSlug: "robinhood" as const,
       chainId: 4663,
@@ -104,13 +114,13 @@ export async function GET(req: Request) {
       floorPriceWei: nativeFloor != null ? nativeFloor.toString() : null,
       floorPriceCurrency: "ETH",
       floorPriceMarketplace: "marketplank",
-      totalSupply: null as number | null,
+      totalSupply: ROBINWOOD_TOTAL_SUPPLY,
       listedCount: nativeListed,
       syncedAt: new Date().toISOString(),
       syncError: null as string | null,
       tradeable: true,
       recentActivity: 0,
-      creatorHandle: null as string | null,
+      creatorHandle: ROBINWOOD_X_HANDLE,
       creatorAddress: null as string | null,
       creatorEns: null as string | null,
       volume24hWei: null as string | null,
@@ -119,7 +129,7 @@ export async function GET(req: Request) {
       sales7d: null as number | null,
       volume30dWei: null as string | null,
       sales30d: null as number | null,
-      holderCount: null as number | null,
+      holderCount: nativeHolders,
       floorChangePct: null as number | null,
       isNativeHome: true,
     };
@@ -137,7 +147,9 @@ export async function GET(req: Request) {
         floorPriceMarketplace: c.floorPriceMarketplace,
         totalSupply: c.totalSupply,
         listedCount:
-          c.listedCount === 0 && !c.floorPriceWei && !c.volume24hWei ? null : c.listedCount,
+          c.listedCount === 0 && c.totalSupply == null && !c.floorPriceWei && !c.volume24hWei
+            ? null
+            : c.listedCount,
         syncedAt: c.syncedAt,
         syncError: c.syncError,
         // TRUE for: the 7 real foreign EVM chains (Seaport buy/sweep/send/

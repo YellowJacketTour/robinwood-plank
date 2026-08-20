@@ -47,6 +47,18 @@ export type CanonicalRobinwoodStats = {
   listings: Array<Record<string, unknown>>;
 };
 
+export async function fetchCanonicalRobinwoodActivity(input: {
+  hostHeader?: string | null;
+  full?: boolean;
+}): Promise<unknown[] | null> {
+  if (isCanonicalRobinwoodHost(input.hostHeader)) return null;
+  const origin = canonicalRobinwoodOrigin();
+  const path = input.full ? "/api/market/activity?full=1" : "/api/market/activity";
+  const json = await getJson(`${origin}${path}`);
+  const events = (json as { events?: unknown })?.events;
+  return Array.isArray(events) && events.length > 0 ? events : null;
+}
+
 async function getJson(url: string): Promise<unknown | null> {
   try {
     const res = await fetch(url, {
