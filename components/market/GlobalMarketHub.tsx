@@ -927,14 +927,12 @@ export default function GlobalMarketHub() {
   /** Real floor price scaled to native units, currency-blind -- honest about the same cross-currency imprecision compareByColumn's own "floor" case documents (Solana lamports and ETH wei both land in the same raw magnitude once scaled). Used ONLY for the min/max price filter below, never for ranking order. */
   const floorNative = (c: TrackedCollection): number | null => (c.floorPriceWei ? Number(c.floorPriceWei) / 1e18 : null);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+  const ranked = useMemo(() => {
     const min = priceMin.trim() ? Number(priceMin) : null;
     const max = priceMax.trim() ? Number(priceMax) : null;
     const rows = collections.filter((c) => {
       if (chainFilter.size > 0 && !chainFilter.has(c.chainSlug)) return false;
       if (isTitleJunkWithoutData(c)) return false;
-      if (q && !(c.name ?? "").toLowerCase().includes(q)) return false;
       if (onlyTradeable && !c.tradeable) return false;
       const oneChain = chainFilter.size === 1;
       if (onlyArt && !hasArt(c) && !oneChain) return false;
@@ -964,7 +962,14 @@ export default function GlobalMarketHub() {
       if (floorTie !== 0) return floorTie;
       return (a.name ?? a.contractAddress).localeCompare(b.name ?? b.contractAddress);
     });
-  }, [collections, chainFilter, search, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, showShells, priceMin, priceMax, deadArt]);
+  }, [collections, chainFilter, sortColumn, sortDir, rankingsWindow, onlyTradeable, onlyArt, onlyVerifiedCreator, onlyListed, showShells, priceMin, priceMax, deadArt]);
+
+  /** Catalog grid only — a name query must not blank Live rankings (that table sits above the search box). */
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return ranked;
+    return ranked.filter((c) => (c.name ?? "").toLowerCase().includes(q));
+  }, [ranked, search]);
 
   useEffect(() => {
     setGridVisibleCount(GRID_PAGE_SIZE);
@@ -1019,7 +1024,7 @@ export default function GlobalMarketHub() {
   // renders -- one filter/sort, two presentations. Previously the table
   // required hasArt while the grid defaulted to every tracked contract
   // (hex + "Art pending" on Avalanche while CryptoSeals sat in rankings).
-  const rankings = useMemo(() => filtered.slice(0, rankingsShowCount), [filtered, rankingsShowCount]);
+  const rankings = useMemo(() => ranked.slice(0, rankingsShowCount), [ranked, rankingsShowCount]);
 
   const hydratedKey = useRef("");
   useEffect(() => {
@@ -1520,11 +1525,15 @@ export default function GlobalMarketHub() {
           </div>
           {rankings.length === 0 ? (
             <EmptyState
-              title="No collections with art yet on this chain"
+              title={
+                chainFilter.size > 0
+                  ? "No ranked collections on this chain yet"
+                  : "No ranked collections yet"
+              }
               body={
                 chainFilter.size > 0
-                  ? "Rankings only list collections that already have real artwork. The chain filter is still on — cards below may still show activity with art pending."
-                  : "Rankings only list collections that already have real artwork. Nothing currently tracked qualifies."
+                  ? "Live rankings need a real book or artwork on the selected chain. Catalog cards below can still list identity rows with art pending."
+                  : "Live rankings need a real floor, listings, or volume plus artwork. The catalog grid below is a separate search."
               }
             />
           ) : (
