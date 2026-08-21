@@ -45,12 +45,11 @@ if not errorlevel 1 (
   exit /b 0
 )
 
-echo Starting Marketplank Next on :3800 in its OWN window.
-echo That window is independent of Grok. Close it only to stop the site.
+echo Starting Marketplank Next on :3800 via LIMITED scheduled task
+echo ^(Grok/admin shells kill `start cmd` children; task survives.^)
 echo Global hub: http://localhost:3800/market/multichain
-echo Native book: http://localhost:3800/market  ^(empty book is local listings, not Global^)
+echo Native book: http://localhost:3800/market
 
-REM Detached console: survives this bat exiting. Do not `timeout ^>nul` here —
-REM redirected Grok shells treat that as a fatal "Input redirection" error.
-start "Marketplank :3800" cmd /k "cd /d "%~dp0" && title Marketplank :3800 && npx next dev -p 3800"
+schtasks /Create /TN "plank-next-3800" /TR "%~dp0scripts\start-local-next.bat" /SC ONCE /ST 00:00 /RL LIMITED /F >nul 2>nul
+schtasks /Run /TN "plank-next-3800"
 exit /b 0
