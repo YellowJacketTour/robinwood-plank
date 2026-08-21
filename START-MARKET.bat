@@ -23,12 +23,22 @@ if not exist node_modules (
   )
 )
 
-echo Starting Marketplank Next on :3800 in a new window.
-echo Leave that window open. Close it only to stop the site.
-start "Marketplank :3800" cmd /k "cd /d "%~dp0" && npx next dev -p 3800"
+REM Already live? Do not spawn a second Next (EADDRINUSE / two trees).
+netstat -ano | findstr ":3800" | findstr "LISTENING" >nul 2>nul
+if not errorlevel 1 (
+  echo Already live — not starting a second process.
+  echo Native book:  http://localhost:3800/market
+  echo Global hub:   http://localhost:3800/market/multichain
+  echo Close the "Marketplank :3800" window to stop.
+  exit /b 0
+)
 
-echo.
-echo Site: http://localhost:3800/market/multichain
-echo This window can close; the Next window stays up.
-timeout /t 3 /nobreak >nul
+echo Starting Marketplank Next on :3800 in its OWN window.
+echo That window is independent of Grok. Close it only to stop the site.
+echo Global hub: http://localhost:3800/market/multichain
+echo Native book: http://localhost:3800/market  ^(empty book is local listings, not Global^)
+
+REM Detached console: survives this bat exiting. Do not `timeout ^>nul` here —
+REM redirected Grok shells treat that as a fatal "Input redirection" error.
+start "Marketplank :3800" cmd /k "cd /d "%~dp0" && title Marketplank :3800 && npx next dev -p 3800"
 exit /b 0
