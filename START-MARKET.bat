@@ -23,6 +23,18 @@ if not exist node_modules (
   )
 )
 
+REM Global hub reads Postgres snapshots. Hard reset kills the portable cluster.
+REM Postgres refuses to start as Administrator; LIMITED scheduled task if needed.
+netstat -ano | findstr ":55556" | findstr "LISTENING" >nul 2>nul
+if errorlevel 1 (
+  echo Starting local Postgres on 55556...
+  call "%~dp0scripts\start-local-pg.bat"
+  if errorlevel 1 (
+    schtasks /Create /TN "plank-pg-55556" /TR "%~dp0scripts\start-local-pg.bat" /SC ONCE /ST 00:00 /RL LIMITED /F >nul 2>nul
+    schtasks /Run /TN "plank-pg-55556" >nul 2>nul
+  )
+)
+
 REM Already live? Do not spawn a second Next (EADDRINUSE / two trees).
 netstat -ano | findstr ":3800" | findstr "LISTENING" >nul 2>nul
 if not errorlevel 1 (
