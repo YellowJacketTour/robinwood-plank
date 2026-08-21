@@ -13,7 +13,7 @@ async function main(): Promise<void> {
   if (!source || !chain) {
     throw new Error("mesh-lane requires --source= and --chain=");
   }
-  if (await isSourceJailed(source)) {
+  if (await isSourceJailed(source, chain)) {
     console.log(`[mesh-lane] skip jailed source=${source} chain=${chain}`);
     return;
   }
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (/429|403|rate limit|quota/i.test(msg)) {
-      await jailSource(source, 20 * 60_000, true);
+      await jailSource(source, 20 * 60_000, true, chain);
       console.log(`[mesh-lane] jailed ${source}: ${msg.slice(0, 180)}`);
       return;
     }

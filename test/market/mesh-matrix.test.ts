@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { MESH_LANES } from "../../lib/market/multichain/mesh/matrix";
+import { sourceJailKey } from "../../lib/market/multichain/mesh/jail";
 
 describe("sync mesh matrix", () => {
   it("has unique lane ids", () => {
@@ -42,5 +43,11 @@ describe("sync mesh matrix", () => {
     const btc = MESH_LANES.filter((l) => l.chainSlug === "bitcoin-mainnet").map((l) => l.source);
     assert.ok(btc.includes("ordinals-wallet"));
     assert.ok(btc.includes("unisat-collections"));
+  });
+
+  it("jails 429 per source×chain, not the whole vendor", () => {
+    assert.equal(sourceJailKey("opensea-stats", "eth-mainnet"), "plank:market:source-jail-until:opensea-stats:eth-mainnet");
+    assert.notEqual(sourceJailKey("opensea-stats", "eth-mainnet"), sourceJailKey("opensea-stats", "opt-mainnet"));
+    assert.equal(sourceJailKey("opensea-stats"), "plank:market:source-jail-until:opensea-stats");
   });
 });

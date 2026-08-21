@@ -64,7 +64,9 @@ export async function GET(req: NextRequest) {
     const sampleSize = meta?.sampleSize ?? map.size;
     // Old first-pass caps (1k/2k/5k) left Claynosaurz stuck at 5,000 forever
     // because we only enqueued when the map was empty. Resume those samples.
-    const staleFirstPass = sampleSize === 1_000 || sampleSize === 2_000 || sampleSize === 5_000;
+    // Resume only historical first-pass caps. 2_000 is also itemCeiling(unknown
+    // supply) — treating it as stale DELETE-looped every rarity GET.
+    const staleFirstPass = sampleSize === 1_000 || sampleSize === 5_000;
     const needsIndex =
       map.size === 0 || (staleFirstPass && map.size < 6_000 && chainSlug !== "bitcoin-mainnet");
     if (needsIndex) {

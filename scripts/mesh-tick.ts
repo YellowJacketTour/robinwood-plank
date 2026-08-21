@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   const lanes = [];
   for (const lane of MESH_LANES) {
     if (chainFilter && lane.chainSlug !== chainFilter) continue;
-    if (await isSourceJailed(lane.source)) {
+    if (await isSourceJailed(lane.source, lane.chainSlug)) {
       console.log(`[mesh-tick] skip jailed ${lane.id}`);
       continue;
     }
