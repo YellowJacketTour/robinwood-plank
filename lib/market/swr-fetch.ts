@@ -146,9 +146,21 @@ export function prefetchJson(url: string, opts?: SwrOptions): void {
 export function invalidateSwr(urlPrefix?: string): void {
   if (!urlPrefix) {
     memory.clear();
-    return;
+  } else {
+    for (const key of memory.keys()) {
+      if (key.startsWith(urlPrefix)) memory.delete(key);
+    }
   }
-  for (const key of memory.keys()) {
-    if (key.startsWith(urlPrefix)) memory.delete(key);
+  if (typeof window === "undefined") return;
+  try {
+    const drop: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (!k?.startsWith("plank-swr:")) continue;
+      if (!urlPrefix || k.includes(urlPrefix)) drop.push(k);
+    }
+    for (const k of drop) sessionStorage.removeItem(k);
+  } catch {
+    /* private mode / quota */
   }
 }

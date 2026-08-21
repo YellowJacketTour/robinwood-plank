@@ -788,11 +788,14 @@ export default function GlobalMarketHub() {
         // one for the full 10-minute swr window -- same stale-poisons-
         // cache fix needed twice already this session (MultichainCollectionView's
         // rarity fetch, ForeignOfferForm's trait-index fetch).
-        const data = await swrJson<{ collections: TrackedCollection[] }>("/api/market/multichain", {
+        const data = await swrJson<{ collections: TrackedCollection[] }>("/api/market/multichain?v=index-2", {
           ttlMs: 60_000,
           swrMs: 600_000,
           session: true,
-          isGood: (d) => Array.isArray((d as { collections?: unknown })?.collections),
+          isGood: (d) => {
+            const rows = (d as { collections?: unknown })?.collections;
+            return Array.isArray(rows) && rows.length > 0;
+          },
         });
         if (!cancelled) {
           const rows = data.collections ?? [];
@@ -1049,11 +1052,14 @@ export default function GlobalMarketHub() {
       const body = (await res.json().catch(() => null)) as { hydrated?: number } | null;
       if (!body?.hydrated) return;
       invalidateSwr("/api/market/multichain");
-      const data = await swrJson<{ collections: TrackedCollection[] }>("/api/market/multichain", {
+      const data = await swrJson<{ collections: TrackedCollection[] }>("/api/market/multichain?v=index-2", {
         ttlMs: 0,
         swrMs: 60_000,
         session: false,
-        isGood: (d) => Array.isArray((d as { collections?: unknown })?.collections),
+        isGood: (d) => {
+          const rows = (d as { collections?: unknown })?.collections;
+          return Array.isArray(rows) && rows.length > 0;
+        },
       });
       if (!cancelled && data.collections) setCollections(data.collections);
     })();
