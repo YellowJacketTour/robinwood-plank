@@ -8,17 +8,13 @@ These are behavioural requirements: the features, states and safety disclosures
 a redesign of a given surface may not quietly drop. A visual pass can change how
 any of this looks; it may not remove the capability.
 
-## PlankSpace checkpoint
+## PlankSpace
 
-The primary navigation and footer expose **PlankSpace** at `/plankspace`, which
-embeds the isolated social app and brokers wallet state and safe message signing
-through the single Plank.love wallet provider. Its child origin is centralized
-in `PLANKSPACE_URL` in `lib/constants.ts`.
-
-The iframe bridge must accept messages only from that exact child window and
-origin. It may expose address state, open the existing wallet chooser, disconnect
-local state, and sign the restricted PlankSpace verification message. It must
-never expose a provider object, private key, seed phrase, or transaction method.
+The primary navigation exposes native PlankSpace routes beginning at
+`/plankspace`. PlankSpace uses the same root wallet provider, same-origin API
+handlers, and PostgreSQL deployment as the rest of Plank.love. It must not use
+an iframe, external child origin, secondary wallet connector, PIN bypass, or
+developer-owned test hostname.
 
 Split out of DESIGN.md on 2026-08-02 — a design system should describe how to
 build anything, not enumerate what each page contains. Mixing the two meant the

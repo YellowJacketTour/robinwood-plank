@@ -22,18 +22,16 @@ test("worker applies browser security headers",async()=>{
 });
 
 test("social persistence and wallet session protections are included",async()=>{
- const [migration,sessionMigration,moderationMigration,owner,bridge]=await Promise.all([
+ const [migration,sessionMigration,moderationMigration,bridge]=await Promise.all([
   readFile(new URL("../drizzle/0008_colossal_skrulls.sql",import.meta.url),"utf8"),
   readFile(new URL("../drizzle/0019_wallet_sessions.sql",import.meta.url),"utf8"),
   readFile(new URL("../drizzle/0020_profile_moderation_settings.sql",import.meta.url),"utf8"),
-  readFile(new URL("../app/owner-access-auth.ts",import.meta.url),"utf8"),
   readFile(new URL("../app/plank-love-wallet.ts",import.meta.url),"utf8"),
  ]);
  for(const table of ["board_messages","notifications","reports","game_scores","owner_access_attempts"])assert.ok(migration.includes("CREATE TABLE `"+table+"`"));
  assert.match(sessionMigration,/CREATE TABLE `wallet_sessions`/);
  assert.match(moderationMigration,/CREATE TABLE IF NOT EXISTS `site_settings`/);
- assert.match(owner,/return false/);
- assert.doesNotMatch(owner,/ACCESS_CODE|SESSION_SECRET/);
+ assert.doesNotMatch(bridge,/owner-access|admin-access|PIN/);
  assert.doesNotMatch(bridge,/endsWith\("\.chatgpt\.site"\)/);
 });
 

@@ -1,27 +1,17 @@
 # PlankSpace
 
-PlankSpace is the wallet-owned social profile test app embedded by Plank.love.
+PlankSpace is the wallet-owned social profile surface built natively into Plank.love.
 Profile creation, editing, layout publishing, mood updates, and wallet-authenticated
-admin actions use the wallet connection already owned by the parent Plank.love
-application.
+admin actions use Plank.love's existing wallet provider, same-origin API routes,
+and PostgreSQL database.
 
-## Plank.love wallet bridge
+## Plank.love wallet integration
 
-`app/plank-love-wallet.ts` is the child half of an origin-bound `postMessage`
-bridge. It can request account state, open Plank.love's existing wallet chooser,
-switch to Robinhood Chain, clear the shared local connection state, and request
-an EIP-191 ownership signature. The provider and private signing capability are
-never passed into this iframe, and PlankSpace does not submit transactions.
-
-The parent accepts messages only from the configured PlankSpace iframe window
-and exact HTTPS origin. Custom profile HTML is rendered in a separate empty
-sandbox, so it cannot access this bridge. Server routes independently verify
-the nonce, expiry, wallet, handle, and signature before accepting profile or
-moderation writes.
-
-Opening the hosted PlankSpace site directly remains useful for public browsing,
-but regular wallet actions intentionally instruct the user to enter through the
-PlankSpace tab on Plank.love.
+`app/plank-love-wallet.ts` calls the root Plank.love wallet library directly.
+There is no iframe, external hostname, secondary wallet connector, access PIN,
+or postMessage bridge. One safe EIP-191 verification creates a 12-hour,
+wallet-bound server session used by PlankSpace actions. Custom HTML remains
+sandboxed and cannot access the wallet provider.
 
 ## Runtime
 
@@ -47,21 +37,15 @@ Scripts that need writable project-scoped home, npm, XDG, and temporary paths us
 ## Included Shape
 
 - edit site code under `app/`
-- `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
+- `app/` contains PlankSpace pages and components imported by root Next.js routes
+- `db/index.ts` uses the root Plank.love PostgreSQL pool
+- `db/schema.ts` defines the namespaced `plankspace_*` tables
+- `deploy/inmotion/postgres/migrations/011_plankspace_native.sql` creates and seeds storage
 
-## Deployment origins
+## Deployment
 
-PlankSpace contains no committed preview hostname. Set `NEXT_PUBLIC_SITE_URL`
-to the standalone PlankSpace origin. When embedding it in Plank.love, set both
-`NEXT_PUBLIC_PLANKSPACE_PARENT_ORIGINS` and `PLANKSPACE_PARENT_ORIGINS` to the
-exact comma-separated parent origins that may use the shared wallet bridge.
-Production `plank.love` and its subdomains remain trusted by default.
-- `drizzle.config.ts` supports local migration generation when needed
+Deploy the root Plank.love application. PlankSpace is served from `/plankspace`
+and its native pages; it is not deployed as a separate application.
 
 ## Workspace Auth Headers
 
@@ -93,33 +77,6 @@ export default async function Home() {
   // ...
 }
 ```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
 
 ## Diagnostic Commands
 

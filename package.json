@@ -45,6 +45,7 @@
     "@tensor-foundation/marketplace": "^1.0.0",
     "@tensor-foundation/whitelist": "^1.0.0",
     "bitcoinjs-lib": "^7.0.1",
+    "drizzle-orm": "0.45.2",
     "ethers": "^6.17.0",
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^1.28.0",

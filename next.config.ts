@@ -1,19 +1,6 @@
 import type { NextConfig } from "next";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
-function configuredPlankSpaceOrigin() {
-  const value = process.env.NEXT_PUBLIC_PLANKSPACE_URL?.trim();
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" ? url.origin : null;
-  } catch {
-    return null;
-  }
-}
-
-const plankSpaceOrigin = configuredPlankSpaceOrigin();
-
 /**
  * Security headers + ensure server secrets are never treated as public.
  * UNISWAP_API_KEY must never use the NEXT_PUBLIC_ prefix.
@@ -50,7 +37,7 @@ const securityHeaders = [
       // players (postMessage-controlled, no provider SDK script — so
       // script-src stays untouched). Without frame-src, iframes fall back to
       // default-src 'self' and the embeds are silently blocked.
-      `frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com${plankSpaceOrigin ? ` ${plankSpaceOrigin}` : ""}`,
+      "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://w.soundcloud.com",
       "connect-src 'self' https://rpc.mainnet.chain.robinhood.com https://*.alchemy.com https://*.infura.io wss: https:",
       "frame-ancestors 'self'",
       "base-uri 'self'",
@@ -112,6 +99,8 @@ const nextConfig: NextConfig = {
     return [
       { source: "/opengraph-image", destination: "/plank-social.jpg" },
       { source: "/opengraph-image.png", destination: "/plank-social.jpg" },
+      { source: "/plank-classic.jpeg", destination: "/images/plank-head.webp" },
+      { source: "/plank-robinwood.png", destination: "/images/plank-logo.webp" },
     ];
   },
   async headers() {

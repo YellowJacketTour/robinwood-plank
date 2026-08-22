@@ -213,16 +213,6 @@ export const TOKEN = {
 } as const;
 
 /**
- * Public origin of the independently deployed PlankSpace application.
- *
- * Never commit a preview or developer-owned hostname here. Each environment
- * must explicitly provide its reviewed PlankSpace origin. Keeping this unset
- * renders a configuration notice instead of silently embedding an old build.
- */
-export const PLANKSPACE_URL =
-  process.env.NEXT_PUBLIC_PLANKSPACE_URL?.trim() || null;
-
-/**
  * Primary navigation in reading order. `emphasis` changes presentation only;
  * every destination still comes from this single source of truth.
  */

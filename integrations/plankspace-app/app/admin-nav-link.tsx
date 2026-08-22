@@ -19,5 +19,5 @@ export default function AdminNavLink() {
     void getPlankLoveWalletState().then(state => sync(state.address)).catch(() => undefined);
     return unsubscribe;
   }, []);
-  return ADMINS.has(wallet) ? <a href="/admin">Admin</a> : null;
+  return ADMINS.has(wallet) ? <a href="/plankspace/admin">Admin</a> : null;
 }

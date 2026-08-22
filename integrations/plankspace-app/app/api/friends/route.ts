@@ -1,13 +1,11 @@
 import { and, eq, or } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { friendRequests, notifications, profileRelations, profiles } from "../../../db/schema";
-import { hasOwnerSession, OWNER_WALLET } from "../../owner-access-auth";
 import { hashJson } from "../auth/hash";
 import { type Proof, verifyAndConsumeProof } from "../auth/verify";
 
 const clean=(value:string)=>value.toLowerCase().replace(/[^a-z0-9_-]/g,"").slice(0,24);
 async function authorize(request:Request,p:Proof,action:string,resource:string,data:unknown){
- if(await hasOwnerSession(request))return OWNER_WALLET;
  return verifyAndConsumeProof(p,`friend:${action}`,resource,await hashJson(data));
 }
 async function profileForWallet(wallet:string){return (await getDb().select().from(profiles).where(eq(profiles.wallet,wallet)).limit(1))[0]}
@@ -51,7 +49,7 @@ export async function POST(request:Request){
  if(action==="remove"){
   const targetHandle=clean(p.targetHandle||""),data={action:"remove",targetHandle},wallet=await authorize(request,p,"remove",targetHandle,data);
   if(!wallet)return Response.json({error:"Sign to remove this friend"},{status:403});
-  const db=getDb(),me=await profileForWallet(wallet),[target]=await db.select().from(profiles).where(eq(profiles.handle,targetHandle)).limit(1);if(!me||!target)return Response.json({error:"Profile not found"},{status:404});if(targetHandle==="degenwaffle"||wallet===OWNER_WALLET)return Response.json({error:"DegenWaffle is every plank’s founding friend"},{status:409});
+  const db=getDb(),me=await profileForWallet(wallet),[target]=await db.select().from(profiles).where(eq(profiles.handle,targetHandle)).limit(1);if(!me||!target)return Response.json({error:"Profile not found"},{status:404});if(targetHandle==="degenwaffle")return Response.json({error:"DegenWaffle is every plank’s founding friend"},{status:409});
   await db.delete(profileRelations).where(or(and(eq(profileRelations.ownerWallet,wallet),eq(profileRelations.targetHandle,targetHandle),eq(profileRelations.kind,"friend")),and(eq(profileRelations.ownerWallet,target.wallet),eq(profileRelations.targetHandle,me.handle),eq(profileRelations.kind,"friend"))));
   return Response.json({status:"removed"});
  }
