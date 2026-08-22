@@ -148,6 +148,7 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   const [collection, setCollection] = useState<MarketCollection | null>(null);
   const [listings, setListings] = useState<Listing[]>([]);
   const [tokens, setTokens] = useState<Array<{ tokenId: string; name: string | null; imageUrl: string | null }>>([]);
+  const [catalogBuilding, setCatalogBuilding] = useState(false);
   const surface = collectionSurface(chainSlug);
   const [tokenLimit, setTokenLimit] = useState(surface.catalogPageSize);
   const [bookFilter, setBookFilter] = useState<"all" | "listed">(() => (searchParams.get("show") === "all" ? "all" : "listed"));
@@ -349,12 +350,18 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
       sort,
     });
     if (tierFilter) qs.set("tier", tierFilter);
-    return swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }> }>(
+    return swrJson<{ tokens: Array<{ tokenId: string; name: string | null; imageUrl: string | null }>; building?: boolean }>(
       `/api/market/multichain/tokens?${qs.toString()}`,
       { ttlMs: 8_000, swrMs: 45_000, session: true }
     )
-      .then((tok) => setTokens(tok.tokens ?? []))
-      .catch(() => setTokens([]));
+      .then((tok) => {
+        setTokens(tok.tokens ?? []);
+        setCatalogBuilding(Boolean(tok.building));
+      })
+      .catch(() => {
+        setTokens([]);
+        setCatalogBuilding(false);
+      });
   }, [chainSlug, collectionSlug, listingSort, activeTier, activeTiers, tokenLimit, surface.catalogCap]);
 
   const load = useCallback(async () => {
@@ -470,6 +477,12 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   useEffect(() => {
     void fetchCatalogTokens();
   }, [fetchCatalogTokens]);
+
+  useEffect(() => {
+    if (!catalogBuilding) return;
+    const id = setInterval(() => void fetchCatalogTokens(), 10_000);
+    return () => clearInterval(id);
+  }, [catalogBuilding, fetchCatalogTokens]);
 
   // Real ETH/SOL/BTC/POL/BNB/AVAX USD prices -- same shared fetch + short-TTL swr pattern
   // GlobalMarketHub.tsx's own usdPrices effect uses. usdPrices stays {} (not
@@ -815,17 +828,6 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!isSolana && !isBitcoin) {
-        try {
-          const data = await swrJson<{ counts: Record<string, Record<string, number>> }>(
-            `/api/market/multichain/traits?collectionSlug=${encodeURIComponent(collectionSlug)}`,
-            { ttlMs: 300_000, swrMs: 3_600_000, session: true }
-          );
-          if (!cancelled) setTraitCounts(data.counts ?? {});
-        } catch {
-          if (!cancelled) setTraitCounts({});
-        }
-      }
       try {
         const idx = await swrJson<TraitIndexResponse>(
           `/api/market/multichain/trait-index?chainSlug=${chainSlug}&collectionSlug=${encodeURIComponent(collectionSlug)}`,
@@ -833,14 +835,14 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
         );
         if (!cancelled) {
           setTraitIndex(idx);
-          if (idx.complete && idx.traits) {
+          if (idx.traits) {
             const derived: Record<string, Record<string, number>> = {};
             for (const [type, values] of Object.entries(idx.traits)) {
               derived[type] = {};
               for (const [value, ids] of Object.entries(values)) derived[type][value] = ids.length;
             }
             setTraitCounts((prev) => (prev && Object.keys(prev).length > 0 ? prev : derived));
-            setSweepClauses((prev) => (prev.length > 0 ? prev : defaultFirstClause(idx.traits!) ? [defaultFirstClause(idx.traits!)!] : []));
+            if (idx.complete) setSweepClauses((prev) => (prev.length > 0 ? prev : defaultFirstClause(idx.traits!) ? [defaultFirstClause(idx.traits!)!] : []));
           }
         }
       } catch {
@@ -2104,10 +2106,10 @@ export default function MultichainCollectionView({ chainSlug, collectionSlug }: 
             <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line bg-panel-strong px-4 py-10 text-center">
               <PackageOpen size={28} strokeWidth={1.75} className="text-gold-400/70" aria-hidden />
               <p className="text-sm font-bold text-foreground/75">
-                {filtersActive ? "No items match your search." : bookFilter === "listed" ? "No live listings in this page." : "No items loaded for this collection yet."}
+                {catalogBuilding ? "Preparing this collection’s pieces…" : filtersActive ? "No items match your search." : bookFilter === "listed" ? "No live listings in this page." : "No items loaded for this collection yet."}
               </p>
               <p className="text-xs text-foreground/45">
-                {filtersActive ? "Try widening your price range or clearing a filter." : "Identity and tools stay on this page. Instant Swap vaults for foreign collections come later."}
+                {catalogBuilding ? "The live indexer is prioritizing this exact contract. This page will update automatically." : filtersActive ? "Try widening your price range or clearing a filter." : "Identity and tools stay on this page. Instant Swap vaults for foreign collections come later."}
               </p>
             </div>
           ) : (

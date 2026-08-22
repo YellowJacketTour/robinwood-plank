@@ -197,6 +197,31 @@ export async function readProjectedRarityInputs(chainSlug: string, collectionSlu
   return result.rows.map((row) => ({ tokenId: row.token_id, name: row.name, traits: normalizeTraits(row.traits) }));
 }
 
+export async function readProjectedTraitIndex(chainSlug: string, collectionSlug: string) {
+  const [rows, projection] = await Promise.all([
+    postgresQuery<{ token_id: string; trait_type: string; trait_value: string }>(
+      `SELECT t.token_id, trait->>'traitType' AS trait_type, trait->>'value' AS trait_value
+       FROM plank_collection_tokens t
+       CROSS JOIN LATERAL jsonb_array_elements(t.traits) trait
+       WHERE t.chain_slug = $1 AND lower(t.collection_slug) = lower($2)
+         AND COALESCE(trait->>'traitType','') <> '' AND COALESCE(trait->>'value','') <> ''`,
+      [chainSlug, collectionSlug]),
+    postgresQuery<{ projected_count: number; expected_count: number | null; partial: boolean }>(
+      `SELECT projected_count, expected_count, partial FROM plank_collection_token_projections
+       WHERE chain_slug = $1 AND lower(collection_slug) = lower($2)`, [chainSlug, collectionSlug]),
+  ]);
+  if (!projection.rows[0]) return null;
+  const traits: Record<string, Record<string, string[]>> = {};
+  for (const row of rows.rows) {
+    traits[row.trait_type] ??= {};
+    traits[row.trait_type][row.trait_value] ??= [];
+    traits[row.trait_type][row.trait_value].push(row.token_id);
+  }
+  return { traits, projectedCount: Number(projection.rows[0].projected_count),
+    expectedCount: projection.rows[0].expected_count == null ? null : Number(projection.rows[0].expected_count),
+    partial: projection.rows[0].partial };
+}
+
 export type TokenMetadataWork = { collectionSlug: string; tokenId: string };
 
 export async function readTokenMetadataWork(chainSlug: string, limit: number): Promise<TokenMetadataWork[]> {

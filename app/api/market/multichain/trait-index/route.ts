@@ -40,16 +40,22 @@ export async function GET(req: NextRequest) {
     ]);
     const rankings: Record<string, number> = {};
     for (const [tokenId, r] of rarityMap) rankings[tokenId] = r.rank;
+    const { readProjectedTraitIndex } = await import("@/lib/market/multichain/collection-token-store");
+    const hasStoredTraits = Boolean(traitIndex && Object.keys(traitIndex).length > 0);
+    const projected = hasStoredTraits ? null : await readProjectedTraitIndex(chainSlug, collectionSlug).catch(() => null);
+    const effectiveTraits = hasStoredTraits ? traitIndex : (projected && Object.keys(projected.traits).length > 0 ? projected.traits : null);
+    const effectivePartial = hasStoredTraits ? partial : projected?.partial ?? true;
+    const scanned = hasStoredTraits ? sampleSize : projected?.projectedCount ?? 0;
 
     return NextResponse.json(
       {
         collection: collectionSlug,
-        complete: traitIndex !== null && !partial,
-        partial,
-        building: false,
-        totalSupply: sampleSize || null,
-        scanned: sampleSize,
-        traits: traitIndex,
+        complete: effectiveTraits !== null && !effectivePartial,
+        partial: effectivePartial,
+        building: effectiveTraits === null,
+        totalSupply: projected?.expectedCount ?? (sampleSize || null),
+        scanned,
+        traits: effectiveTraits,
         rankings: Object.keys(rankings).length > 0 ? rankings : null,
       },
       { headers: { "Cache-Control": "no-store" } }

@@ -14,11 +14,12 @@ const limitArg = process.argv.find((a) => a.startsWith("--limit="));
 const limit = limitArg ? Number(limitArg.slice("--limit=".length)) : 6;
 const chainFilter = process.argv.find((a) => a.startsWith("--chain="))?.slice("--chain=".length);
 
-function runLane(source: string, chain: string): Promise<number> {
+function runLane(source: string, chain: string, subject?: string | null): Promise<number> {
   return new Promise((resolve) => {
     const p = spawn(
       process.execPath,
-      ["--import", "tsx", "--env-file=.env.local", "scripts/mesh-lane.ts", `--source=${source}`, `--chain=${chain}`],
+      ["--import", "tsx", "--env-file=.env.local", "scripts/mesh-lane.ts", `--source=${source}`, `--chain=${chain}`,
+        ...(subject ? [`--subject=${subject}`] : [])],
       { cwd: process.cwd(), stdio: "inherit", shell: false }
     );
     p.on("exit", (code) => resolve(code ?? 1));
@@ -60,7 +61,7 @@ async function main(): Promise<void> {
         continue;
       }
       console.log(`[mesh-tick] start ${job.jobKey}`);
-      const code = await runLane(job.source, job.chainSlug);
+      const code = await runLane(job.source, job.chainSlug, job.subject);
       await finishDataJob(job, code === 0 ? undefined : `lane exited ${code}`);
       console.log(`[mesh-tick] end ${job.jobKey} exit=${code}`);
     }

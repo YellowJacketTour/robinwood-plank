@@ -8,6 +8,7 @@ import type { MeshSource } from "../lib/market/multichain/mesh/matrix";
 
 const source = (process.argv.find((a) => a.startsWith("--source="))?.slice("--source=".length) ?? "") as MeshSource;
 const chain = process.argv.find((a) => a.startsWith("--chain="))?.slice("--chain=".length) ?? "";
+const subject = process.argv.find((a) => a.startsWith("--subject="))?.slice("--subject=".length) ?? "";
 
 async function main(): Promise<void> {
   if (!source || !chain) {
@@ -60,8 +61,11 @@ async function main(): Promise<void> {
       return;
     }
     if (source === "robinhood-membership") {
-      const { advanceNextRobinhoodMembership } = await import("../lib/market/multichain/rarity-index-runner");
-      console.log("[mesh-lane] robinhood-membership", JSON.stringify(await advanceNextRobinhoodMembership()));
+      const { advanceEvmCollectionMembership, advanceNextRobinhoodMembership } = await import("../lib/market/multichain/rarity-index-runner");
+      const result = /^0x[0-9a-f]{40}$/i.test(subject)
+        ? await advanceEvmCollectionMembership("robinhood", subject, "robinhood")
+        : await advanceNextRobinhoodMembership();
+      console.log("[mesh-lane] robinhood-membership", JSON.stringify(result));
       return;
     }
     if (source === "robinhood-metadata") {
@@ -90,8 +94,11 @@ async function main(): Promise<void> {
       return;
     }
     if (source === "opensea-membership") {
-      const { advanceNextTrackedEvmMembership } = await import("../lib/market/multichain/rarity-index-runner");
-      console.log("[mesh-lane] opensea-membership", JSON.stringify(await advanceNextTrackedEvmMembership(chain)));
+      const { advanceEvmCollectionMembership, advanceNextTrackedEvmMembership } = await import("../lib/market/multichain/rarity-index-runner");
+      const result = /^0x[0-9a-f]{40}$/i.test(subject)
+        ? await advanceEvmCollectionMembership(chain, subject)
+        : await advanceNextTrackedEvmMembership(chain);
+      console.log("[mesh-lane] opensea-membership", JSON.stringify(result));
       return;
     }
     if (source === "coingecko-nft") {

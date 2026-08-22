@@ -47,6 +47,22 @@ export async function GET(req: NextRequest) {
         });
       }
     }
+    // A cold projection never performs provider work in this request. It
+    // records exact demand so the isolated mesh hydrates this contract ahead
+    // of the background round-robin on its next tick.
+    const contractAddress = /^0x[0-9a-fA-F]{40}$/.test(collectionSlug) ? collectionSlug.toLowerCase() : null;
+    if (contractAddress && (isRobinhoodChainSlug(chainSlug) || foreignChainByChainSlug(chainSlug)?.openSeaChain)) {
+      const { enqueueDataJob } = await import("@/lib/market/multichain/control-plane");
+      const source = isRobinhoodChainSlug(chainSlug) ? "robinhood-membership" : "opensea-membership";
+      await enqueueDataJob({
+        jobKey: `demand:membership:${chainSlug}:${contractAddress}`,
+        kind: `mesh-lane:${chainSlug}`,
+        source,
+        chainSlug,
+        subject: contractAddress,
+        priority: 90,
+      }).catch(() => {});
+    }
     const { hasForeignRarityStore, listForeignRarityTokens } = await import("@/lib/market/multichain/foreign-rarity-store");
     if (hasForeignRarityStore()) {
       const indexed = await listForeignRarityTokens(chainSlug, collectionSlug, limit, { sort, tier }).catch(() => []);
@@ -118,10 +134,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ tokens: await solanaTokens(collectionSlug, limit) }, { headers: { "Cache-Control": "no-store" } });
     }
     if (isRobinhoodChainSlug(chainSlug)) {
-      return NextResponse.json(
-        { tokens: await openSeaTokens("robinhood", collectionSlug, limit) },
-        { headers: { "Cache-Control": "public, s-maxage=15, stale-while-revalidate=120" } }
-      );
+      return NextResponse.json({ tokens: [], partial: true, building: true },
+        { headers: { "Cache-Control": "no-store" } });
     }
     const chain = foreignChainByChainSlug(chainSlug);
     if (!chain?.openSeaChain) {
