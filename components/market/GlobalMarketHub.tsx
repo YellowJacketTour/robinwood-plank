@@ -202,6 +202,25 @@ function displayName(c: TrackedCollection): string {
   }
   return n;
 }
+
+function searchText(value: string | null | undefined): string {
+  return (value ?? "").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function collectionSearchScore(c: TrackedCollection, rawQuery: string): number {
+  const q = searchText(rawQuery);
+  if (!q) return 0;
+  const fields = [displayName(c), c.contractAddress, c.creatorHandle, c.creatorEns].map(searchText);
+  let best = -1;
+  for (const field of fields) {
+    if (!field) continue;
+    if (field === q) best = Math.max(best, 1000);
+    else if (field.startsWith(q)) best = Math.max(best, 800);
+    else if (field.split(" ").some((word) => word.startsWith(q))) best = Math.max(best, 650);
+    else if (field.includes(q)) best = Math.max(best, 500);
+  }
+  return best;
+}
 /** Real listed-count/total-supply as a percentage -- null unless both real figures are present (never a fabricated 0%). Shared by both the "Listed" column's own display AND its sort. */
 function listedPctOf(c: TrackedCollection): number | null {
   if (c.listedCount == null || c.listedCount <= 0) return null;
@@ -1007,10 +1026,19 @@ export default function GlobalMarketHub() {
 
   /** Catalog grid only — a name query must not blank Live rankings (that table sits above the search box). */
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = search.trim();
     if (!q) return ranked;
-    return ranked.filter((c) => (c.name ?? "").toLowerCase().includes(q));
-  }, [ranked, search]);
+    // Search is a catalog-wide discovery operation. Feature toggles such as
+    // "has art" must not hide a collection whose indexed pieces prove that
+    // it exists (the MUGS collection did exactly that). Chain selection still
+    // scopes results; junk-name suppression remains a safety invariant.
+    return collections
+      .filter((c) => (chainFilter.size === 0 || chainFilter.has(c.chainSlug)) && !isSpamCollectionTitle(c.name))
+      .map((c) => ({ c, score: collectionSearchScore(c, q) }))
+      .filter((row) => row.score >= 0)
+      .sort((a, b) => b.score - a.score || compareByColumn(a.c, b.c, sortColumn, sortDir, rankingsWindow, hasArt))
+      .map((row) => row.c);
+  }, [ranked, collections, chainFilter, search, sortColumn, sortDir, rankingsWindow, deadArt]);
 
   useEffect(() => {
     const query = search.trim();
@@ -1945,10 +1973,37 @@ export default function GlobalMarketHub() {
         </aside>
 
         <div className="min-w-0 flex-1">
+          {search.trim().length >= 2 && filtered.length > 0 && (
+            <section className="mb-4 space-y-2" aria-label="Matching collections">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-black uppercase tracking-wider text-gold-300">Collections</h3>
+                <span className="text-[0.65rem] text-foreground/45">{filtered.length} matches · best matches first</span>
+              </div>
+              <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-6">
+                {filtered.slice(0, 12).map((c) => (
+                  <li key={`search:${key(c)}`}>
+                    <Link href={collectionHref(c)} className="dense-card group flex h-full items-center gap-2 p-2 hover:border-line-strong">
+                      <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-wood-900">
+                        <CollectionThumb src={c.imageUrl} alt={displayName(c)} width={256} variant="tile" />
+                        <span className="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/70">
+                          <ChainIcon chainSlug={c.chainSlug} size={10} />
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-bold text-foreground">{displayName(c)}</p>
+                        <p className="truncate text-[0.6rem] text-foreground/45">{chainDisplayName(c.chainSlug)}</p>
+                        {c.totalSupply != null && <p className="text-[0.6rem] text-foreground/45">{c.totalSupply.toLocaleString()} pieces</p>}
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {search.trim().length >= 2 && (tokenSearchLoading || tokenHits.length > 0) && (
             <section className="mb-4 space-y-2" aria-label="Matching pieces">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="text-xs font-black uppercase tracking-wider text-gold-300">Pieces across chains</h3>
+                <h3 className="text-xs font-black uppercase tracking-wider text-gold-300">Individual pieces</h3>
                 <span className="text-[0.65rem] text-foreground/45">
                   {tokenSearchLoading ? "Searching indexed pieces…" : `${tokenHits.length} matches`}
                 </span>
@@ -1990,7 +2045,7 @@ export default function GlobalMarketHub() {
                   : "No tracked collections fit the current chain/feature filters — try clearing a few."
               }
             />
-          ) : (
+          ) : search.trim().length >= 2 ? null : (
             // Density scales with real available width instead of capping at
             // 4 columns forever -- flagged live 2026-08-20 ("no wasted real
             // estate"): a wide desktop monitor was stretching each card far
